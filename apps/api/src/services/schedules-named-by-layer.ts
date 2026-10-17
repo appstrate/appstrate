@@ -212,7 +212,7 @@ export async function disableSchedulesLeftUnnamed(
  * ungoverned it would bind fewer connections than the floor did, or none. An equal set, in any
  * order or case, binds the same either way, so it is not within; nothing is within an empty floor.
  * Uuids compare case-insensitively and deduplicated, as Postgres compares them — the predicate of
- * the `0048` pre-flight report.
+ * the `0050` pre-flight report.
  */
 export function withinFloor(selection: readonly string[], floor: readonly string[]): boolean {
   const imposed = new Set(floor.map((id) => id.toLowerCase()));

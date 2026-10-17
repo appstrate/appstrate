@@ -525,6 +525,7 @@
   "schedule.disabledReason.connection_unshared": "This schedule was disabled automatically: a connection it used is no longer shared. Choose its connections again before enabling it.",
   "schedule.disabledReason.connection_set_unnamed": "This schedule was disabled automatically: its actor's choice for the agent, the admin pin or the space default that named its connections was removed. Choose its connections before enabling it.",
   "schedule.disabledReason.connection_choice_invalid": "This schedule was disabled automatically: when it fired, its choice of connections was refused. Choose its connections again before enabling it.",
+  "schedule.disabledReason.package_removed": "This schedule was disabled automatically: the package was removed from this space. Enable it again once the agent is available here again.",
   "schedule.disabledUnnamed_one": "One schedule was disabled: nothing names its connections for this integration any more.",
   "schedule.disabledUnnamed_other": "{{count}} schedules were disabled: nothing names their connections for this integration any more.",
   "editor.description.general": "Define this agent’s identity, publication, and execution behavior.",

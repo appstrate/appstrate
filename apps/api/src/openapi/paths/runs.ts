@@ -263,7 +263,7 @@ const canonicalRunsPaths = {
         "404": {
           $ref: "#/components/responses/NotFound",
           description:
-            "`agent_not_found` when this space holds no placement for the agent (homed here, offered here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — an execution refusal, raised by this door and not by the reads: `GET /api/packages/agents/{scope}/{name}` still answers 200 with `active: false`. Switch it back on with `POST /api/spaces/{spaceId}/packages`.",
+            "`agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — an execution refusal, raised by this door and not by the reads: `GET /api/packages/agents/{scope}/{name}` still answers 200 with `active: false`. Switch it back on with `POST /api/spaces/{spaceId}/packages`.",
         },
         "409": {
           description:

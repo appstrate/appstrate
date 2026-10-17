@@ -13,7 +13,9 @@ export interface SheetSpaceRow {
   state: PlacementState | null;
   /** Where it is edited. */
   home: boolean;
-  offeredBy: string | null;
+  /** Placed by someone else and not switched on: switching it on is the consent. */
+  shared: boolean;
+  sharedBy: string | null;
   mayToggle: boolean;
   refusal: ActivationRefusal | null;
 }
@@ -41,7 +43,8 @@ export function sheetSpaceRows(
       name: space.name,
       state,
       home: placement.homeSpaceId === space.id,
-      offeredBy: placement.offeredBy[space.id] ?? null,
+      shared: space.id in placement.sharedBy,
+      sharedBy: placement.sharedBy[space.id] ?? null,
       mayToggle: gate.allowed,
       refusal: gate.refusal,
     };
@@ -51,10 +54,6 @@ export function sheetSpaceRows(
 export function sheetSpaceMode(rows: readonly SheetSpaceRow[]): SheetSpaceMode {
   if (!rows.some((row) => row.mayToggle)) return "readonly";
   return rows.length === 1 ? "single" : "table";
-}
-
-export function sheetOffers(rows: readonly SheetSpaceRow[]): SheetSpaceRow[] {
-  return rows.filter((row) => row.state === "offered");
 }
 
 export type ChatEnforceRefusal = "configure" | "publishFirst";

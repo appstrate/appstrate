@@ -110,7 +110,7 @@ const PACKAGE_HOME_PROPERTIES = {
   home_shareable: {
     type: "boolean",
     description:
-      "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the offer, the audience listing and the revoke (`/shares`), plus the activation that has to create the offer first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it.",
+      "Whether THIS caller holds the package type's `share` in its home space — the exact predicate every act that widens the audience enforces: the share and the audience listing (`/shares`), plus the activation that has to create the placement first (`POST /api/spaces/{spaceId}/packages` on a package this space does not yet hold). A withdrawal (`DELETE …/shares/{target}`) accepts it too, or the target space's `deactivate` grant. Activating an ALREADY-placed package asks for no `share`. `share` decides who runs the package with whose credentials, so it is granted by the `admin` and `builder` presets and carried by no API key; a custom role may hold it without `write`, or `write` without it.",
   },
 } as const;
 
@@ -1866,7 +1866,7 @@ export const schemas = {
         type: ["string", "null"],
         enum: [...scheduleDisabledReasonValues, null],
         description:
-          "The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted. On the schedule of the connection's owner, that emptied the integration's set, whose key is dropped — re-enabling resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. On another actor's schedule the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. It also marks a schedule of the connection's owner whose member pin, emptied by the delete and removed, alone named an integration's set. `connection_unshared`: a connection another actor owns, which its `connection_overrides` named, stopped being shared; the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_set_unnamed`: a pin or an org default was removed, and nothing names an integration's set for its fire any more — or an imposed set (an admin pin, an enforced org default, or that enforcement) was removed while the schedule's own `connection_overrides` set strictly narrowed it (only connections of it, fewer than it holds, `[]` included), which added nothing under it and would bind fewer connections as written without it; re-enabling goes through the schedule write rule (the `POST`/`PATCH` of a schedule). `connection_choice_invalid`: a fire was refused over the schedule's own connection choice, one the schedule write refuses too — a set left to choose (`must_choose_connection`), or a `connection_overrides` set naming a connection its actor cannot reach (`override_connection_unavailable`), falling outside an admin pin closed to additions or an enforced org default (`override_outranked`), binding a floor plus additions above the per-integration cap (`connection_set_too_large`), binding a connection on an auth that serves none of the selected tools (`auth_serves_no_selected_tool`) or empty for an integration the agent requires (`required_integration_unbound`). The schedule stays disabled even when the cause is reverted elsewhere; re-enabling goes through that write rule, which judges the choice again. Cleared by re-enabling.",
+          "The system act that disabled the schedule; `null` while `enabled` is true and when a write switched it off (`PATCH` with `enabled: false`). `actor_invalid`: a fire found its actor can no longer run agents in this space. `actor_left_org`: its member actor left or was removed from the organization. `connection_deleted`: a connection its `connection_overrides` named was deleted. On the schedule of the connection's owner, that emptied the integration's set, whose key is dropped — re-enabling resolves that integration through the rest of the cascade, so re-check `connection_overrides` first. On another actor's schedule the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. It also marks a schedule of the connection's owner whose member pin, emptied by the delete and removed, alone named an integration's set. `connection_unshared`: a connection another actor owns, which its `connection_overrides` named, stopped being shared; the overrides keep the id: while the connection stays unreachable, re-enabling requires a new choice. `connection_set_unnamed`: a pin or an org default was removed, and nothing names an integration's set for its fire any more — or an imposed set (an admin pin, an enforced org default, or that enforcement) was removed while the schedule's own `connection_overrides` set strictly narrowed it (only connections of it, fewer than it holds, `[]` included), which added nothing under it and would bind fewer connections as written without it; re-enabling goes through the schedule write rule (the `POST`/`PATCH` of a schedule). `connection_choice_invalid`: a fire was refused over the schedule's own connection choice, one the schedule write refuses too — a set left to choose (`must_choose_connection`), or a `connection_overrides` set naming a connection its actor cannot reach (`override_connection_unavailable`), falling outside an admin pin closed to additions or an enforced org default (`override_outranked`), binding a floor plus additions above the per-integration cap (`connection_set_too_large`), binding a connection on an auth that serves none of the selected tools (`auth_serves_no_selected_tool`) or empty for an integration the agent requires (`required_integration_unbound`). The schedule stays disabled even when the cause is reverted elsewhere; re-enabling goes through that write rule, which judges the choice again. `package_removed`: the agent's placement in the space was withdrawn (`DELETE /api/packages/{scope}/{name}/shares/{target}`, or a home move leaving the space); re-enabling it fails every fire until the agent is placed there again. Cleared by re-enabling.",
       },
       cron_expression: { type: "string" },
       timezone: { type: "string" },
@@ -3035,7 +3035,7 @@ export const schemas = {
         activation: {
           type: "array",
           description:
-            "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the offer; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance.",
+            "What the caller may do to this package in each space the listing names (`spaces`): switch it on (`activate`, `POST /api/spaces/{id}/packages`) or off (`deactivate`, `DELETE …/packages/{scope}/{name}`). `allowed`; `not_shareable` — it is not placed there and its home grants the caller no `<type>:share`, which the activation needs to create the placement; `forbidden` — the type's `activate`/`deactivate` permission is missing in that space (the owner of a personal space needs none). The routes stay the authority; this is their verdict served in advance.",
           items: {
             type: "object",
             required: ["spaceId", "activate", "deactivate"],
@@ -3071,13 +3071,13 @@ export const schemas = {
         type: "string",
         enum: ["home", "shared", "system"],
         description:
-          "WHY the package is placed here: `home` (this space owns it and governs its draft), `shared` (it was offered to this space), `system` (a built-in package, readable in every space).",
+          "WHY the package is placed here: `home` (this space owns it and governs its draft), `shared` (a `space_packages` row places it here, outside its home), `system` (a built-in package, readable in every space).",
       },
       state: {
         type: "string",
         enum: ["active", "inactive", "none"],
         description:
-          "Whether the space RUNS it. `active`: yes. `inactive`: it was switched off here, and its per-space model, proxy and input settings are kept. `none`: nothing has switched it on yet — a pending offer is exactly this. Activate with `POST /api/spaces/{spaceId}/packages`, deactivate with `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none`.",
+          "Whether the space RUNS it. `active`: yes. `inactive`: its row here says off — switched off, or placed by someone who could not switch it on here — and its per-space model, proxy and input settings are kept. `none`: no row here and the deployment's default is off. Activate with `POST /api/spaces/{spaceId}/packages`, deactivate with `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}`. The placement ROW always wins, for every package type: a system one switched off here reads `inactive`. With NO row the deployment's default decides — `source: 'system'`, and for an integration membership of this deployment's offered set (`SYSTEM_INTEGRATIONS`), so a system integration the deployment does not offer reads `none`.",
       },
       chat_enforced: {
         type: "boolean",
@@ -3087,7 +3087,7 @@ export const schemas = {
       shared_by: {
         type: ["object", "null"],
         description:
-          'Who offered it — on `via: "shared"` placements only. `null` there when the offer came from a home move rather than from a person, once that account is gone, or once they have left this organization. Always `null` for `home` and `system`.',
+          'Who placed it here — on `via: "shared"` placements only. `null` there when the row was left by a home move rather than placed by a person, once that account is gone, or once they have left this organization. Always `null` for `home` and `system`.',
         required: ["user_id", "name"],
         properties: {
           user_id: { type: "string" },
@@ -3099,7 +3099,7 @@ export const schemas = {
   ShareTarget: {
     type: "object",
     description:
-      "Who a package is offered to. A PERSON is not a space: a `user` target is resolved server-side to that member's personal space, so the sharer never handles the id of a space they cannot see. A `space` target must be one the caller can already reach — which is also why another member's personal space is not targetable by id.",
+      "Where a package is placed outside its home. A PERSON is not a space: a `user` target is resolved server-side to that member's personal space, so the sharer never handles the id of a space they cannot see. A `space` target must be one the caller can already reach — which is also why another member's personal space is not targetable by id.",
     required: ["kind"],
     oneOf: [
       {
@@ -3140,22 +3140,31 @@ export const schemas = {
   PackageShare: {
     type: "object",
     description:
-      "One entry of a package's AUDIENCE (`package_shares`): a space the package is offered to. A share grants READ and the affordance to activate; it is never an activation, and no execution path consults it.",
-    required: ["object", "target", "shared_by", "createdAt"],
+      "One entry of a package's AUDIENCE: a space the package is placed in outside its home — its `space_packages` row there. The placement grants READ; whether the space RUNS the package is the row's `enabled`.",
+    required: ["object", "target", "shared_by", "enabled", "createdAt"],
     properties: {
       object: { type: "string", enum: ["package_share"] },
       target: { $ref: "#/components/schemas/ShareTargetView" },
       shared_by: {
         type: ["object", "null"],
         description:
-          "Who shared it. `null` once that account is gone, and `null` once they have left this organization.",
+          "Who placed it there. `null` once that account is gone, once they have left this organization, and on a row a home move left behind.",
         required: ["user_id", "name"],
         properties: {
           user_id: { type: "string" },
           name: { type: "string" },
         },
       },
-      createdAt: { type: "string", format: "date-time" },
+      enabled: {
+        type: "boolean",
+        description:
+          "Whether the package is switched on in the target space (`space_packages.enabled`). A placement lands on when the sharer may activate in the target, and off otherwise, for the target's members to switch on.",
+      },
+      createdAt: {
+        type: "string",
+        format: "date-time",
+        description: "When the placement row was created (`space_packages.installed_at`).",
+      },
     },
   },
   PackageHome: {
@@ -3179,7 +3188,7 @@ export const schemas = {
         type: "array",
         items: { type: "string" },
         description:
-          "Spaces (`spc_…`) where this caller holds the package type's read AND the placement grants it — the home, or a space it is offered to; every reachable space holding that read for a system package. The home comes first when it is one of them, the rest sorted by id. Never empty: a package readable from nowhere is a 404.",
+          "Spaces (`spc_…`) where this caller holds the package type's read AND the placement grants it — the home, or a space holding a `space_packages` row for it; every reachable space holding that read for a system package. The home comes first when it is one of them, the rest sorted by id. Never empty: a package readable from nowhere is a 404.",
       },
     },
   },

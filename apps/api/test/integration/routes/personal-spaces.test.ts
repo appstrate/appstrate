@@ -29,7 +29,6 @@ import {
   organizationMembers,
   packages,
   runs,
-  packageShares,
   spaceMembers,
   spacePackages,
   spaces,
@@ -1187,19 +1186,11 @@ describe("personal spaces — offboarding", () => {
     expect(await db.select().from(spaces).where(eq(spaces.id, personalId))).toHaveLength(0);
   });
 
-  it("re-homes a package the org still runs AND writes the offer that places it", async () => {
-    // The sweeper MOVES a placement — it takes `home_space_id` away from a
-    // space that is about to stop existing. Every space still holding a
-    // `space_packages` row needs the other placement or it is left with an
-    // orphan: the package vanishes from its index, its detail, its
-    // space-package pages and its run gate, and its schedules fail on every
-    // tick, with nobody having decided anything.
-    //
-    // The fixture is that shape exactly: the team space holds the row and no
-    // offer. It is what inherited data looks like (`scripts/migration/0016`
-    // repairs precisely this), and what any second writer of `space_packages`
-    // would produce — which is why the invariant is asserted on the sweeper's
-    // OUTPUT rather than on the path that happened to create the row.
+  it("re-homes a package the org still runs, and its row keeps placing it there", async () => {
+    // The sweeper MOVES the home away from a space that is about to stop
+    // existing. A team space holding a `space_packages` row keeps it, and the
+    // row keeps placing the package there: the package stays on its index, its
+    // detail and its run gate, and its schedules keep firing.
     const team = await seedSpace({ orgId: owner.orgId, name: "Team" });
     await seedPackage({
       id: SHARED,
@@ -1220,18 +1211,8 @@ describe("personal spaces — offboarding", () => {
     expect((await getDbRow(packages, eq(packages.id, SHARED))).homeSpaceId).toBe(
       owner.defaultSpaceId,
     );
-    // …and placed in the space that runs it, by nobody in particular: the home
-    // was the placement until this sweep, so no person offered it. The default
-    // space gets NO offer — it HOMES the package now, and a package is not
-    // offered to the space it lives in.
-    const offers = await db
-      .select({ spaceId: packageShares.spaceId, sharedBy: packageShares.sharedBy })
-      .from(packageShares)
-      .where(eq(packageShares.packageId, SHARED));
-    expect(offers).toEqual([{ spaceId: team.id, sharedBy: null }]);
-
-    // The row survives, and it now means something again — the same verdict
-    // the three HTTP doors and the scheduler tick read.
+    // The row survives, untouched — the same verdict the three HTTP doors and
+    // the scheduler tick read.
     expect(
       await db
         .select({ enabled: spacePackages.enabled })
@@ -1241,50 +1222,11 @@ describe("personal spaces — offboarding", () => {
     expect(await agentExecutionBlock({ orgId: owner.orgId, spaceId: team.id }, SHARED)).toBeNull();
   });
 
-  it("drops the DEFAULT space's own offer when it re-homes there", async () => {
-    // The mirror image of the offer it writes. Before the sweep the default
-    // space was just another space running the package, so it held an offer of
-    // its own; afterwards it HOMES the package, and a package is not offered to
-    // the space it lives in (`share_target_is_home` says the same thing on the
-    // HTTP door). Left behind, that row would show the organization's own
-    // package as "shared with us" on the very page that owns it.
-    const team = await seedSpace({ orgId: owner.orgId, name: "Team" });
-    await seedPackage({
-      id: SHARED,
-      orgId: owner.orgId,
-      type: "agent",
-      homeSpaceId: personalId,
-      draftManifest: { name: SHARED, version: "0.1.0", type: "agent" },
-      draftContent: "prompt",
-    });
-    for (const spaceId of [team.id, owner.defaultSpaceId]) {
-      await seedPackageShare(spaceId, SHARED);
-      await seedSpacePackage(spaceId, SHARED, { enabled: true });
-    }
-
-    await removeMember(owner.orgId, member.user.id, ownerActor(owner));
-    await ageOrphan(personalId);
-    expect(await sweepOrphanedPersonalSpaces()).toEqual({ sweptSpaces: 1, failedSpaces: 0 });
-
-    expect((await getDbRow(packages, eq(packages.id, SHARED))).homeSpaceId).toBe(
-      owner.defaultSpaceId,
-    );
-    const offers = await db
-      .select({ spaceId: packageShares.spaceId })
-      .from(packageShares)
-      .where(eq(packageShares.packageId, SHARED));
-    expect(offers).toEqual([{ spaceId: team.id }]);
-  });
-
-  it("re-homes a package an OFFER alone reached, and leaves that offer standing", async () => {
-    // An offer is a placement, here as everywhere else: "placed elsewhere" is
-    // `placementReadFilter`, not "holds a `space_packages` row". A space that
+  it("re-homes a package placed elsewhere switched OFF, and leaves that row standing", async () => {
+    // A row switched off is a placement, here as everywhere else. A space that
     // was SHOWN the package can see it, so the package was never private, and
     // destroying it would take away work its author deliberately handed to a
     // colleague who had not switched it on yet.
-    //
-    // The reconciliation writes no offer here — the one that placed the package
-    // is untouched by the move and keeps placing it.
     const team = await seedSpace({ orgId: owner.orgId, name: "Team" });
     await seedPackage({
       id: SHARED,
@@ -1303,16 +1245,16 @@ describe("personal spaces — offboarding", () => {
     expect((await getDbRow(packages, eq(packages.id, SHARED))).homeSpaceId).toBe(
       owner.defaultSpaceId,
     );
-    const offers = await db
-      .select({ spaceId: packageShares.spaceId })
-      .from(packageShares)
-      .where(eq(packageShares.packageId, SHARED));
-    expect(offers).toEqual([{ spaceId: team.id }]);
+    const rows = await db
+      .select({ spaceId: spacePackages.spaceId, enabled: spacePackages.enabled })
+      .from(spacePackages)
+      .where(eq(spacePackages.packageId, SHARED));
+    expect(rows).toEqual([{ spaceId: team.id, enabled: false }]);
   });
 
   it("deletes a package no other space was ever placed for", async () => {
-    // The other branch, and the only one that deletes: no offer, no row, no
-    // space but the one being emptied. Private to a person who is gone, and
+    // The other branch, and the only one that deletes: no row, no space but
+    // the one being emptied. Private to a person who is gone, and
     // nobody else could ever see it.
     await seedPackage({
       id: HOMED,
@@ -1322,9 +1264,8 @@ describe("personal spaces — offboarding", () => {
       draftManifest: { name: HOMED, version: "0.1.0", type: "agent" },
       draftContent: "prompt",
     });
-    // A row and an offer in the space being emptied place it THERE, and that
-    // placement is the one leaving — they must not read as "elsewhere".
-    await seedPackageShare(personalId, HOMED);
+    // A row in the space being emptied places it THERE, and that placement is
+    // the one leaving — it must not read as "elsewhere".
     await seedSpacePackage(personalId, HOMED);
 
     await removeMember(owner.orgId, member.user.id, ownerActor(owner));
@@ -1333,7 +1274,7 @@ describe("personal spaces — offboarding", () => {
 
     expect(await db.select().from(packages).where(eq(packages.id, HOMED))).toHaveLength(0);
     expect(
-      await db.select().from(packageShares).where(eq(packageShares.packageId, HOMED)),
+      await db.select().from(spacePackages).where(eq(spacePackages.packageId, HOMED)),
     ).toHaveLength(0);
   });
 

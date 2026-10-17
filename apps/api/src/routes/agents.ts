@@ -206,7 +206,7 @@ export function createAgentsRouter() {
     // Single query: the activation rule (`activeHereSql` — placed here AND
     // switched on, or a system agent with no row) via LEFT JOIN. This page
     // answers "what can I launch here?", so every row on it is launchable;
-    // an agent merely placed here, offered or switched off, lives on the
+    // an agent placed here but switched off (or never switched on) lives on the
     // space library instead (`GET /api/spaces/{spaceId}/library`), which
     // carries its origin, its state and the switch.
     const [rows, runningCounts] = await Promise.all([

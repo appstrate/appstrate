@@ -26,10 +26,9 @@ import {
 import {
   seedEndUser,
   seedPackage,
-  seedPlacedPackage,
+  seedSpacePackage,
   seedSchedule,
   seedSpace,
-  seedSpacePackage,
 } from "../../helpers/seed.ts";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import {
@@ -323,11 +322,23 @@ describe("integration-pins-service — DB access/ownership", () => {
         homeSpaceId: scope.spaceId,
         enabled: false,
       });
-      // ORPHAN: a row here, but homed elsewhere and offered to nobody.
-      await seedConsumingAgent("@pinsorg/orphan", { homeSpaceId: elsewhere.id });
+      // Placed here from another home and switched on: it runs here too.
+      await seedConsumingAgent("@pinsorg/placed-here", { homeSpaceId: elsewhere.id });
+      // Placed and switched on in ANOTHER space only: it runs nowhere here.
+      await seedPackage({
+        id: "@pinsorg/elsewhere",
+        orgId: ctx.orgId,
+        type: "agent",
+        homeSpaceId: elsewhere.id,
+        draftManifest: agentManifest("@pinsorg/elsewhere"),
+      });
+      await seedSpacePackage(elsewhere.id, "@pinsorg/elsewhere");
 
       const listed = await listAgentsConsumingIntegration(scope, INTEGRATION);
-      expect(listed.map((a) => a.agent_package_id)).toEqual(["@pinsorg/runs-here"]);
+      expect(listed.map((a) => a.agent_package_id)).toEqual([
+        "@pinsorg/placed-here",
+        "@pinsorg/runs-here",
+      ]);
     });
 
     it("a pin is refused for an agent this space does not RUN", async () => {
@@ -1570,7 +1581,7 @@ describe("integration-pins-service — DB access/ownership", () => {
     });
 
     it("a target blocking user connections takes a sharer governing it there (403 otherwise)", async () => {
-      await seedPlacedPackage(other, INTEGRATION, { blockUserConnections: true });
+      await seedSpacePackage(other, INTEGRATION, { blockUserConnections: true });
       const id = await seedConnection({ spaceId: scope.spaceId, orgScope: true, userId: memberId });
       await expect(shareInto(id, other)).rejects.toMatchObject({
         status: 403,

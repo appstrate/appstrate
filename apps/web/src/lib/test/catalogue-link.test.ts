@@ -2,7 +2,6 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  CATALOGUE_SHARED_HREF,
   catalogueHref,
   catalogueVersionFor,
   isCatalogueKind,
@@ -60,14 +59,14 @@ describe("catalogueVersionFor", () => {
 });
 
 describe("catalogue addresses", () => {
-  it("name a reading and a kind, the shares list included", () => {
-    expect(CATALOGUE_SHARED_HREF).toBe("/catalogue/shared/agent");
-    expect(isCatalogueReading("shared")).toBe(true);
+  it("name a reading and a kind", () => {
+    expect(isCatalogueReading("placed")).toBe(true);
     expect(isCatalogueKind("mcp-server")).toBe(true);
   });
 
   it("refuse a reading or a kind the catalogue does not have", () => {
     expect(isCatalogueReading("origin")).toBe(false);
+    expect(isCatalogueReading("shared")).toBe(false);
     expect(isCatalogueKind("all")).toBe(false);
     expect(isCatalogueKind("agents")).toBe(false);
   });

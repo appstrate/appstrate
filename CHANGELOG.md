@@ -8,9 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
-- **Run the read-only pre-flight `scripts/migration/0048-report-narrowing-overrides.ts`
-  before deploying the release that carries migration `0100`** (#2043):
-  `DATABASE_URL=<platform> bun scripts/migration/0048-report-narrowing-overrides.ts`
+- **Run the read-only pre-flight `scripts/migration/0050-report-narrowing-overrides.ts`
+  before deploying the release that carries migration `0101`** (#2043):
+  `DATABASE_URL=<platform> bun scripts/migration/0050-report-narrowing-overrides.ts`
   (the image ships it, see "The image ships `scripts/migration/`" below). It
   lists the schedules whose `connection_overrides` are `[]` or a strict subset of
   a set an admin pin or an enforced org default imposes. Until now such an override
@@ -21,7 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   non-required integration, and those schedules bind the whole imposed set after
   the deploy. Only a non-empty strict subset could not come from the interface.
   Every listed schedule is a decision for its owner before the deploy; the script
-  rewrites nothing. Migration `0100` itself
+  rewrites nothing. Migration `0101` itself
   rewrites no data: every existing admin pin stays closed.
 
 ### Changed
@@ -201,7 +201,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `additional_connections_allowed`. When it is on, a run binds the imposed
   connections plus the ones the actor chose among those they can use in the
   space (`block_user_connections` still bounds them); nothing is added
-  automatically. Migration `0100_integration_pin_additions` adds the column and
+  automatically. Migration `0101_integration_pin_additions` adds the column and
   two `CHECK`s: a member pin is never open, and an open pin imposes at least one
   connection. A member pin no longer survives under a closed admin pin: every
   admin pin write or delete where the pin is, or was, closed deletes the member

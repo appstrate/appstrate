@@ -1,5 +1,5 @@
 {
-  "id": "d5f2003a-051c-42ee-adf2-e3711292b322",
+  "id": "a8a6f48c-7954-4813-b692-1a5318b120e0",
   "prevId": "b3c290ef-d56d-408f-88a4-40ab7ec9f573",
   "version": "7",
   "dialect": "postgresql",
@@ -3086,8 +3086,13 @@
           "name": "enabled",
           "type": "boolean",
           "primaryKey": false,
-          "notNull": true,
-          "default": true
+          "notNull": true
+        },
+        "shared_by": {
+          "name": "shared_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "installed_at": {
           "name": "installed_at",
@@ -3119,6 +3124,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "idx_space_packages_shared_by": {
+          "name": "idx_space_packages_shared_by",
+          "columns": [
+            {
+              "expression": "shared_by",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -3138,6 +3158,15 @@
           "columnsFrom": ["package_id"],
           "columnsTo": ["id"],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "space_packages_shared_by_user_id_fk": {
+          "name": "space_packages_shared_by_user_id_fk",
+          "tableFrom": "space_packages",
+          "tableTo": "user",
+          "columnsFrom": ["shared_by"],
+          "columnsTo": ["id"],
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -6060,13 +6089,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "allow_additional_connections": {
-          "name": "allow_additional_connections",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -6193,14 +6215,6 @@
         "integration_pins_connection_ids_cardinality": {
           "name": "integration_pins_connection_ids_cardinality",
           "value": "cardinality(connection_ids) BETWEEN 0 AND 20"
-        },
-        "integration_pins_additions_admin_only": {
-          "name": "integration_pins_additions_admin_only",
-          "value": "user_id IS NULL OR NOT allow_additional_connections"
-        },
-        "integration_pins_additions_need_imposed": {
-          "name": "integration_pins_additions_need_imposed",
-          "value": "NOT allow_additional_connections OR cardinality(connection_ids) > 0"
         }
       },
       "isRLSEnabled": false
@@ -9845,7 +9859,8 @@
         "connection_deleted",
         "connection_unshared",
         "connection_set_unnamed",
-        "connection_choice_invalid"
+        "connection_choice_invalid",
+        "package_removed"
       ]
     }
   },

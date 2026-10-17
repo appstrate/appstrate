@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * 0048 — READ-ONLY report (#2043), before deploying the release where a launch override can no
+ * 0050 — READ-ONLY report (#2043), before deploying the release where a launch override can no
  * longer NARROW a connection set an admin imposes:
  *
- *   DATABASE_URL=<platform> bun scripts/migration/0048-report-narrowing-overrides.ts
+ *   DATABASE_URL=<platform> bun scripts/migration/0050-report-narrowing-overrides.ts
  *
  * Under an admin pin (`integration_pins.user_id IS NULL` for the schedule's space, agent and
  * integration) or, without one, an enforced org default (`integration_org_defaults.enforce` for

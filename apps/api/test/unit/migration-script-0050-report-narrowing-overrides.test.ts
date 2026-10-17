@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `scripts/migration/0048-report-narrowing-overrides.ts` on a private PGlite replayed to the
+ * `scripts/migration/0050-report-narrowing-overrides.ts` on a private PGlite replayed to the
  * current schema: the queries it reads, then the report it prints. Each fixture is one clause of
  * the predicate — deleting it moves a schedule in or out of the list.
  */
@@ -12,13 +12,13 @@ import {
   readSnapshot,
   report,
   type ReportSnapshot,
-} from "../../../../scripts/migration/0048-report-narrowing-overrides.ts";
+} from "../../../../scripts/migration/0050-report-narrowing-overrides.ts";
 
 const ORG = "e0000000-0000-4000-8000-00000000d048";
 const SPACE = "spc_d0480000-0000-4000-8000-000000000001";
 const OTHER_SPACE = "spc_d0480000-0000-4000-8000-000000000002";
-const USER = "usr_0048";
-const AGENT = "@acme/agent-0048";
+const USER = "usr_0050";
+const AGENT = "@acme/agent-0050";
 const PINNED = "@acme/pinned";
 const ENFORCED = "@acme/enforced";
 const BOTH = "@acme/both";
@@ -30,7 +30,7 @@ const conn = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0
 const [A, B, C, D] = [conn(1), conn(2), conn(3), conn(4)];
 const json = (v: unknown) => `'${JSON.stringify(v)}'`;
 
-describe("0048 — overrides that narrowed an imposed set", () => {
+describe("0050 — overrides that narrowed an imposed set", () => {
   let pg: PGlite;
   let snapshot: ReportSnapshot;
 
@@ -45,7 +45,7 @@ describe("0048 — overrides that narrowed an imposed set", () => {
       INSERT INTO spaces (id, org_id, name, is_default)
         VALUES ('${SPACE}', '${ORG}', 'Default', true), ('${OTHER_SPACE}', '${ORG}', 'Other', false);
       INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
-        VALUES ('${USER}', 'Owner', 'o-0048@example.com', true, now(), now());
+        VALUES ('${USER}', 'Owner', 'o-0050@example.com', true, now(), now());
 
       -- admin pin {A,B}; member pin on PINNED must govern nothing
       INSERT INTO integration_pins (space_id, package_id, integration_package_id, user_id, connection_ids)

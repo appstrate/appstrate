@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The database a window script (`0040`, `0041`, `0043`, `0044`, `0045`) targets: `DATABASE_URL`, or an embedded database
+ * The database a window script (`0040`, `0041`, `0043`, `0044`, `0045`, `0048`) targets: `DATABASE_URL`, or an embedded database
  * named by `PGLITE_DATA_DIR` (the platform stopped: PGlite opens in one process). With neither set,
  * `@appstrate/db/client` would open the default `./data/pglite`, so the entry point calls this
  * before importing it, and exits 2.

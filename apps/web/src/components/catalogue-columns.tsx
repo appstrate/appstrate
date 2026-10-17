@@ -107,6 +107,7 @@ export function useCatalogueActionsColumn({
   isPending,
   deedsOf,
   spaceNameOf,
+  currentSpaceId,
   onOpen,
   onMoveHome,
   onShare,
@@ -116,6 +117,7 @@ export function useCatalogueActionsColumn({
   /** `undefined` for a row the library does not carry: its menu only opens it. */
   deedsOf: (item: CardItem) => CatalogueDeeds | undefined;
   spaceNameOf: (spaceId: string) => string;
+  currentSpaceId: string | null;
   onOpen: (item: CardItem) => void;
   onMoveHome: (item: CardItem) => void;
   onShare: (item: CardItem) => void;
@@ -124,9 +126,10 @@ export function useCatalogueActionsColumn({
   return rowActionsColumn((item) => (
     <CatalogueRowMenu
       item={item}
-      // A system package has no home to move and no audience to offer.
+      // A system package has no home to move and no audience to share with.
       deeds={deedsOf(item) ?? NO_DEEDS}
       spaceNameOf={spaceNameOf}
+      currentSpaceId={currentSpaceId}
       isPending={isPending}
       onOpen={onOpen}
       onMoveHome={onMoveHome}
@@ -161,8 +164,8 @@ export function useCatalogueProtocolColumn<T = CardItem>(
  * One column per space the caller reaches; each cell says, and changes, this package's
  * state THERE. The switch IS the deed: activating in a space where it is not placed shares
  * and switches it on in one transaction. The verdict is the TARGET space's (`activationGate`).
- * "Offered" and "switched off" are written beside the switch, which alone reads the same
- * placed or not (only a placed one keeps its settings).
+ * "Switched off" is written beside the switch, which alone reads the same placed or not
+ * (only a placed one keeps its settings).
  */
 export function useCatalogueSpaceColumns({
   spaces,
@@ -203,6 +206,8 @@ export function useCatalogueSpaceColumns({
       if (!placement) return <CellEmpty />;
       const state = placementIn(placement, space.id);
       const gate = gateOf(item, space.id, state !== "active");
+      // Placed by someone else and not switched on: switching it on is the consent.
+      const sharedOff = space.id in placement.sharedBy;
       return (
         // `relative z-10`: sit above the row link's overlay or the row swallows the click (see `data-table.tsx`).
         <span className="relative z-10 flex min-w-0 items-center gap-1.5 overflow-hidden">
@@ -216,18 +221,12 @@ export function useCatalogueSpaceColumns({
             title={
               gate.refusal
                 ? t(ACTIVATION_REFUSAL_KEY[gate.refusal], { ns: "common" })
-                : state === "offered"
+                : sharedOff
                   ? t("catalogue.sheet.offerCredentials")
                   : undefined
             }
             onCheckedChange={(next) => onSetActive(item, space.id, next === true)}
           />
-          {state === "offered" && (
-            // One word: who shared it is on the sheet and in "Partages en attente".
-            <span className="text-primary text-[0.7rem] font-medium">
-              {t("catalogue.offeredHere")}
-            </span>
-          )}
           {state === "inactive" && (
             <span className="text-muted-foreground text-[0.7rem]">
               {t("catalogue.filter.inactive")}

@@ -2,7 +2,7 @@
 
 /**
  * The integration index: what this space can use. Like every index it holds the ACTIVE set; one
- * placed here but switched off, or merely offered, is in the space library.
+ * placed here but switched off, or never switched on, is in the space library.
  */
 
 import { useMemo } from "react";

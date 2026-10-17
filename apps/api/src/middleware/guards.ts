@@ -36,7 +36,7 @@ export function isActiveAgentGate(handler: unknown): boolean {
 /**
  * Middleware: load an agent by route param and set it on context, or 404.
  *
- * The rule is PLACEMENT — the agent is homed in this space, offered to it, or
+ * The rule is PLACEMENT — the agent is homed in this space, placed in it, or
  * shipped with the deployment ({@link isPackageReadableInSpace}) — and nothing
  * else. An agent placed here and switched OFF is loaded like any other: reading
  * an agent, listing its runs, choosing its model and asking what is blocking it

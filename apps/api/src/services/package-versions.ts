@@ -233,9 +233,15 @@ export async function listPackageVersions(packageId: string) {
   }));
 }
 
-/** Get the latest version ID for a package via the "latest" dist-tag. */
-export async function getLatestVersionId(packageId: string): Promise<number | null> {
-  const [tag] = await db
+/**
+ * Get the latest version ID for a package via the "latest" dist-tag. `executor`:
+ * read inside the caller's transaction.
+ */
+export async function getLatestVersionId(
+  packageId: string,
+  executor: DbOrTx = db,
+): Promise<number | null> {
+  const [tag] = await executor
     .select({ versionId: packageDistTags.versionId })
     .from(packageDistTags)
     .where(and(eq(packageDistTags.packageId, packageId), eq(packageDistTags.tag, "latest")))
