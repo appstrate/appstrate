@@ -151,6 +151,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `api_call` integration the exported agent declares, as a local bundle
     read from disk already did.
 
+### Added
+
+- **Garmin inReach (MapShare) — an agent reads where an inReach is (#2060).**
+  `@appstrate/garmin-mapshare@1.0.0` reads the owner's Garmin Explore MapShare
+  KML feed (`https://explore.garmin.com/feed/share/<map link name>`) through
+  `api_call`, with one `api_key` auth: the map link name, which labels the
+  connection, and an optional MapShare password sent as HTTP Basic with an
+  empty username (never the Garmin account password). Its `INTEGRATION.md`
+  gives the last point or a `d1`/`d2` UTC range, the KML fields and their
+  units, and what an empty `200` (wrong name, MapShare off, nothing visible)
+  and a `401` (password) mean. The position is the last tracking point, not a
+  live fix: no on-demand locate, no messaging, and messages sent in SOS mode
+  are absent from the feed.
+
 ### Fixed
 
 - **A link to a catalogue sheet opens it from the package id alone** (#2013).

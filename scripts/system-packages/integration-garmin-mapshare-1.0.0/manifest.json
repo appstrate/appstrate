@@ -1,0 +1,68 @@
+{
+  "name": "@appstrate/garmin-mapshare",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.3",
+  "display_name": "Garmin inReach (MapShare)",
+  "description": "Reads the owner's Garmin inReach position (last point, history) from their Garmin Explore MapShare feed. Not real time: a point exists only when the device tracked or sent a message. No on-demand locate, and messages sent in SOS mode are absent.",
+  "keywords": ["gps", "location", "satellite"],
+  "license": "Apache-2.0",
+  "icon": "simple-icons:garmin",
+  "source": {
+    "kind": "none"
+  },
+  "default_tools": ["api_call"],
+  "auths": {
+    "primary": {
+      "type": "api_key",
+      "authorized_uris": ["https://explore.garmin.com/feed/share/**"],
+      "identity_claims": {
+        "account_id": "$.mapshare_id"
+      },
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "mapshare_id": {
+              "type": "string",
+              "title": "Nom du lien MapShare",
+              "description": "La fin de l'adresse MapShare, share.garmin.com/<nom>, affichée dans Garmin Explore (Réglages ou Social › MapShare). MapShare doit être activé.",
+              "pattern": "^[^/?#\\s]+$"
+            },
+            "password": {
+              "type": "string",
+              "writeOnly": true,
+              "title": "Mot de passe MapShare",
+              "description": "Seulement si la page MapShare est protégée par un mot de passe. C'est le mot de passe MapShare, JAMAIS celui du compte Garmin."
+            }
+          },
+          "required": ["mapshare_id"]
+        }
+      },
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Basic ",
+          "value": ":{$credential.password}",
+          "encoding": "base64"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auths": {
+        "primary": {}
+      }
+    }
+  }
+}
