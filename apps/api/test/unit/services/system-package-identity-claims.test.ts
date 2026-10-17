@@ -123,6 +123,14 @@ const CASES: Record<string, Case> = {
     accountId: "80351110224678912",
     source_doc: "docs.discord.com/developers/resources/user",
   },
+  // Like SSH, no third-party payload: the account key is read off the credential
+  // bag — the owner's public personal LiveTrack link, the one field it holds.
+  "@appstrate/garmin-livetrack": {
+    authKey: "primary",
+    source: { livetrack_url: "https://livetrack.garmin.com/jane-doe" },
+    accountId: "https://livetrack.garmin.com/jane-doe",
+    source_doc: "the connect form's credential bag — integration-garmin-livetrack manifest",
+  },
   "@appstrate/github": {
     authKey: "primary",
     source: {
