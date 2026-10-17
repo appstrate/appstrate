@@ -17,8 +17,8 @@ consumer's publish rather than the first user's `npm install`.
 ### Fixed
 
 - **`urlTemplateAuthority`** ends the authority at a backslash: WHATWG reads `\` as a
-  path delimiter for http(s), so a target such as `https://a.com\@evil.com/` no longer
-  yields `a.com\@evil.com` as its host (#2063).
+  path delimiter for http(s), so a target such as `https://a.com\@evil.com/` yields
+  `https://a.com` instead of `https://a.com\@evil.com` (#2063).
 
 ## [0.13.0] — 2026-10-12
 

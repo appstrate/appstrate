@@ -95,9 +95,11 @@ export const tusAdapter: UploadAdapter = {
       );
     }
     return {
-      sessionUrl: resolveLocation(
-        ctx.target,
-        serverSessionUrl(sessionUrl, "tus: Location header", res),
+      // Checked raw (new URL() %7B-encodes a '{{' in a path) and resolved (it strips tab/newline,
+      // so '{\t{' becomes '{{' in a query).
+      sessionUrl: serverSessionUrl(
+        resolveLocation(ctx.target, serverSessionUrl(sessionUrl, "tus: Location header", res), res),
+        "tus: Location header",
         res,
       ),
       serverOffset: 0,

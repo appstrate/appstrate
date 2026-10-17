@@ -176,7 +176,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   becomes the target of the next call, and the sidecar would have rendered its
   `{{field}}` as a credential placeholder. A relative tus `Location` under a
   templated target resolves only where rendering cannot change the result,
-  otherwise it is refused.
+  otherwise it is refused. A tus `Location` that is not an http(s) URL, or that
+  holds `{{` once parsed, is an `UploadError`.
 
 - **A link to a catalogue sheet opens it from the package id alone** (#2013).
   `/catalogue?package=<id>[&version=…]`, or a link naming the wrong kind,

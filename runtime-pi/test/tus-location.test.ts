@@ -71,6 +71,18 @@ describe("tus Location resolution", () => {
     }
   });
 
+  it("refuses a Location that only holds '{{' once parsed (WHATWG strips tab/newline)", async () => {
+    for (const [target, location] of [
+      ["https://h.example/upload", "https://h.example/files/abc?k={\t{api_key}}"],
+      ["https://h.example/upload", "/files?k={\n{api_key}}"],
+      ["https://h.example/{{f}}/upload", "/files?k={\t{api_key}}"],
+    ] as const) {
+      await expect(sessionUrl(target, location)).rejects.toThrow(
+        /tus: Location header holds '\{\{'/,
+      );
+    }
+  });
+
   it("refuses a non-http(s) absolute Location", async () => {
     for (const location of ["javascript:alert(1)", "file:///etc/passwd"]) {
       await expect(sessionUrl("https://h.example/upload", location)).rejects.toThrow(
