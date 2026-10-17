@@ -100,7 +100,6 @@ test("a role missing from the assignable catalog stays visible and disabled afte
   await expect(page.getByRole("option", { name: "Opérateur", exact: true })).toBeDisabled();
   await page.getByRole("option", { name: "Lecteur", exact: true }).click();
   await expect(role).toHaveText("Lecteur");
-  await page.getByRole("button", { name: "Enregistrer", exact: true }).click();
   await expect
     .poll(async () => (await (await orgOnlyClient.get(`/spaces/${space}`)).json()).default_role)
     .toBe("viewer");

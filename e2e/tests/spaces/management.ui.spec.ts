@@ -98,7 +98,8 @@ test.describe("Space management in UI", () => {
     await page.goto("/workspace-settings/general");
     const sidebar = new Sidebar(page);
     const name = page.getByRole("textbox", { name: "Nom", exact: true });
-    // Prime B's cache, then save A. Returning to B must show B's own settings.
+    // Prime B's detail cache, then change A's default role (a single choice, written at
+    // once). The return to B must show B's own values and A's pick must have reached A only.
     await sidebar.switchSpaceInSettings(target.name);
     await expect(name).toHaveValue(target.name);
     await sidebar.switchSpaceInSettings(source.name);
@@ -111,7 +112,6 @@ test.describe("Space management in UI", () => {
     );
     await page.locator("#space-default-role").click();
     await page.getByRole("option", { name: /^(Administrateur de l'espace|Space admin)$/ }).click();
-    await page.getByRole("button", { name: "Enregistrer", exact: true }).click();
     expect((await sourceSaved).status()).toBe(200);
 
     await sidebar.switchSpaceInSettings(target.name);

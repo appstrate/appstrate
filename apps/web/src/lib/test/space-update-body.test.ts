@@ -34,8 +34,6 @@ describe("spaceSettingsUpdate", () => {
   const baseline = {
     name: "Before",
     domains: ["old.test"],
-    visibility: "open" as const,
-    defaultRole: "viewer" as const,
   };
   it("renames with the trimmed name alone, so a personal space accepts it", () => {
     // `visibility` or `default_role` in the body is a 409 `personal_space_immutable`
@@ -45,17 +43,9 @@ describe("spaceSettingsUpdate", () => {
     });
   });
   it("combines the edited fields, the domain list without the empty rows of editing", () => {
-    const next = {
-      ...baseline,
-      name: "After",
-      visibility: "private" as const,
-      defaultRole: "operator" as const,
-      domains: [" new.test ", "", "  "],
-    };
+    const next = { name: "After", domains: [" new.test ", "", "  "] };
     expect(spaceSettingsUpdate(baseline, next)).toEqual({
       name: "After",
-      visibility: "private",
-      default_role: "operator",
       settings: { allowedRedirectDomains: ["new.test"] },
     });
   });

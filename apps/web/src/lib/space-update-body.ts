@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The `PATCH /api/spaces/{id}` body contains only edited fields:
- * the route refuses `visibility`/`default_role` on a personal space whatever their
- * value (409 `personal_space_immutable`), so a rename carrying them would fail.
+ * The space form's `PATCH /api/spaces/{id}` body: its text fields, only the edited ones.
+ * Visibility and default role are single choices written on their own.
  */
 
 import type { components, paths } from "../api/client";
@@ -37,14 +36,9 @@ export function visibilityChangeNeedsConfirmation(
 export interface SpaceSettingsDraft {
   name: string;
   domains: string[];
-  visibility: SpaceObject["visibility"];
-  defaultRole: SpaceObject["default_role"];
 }
 
-/**
- * Compare with the edit baseline, never with a refetch that may contain another admin's changes.
- * A personal space never offers visibility or default role, so neither appears in its diff.
- */
+/** Compare with the edit baseline, never with a refetch that may contain another admin's changes. */
 export function spaceSettingsUpdate(
   baseline: SpaceSettingsDraft,
   next: SpaceSettingsDraft,
@@ -54,7 +48,5 @@ export function spaceSettingsUpdate(
     ...(domainsChanged(baseline.domains, next.domains)
       ? { settings: { allowedRedirectDomains: cleanDomains(next.domains) } }
       : {}),
-    ...(next.visibility !== baseline.visibility ? { visibility: next.visibility } : {}),
-    ...(next.defaultRole !== baseline.defaultRole ? { default_role: next.defaultRole } : {}),
   };
 }

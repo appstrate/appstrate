@@ -13,6 +13,8 @@ import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { ErrorState, EmptyState } from "../../components/page-states";
 import { SettingsSkeleton } from "../../components/loading-skeletons";
 import { ManualSave } from "../../components/settings/manual-save";
+import { SaveFeedback } from "../../components/settings/save-feedback";
+import { fieldWriteState } from "../../lib/field-write-state";
 import { useSettingDraft } from "../../hooks/use-setting-draft";
 import { RadioGroup, RadioGroupItem } from "@appstrate/ui/components/radio-group";
 import { Label } from "@appstrate/ui/components/label";
@@ -65,24 +67,19 @@ function GeneralForm({
   const updateMutation = useUpdateSpace();
   const deleteMutation = useDeleteSpace();
 
-  const domains = space.settings?.allowedRedirectDomains ?? [];
+  // The text fields are one draft with Save; visibility and default role are single
+  // choices, written as they are picked.
   const draft = useSettingDraft({
     name: space.name,
-    domains,
-    visibility: space.visibility,
-    defaultRole: space.default_role,
+    domains: space.settings?.allowedRedirectDomains ?? [],
   });
-  const {
-    domains: activeDomains,
-    visibility: activeVisibility,
-    defaultRole: activeDefaultRole,
-  } = draft.value;
+  const activeDomains = draft.value.domains;
+  const [editedVisibility, setEditedVisibility] = useState<SpaceVisibility | null>(null);
+  const [editedDefaultRole, setEditedDefaultRole] = useState<SpaceRolePreset | null>(null);
+  const activeVisibility = editedVisibility ?? space.visibility;
+  const activeDefaultRole = editedDefaultRole ?? space.default_role;
+  const [pendingClose, setPendingClose] = useState<SpaceVisibility | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  // Closing an open space is confirmed once, at Save: the save waits on this decision.
-  const [closeAsk, setCloseAsk] = useState<{
-    resolve: () => void;
-    reject: (error: unknown) => void;
-  } | null>(null);
 
   // The assignable presets come from the org's role catalogue, which a space
   // admin may read without owning it.
@@ -97,17 +94,46 @@ function GeneralForm({
     .filter((role) => role.kind === "preset")
     .map((role) => ({ value: role.key, label: t(`roles.preset.${role.key}`) }));
 
-  const chooseVisibility = (next: SpaceVisibility) =>
-    draft.set((previous) => ({ ...previous, visibility: next }));
-  const commitDefaultRole = (next: SpaceRolePreset) =>
-    draft.set((previous) => ({ ...previous, defaultRole: next }));
+  // The space mutation leaves its refusals to the caller (`useUpdateSpace`). A refused
+  // choice shows the stored value again, not the one the server refused.
+  const commitVisibility = (next: SpaceVisibility) => {
+    setEditedVisibility(next);
+    updateMutation.mutate(
+      { params: { path: { id: spaceId } }, body: { visibility: next } },
+      {
+        onSuccess: () => setPendingClose(null),
+        onError: (error) => {
+          toastError(error);
+          setEditedVisibility(null);
+        },
+      },
+    );
+  };
+  const chooseVisibility = (next: SpaceVisibility) => {
+    if (next === activeVisibility) return;
+    if (visibilityChangeNeedsConfirmation(activeVisibility, next)) setPendingClose(next);
+    else commitVisibility(next);
+  };
+  const commitDefaultRole = (next: SpaceRolePreset) => {
+    setEditedDefaultRole(next);
+    updateMutation.mutate(
+      { params: { path: { id: spaceId } }, body: { default_role: next } },
+      {
+        onError: (error) => {
+          toastError(error);
+          setEditedDefaultRole(null);
+        },
+      },
+    );
+  };
   const setDomains = (next: string[]) => draft.set((previous) => ({ ...previous, domains: next }));
-  const persist = async () => {
+  const save = async () => {
     const sent = draft.value;
-    const body = spaceSettingsUpdate(draft.baseline, sent);
-    // The space mutation leaves its refusals to the caller (`useUpdateSpace`).
     const saved = await updateMutation
-      .mutateAsync({ params: { path: { id: spaceId } }, body })
+      .mutateAsync({
+        params: { path: { id: spaceId } },
+        body: spaceSettingsUpdate(draft.baseline, sent),
+      })
       .catch((error: unknown) => {
         toastError(error);
         throw error;
@@ -115,14 +141,8 @@ function GeneralForm({
     draft.accept(sent, {
       name: saved.name,
       domains: saved.settings?.allowedRedirectDomains ?? [],
-      visibility: saved.visibility,
-      defaultRole: saved.default_role,
     });
   };
-  const save = () =>
-    visibilityChangeNeedsConfirmation(draft.baseline.visibility, draft.value.visibility)
-      ? new Promise<void>((resolve, reject) => setCloseAsk({ resolve, reject }))
-      : persist();
 
   return (
     <>
@@ -196,6 +216,7 @@ function GeneralForm({
                 variant="field"
                 label={t("spaces.visibilityLabel")}
                 description={t("spaces.visibilityHint")}
+                status={<SaveFeedback {...fieldWriteState(updateMutation, "visibility")} />}
               >
                 <div className="flex w-full flex-col gap-3">
                   <RadioGroup
@@ -239,6 +260,7 @@ function GeneralForm({
                   variant="field"
                   label={t("spaces.defaultRoleLabel")}
                   description={t("spaces.defaultRoleHint")}
+                  status={<SaveFeedback {...fieldWriteState(updateMutation, "default_role")} />}
                 >
                   <div className="flex w-full flex-col gap-2">
                     <SpaceRoleSelect
@@ -297,22 +319,13 @@ function GeneralForm({
       )}
 
       <ConfirmModal
-        open={closeAsk !== null}
-        onClose={() => {
-          closeAsk?.reject(new Error("save cancelled"));
-          setCloseAsk(null);
-        }}
+        open={pendingClose !== null}
+        onClose={() => setPendingClose(null)}
         title={t("spaces.closeConfirmTitle")}
         confirmLabel={t("spaces.closeConfirm")}
         description={t("spaces.closeUnsharesConnections")}
         isPending={updateMutation.isPending}
-        onConfirm={() => {
-          const ask = closeAsk;
-          if (!ask) return;
-          void persist()
-            .then(ask.resolve, ask.reject)
-            .finally(() => setCloseAsk(null));
-        }}
+        onConfirm={() => pendingClose && commitVisibility(pendingClose)}
       />
 
       <ConfirmModal

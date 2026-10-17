@@ -192,17 +192,17 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
   Typing, leaving a field, waiting, hiding the page or unmounting never persists a
   draft.
   - Drafts: `useSettingDraft` + `ManualSave` (its `SaveBar`), one form and one write
-    per group of related values (a space's general settings, input values and locks,
+    per group of related values (a space's name and domains, input values and locks,
     model and generation, schedule and connections, an integration's default set and
     mode). A single text field uses `InlineTextSetting` (Save or Enter, Cancel or
     Escape). Keep API and permission boundaries explicit.
   - At once: theme, language, cards/table choice, column widths and visibility, the
-    chat's model/generation/authoring choices, an agent's proxy, the organization
-    logo, activating a package in a space, a space member's role, sharing a
-    connection, an organization policy switch, and the deeds (Send, Run, Delete,
-    Connect, Set as default). One whose effect reaches others asks first with a
+    chat's model/generation/authoring choices, an agent's proxy, a space's visibility
+    and default role, the organization logo, activating a package in a space, a space
+    member's role, sharing a connection, an organization policy switch, and the deeds
+    (Send, Run, Delete, Connect, Set as default). One whose effect reaches others asks first with a
     `ConfirmModal`: imposing a skill on a space's chat, an organization member's
-    owner or access-revoking role, closing an open space (asked at Save).
+    owner or access-revoking role, closing an open space.
   - Operational state and navigation history (auth, selected org/space, sidebar,
     pairing recovery, sent messages, runs and logs) are not drafts.
 - Clean forms follow refreshed data. Dirty forms preserve their edits on refetch
