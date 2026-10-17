@@ -22,7 +22,7 @@ export function SaveControls({
   action,
 }: Omit<ManualSaveProps, "onSave"> & { action: SaveAction }) {
   const { t } = useTranslation("common");
-  const { blocker } = useUnsavedChanges(dirty || action.saving);
+  const { blocker } = useUnsavedChanges(dirty || action.saving, onDiscard);
   if (!dirty && !action.saving) return null;
   return (
     <>

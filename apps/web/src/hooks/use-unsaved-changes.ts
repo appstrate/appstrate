@@ -31,6 +31,8 @@ interface Guard {
   dirty: boolean;
   /** `allowNavigation`, or a scope change the user agreed to: the draft is let go. */
   skip: boolean;
+  /** Drops the draft, so a form that outlives a scope change is clean and guarded again. */
+  discard: () => void;
 }
 
 /** A leave decision waiting on the user, shown by the one form it names. */
@@ -107,8 +109,13 @@ export function requestScopeChange(action: () => void): void {
     othersDirty: dirty.length > 1,
     proceed: () => {
       setAsk(null);
-      // The answer covers whatever the change navigates to, an asynchronous Back included.
-      for (const guard of dirtyGuards()) guard.skip = true;
+      // "Leave without saving" drops every draft. `skip` covers the navigation the change
+      // may start before the forms re-render clean; a clean form clears it and is guarded
+      // again (a form that stays mounted, such as an account preference, included).
+      for (const guard of dirtyGuards()) {
+        guard.skip = true;
+        guard.discard();
+      }
       action();
     },
     reset: () => setAsk(null),
@@ -117,19 +124,22 @@ export function requestScopeChange(action: () => void): void {
 
 const noop = () => {};
 
-export function useUnsavedChanges(isDirty: boolean): {
+export function useUnsavedChanges(
+  isDirty: boolean,
+  discard: () => void,
+): {
   blocker: UnsavedBlocker;
   allowNavigation: (allowed?: boolean) => void;
 } {
   const location = useLocation();
   const place = useContext(EditorPlaceContext);
   const [id] = useState(() => Symbol());
-  const guard = useRef<Guard>({ id, path: "", place, dirty: isDirty, skip: false });
+  const guard = useRef<Guard>({ id, path: "", place, dirty: isDirty, skip: false, discard });
   const path = createPath(location);
   useLayoutEffect(() => {
-    Object.assign(guard.current, { path, place, dirty: isDirty });
+    Object.assign(guard.current, { path, place, dirty: isDirty, discard });
     if (!isDirty) guard.current.skip = false;
-  }, [path, place, isDirty]);
+  }, [path, place, isDirty, discard]);
   useLayoutEffect(() => {
     if (!isDirty) return;
     guards.set(id, guard.current);

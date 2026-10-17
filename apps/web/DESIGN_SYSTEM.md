@@ -217,14 +217,14 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 - An inline rename (`InlineEditableLabel`, a chat title) is a named action opened
   from a menu: Save or Enter saves, Escape cancels, and leaving cancels it without
   asking; blur never writes.
-- **One return of a write, everywhere** (agent, schedule, organisation,
-  workspace, preferences, integration rules): `SaveFeedback`
+- **Every write has one return, never two.** A draft's return is its save bar: Save
+  shows pending, the bar leaves on success, a refusal is the mutation's toast and
+  the draft stays. A change applied at once returns with `SaveFeedback`
   (`components/settings/save-feedback.tsx`: Enregistrement… / Enregistré / Erreur
-  d'enregistrement). It sits with the control: in the `status` of its
-  `SettingRow` (under a field, beside a switch), or at the foot of a section
-  whose controls share one write. When one mutation writes several rows, each
+  d'enregistrement) in the `status` of its `SettingRow` (beside a switch, under a
+  select), never next to a save bar. When one mutation writes several rows, each
   row reports only the write that carried its own key. A spinner or silence is
-  not a return; a failure is also a toast, and the field keeps what was typed.
+  not a return; a failure is also a toast.
   The one exception is a write whose answer is not « saved » (an email change
   that sends a confirmation): its toast says so and the row shows only the
   pending line.

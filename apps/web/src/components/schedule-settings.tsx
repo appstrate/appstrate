@@ -263,11 +263,11 @@ function ScheduleSettingsPanel({
     declared: facts.integrations?.map((i) => i.id),
   });
   const dirty = Object.keys(body).length > 0;
-  const { blocker } = useUnsavedChanges(dirty);
   const discard = () => {
     setDraft({});
     setRefusal(null);
   };
+  const { blocker } = useUnsavedChanges(dirty, discard);
   const save = () =>
     update.mutate(
       { id: schedule.id, ...body },

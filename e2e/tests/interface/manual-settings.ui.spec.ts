@@ -129,6 +129,32 @@ test("switching spaces asks before discarding the current form", async ({
   expect((await original.json()).name).not.toBe("Unsaved space name");
 });
 
+test("a form that outlives a space switch drops its draft and stays guarded", async ({
+  authedPage: page,
+  orgOnlyClient,
+}) => {
+  const target = await createSpace(orgOnlyClient, `Manual survivor ${Date.now()}`);
+  await page.goto("/preferences/general");
+  const name = page.getByRole("textbox", { name: "Nom d'affichage", exact: true });
+  const original = await name.inputValue();
+  const save = page.getByRole("button", { name: "Enregistrer", exact: true });
+  const dialog = page.getByRole("alertdialog", { name: "Modifications non enregistrées" });
+  await name.fill("Draft before the switch");
+  await new Sidebar(page).switchSpaceInSettings(target.name);
+  await dialog.getByRole("button", { name: "Quitter sans enregistrer" }).click();
+  // The account preference stays mounted: the draft is gone, not left unguarded.
+  await expect(name).toHaveValue(original);
+  await expect(save).toHaveCount(0);
+  await name.fill("Draft after the switch");
+  await page
+    .getByRole("navigation", { name: "Compte", exact: true })
+    .getByRole("link", { name: "Apparence", exact: true })
+    .click();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Annuler", exact: true }).click();
+  await expect(name).toHaveValue("Draft after the switch");
+});
+
 test("switching spaces under a mounted agent page drops its draft instead of saving it into the next space", async ({
   authedPage: page,
   apiClient,

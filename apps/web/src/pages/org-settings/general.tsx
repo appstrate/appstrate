@@ -151,7 +151,6 @@ export function OrgSettingsGeneralPage() {
     uploadLogoMutation.reset();
     updateNameMutation.mutate({ params: { path: { orgId } }, body: { logo } });
   };
-  const nameWrite = fieldWriteState(updateNameMutation, "name");
 
   // No reload needed: `forgetOrg` moves the selection off the gone org.
   const exitOrg = (leftOrgId: string) => {
@@ -260,16 +259,10 @@ export function OrgSettingsGeneralPage() {
             )}
           </div>
         </SettingRow>
-        <SettingRow
-          variant="field"
-          label={t("spaces.nameLabel")}
-          description={currentOrg.slug}
-          status={<SaveFeedback {...nameWrite} />}
-        >
+        <SettingRow variant="field" label={t("spaces.nameLabel")} description={currentOrg.slug}>
           {canUpdateOrg ? (
             <InlineTextSetting
               value={currentOrg.name}
-              disabled={nameWrite.pending}
               aria-label={t("spaces.nameLabel")}
               onCommit={(name) => {
                 if (!orgId) return Promise.reject(new Error("org_missing"));

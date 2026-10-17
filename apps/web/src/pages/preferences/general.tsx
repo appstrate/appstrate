@@ -206,20 +206,9 @@ function DisplayNameRow() {
   const updateDisplayName = useUpdateDisplayName();
 
   return (
-    <SettingRow
-      variant="field"
-      label={t("preferences.displayName")}
-      status={
-        <SaveFeedback
-          pending={updateDisplayName.isPending}
-          success={updateDisplayName.isSuccess}
-          error={updateDisplayName.isError}
-        />
-      }
-    >
+    <SettingRow variant="field" label={t("preferences.displayName")}>
       <InlineTextSetting
         value={profile?.displayName ?? ""}
-        disabled={updateDisplayName.isPending}
         maxLength={100}
         aria-label={t("preferences.displayName")}
         onCommit={(displayName) => updateDisplayName.mutateAsync({ body: { displayName } })}
