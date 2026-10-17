@@ -14,7 +14,7 @@
  * panel and its breadcrumb would claim the current space for a package not in it.
  */
 import { PendingButton } from "@/components/app-ui/pending-button";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -32,6 +32,7 @@ import { packageDetailPath } from "../lib/package-paths";
 import {
   CATALOGUE_KINDS,
   CATALOGUE_VERSION_PARAM,
+  catalogueSheetAddress,
   type CatalogueReading,
 } from "../lib/catalogue-link";
 import { searchOf } from "../lib/url-search";
@@ -182,13 +183,20 @@ export function OrgCatalogueModal({
   const [execution, setExecution] = useState<IntegrationExecution>("remote");
   const ofKind: LibraryPackageItem[] = library?.packages[active] ?? [];
   // The read has an address of its own: reload lands on it, Back leaves it.
-  // Looked up in the whole kind, not the rows the filters leave: a link to a
-  // package (a share notification) opens its sheet whatever the list shows,
-  // the other execution's integrations included. An id the kind does not hold
-  // drops from the address.
-  const preview = useUrlModalTarget("package", library ? ofKind : undefined, {
-    companions: SHEET_COMPANIONS,
-  });
+  // Looked up in the whole library, not the kind shown nor the rows the filters leave: a link
+  // to a package (a share notification) opens its sheet whatever the list shows, the other
+  // execution's integrations included. An id the library does not hold drops from the address.
+  const preview = useUrlModalTarget(
+    "package",
+    library ? CATALOGUE_KINDS.flatMap((kind) => library.packages[kind]) : undefined,
+    { companions: SHEET_COMPANIONS },
+  );
+  // A package of another kind moves the address to its kind; the sheet renders only once the
+  // address is its own (`previewed`).
+  const sheetAddress = catalogueSheetAddress(reading, active, preview.target?.type, location);
+  useEffect(() => {
+    if (sheetAddress !== null) navigate(sheetAddress, { replace: true, state: location.state });
+  }, [sheetAddress, navigate, location.state]);
   const placementById = new Map(ofKind.map((item) => [item.id, placementOf(item)] as const));
   const spaceNameOf = (id: string) => spaces.find((space) => space.id === id)?.name ?? id;
   const all = ofKind.filter((item) => {
@@ -329,7 +337,7 @@ export function OrgCatalogueModal({
   const activatable = offered.filter(canActivate).map((item) => item.id);
   const allSelected = activatable.length > 0 && activatable.every((id) => selected.has(id));
   const picked = offered.filter((item) => selected.has(item.id));
-  const previewed = preview.target;
+  const previewed = sheetAddress === null ? preview.target : undefined;
   // A system package ships one definition and answers no version: the sheet reads it as is.
   const pinnedVersion =
     previewed && previewed.source !== "system"

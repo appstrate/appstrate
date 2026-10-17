@@ -47,11 +47,35 @@ export function catalogueHref(
   type: PackageType,
   options: { packageId?: string; version?: string } = {},
 ): string {
-  const base = `/catalogue/discover/${type}`;
+  const base = cataloguePath("discover", type);
   if (!options.packageId) return base;
   const query = new URLSearchParams({ [CATALOGUE_PACKAGE_PARAM]: options.packageId });
   if (options.version) query.set(CATALOGUE_VERSION_PARAM, options.version);
   return `${base}?${query.toString().replace(/\+/g, "%20")}`;
+}
+
+function cataloguePath(reading: CatalogueReading, type: PackageType): string {
+  return `/catalogue/${reading}/${type}`;
+}
+
+/** A reading and kind's address, keeping the current query (the sheet's `package`, `version`) and hash. */
+export function catalogueKindAddress(
+  reading: CatalogueReading,
+  type: PackageType,
+  from: { search: string; hash: string },
+): string {
+  return `${cataloguePath(reading, type)}${from.search}${from.hash}`;
+}
+
+/** Where the address must move for a package's sheet to open on its own kind, or `null` when it already can. */
+export function catalogueSheetAddress(
+  reading: CatalogueReading,
+  active: PackageType,
+  target: PackageType | undefined,
+  from: { search: string; hash: string },
+): string | null {
+  if (target === undefined || target === active) return null;
+  return catalogueKindAddress(reading, target, from);
 }
 
 /**

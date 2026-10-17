@@ -2,7 +2,12 @@
 
 import { describe, expect, it } from "bun:test";
 import { createMemoryRouter } from "react-router-dom";
-import { closeOncePerEntry, modalOpeningState, modalParamStep } from "../use-url-modal.ts";
+import {
+  closeOncePerEntry,
+  modalOpeningState,
+  modalParamStep,
+  modalTargetStep,
+} from "../use-url-modal.ts";
 
 const at = (search: string, state: unknown = null) => ({ search, state });
 
@@ -163,5 +168,78 @@ describe("opening a modal on another address", () => {
       overlayBackground: { index: 2 },
       openedModal: "package",
     });
+  });
+});
+
+describe("the object a modal's parameter names", () => {
+  type Look = { value: string | null; list?: readonly string[] };
+
+  /** The verdict of each render, carrying `lastResolved` as the hook's effect does. */
+  function walk(looks: readonly Look[]) {
+    let lastResolved: string | null = null;
+    return looks.map(({ value, list }) => {
+      const found = value !== null && list !== undefined && list.includes(value);
+      const step = modalTargetStep(value, list !== undefined, found, lastResolved);
+      lastResolved = step.lastResolved;
+      return step.verdict;
+    });
+  }
+
+  it("vanishes once seen: a found id is remembered", () => {
+    expect(
+      walk([
+        { value: "p_1", list: ["p_1"] },
+        { value: "p_1", list: [] },
+      ]),
+    ).toEqual(["found", "vanished"]);
+  });
+
+  it("is unknown when the same link is reopened after a close", () => {
+    expect(
+      walk([
+        { value: "p_1", list: ["p_1"] },
+        { value: null, list: ["p_1"] },
+        { value: "p_1", list: [] },
+      ]),
+    ).toEqual(["found", "closed", "unknown"]);
+  });
+
+  it("vanishes when the list reloads without it: loading forgets nothing", () => {
+    expect(
+      walk([{ value: "p_1", list: ["p_1"] }, { value: "p_1" }, { value: "p_1", list: [] }]),
+    ).toEqual(["found", "pending", "vanished"]);
+  });
+
+  it("is unknown when it never loaded: loading remembers nothing", () => {
+    expect(walk([{ value: "p_1" }, { value: "p_1", list: [] }])).toEqual(["pending", "unknown"]);
+  });
+
+  it("stays unknown on a second look: an unknown id is not remembered", () => {
+    expect(
+      walk([
+        { value: "p_1", list: [] },
+        { value: "p_1", list: [] },
+      ]),
+    ).toEqual(["unknown", "unknown"]);
+  });
+
+  it("still vanishes after an unknown id: the remembered one survives it", () => {
+    expect(
+      walk([
+        { value: "p_1", list: ["p_1"] },
+        { value: "p_2", list: ["p_1"] },
+        { value: "p_1", list: [] },
+      ]),
+    ).toEqual(["found", "unknown", "vanished"]);
+  });
+
+  it("stays vanished on a second look: a vanished id is still remembered", () => {
+    expect(
+      walk([
+        { value: "p_1", list: ["p_1"] },
+        { value: "p_1", list: [] },
+        { value: "p_1", list: [] },
+      ]),
+    ).toEqual(["found", "vanished", "vanished"]);
   });
 });

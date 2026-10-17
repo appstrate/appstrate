@@ -233,7 +233,7 @@ function SpaceMembersTable({ spaceId }: { spaceId: string }) {
           key={`${currentOrg.id}:${spaceId}`}
           orgId={currentOrg.id}
           spaceId={spaceId}
-          invitations={orgDetail?.invitations ?? []}
+          invitations={orgDetail?.invitations}
         />
       )}
 
