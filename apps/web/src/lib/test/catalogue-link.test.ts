@@ -4,6 +4,8 @@ import { describe, it, expect } from "bun:test";
 import {
   CATALOGUE_SHARED_HREF,
   catalogueHref,
+  catalogueKindAddress,
+  CATALOGUE_KINDS,
   catalogueVersionFor,
   isCatalogueKind,
   isCatalogueReading,
@@ -35,6 +37,35 @@ describe("catalogueHref", () => {
       "/catalogue/discover/agent?package=%40acme%2Fa&version=2.0.0-beta.1%2Bbuild",
     );
     expect(catalogueHref("agent", { version: "1.0.0" })).toBe("/catalogue/discover/agent");
+  });
+});
+
+describe("catalogueKindAddress", () => {
+  it("moves a reading to a kind and keeps the sheet's package and version", () => {
+    const from = { search: "?package=%40acme%2Fredactor&version=1.2.0", hash: "" };
+    expect(catalogueKindAddress("discover", "skill", from)).toBe(
+      "/catalogue/discover/skill?package=%40acme%2Fredactor&version=1.2.0",
+    );
+  });
+
+  it("keeps the other params and the hash", () => {
+    const from = { search: "?package=%40acme%2Fa&state=active", hash: "#tab" };
+    expect(catalogueKindAddress("placed", "integration", from)).toBe(
+      "/catalogue/placed/integration?package=%40acme%2Fa&state=active#tab",
+    );
+  });
+
+  it("is the target of the /catalogue index redirect", () => {
+    const from = { search: "?package=%40acme%2Fredactor&version=1.2.0", hash: "" };
+    expect(catalogueKindAddress("discover", CATALOGUE_KINDS[0], from)).toBe(
+      "/catalogue/discover/agent?package=%40acme%2Fredactor&version=1.2.0",
+    );
+  });
+
+  it("adds nothing when the address has no query", () => {
+    expect(catalogueKindAddress("discover", "agent", { search: "", hash: "" })).toBe(
+      "/catalogue/discover/agent",
+    );
   });
 });
 

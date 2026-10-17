@@ -10,7 +10,7 @@ import { useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/core/validation";
 import { OrgCatalogueModal } from "../components/org-catalogue-modal";
 import {
-  catalogueHref,
+  catalogueKindAddress,
   CATALOGUE_KINDS,
   CATALOGUE_PACKAGE_PARAM,
   CATALOGUE_VERSION_PARAM,
@@ -26,7 +26,11 @@ import { PanelUnavailable } from "../components/overlay-unavailable";
 export function CatalogueIndexRedirect() {
   const { search, hash, state } = useLocation();
   return (
-    <Navigate to={`${catalogueHref(CATALOGUE_KINDS[0])}${search}${hash}`} replace state={state} />
+    <Navigate
+      to={catalogueKindAddress("discover", CATALOGUE_KINDS[0], { search, hash })}
+      replace
+      state={state}
+    />
   );
 }
 

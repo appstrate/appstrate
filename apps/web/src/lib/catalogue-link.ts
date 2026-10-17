@@ -54,6 +54,15 @@ export function catalogueHref(
   return `${base}?${query.toString().replace(/\+/g, "%20")}`;
 }
 
+/** A reading and kind's address, keeping the current query (the sheet's `package`, `version`) and hash. */
+export function catalogueKindAddress(
+  reading: CatalogueReading,
+  type: PackageType,
+  from: { search: string; hash: string },
+): string {
+  return `/catalogue/${reading}/${type}${from.search}${from.hash}`;
+}
+
 /**
  * The version a package page asks the catalogue to open, or `undefined` for the
  * package as the reader sees it. Only a version the reader CHOSE is pinned (the
