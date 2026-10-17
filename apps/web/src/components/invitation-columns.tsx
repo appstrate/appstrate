@@ -9,8 +9,6 @@
  * Editing is what a click on the row does, and it is the menu's first entry;
  * copying the link and cancelling follow, cancelling last because it is
  * destructive.
- *
- * Out of the table component so `column-tiers.test.tsx` can measure it.
  */
 import { useTranslation } from "react-i18next";
 import { Link2, Pencil, Trash2 } from "lucide-react";

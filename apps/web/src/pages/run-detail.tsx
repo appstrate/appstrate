@@ -45,7 +45,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { ArrowRight, LayoutGrid, FileText, ScrollText } from "lucide-react";
 import { DetailTabs, DetailTabPanel, type DetailTab } from "../components/detail-tabs";
 import { RunStatusBadge } from "../components/status-badge";
-import { RunProvenanceBadges } from "../components/run-cells";
+import { RunProvenanceBadges } from "../components/run-provenance-badges";
 import type { JournalOverviewFilter } from "../components/log-viewer";
 import { isQueryInFlight } from "../lib/query-state";
 import { findModelFallback } from "../lib/run-model-fallback";
@@ -289,7 +289,15 @@ function RunDetailBody() {
   return (
     <DetailTabs value={tab} onChange={setTab}>
       <DetailBar
-        icon={<PackageIcon type="agent" icon={identity?.icon} color={identity?.color} />}
+        icon={
+          <PackageIcon
+            type="agent"
+            id={packageId}
+            name={identity?.display_name}
+            icon={identity?.icon}
+            color={identity?.color}
+          />
+        }
         title={title}
         trail={trail}
         tabs={tabs}

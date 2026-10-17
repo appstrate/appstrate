@@ -2,10 +2,10 @@
 
 import { Card } from "@appstrate/ui/components/card";
 import { Alert } from "@appstrate/ui/components/alert";
-import { useId, useRef, useState } from "react";
+import { useId, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, Building, HardDrive, Smile, Trash2, Upload } from "lucide-react";
+import { AlertTriangle, Building, HardDrive } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { AlertDescription } from "@appstrate/ui/components/alert";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -14,6 +14,7 @@ import { $api } from "../../api/client";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
 import { InlineTextSetting } from "../../components/settings/inline-text-setting";
 import { useOrg, useOrgDetail } from "../../hooks/use-org";
+import { useLatestWrite } from "../../hooks/use-latest-write";
 import { usePermissions } from "../../hooks/use-permissions";
 import { useCanCreateOrg } from "../../hooks/use-auth";
 import { useOrgStorage } from "../../hooks/use-org-storage";
@@ -28,50 +29,8 @@ import { PersonalCredentialsSetting } from "../../components/settings/personal-c
 import { EmptyState } from "../../components/page-states";
 import { orgKeys } from "../../lib/query-keys";
 import { useViewAsHeader } from "../../stores/view-as-store";
-import { toast } from "sonner";
-import { OrganizationAvatar } from "../../components/organization-avatar";
-import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
-import { storableLogo, type OrgLogo } from "../../lib/org-logo";
-
-const ORGANIZATION_EMOJIS = ["⚡️", "🚜", "🏢", "🧠", "✨", "🔵", "🟣", "🟠"];
-const MAX_LOGO_SOURCE_BYTES = 5 * 1024 * 1024;
-
-function encodeWebp(canvas: HTMLCanvasElement): Promise<Blob> {
-  return new Promise((resolve, reject) =>
-    canvas.toBlob(
-      (blob) => (blob ? resolve(blob) : reject(new Error("logo_processing"))),
-      "image/webp",
-      0.82,
-    ),
-  );
-}
-
-async function normalizeOrganizationLogo(file: File): Promise<Blob> {
-  if (!file.type.startsWith("image/")) throw new Error("logo_file_type");
-  if (file.size > MAX_LOGO_SOURCE_BYTES) throw new Error("logo_file_size");
-
-  const bitmap = await createImageBitmap(file);
-  try {
-    const crop = Math.min(bitmap.width, bitmap.height);
-    const sourceX = (bitmap.width - crop) / 2;
-    const sourceY = (bitmap.height - crop) / 2;
-
-    for (const size of [192, 160, 128, 96]) {
-      const canvas = document.createElement("canvas");
-      canvas.width = size;
-      canvas.height = size;
-      const context = canvas.getContext("2d");
-      if (!context) throw new Error("logo_processing");
-      context.drawImage(bitmap, sourceX, sourceY, crop, crop, 0, 0, size, size);
-      const logo = storableLogo(await encodeWebp(canvas));
-      if (logo) return logo;
-    }
-  } finally {
-    bitmap.close();
-  }
-
-  throw new Error("logo_processing");
-}
+import { AppearancePicker } from "../../components/appearance-picker";
+import { orgUpdateBody, type OrgSettingChange } from "../../lib/org-update-body";
 
 export function OrgSettingsGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
@@ -100,8 +59,6 @@ export function OrgSettingsGeneralPage() {
   const storageNearLimit = storagePercent !== null && storagePercent >= USAGE_WARN;
 
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [processingLogo, setProcessingLogo] = useState(false);
-  const logoInputRef = useRef<HTMLInputElement>(null);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const leaveHintId = useId();
 
@@ -123,35 +80,27 @@ export function OrgSettingsGeneralPage() {
         : t("orgSettings.leaveLastOwner")
       : t("orgSettings.leaveOrgDesc");
 
-  const updateNameMutation = $api.useMutation("patch", "/api/orgs/{orgId}", {
+  const updateOrgMutation = $api.useMutation("patch", "/api/orgs/{orgId}", {
     onSuccess: () => {
       // The org list lives under the legacy ["orgs"] key (see use-org.ts).
       void queryClient.invalidateQueries({ queryKey: orgKeys.all });
     },
   });
-
-  const uploadLogoMutation = $api.useMutation("put", "/api/orgs/{orgId}/logo", {
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: orgKeys.all });
-    },
-  });
-
-  // The logo is written by two requests: an image upload, or an emoji / removal patch.
-  // Each starts by clearing the other's state, so the feedback is the latest write's.
-  const logoWrite = uploadLogoMutation.isIdle
-    ? fieldWriteState(updateNameMutation, "logo")
-    : {
-        pending: uploadLogoMutation.isPending,
-        success: uploadLogoMutation.isSuccess,
-        error: uploadLogoMutation.isError,
-      };
-  const logoBusy = updateNameMutation.isPending || uploadLogoMutation.isPending || processingLogo;
-  const patchLogo = (logo: Extract<OrgLogo, { kind: "emoji" }> | null) => {
+  // One mutation writes every row; each row's feedback is the write that carried its field.
+  const save = (change: OrgSettingChange) => {
     if (!orgId) return;
-    uploadLogoMutation.reset();
-    updateNameMutation.mutate({ params: { path: { orgId } }, body: { logo } });
+    updateOrgMutation.mutate({ params: { path: { orgId } }, body: orgUpdateBody(change) });
   };
-  const nameWrite = fieldWriteState(updateNameMutation, "name");
+  // The picker fires a write per arrow key: one in flight, the newest value after it.
+  const writeAppearance = useLatestWrite();
+  const saveAppearance = (change: OrgSettingChange) => {
+    if (!orgId) return;
+    writeAppearance(change.field, change.value, () =>
+      updateOrgMutation.mutateAsync({ params: { path: { orgId } }, body: orgUpdateBody(change) }),
+    );
+  };
+  const nameWrite = fieldWriteState(updateOrgMutation, "name");
+  const appearanceWrite = fieldWriteState(updateOrgMutation, ["icon", "color"]);
 
   // No reload needed: `forgetOrg` moves the selection off the gone org.
   const exitOrg = (leftOrgId: string) => {
@@ -176,88 +125,26 @@ export function OrgSettingsGeneralPage() {
       <SettingsGroup title={t("source.org")}>
         <SettingRow
           variant="field"
-          label={t("orgSettings.logoLabel")}
-          description={canUpdateOrg ? t("orgSettings.logoDescription") : undefined}
-          status={<SaveFeedback {...logoWrite} pending={logoWrite.pending || processingLogo} />}
+          label={t("orgSettings.appearanceLabel")}
+          description={t("orgSettings.appearanceDescription")}
+          status={<SaveFeedback {...appearanceWrite} />}
         >
-          <div className="flex items-center gap-3">
-            <OrganizationAvatar org={currentOrg} className="size-16 rounded-xl text-2xl" />
-            {canUpdateOrg && (
-              <div className="flex flex-wrap gap-2">
-                <input
-                  ref={logoInputRef}
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
-                  className="sr-only"
-                  onChange={async (event) => {
-                    const file = event.target.files?.[0];
-                    event.target.value = "";
-                    if (!file || !orgId) return;
-                    setProcessingLogo(true);
-                    try {
-                      const logo = await normalizeOrganizationLogo(file);
-                      uploadLogoMutation.mutate({
-                        params: { path: { orgId } },
-                        body: logo,
-                        headers: { "Content-Type": "image/webp" },
-                        bodySerializer: (body) => body,
-                      });
-                    } catch {
-                      toast.error(t("orgSettings.logoError"));
-                    } finally {
-                      setProcessingLogo(false);
-                    }
-                  }}
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={logoBusy}
-                  onClick={() => logoInputRef.current?.click()}
-                >
-                  <Upload />
-                  {t("orgSettings.logoUpload")}
-                </Button>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button type="button" variant="outline" size="sm" disabled={logoBusy}>
-                      <Smile />
-                      {t("orgSettings.logoEmoji")}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent align="start" className="w-auto p-2">
-                    <div className="grid grid-cols-4 gap-1">
-                      {ORGANIZATION_EMOJIS.map((emoji) => (
-                        <Button
-                          key={emoji}
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="text-lg"
-                          aria-label={t("orgSettings.logoUseEmoji", { emoji })}
-                          onClick={() => patchLogo({ kind: "emoji", emoji })}
-                        >
-                          {emoji}
-                        </Button>
-                      ))}
-                    </div>
-                  </PopoverContent>
-                </Popover>
-                {currentOrg.logo && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    disabled={logoBusy}
-                    onClick={() => patchLogo(null)}
-                  >
-                    <Trash2 />
-                    {t("common:btn.remove")}
-                  </Button>
-                )}
-              </div>
-            )}
+          <div className="w-full min-w-0">
+            {/* Keyed: no tab or upload error carries over to another org. Never disabled by a
+                pending write — each arrow key on the colours is a PATCH, and disabling would
+                drop the focus; the writes are serialised, the last pick wins. */}
+            <AppearancePicker
+              key={currentOrg.id}
+              value={{ icon: currentOrg.icon, color: currentOrg.color }}
+              allow={["lucide", "emoji", "image"]}
+              seed={currentOrg.id}
+              label={currentOrg.name}
+              disabled={!canUpdateOrg}
+              onChange={(next) => {
+                if (next.icon !== undefined) saveAppearance({ field: "icon", value: next.icon });
+                if (next.color !== undefined) saveAppearance({ field: "color", value: next.color });
+              }}
+            />
           </div>
         </SettingRow>
         <SettingRow
@@ -271,10 +158,7 @@ export function OrgSettingsGeneralPage() {
               value={currentOrg.name}
               disabled={nameWrite.pending}
               aria-label={t("spaces.nameLabel")}
-              onCommit={(name) => {
-                if (!orgId) return;
-                updateNameMutation.mutate({ params: { path: { orgId } }, body: { name } });
-              }}
+              onCommit={(name) => save({ field: "name", value: name })}
             />
           ) : (
             <span className="text-sm">{currentOrg.name}</span>

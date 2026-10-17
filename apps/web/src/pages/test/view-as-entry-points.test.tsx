@@ -53,6 +53,8 @@ function space(): components["schemas"]["SpaceObject"] {
     id: SPACE_ID,
     orgId: ORG_ID,
     name: "Marketing",
+    icon: null,
+    color: null,
     isDefault: true,
     settings: {},
     visibility: "open",
@@ -97,7 +99,8 @@ function seed(orgRole: OrgRole, options: SeedOptions = {}): QueryClient {
     id: ORG_ID,
     name: "Acme",
     slug: "acme",
-    logo: null,
+    icon: null,
+    color: null,
     role: orgRole,
     deleting_at: null,
     permissions: [

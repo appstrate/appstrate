@@ -5,8 +5,6 @@
  * as what. The role is the CONTROL when it is the caller's to change, which is
  * what makes this modal the place to manage someone's access rather than a
  * report about it.
- *
- * Out of the modal so `column-tiers.test.tsx` can measure it.
  */
 import { useTranslation } from "react-i18next";
 import type { DataColumn } from "../../components/data-table";

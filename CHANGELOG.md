@@ -9,7 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Operators
 
 - **Run the read-only pre-flight `scripts/migration/0050-report-narrowing-overrides.ts`
-  before deploying the release that carries migration `0101`** (#2043):
+  before deploying the release that carries migration `0102`** (#2043):
   `DATABASE_URL=<platform> bun scripts/migration/0050-report-narrowing-overrides.ts`
   (the image ships it, see "The image ships `scripts/migration/`" below). It
   lists the schedules whose `connection_overrides` are `[]` or a strict subset of
@@ -21,7 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   non-required integration, and those schedules bind the whole imposed set after
   the deploy. Only a non-empty strict subset could not come from the interface.
   Every listed schedule is a decision for its owner before the deploy; the script
-  rewrites nothing. Migration `0101` itself
+  rewrites nothing. Migration `0102` itself
   rewrites no data: every existing admin pin stays closed.
 
 ### Changed
@@ -35,6 +35,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (the app may keep running; PGlite: app stopped). It removes redundant personal-space shares, each
   audited.
   See `scripts/migration/README.md`.
+
+- **Organizations, team spaces and agents carry one visual identity,
+  `{ icon, color }`** (#2046), both always present on the wire, both nullable.
+  `icon` is `lucide:<name>`, `emoji:<one emoji>` or, on an organization only, an
+  image held inline as a base64 data URI (`data:image/webp;base64,…` or
+  `data:image/png;base64,…`, at most 12 000 bytes and 256×256 px; the audit log
+  records it by a hash, never its bytes). A written emoji must be exactly one
+  emoji of Unicode's RGI set and is stored in its RGI form, the only rewrite
+  being a U+FE0F added or removed (`❤` → `❤️`, `👍️` → `👍`, `1⃣` → `1️⃣`).
+  `color` is a palette key (`neutral`, `blue`, `emerald`, `violet`, `amber`,
+  `rose`, `cyan`, `pink`, `orange`); `null` means a hue derived from the id,
+  never `neutral`. An organization's pair is returned by `GET /api/orgs`,
+  `GET /api/me/orgs` and invitation accept and written by `PATCH /api/orgs/{id}`;
+  a space's by the space routes and `PATCH /api/spaces/{id}`, which refuses both
+  on a personal space (`409 personal_space_immutable`): it has no identity of
+  its own. An agent's is its manifest `icon` and `_meta["dev.appstrate/ui"].color`,
+  on the list and the detail, `null` when absent or, for the colour, not a
+  palette key. Migrations `0097_org_logo` (a nullable `organizations.logo`), then
+  `0101_identity_appearance` (renames it `icon`; adds `color` to organizations,
+  `icon` and `color` to spaces; caps each `icon` at 16 384 bytes with a CHECK).
+  **Operators:** only where `0097` was applied before this release (staging, never
+  production), run `scripts/migration/0049-org-icon-images.ts --apply` in the
+  same window as `0101`, right after it: it clears the organization icons `0097`
+  left as `image:<version>` and empties the `orgs` bucket. See
+  `scripts/migration/README.md`.
 
 - **The dashboard is redesigned** (#1937): settings and preferences open as
   routed overlays, every real dialog has a URL, tables share one component, and
@@ -55,13 +80,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `category`, the provider's HTTP `status` and its own sentence, classified
     once at finalize. Also on the `run_update` realtime event (`modelError`) and
     in the MCP `run_and_wait` result.
-  - **Organizations carry a `logo`** (migration `0097_org_logo`, a nullable
-    column), returned by `GET /api/orgs`, `GET /api/me/orgs` and invitation
-    accept as `{ kind: "emoji", emoji }`, `{ kind: "image", url }` or `null`. An
-    emoji (or `null`) is written by `PATCH /api/orgs/{id}`; an image is uploaded
-    as WebP bytes by `PUT /api/orgs/{id}/logo`, kept in object storage and served
-    by `GET /api/orgs/{id}/logo`, whose URL names the image's version. The audit
-    log records an image logo by its version, never its bytes.
   - **`POST /api/models/apply`** (new) applies a model-provider choice in one
     transaction: an optional new credential, models enabled or disabled, the
     default. It honours `Idempotency-Key`, which widens the core set of
@@ -83,8 +101,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - **Model-provider credentials carry `serves_model_ids`**: on a personal
     credential, the organization models left to members' own credentials that
     it pays for; `[]` on an organization or built-in credential.
-  - **Agents** return optional `icon` and `color` on the list and the detail.
-    `GET /api/files` takes `q` (by name, inside the existing visibility filter).
+  - **Files**: `GET /api/files` takes `q` (by name, inside the existing
+    visibility filter).
   - **Schedules**: `GET`, `POST` and `PATCH /api/schedules/{id}` return an
     `ETag`, and a `PATCH` carrying `If-Match` answers `412` when the schedule
     moved since it was read. When the caller writes a schedule for itself and
@@ -202,7 +220,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   « Exactement ces connexions » (default) or « Ces connexions, plus celles de
   l'utilisateur »; in the latter, a run binds the imposed connections plus the
   ones the actor chose among those they can use in the space (`block_user_connections` still bounds them); nothing is added
-  automatically. Migration `0101_integration_pin_additions` adds the column and
+  automatically. Migration `0102_integration_pin_additions` adds the column and
   two `CHECK`s: a member pin is never open, and an open pin imposes at least one
   connection. A member pin no longer survives under a closed admin pin: every
   admin pin write or delete where the pin is, or was, closed deletes the member
@@ -241,6 +259,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   stored, and `DELETE` is always allowed. A stored selection keeps the ids its
   writer named, imposed ones included. The connection picker shows the imposed
   connections locked and edits the additions only.
+
+### Fixed
+
+- **A link to a catalogue sheet opens it from the package id alone** (#2013).
+  `/catalogue?package=<id>[&version=…]`, or a link naming the wrong kind,
+  lands on the package's own kind instead of closing the sheet. Interface only.
+- **A link to an object that does not exist is announced** (#2013). A dialog
+  address naming an object its list does not hold (deleted, mistyped, out of
+  reach) shows « Élément introuvable ou inaccessible » instead of closing in
+  silence, on every dialog that has an address. An object that leaves the list
+  while its dialog is open (renamed, deleted) still closes silently.
 
 ## [1.0.0-beta.68] - 2026-10-15
 

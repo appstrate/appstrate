@@ -10,8 +10,6 @@
  * Removing an explicit seat is the one deed, and it lives in the menu: for a
  * member of an open space it restores the default role rather than cutting
  * access, and the menu says which.
- *
- * Out of the page so `column-tiers.test.tsx` can measure it.
  */
 import { useTranslation } from "react-i18next";
 import { RotateCcw, Trash2 } from "lucide-react";

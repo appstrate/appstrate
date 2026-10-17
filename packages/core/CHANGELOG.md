@@ -23,14 +23,36 @@ providerMessage? }` — the `<status> <JSON body>` envelope of a provider refusa
   the `_meta` key holding an agent's presentation (`color`), next to
   `AGENT_RESOURCES_META_KEY`.
 - **`readAgentAppearance(manifest)`** (`@appstrate/core/validation`): an
-  agent's identity tile, `{ icon?, color? }` — the manifest `icon` and the
-  `color` under `_meta[AGENT_UI_META_KEY]`, each only when it is a string.
-- **`@appstrate/core/manifest-icon`**: the grammar of a manifest `icon` —
-  **`parseManifestIcon(value)`** reads it as a `ManifestIcon` (`lucide` name,
-  other Iconify id, or image URL), `null` when no surface can draw it;
-  **`LUCIDE_ICON_PREFIX`** is `"lucide:"`, the prefix of an agent's icon.
-- **`ORG_LOGO_MAX_BYTES`** (`@appstrate/core/validation`): the largest
-  organization logo image `PUT /api/orgs/{orgId}/logo` accepts, 36 000 bytes.
+  agent's identity tile, `{ icon, color }`, both always present — the manifest
+  `icon` when it is a non-empty string, else `null`, and the `color` under
+  `_meta[AGENT_UI_META_KEY]` when it is a palette key (`isAppearanceColor`),
+  else `null` (derived from the agent id).
+- **`@appstrate/core/appearance`**: the one grammar of a visual identity
+  (agent, space, organization). **`parseIcon(value)`** reads an `icon` as an
+  **`AppearanceIcon`** (`lucide` name, other Iconify id, image URL, or
+  `emoji:<text>`), `null` when no surface can draw it — leniently: an `emoji:`
+  value is drawn as written when it carries a pictograph, a regional indicator
+  or a keycap and holds no whitespace within 32 UTF-16 units, read with `u`-flag
+  expressions only, so the module loads and reads on browsers that cannot
+  compile a `v`-flag one. The prefixes
+  **`LUCIDE_ICON_PREFIX`** and **`EMOJI_ICON_PREFIX`**;
+  **`normalizeEmoji(value)`**, the RGI form of one emoji or `null` (beyond 32
+  UTF-16 units, before any work), only U+FE0F added or removed: a superfluous
+  one dropped, a missing one inserted after each text-default pictograph or
+  keycap base (`👍️` → `👍`, `❤` → `❤️`, `1⃣` → `1️⃣`, `👁‍🗨` → `👁️‍🗨️`), its
+  `\p{RGI_Emoji}` expression compiled on first call. The palette
+  **`APPEARANCE_COLORS`** / **`AppearanceColor`** with **`isAppearanceColor`**,
+  **`derivedColor(seed)`** (a stable hue from an entity id, never `neutral`)
+  and **`resolveColor(color, seed)`** (`null` means derived). An uploaded icon
+  image: **`isIconImage(value)`**, a base64 data URI of one of
+  **`ICON_IMAGE_TYPES`** (`image/webp`, `image/png`) whose bytes are that type,
+  within **`ICON_IMAGE_MAX_BYTES`** (12 000) and **`ICON_IMAGE_MAX_SIZE`**
+  (256 px), its type and size read by **`imageSize(bytes)`** (a WebP's first
+  chunk, a PNG's `IHDR`). The write-side Zod schemas
+  **`appearanceIconSchema(forms)`** (one of the **`IconForm`**s `lucide`,
+  `emoji`, `image`, at most **`ICON_MAX_LENGTH`** (16 384) characters; it
+  parses an emoji to its RGI form) and
+  **`appearanceColorSchema`**.
 - **`unwrapMcpResult(value)`** (`@appstrate/core/mcp-result`): the payload inside
   an MCP tool result — a `CallToolResult`, a bare content array or a JSON
   string — recovered even when a prose text part (the turn-budget note) follows

@@ -43,6 +43,8 @@ const VERSIONS = { canRestore: false, canDelete: false };
 function agent(over: Partial<AgentDetail> = {}): Versioned<AgentDetail> {
   return {
     id: "@acme/worker",
+    icon: null,
+    color: null,
     source: "local",
     dependencies: { skills: [], mcp_servers: [], integrations: [] },
     input: {

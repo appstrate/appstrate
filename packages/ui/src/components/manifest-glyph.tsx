@@ -2,15 +2,10 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { Icon, iconLoaded, loadIcon } from "@iconify/react";
-import { DynamicIcon, iconNames, type IconName } from "lucide-react/dynamic";
-import type { ManifestIcon } from "@appstrate/core/manifest-icon";
+import { DynamicIcon } from "lucide-react/dynamic";
+import type { AppearanceIcon } from "@appstrate/core/appearance";
 import { cn } from "../cn.ts";
-
-const LUCIDE_NAMES = new Set<string>(iconNames);
-
-function isLucideName(name: string): name is IconName {
-  return LUCIDE_NAMES.has(name);
-}
+import { isLucideName } from "../lucide-names.ts";
 
 type LoadState = "loading" | "ok" | "error";
 
@@ -76,10 +71,11 @@ function UrlGlyph({
 }
 
 /**
- * A manifest icon (`parseManifestIcon`): Lucide from the bundle, any other
- * Iconify id from the API, an URL as an image. `fallback` stands in when the
+ * An icon (`parseIcon`): Lucide from the bundle, any other Iconify id from the
+ * API, an URL as an image, an emoji as text. `fallback` stands in when the
  * glyph cannot be drawn: an unknown Lucide name, a failed Iconify fetch, a
- * broken image.
+ * broken image. Not passed to `DynamicIcon`: it would show it while the Lucide
+ * chunk loads, a flash of initials on every tile.
  */
 export function ManifestGlyph({
   icon,
@@ -87,7 +83,7 @@ export function ManifestGlyph({
   fallback,
   strokeWidth,
 }: {
-  icon: ManifestIcon;
+  icon: AppearanceIcon;
   className: string;
   fallback: ReactNode;
   strokeWidth?: number;
@@ -101,5 +97,11 @@ export function ManifestGlyph({
   }
   if (icon.kind === "iconify")
     return <IconifyGlyph key={icon.id} id={icon.id} className={className} fallback={fallback} />;
+  if (icon.kind === "emoji")
+    return (
+      <span className={cn("leading-none", className)} aria-hidden>
+        {icon.emoji}
+      </span>
+    );
   return <UrlGlyph src={icon.src} className={className} fallback={fallback} />;
 }

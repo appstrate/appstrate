@@ -19,8 +19,8 @@ interface AgentDetailBarDetail {
    * who may not write the agent reads (`definition: "published"`).
    */
   readsPublished?: boolean;
-  icon?: string;
-  color?: string;
+  icon?: string | null;
+  color?: string | null;
 }
 
 /**
@@ -53,7 +53,15 @@ export function AgentDetailBar<T extends string>({
 
   return (
     <DetailBar
-      icon={<PackageIcon type="agent" icon={detail.icon} color={detail.color} />}
+      icon={
+        <PackageIcon
+          type="agent"
+          id={detail.id}
+          name={title}
+          icon={detail.icon}
+          color={detail.color}
+        />
+      }
       title={title}
       badge={
         <VersionPill

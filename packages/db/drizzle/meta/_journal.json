@@ -712,8 +712,15 @@
     {
       "idx": 101,
       "version": "7",
-      "when": 1792240000000,
-      "tag": "0101_integration_pin_additions",
+      "when": 1792160060000,
+      "tag": "0101_identity_appearance",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1792240060000,
+      "tag": "0102_integration_pin_additions",
       "breakpoints": true
     }
   ]

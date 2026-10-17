@@ -2,10 +2,12 @@
 
 /**
  * The `PATCH /api/spaces/{id}` body for one setting. Each control commits alone:
- * the route refuses `visibility`/`default_role` on a personal space whatever their
- * value (409 `personal_space_immutable`), so a rename carrying them would fail.
+ * the route refuses `visibility`/`default_role`/`icon`/`color` on a personal space
+ * whatever their value (409 `personal_space_immutable`), so a rename carrying them
+ * would fail.
  */
 
+import type { AppearanceColor } from "@appstrate/core/appearance";
 import type { components, paths } from "../api/client";
 
 type SpaceUpdateBody = NonNullable<
@@ -17,7 +19,9 @@ export type SpaceSettingChange =
   | { field: "name"; value: string }
   | { field: "domains"; value: string[] }
   | { field: "visibility"; value: SpaceObject["visibility"] }
-  | { field: "defaultRole"; value: SpaceObject["default_role"] };
+  | { field: "defaultRole"; value: SpaceObject["default_role"] }
+  | { field: "icon"; value: string | null }
+  | { field: "color"; value: AppearanceColor | null };
 
 function cleanDomains(domains: readonly string[]): string[] {
   return domains.map((domain) => domain.trim()).filter(Boolean);
@@ -50,5 +54,9 @@ export function spaceUpdateBody(change: SpaceSettingChange): SpaceUpdateBody {
       return { visibility: change.value };
     case "defaultRole":
       return { default_role: change.value };
+    case "icon":
+      return { icon: change.value };
+    case "color":
+      return { color: change.value };
   }
 }

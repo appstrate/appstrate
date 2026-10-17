@@ -3,6 +3,8 @@
 import { describe, it, expect } from "bun:test";
 import {
   catalogueHref,
+  catalogueKindAddress,
+  catalogueSheetAddress,
   catalogueVersionFor,
   isCatalogueKind,
   isCatalogueReading,
@@ -34,6 +36,43 @@ describe("catalogueHref", () => {
       "/catalogue/discover/agent?package=%40acme%2Fa&version=2.0.0-beta.1%2Bbuild",
     );
     expect(catalogueHref("agent", { version: "1.0.0" })).toBe("/catalogue/discover/agent");
+  });
+});
+
+describe("catalogueKindAddress", () => {
+  it("keeps the other params and the hash", () => {
+    const from = { search: "?package=%40acme%2Fa&state=active", hash: "#tab" };
+    expect(catalogueKindAddress("placed", "integration", from)).toBe(
+      "/catalogue/placed/integration?package=%40acme%2Fa&state=active#tab",
+    );
+  });
+
+  it("adds nothing when the address has no query", () => {
+    expect(catalogueKindAddress("discover", "agent", { search: "", hash: "" })).toBe(
+      "/catalogue/discover/agent",
+    );
+  });
+});
+
+describe("catalogueSheetAddress", () => {
+  const from = { search: "?package=%40acme%2Fredactor&version=1.2.0", hash: "#notes" };
+
+  it("leaves the address alone when no package is named", () => {
+    expect(catalogueSheetAddress("discover", "agent", undefined, from)).toBeNull();
+  });
+
+  it("leaves the address alone when the package is of the kind shown", () => {
+    expect(catalogueSheetAddress("discover", "skill", "skill", from)).toBeNull();
+    expect(catalogueSheetAddress("placed", "agent", "agent", from)).toBeNull();
+  });
+
+  it("moves a package of another kind to its kind, in the same reading", () => {
+    expect(catalogueSheetAddress("discover", "agent", "skill", from)).toBe(
+      "/catalogue/discover/skill?package=%40acme%2Fredactor&version=1.2.0#notes",
+    );
+    expect(catalogueSheetAddress("placed", "agent", "integration", from)).toBe(
+      "/catalogue/placed/integration?package=%40acme%2Fredactor&version=1.2.0#notes",
+    );
   });
 });
 

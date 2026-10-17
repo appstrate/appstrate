@@ -1,5 +1,5 @@
 {
-  "id": "70d02c88-301f-4992-940c-d253675f65f5",
+  "id": "de4cf501-e987-40f6-9552-dbaa3a556970",
   "prevId": "a8a6f48c-7954-4813-b692-1a5318b120e0",
   "version": "7",
   "dialect": "postgresql",
@@ -1579,8 +1579,14 @@
           "primaryKey": false,
           "notNull": true
         },
-        "logo": {
-          "name": "logo",
+        "icon": {
+          "name": "icon",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "color": {
+          "name": "color",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -1681,7 +1687,12 @@
         }
       },
       "policies": {},
-      "checkConstraints": {},
+      "checkConstraints": {
+        "organizations_icon_length": {
+          "name": "organizations_icon_length",
+          "value": "octet_length(icon) <= 16384"
+        }
+      },
       "isRLSEnabled": false
     },
     "public.end_users": {
@@ -2147,6 +2158,18 @@
           "primaryKey": false,
           "notNull": true
         },
+        "icon": {
+          "name": "icon",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "color": {
+          "name": "color",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "is_default": {
           "name": "is_default",
           "type": "boolean",
@@ -2340,6 +2363,10 @@
         "spaces_orphaned_is_personal": {
           "name": "spaces_orphaned_is_personal",
           "value": "orphaned_at IS NULL OR owner_user_id IS NOT NULL"
+        },
+        "spaces_icon_length": {
+          "name": "spaces_icon_length",
+          "value": "octet_length(icon) <= 16384"
         }
       },
       "isRLSEnabled": false
@@ -6089,13 +6116,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "allow_additional_connections": {
-          "name": "allow_additional_connections",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -6222,14 +6242,6 @@
         "integration_pins_connection_ids_cardinality": {
           "name": "integration_pins_connection_ids_cardinality",
           "value": "cardinality(connection_ids) BETWEEN 0 AND 20"
-        },
-        "integration_pins_additions_admin_only": {
-          "name": "integration_pins_additions_admin_only",
-          "value": "user_id IS NULL OR NOT allow_additional_connections"
-        },
-        "integration_pins_additions_need_imposed": {
-          "name": "integration_pins_additions_need_imposed",
-          "value": "NOT allow_additional_connections OR cardinality(connection_ids) > 0"
         }
       },
       "isRLSEnabled": false

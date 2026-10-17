@@ -97,7 +97,7 @@
     "./dedupe-label": "./src/dedupe-label.ts",
     "./chat-contract": "./src/chat-contract.ts",
     "./file-uri": "./src/file-uri.ts",
-    "./manifest-icon": "./src/manifest-icon.ts",
+    "./appearance": "./src/appearance.ts",
     "./chat-turn-metadata": "./src/chat-turn-metadata.ts",
     "./model-error": "./src/model-error.ts",
     "./bearer": "./src/bearer.ts",

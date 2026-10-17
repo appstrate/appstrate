@@ -52,7 +52,8 @@ test("the switcher pins the caller's own space above the team spaces", async ({
 
   const personalItem = page.getByTestId(`space-item-${personalId}`);
   await expect(personalItem).toBeVisible();
-  await expect(personalItem).toContainText(/^(Mon espace|My space)/);
+  // The label on its own element: the row opens on the owner's tile (their initials).
+  await expect(personalItem.getByText(/^(Mon espace|My space)$/)).toBeVisible();
 
   // Pinned: the personal entry comes before the default team space in the menu.
   const items = await page.getByTestId(/^space-item-/).all();

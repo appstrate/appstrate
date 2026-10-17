@@ -75,6 +75,8 @@ function section(
           id: SPACE_ID,
           orgId: ORG_ID,
           name: "Default",
+          icon: null,
+          color: null,
           isDefault: true,
           settings: {},
           visibility: "open",

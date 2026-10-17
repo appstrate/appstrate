@@ -170,7 +170,7 @@ export function OrgSettingsMembersPage() {
         />
       )}
 
-      {orgId && <InvitationsTable orgId={orgId} invitations={invitations} />}
+      {orgId && <InvitationsTable orgId={orgId} invitations={orgData?.invitations} />}
 
       {!isLoading && !error && members.length === 0 && invitations.length === 0 && (
         <EmptyState

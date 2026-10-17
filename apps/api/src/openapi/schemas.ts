@@ -25,6 +25,12 @@ import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog"
 import { MAX_TOKEN_USAGE_TIERS, TOKEN_USAGE_COUNTERS } from "@appstrate/afps-shared/token-usage";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
 import {
+  APPEARANCE_COLORS,
+  ICON_IMAGE_MAX_BYTES,
+  ICON_IMAGE_MAX_SIZE,
+  ICON_IMAGE_TYPES,
+} from "@appstrate/core/appearance";
+import {
   CONNECTION_RESOLUTION_ERROR_CODES,
   CONNECTION_RESOLUTION_SOURCES,
   CONNECTION_SCOPE_FITS,
@@ -114,49 +120,26 @@ const PACKAGE_HOME_PROPERTIES = {
   },
 } as const;
 
-/** An organization logo that is one emoji: the write form, and one of the read forms. */
-export const ORG_LOGO_EMOJI_SCHEMA = {
-  type: "object",
-  required: ["kind", "emoji"],
-  properties: {
-    kind: { type: "string", const: "emoji" },
-    emoji: { type: "string", description: "Exactly one emoji." },
-  },
-  additionalProperties: false,
-} as const;
+/**
+ * What a write does to an `emoji:` icon (`normalizeEmoji`, `@appstrate/core/appearance`),
+ * stated once for the identity component and every write body.
+ */
+export const EMOJI_ICON_WRITE_RULE =
+  "An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`).";
 
-export const ORG_LOGO_PROPERTY = {
-  oneOf: [
-    ORG_LOGO_EMOJI_SCHEMA,
-    {
-      type: "object",
-      required: ["kind", "url"],
-      properties: {
-        kind: { type: "string", const: "image" },
-        url: {
-          type: "string",
-          description:
-            "Path of the uploaded WebP image, relative to the API origin (`/api/orgs/{orgId}/logo?v=<version>`). It names the image's version, so it changes with the image and its response can be cached for good.",
-        },
-      },
-      additionalProperties: false,
-    },
-    { type: "null" },
-  ],
-  description:
-    "Organization logo, discriminated by `kind`: one emoji, or an uploaded image. Null uses the organization initial.",
-} as const;
-
-/** The agent's identity tile, on the list item and on the detail. */
-const AGENT_IDENTITY_PROPERTIES = {
+/**
+ * The visual identity of an agent, a space or an organization — one `icon`
+ * and one `color`, both always present, both nullable. The one definition every
+ * resource carrying an identity spreads.
+ */
+export const APPEARANCE_PROPERTIES = {
   icon: {
-    type: "string",
-    description:
-      "The manifest's `icon`: an Iconify id (`<prefix>:<name>`; an icon picked in the agent editor is `lucide:<name>`, e.g. `lucide:bot`) or an image URL. Absent when the manifest declares none.",
+    type: ["string", "null"],
+    description: `The icon, \`null\` when none is set. Written as \`lucide:<name>\` (a Lucide icon, e.g. \`lucide:bot\`), \`emoji:<one emoji>\`, or — on an organization only — an uploaded image as a base64 data URI, ${ICON_IMAGE_TYPES.map((type) => `\`data:${type};base64,…\``).join(" or ")} (at most ${ICON_IMAGE_MAX_BYTES} bytes and ${ICON_IMAGE_MAX_SIZE}×${ICON_IMAGE_MAX_SIZE} px). ${EMOJI_ICON_WRITE_RULE} An agent's is its manifest \`icon\`, read as written: it may also be another Iconify id (\`<prefix>:<name>\`) or an image URL, and a client draws nothing for a value it cannot parse.`,
   },
   color: {
-    type: "string",
-    description: 'Presentation token from `_meta["dev.appstrate/ui"].color`.',
+    type: ["string", "null"],
+    description: `The colour, a palette key: ${APPEARANCE_COLORS.map((c) => `\`${c}\``).join(", ")}. \`null\` means derived from the resource id (a stable hue, never \`neutral\`); \`neutral\` is an explicit choice. An agent's is \`_meta["dev.appstrate/ui"].color\`, \`null\` when that is not a palette key.`,
   },
 } as const;
 
@@ -820,12 +803,22 @@ export const schemas = {
   },
   Organization: {
     type: "object",
-    required: ["id", "name", "slug", "logo", "role", "permissions", "createdAt", "deleting_at"],
+    required: [
+      "id",
+      "name",
+      "slug",
+      "icon",
+      "color",
+      "role",
+      "permissions",
+      "createdAt",
+      "deleting_at",
+    ],
     properties: {
       id: { type: "string" },
       name: { type: "string" },
       slug: { type: "string" },
-      logo: ORG_LOGO_PROPERTY,
+      ...APPEARANCE_PROPERTIES,
       role: { type: "string", enum: ORG_ROLES },
       permissions: {
         type: "array",
@@ -916,11 +909,12 @@ export const schemas = {
   },
   OrgDetail: {
     type: "object",
+    required: ["id", "name", "slug", "icon", "color"],
     properties: {
       id: { type: "string" },
       name: { type: "string" },
       slug: { type: "string" },
-      logo: ORG_LOGO_PROPERTY,
+      ...APPEARANCE_PROPERTIES,
       createdAt: { type: "string", format: "date-time" },
       deleting_at: {
         type: ["string", "null"],
@@ -985,6 +979,8 @@ export const schemas = {
     // only ever say `true` — `AgentDetail.active` is where the switch is read.
     required: [
       "id",
+      "icon",
+      "color",
       "source",
       "type",
       "running_runs",
@@ -995,7 +991,7 @@ export const schemas = {
     ],
     properties: {
       id: { type: "string" },
-      ...AGENT_IDENTITY_PROPERTIES,
+      ...APPEARANCE_PROPERTIES,
       display_name: { type: "string" },
       description: { type: "string" },
       schema_version: { type: "string" },
@@ -1062,6 +1058,8 @@ export const schemas = {
     // answered yet" rather than "no".
     required: [
       "id",
+      "icon",
+      "color",
       "source",
       "scope",
       "version",
@@ -1079,7 +1077,7 @@ export const schemas = {
     ],
     properties: {
       id: { type: "string" },
-      ...AGENT_IDENTITY_PROPERTIES,
+      ...APPEARANCE_PROPERTIES,
       display_name: { type: "string" },
       description: { type: "string" },
       source: { type: "string", enum: [...packageSourceValues] },
@@ -2681,6 +2679,8 @@ export const schemas = {
       "object",
       "orgId",
       "name",
+      "icon",
+      "color",
       "isDefault",
       "settings",
       "visibility",
@@ -2698,6 +2698,7 @@ export const schemas = {
       object: { type: "string", enum: ["space"], description: "Object type" },
       orgId: { type: "string", description: "Organization ID" },
       name: { type: "string", description: "Human-readable space name" },
+      ...APPEARANCE_PROPERTIES,
       isDefault: { type: "boolean", description: "Whether this is the default space" },
       settings: {
         type: "object",

@@ -28,9 +28,9 @@ they start with `packages/` or `e2e/`.
   `bg-card` / `bg-background`. A field is white on the canvas and grey inside a
   dialog: `Input` does it by itself, never override its background.
 - **Icons**: `lucide-react`, `size-4` in rows and buttons. A package's manifest
-  `icon` follows one grammar for every type (`@appstrate/core/manifest-icon`):
+  `icon` follows one grammar for every type (`@appstrate/core/appearance`):
   an Iconify id (`logos:slack-icon`; an agent's is `lucide:<name>`, drawn from
-  the bundle) or an image URL. Always render it with `PackageIcon`
+  the bundle), an image URL, or `emoji:<one emoji>`. Always render it with `PackageIcon`
   (`components/package-icon.tsx`, sizes `sm` / `md`, skeleton while loading,
   placeholder on failure), never as an `<img src>`.
 - **Numbers that change in place** (durations, costs, counts, timers) use
@@ -309,6 +309,7 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
 | A handful of options                                                 | `Select`                                                                                                                                                                                                                                                                                                                                                                                    |
 | Many options, or options worth searching (time zones, people, icons) | combobox: `Popover` + `Command`: `TimezoneSelect`, `ActorSelect`, the icon picker in `agent-editor/agent-appearance-fields.tsx`                                                                                                                                                                                                                                                             |
 | Several of a small set (weekdays)                                    | `ToggleGroup type="multiple"` (in `FrequencyComposer`)                                                                                                                                                                                                                                                                                                                                      |
+| One value, alternative editors (an icon: Lucide, emoji, image)       | `Tabs`, one editor per tab (`AppearancePicker`); never a `ToggleGroup type="single"`, which does not switch panels                                                                                                                                                                                                                                                                          |
 | On / off                                                             | `Switch` (a `SettingRow` `toggle`)                                                                                                                                                                                                                                                                                                                                                          |
 | Several of a long set (scopes, permissions)                          | `ScopeMultiSelect` (`components/scope-multi-select.tsx`, a searchable multi combobox grouped by resource, with a count and an all / none shortcut)                                                                                                                                                                                                                                          |
 | A model (agent, schedule, run with options, chat)                    | `ModelSelect` (`components/model-select.tsx`, over `ModelPicker` of `packages/ui/src/components/model-picker.tsx`): the one list, in a Popover + Command, grouped by who pays (see below). Never a `Select` of models, never a flat list. The groups are `groupModelsForPicker` (`packages/ui/src/components/model-picker-groups.ts`), the chat's composer draws the same `ModelPickerList` |
@@ -381,17 +382,18 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   Its required `tableId` is the stable key for column widths, independent of its
   translated accessible `label`; occurrences of the same table share that key.
   `PackageCollection` callers compose their columns and visibility menu directly,
-  sharing `usePackageNameColumn` for the identity column.
+  sharing `usePackageNameColumn` for the identity column (its second line is the
+  description, else the package id in mono, so every row keeps one height).
 - **Three rules for every table** (both live in `DataTable`, no caller opts in):
   1. **A column that can be acted on never disappears.** A column declares what it
      is in its definition: a READ column (text, badge, date) may carry a `tier`
      and wait for room in a `tiered` table (tier `2` for a 36rem table, `3` for a
      56rem one); a CONTROL column (`control: true`: a select, a switch, a tick, a
      button, a link that does something) has no tier and is always drawn. The type
-     forbids a `tier` on a control, and `components/test/column-tiers.test.tsx`
-     fails on one in any real column set (add your set to it, and mark every
-     column that holds a control). When a table does not fit, it scrolls sideways
-     and holds its name column (the first read column, with the ticks before it)
+     forbids a `tier` on a control, and `DataTable` itself drops any tier given to a
+     control or to the row's « … » column (`components/test/data-table.test.tsx`), so
+     mark every column that holds a control. When a table does not fit, it scrolls
+     sideways and holds its name column (the first read column, with the ticks before it)
      and its row's end (the headerless « … » column) in place (`sticky`), so a row
      is always named and its actions are always in reach. A scroll is better than
      a lost control, and a « … » menu is not the place for a dropdown: a control
@@ -416,11 +418,9 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   32 px, on a `bg-card` surface — the same in a detail page's header).
   `CollectionTabs` splits one collection into parts at the head of the bar; it is
   not a detail page's tabs.
-- **Runs** (`components/runs-table.tsx`): the Résultat column is what ended the run
-  (`runErrorText`), else one readable line of its structured output
-  (`lib/run-output-summary.ts`: the first text, else « N champs », never JSON),
-  truncated with a tooltip. Déclencheur names who or what launched it, and a dash
-  when nothing is recorded: no column is left blank.
+- **Runs** (`components/run-columns.tsx`): identity and timing columns only; the outcome (error,
+  output, files) lives on the run's own page. Déclencheur names who or what launched it, and a
+  dash when nothing is recorded: no column is left blank.
 - **The keys tables** (Settings › Models, two tabs; Preferences › Mes clés). The rule that reads
   the whole page: **a connected key makes its provider's models available.** A row is a key or a
   provider, never a model. **Vocabulary, everywhere (`apps/web`, `packages/ui`,
@@ -590,10 +590,23 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   with `font-mono`; an agent whose working copy differs from its last published
   version (or has none) wears « Brouillon » in its place, and only then; a
   disabled reason hangs on `DisabledReasonTooltip`.
-- **Identity**: `PackageIcon` (`components/package-icon.tsx`), `OrganizationAvatar`, `EndUserAvatar`, `ActorLabel` (the
-  member or end-user a schedule runs as). An end-user's initials sit in one of
-  eight person colours hashed from their id (`--avatar-1..8` in `styles.css`),
-  never a raw Tailwind colour.
+- **Identity**: one tile draws every identity — an agent, an organization, a
+  space, a member, an end-user: `IdentityTile`
+  (`packages/ui/src/components/identity-tile.tsx`), sized by one `size-*`, an
+  image covering it, a glyph or the initials on its colour; `shape="round"` for a
+  person. `PackageIcon` (`components/package-icon.tsx`), `EndUserAvatar` and the
+  user menu's avatar are callers of it, `ActorLabel` names the member or end-user
+  a schedule runs as. An organization is drawn through `orgTile`, a space through
+  `spaceTile` (both `lib/identity-tile-props.ts`): a team space by its own icon and
+  colour, the viewer's own personal space as the viewer, an orphaned one as a
+  departed person. Its colours are the `APPEARANCE_COLORS` palette
+  (`--identity-<key>` for the tint and `--identity-<key>-foreground` for the glyph,
+  4.5:1 in both themes, in `styles.css`; tile classes in
+  `packages/ui/src/identity-colors.ts`), never a raw Tailwind colour;
+  no colour chosen means one hashed from the id (an end-user's and a person's
+  always is). `AppearancePicker` (`components/appearance-picker.tsx`) is every
+  identity editor — an agent's, an organization's, a team space's: the icon forms
+  the entity allows, a palette colour or « Automatique ».
 - **Cards**: a summary block on a detail page is `DetailSectionCard`; a titled
   pane is `SectionCard` (`components/section-card.tsx`, a real `<h3>`); a figure with a label is `OperationalStat` (a `dl` row) with
   `OverviewCardAction` as its quiet footer action; a label and value fact grid is
@@ -631,8 +644,11 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
     object's id otherwise. Export the name when several entry points open the same
     modal (`SHARE_PARAM`).
   - **An object that may not exist**: `useUrlModalTarget(name, items)` resolves the
-    id against the loaded list and drops the param for an unknown id. Pass
-    `undefined` while the list loads, never `[]`. Never `find` by `param.value` by hand.
+    id against the loaded list and drops the param for an id it does not hold: with
+    the « Élément introuvable ou inaccessible » toast when the id never resolved (a
+    link to a deleted, mistyped or out-of-reach object), silently when its object
+    left the list (deleted from its modal, renamed). Pass `undefined` while the list
+    loads, never `[]`. Never `find` by `param.value` by hand.
   - **Handing over** from a URL modal to another modal: close the first, open the
     second (`share.close(); setMovingHome(true)`). Closing a URL modal goes back one
     entry, which lands a frame later: the two overlap for that frame.

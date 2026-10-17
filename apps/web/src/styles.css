@@ -42,8 +42,6 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
   /* Page canvas — the grey the whole chrome sits on. Distinct from
@@ -59,18 +57,32 @@
   /* Soft tints of the brand blue and the spark. Selection
      fills in the switcher, where two dimensions are picked side by side and
      need to be told apart at a glance. */
-  /* Person palette — the colour an end-user's initials sit in, hashed from
-     their id so the same person is always the same colour. Eight hues that
-     tell people apart in a list; never a status, which is what success,
-     warning and destructive say. */
-  --color-avatar-1: var(--avatar-1);
-  --color-avatar-2: var(--avatar-2);
-  --color-avatar-3: var(--avatar-3);
-  --color-avatar-4: var(--avatar-4);
-  --color-avatar-5: var(--avatar-5);
-  --color-avatar-6: var(--avatar-6);
-  --color-avatar-7: var(--avatar-7);
-  --color-avatar-8: var(--avatar-8);
+  /* Identity palette — the hues of `APPEARANCE_COLORS` (`@appstrate/core/
+     appearance`), one per key, behind every identity tile: an agent, a space,
+     an organization, a person. A tile without a chosen colour takes one
+     hashed from its id, so the same entity is always the same colour. Eight
+     hues that tell entities apart in a list; never a status, which is what
+     success, warning and destructive say. A tile is the hue at 20 % under
+     its `-foreground`: the same hue, darkened in the light theme so the glyph
+     or initials reach 4.5:1 on that tint over the card and the canvas; the
+     base itself in the dark theme, where it already does. Tile classes:
+     `packages/ui/src/identity-colors.ts`. */
+  --color-identity-blue: var(--identity-blue);
+  --color-identity-blue-foreground: var(--identity-blue-foreground);
+  --color-identity-emerald: var(--identity-emerald);
+  --color-identity-emerald-foreground: var(--identity-emerald-foreground);
+  --color-identity-violet: var(--identity-violet);
+  --color-identity-violet-foreground: var(--identity-violet-foreground);
+  --color-identity-amber: var(--identity-amber);
+  --color-identity-amber-foreground: var(--identity-amber-foreground);
+  --color-identity-rose: var(--identity-rose);
+  --color-identity-rose-foreground: var(--identity-rose-foreground);
+  --color-identity-cyan: var(--identity-cyan);
+  --color-identity-cyan-foreground: var(--identity-cyan-foreground);
+  --color-identity-pink: var(--identity-pink);
+  --color-identity-pink-foreground: var(--identity-pink-foreground);
+  --color-identity-orange: var(--identity-orange);
+  --color-identity-orange-foreground: var(--identity-orange-foreground);
   /* Page frame — a fluid gutter and a 1300px column. The
      header shares the gutter and not the column: it runs edge to edge, so its
      trail lines up with the content's left edge until the page is wider than
@@ -128,21 +140,24 @@
   --canvas: oklch(0.985 0 0); /* #FAFAFA */
   --spark: oklch(0.682 0.18 37.9); /* #F2683C */
   --spark-foreground: oklch(1 0 0);
-  --avatar-1: oklch(0.546 0.215 263);
-  --avatar-2: oklch(0.596 0.145 163);
-  --avatar-3: oklch(0.541 0.281 293);
-  --avatar-4: oklch(0.666 0.179 58);
-  --avatar-5: oklch(0.586 0.253 18);
-  --avatar-6: oklch(0.609 0.126 222);
-  --avatar-7: oklch(0.591 0.293 323);
-  --avatar-8: oklch(0.646 0.222 41);
+  --identity-blue: oklch(0.546 0.215 263);
+  --identity-emerald: oklch(0.596 0.145 163);
+  --identity-violet: oklch(0.541 0.281 293);
+  --identity-amber: oklch(0.666 0.179 58);
+  --identity-rose: oklch(0.586 0.253 18);
+  --identity-cyan: oklch(0.609 0.126 222);
+  --identity-pink: oklch(0.591 0.293 323);
+  --identity-orange: oklch(0.646 0.222 41);
+  --identity-blue-foreground: oklch(0.496 0.215 263);
+  --identity-emerald-foreground: oklch(0.481 0.104 163);
+  --identity-violet-foreground: oklch(0.511 0.281 293);
+  --identity-amber-foreground: oklch(0.511 0.122 58);
+  --identity-rose-foreground: oklch(0.491 0.196 18);
+  --identity-cyan-foreground: oklch(0.489 0.09 222);
+  --identity-pink-foreground: oklch(0.501 0.236 323);
+  --identity-orange-foreground: oklch(0.506 0.155 41);
   --sidebar: oklch(0.985 0 0); /* #FAFAFA — merges with the canvas, split only by its border */
   --sidebar-foreground: oklch(0.21 0.006 285.9);
-  /* Stays near-black, not the brand blue: it fills the organization avatar,
-     and a blue avatar would compete with the one blue that means "primary
-     action". */
-  --sidebar-primary: oklch(0.21 0.006 285.9);
-  --sidebar-primary-foreground: oklch(1 0 0);
   --sidebar-accent: oklch(0.929 0.005 286.3); /* hover/active nav surface */
   --sidebar-accent-foreground: oklch(0.21 0.006 285.9);
   --sidebar-border: oklch(0.929 0.005 286.3);
@@ -176,20 +191,24 @@
   --canvas: oklch(0.145 0.004 286);
   --spark: oklch(0.72 0.16 38);
   --spark-foreground: oklch(0.145 0.004 286);
-  --avatar-1: oklch(0.707 0.165 255);
-  --avatar-2: oklch(0.765 0.177 163);
-  --avatar-3: oklch(0.702 0.183 294);
-  --avatar-4: oklch(0.828 0.189 84);
-  --avatar-5: oklch(0.712 0.194 13);
-  --avatar-6: oklch(0.789 0.154 212);
-  --avatar-7: oklch(0.74 0.238 322);
-  --avatar-8: oklch(0.75 0.183 56);
+  --identity-blue: oklch(0.707 0.165 255);
+  --identity-emerald: oklch(0.765 0.177 163);
+  --identity-violet: oklch(0.702 0.183 294);
+  --identity-amber: oklch(0.828 0.189 84);
+  --identity-rose: oklch(0.712 0.194 13);
+  --identity-cyan: oklch(0.789 0.154 212);
+  --identity-pink: oklch(0.74 0.238 322);
+  --identity-orange: oklch(0.75 0.183 56);
+  --identity-blue-foreground: var(--identity-blue);
+  --identity-emerald-foreground: var(--identity-emerald);
+  --identity-violet-foreground: var(--identity-violet);
+  --identity-amber-foreground: var(--identity-amber);
+  --identity-rose-foreground: var(--identity-rose);
+  --identity-cyan-foreground: var(--identity-cyan);
+  --identity-pink-foreground: var(--identity-pink);
+  --identity-orange-foreground: var(--identity-orange);
   --sidebar: oklch(0.145 0.004 286);
   --sidebar-foreground: oklch(0.96 0.002 286);
-  /* Mirrors the light theme's org-avatar contrast (dark chip / light text)
-     rather than turning it into the brand blue. */
-  --sidebar-primary: oklch(0.96 0.002 286);
-  --sidebar-primary-foreground: oklch(0.21 0.006 285.9);
   --sidebar-accent: oklch(0.28 0.005 286);
   --sidebar-accent-foreground: oklch(0.96 0.002 286);
   --sidebar-border: oklch(0.28 0.005 286);

@@ -2,8 +2,9 @@
 
 /**
  * The `SaveFeedback` of one setting when a mutation writes several: only a write
- * whose body carried `key` is that setting's, so saving a second field does not
- * say « Enregistré » under the first.
+ * whose body carried one of the setting's `keys` is that setting's, so saving a
+ * second field does not say « Enregistré » under the first. A setting written as
+ * several fields (an appearance: `icon` or `color`) names them all.
  */
 export function fieldWriteState(
   mutation: {
@@ -12,9 +13,10 @@ export function fieldWriteState(
     isError: boolean;
     variables?: { body?: object };
   },
-  key: string,
+  keys: string | readonly string[],
 ): { pending: boolean; success: boolean; error: boolean } {
-  const mine = !!mutation.variables?.body && key in mutation.variables.body;
+  const body = mutation.variables?.body;
+  const mine = !!body && (typeof keys === "string" ? [keys] : keys).some((key) => key in body);
   return {
     pending: mine && mutation.isPending,
     success: mine && mutation.isSuccess,

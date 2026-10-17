@@ -228,6 +228,8 @@ function DashboardScheduleRow({
     >
       <PackageIcon
         type="agent"
+        id={schedule.packageId}
+        name={agent?.display_name}
         icon={agent?.icon}
         color={agent?.color}
         className="size-9 rounded-lg"

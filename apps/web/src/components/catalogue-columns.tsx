@@ -67,7 +67,7 @@ export function useCatalogueSelectColumn({
 /**
  * The one origin column of every package table: the provider, with the home space
  * (which governs the draft) under it. A column each would cost the tier-3 budget a
- * whole track (`column-tiers.test.tsx`). A system package has no home space.
+ * whole track. A system package has no home space.
  */
 export function useCatalogueOriginColumn<
   T extends { source?: string | null; autoInstalled?: boolean } = CardItem,
