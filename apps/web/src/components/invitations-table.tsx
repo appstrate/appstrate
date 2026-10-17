@@ -36,7 +36,8 @@ export function InvitationsTable({
   spaceId,
 }: {
   orgId: string;
-  invitations: Invitation[];
+  /** `undefined` while the list loads: the URL target is only judged on a loaded list. */
+  invitations: Invitation[] | undefined;
   spaceId?: string;
 }) {
   const { t } = useTranslation(["settings", "common"]);
@@ -50,12 +51,11 @@ export function InvitationsTable({
 
   const canInvite = currentOrg?.id === orgId && can("members:invite");
   const canEdit = currentOrg?.id === orgId && can("members:change-role");
-  const visible = spaceId
-    ? invitations.filter((invitation) =>
-        invitation.space_assignments.some((assignment) => assignment.spaceId === spaceId),
-      )
-    : invitations;
-  const editParam = useUrlModalTarget("invitation", canEdit ? visible : undefined);
+  const visible = (invitations ?? []).filter(
+    (invitation) =>
+      !spaceId || invitation.space_assignments.some((assignment) => assignment.spaceId === spaceId),
+  );
+  const editParam = useUrlModalTarget("invitation", canEdit && invitations ? visible : undefined);
   const editing = editParam.target;
   const canceling = visible.find((invitation) => invitation.id === cancelingId);
   const spaceName = (id: string) => spaceLabelOf(id) ?? t("orgSettings.assignmentUnavailableSpace");
