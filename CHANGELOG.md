@@ -179,7 +179,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   although the sidecar renders such a field as one percent-encoded component.
   The schema is now a pattern on `http(s)://` (still checked as a parsable
   URL), and the validator also refuses `ftp:` or `javascript:` targets it used
-  to let through.
+  to let through. `api_upload` targets get the same schema, and a backslash is
+  treated as a path delimiter (as WHATWG does), so a `\{{field}}` segment gets
+  the same empty/`.`/`..` checks as a `/{{field}}` one.
 - **`responseMode.toFile` writes under a workspace reached through a symlink**
   (#2060). The escape check compared the real path of the target directory to
   the workspace path as given, so under `RUN_ADAPTER=process` on macOS (the
