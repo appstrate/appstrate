@@ -18,7 +18,6 @@ import { Bot, Pencil, RefreshCw, ShieldCheck, Trash2 } from "lucide-react";
 import { DropdownMenuItem, DropdownMenuLabel } from "@appstrate/ui/components/dropdown-menu";
 import { InlineEditableLabel } from "../inline-editable-label";
 import { ConnectionStatusBadge } from "../integration-connect/connection-status-badge";
-import { ConnectionScopeBadge } from "../integration-connect/connection-scope-badge";
 import { ConnectionShareEditor } from "../integration-connect/connection-share-editor";
 import { ConnectionVariablesLine } from "../integration-connect/connection-variables-line";
 import { useHostedConnectPopup } from "../integration-connect/use-hosted-connect-popup";
@@ -27,6 +26,7 @@ import { connectionLockHintKey } from "../integration-connect/connection-ownersh
 import {
   useRenameIntegrationConnection,
   useConnectionShare,
+  useConnectionShareAllSpaces,
   type IntegrationAuthType,
   type IntegrationConnection,
   useAgentsConsumingIntegration,
@@ -153,11 +153,8 @@ export function StatusCell({ connection }: { connection: IntegrationConnection }
   );
 }
 
-/**
- * Scope is that of the OAuth client that minted it: a fact (badge), not a setting. Sharing is
- * the owner's consent; a governor can only withdraw a colleague's share here.
- */
-export function ScopeCell({
+/** Sharing is the owner's consent; a governor can only withdraw a colleague's share here. */
+export function SharingCell({
   connection,
   packageId,
   isAdmin,
@@ -167,6 +164,7 @@ export function ScopeCell({
   isAdmin: boolean;
 }) {
   const shareConnection = useConnectionShare("share", packageId);
+  const allSpacesSharing = useConnectionShareAllSpaces(packageId);
   const unshareConnection = useConnectionShare("unshare", packageId);
   const orgId = useCurrentOrgId();
   const { spaceId, canShare, canUnshareHere, lockKey } = useRowGrants(connection, isAdmin);
@@ -183,7 +181,6 @@ export function ScopeCell({
   }, [orgSpaces, connection.shareable_spaces, connection.shared_space_ids]);
   return (
     <div className="flex min-w-0 flex-col items-start gap-1.5">
-      <ConnectionScopeBadge scope={connection.scope} testId={`connection-scope-${connection.id}`} />
       <ConnectionShareEditor
         connectionId={connection.id}
         scope={connection.scope}
@@ -195,9 +192,16 @@ export function ScopeCell({
         canShare={canShare}
         canUnshareHere={canUnshareHere}
         lockHint={lockText}
-        pending={shareConnection.isPending || unshareConnection.isPending}
+        pending={
+          shareConnection.isPending || unshareConnection.isPending || allSpacesSharing.isPending
+        }
         onShare={(targetSpaceId) =>
           shareConnection.mutate({ connectionId: connection.id, spaceId: targetSpaceId })
+        }
+        canShareAllSpaces={connection.allowed_actions?.includes("share_all_spaces") ?? false}
+        shareAllSpaces={connection.share_all_spaces ?? false}
+        onShareAllSpacesChange={(enabled) =>
+          allSpacesSharing.mutate({ connectionId: connection.id, enabled })
         }
         onUnshare={(targetSpaceId) =>
           unshareConnection.mutate({ connectionId: connection.id, spaceId: targetSpaceId })

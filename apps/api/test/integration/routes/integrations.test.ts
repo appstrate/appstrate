@@ -1984,13 +1984,27 @@ describe("PATCH/PUT/DELETE /api/integrations/:packageId/connections/:connectionI
     expect(await sharesOf(spaceRow)).toEqual([]);
   });
 
-  it("refuses a target space the owner does not reach (409)", async () => {
-    const id = await seedConn({ userId: ctx.user.id });
-    const unreachable = await seedUnreachableSpace(ctx.orgId);
+  it("refuses a team space the owner does not reach (409)", async () => {
+    // An org owner/admin reaches every team space, so the owner is a plain member.
+    const member = await memberContext(ctx, "member", "builder");
+    const id = await seedConn({ userId: member.user.id });
+    const closed = (await seedSpace({ orgId: ctx.orgId, name: "Closed", visibility: "private" }))
+      .id;
 
-    const res = await share("PUT", authHeaders(ctx), id, unreachable);
+    const res = await share("PUT", authHeaders(member), id, closed);
     expect(res.status).toBe(409);
     expect(((await res.json()) as { code: string }).code).toBe("connection_owner_without_access");
+    expect(await sharesOf(id)).toEqual([]);
+  });
+
+  it("refuses a personal space as a share target (400)", async () => {
+    const id = await seedConn({ userId: ctx.user.id });
+    const personal = await seedUnreachableSpace(ctx.orgId);
+
+    const res = await share("PUT", authHeaders(ctx), id, personal);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code: string }).code).toBe("invalid_share_target");
+    expect(await sharesOf(id)).toEqual([]);
   });
 
   it("refuses withdrawing a space whose admin pin names the connection, not another (409)", async () => {

@@ -39,6 +39,9 @@ const base: Props = {
   lockHint: null,
   pending: false,
   onShare: () => {},
+  canShareAllSpaces: true,
+  shareAllSpaces: false,
+  onShareAllSpacesChange: () => {},
   onUnshare: () => {},
 };
 
@@ -115,6 +118,60 @@ describe("ConnectionShareEditor — the owner's org-scoped row", () => {
     expect(targetTestIds(tree)).toEqual([target("s1"), target("s2")]);
   });
 
+  it("toggles all-spaces sharing as one server policy, even when no space exists yet", () => {
+    for (const enabled of [false, true]) {
+      const changes: boolean[] = [];
+      const tree = treeOf({
+        ...base,
+        targets: [],
+        shareAllSpaces: enabled,
+        onShareAllSpacesChange: (value) => changes.push(value),
+      });
+      const control = propsOf(tree, "share-all-" + CONN)!;
+      expect(control.disabled).toBe(false);
+      expect(control.checked).toBe(enabled);
+      (control.onCheckedChange as (checked: boolean) => void)(!enabled);
+      expect(changes).toEqual([!enabled]);
+    }
+  });
+
+  it("only offers organization consent when the server allows it", () => {
+    expect(
+      propsOf(treeOf({ ...base, canShareAllSpaces: false }), "share-all-" + CONN),
+    ).toBeUndefined();
+    expect(propsOf(treeOf({ ...base, pending: true }), "share-all-" + CONN)?.disabled).toBe(true);
+  });
+
+  it("names all team spaces without counting personal spaces", () => {
+    expect(render(<ConnectionShareEditor {...base} />)).toContain("Vous uniquement");
+    const props = {
+      ...base,
+      shareAllSpaces: true,
+      sharedSpaceIds: [HERE, "spc_other"],
+      targets: [...base.targets, { id: "personal", name: "Mon espace" }],
+    };
+    const html = render(<ConnectionShareEditor {...props} />);
+    expect(html).toContain("Tous les espaces");
+    expect(html).not.toContain("+ futurs");
+    expect(propsOf(treeOf(props), "share-all-" + CONN)?.checked).toBe(true);
+    expect(targetTestIds(treeOf(props))).toEqual([]);
+    expect(targetTestIds(treeOf({ ...props, shareAllSpaces: false }))).toEqual([
+      target(HERE),
+      target("spc_other"),
+      target("personal"),
+    ]);
+  });
+
+  it("reads the canonical server mode without a separate team-space listing", () => {
+    const props = { ...base, shareAllSpaces: true, sharedSpaceIds: [HERE], targets: [] };
+    expect(render(<ConnectionShareEditor {...props} />)).toContain("Tous les espaces");
+    expect(propsOf(treeOf(props), "share-all-" + CONN)?.checked).toBe(true);
+    expect(targetTestIds(treeOf(props))).toEqual([]);
+    expect(render(<ConnectionShareEditor {...props} shareAllSpaces={false} />)).toContain(
+      "1 espace",
+    );
+  });
+
   it("shares into a space that is not yet in the set", () => {
     expect(actOn({ sharedSpaceIds: [] }, target("spc_other"), select)).toEqual({
       shared: ["spc_other"],
@@ -151,6 +208,12 @@ describe("ConnectionShareEditor — the owner's space-scoped row", () => {
     expect(html).toContain(`share-toggle-${CONN}`);
     expect(html).not.toContain(`share-editor-${CONN}`);
     expect(html).toContain(i18n.t("settings:integration.connection.share.thisSpace"));
+  });
+
+  it("offers no share toggle when the row's space is not a shareable target", () => {
+    const html = render(<ConnectionShareEditor {...base} {...space} targets={[]} />);
+    expect(html).not.toContain(`share-toggle-${CONN}`);
+    expect(html).toContain("Vous uniquement");
   });
 
   it("shares into and out of its space", () => {
@@ -219,10 +282,10 @@ describe("ConnectionShareEditor — a plain member", () => {
 describe("ConnectionScopeBadge", () => {
   it("names the scope and carries its explanation for a screen reader", () => {
     const org = render(<ConnectionScopeBadge scope="org" />);
-    expect(org).toContain("Toute l'organisation");
+    expect(org).toContain("Usage multi-espace");
     expect(org).toContain(i18n.t("settings:integration.connection.scope.orgHelp"));
     const space = render(<ConnectionScopeBadge scope="space" />);
-    expect(space).toContain("Cet espace uniquement");
+    expect(space).toContain("Usage limité à un espace");
     expect(space).toContain(i18n.t("settings:integration.connection.scope.spaceHelp"));
   });
 });

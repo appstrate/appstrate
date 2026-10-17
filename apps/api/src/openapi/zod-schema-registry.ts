@@ -131,6 +131,7 @@ import {
   oauthClientCreateSchema,
   oauthClientUpdateSchema,
   updateConnectionSchema,
+  connectionShareAllSpacesSchema,
   connectSessionSchema,
   connectSubmitSchema,
   setDefaultClientSchema,
@@ -625,6 +626,18 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/me/connections/{connectionId}",
     jsonSchema: toJsonSchema(updateConnectionSchema),
     description: "Rename one of the caller's connections",
+  },
+  {
+    method: "PUT",
+    path: "/api/integrations/{packageId}/connections/{connectionId}/shares",
+    jsonSchema: toJsonSchema(connectionShareAllSpacesSchema),
+    description: "Share with current and future team spaces",
+  },
+  {
+    method: "PUT",
+    path: "/api/me/connections/{connectionId}/shares",
+    jsonSchema: toJsonSchema(connectionShareAllSpacesSchema),
+    description: "Share an owned connection with current and future team spaces",
   },
   {
     method: "POST",
