@@ -169,16 +169,19 @@ describe("overlay paths", () => {
   const matched = (url: string) => matchRoutes(routes, url)?.[0]?.route.path;
 
   it("answer an unknown address under every overlay inside that overlay", () => {
-    // Two segments: one may be a page's own parameter (`/catalogue/:type`), which answers it itself.
     for (const prefix of OVERLAY_PREFIXES) {
+      // One segment under a page that takes a parameter there (`/catalogue/:type`) is that
+      // page's to answer; anywhere else, and any deeper, it is the catch-all's.
+      const param = Object.keys(ROUTE_ACCESS).find((path) =>
+        new RegExp(`^${prefix}/:[^/]+$`).test(path),
+      );
+      expect(matched(`${prefix}/no-such-page`)).toBe(param ?? `${prefix}/*`);
       expect(matched(`${prefix}/no-such/page`)).toBe(`${prefix}/*`);
     }
     // Below a declared page too: no prefix of it stands in.
     expect(matched("/org-settings/general/no-such-page")).toBe("/org-settings/*");
     // Outside the overlays the main tree answers.
     expect(matched("/agents/no-such-page")).toBeUndefined();
-    // A retired address is the overlay's unavailable page, not the dashboard.
-    expect(matched("/catalogue/discover/agent")).toBe("/catalogue/*");
   });
 
   it("leave every declared overlay page ahead of the not-found catch-all", () => {

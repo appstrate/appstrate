@@ -46,7 +46,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **The dashboard is redesigned** (#1937): settings and preferences open as
   routed overlays, every real dialog has a URL, tables share one component, and
   one connection menu and one model picker serve every screen. SPA routes moved
-  without redirects: `/library` is `/catalogue`, `/webhooks`, `/end-users` and
+  without redirects: `/library` is `/catalogue/<type>` (its per-space table
+  `/catalogue/<type>?view=spaces`), `/webhooks`, `/end-users` and
   `/org-settings/space/*` live under `/workspace-settings/*`, and
   `/schedules/new` and the `…/edit` routes are gone (editing happens in a
   package's settings). The API changes behind it:
@@ -149,12 +150,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `--local --integrations local` it therefore needs credentials for every
     `api_call` integration the exported agent declares, as a local bundle
     read from disk already did.
-
-- **The catalogue's view moved from the path to the query** (#2013). A kind has
-  one address, `/catalogue/<type>`, showing Découvrir; the per-space table is
-  `/catalogue/<type>?view=spaces`. The old `/catalogue/discover/<type>` and
-  `/catalogue/placed/<type>` addresses are not redirected: they show the page
-  unavailable. Interface only.
 
 ### Fixed
 

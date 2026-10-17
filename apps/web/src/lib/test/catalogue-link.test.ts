@@ -129,10 +129,10 @@ describe("catalogue addresses", () => {
   it("refuse a kind or a view the catalogue does not have", () => {
     expect(isCatalogueKind("all")).toBe(false);
     expect(isCatalogueKind("agents")).toBe(false);
-    expect(isCatalogueKind("discover")).toBe(false);
-    // Découvrir has one address, the param's absence; the retired readings name nothing.
+    // One address per view: Découvrir is the param's absence, and the param is named once.
     expect(catalogueViewOf("?view=discover")).toBeNull();
-    expect(catalogueViewOf("?view=placed")).toBeNull();
     expect(catalogueViewOf("?view=")).toBeNull();
+    expect(catalogueViewOf("?view=SPACES")).toBeNull();
+    expect(catalogueViewOf("?view=spaces&view=spaces")).toBeNull();
   });
 });

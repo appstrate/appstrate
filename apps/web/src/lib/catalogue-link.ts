@@ -29,7 +29,7 @@ export const CATALOGUE_TYPE_LABEL_KEY: Record<PackageType, string> = {
 };
 
 /** The sheet's package, and the published version it is read at (`?package=…&version=…`). */
-const CATALOGUE_PACKAGE_PARAM = "package";
+export const CATALOGUE_PACKAGE_PARAM = "package";
 export const CATALOGUE_VERSION_PARAM = "version";
 
 /**
@@ -41,9 +41,9 @@ const CATALOGUE_VIEW_PARAM = "view";
 
 /** The view an address asks for, or `null` for one the catalogue does not have. */
 export function catalogueViewOf(search: string): CatalogueView | null {
-  const value = new URLSearchParams(search).get(CATALOGUE_VIEW_PARAM);
-  if (value === null) return "discover";
-  return value === "spaces" ? value : null;
+  const values = new URLSearchParams(search).getAll(CATALOGUE_VIEW_PARAM);
+  if (values.length === 0) return "discover";
+  return values.length === 1 && values[0] === "spaces" ? "spaces" : null;
 }
 
 /**

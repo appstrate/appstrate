@@ -31,6 +31,7 @@ import { RemoveFromSpaceConfirm, type RemovalTarget } from "./remove-from-space-
 import { packageDetailPath } from "../lib/package-paths";
 import {
   CATALOGUE_KINDS,
+  CATALOGUE_PACKAGE_PARAM,
   CATALOGUE_VERSION_PARAM,
   catalogueListAddress,
   catalogueSheetAddress,
@@ -130,7 +131,7 @@ export function OrgCatalogueModal({
   const { data: library, isLoading, error } = useCatalogueLibrary();
   const activate = useSetPackageActive();
   const list = useListParams(["state", "origin"]);
-  // Découvrir is BROWSING (cards); Vos espaces is MANAGING (a table of per-space state). No toggle.
+  // Découvrir is BROWSING (cards); Par espace is MANAGING (a table of per-space state). No toggle.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // A tick belongs to one list: another view or kind starts with none.
   const listKey = `${view}/${active}`;
@@ -185,7 +186,7 @@ export function OrgCatalogueModal({
   // to a package (a share notification) opens its sheet whatever the list shows, the other
   // execution's integrations included. An id the library does not hold drops from the address.
   const preview = useUrlModalTarget(
-    "package",
+    CATALOGUE_PACKAGE_PARAM,
     library ? CATALOGUE_KINDS.flatMap((kind) => library.packages[kind]) : undefined,
     { companions: SHEET_COMPANIONS },
   );
