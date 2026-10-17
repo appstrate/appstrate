@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Agent persistence: one visibility rule for pinned slots and memories** (#2070). A caller holding
+  `persistence:delete` (admin, builder) who names no actor in `GET /api/agents/{scope}/{name}/persistence`
+  now sees every actor's memories, as it already did for pinned slots, with or without `runId`. A
+  colleague's run page now lists that run's memories. On the agent page, "Mine" now covers only the
+  signed-in user's rows; other actors' rows get their own "Other actors" filter and badge.
 - **Connection use and sharing are separate** (#2041). “Multi-space use” describes the owner's
   reach; the sharing control grants access to other members. “All spaces” includes current and
   future team spaces and hides the individual list. Any effective withdrawal switches atomically
