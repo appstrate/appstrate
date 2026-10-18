@@ -18,6 +18,8 @@ import { createTestContext, authHeaders, type TestContext } from "../../helpers/
 import { seedPackage, seedSpacePackage, seedSpace } from "../../helpers/seed.ts";
 import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import type { SystemPackageEntry } from "@appstrate/core/system-packages";
+import { _setSystemPackagesForTesting } from "../../../src/services/system-packages.ts";
 import { buildIntegrationOAuthRefreshContext } from "../../../src/services/integration-token-refresh.ts";
 import { authorizationServerTag } from "../../../src/lib/integration-callback-url.ts";
 import {
@@ -603,6 +605,36 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     });
     expect(res.status).toBe(400);
     expect(JSON.stringify(await res.json())).toContain("per connection");
+  });
+
+  it("vouches for no server a system integration chooses per connection: no iss, refused", async () => {
+    const restore = _setSystemPackagesForTesting(
+      new Map([
+        [
+          "@myorg/forge",
+          {
+            packageId: "@myorg/forge",
+            type: "integration",
+            manifest: forgeManifest("@myorg/forge"),
+          } as unknown as SystemPackageEntry,
+        ],
+      ]),
+    );
+    try {
+      forge.iss = false;
+      const res = await app.request("/api/integrations/@myorg/forge/auths/oauth/connect/oauth2", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ variables: { base_url: base } }),
+      });
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { code: string }).code).toBe(
+        "authorization_server_iss_unsupported",
+      );
+      expect(forge.registrations).toHaveLength(0);
+    } finally {
+      restore();
+    }
   });
 
   it("refuses a server chosen per connection that does not advertise iss, registering nothing", async () => {

@@ -644,6 +644,90 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
     expect(await db.select().from(integrationOauthClients)).toEqual([]);
   });
 
+  /** An org DCR client bound to the installed server, as an earlier connect left it. */
+  async function seedBoundClient(): Promise<string> {
+    const [row] = await db
+      .insert(integrationOauthClients)
+      .values({
+        orgId: ctx.orgId,
+        integrationId: INTEGRATION,
+        authKey: AUTH_KEY,
+        clientId: "dcr-1",
+        clientSecretEncrypted: "",
+        tokenEndpointAuthMethod: "none",
+        autoProvisioned: true,
+        issuer: meta.base,
+        redirectUri: `${CALLBACK}/${authorizationServerTag(meta.base)}`,
+      })
+      .returning({ id: integrationOauthClients.id });
+    return row!.id;
+  }
+
+  it("refuses a server without iss before reusing a client bound to it earlier", async () => {
+    await install({ cimd: false, registration: true, iss: false }, { clientId: "dcr-1" });
+    await seedBoundClient();
+    const res = await postConnect();
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe(
+      "authorization_server_iss_unsupported",
+    );
+    expect(meta.provider!.authorizeRequests).toHaveLength(0);
+  });
+
+  it("refuses a server without iss on a reconnect and through the hosted connect link", async () => {
+    await install({ cimd: false, registration: true, iss: false }, { clientId: "dcr-1" });
+    const [connection] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: INTEGRATION,
+        authKey: AUTH_KEY,
+        accountId: "alice",
+        label: "alice",
+        orgId: ctx.orgId,
+        spaceId: null,
+        originSpaceId: ctx.defaultSpaceId,
+        userId: ctx.user.id,
+        credentialsEncrypted: "enc",
+        clientRef: await seedBoundClient(),
+      })
+      .returning({ id: integrationConnections.id });
+    const reconnect = await app.request(
+      `/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/connect/oauth2`,
+      {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ connection_id: connection!.id }),
+      },
+    );
+    expect(reconnect.status).toBe(403);
+    expect(((await reconnect.json()) as { code: string }).code).toBe(
+      "authorization_server_iss_unsupported",
+    );
+
+    const minted = await app.request(
+      `/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/connect/session`,
+      {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      },
+    );
+    const link = new URL(((await minted.json()) as { connect_url: string }).connect_url);
+    const started = await app.request(link.pathname + link.search, { redirect: "manual" });
+    expect(started.status).toBe(403);
+    expect(meta.provider!.authorizeRequests).toHaveLength(0);
+    expect(meta.registrations).toBe(0);
+  });
+
+  it("uses no stored client while the server's metadata does not answer (503)", async () => {
+    await install({ cimd: false, registration: true, metadataStatus: 503 }, { clientId: "dcr-1" });
+    await seedBoundClient();
+    const res = await postConnect();
+    expect(res.status).toBe(503);
+    expect(meta.registrations).toBe(0);
+    expect(meta.provider!.authorizeRequests).toHaveLength(0);
+  });
+
   it("refuses a fork of a system integration: the platform vouches for the system id alone", async () => {
     await install(
       { cimd: false, registration: true, iss: false },
