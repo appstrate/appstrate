@@ -1488,12 +1488,9 @@ describe("OAuth2 connect initiate", () => {
       },
     );
     expect(res.status).toBe(403);
-    // The error names the specific provisioning failure (no registration
-    // endpoint discovered against the unreachable AS) and carries its remedy.
+    // The error names the provisioning failure (no metadata, no server to register at) and its remedy.
     const body = (await res.json()) as { detail: string };
-    expect(body.detail).toContain(
-      "advertises neither client metadata documents nor dynamic client registration",
-    );
+    expect(body.detail).toContain("publishes no valid metadata (RFC 8414)");
     expect(body.detail).toContain("register an OAuth client manually");
   });
 

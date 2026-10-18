@@ -266,7 +266,6 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
       AUTH_KEY,
       manifest as IntegrationManifest,
       auth as AfpsManifestAuth,
-      `${process.env.APP_URL}/api/integrations/callback`,
     );
     const picked = resolved.provisioningFailure
       ? null
@@ -396,17 +395,39 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
   });
 
   it("never completes a DCR flow with a response on a document's redirect URI", async () => {
-    // A DCR client of a server without `iss` (fixed server: no tag). A response arriving on the
-    // document namespace — where a server handed our document would send it — is refused.
+    // A DCR client of a server without `iss`. A response arriving on the document namespace —
+    // where a server handed our document would send it — is refused.
     await install({ cimd: false, registration: true, iss: false }, { clientId: "dcr-1" });
     const back = await consent(await begin());
-    expect(back.pathname).toBe("/api/integrations/callback");
+    expect(back.pathname).toBe(`/api/integrations/callback/${authorizationServerTag(meta.base)}`);
     const onDocumentPath = `/api/integrations/callback/cimd/${authorizationServerTag(meta.base)}${back.search}`;
     expect(await callbackText(onDocumentPath)).toContain(
       "did not come from the authorization server",
     );
     expect(meta.provider!.tokenRequests).toHaveLength(0);
     expect(await db.select().from(integrationConnections)).toEqual([]);
+  });
+
+  it("binds a DCR client of a server without iss to that server's own redirect URI (#2102)", async () => {
+    // Without `iss`, the redirect URI tells servers apart (RFC 9700 §4.4.2): the shared callback
+    // would take a code from any honest server whose client returns there.
+    await install({ cimd: false, registration: true, iss: false }, { clientId: "dcr-1" });
+    const tagged = `${CALLBACK}/${authorizationServerTag(meta.base)}`;
+
+    const authUrl = await begin();
+    expect(authUrl.searchParams.get("redirect_uri")).toBe(tagged);
+    const [client] = await db.select().from(integrationOauthClients);
+    expect(client).toMatchObject({ issuer: meta.base, redirectUri: tagged, autoProvisioned: true });
+    const back = await consent(authUrl);
+
+    const shared = await callbackText(`/api/integrations/callback${back.search}`);
+    expect(shared).toContain("did not come from the authorization server");
+    expect(meta.provider!.tokenRequests).toHaveLength(0);
+
+    const genuine = await consent(await begin());
+    expect(await callbackText(genuine)).not.toContain("error");
+    expect(meta.provider!.tokenRequests).toHaveLength(1);
+    expect(meta.registrations).toBe(1);
   });
 
   it("refuses a document client bound to another server than the state's (issuer_mismatch)", async () => {

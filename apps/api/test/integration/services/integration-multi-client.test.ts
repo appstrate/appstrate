@@ -581,7 +581,6 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         LOCAL_MANIFEST,
         OAUTH2_AUTH,
-        "https://platform.test/callback",
       );
       expect(() =>
         resolveConnectClient(INTEGRATION, AUTH_KEY, LOCAL_MANIFEST, OAUTH2_AUTH, resolved),

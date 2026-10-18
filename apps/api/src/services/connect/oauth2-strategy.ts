@@ -362,12 +362,6 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
         "oauth2 auth must declare an issuer (for discovery) or explicit authorization_endpoint + token_endpoint for marketplace connect.",
       );
     }
-    // Same callback for every integration flow. Computed before client
-    // resolution so auto-DCR registers exactly this redirect URI. Shared
-    // helper, not an inline template: the admin UI displays the very same
-    // string (integration detail `platform_redirect_uri`) so what an admin
-    // registers at the provider cannot drift from what we send.
-    const redirectUri = integrationCallbackUrl();
     // Resolve the client (auto-registering via DCR for remote MCP integrations
     // when unregistered) and the connect endpoints/resource (discovered for
     // MCP, else manifest).
@@ -377,7 +371,6 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       ctx.authKey,
       manifest,
       auth,
-      redirectUri,
       variables ?? {},
     );
     // Client selection (multi-client) — full precedence lives in
@@ -398,7 +391,8 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       resolved,
       ctx.target?.spaceId === null,
     );
-    const effectiveRedirectUri = clientRedirectUri ?? redirectUri;
+    // The shared callback, the very string the admin UI displays (`platform_redirect_uri`).
+    const effectiveRedirectUri = clientRedirectUri ?? integrationCallbackUrl();
     // Threaded endpoints/resource: discovery result wins, manifest is the
     // fallback (classic integrations have no resolved.* fields).
     const issuer = resolved.issuer ?? auth.issuer;
@@ -602,7 +596,6 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       ctx.authKey,
       manifest,
       auth,
-      integrationCallbackUrl(),
       variables ?? {},
     );
     const { clientRef } = resolveConnectClient(

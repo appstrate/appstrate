@@ -137,7 +137,6 @@ describe("public OAuth client is declared, not inferred", () => {
       AUTH_KEY,
       MANIFEST,
       auth,
-      "https://app.example.com/callback",
     );
     return resolveConnectClient(INTEGRATION, AUTH_KEY, MANIFEST, auth, resolved);
   }

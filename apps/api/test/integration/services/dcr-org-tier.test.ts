@@ -24,6 +24,7 @@ import {
   resolveIntegrationClientById,
 } from "../../../src/services/integration-connections.ts";
 import { usableInSpace } from "../../../src/services/connection-reach.ts";
+import { integrationCallbackUrlFor } from "../../../src/lib/integration-callback-url.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
@@ -31,7 +32,6 @@ import type { AfpsManifestAuth } from "../../../src/services/integration-manifes
 
 const REMOTE = "@myorg/remote-mcp";
 const AUTH_KEY = "oauth";
-const REDIRECT = "https://app.example.com/api/integrations/callback";
 
 interface AuthServer {
   base: string;
@@ -145,14 +145,7 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
 
   /** The client a connect flow from `scope` uses — the calls `OAuth2Strategy.begin` makes. */
   async function connectClientRef(scope: SpaceScope): Promise<string> {
-    const resolved = await ensureIntegrationOAuthClient(
-      scope,
-      REMOTE,
-      AUTH_KEY,
-      manifest,
-      auth,
-      REDIRECT,
-    );
+    const resolved = await ensureIntegrationOAuthClient(scope, REMOTE, AUTH_KEY, manifest, auth);
     return resolveConnectClient(REMOTE, AUTH_KEY, manifest, auth, resolved).clientRef;
   }
 
@@ -166,6 +159,7 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
     return conn!.id;
   }
 
+  /** A space-tier DCR client of the integration's server, as registered before #1870. */
   async function seedLegacySpaceClient(spaceId: string, clientId = "legacy"): Promise<string> {
     const [row] = await db
       .insert(integrationOauthClients)
@@ -179,6 +173,8 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
         tokenEndpointAuthMethod: "none",
         isDefault: true,
         autoProvisioned: true,
+        issuer: as.base,
+        redirectUri: integrationCallbackUrlFor(as.base),
       })
       .returning({ id: integrationOauthClients.id });
     return row!.id;
@@ -221,6 +217,7 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
         clientId: clients[0]!.clientId,
         clientSecret: "",
         tokenEndpointAuthMethod: "none",
+        issuer: as.base,
       });
     }
   });
@@ -252,7 +249,12 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
 
     expect(
       await resolveIntegrationClientById(legacy, spaceA.spaceId, REMOTE, AUTH_KEY, "none"),
-    ).toEqual({ clientId: "legacy", clientSecret: "", tokenEndpointAuthMethod: "none" });
+    ).toEqual({
+      clientId: "legacy",
+      clientSecret: "",
+      tokenEndpointAuthMethod: "none",
+      issuer: as.base,
+    });
     expect(await usableIds(spaceB.spaceId)).toEqual([]);
 
     const clientRef = await connectClientRef(spaceA);
