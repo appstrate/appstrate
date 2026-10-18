@@ -7,17 +7,13 @@ import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
 import { PackageIcon } from "../package-icon";
 import { ICON_SOURCE_TYPES, encodeIconImage, iconImageErrorCode } from "../../lib/icon-image";
-import { DiscoveryBadge } from "./discovery-badge";
-import type { DiscoveryBadges } from "../../lib/integration-discovery-merge";
 
 /** The integration's logo: its manifest `icon`, uploaded as a re-encoded image. */
 export function IntegrationIconField({
   icon,
-  badge,
   onChange,
 }: {
   icon: string | undefined;
-  badge?: DiscoveryBadges[string];
   onChange: (icon: string | undefined) => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
@@ -39,10 +35,7 @@ export function IntegrationIconField({
 
   return (
     <div className="flex flex-col gap-2">
-      <Label className="mb-0 inline-flex items-center gap-2">
-        {t("integrationEditor.icon.label")}
-        <DiscoveryBadge provenance={badge} />
-      </Label>
+      <Label className="mb-0">{t("integrationEditor.icon.label")}</Label>
       <div className="flex items-center gap-3">
         <PackageIcon type="integration" icon={icon} />
         <input

@@ -68,7 +68,7 @@ export const ROUTE_ACCESS = {
   "/integrations": { anyOf: ["integrations:read"], operations: ["listIntegrations"] },
   "/integrations/new": {
     anyOf: ["integrations:write"],
-    operations: ["createIntegrationPackage", "discoverRemoteIntegration"],
+    operations: ["createIntegrationPackage"],
   },
   "/integrations/:scope/:name": { anyOf: ["integrations:read"], operations: ["getIntegration"] },
 

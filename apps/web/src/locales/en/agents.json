@@ -633,7 +633,6 @@
   "integrationEditor.source.remoteUrlDesc": "An absolute URL, or a URL template when each connection chooses its server: {$variable.base_url}/mcp or https://{$variable.tenant}.example.com/mcp. Declare the variables in variables.schema (JSON tab).",
   "integrationEditor.source.errorRemoteUrl": "The remote server URL is required, as an absolute URL or a URL template: fill it in on the Source tab, or pick another source type.",
   "integrationEditor.source.transport": "Transport",
-  "integrationEditor.discover.analyse": "Analyze",
   "integrationEditor.discover.detected": "detected",
   "integrationEditor.discover.guessed": "suggested",
   "integrationEditor.discover.warning.manual_client_required": "This server does not support dynamic client registration: create an OAuth app with the provider and enter its client ID and secret in the integration settings.",

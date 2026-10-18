@@ -9,7 +9,7 @@ import { errorMessage } from "../../lib/mutation-error";
 import {
   syncConnectionCandidates,
   type ServerSyncProposal,
-} from "../../lib/integration-discovery-merge";
+} from "../../lib/integration-server-sync";
 import { OptionSelect } from "../app-ui/option-select";
 import { DiscoveryWarnings } from "./discovery-warnings";
 

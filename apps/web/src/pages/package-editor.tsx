@@ -52,16 +52,10 @@ import {
 } from "../components/agent-editor/utils";
 import type { ResourceEntry, SchemaField } from "../components/agent-editor/types";
 import {
-  isDiscoveryCurrent,
-  mergeDiscovery,
   mergeServerSync,
-  proposalBadges,
-  serverSyncProvenance,
   serverSyncBody,
-  type DiscoveryBadges,
-  type DiscoveryProposal,
   type ServerSyncBody,
-} from "../lib/integration-discovery-merge";
+} from "../lib/integration-server-sync";
 import { encodeIconDataUri } from "../lib/icon-image";
 
 const asNumber = (value: unknown) => (typeof value === "number" ? value : undefined);
@@ -414,64 +408,19 @@ function IntegrationEditorInner({
     },
   });
   const { state, activeTab, replaceManifest: onManifestChange } = editor;
-  const { user } = useAuth();
-  const { currentOrg } = useOrg();
-  // The last applied proposal: its fields badge the draft while they still hold its values, and
-  // a second analysis may replace them.
-  const [applied, setApplied] = useState<{
-    manifest: Record<string, unknown>;
-    provenance: DiscoveryBadges;
-  } | null>(null);
-  // An icon re-encoded from the proposal's `icon_source`, which `applied` does not carry.
-  const [filledIcon, setFilledIcon] = useState<string | null>(null);
-  const [warnings, setWarnings] = useState<DiscoveryProposal["warnings"]>([]);
   const [syncResult, setSyncResult] = useState<ServerSyncResult | null>(null);
-  const badges: DiscoveryBadges = {
-    ...(applied ? proposalBadges(state.manifest, applied) : {}),
-    ...(filledIcon && state.manifest.icon === filledIcon ? { "/icon": "detected" } : {}),
-  };
 
   // A raster the manifest does not accept as is (ICO, large PNG) is re-encoded here; one the
-  // browser cannot decode is skipped.
-  // The encoding is async: the icon lands only if the draft still analyses `analysedUrl`.
-  const fillIcon = (
-    proposal: { icon_source: string | null; manifest: { icon?: string } },
-    analysedUrl: string,
-  ) => {
+  // browser cannot decode is skipped. The encoding is async: the icon lands only if the draft
+  // still has none.
+  const fillIcon = (proposal: { icon_source: string | null; manifest: { icon?: string } }) => {
     if (!proposal.icon_source || proposal.manifest.icon) return;
     void encodeIconDataUri(proposal.icon_source)
       .then((icon) => {
-        editor.setState((s) =>
-          s.manifest.icon || !isDiscoveryCurrent(s.manifest, analysedUrl)
-            ? s
-            : { ...s, manifest: { ...s.manifest, icon } },
-        );
-        setFilledIcon(icon);
+        editor.setState((s) => (s.manifest.icon ? s : { ...s, manifest: { ...s.manifest, icon } }));
       })
       .catch(() => {});
   };
-
-  // Both requests live here, not in their tab: this editor outlives a tab switch, and React Query
-  // runs a `mutate()` call's own callbacks only while the component that made it is mounted. Each
-  // merge runs on the latest draft, so edits made while the request was out are kept.
-  const analyse = $api.useMutation("post", "/api/integrations/discover", {
-    meta: { errorHandledByCaller: true },
-    onMutate: () => getSource(state.manifest),
-    onSuccess: (proposal, { body }, analysedSource) => {
-      // The author changed the source while the analysis was out: its answer is dropped.
-      if (!analysedSource || !isDiscoveryCurrent(state.manifest, body.url)) return;
-      const defaults = defaultIntegrationManifest(currentOrg?.slug, user?.email);
-      const previous = applied?.manifest;
-      editor.setState((s) => ({
-        ...s,
-        manifest: mergeDiscovery(s.manifest, defaults, proposal, analysedSource, previous),
-      }));
-      setApplied(proposal);
-      setFilledIcon(null);
-      setWarnings(proposal.warnings);
-      fillIcon(proposal, body.url);
-    },
-  });
 
   const canSync = isEdit && syncBody !== undefined;
 
@@ -479,7 +428,6 @@ function IntegrationEditorInner({
     meta: { errorHandledByCaller: true },
     onSuccess: (proposal) => {
       editor.setState((s) => ({ ...s, manifest: mergeServerSync(s.manifest, proposal) }));
-      setApplied(serverSyncProvenance(proposal));
       // `null` when the package already has an `INTEGRATION.md`, which a sync never replaces.
       const { instructions } = proposal;
       setSyncResult({
@@ -495,8 +443,7 @@ function IntegrationEditorInner({
             : { ...s, operations: [...(s.operations ?? []), operation] },
         );
       }
-      const source = getSource(state.manifest);
-      if (source.kind === "remote") fillIcon(proposal, source.remoteUrl);
+      fillIcon(proposal);
     },
   });
 
@@ -524,11 +471,9 @@ function IntegrationEditorInner({
           value={editor.metadata}
           onChange={editor.onMetadataChange}
           isEdit={isEdit}
-          badges={badges}
           identityChildren={
             <IntegrationIconField
               icon={typeof state.manifest.icon === "string" ? state.manifest.icon : undefined}
-              badge={badges["/icon"]}
               onChange={(icon) => editor.updateManifest({ icon })}
             />
           }
@@ -536,25 +481,11 @@ function IntegrationEditorInner({
       )}
 
       {activeTab === "source" && (
-        <SourceSection
-          manifest={state.manifest}
-          onChange={onManifestChange}
-          discovery={
-            isEdit
-              ? undefined
-              : {
-                  analyse: (url) => analyse.mutate({ body: { url } }),
-                  isPending: analyse.isPending,
-                  error: analyse.error,
-                  badges,
-                  warnings,
-                }
-          }
-        />
+        <SourceSection manifest={state.manifest} onChange={onManifestChange} />
       )}
 
       {activeTab === "auths" && (
-        <AuthsSection manifest={state.manifest} onChange={onManifestChange} badges={badges} />
+        <AuthsSection manifest={state.manifest} onChange={onManifestChange} />
       )}
 
       {activeTab === "tools" && (
