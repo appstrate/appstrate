@@ -165,6 +165,7 @@ function pinColumns(opts: { loaded?: boolean } = {}) {
       agentName: () => "Ops",
       pinnable: connections ?? [],
       connections,
+      connectionsLoading: opts.loaded === false,
       isDeleting: () => false,
       onEdit: connections ? (p) => edited.push(p) : undefined,
       onDelete: (p) => deleted.push(p),
@@ -237,6 +238,19 @@ describe("the pins table", () => {
       columns[columns.length - 1]!.cell(pin()) as ReactElement<{ actions: MenuAction[] }>
     ).props.actions[0]!;
     expect(edit).toMatchObject({ id: "edit", disabled: true, onSelect: undefined });
+  });
+
+  it("draws a skeleton in the connections cell, not an empty one, until the connections load", () => {
+    const cellOf = (loaded: boolean) =>
+      render(
+        <>
+          {pinColumns({ loaded })
+            .columns.find((c) => c.id === "connections")!
+            .cell(pin())}
+        </>,
+      );
+    expect(cellOf(false)).toContain("animate-pulse");
+    expect(cellOf(true)).not.toContain("animate-pulse");
   });
 
   it("offers « Ajouter » while an agent has no pin", () => {

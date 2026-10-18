@@ -588,7 +588,8 @@ export function OrgCatalogueModal({
         <PackageCollection
           columnMenu={columnMenu}
           items={offered}
-          isLoading={isLoading || (active === "integration" && integrationsQuery.isLoading)}
+          // Icons wait on their own (`iconPending`): the rows never do.
+          isLoading={isLoading}
           error={
             error instanceof Error
               ? error

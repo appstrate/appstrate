@@ -209,7 +209,8 @@ function IntegrationConnectionCell({
 
   if (!detail) {
     // A placeholder only while a fetch is in flight: a disabled read (no `integrations:read`) never settles.
-    if (isLoading) return <Skeleton className="h-4 w-28" />;
+    // The picker's own wait (`LoadingPicker`), so the cell keeps one shape.
+    if (isLoading) return <Skeleton className="h-7 w-32 rounded-md" />;
     if (isNotPlaced(error))
       return <InactiveIntegration packageId={packageId} required={required} />;
     // Any other failure is named; a disabled read has none to name.

@@ -111,7 +111,7 @@ function VersionPill({
 
   // A draft that says what the last published version already says is not worth a
   // pill of its own: the version is. "Draft" means it differs, or nothing is published.
-  if (draftVerdictPending) return <Skeleton className="h-5 w-14 shrink-0" />;
+  if (draftVerdictPending) return <Skeleton className="h-[22px] w-14 shrink-0 rounded-full" />;
   if (!hasUnarchivedChanges && detail.version) return published;
   return (
     <Tooltip>

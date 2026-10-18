@@ -208,7 +208,7 @@ export function RunOverridesPanel({
           description={t("schedule.settings.modelHint", { ns: "agents" })}
         >
           {modelsPending || !orgModels ? (
-            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-10 w-full" />
           ) : (
             <ModelSelect
               models={orgModels}
@@ -269,7 +269,7 @@ export function RunOverridesPanel({
           description={t("schedule.settings.proxyHint", { ns: "agents" })}
         >
           {proxiesPending || !orgProxies ? (
-            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-10 w-full" />
           ) : (
             <OptionSelect
               value={proxySelectValue}
@@ -389,7 +389,8 @@ function IntegrationOverrideRow({
     return (
       <div className="flex flex-col gap-1.5">
         <Skeleton className="h-4 w-24" />
-        <Skeleton className="h-8 w-full" />
+        {/* The picker's own wait (`LoadingPicker`), so the row keeps one shape. */}
+        <Skeleton className="h-7 w-32 rounded-md" />
       </div>
     );
   }

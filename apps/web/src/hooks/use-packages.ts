@@ -11,6 +11,7 @@ import { asJSONSchemaObject } from "@appstrate/core/form";
 import { client, type components } from "../api/client";
 import { downloadOrToast } from "../lib/blob-download";
 import { splitPackageRef } from "../lib/package-paths";
+import { keepPreviousWithin, versionKeyPackage } from "../lib/query-state";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
@@ -366,6 +367,11 @@ export function useVersionDetail(
       return data!;
     },
     enabled: canRead && !!orgId && !!spaceId && !!packageId && !!version,
+    // Another version of the same package keeps the page drawn while it loads.
+    placeholderData: keepPreviousWithin(
+      packageId && version ? `${type}/${packageId}` : undefined,
+      versionKeyPackage,
+    ),
   });
 }
 

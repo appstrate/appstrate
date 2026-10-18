@@ -80,13 +80,14 @@ const CALLERS = [
     from: '"../lib/blob-download"',
     calls: ['parseAs: "blob", }), name'],
     /**
-     * `useFileImageSrc` builds ONE object URL of its own, for an
+     * `useFileImageSrc` builds ONE object URL of its own (cached; revoked in
+     * `lib/query-client.ts`), for an
      * `<img src>` thumbnail — a preview, not a download, and no `<a download>`
      * anywhere near it. Declared here with the exact expression so it is an
      * accounted-for exception rather than a hole: a SECOND object URL in this
      * file, or any anchor forging, still fails.
      */
-    allowedObjectUrls: ["objectUrl = URL.createObjectURL(data)"],
+    allowedObjectUrls: ["return data ? URL.createObjectURL(data) : null;"],
   },
 ] as const;
 

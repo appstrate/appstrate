@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Info } from "lucide-react";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import type { PackageType } from "@appstrate/core/validation";
 import { packageDetailPath } from "../../lib/package-paths";
 
@@ -13,12 +14,15 @@ export function PackageOwnershipNotice({
   isOwned,
   forkedFrom,
   draftReadOnly,
+  pending = false,
 }: {
   type: PackageType;
   isOwned: boolean;
   forkedFrom: string | null;
   /** Nothing is published and the working copy is not this reader's. */
   draftReadOnly: boolean;
+  /** The package detail (source, origin, draft) is still on its way: the notice's place is held, not left to pop in. */
+  pending?: boolean;
 }) {
   const { t } = useTranslation("agents");
   const origin = forkedFrom && (
@@ -29,6 +33,8 @@ export function PackageOwnershipNotice({
       </Link>
     </span>
   );
+
+  if (pending) return <Skeleton className="mb-4 h-12 w-full rounded-lg" />;
 
   return (
     <>

@@ -32,7 +32,7 @@ import {
 } from "../../lib/settings-section-href";
 import { SettingsRailView } from "../settings/settings-rail-view";
 import { AgentConfigurationView } from "./agent-configuration-view";
-import { SettingsSkeleton } from "../loading-skeletons";
+import { EditorPanelSkeleton } from "../loading-skeletons";
 import {
   PackageCommonSection,
   type PackageVersionsProps,
@@ -190,7 +190,7 @@ export function AgentSettingsView({
             versions={versions}
           />
         ) : isDefinitionSection(active) ? (
-          <Suspense fallback={<SettingsSkeleton />}>
+          <Suspense fallback={<EditorPanelSkeleton />}>
             <AgentDefinitionEditor
               detail={detail}
               section={active as AgentDefinitionSection}

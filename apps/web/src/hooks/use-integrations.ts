@@ -6,6 +6,7 @@
  */
 
 import {
+  keepPreviousData,
   useMutation,
   useQueries,
   useQuery,
@@ -153,6 +154,9 @@ export function useIntegrationsById(
         params: { query: { id: chunk, limit: IDS_PER_REQUEST }, header: scope.header },
       }),
       enabled: scope.enabled && (options?.enabled ?? true),
+      // The key is the set of ids: an import or a creation changes it, and the rows already
+      // drawn must stay while the new set loads.
+      placeholderData: keepPreviousData,
     })),
     combine: (results) => ({
       data: results.every((result) => result.data)

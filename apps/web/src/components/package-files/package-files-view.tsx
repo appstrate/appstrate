@@ -87,9 +87,14 @@ export function PackageFilesView({
 
   const { data: versions } = usePackageVersions(type, packageId);
   const fileVersion = selectedVersion === "draft" ? undefined : selectedVersion;
-  const { data: bundleIndex, error: bundleError } = usePackageFileIndex(packageId, fileVersion);
+  const {
+    data: bundleIndex,
+    error: bundleError,
+    isPlaceholderData: indexIsStandIn,
+  } = usePackageFileIndex(packageId, fileVersion);
 
-  const editing = editable && selectedVersion === "draft";
+  // A stand-in tree is another version's: it is read, never edited.
+  const editing = editable && selectedVersion === "draft" && !indexIsStandIn;
   const edits = useDraftFileEdits({
     type,
     packageId,
@@ -330,6 +335,9 @@ export function PackageFilesView({
                 hideHeader
               />
             </div>
+          ) : !bundleIndex && !bundleError ? (
+            // No tree yet: nothing to select from, so the pane waits in its shape.
+            <TextSkeleton lines={8} className="p-4" />
           ) : (
             <div className="text-muted-foreground grid h-full place-items-center text-sm">
               {t("agents:detail.files.selectItem")}

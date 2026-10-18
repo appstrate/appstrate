@@ -188,3 +188,10 @@ export const persistenceKeys = {
   list: (scopeTag: string, orgId: Id, spaceId: Id, packageId: Id, query: unknown) =>
     ["agent-persistence", scopeTag, orgId, spaceId, packageId, query] as const,
 };
+
+/** A stored file's bytes as an object URL (`useFileImageSrc`); `query-client.ts` revokes the URL when the entry leaves the cache. */
+export const fileBlobKeys = {
+  root: "file-blob",
+  detail: (id: string, scope: Record<string, string | undefined>) =>
+    ["file-blob", id, scope] as const,
+};

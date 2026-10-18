@@ -20,9 +20,8 @@ import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { formatBytes } from "../../lib/format-bytes";
 import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
-import { CodeEditor } from "../monaco";
+import { CodeEditor, EditorSkeleton } from "../monaco";
 import { ErrorState } from "../page-states";
-import { TextSkeleton } from "../loading-skeletons";
 import {
   baseName,
   languageForPath,
@@ -119,7 +118,7 @@ export function PackageFileSource({
       ) : isError ? (
         <ErrorState />
       ) : isLoading || text === undefined ? (
-        <TextSkeleton lines={8} />
+        <EditorSkeleton height="520px" />
       ) : (
         // No `path` prop on purpose: it creates one Monaco model per URI, and the singleton only
         // disposes the current one, so browsing a 200-file artifact would retain 200 models.

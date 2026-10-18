@@ -466,6 +466,7 @@ export function IntegrationDetailPage() {
         isOwned={isOwned}
         forkedFrom={pkg?.forked_from ?? null}
         draftReadOnly={pkg?.definition === "draft" && !homeWritable}
+        pending={pkgLoading}
       />
 
       {/* One connected-accounts table, with each row retaining its auth context. */}

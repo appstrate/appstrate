@@ -2,8 +2,8 @@
 
 import { lazy, Suspense } from "react";
 import type { EditorProps, DiffEditorProps } from "@monaco-editor/react";
-import { Spinner } from "@appstrate/ui/components/spinner";
 import { useTheme } from "../../stores/theme-store";
+import { TextSkeleton } from "../loading-skeletons";
 
 /**
  * Lazy facade over the self-hosted Monaco setup (`./setup.ts`).
@@ -27,10 +27,14 @@ function useMonacoTheme() {
   return useTheme().resolvedTheme === "dark" ? "vs-dark" : "vs";
 }
 
-function EditorFallback({ height }: { height?: string | number }) {
+/**
+ * The editor's own box, drawn as text lines: the same block waits for the data
+ * and for the lazy chunk, so the editor replaces it in place.
+ */
+export function EditorSkeleton({ height }: { height?: string | number }) {
   return (
-    <div className="flex items-center justify-center" style={{ height: height ?? "300px" }}>
-      <Spinner />
+    <div className="overflow-hidden" style={{ height: height ?? "300px" }}>
+      <TextSkeleton lines={8} className="p-4" />
     </div>
   );
 }
@@ -38,7 +42,7 @@ function EditorFallback({ height }: { height?: string | number }) {
 export function CodeEditor({ options, ...props }: Omit<EditorProps, "theme">) {
   const theme = useMonacoTheme();
   return (
-    <Suspense fallback={<EditorFallback height={props.height} />}>
+    <Suspense fallback={<EditorSkeleton height={props.height} />}>
       <EditorImpl theme={theme} options={{ ...BASE_OPTIONS, ...options }} {...props} />
     </Suspense>
   );
@@ -48,7 +52,7 @@ export function CodeEditor({ options, ...props }: Omit<EditorProps, "theme">) {
 export function CodeDiff({ options, ...props }: Omit<DiffEditorProps, "theme">) {
   const theme = useMonacoTheme();
   return (
-    <Suspense fallback={<EditorFallback height={props.height} />}>
+    <Suspense fallback={<EditorSkeleton height={props.height} />}>
       <DiffEditorImpl
         theme={theme}
         // The wrapper would dispose the models before the widget lets go of

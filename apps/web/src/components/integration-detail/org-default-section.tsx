@@ -5,6 +5,7 @@ import { useSettingDraft } from "../../hooks/use-setting-draft";
 import { ManualSave } from "../settings/manual-save";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Button } from "@appstrate/ui/components/button";
 import { AlertDescription } from "@appstrate/ui/components/alert";
 import { OptionSelect } from "@/components/app-ui/option-select";
@@ -17,7 +18,6 @@ import {
   useUpsertIntegrationOrgDefault,
   useDeleteIntegrationOrgDefault,
 } from "../../hooks/use-integrations";
-import { SettingsSkeleton } from "../loading-skeletons";
 import { ConnectionCheckboxList } from "./connection-checkbox-list";
 
 /**
@@ -111,7 +111,17 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
         </Alert>
       )}
       {isLoading || connectionsLoading ? (
-        <SettingsSkeleton rows={2} />
+        // The two columns below: a usage select, and the connections it names.
+        <div className="grid items-start gap-6 md:grid-cols-2" aria-hidden>
+          {[0, 1].map((i) => (
+            <div key={i} className="min-w-0">
+              <div className="mb-3 flex h-5 items-center">
+                <Skeleton className="h-3.5 w-32" />
+              </div>
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ))}
+        </div>
       ) : (
         <div className="grid items-start gap-6 md:grid-cols-2">
           <div className="min-w-0">

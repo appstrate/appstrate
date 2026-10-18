@@ -76,6 +76,10 @@ export function SkillsPicker({ getHeaders, selection, onChange }: SkillsPickerPr
     onChange({ ...selection, pinnedSkills: togglePinned(pinned, packageId) });
   };
 
+  // The trigger's tone and badge hang on the enforced read: no default look while it is on its way.
+  // `isLoading`, not `isPending` — a disabled query stays pending forever.
+  if (enforcedQuery.isLoading) return <Skeleton className="size-8 rounded-lg" />;
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <Tooltip>

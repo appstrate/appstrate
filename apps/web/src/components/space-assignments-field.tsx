@@ -83,7 +83,7 @@ export function SpaceAssignmentsField({
                 {loading ? (
                   <>
                     <Skeleton className="col-span-2 h-4 w-32 sm:col-span-1" />
-                    <Skeleton className="h-9 w-full min-w-0" />
+                    <Skeleton className="h-10 w-full min-w-0" />
                   </>
                 ) : (
                   <>

@@ -6,6 +6,7 @@ import { ChevronDown, KeyRound, Plus } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -303,6 +304,7 @@ export function ClientsTable({
     spaceClients.data ?? [],
     canManageOrg ? orgClients.data : undefined,
   );
+  const loading = spaceClients.isLoading || (canManageOrg && orgClients.isLoading);
   const inUse = rows.find((row) => row.usedHere);
   const hasAutoClient = rows.some((row) => row.client.auto_provisioned);
   // Classic auths always allow registering more clients; auto-provisioned
@@ -398,6 +400,7 @@ export function ClientsTable({
       </div>
 
       {/* The one answer the table exists for, then the rule in one line. */}
+      {loading && <Skeleton className="mb-1 h-5 w-64 max-w-full" />}
       {inUse && (
         <p className="mb-1 text-sm" data-testid={`oauth-client-in-use-${authKey}`}>
           {t("integration.clients.inUse", {
@@ -417,7 +420,7 @@ export function ClientsTable({
         columns={columns}
         rows={rows}
         rowKey={(row) => row.client.client_ref}
-        isLoading={spaceClients.isLoading || (canManageOrg && orgClients.isLoading)}
+        isLoading={loading}
         failure={spaceClients.error}
         // On an auto-provisioned auth the reason the list is empty IS the state, so
         // it is the empty state's hint rather than a second sentence above a
@@ -440,7 +443,7 @@ export function ClientsTable({
         }
       />
 
-      {autoProvisioned && !showManual && !hasAutoClient && (
+      {!loading && autoProvisioned && !showManual && !hasAutoClient && (
         <Button
           type="button"
           variant="ghost"

@@ -191,18 +191,19 @@ export function ListPageSkeleton() {
   return (
     <Waiting>
       <HeaderBlocks breadcrumbs={NO_CRUMBS} />
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <Skeleton className="h-9 w-72 max-w-full" />
-        <Skeleton className="h-9 w-24" />
+      {/* `ListToolbar`: an `h-8` search of at most 280px, then its filter button. */}
+      <div className="mb-3 flex items-center gap-2">
+        <Skeleton className="h-8 min-w-40 flex-1 sm:max-w-[280px]" />
+        <Skeleton className="h-8 w-20" />
       </div>
       <Card className="overflow-hidden">
-        <div className="border-border flex h-10 items-center border-b px-4">
+        <div className="border-border flex h-10 items-center border-b px-3">
           <Skeleton className="h-3 w-1/3" />
         </div>
         {Array.from({ length: 3 }, (_, i) => (
           <div
             key={i}
-            className="border-border/60 flex h-12 items-center border-b px-4 last:border-b-0"
+            className="border-border/60 flex h-12 items-center border-b px-3 last:border-b-0"
           >
             <Skeleton className="h-3.5 w-full" />
           </div>
@@ -212,17 +213,41 @@ export function ListPageSkeleton() {
   );
 }
 
-/** A settings page or section: `SettingRow`s, label over description over control. */
+/**
+ * A settings page or section: `SettingRow`s, label over description over control, each bar in a
+ * box of its line's height (`text-sm`, then `mt-1 text-xs leading-relaxed`, then an `h-10` field)
+ * so the rows that replace them stand where they did.
+ */
 export function SettingsSkeleton({ rows = 3, className }: { rows?: number; className?: string }) {
   return (
     <Waiting className={className}>
       {Array.from({ length: rows }, (_, i) => (
         <div key={i} className="pb-8 last:pb-0">
-          <Skeleton className="h-4 w-36" />
-          <Skeleton className="mt-2 h-3 w-72 max-w-full" />
-          <Skeleton className="mt-3 h-9 w-full max-w-md" />
+          <div className="flex h-5 items-center">
+            <Skeleton className="h-3.5 w-36" />
+          </div>
+          <div className="mt-1 flex h-[1.21875rem] items-center">
+            <Skeleton className="h-3 w-72 max-w-full" />
+          </div>
+          <Skeleton className="mt-3 h-10 w-full max-w-md" />
         </div>
       ))}
+    </Waiting>
+  );
+}
+
+/**
+ * A package's definition editor while its code loads: `PackageEditorFrame`'s padded column, its
+ * section heading, then the section's rows.
+ */
+export function EditorPanelSkeleton() {
+  return (
+    <Waiting className="flex flex-1 flex-col gap-4 p-6">
+      <div className="mb-2">
+        <Skeleton className="h-7 w-48" />
+        <Skeleton className="mt-1.5 h-4 w-80 max-w-full" />
+      </div>
+      <SettingsSkeleton />
     </Waiting>
   );
 }
@@ -243,11 +268,11 @@ export function DashboardBodySkeleton() {
     <Waiting>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {Array.from({ length: 4 }, (_, i) => (
-          <Skeleton key={i} className="h-[7.5rem] rounded-xl" />
+          <Skeleton key={i} className="h-32 rounded-xl" />
         ))}
       </div>
       <div>
-        <Skeleton className="mb-3 h-5 w-36" />
+        <Skeleton className="mb-3 h-6 w-36" />
         <div className="flex gap-3 overflow-hidden">
           {Array.from({ length: 4 }, (_, i) => (
             <Skeleton key={i} className="h-28 w-[19rem] shrink-0 rounded-xl" />
@@ -255,12 +280,18 @@ export function DashboardBodySkeleton() {
         </div>
       </div>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)]">
-        {[3, 2].map((rows, i) => (
+        {/* Recent runs (`RunRow`, `min-h-16`), then upcoming schedules (`min-h-[74px]`). */}
+        {(
+          [
+            [3, "min-h-16"],
+            [2, "min-h-[74px]"],
+          ] as const
+        ).map(([rows, rowHeight], i) => (
           <div key={i}>
-            <Skeleton className="mb-3 h-5 w-40" />
+            <Skeleton className="mb-3 h-6 w-40" />
             <CardList>
               {Array.from({ length: rows }, (_, j) => (
-                <div key={j} className="flex min-h-[74px] items-center gap-3 px-4">
+                <div key={j} className={cn("flex items-center gap-3 px-4", rowHeight)}>
                   <Skeleton className="size-8 shrink-0 rounded-md" />
                   <div className="flex flex-1 flex-col gap-2">
                     <Skeleton className="h-3.5 w-1/2" />

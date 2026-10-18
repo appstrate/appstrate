@@ -103,7 +103,7 @@ function NewScheduleForm({
     <div className="flex flex-col gap-5">
       <FormItem id="new-schedule-agent" label={t("schedule.agent")}>
         {agentsPending ? (
-          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-10 w-full" />
         ) : (
           <OptionSelect
             value={agentId ?? ""}

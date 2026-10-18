@@ -1,13 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { keepPreviousData, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { $api, client, type paths } from "../api/client";
 import { keysetPaging } from "../lib/keyset-paging";
 import { downloadOrToast } from "../lib/blob-download";
-import { invalidateOrgDetail, invalidatePaths, invalidateRunDetails } from "../lib/query-keys";
+import {
+  fileBlobKeys,
+  invalidateOrgDetail,
+  invalidatePaths,
+  invalidateRunDetails,
+} from "../lib/query-keys";
 import { useOrgScope } from "./use-org-scope";
 import { fileContextHeader, type FileContext } from "../lib/file-link";
 import { usePermissions } from "./use-permissions";
@@ -157,42 +167,40 @@ export function useFileTextCopy(context?: FileContext) {
   return { copied, copy: copyFile };
 }
 
+/** Object URLs outlive a navigation: tiles and thumbnails remounting within this window reuse them. */
+const FILE_BLOB_GC_TIME = 5 * 60 * 1000;
+
 /**
- * Authenticated image preview: a stored file's bytes → an object URL for an `<img src>`, revoked
- * on unmount / id change. `undefined` while loading, `null` when there is no preview (no grant,
- * failed read). THE single implementation for image thumbnails; chat gets it via `ChatPage`'s injection seam.
+ * Authenticated image preview: a stored file's bytes → an object URL for an `<img src>`, held in
+ * the query cache (keyed by file id) so a remount reuses it instead of re-fetching, and revoked
+ * when the entry is removed (`lib/query-client.ts`). `undefined` while loading, `null` when there
+ * is no preview (no grant, failed read). THE single implementation for image thumbnails; chat
+ * gets it via `ChatPage`'s injection seam.
  */
 export function useFileImageSrc(id: string): string | null | undefined {
-  const [loaded, setLoaded] = useState<{ id: string; src: string | null } | null>(null);
+  const scope = useOrgScope();
   const readsFiles = usePermissions().can("files:read");
-  useEffect(() => {
-    if (!readsFiles) return;
-    let cancelled = false;
-    let objectUrl: string | null = null;
-    void (async () => {
+  const query = useQuery({
+    queryKey: fileBlobKeys.detail(id, scope.header),
+    queryFn: async (): Promise<string | null> => {
       try {
         const { data } = await client.GET("/api/files/{id}/content", {
           params: { path: { id } },
           parseAs: "blob",
         });
-        // No await between this check and `createObjectURL`: cleanup can never miss the URL to revoke.
-        if (cancelled) return;
-        if (!data) {
-          setLoaded({ id, src: null });
-          return;
-        }
-        objectUrl = URL.createObjectURL(data);
-        setLoaded({ id, src: objectUrl });
+        return data ? URL.createObjectURL(data) : null;
       } catch {
         // Decorative: a failed fetch (403, network) means no preview.
-        if (!cancelled) setLoaded({ id, src: null });
+        return null;
       }
-    })();
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [id, readsFiles]);
+    },
+    enabled: readsFiles && scope.enabled,
+    // Never refetched in place: a refetch would swap in a new URL without revoking the old one.
+    // Only leaving the cache frees it (`lib/query-client.ts`).
+    staleTime: Infinity,
+    gcTime: FILE_BLOB_GC_TIME,
+    retry: false,
+  });
   if (!readsFiles) return null;
-  return loaded?.id === id ? loaded.src : undefined;
+  return query.data;
 }
