@@ -14,6 +14,7 @@
 import { describe, it, expect } from "bun:test";
 import { z } from "zod";
 import {
+  API_CALL_BODY_FROM_FILE_RULE,
   apiCallRequestSchema,
   apiCallTargetJsonSchema,
   makeApiCallTool,
@@ -642,5 +643,11 @@ describe("generated JSON schema structure", () => {
     const body = props["body"] as Record<string, unknown>;
     expect(typeof body.description).toBe("string");
     expect((body.description as string).length).toBeGreaterThan(0);
+  });
+
+  it("states the write-the-body-to-a-file rule on the body field", () => {
+    const props = schema.properties as Record<string, unknown>;
+    const body = props["body"] as Record<string, unknown>;
+    expect(body.description as string).toContain(API_CALL_BODY_FROM_FILE_RULE);
   });
 });

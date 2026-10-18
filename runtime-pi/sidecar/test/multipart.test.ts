@@ -26,6 +26,7 @@ import { createTestApp } from "./helpers/authed-app.ts";
 import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import { MAX_REQUEST_BODY_SIZE } from "../helpers.ts";
 import type { CredentialsResponse } from "../helpers.ts";
+import { API_CALL_BODY_FROM_FILE_RULE } from "@appstrate/afps-runtime/resolvers";
 
 // The multipart body shape is exercised through the generic
 // `{ns}__api_call` integration tool — the credential-injecting MCP tool.
@@ -526,6 +527,7 @@ describe("POST /mcp — api_call multipart/form-data", () => {
     expect(proxy.inputSchema.properties.body?.oneOf?.length).toBe(5);
     expect(proxy.inputSchema.properties.body?.description).toContain("multipart");
     expect(proxy.inputSchema.properties.body?.description).toContain("fromFile");
+    expect(proxy.inputSchema.properties.body?.description).toContain(API_CALL_BODY_FROM_FILE_RULE);
   });
 
   it("dispatches a multipart JSON-RPC call without crashing the MCP transport", async () => {

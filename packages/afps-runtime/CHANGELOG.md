@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `API_CALL_BODY_FROM_FILE_RULE`
+
+- The request-body rule both `api_call` surfaces state: write the complete body
+  to a workspace file and pass `{ fromFile }`, never re-type it into the
+  arguments. `apiCallRequestSchema`'s `body` description carries it.
+
 ### Changed — catalogs resolve per dependency section (#2005, BREAKING)
 
 - `PackageCatalog.resolve(name, versionSpec, section)` takes a required third

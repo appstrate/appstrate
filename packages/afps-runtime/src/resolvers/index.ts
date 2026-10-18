@@ -84,6 +84,7 @@ export {
   MAX_STREAMED_BODY_SIZE,
   STREAMING_THRESHOLD,
   makeApiCallTool,
+  API_CALL_BODY_FROM_FILE_RULE,
   apiCallRequestJsonSchema,
   apiCallTargetJsonSchema,
   resolveSafeFile,

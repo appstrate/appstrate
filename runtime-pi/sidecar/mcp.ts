@@ -69,7 +69,10 @@ import {
 } from "@appstrate/mcp-transport";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { isTextShapedContentType } from "@appstrate/core/mime";
-import { apiCallTargetJsonSchema } from "@appstrate/afps-runtime/resolvers";
+import {
+  API_CALL_BODY_FROM_FILE_RULE,
+  apiCallTargetJsonSchema,
+} from "@appstrate/afps-runtime/resolvers";
 // The canonical api_call/api_upload naming. NOT copied: the reason this file
 // gave for copying it — "the sidecar bundle deliberately avoids the manifest
 // schema stack" — named `@appstrate/core/integration`, but the definition lives
@@ -631,17 +634,17 @@ function buildSidecarTools(options: MountMcpOptions): {
       },
       body: {
         description:
-          "Request body. Shapes:\n" +
+          `Request body. ${API_CALL_BODY_FROM_FILE_RULE} Shapes:\n` +
           '  - JSON object (e.g. { "url": "https://…" }): serialized to a JSON ' +
           "string and sent with Content-Type: application/json by default (unless you set " +
-          "the header yourself). Use this for ordinary JSON request bodies.\n" +
+          "the header yourself).\n" +
           "  - string: pre-serialized text/JSON/XML/form bodies. No Content-Type is added " +
           "automatically — set it yourself when the endpoint needs one.\n" +
           "  - { fromFile: <workspace-relative path> }: send a workspace file's bytes as the " +
           "body without base64-encoding it into this argument. Resolved agent-side (read + " +
           "base64) before the call, so the file never enters the model context. Capped at " +
           "SIDECAR_MAX_REQUEST_BODY_BYTES (buffered over MCP, not streamed — use api_upload for larger).\n" +
-          "  - { fromBytes: <base64>, encoding: 'base64' }: binary uploads. " +
+          "  - { fromBytes: <base64>, encoding: 'base64' }: small binary payloads only. " +
           "Standard base64 (RFC 4648 §4) only — no URL-safe alphabet, no whitespace.\n" +
           "  - { multipart: [...] }: multipart/form-data uploads. The sidecar " +
           "builds a `FormData` from the supplied parts and lets `fetch()` set the " +

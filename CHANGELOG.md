@@ -376,6 +376,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`{ns}__api_call` steers request bodies through a workspace file.** An agent
+  re-typed a file's base64 into `body` and the upstream accepted the truncated
+  value. The `body` description of both api_call surfaces (sidecar and
+  in-process) now says to write the complete body to a file and pass
+  `{ fromFile }`, and frames `{ fromBytes }` as small payloads only.
+
 - **A schedule saved while the pin or default naming its connections was removed
   no longer stays armed with no connection named.** It is now disabled
   (`connection_set_unnamed`) by the removal, or its write is refused with
