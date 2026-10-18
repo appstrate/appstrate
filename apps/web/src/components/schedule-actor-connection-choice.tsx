@@ -7,7 +7,7 @@ import { Label } from "@appstrate/ui/components/label";
 import { CheckboxField } from "@/components/app-ui/checkbox-field";
 import { useIntegrationConnections } from "../hooks/use-integrations";
 import { useIntegrationName } from "../hooks/use-integration-name";
-import type { ConnectionChoice } from "../lib/connection-choice";
+import { candidateDescription, type ConnectionChoice } from "../lib/connection-choice";
 import { toggleCapped, type ConnectionSet } from "../lib/connection-set";
 import { ClearChoiceButton } from "./integration-connect/clear-choice-button";
 
@@ -136,6 +136,10 @@ function ScheduleCandidatePicker({
 }) {
   const { t } = useTranslation(["agents"]);
   const picked = value ?? [];
+  const labels = {
+    sharedByOther: t("schedule.connectionOverrides.sharedByOther"),
+    needsReconnection: t("schedule.connectionOverrides.needsReconnection"),
+  };
   return (
     <div role="group" className="flex flex-col gap-3">
       {choice.candidates.map((c) => {
@@ -146,14 +150,7 @@ function ScheduleCandidatePicker({
             id={`sched-choice-pick-option-${c.id}`}
             data-testid={`sched-choice-pick-option-${c.id}`}
             label={c.label}
-            description={[
-              // "default" is the placeholder of a connection with no account identity.
-              c.account_id !== "default" ? c.account_id : null,
-              !c.owned_by_actor ? t("schedule.connectionOverrides.sharedByOther") : null,
-              c.needs_reconnection ? t("schedule.connectionOverrides.needsReconnection") : null,
-            ]
-              .filter((part): part is string => part !== null)
-              .join(" · ")}
+            description={candidateDescription(c, labels)}
             checked={checked}
             // A dead connection fails the fire it is picked for; unticking stays open.
             disabled={!checked && c.needs_reconnection}

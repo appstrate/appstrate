@@ -8,6 +8,7 @@ import type {
   IntegrationToolCatalogEntry,
   OrgPackageItemDetail,
 } from "@appstrate/shared-types";
+import { $api } from "../api/client";
 import { useAuth } from "../hooks/use-auth";
 import { useOrg } from "../hooks/use-org";
 import type { AgentDefinitionSection } from "../lib/settings-section-href";
@@ -30,8 +31,10 @@ import { ResourceSection } from "../components/agent-editor/resource-section";
 import { RuntimeToolsGroup } from "../components/agent-editor/runtime-tools-group";
 import { SourceSection } from "../components/integration-editor/source-section";
 import { getSource, isRemoteSourceUrl } from "../components/integration-editor/utils";
+import { IntegrationIconField } from "../components/integration-editor/integration-icon-field";
 import { AuthsSection } from "../components/integration-editor/auths-section";
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
+import type { ServerSyncResult } from "../components/integration-editor/sync-from-server";
 
 import {
   defaultSkillManifest,
@@ -48,6 +51,18 @@ import {
   fieldsToSchema,
 } from "../components/agent-editor/utils";
 import type { ResourceEntry, SchemaField } from "../components/agent-editor/types";
+import {
+  isDiscoveryCurrent,
+  mergeDiscovery,
+  mergeServerSync,
+  proposalBadges,
+  serverSyncProvenance,
+  serverSyncBody,
+  type DiscoveryBadges,
+  type DiscoveryProposal,
+  type ServerSyncBody,
+} from "../lib/integration-discovery-merge";
+import { encodeIconDataUri } from "../lib/icon-image";
 
 const asNumber = (value: unknown) => (typeof value === "number" ? value : undefined);
 
@@ -370,6 +385,7 @@ function IntegrationEditorInner({
   tab,
   onTabRequest,
   toolCatalog,
+  syncBody,
 }: {
   initialState: EditorState;
   /** Undefined on the creation page; set to edit the integration in its Package AFPS. */
@@ -378,6 +394,8 @@ function IntegrationEditorInner({
   onTabRequest?: (tab: PackageEditorTab) => void;
   /** Editing: the saved package's tool catalog, shown with the draft's policy. */
   toolCatalog?: IntegrationToolCatalogEntry[];
+  /** Editing: the sync request, when the published version's server can be asked. */
+  syncBody?: ServerSyncBody;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const isEdit = packageId !== undefined;
@@ -396,6 +414,91 @@ function IntegrationEditorInner({
     },
   });
   const { state, activeTab, replaceManifest: onManifestChange } = editor;
+  const { user } = useAuth();
+  const { currentOrg } = useOrg();
+  // The last applied proposal: its fields badge the draft while they still hold its values, and
+  // a second analysis may replace them.
+  const [applied, setApplied] = useState<{
+    manifest: Record<string, unknown>;
+    provenance: DiscoveryBadges;
+  } | null>(null);
+  // An icon re-encoded from the proposal's `icon_source`, which `applied` does not carry.
+  const [filledIcon, setFilledIcon] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<DiscoveryProposal["warnings"]>([]);
+  const [syncResult, setSyncResult] = useState<ServerSyncResult | null>(null);
+  const badges: DiscoveryBadges = {
+    ...(applied ? proposalBadges(state.manifest, applied) : {}),
+    ...(filledIcon && state.manifest.icon === filledIcon ? { "/icon": "detected" } : {}),
+  };
+
+  // A raster the manifest does not accept as is (ICO, large PNG) is re-encoded here; one the
+  // browser cannot decode is skipped.
+  // The encoding is async: the icon lands only if the draft still analyses `analysedUrl`.
+  const fillIcon = (
+    proposal: { icon_source: string | null; manifest: { icon?: string } },
+    analysedUrl: string,
+  ) => {
+    if (!proposal.icon_source || proposal.manifest.icon) return;
+    void encodeIconDataUri(proposal.icon_source)
+      .then((icon) => {
+        editor.setState((s) =>
+          s.manifest.icon || !isDiscoveryCurrent(s.manifest, analysedUrl)
+            ? s
+            : { ...s, manifest: { ...s.manifest, icon } },
+        );
+        setFilledIcon(icon);
+      })
+      .catch(() => {});
+  };
+
+  // Both requests live here, not in their tab: this editor outlives a tab switch, and React Query
+  // runs a `mutate()` call's own callbacks only while the component that made it is mounted. Each
+  // merge runs on the latest draft, so edits made while the request was out are kept.
+  const analyse = $api.useMutation("post", "/api/integrations/discover", {
+    meta: { errorHandledByCaller: true },
+    onMutate: () => getSource(state.manifest),
+    onSuccess: (proposal, { body }, analysedSource) => {
+      // The author changed the source while the analysis was out: its answer is dropped.
+      if (!analysedSource || !isDiscoveryCurrent(state.manifest, body.url)) return;
+      const defaults = defaultIntegrationManifest(currentOrg?.slug, user?.email);
+      const previous = applied?.manifest;
+      editor.setState((s) => ({
+        ...s,
+        manifest: mergeDiscovery(s.manifest, defaults, proposal, analysedSource, previous),
+      }));
+      setApplied(proposal);
+      setFilledIcon(null);
+      setWarnings(proposal.warnings);
+      fillIcon(proposal, body.url);
+    },
+  });
+
+  const canSync = isEdit && syncBody !== undefined;
+
+  const sync = $api.useMutation("post", "/api/integrations/{packageId}/discover", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: (proposal) => {
+      editor.setState((s) => ({ ...s, manifest: mergeServerSync(s.manifest, proposal) }));
+      setApplied(serverSyncProvenance(proposal));
+      // `null` when the package already has an `INTEGRATION.md`, which a sync never replaces.
+      const { instructions } = proposal;
+      setSyncResult({
+        count: proposal.manifest.default_tools.length,
+        warnings: proposal.warnings,
+        docProposed: Boolean(instructions),
+      });
+      if (instructions) {
+        const operation = { op: "write", path: "INTEGRATION.md", text: instructions } as const;
+        editor.setState((s) =>
+          (s.operations ?? []).some((o) => o.op === "write" && o.path === operation.path)
+            ? s
+            : { ...s, operations: [...(s.operations ?? []), operation] },
+        );
+      }
+      const source = getSource(state.manifest);
+      if (source.kind === "remote") fillIcon(proposal, source.remoteUrl);
+    },
+  });
 
   return (
     <PackageEditorFrame
@@ -421,21 +524,57 @@ function IntegrationEditorInner({
           value={editor.metadata}
           onChange={editor.onMetadataChange}
           isEdit={isEdit}
+          badges={badges}
+          identityChildren={
+            <IntegrationIconField
+              icon={typeof state.manifest.icon === "string" ? state.manifest.icon : undefined}
+              badge={badges["/icon"]}
+              onChange={(icon) => editor.updateManifest({ icon })}
+            />
+          }
         />
       )}
 
       {activeTab === "source" && (
-        <SourceSection manifest={state.manifest} onChange={onManifestChange} />
+        <SourceSection
+          manifest={state.manifest}
+          onChange={onManifestChange}
+          discovery={
+            isEdit
+              ? undefined
+              : {
+                  analyse: (url) => analyse.mutate({ body: { url } }),
+                  isPending: analyse.isPending,
+                  error: analyse.error,
+                  badges,
+                  warnings,
+                }
+          }
+        />
       )}
 
       {activeTab === "auths" && (
-        <AuthsSection manifest={state.manifest} onChange={onManifestChange} />
+        <AuthsSection manifest={state.manifest} onChange={onManifestChange} badges={badges} />
       )}
 
       {activeTab === "tools" && (
         <IntegrationToolsSection
           tools={toolCatalog ?? []}
           edit={{ manifest: state.manifest, onChange: onManifestChange }}
+          sync={
+            canSync && packageId
+              ? {
+                  run: (connectionId) =>
+                    sync.mutate({
+                      params: { path: { packageId } },
+                      body: serverSyncBody(connectionId),
+                    }),
+                  isPending: sync.isPending,
+                  error: sync.error,
+                  result: syncResult,
+                }
+              : undefined
+          }
         />
       )}
     </PackageEditorFrame>
@@ -450,11 +589,18 @@ export function IntegrationDefinitionEditor({
   section,
   onSection,
   toolCatalog,
+  syncBody,
 }: {
   detail: Versioned<OrgPackageItemDetail>;
   section: IntegrationDefinitionSection;
   onSection: (section: IntegrationDefinitionSection) => void;
   toolCatalog: IntegrationToolCatalogEntry[];
+  /**
+   * The sync request, set when the published version is served by a Streamable HTTP server at a
+   * fixed URL and the caller may call it through one of its connections (the sync reads it, not
+   * the draft).
+   */
+  syncBody: ServerSyncBody | undefined;
 }) {
   return (
     <DraftEditorMount id={detail.id} etag={detail.etag}>
@@ -464,6 +610,7 @@ export function IntegrationDefinitionEditor({
         tab={section}
         onTabRequest={(next) => onSection(next as IntegrationDefinitionSection)}
         toolCatalog={toolCatalog}
+        syncBody={syncBody}
       />
     </DraftEditorMount>
   );

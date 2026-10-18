@@ -7,6 +7,8 @@ import { Label } from "@appstrate/ui/components/label";
 import { Textarea } from "@appstrate/ui/components/textarea";
 import { FormField } from "../form-field";
 import { SettingsHeading } from "../settings/settings-heading";
+import { DiscoveryBadge } from "../integration-editor/discovery-badge";
+import type { DiscoveryBadges } from "../../lib/integration-discovery-merge";
 import { toSlug, toLiveSlug } from "../../lib/strings";
 
 export interface MetadataState {
@@ -31,6 +33,8 @@ interface MetadataSectionProps {
   children?: React.ReactNode;
   /** Package-specific identity controls, such as Agent icon and colour. */
   identityChildren?: React.ReactNode;
+  /** Integration creation: provenance of the identity fields a discovery filled. */
+  badges?: DiscoveryBadges;
 }
 
 export function MetadataSection({
@@ -39,6 +43,7 @@ export function MetadataSection({
   isEdit,
   children,
   identityChildren,
+  badges,
 }: MetadataSectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   const update = (patch: Partial<MetadataState>) => onChange({ ...value, ...patch });
@@ -62,6 +67,7 @@ export function MetadataSection({
           value={value.displayName}
           onChange={handleDisplayNameChange}
           placeholder={t("editor.metaDisplayNamePlaceholder")}
+          badge={<DiscoveryBadge provenance={badges?.["/display_name"]} />}
         />
         <FormField
           id="meta-name"
@@ -75,6 +81,7 @@ export function MetadataSection({
           onBlur={() => update({ id: toSlug(value.id) })}
           placeholder={t("editor.metaNamePlaceholder")}
           description={isEdit ? t("editor.metaNameEditDesc") : t("editor.metaNameDesc")}
+          badge={<DiscoveryBadge provenance={badges?.["/name"]} />}
         />
         <FormField
           id="meta-scope"

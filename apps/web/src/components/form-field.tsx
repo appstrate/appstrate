@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { OptionSelect } from "@/components/app-ui/option-select";
@@ -21,6 +21,8 @@ interface FormFieldProps {
   enumLabel?: (value: string) => string;
   disabled?: boolean;
   min?: number;
+  /** Shown beside the label (e.g. a discovery provenance badge). */
+  badge?: ReactNode;
 }
 
 export function FormField({
@@ -37,6 +39,7 @@ export function FormField({
   enumLabel,
   disabled,
   min,
+  badge,
 }: FormFieldProps) {
   const renderInput = () => {
     if (enumValues) {
@@ -80,8 +83,22 @@ export function FormField({
     );
   };
 
+  const text = required ? `${label} *` : label;
   return (
-    <FormItem id={id} label={required ? `${label} *` : label} hint={description}>
+    <FormItem
+      id={id}
+      label={
+        badge ? (
+          <span className="inline-flex items-center gap-2">
+            {text}
+            {badge}
+          </span>
+        ) : (
+          text
+        )
+      }
+      hint={description}
+    >
       {renderInput()}
     </FormItem>
   );

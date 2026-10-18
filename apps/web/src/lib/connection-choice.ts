@@ -17,9 +17,40 @@ export function integrationIdOfField(field: string): string {
 /** One `errors[]` item of a `409 missing_integration_connection`. */
 export type MissingIntegrationFieldError = components["schemas"]["ConnectionResolutionItem"];
 
-type ConnectionChoiceCandidate = NonNullable<
+export type ConnectionChoiceCandidate = NonNullable<
   MissingIntegrationFieldError["candidate_connections"]
 >[number];
+
+/**
+ * What tells candidates apart: the account, whether another member shared it, whether it is dead.
+ * `labels` are the translated phrases, so the wording stays with the caller.
+ */
+export function candidateDescription(
+  c: Pick<ConnectionChoiceCandidate, "account_id" | "owned_by_actor" | "needs_reconnection">,
+  labels: { sharedByOther: string; needsReconnection: string },
+): string {
+  return [
+    // "default" is the placeholder of a connection with no account identity.
+    c.account_id !== "default" ? c.account_id : null,
+    !c.owned_by_actor ? labels.sharedByOther : null,
+    c.needs_reconnection ? labels.needsReconnection : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(" · ");
+}
+
+/** A candidate as a single-choice option; a dead connection fails the run it is picked for. */
+export function candidateSelectOption(
+  c: ConnectionChoiceCandidate,
+  labels: { sharedByOther: string; needsReconnection: string },
+): { value: string; label: string; disabled: boolean } {
+  const description = candidateDescription(c, labels);
+  return {
+    value: c.id,
+    label: description ? `${c.label} · ${description}` : c.label,
+    disabled: c.needs_reconnection,
+  };
+}
 
 const SCHEDULE_CHOICE_CODES = [
   "must_choose_connection",

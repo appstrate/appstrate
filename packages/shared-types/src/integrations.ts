@@ -147,14 +147,12 @@ export interface IntegrationAuthStatus {
    */
   has_system_client: boolean;
   /**
-   * True for an oauth2 auth on a remote MCP integration (`source.kind:
-   * "remote"`). Per the MCP Authorization spec the OAuth client is provisioned
-   * automatically at connect time — the flow discovers the authorization server
-   * (RFC 9728 → RFC 8414) and obtains a client without manual pre-registration
-   * (CIMD when advertised, else RFC 7591 dynamic registration). The UI therefore
-   * treats the auth as connectable even without a pre-registered client. Named
-   * for the capability (auto-provisioned client), not the specific mechanism, so
-   * it stays accurate once CIMD lands alongside DCR.
+   * True for an oauth2 auth declaring `token_endpoint_auth_method: "none"` on a
+   * remote MCP integration (`source.kind: "remote"`) or with an authorization
+   * server chosen per connection. Its OAuth client is provisioned at connect
+   * time — authorization server discovery (RFC 9728 → RFC 8414), then RFC 7591
+   * dynamic registration of a public client — so the UI treats the auth as
+   * connectable without a pre-registered client.
    */
   client_auto_provisioned: boolean;
 }

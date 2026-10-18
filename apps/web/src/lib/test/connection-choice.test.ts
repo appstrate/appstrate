@@ -3,6 +3,7 @@
 import { describe, it, expect } from "bun:test";
 import { ApiError } from "../../api/errors.ts";
 import {
+  candidateSelectOption,
   integrationIdOfField,
   isChoiceRequest,
   pendingConnectionChoices,
@@ -279,5 +280,46 @@ describe("retryDecision", () => {
       canRetry: false,
     });
     expect(retryDecision(mixed, false, []).canRetry).toBe(true);
+  });
+});
+
+describe("candidate labels", () => {
+  const labels = {
+    sharedByOther: "shared by another member",
+    needsReconnection: "needs reconnection",
+  };
+  const base = {
+    id: "c1",
+    label: "Work",
+    account_id: "me@x.io",
+    owned_by_actor: true,
+    needs_reconnection: false,
+    scopes_granted: [],
+    missing_scopes: [],
+  };
+
+  it("names the account and keeps a live own connection selectable", () => {
+    expect(candidateSelectOption(base, labels)).toEqual({
+      value: "c1",
+      label: "Work · me@x.io",
+      disabled: false,
+    });
+  });
+
+  it("says who owns a shared one and disables a dead one", () => {
+    expect(
+      candidateSelectOption(
+        { ...base, account_id: "default", owned_by_actor: false, needs_reconnection: true },
+        labels,
+      ),
+    ).toEqual({
+      value: "c1",
+      label: "Work · shared by another member · needs reconnection",
+      disabled: true,
+    });
+  });
+
+  it("shows the bare label for an own connection without account identity", () => {
+    expect(candidateSelectOption({ ...base, account_id: "default" }, labels).label).toBe("Work");
   });
 });

@@ -605,7 +605,7 @@ const authStatusSchema = {
     client_auto_provisioned: {
       type: "boolean",
       description:
-        'True for an oauth2 auth on a remote MCP integration (`source.kind: "remote"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required.',
+        'True for an oauth2 auth declaring `token_endpoint_auth_method: "none"` on a remote MCP integration (`source.kind: "remote"`) or with an authorization server chosen per connection. Its OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414), then RFC 7591 dynamic registration of a public client — so no pre-registered client is required.',
     },
   },
 } as const;
@@ -961,6 +961,243 @@ export const integrationsPaths = {
       responses: oauthCallbackResponses,
     },
   },
+  "/api/integrations/discover": {
+    post: {
+      operationId: "discoverRemoteIntegration",
+      tags: ["Integrations"],
+      summary: "Propose an integration manifest from a remote MCP server URL",
+      description:
+        "Probes a remote MCP server before any integration exists and returns a manifest proposal for the editor to merge: an MCP `initialize` request (Streamable HTTP; a 404/405 falls back to the SSE transport's GET), then its OAuth protected-resource metadata (RFC 9728) and authorization-server metadata (RFC 8414), plus the site's raster icon. An oauth2 auth is proposed as a public client (`token_endpoint_auth_method: none`) when the authorization server offers dynamic client registration (RFC 7591), else as `client_secret_post` with its `issuer` and a `manual_client_required` warning (`authorization_server_blocked` instead when the advertised authorization server is on a refused address, which is never read); without metadata, a server at the URL's origin offering DCR is guessed as oauth2, anything else as an API key sent as a Bearer token (auth `primary`, credential field `api_key`). A 401/403 counts as an MCP server only when its `WWW-Authenticate` offers the Bearer scheme. The whole discovery is bounded to 25 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Every URL reached is egress-guarded (private and reserved addresses refused, `https` required for a host the operator has not allowlisted). Requires `integrations:write`. Rate limited to 10 requests per minute.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["url"],
+              properties: {
+                url: {
+                  type: "string",
+                  format: "uri",
+                  description:
+                    "The MCP server URL, as it would be `source.remote.url`. A URL carrying a username or password is refused.",
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "The manifest proposal.",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["manifest", "icon_source", "provenance", "warnings"],
+                properties: {
+                  manifest: {
+                    type: "object",
+                    required: ["display_name", "name", "source", "auths"],
+                    description:
+                      "A partial AFPS integration manifest: `display_name`, `name` (`@<org slug>/<slug>`), `source` (`kind: remote`), `auths` (one auth, `oauth` or `api_key`), and when published `documentation`, `privacy_policies` and `icon` (only an icon image the manifest accepts as is).",
+                    properties: {
+                      display_name: { type: "string" },
+                      name: { type: "string" },
+                      documentation: { type: "string", format: "uri" },
+                      privacy_policies: { type: "array", items: { type: "string", format: "uri" } },
+                      icon: { type: "string" },
+                      source: {
+                        type: "object",
+                        required: ["kind", "remote"],
+                        properties: {
+                          kind: { type: "string", enum: ["remote"] },
+                          remote: {
+                            type: "object",
+                            required: ["url", "transport"],
+                            properties: {
+                              url: { type: "string", format: "uri" },
+                              transport: { type: "string", enum: ["streamable-http", "sse"] },
+                            },
+                          },
+                        },
+                      },
+                      auths: { type: "object", additionalProperties: { type: "object" } },
+                    },
+                  },
+                  icon_source: {
+                    type: ["string", "null"],
+                    description:
+                      "The site's raster icon (PNG, JPEG, WebP, GIF or ICO, at most 256 KiB) as a base64 data URI, for the editor to re-encode; null when none was found. Never an SVG, never a URL.",
+                  },
+                  provenance: {
+                    type: "object",
+                    description:
+                      "Per proposed field, keyed by JSON pointer into `manifest` (`/display_name`, `/auths/oauth`, …): `detected` when the server published it, `guessed` when inferred.",
+                    additionalProperties: { type: "string", enum: ["detected", "guessed"] },
+                  },
+                  warnings: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["code", "message"],
+                      properties: {
+                        code: {
+                          type: "string",
+                          enum: ["manual_client_required", "authorization_server_blocked"],
+                        },
+                        message: { type: "string" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+        },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "422": {
+          description:
+            "`not_an_mcp_server` — the URL answered, but not as a Streamable HTTP or SSE MCP server (a 401/403 without a Bearer challenge included); `remote_mcp_auth_not_supported` — it serves MCP without authentication (it answered the probe, or refused it with a JSON-RPC error rather than a Bearer challenge), which integrations do not support yet; `remote_mcp_modern_only` — it refused the probe as an `UnsupportedProtocolVersionError` listing only MCP versions newer than the 2025-11-25 Appstrate speaks.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "429": { $ref: "#/components/responses/RateLimited" },
+        "502": {
+          description:
+            "`bad_gateway` — the server could not be reached or read (network failure, timeout, a body cut short, the 25-second bound passed before the auth metadata was read, or a redirect to a refused address).",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+      },
+    },
+  },
+  "/api/integrations/{packageId}/discover": {
+    post: {
+      operationId: "syncIntegrationFromServer",
+      tags: ["Integrations"],
+      summary: "Propose manifest fields from the integration's connected MCP server",
+      description:
+        "Connects to the remote MCP server of the integration's latest published version through the credential proxy — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, each exchange journaled like one of its calls (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500 tools over 20 pages of at most 2 MiB each) as `default_tools` with an empty `tools_policy` entry each, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning). The whole sync is bounded to 20 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Only a Streamable HTTP server is supported. Requires `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too) and write authority on the package in its home space. Rate limited to 10 requests per minute.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        packageIdParam,
+      ],
+      requestBody: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                connection_id: {
+                  type: "string",
+                  format: "uuid",
+                  description:
+                    "The connection to call the server with; omitted, the proxy's selection (`X-Connection-Id` semantics).",
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "The manifest proposal.",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["manifest", "icon_source", "instructions", "warnings"],
+                properties: {
+                  manifest: {
+                    type: "object",
+                    required: ["default_tools", "tools_policy"],
+                    description:
+                      "A partial AFPS integration manifest: only the fields the server reported.",
+                    properties: {
+                      default_tools: { type: "array", items: { type: "string" } },
+                      tools_policy: {
+                        type: "object",
+                        additionalProperties: { type: "object" },
+                      },
+                      display_name: { type: "string" },
+                      description: { type: "string" },
+                      homepage: { type: "string", format: "uri" },
+                      icon: { type: "string" },
+                    },
+                  },
+                  icon_source: {
+                    type: ["string", "null"],
+                    description:
+                      "The server's raster icon (PNG, JPEG, WebP, GIF or ICO, at most 256 KiB) as a base64 data URI, for the editor to re-encode; null when none was found. Never an SVG, never a URL. A `serverInfo.icons` entry is taken only as a `data:` URI or an https URL of the MCP server's own origin, fetched without credentials and with every redirect kept on that origin; else the site's own icon, over https only.",
+                  },
+                  instructions: {
+                    type: ["string", "null"],
+                    description:
+                      "The server's `initialize` instructions, for the editor to propose as `INTEGRATION.md`; null when it sent none, or when the package's draft already holds an `INTEGRATION.md` (whatever its content, empty included).",
+                  },
+                  warnings: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["code", "message"],
+                      properties: {
+                        code: {
+                          type: "string",
+                          enum: ["tools_truncated", "instructions_truncated"],
+                        },
+                        message: { type: "string" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": {
+          description:
+            "Missing permission or write authority on the package, or the proxy refused the call (`unauthorized_target`: the server URL is outside the auth's `authorized_uris`; `blocked_target`: egress guard).",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "`integration_not_published` — the integration has no usable published version; `integration_not_connected` — no connection of the integration usable by the caller in this space; the proxy's own connection-selection conflicts are relayed (`needs_reconnection`; `must_choose_connection` when the caller holds several usable connections and the body names none: retry with one of its `candidate_connections` as `connection_id`).",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "422": {
+          description:
+            "`integration_not_remote` — the integration is not backed by a remote MCP server; `sync_transport_unsupported` — its server uses the SSE transport; `sync_url_templated` — its server URL is chosen per connection (`{$variable.…}`).",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "429": { $ref: "#/components/responses/RateLimited" },
+        "502": {
+          description:
+            "`bad_gateway` — the server could not be reached, did not answer as an MCP server within 20 s, or refused the credential; the proxy's `upstream_*` and `credential_unusable` codes are relayed.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+      },
+    },
+  },
   "/api/integrations/{packageId}": {
     get: {
       operationId: "getIntegration",
@@ -1003,7 +1240,7 @@ export const integrationsPaths = {
         "space may hold N clients per auth (model-provider pattern). The first " +
         "registered client becomes the default; later ones are non-default until " +
         "promoted via PUT .../default-client. Rejected for auto-provisioned " +
-        "(DCR/CIMD) auths. Requires `integrations:configure`, which is never granted to an API key.",
+        "(DCR) auths. Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1039,7 +1276,7 @@ export const integrationsPaths = {
       description:
         "Updates one of this space's custom clients in place, by its id (an " +
         "org-level client id is a 404 here). Its `client_id` cannot change. Auto-provisioned " +
-        "(DCR/CIMD) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.",
+        "(DCR) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1116,7 +1353,7 @@ export const integrationsPaths = {
         "Moves one of this space's custom clients to the org level (`spaceId: " +
         "null`), inherited by every space of the org. It keeps its id and secret, " +
         "so the connections it minted keep working; it becomes the org default " +
-        "when the org has none. A space's auto-provisioned (DCR/CIMD) client moves too, " +
+        "when the org has none. A space's auto-provisioned (DCR) client moves too, " +
         "unless the org already holds the auto-provisioned client of the same authorization " +
         "server (409 `auto_client_exists_at_org`). Requires both `integrations:configure` and " +
         "`org-integrations:configure`, which are never granted to an API key.",
@@ -1418,12 +1655,12 @@ export const integrationsPaths = {
         },
         "400": {
           description:
-            "Missing token, or the oauth2 auth declares neither an issuer nor explicit endpoints (HTML error page). The link stays reusable — except on an auth that auto-provisions its client (DCR/CIMD), where every refusal burns it.",
+            "Missing token, or the oauth2 auth declares neither an issuer nor explicit endpoints (HTML error page). The link stays reusable — except on an auth that auto-provisions its client (DCR), where every refusal burns it.",
           content: htmlErrorPage,
         },
         "403": {
           description:
-            "The space has no OAuth client registered for this auth and none could be auto-provisioned; the page says the failure is permanent and to ask an administrator, while the operator-facing detail naming the exact remedy stays on the server log — this route carries no session (HTML error page). For an auth whose client is pre-registered the link stays reusable, so a retry after the administrator registers one needs no re-mint and the page says to open the link again. For an auth that auto-provisions its client at the authorization server (DCR/CIMD) the link is burned — reaching this refusal means a registration was already attempted upstream, and a reusable link would replay it on every click — so the page says to request a new connection link instead.",
+            "The space has no OAuth client registered for this auth and none could be auto-provisioned; the page says the failure is permanent and to ask an administrator, while the operator-facing detail naming the exact remedy stays on the server log — this route carries no session (HTML error page). For an auth whose client is pre-registered the link stays reusable, so a retry after the administrator registers one needs no re-mint and the page says to open the link again. For an auth that auto-provisions its client at the authorization server (DCR) the link is burned — reaching this refusal means a registration was already attempted upstream, and a reusable link would replay it on every click — so the page says to request a new connection link instead.",
           content: htmlErrorPage,
         },
         "410": {

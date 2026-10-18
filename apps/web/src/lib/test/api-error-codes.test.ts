@@ -206,6 +206,13 @@ const NOT_SURFACED = new Set([
   "signup_configuration_invalid",
   // A launch warning, never a refusal: `lib/launch-warnings.ts` words the toast.
   "integration_unbound",
+  // Warnings of integration discovery and server sync (`POST /api/integrations/discover`,
+  // `POST /api/integrations/{packageId}/discover`), never a refusal: `agents.json` words them
+  // under `integrationEditor.discover.warning.*`.
+  "manual_client_required",
+  "authorization_server_blocked",
+  "tools_truncated",
+  "instructions_truncated",
   // A refused role preview ends the preview with its own copy (`viewAs.stopped.<code>`).
   "invalid_view_as",
   "view_as_forbidden",

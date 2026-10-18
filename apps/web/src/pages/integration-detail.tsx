@@ -58,6 +58,9 @@ import { ConfigAuthBlock } from "../components/integration-detail/config-auth-bl
 import { AccessRulesSection } from "../components/integration-detail/access-rules-section";
 import { ConnectionsTable } from "../components/integration-detail/connections-table";
 import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
+import { readIntegrationSource } from "../lib/package-manifest";
+import { serverSyncBody } from "../lib/integration-discovery-merge";
+import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { usePackageDetail, usePackageDownload, type Versioned } from "../hooks/use-packages";
 import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-integrations";
 import { useCanReach } from "../hooks/use-can-reach";
@@ -113,6 +116,15 @@ function IntegrationSettings({
 }) {
   const { t } = useTranslation(["settings", "agents"]);
   const navigate = useNavigate();
+  const { can } = usePermissions();
+  // `detail.manifest` is the published version, the one the sync's server call goes to.
+  const published = readIntegrationSource(detail.manifest.source);
+  const syncable =
+    published?.kind === "remote" &&
+    published.transport !== "sse" &&
+    !isVariableTemplate(published.url) &&
+    can("credential-proxy:call-own") &&
+    detail.auths.some((auth) => auth.connections.length > 0);
   const resolve = (requested: string | null): IntegrationSettingsSection =>
     requested === "tools" ||
     requested === "functioning" ||
@@ -196,6 +208,7 @@ function IntegrationSettings({
                 if (railId) void navigate(href(railId));
               }}
               toolCatalog={detail.tool_catalog ?? []}
+              syncBody={syncable ? serverSyncBody() : undefined}
             />
           </Suspense>
         ) : isPackageCommonSection(active) ? (

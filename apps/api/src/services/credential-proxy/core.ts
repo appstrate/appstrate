@@ -116,6 +116,12 @@ type ProxyCallInput = {
   /** A stream body's byte length from the request's own framing; omitted = sent chunked. */
   bodyLength?: number;
   substituteBody?: boolean;
+  /**
+   * Headers go as written, no `{{field}}` substituted (the credential header is still injected).
+   * For a caller relaying another party's values, such as a protocol client echoing what the
+   * upstream sent it, which must never name a credential field.
+   */
+  literalHeaders?: true;
 
   /**
    * Cookie jar store — read before the upstream call, written after.
@@ -139,6 +145,9 @@ type ProxyCallInput = {
    * means no cap — the full response passes through.
    */
   maxResponseBytes?: number;
+
+  /** Cancels the upstream exchange (each hop, and the 401 replay). */
+  signal?: AbortSignal;
 
   /** Transport override (tests): keeps every per-hop guard, disables the address pin. */
   fetch?: typeof fetch;
@@ -233,10 +242,11 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   }
 
   const fields = resolved.credentials;
+  const literal = input.literalHeaders === true;
   const prepareFor = (credentials: Record<string, string>) =>
     prepareApiCallRequest({
       target: input.target,
-      headers: input.headers ?? {},
+      headers: literal ? {} : (input.headers ?? {}),
       body: typeof input.body === "string" && input.substituteBody ? input.body : null,
       fields: credentials,
     });
@@ -271,7 +281,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // Every header carrying a decrypted credential: a redirect leaving the allowlist strips them.
   const sensitiveHeaderNames = new Set<string>();
   const outbound = (request: PreparedApiCallRequest, payload: typeof resolved) => {
-    const headers = new Headers(request.headers);
+    const headers = new Headers(literal ? input.headers : request.headers);
     const injection = applyInjectedCredentialHeaderToHeaders(headers, payload);
     const carrier = credentialCarryingHeader(injection);
     for (const name of request.credentialHeaders) sensitiveHeaderNames.add(name);
@@ -318,6 +328,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     method: input.method,
     headers: first.headers,
     body: first.body,
+    ...(input.signal ? { signal: input.signal } : {}),
   };
   // fetch spec: streaming body requires `duplex: "half"`.
   if (isStreamBody) {

@@ -1524,7 +1524,7 @@ export interface paths {
         };
         /**
          * The credential proxy's calls made in the current space
-         * @description Every call the credential proxy (`/api/credential-proxy/proxy`) made in the current space, whatever the connection and whoever owns it: who used which connection, against which host, with what outcome. One row per call that may have sent a credential, successful or not. Requires `integrations:configure`, the permission that governs which credential the space resolves to; it is session-only, so no API key reads this journal. Calls made in another space are never listed, including those made with a connection shared into both. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
+         * @description Every call the credential proxy (`/api/credential-proxy/proxy`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`) made in the current space, whatever the connection and whoever owns it: who used which connection, against which host, with what outcome. One row per call that may have sent a credential, successful or not. Requires `integrations:configure`, the permission that governs which credential the space resolves to; it is session-only, so no API key reads this journal. Calls made in another space are never listed, including those made with a connection shared into both. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
          */
         get: operations["listConnectionCalls"];
         put?: never;
@@ -1589,6 +1589,26 @@ export interface paths {
          * @description Persists credentials entered on the hosted form — or, for an oauth2 auth (reached only when the integration declares connection variables), starts its OAuth flow with the submitted `variables` and returns the provider URL to navigate to; the connection is then created by the callback. Context + actor come from the page cookie; the request carries only the credentials and/or the variables and echoes the CSRF nonce in the `x-connect-csrf` header. An oauth2 refusal mirrors `startIntegrationConnect`: a variable to fix is a 400 `validation_failed` and the form can be resubmitted; another refusal keeps its status with a generic detail, and keeps the page session only when it preceded any request to the authorization server; anything else is a 502 that ends the session.
          */
         post: operations["submitIntegrationConnect"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/discover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Propose an integration manifest from a remote MCP server URL
+         * @description Probes a remote MCP server before any integration exists and returns a manifest proposal for the editor to merge: an MCP `initialize` request (Streamable HTTP; a 404/405 falls back to the SSE transport's GET), then its OAuth protected-resource metadata (RFC 9728) and authorization-server metadata (RFC 8414), plus the site's raster icon. An oauth2 auth is proposed as a public client (`token_endpoint_auth_method: none`) when the authorization server offers dynamic client registration (RFC 7591), else as `client_secret_post` with its `issuer` and a `manual_client_required` warning (`authorization_server_blocked` instead when the advertised authorization server is on a refused address, which is never read); without metadata, a server at the URL's origin offering DCR is guessed as oauth2, anything else as an API key sent as a Bearer token (auth `primary`, credential field `api_key`). A 401/403 counts as an MCP server only when its `WWW-Authenticate` offers the Bearer scheme. The whole discovery is bounded to 25 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Every URL reached is egress-guarded (private and reserved addresses refused, `https` required for a host the operator has not allowlisted). Requires `integrations:write`. Rate limited to 10 requests per minute.
+         */
+        post: operations["discoverRemoteIntegration"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1728,7 +1748,7 @@ export interface paths {
         put?: never;
         /**
          * Register a custom OAuth client for an integration auth
-         * @description Registers a NEW custom (BYO-app) client for this auth, in this space — it overrides the org-level clients here. Repeatable — a space may hold N clients per auth (model-provider pattern). The first registered client becomes the default; later ones are non-default until promoted via PUT .../default-client. Rejected for auto-provisioned (DCR/CIMD) auths. Requires `integrations:configure`, which is never granted to an API key.
+         * @description Registers a NEW custom (BYO-app) client for this auth, in this space — it overrides the org-level clients here. Repeatable — a space may hold N clients per auth (model-provider pattern). The first registered client becomes the default; later ones are non-default until promoted via PUT .../default-client. Rejected for auto-provisioned (DCR) auths. Requires `integrations:configure`, which is never granted to an API key.
          */
         post: operations["createIntegrationOAuthClient"];
         delete?: never;
@@ -1869,6 +1889,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/integrations/{packageId}/discover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Propose manifest fields from the integration's connected MCP server
+         * @description Connects to the remote MCP server of the integration's latest published version through the credential proxy — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, each exchange journaled like one of its calls (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500 tools over 20 pages of at most 2 MiB each) as `default_tools` with an empty `tools_policy` entry each, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning). The whole sync is bounded to 20 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Only a Streamable HTTP server is supported. Requires `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too) and write authority on the package in its home space. Rate limited to 10 requests per minute.
+         */
+        post: operations["syncIntegrationFromServer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/integrations/{packageId}/oauth-clients/{clientId}": {
         parameters: {
             query?: never;
@@ -1888,7 +1928,7 @@ export interface paths {
         head?: never;
         /**
          * Update a custom OAuth client (rotate its secret, change its redirect URI or method)
-         * @description Updates one of this space's custom clients in place, by its id (an org-level client id is a 404 here). Its `client_id` cannot change. Auto-provisioned (DCR/CIMD) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.
+         * @description Updates one of this space's custom clients in place, by its id (an org-level client id is a 404 here). Its `client_id` cannot change. Auto-provisioned (DCR) clients are machine-managed and rejected. Requires `integrations:configure`, which is never granted to an API key.
          */
         patch: operations["updateIntegrationOAuthClient"];
         trace?: never;
@@ -1904,7 +1944,7 @@ export interface paths {
         put?: never;
         /**
          * Promote a space OAuth client to the org level
-         * @description Moves one of this space's custom clients to the org level (`spaceId: null`), inherited by every space of the org. It keeps its id and secret, so the connections it minted keep working; it becomes the org default when the org has none. A space's auto-provisioned (DCR/CIMD) client moves too, unless the org already holds the auto-provisioned client of the same authorization server (409 `auto_client_exists_at_org`). Requires both `integrations:configure` and `org-integrations:configure`, which are never granted to an API key.
+         * @description Moves one of this space's custom clients to the org level (`spaceId: null`), inherited by every space of the org. It keeps its id and secret, so the connections it minted keep working; it becomes the org default when the org has none. A space's auto-provisioned (DCR) client moves too, unless the org already holds the auto-provisioned client of the same authorization server (409 `auto_client_exists_at_org`). Requires both `integrations:configure` and `org-integrations:configure`, which are never granted to an API key.
          */
         post: operations["promoteIntegrationOAuthClient"];
         delete?: never;
@@ -2186,7 +2226,7 @@ export interface paths {
         };
         /**
          * The credential proxy's calls made with one of the caller's connections
-         * @description Every call the credential proxy (`/api/credential-proxy/proxy`) made with a connection the caller owns, whoever made it and from whichever space: a colleague using a connection shared into a space, a run, an API key. One row per call that may have sent the credential, successful or not. Authorized by ownership, capped by a delegated credential's `integrations:read` ceiling. A delegated or end-user credential reads inside its bound organization (and space, when it pins one) only. Ownership is read on the connection itself: once it is deleted this route answers 404, and its calls remain listed by `GET /api/integrations/calls` in the spaces they were made in. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
+         * @description Every call the credential proxy (`/api/credential-proxy/proxy`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`) made with a connection the caller owns, whoever made it and from whichever space: a colleague using a connection shared into a space, a run, an API key. One row per call that may have sent the credential, successful or not. Authorized by ownership, capped by a delegated credential's `integrations:read` ceiling. A delegated or end-user credential reads inside its bound organization (and space, when it pins one) only. Ownership is read on the connection itself: once it is deleted this route answers 404, and its calls remain listed by `GET /api/integrations/calls` in the spaces they were made in. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
          */
         get: operations["listMyConnectionCalls"];
         put?: never;
@@ -2974,7 +3014,7 @@ export interface paths {
         };
         /**
          * List the org-level OAuth clients of an integration auth
-         * @description Returns the org's own clients (`org`, oldest first) plus the default it inherits, the platform-provided system client (`system`), if any. `is_default` marks the org-tier default. Secrets are never returned. Only oauth2 auths whose client is not auto-provisioned (DCR/CIMD) are listed here — the org's machine client of an auto-provisioned auth is not chosen by an admin; any other auth is a 400. Requires `org-integrations:configure`, which is never granted to an API key.
+         * @description Returns the org's own clients (`org`, oldest first) plus the default it inherits, the platform-provided system client (`system`), if any. `is_default` marks the org-tier default. Secrets are never returned. Only oauth2 auths whose client is not auto-provisioned (DCR) are listed here — the org's machine client of an auto-provisioned auth is not chosen by an admin; any other auth is a 400. Requires `org-integrations:configure`, which is never granted to an API key.
          */
         get: operations["listOrgIntegrationClients"];
         put?: never;
@@ -3016,7 +3056,7 @@ export interface paths {
         put?: never;
         /**
          * Register an org-level OAuth client for an integration auth
-         * @description Registers a custom (BYO-app) client at the org level (`spaceId: null`), inherited by every space of the org. The first one becomes the org default. Rejected (400) for auto-provisioned (DCR/CIMD) auths, whose org-level client the platform registers itself at the first connect from any space. Requires `org-integrations:configure`, which is never granted to an API key.
+         * @description Registers a custom (BYO-app) client at the org level (`spaceId: null`), inherited by every space of the org. The first one becomes the org default. Rejected (400) for auto-provisioned (DCR) auths, whose org-level client the platform registers itself at the first connect from any space. Requires `org-integrations:configure`, which is never granted to an API key.
          */
         post: operations["createOrgIntegrationOAuthClient"];
         delete?: never;
@@ -13330,7 +13370,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Missing token, or the oauth2 auth declares neither an issuer nor explicit endpoints (HTML error page). The link stays reusable — except on an auth that auto-provisions its client (DCR/CIMD), where every refusal burns it. */
+            /** @description Missing token, or the oauth2 auth declares neither an issuer nor explicit endpoints (HTML error page). The link stays reusable — except on an auth that auto-provisions its client (DCR), where every refusal burns it. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -13339,7 +13379,7 @@ export interface operations {
                     "text/html": string;
                 };
             };
-            /** @description The space has no OAuth client registered for this auth and none could be auto-provisioned; the page says the failure is permanent and to ask an administrator, while the operator-facing detail naming the exact remedy stays on the server log — this route carries no session (HTML error page). For an auth whose client is pre-registered the link stays reusable, so a retry after the administrator registers one needs no re-mint and the page says to open the link again. For an auth that auto-provisions its client at the authorization server (DCR/CIMD) the link is burned — reaching this refusal means a registration was already attempted upstream, and a reusable link would replay it on every click — so the page says to request a new connection link instead. */
+            /** @description The space has no OAuth client registered for this auth and none could be auto-provisioned; the page says the failure is permanent and to ask an administrator, while the operator-facing detail naming the exact remedy stays on the server log — this route carries no session (HTML error page). For an auth whose client is pre-registered the link stays reusable, so a retry after the administrator registers one needs no re-mint and the page says to open the link again. For an auth that auto-provisions its client at the authorization server (DCR) the link is burned — reaching this refusal means a registration was already attempted upstream, and a reusable link would replay it on every click — so the page says to request a new connection link instead. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -13548,6 +13588,102 @@ export interface operations {
             };
         };
     };
+    discoverRemoteIntegration: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uri
+                     * @description The MCP server URL, as it would be `source.remote.url`. A URL carrying a username or password is refused.
+                     */
+                    url: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The manifest proposal. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description A partial AFPS integration manifest: `display_name`, `name` (`@<org slug>/<slug>`), `source` (`kind: remote`), `auths` (one auth, `oauth` or `api_key`), and when published `documentation`, `privacy_policies` and `icon` (only an icon image the manifest accepts as is). */
+                        manifest: {
+                            display_name: string;
+                            name: string;
+                            /** Format: uri */
+                            documentation?: string;
+                            privacy_policies?: string[];
+                            icon?: string;
+                            source: {
+                                /** @enum {string} */
+                                kind: "remote";
+                                remote: {
+                                    /** Format: uri */
+                                    url: string;
+                                    /** @enum {string} */
+                                    transport: "streamable-http" | "sse";
+                                };
+                            };
+                            auths: {
+                                [key: string]: Record<string, never>;
+                            };
+                        };
+                        /** @description The site's raster icon (PNG, JPEG, WebP, GIF or ICO, at most 256 KiB) as a base64 data URI, for the editor to re-encode; null when none was found. Never an SVG, never a URL. */
+                        icon_source: string | null;
+                        /** @description Per proposed field, keyed by JSON pointer into `manifest` (`/display_name`, `/auths/oauth`, …): `detected` when the server published it, `guessed` when inferred. */
+                        provenance: {
+                            [key: string]: "detected" | "guessed";
+                        };
+                        warnings: {
+                            /** @enum {string} */
+                            code: "manual_client_required" | "authorization_server_blocked";
+                            message: string;
+                        }[];
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            403: components["responses"]["Forbidden"];
+            /** @description `not_an_mcp_server` — the URL answered, but not as a Streamable HTTP or SSE MCP server (a 401/403 without a Bearer challenge included); `remote_mcp_auth_not_supported` — it serves MCP without authentication (it answered the probe, or refused it with a JSON-RPC error rather than a Bearer challenge), which integrations do not support yet; `remote_mcp_modern_only` — it refused the probe as an `UnsupportedProtocolVersionError` listing only MCP versions newer than the 2025-11-25 Appstrate speaks. */
+            422: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+            /** @description `bad_gateway` — the server could not be reached or read (network failure, timeout, a body cut short, the 25-second bound passed before the auth metadata was read, or a redirect to a refused address). */
+            502: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     getIntegration: {
         parameters: {
             query?: never;
@@ -13653,7 +13789,7 @@ export interface operations {
                             has_oauth_client: boolean;
                             /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when neither the space nor the org has flagged a default client of its own, so the auth is connectable without a pre-registered client. */
                             has_system_client: boolean;
-                            /** @description True for an oauth2 auth on a remote MCP integration (`source.kind: "remote"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required. */
+                            /** @description True for an oauth2 auth declaring `token_endpoint_auth_method: "none"` on a remote MCP integration (`source.kind: "remote"`) or with an authorization server chosen per connection. Its OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414), then RFC 7591 dynamic registration of a public client — so no pre-registered client is required. */
                             client_auto_provisioned: boolean;
                         }[];
                         tool_catalog: {
@@ -14688,6 +14824,115 @@ export interface operations {
             403: components["responses"]["Forbidden"];
         };
     };
+    syncIntegrationFromServer: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                /** @description Integration package id (e.g. `@official/gmail`). */
+                packageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description The connection to call the server with; omitted, the proxy's selection (`X-Connection-Id` semantics).
+                     */
+                    connection_id?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The manifest proposal. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description A partial AFPS integration manifest: only the fields the server reported. */
+                        manifest: {
+                            default_tools: string[];
+                            tools_policy: {
+                                [key: string]: Record<string, never>;
+                            };
+                            display_name?: string;
+                            description?: string;
+                            /** Format: uri */
+                            homepage?: string;
+                            icon?: string;
+                        };
+                        /** @description The server's raster icon (PNG, JPEG, WebP, GIF or ICO, at most 256 KiB) as a base64 data URI, for the editor to re-encode; null when none was found. Never an SVG, never a URL. A `serverInfo.icons` entry is taken only as a `data:` URI or an https URL of the MCP server's own origin, fetched without credentials and with every redirect kept on that origin; else the site's own icon, over https only. */
+                        icon_source: string | null;
+                        /** @description The server's `initialize` instructions, for the editor to propose as `INTEGRATION.md`; null when it sent none, or when the package's draft already holds an `INTEGRATION.md` (whatever its content, empty included). */
+                        instructions: string | null;
+                        warnings: {
+                            /** @enum {string} */
+                            code: "tools_truncated" | "instructions_truncated";
+                            message: string;
+                        }[];
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            /** @description Missing permission or write authority on the package, or the proxy refused the call (`unauthorized_target`: the server URL is outside the auth's `authorized_uris`; `blocked_target`: egress guard). */
+            403: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            /** @description `integration_not_published` — the integration has no usable published version; `integration_not_connected` — no connection of the integration usable by the caller in this space; the proxy's own connection-selection conflicts are relayed (`needs_reconnection`; `must_choose_connection` when the caller holds several usable connections and the body names none: retry with one of its `candidate_connections` as `connection_id`). */
+            409: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `integration_not_remote` — the integration is not backed by a remote MCP server; `sync_transport_unsupported` — its server uses the SSE transport; `sync_url_templated` — its server URL is chosen per connection (`{$variable.…}`). */
+            422: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+            /** @description `bad_gateway` — the server could not be reached, did not answer as an MCP server within 20 s, or refused the credential; the proxy's `upstream_*` and `credential_unusable` codes are relayed. */
+            502: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     deleteIntegrationOAuthClient: {
         parameters: {
             query?: never;
@@ -15116,7 +15361,7 @@ export interface operations {
                             has_oauth_client: boolean;
                             /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when neither the space nor the org has flagged a default client of its own, so the auth is connectable without a pre-registered client. */
                             has_system_client: boolean;
-                            /** @description True for an oauth2 auth on a remote MCP integration (`source.kind: "remote"`). Per the MCP Authorization spec the OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414) plus client acquisition without manual pre-registration (CIMD when advertised, else RFC 7591 dynamic registration) — so no pre-registered client is required. */
+                            /** @description True for an oauth2 auth declaring `token_endpoint_auth_method: "none"` on a remote MCP integration (`source.kind: "remote"`) or with an authorization server chosen per connection. Its OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414), then RFC 7591 dynamic registration of a public client — so no pre-registered client is required. */
                             client_auto_provisioned: boolean;
                         }[];
                         tool_catalog: {

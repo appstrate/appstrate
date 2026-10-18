@@ -47,7 +47,8 @@ import {
  */
 const MCP_PROGRESS_CALL_MAX_TOTAL_MS = 60 * 60_000;
 
-const DEFAULT_CLIENT_INFO: Implementation = {
+/** How Appstrate names itself to an MCP server: in every client, and in a raw `initialize`. */
+export const DEFAULT_CLIENT_INFO: Implementation = {
   name: "appstrate-mcp-client",
   version: "0.0.0",
 };
