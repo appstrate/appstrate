@@ -182,17 +182,15 @@ export function useFileImageSrc(id: string): string | null | undefined {
   const readsFiles = usePermissions().can("files:read");
   const query = useQuery({
     queryKey: fileBlobKeys.detail(id, scope.header),
-    queryFn: async (): Promise<string | null> => {
-      try {
-        const { data } = await client.GET("/api/files/{id}/content", {
-          params: { path: { id } },
-          parseAs: "blob",
-        });
-        return data ? URL.createObjectURL(data) : null;
-      } catch {
-        // Decorative: a failed fetch (403, network) means no preview.
-        return null;
-      }
+    queryFn: async ({ signal }): Promise<string | null> => {
+      const { data } = await client.GET("/api/files/{id}/content", {
+        params: { path: { id }, header: scope.header },
+        parseAs: "blob",
+        signal,
+      });
+      // A transport can finish after cache removal, even when it ignores cancellation.
+      signal.throwIfAborted();
+      return data ? URL.createObjectURL(data) : null;
     },
     enabled: readsFiles && scope.enabled,
     // Never refetched in place: a refetch would swap in a new URL without revoking the old one.
@@ -201,6 +199,7 @@ export function useFileImageSrc(id: string): string | null | undefined {
     gcTime: FILE_BLOB_GC_TIME,
     retry: false,
   });
-  if (!readsFiles) return null;
+  // Decorative failures have no preview, but remain errors so reopening retries them.
+  if (!readsFiles || query.isError) return null;
   return query.data;
 }

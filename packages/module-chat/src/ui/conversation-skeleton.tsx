@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ReactNode } from "react";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 /**
@@ -13,7 +14,7 @@ export function ConversationSkeleton({
 }: {
   label: string;
   /** The composer's placeholder; null for a reader, who gets no composer. */
-  placeholder: string | null;
+  placeholder: ReactNode;
 }) {
   return (
     <div

@@ -10,6 +10,7 @@
  * draws while loading, so the chunk and the data wait under one shape.
  */
 
+import { ConversationSkeleton } from "@appstrate/module-chat/conversation-skeleton";
 import { Card } from "@appstrate/ui/components/card";
 import { CardList } from "./card-list";
 import type { ReactNode } from "react";
@@ -470,27 +471,12 @@ export function ChatPanelSkeleton() {
  * draws it (`ConversationSkeleton`) — turns at the top, the composer and its line at the bottom.
  */
 export function ChatConversationSkeleton() {
+  const { t } = useTranslation("common");
   const canWrite = usePermissions().can("chat:write");
   return (
-    <Waiting className="flex size-full flex-col overflow-hidden">
-      <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col gap-6 px-4 pt-8">
-        <Skeleton className="ml-auto h-10 w-2/5 rounded-2xl" />
-        <Lines lines={3} />
-        <Skeleton className="ml-auto h-10 w-1/3 rounded-2xl" />
-        <Lines lines={2} />
-      </div>
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-2 px-4 pb-4">
-        {canWrite ? (
-          <>
-            <ComposerBlock />
-            <div className="flex h-4 justify-center">
-              <Skeleton className="h-3 w-64" />
-            </div>
-          </>
-        ) : (
-          <Skeleton className="h-[46px] w-full rounded-xl" />
-        )}
-      </div>
-    </Waiting>
+    <ConversationSkeleton
+      label={t("loading")}
+      placeholder={canWrite ? <Skeleton className="h-3.5 w-48" /> : null}
+    />
   );
 }
