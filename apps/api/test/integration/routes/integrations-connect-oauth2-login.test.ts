@@ -8,7 +8,9 @@
  * The token endpoint is a loopback server reached through `EGRESS_ALLOW_INTERNAL_HOSTS`.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
-import { truncateAll } from "../../helpers/db.ts";
+import { eq } from "drizzle-orm";
+import { integrationConnections } from "@appstrate/db/schema";
+import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
@@ -33,7 +35,12 @@ beforeAll(() => {
       if (new URL(req.url).pathname !== "/token") return new Response("no page", { status: 404 });
       const form = new URLSearchParams(await req.text());
       exchanged.push(form.get("refresh_token") ?? "");
-      return Response.json({ access_token: "at", refresh_token: "rt-next", expires_in: 3600 });
+      return Response.json({
+        access_token: "at",
+        refresh_token: "rt-next",
+        expires_in: 3600,
+        user_id: "acct-42",
+      });
     },
   });
   origin = `http://${server.hostname}:${server.port}`;
@@ -81,6 +88,7 @@ describe("oauth2 acquired by connect.login — connect routes", () => {
             type: "oauth2",
             token_endpoint: `${origin}/token`,
             token_endpoint_auth_method: "none",
+            identity_claims: { account_id: "$.user_id" },
             authorized_uris: ["https://api.example.com/**"],
             credentials: {
               schema: {
@@ -121,6 +129,40 @@ describe("oauth2 acquired by connect.login — connect routes", () => {
 
     expect(res.status).toBe(200);
     expect(exchanged).toEqual(["rt-submitted"]);
+    const rows = await db
+      .select({
+        accountId: integrationConnections.accountId,
+        clientRef: integrationConnections.clientRef,
+      })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.integrationId, INTEGRATION_ID));
+    expect(rows).toEqual([{ accountId: "acct-42", clientRef: "mobile-sso-sys" }]);
+  });
+
+  it("the hosted dispatch hands the auth to the form, never to an authorization server", async () => {
+    const app = getTestApp();
+    const mint = await app.request(
+      `/api/integrations/${INTEGRATION_ID}/auths/account/connect/session`,
+      {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      },
+    );
+    expect(mint.status).toBe(200);
+    const token = new URL(
+      ((await mint.json()) as { connect_url: string }).connect_url,
+    ).searchParams.get("token")!;
+
+    const start = await app.request(
+      `/api/integrations/connect/start?token=${encodeURIComponent(token)}`,
+      { redirect: "manual" },
+    );
+
+    expect(start.status).toBe(302);
+    expect(start.headers.get("location")).toBe("/connect");
+    expect(start.headers.get("set-cookie")).toContain("appstrate_connect=");
+    expect(exchanged).toEqual([]);
   });
 
   it("connect/oauth2 refuses to start an authorization flow", async () => {

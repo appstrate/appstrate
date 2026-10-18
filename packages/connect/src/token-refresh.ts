@@ -165,7 +165,14 @@ export async function performTokenRequest(
       signal: AbortSignal.timeout(30_000),
     });
   } catch (err) {
-    throw new RefreshError(`${opts.label} network error: ${getErrorMessage(err)}`, "transient");
+    // The cause tells a request never sent (`SsrfBlockedError`) from one that may have arrived.
+    throw new RefreshError(
+      `${opts.label} network error: ${getErrorMessage(err)}`,
+      "transient",
+      undefined,
+      undefined,
+      { cause: err },
+    );
   }
 
   // A 2xx without `access_token` is a FAILED request, never a success with the

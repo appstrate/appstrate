@@ -753,13 +753,15 @@ const connectRunResponses = {
 
 /** How a declarative `connect.login` (AFPS §7.7) refuses, on both connect surfaces. */
 const CONNECT_LOGIN_400 =
-  "A login the service refused is `login_rejected` on `credentials`. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer.";
+  "A login the service refused is `login_rejected` on `credentials`; on an oauth2 auth, that is a token endpoint answering `invalid_grant` or any 4xx other than 429 and other than a refused OAuth client. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer.";
 const CONNECT_LOGIN_502 =
-  "A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`login_upstream_unavailable`). A `Retry-After` the service sent is relayed, as the header and as `retry_after`. On an oauth2 auth, an OAuth client its token endpoint refuses is `oauth_client_rejected`.";
-/** An oauth2 `connect.login` whose OAuth client no longer resolves, on both connect surfaces. */
+  "A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`login_upstream_unavailable`). A `Retry-After` the service sent is relayed, as the header and as `retry_after`, except on an oauth2 auth, whose token request relays none; there an unusable 2xx is also `login_upstream_unavailable`, and its detail says the service may already have redeemed the grant unless the request was throttled (429) or never sent. On an oauth2 auth, an OAuth client its token endpoint refuses is `oauth_client_rejected`.";
+const CONNECT_LOGIN_403 =
+  "oauth2 declaring `connect.login`: the auth has no usable OAuth client — none registered, or one whose secret cannot be decrypted (`forbidden`); an administrator must register one.";
+/** An oauth2 `connect.login` whose chosen OAuth client is gone by the token request, on both connect surfaces. */
 const CONNECT_LOGIN_409 = {
   description:
-    "oauth2 declaring `connect.login`: its OAuth client cannot be resolved (`connection_not_ready`); an administrator must finish setting the integration up.",
+    "oauth2 declaring `connect.login`: the OAuth client chosen for the auth no longer resolves when the token request is built, removed in between (`connection_not_ready`); nothing was sent. An auth with no usable OAuth client is the 403.",
   content: {
     "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
   },
@@ -1274,7 +1276,10 @@ export const integrationsPaths = {
           $ref: "#/components/responses/ValidationError",
           description: `Invalid body or credentials. ${CONNECT_LOGIN_400}`,
         },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description: `Insufficient permissions. ${CONNECT_LOGIN_403}`,
+        },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": CONNECT_LOGIN_409,
         "502": {
@@ -1584,7 +1589,8 @@ export const integrationsPaths = {
         },
         "403": {
           description:
-            "oauth2: the authorization server's client could not be provisioned or is refused (`connection_not_ready`); the detail is generic, the operator-facing reason stays on the server log.",
+            "oauth2: the authorization server's client could not be provisioned or is refused (`connection_not_ready`); the detail is generic, the operator-facing reason stays on the server log. " +
+            CONNECT_LOGIN_403,
           content: {
             "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
           },

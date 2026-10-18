@@ -165,6 +165,123 @@ async function identitySourceFor(
   return identitySource;
 }
 
+type IntegrationManifestRead = Awaited<ReturnType<typeof readIntegrationAuth>>["manifest"];
+
+/** The authorization server a connection is acquired from, as {@link authorizationServer} reads it. */
+interface AuthorizationServer {
+  issuer: string | undefined;
+  /** The manifest's endpoints beside `issuer`, which discovery must not override. */
+  declaredEndpoints: { authorizationEndpoint?: string; tokenEndpoint?: string };
+  /** The manifest-declared `userinfo_endpoint`. */
+  userinfoEndpoint: string | undefined;
+}
+
+/**
+ * AFPS §7.3: a server chosen per connection is the validated issuer the flow carried
+ * (`connectionIssuer`), the one the minting client is bound to, with no manifest endpoint beside
+ * it; otherwise the manifest's issuer and endpoints.
+ */
+function authorizationServer(
+  manifest: IntegrationManifestRead,
+  auth: AfpsManifestAuth,
+  connectionIssuer: string | undefined,
+): AuthorizationServer {
+  if (hasPerConnectionAuthServer(manifest, auth)) {
+    return { issuer: connectionIssuer, declaredEndpoints: {}, userinfoEndpoint: undefined };
+  }
+  return {
+    issuer: auth.issuer,
+    declaredEndpoints: {
+      ...(auth.authorization_endpoint
+        ? { authorizationEndpoint: auth.authorization_endpoint }
+        : {}),
+      ...(auth.token_endpoint ? { tokenEndpoint: auth.token_endpoint } : {}),
+    },
+    userinfoEndpoint: auth.userinfo_endpoint,
+  };
+}
+
+/**
+ * Userinfo URL precedence (AFPS §7.3), the same fallback chain as
+ * `code_challenge_methods_supported`:
+ *   1. Manifest-declared `userinfo_endpoint` (authoritative).
+ *   2. Discovery-projected `userinfo_endpoint` (a manifest that only declares
+ *      an `issuer` rides on whatever the IdP advertises).
+ *   3. undefined — the caller skips userinfo enrichment.
+ */
+async function resolveUserinfoUrl(
+  server: AuthorizationServer,
+  log: { packageId: string; authKey: string },
+): Promise<string | undefined> {
+  if (server.userinfoEndpoint) return server.userinfoEndpoint;
+  if (!server.issuer) return undefined;
+  try {
+    const discovered = await resolveOAuthEndpoints({
+      issuer: server.issuer,
+      ...server.declaredEndpoints,
+    });
+    return discovered.userinfoEndpoint;
+  } catch (err) {
+    // Best-effort: discovery failures fall through to "no userinfo".
+    logger.warn("Integration userinfo discovery failed", { ...log, err: String(err) });
+    return undefined;
+  }
+}
+
+/** The stored oauth2 credential bundle of a token response (RFC 6749 §5.1). */
+function oauthCredentials(
+  tokens: { accessToken: string; refreshToken: string | undefined; scopesGranted: string[] },
+  tokenResponse: Record<string, unknown>,
+): Record<string, unknown> {
+  return {
+    access_token: tokens.accessToken,
+    ...(tokens.refreshToken ? { refresh_token: tokens.refreshToken } : {}),
+    ...(typeof tokenResponse.token_type === "string"
+      ? { token_type: tokenResponse.token_type }
+      : {}),
+    ...(typeof tokenResponse.id_token === "string" ? { id_token: tokenResponse.id_token } : {}),
+    scope: tokens.scopesGranted.join(" "),
+  };
+}
+
+/**
+ * A failed `connect.login` token request as its API error. Unlike a refresh — where only
+ * `invalid_grant` condemns a stored credential, since a stray 4xx may be the provider's blip — a
+ * grant typed into a form that the token endpoint answers with any 4xx but 429 is unusable as
+ * submitted. Retry-After is not captured by the token request, so none is relayed.
+ */
+function tokenRequestRefusal(err: RefreshError): ApiError {
+  if (err.kind === "revoked") {
+    return loginRejected(
+      "The service refused the submitted grant: it is invalid, expired or already used.",
+    );
+  }
+  if (err.kind === "client_rejected") {
+    return new ApiError({
+      status: 502,
+      code: "oauth_client_rejected",
+      title: "OAuth Client Rejected",
+      detail:
+        "The service rejected this integration's OAuth client. Ask an administrator to check its client registration.",
+    });
+  }
+  const { status } = err;
+  if (status !== undefined && status >= 400 && status < 500 && status !== 429) {
+    return loginRejected(
+      `The service refused the token request (HTTP ${status}): the submitted grant cannot be used as given.`,
+    );
+  }
+  // Throttled, or refused by the egress guard before anything was sent: the grant is intact.
+  // Anything else (a timeout, a 5xx, an unusable 2xx) may follow a redemption of a rotating grant.
+  if (status === 429 || err.cause instanceof SsrfBlockedError) {
+    return loginUpstreamUnavailable(undefined);
+  }
+  return loginUpstreamUnavailable(
+    undefined,
+    "The service may already have redeemed the submitted grant: if a retry is refused, obtain a new one.",
+  );
+}
+
 /** A grant the submitted fields cannot render, as its 400; a manifest fault stays the caller's 500. */
 function grantRefusal(err: unknown): unknown {
   if (!(err instanceof LoginError)) return err;
@@ -301,48 +418,14 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     if (input.kind === "fields") return this.completeFromLogin(ctx, input.credentials);
     const result = input.result;
     const { manifest, auth } = await readIntegrationAuth(ctx.scope, ctx.integrationId, ctx.authKey);
-    // A server chosen per connection (AFPS §7.3) is the validated issuer the state carried, the one
-    // the minting client is bound to, with no manifest endpoint beside it.
-    const perConnection = hasPerConnectionAuthServer(manifest, auth as AfpsManifestAuth);
-    const issuer = perConnection ? result.issuer : auth.issuer;
-    const declaredEndpoints = perConnection
-      ? {}
-      : {
-          ...(auth.authorization_endpoint
-            ? { authorizationEndpoint: auth.authorization_endpoint }
-            : {}),
-          ...(auth.token_endpoint ? { tokenEndpoint: auth.token_endpoint } : {}),
-        };
-
-    // Userinfo URL precedence (AFPS §7.3): mirror the same fallback chain
-    // we apply for `code_challenge_methods_supported` —
-    //   1. Manifest-declared `userinfo_endpoint` (authoritative).
-    //   2. Discovery-projected `userinfo_endpoint` (a manifest that only
-    //      declares an `issuer` rides on whatever the IdP advertises).
-    //   3. undefined — caller skips userinfo enrichment.
-    const manifestUserinfo = perConnection
-      ? undefined
-      : (auth as { userinfo_endpoint?: string }).userinfo_endpoint;
-    let discoveredUserinfo: string | undefined;
-    if (!manifestUserinfo && issuer) {
-      try {
-        const discovered = await resolveOAuthEndpoints({ issuer, ...declaredEndpoints });
-        discoveredUserinfo = discovered.userinfoEndpoint;
-      } catch (err) {
-        // Best-effort: discovery failures fall through to "no userinfo".
-        logger.warn("Integration userinfo discovery failed", {
-          packageId: result.packageId,
-          authKey: result.authKey,
-          err: String(err),
-        });
-      }
-    }
-    const userinfoUrl = manifestUserinfo ?? discoveredUserinfo;
+    const server = authorizationServer(manifest, auth as AfpsManifestAuth, result.issuer);
+    const { issuer, declaredEndpoints } = server;
+    const log = { packageId: result.packageId, authKey: result.authKey };
     const identitySource = await identitySourceFor(
       result.tokenResponse,
       result.accessToken,
-      userinfoUrl,
-      { packageId: result.packageId, authKey: result.authKey },
+      await resolveUserinfoUrl(server, log),
+      log,
     );
 
     const { accountId, identityClaims } = extractIdentity(manifest, result.authKey, identitySource);
@@ -423,20 +506,14 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       );
     }
 
-    const credentials: Record<string, unknown> = {
-      access_token: result.accessToken,
-      ...(refreshToken ? { refresh_token: refreshToken } : {}),
-      ...(result.tokenResponse.token_type
-        ? { token_type: String(result.tokenResponse.token_type) }
-        : {}),
-      ...(result.tokenResponse.id_token ? { id_token: String(result.tokenResponse.id_token) } : {}),
-      scope: result.scopesGranted.join(" "),
-    };
     return saveIntegrationConnection(ctx.scope, {
       packageId: result.packageId,
       authKey: result.authKey,
       accountId,
-      credentials,
+      credentials: oauthCredentials(
+        { accessToken: result.accessToken, refreshToken, scopesGranted: result.scopesGranted },
+        result.tokenResponse,
+      ),
       identityClaims,
       scopesGranted: result.scopesGranted,
       expiresAt: result.expiresAt ? new Date(result.expiresAt) : null,
@@ -517,8 +594,8 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       }
       throw err;
     }
-    // The manifest schema guarantees a token endpoint; a client that no longer resolves is the one
-    // setup gap left.
+    // The manifest schema guarantees a token endpoint, and the client resolution above refuses an
+    // auth with no usable client (403); what is left is the chosen client gone by now.
     if (!tokenContext) {
       logger.warn("Integration connect.login: no token request context", log);
       throw new ApiError({
@@ -546,94 +623,66 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
         kind: err.kind,
         status: err.status,
       });
-      if (err.kind === "revoked") {
-        throw loginRejected(
-          "The service refused the submitted grant: it is invalid, expired or already used.",
-        );
-      }
-      if (err.kind === "client_rejected") {
-        throw new ApiError({
-          status: 502,
-          code: "oauth_client_rejected",
-          title: "OAuth Client Rejected",
-          detail:
-            "The service rejected this integration's OAuth client. Ask an administrator to check its client registration.",
-        });
-      }
-      throw loginUpstreamUnavailable(undefined);
+      throw tokenRequestRefusal(err);
     }
 
     // The request redeemed the submitted grant (a rotating server invalidates a refresh token), so
     // a failure from here on must say so: retrying with the same values cannot work.
+    const { parsed, raw } = exchanged;
     try {
-      return await this.storeExchangedConnection(ctx, manifest, auth, exchanged, {
-        clientRef,
-        oauthResource,
-        variables,
+      const identitySource = await identitySourceFor(
+        raw,
+        parsed.accessToken,
+        await resolveUserinfoUrl(authorizationServer(manifest, auth, resolved.issuer), log),
         log,
+      );
+      const { accountId, identityClaims } = extractIdentity(manifest, ctx.authKey, identitySource);
+      assertRequiredIdentityClaims(manifest, ctx.authKey, identityClaims);
+
+      const scopesGranted = parsed.scopesReturned ?? [];
+      return await saveIntegrationConnection(ctx.scope, {
+        packageId: ctx.integrationId,
+        authKey: ctx.authKey,
+        accountId,
+        credentials: oauthCredentials(
+          { accessToken: parsed.accessToken, refreshToken: parsed.refreshToken, scopesGranted },
+          raw,
+        ),
+        identityClaims,
+        scopesGranted,
+        expiresAt: parsed.expiresAt ? new Date(parsed.expiresAt) : null,
+        actor: ctx.actor,
+        ...(ctx.target ? { connectionId: ctx.target.id } : {}),
+        ...(ctx.delegated ? { delegated: true } : {}),
+        ...(ctx.onScopeWidened ? { onScopeWidened: ctx.onScopeWidened } : {}),
+        clientRef,
+        variables: variables ?? null,
+        ...(oauthResource ? { oauthResource } : {}),
       });
     } catch (err) {
       logger.error("Integration connect.login: token request succeeded, connection not stored", {
         ...log,
         err: String(err),
       });
-      if (!(err instanceof ApiError)) throw err;
+      const redeemed =
+        "The submitted grant was already redeemed: obtain a new one before trying again.";
+      if (!(err instanceof ApiError)) {
+        throw new ApiError({
+          status: 500,
+          code: "internal_error",
+          title: "Internal Error",
+          detail: `The connection could not be stored. ${redeemed}`,
+          cause: err,
+        });
+      }
       throw new ApiError({
         status: err.status,
         code: err.code,
         title: err.title,
-        detail: `${err.message} The submitted grant was already redeemed: obtain a new one before trying again.`,
+        detail: `${err.message} ${redeemed}`,
         ...(err.param !== undefined ? { param: err.param } : {}),
         cause: err,
       });
     }
-  }
-
-  /** Identity and persistence for {@link completeFromLogin}, once the token request succeeded. */
-  private async storeExchangedConnection(
-    ctx: ConnectContext,
-    manifest: Awaited<ReturnType<typeof readIntegrationAuth>>["manifest"],
-    auth: AfpsManifestAuth,
-    { parsed, raw }: RefreshExchangeResult,
-    pinned: {
-      clientRef: string;
-      oauthResource: string | null;
-      variables: Awaited<ReturnType<typeof resolveConnectionVariables>>;
-      log: { packageId: string; authKey: string };
-    },
-  ): Promise<IntegrationConnectionSummary> {
-    const { clientRef, oauthResource, variables, log } = pinned;
-    const identitySource = await identitySourceFor(
-      raw,
-      parsed.accessToken,
-      auth.userinfo_endpoint,
-      log,
-    );
-    const { accountId, identityClaims } = extractIdentity(manifest, ctx.authKey, identitySource);
-    assertRequiredIdentityClaims(manifest, ctx.authKey, identityClaims);
-
-    const scopesGranted = parsed.scopesReturned ?? [];
-    return saveIntegrationConnection(ctx.scope, {
-      packageId: ctx.integrationId,
-      authKey: ctx.authKey,
-      accountId,
-      credentials: {
-        access_token: parsed.accessToken,
-        ...(parsed.refreshToken ? { refresh_token: parsed.refreshToken } : {}),
-        ...(typeof raw.token_type === "string" ? { token_type: raw.token_type } : {}),
-        ...(typeof raw.id_token === "string" ? { id_token: raw.id_token } : {}),
-        scope: scopesGranted.join(" "),
-      },
-      identityClaims,
-      scopesGranted,
-      expiresAt: parsed.expiresAt ? new Date(parsed.expiresAt) : null,
-      actor: ctx.actor,
-      ...(ctx.target ? { connectionId: ctx.target.id } : {}),
-      ...(ctx.delegated ? { delegated: true } : {}),
-      ...(ctx.onScopeWidened ? { onScopeWidened: ctx.onScopeWidened } : {}),
-      clientRef,
-      variables: variables ?? null,
-      ...(oauthResource ? { oauthResource } : {}),
-    });
   }
 }

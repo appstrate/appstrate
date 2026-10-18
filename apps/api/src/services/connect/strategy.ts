@@ -173,13 +173,16 @@ export function loginUrlRefused(fields: readonly string[]): ApiError {
   });
 }
 
-/** A login target that is unreachable, throttling or failing; `retryAfter` is its own, in seconds. */
-export function loginUpstreamUnavailable(retryAfter: number | undefined): ApiError {
+/**
+ * A login target that is unreachable, throttling or failing; `retryAfter` is its own, in seconds.
+ * `note` is a sentence on what the failed attempt may have consumed.
+ */
+export function loginUpstreamUnavailable(retryAfter: number | undefined, note?: string): ApiError {
   return new ApiError({
     status: 502,
     code: "login_upstream_unavailable",
     title: "Login Upstream Unavailable",
-    detail: "The service could not complete the login. Try again later.",
+    detail: `The service could not complete the login.${note ? ` ${note}` : ""} Try again later.`,
     ...(retryAfter !== undefined ? { retryAfter } : {}),
   });
 }

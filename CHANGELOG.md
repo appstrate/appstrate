@@ -302,12 +302,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   them; the platform renders the grant, adds the client authentication of the
   auth's default client — the client later refreshes use — and the RFC 8707
   `resource` it sends, and posts it through the same token request refreshes run,
-  before anything is stored. A grant the server refuses is a 400
-  `login_rejected` on the form, a refused client a 502 `oauth_client_rejected`, a
-  client that no longer resolves a 409 `connection_not_ready`, and a failure
-  after a successful token request says the grant was redeemed. Identity comes
-  from the token response, an `id_token` and `userinfo_endpoint`; a response
-  without `refresh_token` keeps the submitted one. The connection is then an
+  before anything is stored. A grant the server refuses (`invalid_grant`, or any
+  other 4xx but 429) is a 400 `login_rejected` on the form, a refused client a
+  502 `oauth_client_rejected`, an unreachable, throttled or failing server a 502
+  `login_upstream_unavailable` that says the grant may already have been
+  redeemed when the request may have reached it, an auth with no usable OAuth
+  client (none registered, a secret that cannot be decrypted) a 403, a chosen
+  client removed before the token request a 409 `connection_not_ready`, and a
+  failure after a successful token request says the grant was redeemed. Identity
+  comes from the token response, an `id_token` and `userinfo_endpoint`
+  (discovered from the `issuer` when not declared); a response without
+  `refresh_token` keeps the submitted one. The connection is then an
   ordinary oauth2 one: proactive and on-401 refresh, rotated tokens written back.
   `connect/oauth2` refuses such an auth and connect offers skip it.
   `@afps-spec/schema` enforces the manifest rules (URL equal to `token_endpoint`,

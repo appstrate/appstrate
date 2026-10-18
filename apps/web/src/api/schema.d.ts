@@ -13482,9 +13482,9 @@ export interface operations {
                     };
                 };
             };
-            /** @description Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is `connection_not_ready`, with a generic detail. A login the service refused is `login_rejected` on `credentials`. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. The page session survives: the form can be submitted again. */
+            /** @description Invalid body, CSRF token, credentials or variables. oauth2: any other 400 refusal of the flow is `connection_not_ready`, with a generic detail. A login the service refused is `login_rejected` on `credentials`; on an oauth2 auth, that is a token endpoint answering `invalid_grant` or any 4xx other than 429 and other than a refused OAuth client. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. The page session survives: the form can be submitted again. */
             400: components["responses"]["ValidationError"];
-            /** @description oauth2: the authorization server's client could not be provisioned or is refused (`connection_not_ready`); the detail is generic, the operator-facing reason stays on the server log. */
+            /** @description oauth2: the authorization server's client could not be provisioned or is refused (`connection_not_ready`); the detail is generic, the operator-facing reason stays on the server log. oauth2 declaring `connect.login`: the auth has no usable OAuth client — none registered, or one whose secret cannot be decrypted (`forbidden`); an administrator must register one. */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -13495,7 +13495,7 @@ export interface operations {
             };
             /** @description No active connect session, or the integration or auth is gone. oauth2: a 404 refusal of the flow is `connection_not_ready`, with a generic detail. */
             404: components["responses"]["NotFound"];
-            /** @description oauth2 declaring `connect.login`: its OAuth client cannot be resolved (`connection_not_ready`); an administrator must finish setting the integration up. */
+            /** @description oauth2 declaring `connect.login`: the OAuth client chosen for the auth no longer resolves when the token request is built, removed in between (`connection_not_ready`); nothing was sent. An auth with no usable OAuth client is the 403. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -13505,7 +13505,7 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description oauth2: the OAuth flow could not be started (`connect_start_failed`); the page session ends — request a new connection link. A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`login_upstream_unavailable`). A `Retry-After` the service sent is relayed, as the header and as `retry_after`. On an oauth2 auth, an OAuth client its token endpoint refuses is `oauth_client_rejected`. The page session survives. */
+            /** @description oauth2: the OAuth flow could not be started (`connect_start_failed`); the page session ends — request a new connection link. A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`login_upstream_unavailable`). A `Retry-After` the service sent is relayed, as the header and as `retry_after`, except on an oauth2 auth, whose token request relays none; there an unusable 2xx is also `login_upstream_unavailable`, and its detail says the service may already have redeemed the grant unless the request was throttled (429) or never sent. On an oauth2 auth, an OAuth client its token endpoint refuses is `oauth_client_rejected`. The page session survives. */
             502: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -13858,11 +13858,12 @@ export interface operations {
                     };
                 };
             };
-            /** @description Invalid body or credentials. A login the service refused is `login_rejected` on `credentials`. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. */
+            /** @description Invalid body or credentials. A login the service refused is `login_rejected` on `credentials`; on an oauth2 auth, that is a token endpoint answering `invalid_grant` or any 4xx other than 429 and other than a refused OAuth client. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. */
             400: components["responses"]["ValidationError"];
+            /** @description Insufficient permissions. oauth2 declaring `connect.login`: the auth has no usable OAuth client — none registered, or one whose secret cannot be decrypted (`forbidden`); an administrator must register one. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description oauth2 declaring `connect.login`: its OAuth client cannot be resolved (`connection_not_ready`); an administrator must finish setting the integration up. */
+            /** @description oauth2 declaring `connect.login`: the OAuth client chosen for the auth no longer resolves when the token request is built, removed in between (`connection_not_ready`); nothing was sent. An auth with no usable OAuth client is the 403. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -13871,7 +13872,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`login_upstream_unavailable`). A `Retry-After` the service sent is relayed, as the header and as `retry_after`. On an oauth2 auth, an OAuth client its token endpoint refuses is `oauth_client_rejected`. */
+            /** @description A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`login_upstream_unavailable`). A `Retry-After` the service sent is relayed, as the header and as `retry_after`, except on an oauth2 auth, whose token request relays none; there an unusable 2xx is also `login_upstream_unavailable`, and its detail says the service may already have redeemed the grant unless the request was throttled (429) or never sent. On an oauth2 auth, an OAuth client its token endpoint refuses is `oauth_client_rejected`. */
             502: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];

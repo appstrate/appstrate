@@ -11,17 +11,24 @@
  * confidential one (`client_secret_basic`) checks the other client authentication.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { eq } from "drizzle-orm";
 import { decryptCredentialsToStringMap } from "@appstrate/connect";
 import type { Actor } from "@appstrate/connect";
 import { integrationManifestSchema } from "@appstrate/core/integration";
-import { integrationConnections } from "@appstrate/db/schema";
+import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
 import { initSystemIntegrations } from "../../../src/services/integration-client-registry.ts";
+import * as connections from "../../../src/services/integration-connections.ts";
+import {
+  createIntegrationOAuthClient,
+  readCredentialRevision,
+} from "../../../src/services/integration-connections.ts";
+import type { AfpsManifestAuth } from "../../../src/services/integration-manifest-helpers.ts";
+import { refreshConnectionCredential } from "../../../src/services/integration-token-refresh.ts";
 import { OAuth2Strategy } from "../../../src/services/connect/oauth2-strategy.ts";
 import type { ConnectContext } from "../../../src/services/connect/strategy.ts";
 
@@ -30,13 +37,15 @@ const INTEGRATION = "@orga/oauth2-login";
 const CONFIDENTIAL = "@orga/oauth2-login-basic";
 /** A login posting somewhere other than its token endpoint. */
 const MISDIRECTED = "@orga/oauth2-login-elsewhere";
+/** The auth served by an organization client, with no system client. */
+const ORG_CLIENT = "@orga/oauth2-login-org";
 const SYSTEM_CLIENT = "oauth2-login-sys";
 const PUBLIC_CLIENT_ID = "PUBLIC_MOBILE_CLIENT";
 
 interface Upstream {
   base: string;
-  /** Next token-endpoint answer. */
-  setToken: (body: Record<string, unknown>, status?: number) => void;
+  /** Next token-endpoint answer; a string body is sent as is. */
+  setToken: (body: Record<string, unknown> | string, status?: number) => void;
   /** The last token request: its form body and Authorization header. */
   lastTokenRequest: () => { form: Record<string, string>; authorization: string | null } | null;
   tokenRequests: () => number;
@@ -44,7 +53,7 @@ interface Upstream {
 }
 
 function startUpstream(): Upstream {
-  let tokenBody: Record<string, unknown> = {};
+  let tokenBody: Record<string, unknown> | string = {};
   let tokenStatus = 200;
   let last: { form: Record<string, string>; authorization: string | null } | null = null;
   let served = 0;
@@ -59,7 +68,9 @@ function startUpstream(): Upstream {
           form: Object.fromEntries(new URLSearchParams(await req.text())),
           authorization: req.headers.get("authorization"),
         };
-        return Response.json(tokenBody, { status: tokenStatus });
+        return typeof tokenBody === "string"
+          ? new Response(tokenBody, { status: tokenStatus })
+          : Response.json(tokenBody, { status: tokenStatus });
       }
       if (url.pathname === "/userinfo") {
         if (req.headers.get("authorization") !== "Bearer at-fresh") {
@@ -312,6 +323,173 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
     expect(upstream.tokenRequests()).toBe(1);
   });
 
+  it("reconnects in place: same row, credentials replaced, client re-pinned", async () => {
+    upstream.setToken({ access_token: "at-fresh", refresh_token: "rt-1", expires_in: 3600 });
+    const first = await strategy.complete(connectCtx, {
+      kind: "fields",
+      credentials: { refresh_token: "rt-submitted" },
+    });
+    // A pin gone stale since (a client remapped): the reconnect writes the current one back.
+    await db
+      .update(integrationConnections)
+      .set({ clientRef: "stale-client" })
+      .where(eq(integrationConnections.id, first.id));
+    upstream.setToken({ access_token: "at-fresh", refresh_token: "rt-2", expires_in: 3600 });
+
+    const again = await strategy.complete(
+      {
+        ...connectCtx,
+        target: { id: first.id, spaceId: ctx.defaultSpaceId, scopesGranted: [] },
+      },
+      { kind: "fields", credentials: { refresh_token: "rt-resubmitted" } },
+    );
+
+    expect(again.id).toBe(first.id);
+    expect(await db.select().from(integrationConnections)).toHaveLength(1);
+    expect(upstream.lastTokenRequest()!.form.refresh_token).toBe("rt-resubmitted");
+    const row = await storedRow(first.id);
+    expect(decryptCredentialsToStringMap(row.credentialsEncrypted).refresh_token).toBe("rt-2");
+    expect(row.clientRef).toBe(SYSTEM_CLIENT);
+  });
+
+  it("is refreshed later with the same client, and the rotation is written back", async () => {
+    upstream.setToken({ access_token: "at-fresh", refresh_token: "rt-1", expires_in: 3600 });
+    const conn = await strategy.complete(connectCtx, {
+      kind: "fields",
+      credentials: { refresh_token: "rt-submitted" },
+    });
+    const row = await storedRow(conn.id);
+    upstream.setToken({ access_token: "at-refreshed", refresh_token: "rt-2", expires_in: 3600 });
+
+    const outcome = await refreshConnectionCredential({
+      connection: {
+        id: row.id,
+        authKey: "primary",
+        credentialsEncrypted: row.credentialsEncrypted,
+        clientRef: row.clientRef,
+        oauthResource: row.oauthResource,
+        expiresAt: row.expiresAt,
+        credentialRevision: (await readCredentialRevision(row.id))!,
+      },
+      integrationId: INTEGRATION,
+      authDef: (manifest(upstream.base).auths as Record<string, AfpsManifestAuth>).primary!,
+      scope: connectCtx.scope,
+      actor,
+      trigger: { kind: "rejected", revision: null },
+    });
+
+    expect(outcome.status).toBe("refreshed");
+    expect(upstream.lastTokenRequest()).toEqual({
+      form: { grant_type: "refresh_token", refresh_token: "rt-1", client_id: PUBLIC_CLIENT_ID },
+      authorization: null,
+    });
+    const creds = decryptCredentialsToStringMap((await storedRow(conn.id)).credentialsEncrypted);
+    expect(creds.access_token).toBe("at-refreshed");
+    expect(creds.refresh_token).toBe("rt-2");
+  });
+
+  for (const [label, body, status] of [
+    ["an OAuth error other than invalid_grant", { error: "invalid_request" }, 400],
+    ["a bare 403", "forbidden", 403],
+  ] as const) {
+    it(`refuses the submitted grant on ${label}, before anything is stored`, async () => {
+      upstream.setToken(body, status);
+
+      const err = await submit({ refresh_token: "rt-submitted" });
+
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).status).toBe(400);
+      expect((err as ApiError).code).toBe("login_rejected");
+      expect((err as ApiError).message).toContain(`HTTP ${status}`);
+      expect(await db.select().from(integrationConnections)).toHaveLength(0);
+    });
+  }
+
+  it("reports a throttled token endpoint as a 502 with the grant intact", async () => {
+    upstream.setToken({ error: "slow_down" }, 429);
+
+    const err = await submit({ refresh_token: "rt-submitted" });
+
+    expect((err as ApiError).status).toBe(502);
+    expect((err as ApiError).code).toBe("login_upstream_unavailable");
+    expect((err as ApiError).retryAfter).toBeUndefined();
+    expect((err as ApiError).message).not.toContain("redeemed");
+    expect(await db.select().from(integrationConnections)).toHaveLength(0);
+  });
+
+  it("reports a failing token endpoint as a 502 that may have redeemed the grant", async () => {
+    upstream.setToken({ error: "server_error" }, 503);
+
+    const err = await submit({ refresh_token: "rt-submitted" });
+
+    expect((err as ApiError).status).toBe(502);
+    expect((err as ApiError).code).toBe("login_upstream_unavailable");
+    expect((err as ApiError).message).toContain("may already have redeemed the submitted grant");
+    expect(await db.select().from(integrationConnections)).toHaveLength(0);
+  });
+
+  it("refuses an auth whose client secret cannot be decrypted as a 403, without calling the server", async () => {
+    await seed(
+      manifest(upstream.base, {
+        name: ORG_CLIENT,
+        auth: { token_endpoint_auth_method: "client_secret_post" },
+      }),
+    );
+    const client = await createIntegrationOAuthClient({ orgId: ctx.orgId }, ORG_CLIENT, "primary", {
+      clientId: "org-client",
+      clientSecret: "org-secret",
+    });
+    // A ciphertext under the current key that no longer opens.
+    const [stored] = await db
+      .select({ secret: integrationOauthClients.clientSecretEncrypted })
+      .from(integrationOauthClients)
+      .where(eq(integrationOauthClients.id, client.id));
+    await db
+      .update(integrationOauthClients)
+      .set({ clientSecretEncrypted: stored!.secret.replace(/:[^:]+$/, `:${"A".repeat(64)}`) })
+      .where(eq(integrationOauthClients.id, client.id));
+
+    const err = await submit(
+      { refresh_token: "rt-submitted" },
+      { ...connectCtx, integrationId: ORG_CLIENT },
+    );
+
+    expect((err as ApiError).status).toBe(403);
+    expect(upstream.tokenRequests()).toBe(0);
+  });
+
+  it("is a 409 when the chosen client is gone by the token request, without calling the server", async () => {
+    // Removed between the client choice and the token request.
+    const gone = spyOn(connections, "resolveIntegrationClientById").mockResolvedValueOnce(null);
+    try {
+      const err = await submit({ refresh_token: "rt-submitted" });
+
+      expect((err as ApiError).status).toBe(409);
+      expect((err as ApiError).code).toBe("connection_not_ready");
+      expect(gone).toHaveBeenCalledTimes(1);
+      expect(upstream.tokenRequests()).toBe(0);
+    } finally {
+      gone.mockRestore();
+    }
+  });
+
+  it("wraps a storage fault after a successful token request as a 500 that says so", async () => {
+    upstream.setToken({ access_token: "at-fresh", refresh_token: "rt-rotated", expires_in: 3600 });
+    const fault = new Error("database unavailable");
+    const save = spyOn(connections, "saveIntegrationConnection").mockRejectedValueOnce(fault);
+    try {
+      const err = await submit({ refresh_token: "rt-submitted" });
+
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).status).toBe(500);
+      expect((err as ApiError).code).toBe("internal_error");
+      expect((err as ApiError).message).toContain("already redeemed");
+      expect((err as ApiError).cause).toBe(fault);
+    } finally {
+      save.mockRestore();
+    }
+  });
+
   it("refuses a submission that does not match credentials.schema without calling the server", async () => {
     const err = await submit({ token: "rt" });
 
@@ -342,7 +520,12 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
       { ...connectCtx, integrationId: MISDIRECTED },
     );
 
-    expect(err).toBeInstanceOf(Error);
+    // The read gate drops the invalid manifest, so the integration is not found.
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(404);
+    expect((err as ApiError).message).toBe(
+      `Integration '${MISDIRECTED}' not found in this organization`,
+    );
     expect(upstream.tokenRequests()).toBe(0);
   });
 
