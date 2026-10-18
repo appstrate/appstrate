@@ -327,6 +327,16 @@
   background-color: transparent;
 }
 
+/* Without scroll-driven animations (Firefox stable), shadcn's `scroll-fade-*`
+   falls back to a static fade on both edges, whatever the scroll position,
+   marking edges that hide nothing. No fade there instead: the row just
+   scrolls. Unlayered on purpose, to beat the utility. */
+@supports not (animation-timeline: scroll()) {
+  .scroll-fade-x {
+    --scroll-fade-mask: none;
+  }
+}
+
 /* Previous / next arrows drawn by the browser (`::scroll-button()`): a click
    scrolls about one scrollport, the arrow disables itself at the end, no
    JavaScript. Chromium 135+ only; elsewhere the row just scrolls. Accessible
