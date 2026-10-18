@@ -109,8 +109,13 @@ with `server/discover` (MCP 2026-07-28 — stateless, version and identity in
 each request's `_meta` and `MCP-Protocol-Version` header), retries once on an
 `UnsupportedProtocolVersion` (-32022) listing a shared version, and falls back
 to the 2025 `initialize` handshake when the server gives no modern evidence.
-A legacy verdict is remembered per origin (15 min) so later connects skip the
-probe. `getProtocol()` says which era was negotiated.
+A probe answered 5xx or unanswered within 10 s falls back to `initialize`
+once. A legacy verdict is remembered per origin (15 min) so later connects
+skip the probe; any non-auth failure of such a connect re-probes once.
+`era: "legacy"` skips the probe for a first-party v1 server.
+`getProtocol()` says which era was negotiated. `tools/list` pages are sent as
+requests of their own, and on a modern connection a tool with an invalid
+`x-mcp-header` is excluded and reported through `onWarning`.
 
 Credentials and egress belong to the injected `fetch` (the credential proxy):
 the SDK is never given an auth provider and leaves redirects to it. A fault

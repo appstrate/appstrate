@@ -168,25 +168,37 @@ async function probeServer(url: string, fetchImpl: typeof fetch): Promise<Protec
     if (seen.failure !== undefined) throw unreachable(url, seen.failure);
     const status = httpStatusOf(err) ?? seen.status;
     if (status === 404 || status === 405) return probeSse(url, fetchImpl);
+    // A server that could not answer (the probe, then `initialize`): not a verdict on it.
+    if (status !== undefined && status >= 500) throw unreachable(url, err);
     throw notAnMcpServer(url);
   }
   try {
     const identity = client.getServerVersion();
-    try {
-      await client.listToolsPage();
-    } catch {
-      // Refused without a challenge: still an open server, whose tools could not be read.
+    // The tools ask, judged by what it answers: a Bearer challenge is a protected server.
+    let refusal: unknown;
+    await client.listToolsPage().catch((err: unknown) => {
+      refusal = err ?? new Error("tools/list failed");
+    });
+    if (seen.challenge !== undefined) {
+      return {
+        transport: "streamable-http",
+        transportDetected: true,
+        challenge: seen.challenge,
+        identity,
+      };
     }
-    if (seen.challenge === undefined) {
+    if (refusal !== undefined && !seen.oversized) {
+      // The same reading as the connect's: a fault on the way is the server unreachable, a
+      // 401/403 without a Bearer challenge not an MCP server asking for a credential, a 5xx
+      // a server that could not answer.
       if (seen.failure !== undefined) throw unreachable(url, seen.failure);
-      throw authNotSupported(url);
+      const status = seen.status;
+      if (status === 401 || status === 403) throw notAnMcpServer(url);
+      if (status !== undefined && status >= 500) throw unreachable(url, refusal);
     }
-    return {
-      transport: "streamable-http",
-      transportDetected: true,
-      challenge: seen.challenge,
-      identity,
-    };
+    // It listed its tools — or answered the ask, if past the probe's bound or with a JSON-RPC
+    // error — without a credential: an open server.
+    throw authNotSupported(url);
   } finally {
     await client.close().catch(() => {});
   }
@@ -199,6 +211,8 @@ interface ProbeObservation {
   status?: number;
   /** The fault of the last exchange that failed (a request, or its body cut short). */
   failure?: unknown;
+  /** The last answer exceeded the probe's bound: the server answered, at length. */
+  oversized?: boolean;
 }
 
 /**
@@ -223,17 +237,20 @@ function observingFetch(
       seen.status = res.status;
       const challenge = bearerChallenge(res);
       if (challenge !== undefined) seen.challenge = challenge;
-      const body = await readBodyUnder(res, PROBE_EXCHANGE_MAX_BYTES);
-      if (body === null)
-        throw new Error(`an MCP answer of ${originOf(url)} exceeds the probe's bound`);
       seen.failure = undefined;
+      seen.oversized = false;
+      const body = await readBodyUnder(res, PROBE_EXCHANGE_MAX_BYTES);
+      if (body === null) {
+        seen.oversized = true;
+        throw new Error(`an MCP answer of ${originOf(url)} exceeds the probe's bound`);
+      }
       return new Response(body, {
         status: res.status,
         statusText: res.statusText,
         headers: res.headers,
       });
     } catch (err) {
-      seen.failure = err;
+      if (!seen.oversized) seen.failure = err;
       throw err;
     }
   }) as typeof fetch;

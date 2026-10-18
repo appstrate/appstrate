@@ -50,6 +50,10 @@ const HOSTS = [
   "mcp.dual.test",
   "mcp.retry.test",
   "mcp.big.test",
+  "mcp.toolsbasic.test",
+  "mcp.tools5xx.test",
+  "mcp.toolsbig.test",
+  "mcp.both5xx.test",
   "mcp.offline.test",
   "mcp.online.test",
   "mcp.noscope.test",
@@ -620,7 +624,79 @@ describe("discoverRemoteIntegration", () => {
         { fetchImpl },
       ),
     );
-    expect(err.status).toBe(502);
+    expect({ status: err.status, code: err.code }).toEqual({
+      status: 422,
+      code: "not_an_mcp_server",
+    });
+  });
+
+  /** An open legacy server whose `tools/list` is answered by `tools` instead. */
+  const openThenTools = (url: string, tools: (req: Request) => Response | Promise<Response>) => {
+    const legacy = legacyMcpHandler({ tools: [echo] });
+    return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const req = new Request(String(input), init);
+      if (req.url !== url) return new Response("not found", { status: 404 });
+      const text = req.method === "POST" ? await req.text() : "";
+      const rebuilt = new Request(req.url, {
+        method: req.method,
+        headers: req.headers,
+        ...(text ? { body: text } : {}),
+      });
+      return text.includes('"tools/list"') ? tools(rebuilt) : legacy(rebuilt);
+    }) as typeof fetch;
+  };
+
+  it("reads the tools ask like the probe: a non-Bearer 401 is not an MCP server", async () => {
+    const url = "https://mcp.toolsbasic.test/mcp";
+    const fetchImpl = openThenTools(url, () => unauthorized('Basic realm="x"'));
+    const err = await refusal(discoverRemoteIntegration({ url, orgSlug: "acme" }, { fetchImpl }));
+    expect(err.code).toBe("not_an_mcp_server");
+  });
+
+  it("reads the tools ask like the probe: a 5xx is a server that could not answer", async () => {
+    const url = "https://mcp.tools5xx.test/mcp";
+    const fetchImpl = openThenTools(url, () => new Response("down", { status: 503 }));
+    const err = await refusal(discoverRemoteIntegration({ url, orgSlug: "acme" }, { fetchImpl }));
+    expect({ status: err.status, code: err.code }).toEqual({ status: 502, code: "bad_gateway" });
+  });
+
+  it("takes a first tools page past the probe's bound as an open server's answer", async () => {
+    const url = "https://mcp.toolsbig.test/mcp";
+    const fetchImpl = openThenTools(url, async (req) => {
+      const { id } = (await req.json()) as { id: number };
+      return json({
+        jsonrpc: "2.0",
+        id,
+        result: {
+          tools: [
+            {
+              name: "x",
+              description: "y".repeat(2 * 1024 * 1024),
+              inputSchema: { type: "object" },
+            },
+          ],
+        },
+      });
+    });
+    const err = await refusal(discoverRemoteIntegration({ url, orgSlug: "acme" }, { fetchImpl }));
+    expect(err.code).toBe("remote_mcp_auth_not_supported");
+  });
+
+  it("answers 502 when the probe and initialize both answer 5xx", async () => {
+    const { fetchImpl, seen } = fakeFetch({
+      "POST https://mcp.both5xx.test/mcp": () => new Response("down", { status: 503 }),
+    });
+    const err = await refusal(
+      discoverRemoteIntegration(
+        { url: "https://mcp.both5xx.test/mcp", orgSlug: "acme" },
+        { fetchImpl },
+      ),
+    );
+    expect({ status: err.status, code: err.code }).toEqual({ status: 502, code: "bad_gateway" });
+    expect(seen).toEqual([
+      "POST https://mcp.both5xx.test/mcp",
+      "POST https://mcp.both5xx.test/mcp",
+    ]);
   });
 
   it("falls back to the SSE GET past a generic JSON-RPC error on a 405", async () => {

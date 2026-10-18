@@ -15,6 +15,7 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import type { Implementation } from "@modelcontextprotocol/sdk/types.js";
 export { forgetProtocolEras } from "./client.ts";
+import { parseMcpPost, serveStatelessPost } from "./streamable-post.ts";
 import {
   createMcpServer,
   type AppstrateRequestExtra,
@@ -36,25 +37,50 @@ export interface FakeServerOptions {
   instructions?: string;
 }
 
-/** A 2025-era server: v1 SDK, stateless, JSON answers — a modern request is a 400 to it. */
-export function legacyMcpHandler(opts: FakeServerOptions = {}): McpHandler {
-  return async (request) => {
-    const server = createMcpServer(
+export interface LegacyServerOptions extends FakeServerOptions {
+  /**
+   * A stateful server: `initialize` mints an `Mcp-Session-Id` the client must echo on every
+   * later request (the v1 transport refuses one without it). Stateless when omitted.
+   */
+  stateful?: boolean;
+  /** Answers each request as an SSE stream rather than one JSON body. */
+  sse?: boolean;
+}
+
+/** A 2025-era server on the v1 SDK: a modern request is a 400 to it. */
+export function legacyMcpHandler(opts: LegacyServerOptions = {}): McpHandler {
+  const build = () =>
+    createMcpServer(
       opts.tools ?? [],
       opts.serverInfo ?? { name: "fake-legacy", version: "1.0.0" },
       opts.instructions ? { instructions: opts.instructions } : {},
     );
+  if (opts.stateful) {
+    const server = build();
+    const transport = new WebStandardStreamableHTTPServerTransport({
+      sessionIdGenerator: () => crypto.randomUUID(),
+      enableJsonResponse: !opts.sse,
+    });
+    const ready = server.connect(transport);
+    return async (request) => {
+      await ready;
+      return transport.handleRequest(request);
+    };
+  }
+  return async (request) => {
+    // A stateless server keeps no stream for server-initiated messages.
+    if (request.method !== "POST") return new Response(null, { status: 405 });
+    const body = await request.arrayBuffer();
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
-      enableJsonResponse: true,
+      enableJsonResponse: !opts.sse,
     });
-    try {
-      await server.connect(transport);
-      return await transport.handleRequest(request);
-    } finally {
-      await transport.close();
-      await server.close();
-    }
+    return serveStatelessPost(
+      build(),
+      transport,
+      new Request(request.url, { method: "POST", headers: request.headers, body }),
+      parseMcpPost(body),
+    );
   };
 }
 
@@ -72,6 +98,8 @@ export interface ModernServerOptions extends FakeServerOptions {
    * error lists, never fall back to `initialize`.
    */
   refuseFirst?: number;
+  /** Advertises no `tools` capability in `server/discover`, while still serving `tools/list`. */
+  noToolsCapability?: boolean;
 }
 
 const json = (status: number, body: unknown) =>
@@ -166,7 +194,7 @@ export function modernMcpHandler(opts: ModernServerOptions = {}): McpHandler {
         return result({
           ...cacheable,
           supportedVersions: supported,
-          capabilities: { tools: { listChanged: false } },
+          capabilities: opts.noToolsCapability ? {} : { tools: { listChanged: false } },
           _meta: { [SERVER_INFO_KEY]: serverInfo },
           ...(opts.instructions ? { instructions: opts.instructions } : {}),
         });

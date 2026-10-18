@@ -159,8 +159,8 @@ interface BuildPlatformMcpToolsOptions {
   turnBudget: PiTurnBudget;
   /**
    * Transport for every platform hop the tool layer makes. Production passes the
-   * platform's in-process dispatch, so the MCP handshake (the era probe — once per
-   * process, the platform's server being legacy — then `initialize` / `tools/list`)
+   * platform's in-process dispatch, so the MCP handshake (`initialize` / `tools/list`,
+   * no era probe: the platform's server is legacy by construction)
    * AND each `run_and_wait`'s launch
    * POST + poll loop re-enter the Hono app directly instead of opening real
    * loopback TCP connections to this same process. `run_and_wait` is the heavier
@@ -241,6 +241,8 @@ export async function buildPlatformMcpTools(
   const connect = () =>
     createMcpHttpClient(opts.url, {
       clientInfo: { name: "appstrate-chat-pi", version: "1.0" },
+      // The platform's MCP module is on the v1 SDK, legacy by construction: no era probe.
+      era: "legacy",
       extraHeaders: opts.headers,
       // `initialize` re-enters this process and can wedge: the turn's signal (not a
       // tool call's — a lazy connect is shared) keeps stop and deadline live.

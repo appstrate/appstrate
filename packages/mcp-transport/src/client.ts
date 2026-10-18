@@ -32,9 +32,13 @@ import type { Client as LegacyClient } from "@modelcontextprotocol/sdk/client/in
 import {
   Client as DualEraClient,
   SdkError,
+  SdkErrorCode,
   SdkHttpError,
   StreamableHTTPClientTransport,
+  UnauthorizedError,
 } from "@modelcontextprotocol/client";
+import { createCache } from "@appstrate/core/cache";
+import { readToolListPage, type ToolListPage } from "./tool-list.ts";
 import {
   ErrorCode,
   McpError,
@@ -68,13 +72,27 @@ const DEFAULT_CLIENT_INFO: Implementation = {
  */
 const LEGACY_VERDICT_TTL_MS = 15 * 60_000;
 
-/** Origins found legacy, and until when: their next connect skips the `server/discover` probe. */
-const legacyOrigins = new Map<string, number>();
+/**
+ * Origins found legacy: their next connect skips the `server/discover` probe. Only legacy
+ * verdicts are kept — a modern connect probes anyway, `server/discover` being how it learns the
+ * server's capabilities.
+ */
+const legacyOrigins = createCache<true>({
+  name: "mcp-transport.legacy-origins",
+  ttlMs: LEGACY_VERDICT_TTL_MS,
+});
 
 /** Forget every era verdict: each origin's next connect probes. For tests (`./testing`). */
 export function forgetProtocolEras(): void {
   legacyOrigins.clear();
 }
+
+/**
+ * Bound on the `server/discover` probe (or the caller's `defaultTimeoutMs`, when lower). Over HTTP the SDK reads a probe that times out as an
+ * outage, not a legacy server, and would otherwise wait its 60 s default: past this the connect
+ * tries the legacy handshake instead (see {@link connectOnce}).
+ */
+const ERA_PROBE_TIMEOUT_MS = 10_000;
 
 /** The protocol a connection speaks: its era, and the revision negotiated when the SDK says. */
 export interface McpProtocol {
@@ -97,6 +115,18 @@ export interface AppstrateMcpClientOptions {
 
 /** Options for `createMcpHttpClient`. */
 export interface McpHttpClientOptions extends AppstrateMcpClientOptions {
+  /**
+   * `auto` (default): negotiate the era. `legacy`: the 2025 `initialize` handshake straight
+   * away, no probe — for a first-party server that is legacy by construction (the sidecar's
+   * `/mcp`, the platform's MCP module, both on the v1 SDK).
+   */
+  era?: "auto" | "legacy";
+  /**
+   * Told what the client set aside on its own and the caller would not otherwise see: a tool
+   * excluded from `tools/list` for an invalid `x-mcp-header` (SEP-2243). The SDK's own console
+   * output is never reached; this is its replacement.
+   */
+  onWarning?: (message: string, data: Record<string, unknown>) => void;
   /** Per-run Bearer token. Sent as `Authorization: Bearer <token>`. */
   bearerToken?: string;
   /** Optional `fetch` override (tests inject a mock). */
@@ -236,7 +266,9 @@ export interface AppstrateMcpClient {
  * retries with it) keeps the connection modern and stateless; anything else falls back to the
  * legacy `initialize` handshake. A server found legacy is remembered per origin for
  * {@link LEGACY_VERDICT_TTL_MS}, so its next connects skip the probe; a connect that then fails
- * on protocol grounds re-probes once.
+ * for any reason but an auth refusal re-probes once. A probe answered 5xx or not at all within
+ * {@link ERA_PROBE_TIMEOUT_MS} falls back to the legacy handshake once. `era: "legacy"` skips the
+ * probe for a server legacy by construction.
  *
  * Every request goes through `options.fetch` when given — the credential proxy is injected
  * there — and redirects are left to it (the SDK's own same-origin redirect policy is turned off:
@@ -274,23 +306,56 @@ export async function createMcpHttpClient(
 }
 
 /**
- * One connect, with the per-origin era verdict: a known-legacy origin is connected without the
- * probe; if that fails on protocol grounds (the server moved to the modern era) the verdict is
- * dropped and the connect probes again, once.
+ * One connect, era included.
+ *
+ * - A caller pinning `era: "legacy"` connects with the `initialize` handshake, no probe.
+ * - An origin remembered legacy does too; when that connect fails for any reason but an auth
+ *   refusal or the caller's abort, the verdict is dropped and the connect probes again, once.
+ * - Otherwise the SDK probes. A probe answered 5xx, or unanswered within
+ *   {@link ERA_PROBE_TIMEOUT_MS}, is no era evidence — the SDK reads it as an outage over HTTP —
+ *   so the legacy handshake is tried once; if it fails too, its error is the one surfaced.
  */
 async function connectOnce(
   targetUrl: URL,
   headers: Record<string, string>,
   options: McpHttpClientOptions,
 ): Promise<AppstrateMcpClient> {
+  if (options.era === "legacy") return connectAttempt(targetUrl, headers, options, "legacy");
   const origin = targetUrl.origin;
-  const knownLegacy = (legacyOrigins.get(origin) ?? 0) > Date.now();
+  if (legacyOrigins.peek(origin)) {
+    try {
+      return await connectAttempt(targetUrl, headers, options, "legacy");
+    } catch (err) {
+      if (options.signal?.aborted || isAuthRefusal(err)) throw err;
+      legacyOrigins.invalidate(origin);
+      return await connectAttempt(targetUrl, headers, options, "auto");
+    }
+  }
   try {
-    return await connectAttempt(targetUrl, headers, options, knownLegacy);
+    return await connectAttempt(targetUrl, headers, options, "auto");
   } catch (err) {
-    if (!knownLegacy || !isProtocolRefusal(err) || options.signal?.aborted) throw err;
-    legacyOrigins.delete(origin);
-    return await connectAttempt(targetUrl, headers, options, false);
+    if (!(err instanceof ProbeInconclusive) || options.signal?.aborted) throw err;
+    return await connectAttempt(targetUrl, headers, options, "legacy");
+  }
+}
+
+/** A probe that said nothing of the era (5xx, timeout): carries the SDK's error as `cause`. */
+class ProbeInconclusive extends Error {
+  constructor(cause: unknown) {
+    super(`MCP era probe inconclusive: ${cause instanceof Error ? cause.message : String(cause)}`, {
+      cause,
+    });
+  }
+}
+
+/** The JSON-RPC method of a POST body, when it is one request. */
+function postedMethod(init: RequestInit | undefined): string | undefined {
+  if (typeof init?.body !== "string") return undefined;
+  try {
+    const method = (JSON.parse(init.body) as { method?: unknown }).method;
+    return typeof method === "string" ? method : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -298,14 +363,18 @@ async function connectAttempt(
   targetUrl: URL,
   headers: Record<string, string>,
   options: McpHttpClientOptions,
-  knownLegacy: boolean,
+  era: "auto" | "legacy",
 ): Promise<AppstrateMcpClient> {
   // The SDK wraps a fault of the era probe's request in an `SdkError` of its own; the fault the
   // injected fetch threw (a credential proxy's refusal, a socket error) is what the caller asked
-  // for, so it is handed back as itself.
+  // for, so it is handed back as itself. The methods sent tell a failed probe from a failed
+  // handshake.
   const baseFetch = options.fetch ?? fetch;
   const fetchFaults = new WeakSet<object>();
+  let pastProbe = false;
   const observedFetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const method = postedMethod(init);
+    if (method !== undefined && method !== "server/discover") pastProbe = true;
     try {
       return await baseFetch(input, init);
     } catch (err) {
@@ -319,29 +388,44 @@ async function connectAttempt(
     fetch: observedFetch,
   });
   const client = new DualEraClient(options.clientInfo ?? DEFAULT_CLIENT_INFO, {
-    versionNegotiation: { mode: "auto" },
+    versionNegotiation: {
+      mode: "auto",
+      // A caller's own per-call bound, when tighter, bounds the probe too.
+      probe: { timeoutMs: Math.min(ERA_PROBE_TIMEOUT_MS, options.defaultTimeoutMs ?? Infinity) },
+    },
   });
   try {
-    await connectWithSignal(client, transport, options.signal, knownLegacy);
+    await connectWithSignal(client, transport, options.signal, era === "legacy");
   } catch (err) {
     await transport.close().catch(() => {});
     const cause = err instanceof SdkError ? err.cause : undefined;
-    throw typeof cause === "object" && cause !== null && fetchFaults.has(cause) ? cause : err;
+    if (typeof cause === "object" && cause !== null && fetchFaults.has(cause)) throw cause;
+    if (era === "auto" && !pastProbe && isInconclusiveProbe(err)) throw new ProbeInconclusive(err);
+    throw err;
   }
   if (client.getProtocolEra() === "legacy") {
-    legacyOrigins.set(targetUrl.origin, Date.now() + LEGACY_VERDICT_TTL_MS);
-  } else {
-    legacyOrigins.delete(targetUrl.origin);
+    if (options.era !== "legacy") legacyOrigins.set(targetUrl.origin, true);
+  } else if (legacyOrigins.peek(targetUrl.origin)) {
+    legacyOrigins.invalidate(targetUrl.origin);
   }
-  return buildClient(dualEraSession(client), transport, options.defaultTimeoutMs);
+  return buildClient(
+    dualEraSession(client, options.onWarning),
+    transport,
+    options.defaultTimeoutMs,
+  );
 }
 
-/** A refusal on protocol grounds: a 4xx other than an auth or rate answer. */
-function isProtocolRefusal(err: unknown): boolean {
+/** A probe answered 5xx, or not at all in time. */
+function isInconclusiveProbe(err: unknown): boolean {
   const status = httpStatusOf(err);
-  return (
-    status !== undefined && status >= 400 && status < 500 && ![401, 403, 408, 429].includes(status)
-  );
+  if (status !== undefined) return status >= 500;
+  return err instanceof SdkError && err.code === SdkErrorCode.RequestTimeout;
+}
+
+/** A 401/403: the credential's verdict, which no other era would change. */
+function isAuthRefusal(err: unknown): boolean {
+  const status = httpStatusOf(err);
+  return status === 401 || status === 403 || err instanceof UnauthorizedError;
 }
 
 /**
@@ -425,8 +509,14 @@ async function connectWithRetry(
     try {
       // The caller's signal reaches each ATTEMPT, not just the sleep below: without it an abort
       // raised while one handshake is in flight waits out that handshake.
-      return await connectOnce(targetUrl, headers, options);
+      // The deadline bounds the attempt in flight too, not only the sleeps between attempts.
+      const budget = AbortSignal.timeout(Math.max(1, deadlineAt - Date.now()));
+      const signal = externalSignal ? AbortSignal.any([externalSignal, budget]) : budget;
+      return await connectOnce(targetUrl, headers, { ...options, signal });
     } catch (err) {
+      if (!externalSignal?.aborted && Date.now() >= deadlineAt) {
+        throw buildDeadlineExceededError(deadlineMs, err, extractErrorCode(err));
+      }
       lastError = err;
       lastErrorCode = extractErrorCode(err);
 
@@ -667,8 +757,33 @@ interface SdkSession {
   close(): Promise<void>;
 }
 
+/** Bounds a server answering `nextCursor` forever, as the SDK's own walk does. */
+const MAX_TOOL_PAGES = 64;
+
 /** A connected v2 (dual-era) client. */
-function dualEraSession(client: DualEraClient): SdkSession {
+function dualEraSession(
+  client: DualEraClient,
+  onWarning: McpHttpClientOptions["onWarning"],
+): SdkSession {
+  // The definitions listed, for `callTool`'s `x-mcp-header` mirroring and output validation: the
+  // SDK reads them from its own `listTools()` cache otherwise, which this session never fills.
+  const listed = new Map<string, Tool>();
+  // Every page is a raw request: the SDK's `listTools()` answers `[]` without asking a server
+  // that advertises no `tools` capability, as v1 never did.
+  const page = async (cursor: string | undefined, options: SessionRequestOptions) => {
+    // The SDK validates a spec method's result itself (an explicit schema does not bypass it):
+    // a page without `tools` is its typed `INVALID_RESULT`, never a TypeError here.
+    const raw = await client.request(
+      { method: "tools/list", params: cursor ? { cursor } : {} },
+      options,
+    );
+    const read: ToolListPage = readToolListPage(raw, client.getProtocolEra() === "modern");
+    for (const { name, reason } of read.excluded) {
+      onWarning?.(`MCP tool '${name}' excluded from tools/list: ${reason}`, { tool: name, reason });
+    }
+    for (const tool of read.tools) listed.set(tool.name, tool);
+    return read;
+  };
   return {
     capabilities: () => client.getServerCapabilities() as ServerCapabilities | undefined,
     serverVersion: () => client.getServerVersion() as Implementation | undefined,
@@ -678,22 +793,26 @@ function dualEraSession(client: DualEraClient): SdkSession {
       return era ? { era, version: client.getNegotiatedProtocolVersion() } : undefined;
     },
     async listTools(options) {
-      const result = await client.listTools(undefined, options);
-      return { tools: result.tools as Tool[] };
+      const tools: Tool[] = [];
+      let cursor: string | undefined;
+      for (let n = 0; n < MAX_TOOL_PAGES; n++) {
+        const read = await page(cursor, options);
+        tools.push(...read.tools);
+        if (read.nextCursor === undefined || read.nextCursor === cursor) return { tools };
+        cursor = read.nextCursor;
+      }
+      throw new Error(`tools/list did not end within ${MAX_TOOL_PAGES} pages`);
     },
     async listToolsPage(cursor, options) {
-      // A `cursor` asks the SDK for one page; without one it walks them all, so the first page
-      // goes as a raw request.
-      const page = cursor
-        ? await client.listTools({ cursor }, options)
-        : await client.request({ method: "tools/list", params: {} }, options);
-      return {
-        tools: page.tools as Tool[],
-        ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
-      };
+      const read = await page(cursor, options);
+      return { tools: read.tools, ...(read.nextCursor ? { nextCursor: read.nextCursor } : {}) };
     },
     async callTool(args, options) {
-      return (await client.callTool(args, options)) as CallToolResult;
+      const toolDefinition = listed.get(args.name);
+      return (await client.callTool(args, {
+        ...options,
+        ...(toolDefinition ? { toolDefinition: toolDefinition as never } : {}),
+      })) as CallToolResult;
     },
     async readResource(args, options) {
       return (await client.readResource(args, options)) as ReadResourceResult;

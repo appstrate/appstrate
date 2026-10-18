@@ -182,7 +182,11 @@ export async function syncIntegrationFromServer(input: {
   let client: AppstrateMcpClient | undefined;
   let exchanged;
   try {
-    client = await createMcpHttpClient(url, { fetch: proxied, signal: deadline });
+    client = await createMcpHttpClient(url, {
+      fetch: proxied,
+      signal: deadline,
+      onWarning: (message, data) => logger.warn(message, { packageId, ...data }),
+    });
     const { tools, truncated } = await listAllTools(client, deadline);
     exchanged = {
       tools,
