@@ -1395,7 +1395,8 @@ export function createIntegrationsRouter() {
       errors: err.fieldErrors,
       headers: err.headers,
       extensions: { ...err.extensions, connect_session_ended: true },
-      cause: err.cause ?? err,
+      // Only the original cause: the error handler logs any cause at error level.
+      cause: err.cause,
     });
   }
 
