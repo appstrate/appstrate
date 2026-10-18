@@ -12,6 +12,8 @@ interface CreationHandoffChoicesProps {
   resource: CreationResource;
   onManual: () => void;
   onChat: (prompt: string) => void;
+  /** Display name of the integration an agent starts with, mentioned in the Chat draft. */
+  integrationName?: string;
   /** The guided way from an MCP server URL, offered first when set (integrations). */
   onFromUrl?: () => void;
 }
@@ -52,11 +54,12 @@ export function CreationHandoffChoices({
   onManual,
   onChat,
   onFromUrl,
+  integrationName,
 }: CreationHandoffChoicesProps) {
   const { t } = useTranslation("settings");
   const canReach = useCanReach();
   const translatePrompt = (key: string, values?: Record<string, string>) => t(key, values);
-  const chatPrompt = buildChatCreationDraft(resource, translatePrompt);
+  const chatPrompt = buildChatCreationDraft(resource, translatePrompt, integrationName);
   const manual = MANUAL_KEYS[resource] ?? {
     title: "creation.manual.title",
     description: "creation.manual.description",

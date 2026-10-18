@@ -813,6 +813,7 @@
   "createAgent.prompt": "Prompt",
   "createAgent.promptPlaceholder": "What the agent should do on every run…",
   "createAgent.promptHint": "The agent's prompt (prompt.md): you can change it later in the agent's files.",
+  "createAgent.useIntegration": "Use the {{name}} integration",
   "editor.fieldDescLabel": "Description",
   "editor.fieldAdvanced": "Advanced options",
   "editor.fieldFormat": "Format",

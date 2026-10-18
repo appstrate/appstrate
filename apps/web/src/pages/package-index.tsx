@@ -37,6 +37,7 @@ import { SpaceLibraryHint } from "../components/space-library-hint";
 import { usePermissions } from "../hooks/use-permissions";
 import { CreateAgentModal } from "../components/create-agent-modal";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
+import { useIntegrationDetail } from "../hooks/use-integrations";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
 
 type IndexType = Extract<PackageType, "agent" | "skill" | "mcp-server">;
@@ -126,7 +127,7 @@ function PackageIndexBody({
   const { t } = useTranslation(["agents", "settings", "common"]);
   const { can } = usePermissions();
   const [importing, setImporting] = useState(false);
-  const [creatingAgent, setCreatingAgent] = useState(false);
+  const [creatingAgent, setCreatingAgent] = useState<{ integrationId: string | null } | null>(null);
   const list = useListParams(["origin", "activity"]);
   const [view, setView] = useListView(type);
   const { columns, menu } = useColumnVisibility(`packages-${type}`, usePackageColumns(type));
@@ -137,6 +138,10 @@ function PackageIndexBody({
   const canImport = PACKAGE_WRITE_PERMISSIONS.some(can);
   const canActivate = can(spacePackagePermission(type, "activate"));
   const creation = useCreationHandoff(type, canCreate);
+  // An id that resolves to nothing (typo, out of reach) is not offered: the draft stays plain.
+  const integrationName = useIntegrationDetail(
+    creation.isOpen ? (creation.integrationId ?? undefined) : undefined,
+  ).data?.manifest.display_name;
   const words = presentation(type, t);
   const createAction: MenuAction = {
     id: "create",
@@ -194,8 +199,11 @@ function PackageIndexBody({
         onViewChange={setView}
       />
       {importing && canImport && <ImportModal onClose={() => setImporting(false)} />}
-      {creatingAgent && canCreate && type === "agent" && (
-        <CreateAgentModal onClose={() => setCreatingAgent(false)} />
+      {creatingAgent !== null && canCreate && type === "agent" && (
+        <CreateAgentModal
+          integrationId={creatingAgent.integrationId ?? undefined}
+          onClose={() => setCreatingAgent(null)}
+        />
       )}
       {creation.isOpen && (
         <CreationHandoffModal
@@ -210,10 +218,11 @@ function PackageIndexBody({
             // The chooser hands over to the agent dialog; other types have a page of their own.
             if (type === "agent") {
               creation.close();
-              setCreatingAgent(true);
+              setCreatingAgent({ integrationId: creation.integrationId });
             } else creation.leave(packageNewPath(type));
           }}
           onChat={creation.openChat}
+          integrationName={integrationName}
         />
       )}
     </>

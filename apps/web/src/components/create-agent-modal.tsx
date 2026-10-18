@@ -10,7 +10,9 @@ import { useCreatePackage } from "../hooks/use-mutations";
 import { useAuth } from "../hooks/use-auth";
 import { useOrg } from "../hooks/use-org";
 import { defaultEditorState } from "./agent-editor/utils";
-import { packageCreateBody } from "../lib/package-file-drafts";
+import { newAgentCreateBody } from "../lib/agent-creation";
+import { useIntegrationDetail } from "../hooks/use-integrations";
+import { CheckboxField } from "./app-ui/checkbox-field";
 import { packageDetailPath } from "../lib/package-paths";
 import { errorMessage } from "../lib/mutation-error";
 import { toLiveSlug, toSlug } from "../lib/strings";
@@ -20,7 +22,14 @@ import { toLiveSlug, toSlug } from "../lib/strings";
  * prompt. Everything else (schema, skills, integrations, timeout, appearance) is set in its
  * settings, where the agent is edited. Mounted by the caller while open.
  */
-export function CreateAgentModal({ onClose }: { onClose: () => void }) {
+export function CreateAgentModal({
+  onClose,
+  integrationId,
+}: {
+  onClose: () => void;
+  /** An integration to start the agent with; offered only when it resolves in this space. */
+  integrationId?: string;
+}) {
   const { t } = useTranslation(["agents", "common"]);
   const { user } = useAuth();
   const { currentOrg } = useOrg();
@@ -32,25 +41,25 @@ export function CreateAgentModal({ onClose }: { onClose: () => void }) {
   const [description, setDescription] = useState("");
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [useIntegration, setUseIntegration] = useState(true);
+  // Never trusted blindly: an id the caller cannot read (or a typo) resolves to nothing and is not offered.
+  const offered = useIntegrationDetail(integrationId).data?.manifest;
+  const integration = offered !== undefined && useIntegration;
   const valid = displayName.trim() !== "" && SLUG_REGEX.test(id) && prompt.trim() !== "";
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
     setError(null);
-    const base = defaultEditorState(currentOrg?.slug, user?.email);
     create.mutate(
-      packageCreateBody(
-        {
-          manifest: {
-            ...base.manifest,
-            name: `@${currentOrg?.slug}/${id}`,
-            display_name: displayName.trim(),
-            description: description.trim(),
-          },
-          operations: [{ op: "write", path: "prompt.md", text: prompt }],
-        },
-        "agent",
-      ),
+      newAgentCreateBody({
+        base: defaultEditorState(currentOrg?.slug, user?.email),
+        orgSlug: currentOrg?.slug,
+        slug: id,
+        displayName,
+        description,
+        prompt,
+        integrationId: integration ? integrationId : undefined,
+      }),
       {
         onSuccess: (created) => navigate(packageDetailPath("agent", created.id)),
         onError: (err) => setError(errorMessage(err)),
@@ -101,6 +110,14 @@ export function CreateAgentModal({ onClose }: { onClose: () => void }) {
         value={description}
         onChange={setDescription}
       />
+      {offered && (
+        <CheckboxField
+          id="create-agent-integration"
+          checked={useIntegration}
+          onCheckedChange={(checked) => setUseIntegration(checked === true)}
+          label={t("createAgent.useIntegration", { name: offered.display_name })}
+        />
+      )}
       <FormField
         id="create-agent-prompt"
         label={t("createAgent.prompt")}

@@ -33,6 +33,7 @@ import { useCreatePackage } from "../hooks/use-mutations";
 import { usePackageDetail } from "../hooks/use-packages";
 import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-integrations";
 import { encodeIconDataUri } from "../lib/icon-image";
+import { agentCreationWithIntegrationPath } from "../lib/creation-handoff";
 import { packageDetailPath } from "../lib/package-paths";
 import {
   declaredToolNames,
@@ -245,7 +246,9 @@ function ExistingPackageWizard({ packageId }: { packageId: string }) {
         ) : (
           <ErrorState />
         ))}
-      {step === "ready" && <ReadyStep detail={detail} detailPath={detailPath} />}
+      {step === "ready" && (
+        <ReadyStep packageId={packageId} detail={detail} detailPath={detailPath} />
+      )}
       {step !== "ready" && step !== "notRemote" && (
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" asChild>
@@ -260,7 +263,15 @@ function ExistingPackageWizard({ packageId }: { packageId: string }) {
   );
 }
 
-function ReadyStep({ detail, detailPath }: { detail: IntegrationDetailWire; detailPath: string }) {
+function ReadyStep({
+  packageId,
+  detail,
+  detailPath,
+}: {
+  packageId: string;
+  detail: IntegrationDetailWire;
+  detailPath: string;
+}) {
   const { t } = useTranslation("agents");
   const { can } = usePermissions();
   const manifest = detail.manifest as Record<string, unknown>;
@@ -280,7 +291,9 @@ function ReadyStep({ detail, detailPath }: { detail: IntegrationDetailWire; deta
         {/* The agent creation hand-off; it opens only for a caller who may create one. */}
         {can("agents:write") && (
           <Button asChild>
-            <Link to="/agents?create=agent">{t("integrationWizard.ready.useInAgent")}</Link>
+            <Link to={agentCreationWithIntegrationPath(packageId)}>
+              {t("integrationWizard.ready.useInAgent")}
+            </Link>
           </Button>
         )}
         <Button variant="outline" asChild>

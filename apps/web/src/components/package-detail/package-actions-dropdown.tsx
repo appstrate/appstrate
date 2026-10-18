@@ -36,6 +36,8 @@ import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { useSpaceLabelOf } from "../../hooks/use-spaces";
 import { splitPackageRef } from "../../lib/package-paths";
 import { catalogueHref } from "../../lib/catalogue-link";
+import { agentCreationWithIntegrationPath } from "../../lib/creation-handoff";
+import { PACKAGE_TYPE_ICON } from "../../lib/package-type-icon";
 import { ConfirmModal } from "../confirm-modal";
 import { RemoveFromSpaceConfirm } from "../remove-from-space-confirm";
 import { ForkPackageModal } from "../fork-package-modal";
@@ -170,6 +172,15 @@ export function PackageActionsDropdown({
   const published = (detail?.version_count ?? 0) > 0;
 
   const entries: PackageMenuEntry[] = [
+    {
+      id: "use-in-agent",
+      group: "build",
+      icon: PACKAGE_TYPE_ICON.agent,
+      label: t("integrationWizard.ready.useInAgent"),
+      // A run resolves an integration's published version, in a space where it is active.
+      hidden: type !== "integration" || !published || isActiveHere !== true || !can("agents:write"),
+      onSelect: () => navigate(agentCreationWithIntegrationPath(packageId)),
+    },
     {
       id: "catalogue",
       group: "build",
