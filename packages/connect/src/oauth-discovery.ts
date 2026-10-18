@@ -74,6 +74,13 @@ export interface OAuthEndpointResolution {
    */
   grantTypesSupported?: string[];
   /**
+   * `client_id_metadata_document_supported` (OAuth Client ID Metadata
+   * Document draft, MCP 2026-07-28 client registration): the AS accepts an
+   * HTTPS URL as `client_id` and fetches the client's metadata from it.
+   * `undefined` unless the document carries a boolean.
+   */
+  clientIdMetadataDocumentSupported?: boolean;
+  /**
    * RFC 8414 §2 `scopes_supported`. Tells whether the AS issues refresh tokens on the OIDC
    * `offline_access` scope, which an MCP client then requests (`undefined` when omitted).
    */
@@ -166,6 +173,7 @@ interface DiscoveredMetadata {
   userinfoEndpoint?: string;
   registrationEndpoint?: string;
   grantTypesSupported?: string[];
+  clientIdMetadataDocumentSupported?: boolean;
   scopesSupported?: string[];
   issuer?: string;
   authorizationResponseIssParameterSupported?: boolean;
@@ -245,6 +253,9 @@ async function discover(
     found.userinfoEndpoint ??= urlString(doc.userinfo_endpoint);
     found.registrationEndpoint ??= urlString(doc.registration_endpoint);
     found.grantTypesSupported ??= stringArray(doc.grant_types_supported);
+    if (typeof doc.client_id_metadata_document_supported === "boolean") {
+      found.clientIdMetadataDocumentSupported ??= doc.client_id_metadata_document_supported;
+    }
     found.scopesSupported ??= stringArray(doc.scopes_supported);
     if (
       found.authorizationEndpoint &&
@@ -276,6 +287,7 @@ interface DiscoveryDocument {
   code_challenge_methods_supported?: unknown;
   registration_endpoint?: unknown;
   grant_types_supported?: unknown;
+  client_id_metadata_document_supported?: unknown;
   scopes_supported?: unknown;
   authorization_response_iss_parameter_supported?: unknown;
 }

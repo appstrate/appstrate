@@ -408,6 +408,16 @@ export const envSchema = z
     INTEGRATION_REFRESH_MAX_FAILURES: z.coerce.number().int().positive().default(5),
     INTEGRATION_REFRESH_GRACE_SECONDS: z.coerce.number().int().nonnegative().default(3600),
 
+    // How an auto-provisioned integration OAuth client (remote MCP, public
+    // client) is acquired from an authorization server advertising
+    // `client_id_metadata_document_supported`:
+    //   - "on"  — this instance's Client ID Metadata Document, when `APP_URL`
+    //             is public https (else DCR, as for a server without CIMD);
+    //   - "off" — always RFC 7591 dynamic registration: for an instance whose
+    //             `APP_URL` the authorization servers cannot fetch (internal
+    //             hostname, split DNS, access proxy) or refuse.
+    INTEGRATION_OAUTH_CIMD: z.enum(["on", "off"]).default("on"),
+
     // Modules (comma-separated specifiers). LLM calls go through the run's
     // sidecar `/llm` proxy — retry is handled by the Pi SDK natively
     // (Retry-After honoring + jitter). The default set is the

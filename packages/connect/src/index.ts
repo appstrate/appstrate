@@ -101,13 +101,18 @@ export {
 export {
   initiateIntegrationOAuth,
   handleIntegrationOAuthCallback,
+  CLIENT_METADATA_REDIRECT_TAG_PREFIX,
+  isClientMetadataRedirectTag,
   OAUTH_STATE_TTL_SECONDS,
 } from "./integration-oauth.ts";
 // Only the callback-result type crosses the package boundary (apps/api's
 // integrations route + connect strategy). The initiate-side input/result
 // shapes stay internal — callers build the argument inline and read the
 // result via inference.
-export type { IntegrationOAuthCallbackResult } from "./integration-oauth.ts";
+export type {
+  AuthorizationServerBinding,
+  IntegrationOAuthCallbackResult,
+} from "./integration-oauth.ts";
 
 // MCP-spec auto-DCR primitives (RFC 9728 protected-resource discovery + RFC 7591
 // dynamic client registration). The apps/api orchestrator chains these to

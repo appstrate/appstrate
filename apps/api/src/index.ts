@@ -49,6 +49,7 @@ import { ORG_PATH_MIDDLEWARE } from "./middleware/org-path-context.ts";
 import meRouter from "./routes/me.ts";
 import profileRouter from "./routes/profile.ts";
 import invitationsRouter from "./routes/invitations.ts";
+import { createOAuthClientMetadataRouter } from "./routes/oauth-client-metadata.ts";
 import welcomeRouter from "./routes/welcome.ts";
 import { swaggerUI } from "@hono/swagger-ui";
 import { createOpenApiSpecRouter } from "./routes/openapi-spec.ts";
@@ -384,6 +385,9 @@ app.route(LLM_PROXY_MOUNT, createLlmProxyRouter());
 
 // Public invitation routes (no auth required — path doesn't start with /api/ or /auth/)
 app.route("/invite", invitationsRouter);
+
+// Public OAuth Client ID Metadata Documents, fetched by integration authorization servers.
+app.route("/oauth", createOAuthClientMetadataRouter());
 
 // Welcome route (authenticated, cookie-based — org context not required)
 app.route("/api", welcomeRouter);

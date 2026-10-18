@@ -1191,15 +1191,17 @@ the entry of `authorization_servers` equal to the rendered `issuer` when you dec
 — a template over the remote URL's variables — and otherwise one with the rendered URL's
 origin, and refuses the connection when there is none. Endpoints come from RFC 8414
 discovery of that server alone, and the RFC 8707 `resource` is always sent for a remote
-source. The client is registered by RFC 7591 Dynamic Client Registration as a public
-client, one per authorization server and integration (and space), and the redirect URI
-is distinct per server.
+source. The client is this instance's OAuth Client ID Metadata Document for that server
+when the server advertises `client_id_metadata_document_supported` and the instance is
+served from a public https `APP_URL` (nothing is registered), else one registered by
+RFC 7591 Dynamic Client Registration as a public client, one per authorization server and
+integration (and space); either way the redirect URI is distinct per server.
 
 Declare `issuer` when the product may be served under a path prefix: its authorization
 server is then `https://host/prefix`, which does not have the origin of the rendered URL.
 `@appstrate/gitlab-mcp` declares `"issuer": "{$variable.base_url}"` for that reason.
 
-A server without dynamic client registration cannot be connected: an admin cannot
+A server offering neither (or only CIMD, to an instance on localhost) cannot be connected: an admin cannot
 register a client by hand for an auth whose server each connection names. Declare
 `token_endpoint_auth_method: "none"` and the scopes the server expects in
 `default_scopes`.

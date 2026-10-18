@@ -59,6 +59,7 @@ import {
   registerDynamicClient,
   DynamicClientRegistrationError,
   OAUTH_STATE_TTL_SECONDS,
+  isClientMetadataRedirectTag,
   sameUrlIdentifier,
 } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
@@ -68,6 +69,12 @@ import {
   variableRefs,
 } from "@appstrate/afps-shared/connection-variables";
 import { egressFetchImpl, isBlockedEgressUrl } from "../lib/egress-host-guard.ts";
+import {
+  clientMetadataDocumentUrl,
+  issuerOfClientMetadataDocumentRef,
+  presentsClientMetadataDocument,
+  platformClientName,
+} from "../lib/integration-client-metadata.ts";
 import {
   resolveSystemClientForAuth,
   getDefaultSystemIntegrationClient,
@@ -127,12 +134,15 @@ import {
 } from "../lib/package-helpers.ts";
 import {
   integrationCallbackUrl,
+  clientMetadataCallbackUrlFor,
+  authorizationServerTag,
   integrationCallbackUrlFor,
+  redirectTagOf,
 } from "../lib/integration-callback-url.ts";
 import { CONNECTION_LABEL_MAX, toMintedLabel } from "../lib/connection-label.ts";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
-import type { Actor, ResolvedOAuthClient } from "@appstrate/connect";
+import type { Actor, AuthorizationServerBinding, ResolvedOAuthClient } from "@appstrate/connect";
 import {
   resolveIntegrationToolCatalog,
   readDefaultTools,
@@ -955,23 +965,32 @@ function assertClientAuth(
   }
   if (!autoProvisioned && hasPerConnectionAuthServer(manifest, auth)) {
     throw invalidRequest(
-      `Integration '${manifest.name}' auth '${authKey}' chooses its authorization server per connection, so its OAuth client is registered automatically with each server (DCR); a manual client, bound to one server, must not be registered.`,
+      `Integration '${manifest.name}' auth '${authKey}' chooses its authorization server per connection, so its OAuth client is provisioned automatically for each server (client metadata document or DCR); a manual client, bound to one server, must not be registered.`,
     );
   }
   if (!autoProvisioned && usesAutoProvisionedClient(manifest, auth)) {
     throw invalidRequest(
-      `Integration '${manifest.name}' auth '${authKey}' provisions its OAuth client automatically at connect time (DCR); a manual client must not be registered. Connect without supplying credentials, or delete the existing client to restore auto-registration.`,
+      `Integration '${manifest.name}' auth '${authKey}' provisions its OAuth client automatically at connect time (client metadata document or DCR); a manual client must not be registered. Connect without supplying credentials, or delete the existing client to restore auto-registration.`,
     );
   }
 }
 
-/** `owner`'s custom clients for the auth, decrypted, oldest-first; a space also sees its org's. */
+/**
+ * `owner`'s custom clients for the auth, decrypted, oldest-first; a space also sees its org's.
+ *
+ * `selectable` (the default) returns the manual rows only — the clients a classic flow and the
+ * default picker choose among: an auto-provisioned (DCR) row is the machine client of one server,
+ * found by {@link getAutoProvisionedClient} on the auto-provisioned path alone — never a classic
+ * flow's client nor a default an admin picks, even once a new version made its auth classic.
+ * `all` adds them back, for the listing that displays them and lets an admin delete them.
+ */
 async function loadClientTiers(
   owner: ClientOwner,
   packageId: string,
   authKey: string,
+  rows: "selectable" | "all" = "selectable",
 ): Promise<{ space: IntegrationOAuthClientWithSecret[]; org: IntegrationOAuthClientWithSecret[] }> {
-  const rows = await db
+  const found = await db
     .select()
     .from(integrationOauthClients)
     .where(
@@ -979,10 +998,11 @@ async function loadClientTiers(
         isSpaceOwner(owner) ? spaceVisibleFilter(owner) : tierFilter(owner),
         eq(integrationOauthClients.integrationId, packageId),
         eq(integrationOauthClients.authKey, authKey),
+        rows === "selectable" ? eq(integrationOauthClients.autoProvisioned, false) : undefined,
       ),
     )
     .orderBy(integrationOauthClients.createdAt);
-  const clients = rows.map(projectClientWithSecret);
+  const clients = found.map(projectClientWithSecret);
   return {
     space: clients.filter((c) => c.spaceId !== null),
     org: clients.filter((c) => c.spaceId === null),
@@ -1067,7 +1087,13 @@ async function hasTierDefault(
     .select({ id: integrationOauthClients.id })
     .from(integrationOauthClients)
     .where(
-      and(tierAuthFilter(owner, packageId, authKey), eq(integrationOauthClients.isDefault, true)),
+      and(
+        tierAuthFilter(owner, packageId, authKey),
+        eq(integrationOauthClients.isDefault, true),
+        // A flag an auto-provisioned row still carries (registered before DCR rows stopped being
+        // defaults) is inert: no flow or picker reads it.
+        eq(integrationOauthClients.autoProvisioned, false),
+      ),
     )
     .limit(1);
   return row !== undefined;
@@ -1187,14 +1213,14 @@ export async function createIntegrationOAuthClient(
 ): Promise<IntegrationOAuthClientWithSecret> {
   if (isSpaceOwner(owner)) await assertSpaceInScope(owner);
   const autoProvisioned = opts.autoProvisioned ?? false;
+  assertRedirectUriNotReserved(input.redirectUri, autoProvisioned);
   const issuer = opts.issuer ?? null;
   assertClientAuth(await loadManifestOrThrow(owner, packageId), authKey, autoProvisioned);
 
-  // An auto-provisioned client of the manifest's server is the default; one per issuer is selected
-  // by its issuer (several coexist). A classic client wins the default only when none holds it.
-  const isDefault = autoProvisioned
-    ? issuer === null
-    : !(await hasTierDefault(owner, packageId, authKey));
+  // An auto-provisioned client is never a default: the auto-provisioned path finds it by its
+  // issuer (`getAutoProvisionedClient`), and no classic flow or default picker ever sees it. A
+  // classic client wins the default only when no manual client holds it.
+  const isDefault = !autoProvisioned && !(await hasTierDefault(owner, packageId, authKey));
 
   // Creation always supplies the field (blank means "register a public
   // client"), so the encoder never returns the preserve sentinel here.
@@ -1220,8 +1246,10 @@ export async function createIntegrationOAuthClient(
       })
       .returning();
   const [row] = await insert(isDefault).catch((err: unknown) => {
-    // A concurrent write took the tier's first default: land as non-default.
-    if (!isDefault || autoProvisioned || !isUniqueViolation(err)) throw err;
+    // A concurrent write took the tier's first default — or an auto-provisioned row registered
+    // before DCR rows stopped being defaults still holds the flag: land as non-default (the
+    // manual tier's `pickDefault` falls back to its first client anyway).
+    if (!isDefault || !isUniqueViolation(err)) throw err;
     return insert(false);
   });
 
@@ -1259,6 +1287,8 @@ export async function updateIntegrationOAuthClient(
   client: IntegrationOAuthClientWithSecret;
 }> {
   if (isSpaceOwner(owner)) await assertSpaceInScope(owner);
+  // Only a manual client reaches an edit (auto-provisioned ones are refused below).
+  assertRedirectUriNotReserved(input.redirectUri, false);
   const byId = clientByIdFilter(owner, packageId, clientId);
   const [existing] = await db.select().from(integrationOauthClients).where(byId).limit(1);
   if (!existing) {
@@ -1383,16 +1413,27 @@ function moveClientToOrg(
         `OAuth client '${clientId}' is auto-provisioned (DCR), and the organization already holds the auto-provisioned client of this auth${existing.issuer ? ` for ${existing.issuer}` : ""}. Reconnect this space's connections to move them onto it, then delete this client.`,
       );
     }
-    // An auto client of a server chosen per connection is picked by its issuer, never the default.
+    // An auto-provisioned client is found by its issuer, never the default.
     const isDefault =
       mayDefault &&
-      !(existing.autoProvisioned && existing.issuer !== null) &&
+      !existing.autoProvisioned &&
       !(await hasTierDefault({ orgId: scope.orgId }, packageId, existing.authKey, tx));
-    const [row] = await tx
-      .update(integrationOauthClients)
-      .set({ spaceId: null, isDefault, updatedAt: new Date() })
-      .where(eq(integrationOauthClients.id, existing.id))
-      .returning();
+    const move = (executor: Tx, asDefault: boolean) =>
+      executor
+        .update(integrationOauthClients)
+        .set({ spaceId: null, isDefault: asDefault, updatedAt: new Date() })
+        .where(eq(integrationOauthClients.id, existing.id))
+        .returning();
+    // A savepoint, so a refused flag (an auto-provisioned row registered before DCR rows stopped
+    // being defaults still holds the org slot) leaves the transaction usable for the plain move.
+    const [row] = isDefault
+      ? await tx
+          .transaction((sp) => move(sp, true))
+          .catch((err: unknown) => {
+            if (!isUniqueViolation(err)) throw err;
+            return move(tx, false);
+          })
+      : await move(tx, false);
     const widened = await widenConnectionsToOrgScope(
       tx,
       eq(integrationConnections.clientRef, existing.id),
@@ -1411,7 +1452,26 @@ interface ResolvedConnectClient {
   clientId: string;
   /** Pre-registered redirect URI override, or null to use the platform default. */
   redirectUri: string | null;
+  /**
+   * The tag of `redirectUri` when it is a per-server callback — `<tag>` for a DCR client's
+   * `…/callback/<tag>`, `cimd/<tag>` for a metadata document's `…/callback/cimd/<tag>` (only
+   * {@link metadataDocumentClient} yields one): recorded in the OAuth state so the callback refuses
+   * a response arriving through any other path (mix-up).
+   */
+  redirectTag?: string;
   clientRef: string;
+}
+
+/**
+ * This instance's Client ID Metadata Document of `issuer`'s server as the connect-time client: no
+ * row, the document URL is both `client_id` and `client_ref`, and the redirect URI is the server's
+ * own in the documents' namespace (`<callback>/cimd/<tag>`) — never the shared callback, nor the
+ * one a DCR client of the same server registers.
+ */
+function metadataDocumentClient(issuer: string): ResolvedConnectClient {
+  const url = clientMetadataDocumentUrl(issuer);
+  const redirectUri = clientMetadataCallbackUrlFor(issuer);
+  return { clientId: url, redirectUri, redirectTag: redirectTagOf(redirectUri)!, clientRef: url };
 }
 
 /** Project a registered system client into the connect-time resolved shape. */
@@ -1467,13 +1527,90 @@ function assertConnectClientUsable(client: IntegrationOAuthClientWithSecret): vo
   }
 }
 
+/**
+ * The per-server callbacks (`…/callback/<tag>` of a DCR client of a server chosen per connection,
+ * `…/callback/cimd/<tag>` of a metadata document) are the platform's own: each is trusted for one
+ * authorization server, and the state of the flow that sends it holds what makes it safe (the
+ * server's issuer; for a document, its `iss` requirement). A client an administrator registers
+ * names no such server, so a row on one of those URIs would put another server's tag in a state
+ * that requires nothing of it — a hostile server could then bounce the user to that server and have
+ * its code delivered on the row's flow. Only an auto-provisioned (DCR) row, registered by the
+ * platform with `integrationCallbackUrlFor(issuer)`, may carry a plain tag; a `cimd/` tag, none.
+ */
+function isReservedRedirectTag(tag: string, autoProvisioned: boolean): boolean {
+  // Write side; the connect side is the stricter {@link assertRedirectBoundToFlow}.
+  return isClientMetadataRedirectTag(tag) || !autoProvisioned;
+}
+
+/**
+ * Refuse a stored row's per-server redirect URI unless it is the one of THIS flow's server: a plain
+ * tag only on an auto-provisioned row of an auth whose server is chosen per connection, and only
+ * the tag of the issuer this flow resolved (`flowIssuer`); a `cimd/` tag on no row (a document
+ * client carries its own, bound by its ref). Anything else would send another server's tag with
+ * this flow's token endpoint — rows written before the write guard, or a DCR row left over from
+ * a version whose server was chosen per connection.
+ */
+function assertRedirectBoundToFlow(
+  client: IntegrationOAuthClientWithSecret,
+  tag: string,
+  flowIssuer: string | undefined,
+): void {
+  const bound =
+    !isClientMetadataRedirectTag(tag) &&
+    client.autoProvisioned &&
+    flowIssuer !== undefined &&
+    tag === authorizationServerTag(flowIssuer);
+  if (!bound) {
+    throw new ApiError({
+      status: 403,
+      code: "oauth_client_redirect_mismatch",
+      title: "OAuth Client Redirect Mismatch",
+      detail: `OAuth client '${client.id}' for '${client.integration_package_id}' auth '${client.auth_key}' declares a redirect URI reserved for the platform's per-server callbacks (${client.redirect_uri}) that is not the one of this connection's authorization server; change or clear the client's redirect_uri, or delete the client.`,
+    });
+  }
+}
+
+/**
+ * Refuse a `redirect_uri` in the platform's per-server callback namespaces (`/callback/<tag>`,
+ * `/callback/cimd/<tag>`) for a client that is not auto-provisioned: a 400 at every writer.
+ */
+function assertRedirectUriNotReserved(
+  redirectUri: string | null | undefined,
+  autoProvisioned: boolean,
+): void {
+  const tag = redirectUri ? redirectTagOf(redirectUri) : undefined;
+  if (tag !== undefined && isReservedRedirectTag(tag, autoProvisioned)) {
+    throw new ApiError({
+      status: 400,
+      code: "redirect_uri_reserved",
+      title: "Reserved Redirect URI",
+      detail: `redirect_uri ${redirectUri} is one of the platform's per-server callbacks (/api/integrations/callback/<tag> or /api/integrations/callback/cimd/<tag>), which no registered OAuth client may use; register the shared callback (/api/integrations/callback) or another URI.`,
+      errors: [
+        {
+          field: "redirect_uri",
+          code: "redirect_uri_reserved",
+          title: "Reserved Redirect URI",
+          message:
+            "The /api/integrations/callback/<tag> and /callback/cimd/<tag> paths are reserved for the platform's per-server callbacks.",
+        },
+      ],
+    });
+  }
+}
+
 /** Project a custom (space or org) client into the resolved shape. */
-function customConnectClient(client: IntegrationOAuthClientWithSecret): ResolvedConnectClient {
+function customConnectClient(
+  client: IntegrationOAuthClientWithSecret,
+  flowIssuer: string | undefined,
+): ResolvedConnectClient {
   // Before the authorize redirect, never after the user has consented.
   assertConnectClientUsable(client);
+  const redirectTag = client.redirect_uri ? redirectTagOf(client.redirect_uri) : undefined;
+  if (redirectTag !== undefined) assertRedirectBoundToFlow(client, redirectTag, flowIssuer);
   return {
     clientId: client.client_id,
     redirectUri: client.redirect_uri ?? null,
+    ...(redirectTag ? { redirectTag } : {}),
     clientRef: client.id,
   };
 }
@@ -1482,8 +1619,9 @@ function customConnectClient(client: IntegrationOAuthClientWithSecret): Resolved
  * Resolve WHICH OAuth client a connect flow uses, and its credentials — the
  * single home for the client-selection precedence. New connections always use the **default**
  * ({@link pickDefault}) — there is no per-connect picker.
- * Auto-provisioned remote-MCP auths (DCR) use the org's machine client
- * and are never served by a system entry. Throws the operator-facing error when
+ * Auto-provisioned remote-MCP auths use this instance's metadata document
+ * (CIMD) or, failing it, the org's machine client (DCR), and are never served
+ * by a system entry. Throws the operator-facing error when
  * no client can be resolved. The returned `clientRef` is pinned on the
  * connection so token refresh resolves the same credentials. The choice of
  * which client is the default is an admin action (`setDefaultIntegrationClient`,
@@ -1506,8 +1644,15 @@ export function resolveConnectClient(
     system,
   );
   if (picked) {
-    return "isDefault" in picked ? customConnectClient(picked) : systemConnectClient(picked);
+    // The server a per-server redirect URI may name: this flow's, when chosen per connection.
+    const flowIssuer = hasPerConnectionAuthServer(manifest, auth)
+      ? resolved.authorizationServer?.issuer
+      : undefined;
+    return "isDefault" in picked
+      ? customConnectClient(picked, flowIssuer)
+      : systemConnectClient(picked);
   }
+  if (resolved.metadataDocumentClient) return resolved.metadataDocumentClient;
   if (reconnectsOrgRow && resolved.spaceClients.length > 0) {
     throw scopeNarrowingRefused(
       "Ask an administrator to register an organization OAuth client for it, or create a new connection here.",
@@ -1537,7 +1682,9 @@ export function resolveConnectClient(
  * credentials that mint/refresh a connection's tokens. The token-refresh
  * counterpart of `resolveConnectClient` — and the direct analogue of the
  * model-provider `loadInferenceCredentials`: try the system registry by id
- * first, then the `integration_oauth_clients` table by id.
+ * first, then this instance's Client ID Metadata Documents by URL (a public
+ * client with no row, bound to the server its name encodes), then the
+ * `integration_oauth_clients` table by id.
  *
  * SECURITY: the custom lookup is scoped to `(spaceId or its org, integrationId,
  * authKey)` so a custom id belonging to another space/org/integration/auth never
@@ -1592,12 +1739,18 @@ export async function resolveIntegrationClientById(
     return resolved(sys.clientId, method === "none" ? "" : (sys.clientSecret ?? ""), method);
   }
 
+  // 2) A metadata document of this instance: public by construction, whatever the manifest says.
+  const documentIssuer = issuerOfClientMetadataDocumentRef(clientRef);
+  if (documentIssuer !== null) {
+    return { ...resolved(clientRef, "", "none"), issuer: documentIssuer };
+  }
+
   // A custom client id is the row's UUID PK. Anything else — a since-removed
   // system id, a remapped id, garbage — cannot be a custom row, so skip the
   // typed lookup (and avoid a `uuid` cast error on a non-UUID literal).
   if (!isUuid(clientRef)) return null;
 
-  // 2) Custom client of this space or its org, by id AND fully scoped.
+  // 3) Custom client of this space or its org, by id AND fully scoped.
   const spaceOrg = db.select({ orgId: spaces.orgId }).from(spaces).where(eq(spaces.id, spaceId));
   const [row] = await db
     .select({
@@ -1703,9 +1856,11 @@ function fingerprintSystemClientId(clientId: string): string {
 }
 
 /**
- * List the OAuth clients `owner` may make its default for `(packageId, authKey)`,
- * secrets omitted: its {@link inheritedDefault} (when not its own) then its own
- * clients, oldest-first. `is_default` marks the effective default.
+ * List the OAuth clients of `owner`'s tier for `(packageId, authKey)`, secrets omitted: its
+ * {@link inheritedDefault} (when not its own) then its own clients, oldest-first. `is_default`
+ * marks the effective default, chosen among the manual clients only. Its auto-provisioned (DCR)
+ * clients are listed too — `auto_provisioned: true`, never `is_default` — for display and
+ * deletion; none can be made the default ({@link setDefaultIntegrationClient} refuses them).
  */
 export async function listIntegrationClients(
   owner: ClientOwner,
@@ -1714,8 +1869,12 @@ export async function listIntegrationClients(
 ): Promise<IntegrationClientDescriptor[]> {
   await assertOwnerInScope(owner, packageId, authKey);
   const { space, org } = await loadClientTiers(owner, packageId, authKey);
+  const all = await loadClientTiers(owner, packageId, authKey, "all");
   const system = getDefaultSystemIntegrationClient(packageId, authKey);
-  const own = isSpaceOwner(owner) ? space : org;
+  // A space also sees the org's machine clients it uses (an auto-provisioned row lives at the org).
+  const own = isSpaceOwner(owner)
+    ? [...all.space, ...all.org.filter((c) => c.autoProvisioned)]
+    : all.org;
   const defaultRef = pickDefault(space, org, system)?.id;
   const inherited = inheritedDefault(owner, space, org, system);
   const listed: Array<IntegrationOAuthClientWithSecret | SystemIntegrationClientDefinition> =
@@ -1819,6 +1978,17 @@ export interface ResolvedOAuthConnect {
   spaceClients: IntegrationOAuthClientWithSecret[];
   /** The org's clients the space inherits — its one machine client for an auto-provisioned auth. */
   orgClients: IntegrationOAuthClientWithSecret[];
+  /**
+   * Set when an auto-provisioned auth's server accepts Client ID Metadata Documents and this
+   * instance can serve one: the client is the document, ahead of any DCR machine client.
+   */
+  metadataDocumentClient?: ResolvedConnectClient;
+  /**
+   * The authorization server the client was chosen for, from the validated metadata the choice
+   * read — handed to the OAuth state as is, so its `iss` requirement is the one that choice relied
+   * on (a document client is chosen only when it is set). Absent when no metadata was read.
+   */
+  authorizationServer?: AuthorizationServerBinding;
   /** Discovered/declared issuer (overrides the manifest when set). */
   issuer?: string;
   authorizationEndpoint?: string;
@@ -1830,7 +2000,7 @@ export interface ResolvedOAuthConnect {
    * failing step authors the complete, operator-facing reason — *including the
    * remedy* — so the caller renders it verbatim and never decides what to
    * advise. Adding a failure point (no registration endpoint, blocked endpoint,
-   * AS rejection, network failure, future CIMD) is "set the field with its own
+   * AS rejection, network failure) is "set the field with its own
    * message"; no new branch and no remedy heuristic in the caller. `status` is
    * the authorization server's HTTP status when the failure came from a
    * response, surfaced alongside the message.
@@ -1841,8 +2011,9 @@ export interface ResolvedOAuthConnect {
 /**
  * Whether an auth's OAuth client is provisioned automatically at connect time
  * (the MCP-spec onboarding path) rather than pre-registered: the authorization
- * server is discovered (RFC 9728 → RFC 8414) and a client registered with it by
- * RFC 7591 dynamic registration, so no hand-registered client is needed.
+ * server is discovered (RFC 9728 → RFC 8414) and the client is this instance's
+ * Client ID Metadata Document when the server accepts one, else one registered
+ * by RFC 7591 dynamic registration, so no hand-registered client is needed.
  *
  * Derived from the manifest shape rather than an opt-in flag, but it is NOT
  * enough to be `oauth2` + `source.kind: "remote"`: the auto-provisioned client
@@ -1851,8 +2022,8 @@ export interface ResolvedOAuthConnect {
  * is a classic *pre-registered* client that happens to be remote (e.g. the
  * GitHub/Gmail MCP connectors, which ship explicit endpoints + expect an
  * admin-registered secret) — it must keep requiring a manually-registered
- * client. The AS advertising (or not) a `registration_endpoint` is the
- * additional runtime gate.
+ * client. The AS advertising (or not) `client_id_metadata_document_supported`
+ * or a `registration_endpoint` is the additional runtime gate.
  */
 export function usesAutoProvisionedClient(
   manifest: IntegrationManifest,
@@ -1911,16 +2082,24 @@ export function assertEndpointsMatchMetadata(
 }
 
 /**
- * Resolve the OAuth connect config for an auth, auto-registering a client via
- * RFC 7591 Dynamic Client Registration for remote MCP integrations when none is
- * pre-registered. This is the MCP-spec onboarding path: an operator installs
- * the connector, the first actor clicks Connect, and Appstrate self-registers
- * — no hand-created OAuth app, no client secret.
+ * Resolve the OAuth connect config for an auth, provisioning a client for
+ * remote MCP integrations in the MCP 2026-07-28 order: this instance's Client
+ * ID Metadata Document when the server advertises
+ * `client_id_metadata_document_supported` and `APP_URL` is public https
+ * ({@link clientMetadataDocumentsServable}) — nothing registered, nothing
+ * stored — else RFC 7591 Dynamic Client Registration (deprecated, kept for the
+ * servers without CIMD, and for tier 0 / localhost, which no server can fetch a
+ * document from). This is the MCP-spec onboarding path: an operator installs
+ * the connector, the first actor clicks Connect, and the client exists — no
+ * hand-created OAuth app, no client secret. An auto-provisioned auth takes no
+ * manually registered client ({@link assertClientAuth}), so no pre-registered
+ * one precedes these two.
  *
  * Discovery chain:
  *   `source.remote.url` → RFC 9728 protected-resource metadata
  *   (`resource` + `authorization_servers`) → RFC 8414 AS metadata
- *   (`authorization_endpoint` / `token_endpoint` / `registration_endpoint`).
+ *   (`authorization_endpoint` / `token_endpoint` / `client_id_metadata_document_supported` /
+ *   `registration_endpoint`).
  *
  * A server chosen per connection (AFPS §7.3) goes to {@link ensurePerConnectionOAuthClient}.
  * Otherwise best-effort: a discovery/registration failure comes back as `provisioningFailure`.
@@ -1945,9 +2124,6 @@ export async function ensureIntegrationOAuthClient(
     const { space, org } = await loadClientTiers(scope, packageId, authKey);
     return { spaceClients: space, orgClients: org };
   }
-
-  // Auto-provisioned path: there is exactly one machine client (DCR).
-  const existing = await getAutoProvisionedClient(scope, packageId, authKey, null);
 
   // Resolve the AS issuer + RFC 8707 resource. The protected-resource metadata
   // (RFC 9728) is authoritative for the canonical `resource` (the token's
@@ -2000,21 +2176,38 @@ export async function ensureIntegrationOAuthClient(
   // so drop any blocked endpoint before threading it into the connect state.
   const resolved: ResolvedOAuthConnect = {
     spaceClients: [],
-    orgClients: existing ? [existing] : [],
+    orgClients: [],
     ...(issuer ? { issuer } : {}),
     ...(safeUrl(endpoints.authorizationEndpoint)
       ? { authorizationEndpoint: endpoints.authorizationEndpoint }
       : {}),
     ...(safeUrl(endpoints.tokenEndpoint) ? { tokenEndpoint: endpoints.tokenEndpoint } : {}),
     ...(resource ? { resource } : {}),
+    ...(discovered.issuer !== undefined
+      ? {
+          authorizationServer: {
+            issuer: discovered.issuer,
+            issParameterSupported: discovered.authorizationResponseIssParameterSupported === true,
+          },
+        }
+      : {}),
   };
 
-  // Client already registered — nothing to mint; just return discovered config.
-  if (existing) return resolved;
+  // CIMD ahead of DCR, even of a machine client DCR registered before: its connections keep it
+  // (their `client_ref`), new ones take the document — the one of the server whose validated
+  // metadata advertised it, with that server's own redirect URI.
+  if (presentsClientMetadataDocument(discovered)) {
+    return { ...resolved, metadataDocumentClient: metadataDocumentClient(discovered.issuer) };
+  }
+
+  // Auto-provisioned by DCR: there is exactly one machine client, registered once.
+  const existing = await getAutoProvisionedClient(scope, packageId, authKey, null);
+  if (existing) return { ...resolved, orgClients: [existing] };
 
   return registerAutoProvisionedClient({ orgId: scope.orgId }, packageId, authKey, auth, {
     registrationEndpoint: endpoints.registrationEndpoint,
     grantTypesSupported: endpoints.grantTypesSupported,
+    clientIdMetadataDocumentSupported: endpoints.clientIdMetadataDocumentSupported,
     redirectUri,
     issuer: null,
     resolved,
@@ -2030,8 +2223,9 @@ export async function ensureIntegrationOAuthClient(
  *     rendered `issuer`, else share the URL's origin — never another provider's server. Its
  *     `resource` is sent (RFC 8707).
  *   - otherwise the rendered `issuer`, no resource.
- *   - endpoints from that server's RFC 8414 metadata only; a public DCR client per issuer with a
- *     redirect URI of its own (`<callback>/<tag>`).
+ *   - endpoints from that server's RFC 8414 metadata only; a redirect URI per issuer
+ *     (`<callback>/<tag>`), carried by the issuer's own metadata document (CIMD) when the server
+ *     accepts one and this instance can serve it, else by a public DCR client per issuer.
  *
  * A failure the user's choice explains is a 400 on the variable that chose it.
  */
@@ -2045,7 +2239,7 @@ async function ensurePerConnectionOAuthClient(
 ): Promise<ResolvedOAuthConnect> {
   if (auth.token_endpoint_auth_method !== "none") {
     throw invalidRequest(
-      `Integration '${packageId}' auth '${authKey}' chooses its authorization server per connection, so its OAuth client is registered automatically as a public client (RFC 7591): the auth must declare token_endpoint_auth_method 'none'.`,
+      `Integration '${packageId}' auth '${authKey}' chooses its authorization server per connection, so its OAuth client is provisioned automatically as a public client (client metadata document or RFC 7591 registration): the auth must declare token_endpoint_auth_method 'none'.`,
     );
   }
   const remoteTemplate = getRemoteSource(manifest)?.url;
@@ -2109,10 +2303,12 @@ async function ensurePerConnectionOAuthClient(
       `the authorization server ${candidate} publishes no valid metadata (RFC 8414)`,
     );
   }
+  const byDocument = presentsClientMetadataDocument(endpoints);
   for (const url of [
     endpoints.authorizationEndpoint,
     endpoints.tokenEndpoint,
-    ...(endpoints.registrationEndpoint ? [endpoints.registrationEndpoint] : []),
+    // Reached only to register by DCR.
+    ...(endpoints.registrationEndpoint && !byDocument ? [endpoints.registrationEndpoint] : []),
   ]) {
     if (!(await isUserUrlReachable(url))) {
       throw refuse(
@@ -2123,27 +2319,33 @@ async function ensurePerConnectionOAuthClient(
   }
 
   const issuer = endpoints.issuer;
-  const existing = await getAutoProvisionedClient(scope, packageId, authKey, issuer);
   const resolved: ResolvedOAuthConnect = {
     spaceClients: [],
-    orgClients: existing ? [existing] : [],
+    orgClients: [],
     issuer,
     authorizationEndpoint: endpoints.authorizationEndpoint,
     tokenEndpoint: endpoints.tokenEndpoint,
     ...(resource ? { resource } : {}),
+    authorizationServer: {
+      issuer,
+      issParameterSupported: endpoints.authorizationResponseIssParameterSupported === true,
+    },
   };
+  if (byDocument) return { ...resolved, metadataDocumentClient: metadataDocumentClient(issuer) };
+  const existing = await getAutoProvisionedClient(scope, packageId, authKey, issuer);
   if (existing) {
     // A reuse renews the client's lease against {@link pruneUnusedPerConnectionClients}.
     await db
       .update(integrationOauthClients)
       .set({ updatedAt: new Date() })
       .where(eq(integrationOauthClients.id, existing.id));
-    return resolved;
+    return { ...resolved, orgClients: [existing] };
   }
   await pruneUnusedPerConnectionClients(scope, packageId, authKey);
   return registerAutoProvisionedClient({ orgId: scope.orgId }, packageId, authKey, auth, {
     registrationEndpoint: endpoints.registrationEndpoint,
     grantTypesSupported: endpoints.grantTypesSupported,
+    clientIdMetadataDocumentSupported: endpoints.clientIdMetadataDocumentSupported,
     redirectUri: integrationCallbackUrlFor(issuer),
     issuer,
     resolved,
@@ -2187,6 +2389,8 @@ async function registerAutoProvisionedClient(
   input: {
     registrationEndpoint: string | undefined;
     grantTypesSupported: string[] | undefined;
+    /** Advertised, but no document presented (`presentsClientMetadataDocument`): the failure says so. */
+    clientIdMetadataDocumentSupported: boolean | undefined;
     redirectUri: string;
     issuer: string | null;
     resolved: ResolvedOAuthConnect;
@@ -2207,15 +2411,19 @@ async function registerAutoProvisionedClient(
       authKey,
       issuer: resolved.issuer,
     });
-    return {
-      ...resolved,
-      provisioningFailure: {
-        message:
-          issuer === null
-            ? "the authorization server did not advertise dynamic client registration; register an OAuth client manually, or retry once the server advertises it"
-            : `the authorization server ${issuer} does not advertise dynamic client registration (RFC 7591), which a server chosen per connection requires`,
-      },
-    };
+    const server =
+      issuer === null ? "the authorization server" : `the authorization server ${issuer}`;
+    const message =
+      input.clientIdMetadataDocumentSupported === true
+        ? `${server} accepts client metadata documents but not dynamic client registration, and this instance presents no document: it takes a server that also advertises RFC 9207 iss (authorization_response_iss_parameter_supported), a public https APP_URL the server can fetch, and INTEGRATION_OAUTH_CIMD not set to 'off'; ${
+            issuer === null
+              ? "register an OAuth client manually, or meet those conditions"
+              : "meet those conditions to connect to it"
+          }`
+        : issuer === null
+          ? `${server} advertises neither client metadata documents nor dynamic client registration; register an OAuth client manually, or retry once the server advertises one of them`
+          : `${server} advertises neither client metadata documents nor dynamic client registration (RFC 7591), one of which a server chosen per connection requires`;
+    return { ...resolved, provisioningFailure: { message } };
   }
 
   // SSRF pre-check — the endpoint is manifest/discovery-derived and we POST to
@@ -2241,14 +2449,6 @@ async function registerAutoProvisionedClient(
   const racedClient = await getAutoProvisionedClient(org, packageId, authKey, issuer);
   if (racedClient) return { ...resolved, orgClients: [racedClient] };
 
-  const host = (() => {
-    try {
-      return new URL(getEnv().APP_URL).host;
-    } catch {
-      return "appstrate";
-    }
-  })();
-
   // Limitation: the registered client is persisted once and reused for every
   // subsequent connect. If the authorization server later revokes or expires it
   // (RFC 7591 §3.2 `client_secret_expires_at`, or operator-side deletion),
@@ -2269,7 +2469,7 @@ async function registerAutoProvisionedClient(
     const registration = await registerDynamicClient({
       registrationEndpoint,
       redirectUri,
-      clientName: `Appstrate (${host})`,
+      clientName: platformClientName(),
       grantTypes,
       ...(auth.default_scopes && auth.default_scopes.length > 0
         ? { scopes: auth.default_scopes }
@@ -2881,7 +3081,7 @@ async function mintingClientSpace(
   tx: Tx,
   clientRef: string | null | undefined,
 ): Promise<string | null> {
-  // System ids are never UUID-shaped (the registry refuses them): a non-UUID names the system tier.
+  // System ids and metadata-document URLs are never UUID-shaped: a non-UUID names no row's tier.
   if (!clientRef || !isUuid(clientRef)) return null;
   const [client] = await tx
     .select({ spaceId: integrationOauthClients.spaceId })
@@ -4208,10 +4408,16 @@ export async function getIntegrationAuthStatuses(
     packageId,
   )!;
   const oauthClients = await db
-    .select({ authKey: integrationOauthClients.authKey })
+    .select({
+      authKey: integrationOauthClients.authKey,
+      autoProvisioned: integrationOauthClients.autoProvisioned,
+    })
     .from(integrationOauthClients)
     .where(and(spaceVisibleFilter(scope), eq(integrationOauthClients.integrationId, packageId)));
-  const oauthClientKeys = new Set(oauthClients.map((r) => r.authKey));
+  // The clients a connect of the auth can use: a classic auth chooses among the manual rows only
+  // (`loadClientTiers`), so a leftover auto-provisioned row does not make it connectable.
+  const hasUsableOAuthClient = (key: string, autoProvisioned: boolean) =>
+    oauthClients.some((r) => r.authKey === key && (autoProvisioned || !r.autoProvisioned));
 
   const auths: IntegrationAuthStatus[] = Object.entries(authsMap).map(([key, rawAuth]) => {
     // AFPS: default scopes are `default_scopes`, the OAuth resource is
@@ -4244,13 +4450,13 @@ export async function getIntegrationAuthStatuses(
       // `block_user_connections`, where a member cannot create a connection at
       // all and a shared one is the only path to a successful run.
       ready: keyConnections.some((c) => !c.needs_reconnection),
-      has_oauth_client: oauthClientKeys.has(key),
+      has_oauth_client: hasUsableOAuthClient(key, usesAutoProvisionedClient(manifest, auth)),
       // Shared platform client (SYSTEM_INTEGRATIONS): when one serves this
       // (integration, auth), connect falls back to it, so the UI is connectable
       // even without an org-registered client. Registry is in-memory — no DB cost.
       has_system_client: listSystemIntegrationClientsFor(packageId, key).length > 0,
       // MCP-spec onboarding: an oauth2 auth on a remote MCP integration provisions
-      // its client at connect time (DCR), so the UI enables Connect even
+      // its client at connect time (CIMD or DCR), so the UI enables Connect even
       // when no client is pre-registered. Derived from the manifest shape.
       client_auto_provisioned: usesAutoProvisionedClient(manifest, auth),
     };

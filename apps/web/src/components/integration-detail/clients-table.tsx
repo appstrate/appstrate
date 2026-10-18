@@ -309,8 +309,11 @@ export function ClientsTable({
 }) {
   const { t } = useTranslation("settings");
   const { can } = usePermissions();
-  // Auto-provisioned clients are per space: such an auth has no org level.
+  // An auto-provisioned auth has no org list to manage (no client an admin registers or chooses
+  // there); its org-tier machine client, listed with the space's clients, stays the org admin's to
+  // delete.
   const canManageOrg = !autoProvisioned && can("org-integrations:configure");
+  const canDeleteOrgMachineClients = can("org-integrations:configure");
   const spaceClients = useIntegrationClients("space", packageId, authKey);
   const orgClients = useIntegrationClients("org", canManageOrg ? packageId : undefined, authKey);
   // Read from the same query key the page already holds, rather than threading
@@ -371,6 +374,7 @@ export function ClientsTable({
   const columns = useIntegrationClientColumns({
     canUseHere: (spaceClients.data?.length ?? 0) > 1,
     canManageOrg,
+    canDeleteOrgMachineClients,
     canChooseOrgDefault: canManageOrg && (orgClients.data?.length ?? 0) > 1,
     pendingClientRef,
     onUseHere: (row) =>

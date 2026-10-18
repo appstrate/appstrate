@@ -60,6 +60,10 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     reason: "signed connect page cookie; manifest display data only",
   },
   getInvitationInfo: { category: "public", reason: "invitation token in URL is the credential" },
+  getOAuthClientMetadataDocument: {
+    category: "public",
+    reason: "OAuth client metadata document an authorization server fetches, no credential",
+  },
   getOpenApiSpec: { category: "public", reason: "static instance spec, skipAuth" },
   getSwaggerUI: { category: "public", reason: "static Swagger UI shell, skipAuth" },
   integrationsOAuthCallback: {
@@ -69,6 +73,10 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   integrationsOAuthCallbackForServer: {
     category: "public",
     reason: "server-side OAuth state minted under integrations:connect, tag-checked",
+  },
+  integrationsOAuthCallbackForMetadataDocument: {
+    category: "public",
+    reason: "server-side OAuth state minted under integrations:connect, tag- and iss-checked",
   },
   mcpProtectedResourceMetadata: { category: "public", reason: "RFC 9728 static metadata" },
   mcpProtectedResourceMetadataInSpace: {

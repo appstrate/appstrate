@@ -1484,9 +1484,29 @@ export interface paths {
         };
         /**
          * Integration OAuth2 callback (popup)
-         * @description Browser-side OAuth callback for an authorization server fixed by the manifest. Exchanges code + state for tokens, persists the connection, and returns an HTML page that closes the popup window. A response for a flow started with an authorization server chosen per connection is refused here: it must arrive at that server's own `/callback/{tag}`. When the response carries `iss` (RFC 9207) it must name the authorization server the request was sent to, and a response without it is refused from a server that advertises `authorization_response_iss_parameter_supported`.
+         * @description Browser-side OAuth callback for an authorization server fixed by the manifest. Exchanges code + state for tokens, persists the connection, and returns an HTML page that closes the popup window. A response for a flow started with a per-server redirect URI is refused here: one with an authorization server chosen per connection must arrive at that server's own `/callback/{tag}`, one with a client metadata document at `/callback/cimd/{tag}`. When the response carries `iss` (RFC 9207) it must name the authorization server the request was sent to, and a response without it is refused from a server that advertises `authorization_response_iss_parameter_supported`.
          */
         get: operations["integrationsOAuthCallback"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/integrations/callback/cimd/{tag}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Integration OAuth2 callback of a client metadata document (popup)
+         * @description The redirect URI a Client ID Metadata Document of this instance lists (`GET /oauth/client-metadata/{document}`), one per authorization server, in a namespace dynamic registration never uses: a response here only completes a flow started with a metadata-document client of the server whose tag it carries — never one started with a DCR or administrator client, and never at `/callback` or `/callback/{tag}`. Any server can fetch any document, so such a flow also requires RFC 9207 `iss` naming the server the request was sent to; a response without it, or naming another server, is refused (RFC 9700 §4.4 mix-up defence). Otherwise identical to `integrationsOAuthCallback`.
+         */
+        get: operations["integrationsOAuthCallbackForMetadataDocument"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1504,7 +1524,7 @@ export interface paths {
         };
         /**
          * Integration OAuth2 callback of an authorization server chosen per connection (popup)
-         * @description The redirect URI registered with, and sent to, an authorization server chosen per connection (AFPS §7.3: an oauth2 auth whose `issuer` or `source.remote.url` is a URL template over connection variables). One per server — the RFC 9700 §4.4 mix-up defence — so the response must arrive at the tag of the server the request was sent to: a mismatch is refused, as is a response for a fixed server. Otherwise identical to `integrationsOAuthCallback`, including the RFC 9207 `iss` check.
+         * @description The redirect URI registered with, and sent to, an authorization server chosen per connection (AFPS §7.3: an oauth2 auth whose `issuer` or `source.remote.url` is a URL template over connection variables). One per server — the RFC 9700 §4.4 mix-up defence — so the response must arrive at the tag of the server the request was sent to: a mismatch is refused, as is a response for a fixed server or for a client metadata document (`/callback/cimd/{tag}`). Otherwise identical to `integrationsOAuthCallback`, including the RFC 9207 `iss` check.
          */
         get: operations["integrationsOAuthCallbackForServer"];
         put?: never;
@@ -1606,7 +1626,7 @@ export interface paths {
         put?: never;
         /**
          * Propose an integration manifest from a remote MCP server URL
-         * @description Probes a remote MCP server before any integration exists and returns a manifest proposal for the editor to merge: an MCP `initialize` request (Streamable HTTP; a 404/405 falls back to the SSE transport's GET), then its OAuth protected-resource metadata (RFC 9728) and authorization-server metadata (RFC 8414), plus the site's raster icon. An oauth2 auth is proposed as a public client (`token_endpoint_auth_method: none`) when the authorization server offers dynamic client registration (RFC 7591), else as `client_secret_post` with its `issuer` and a `manual_client_required` warning (`authorization_server_blocked` instead when the advertised authorization server is on a refused address, which is never read); without metadata, a server at the URL's origin offering DCR is guessed as oauth2, anything else as an API key sent as a Bearer token (auth `primary`, credential field `api_key`). A 401/403 counts as an MCP server only when its `WWW-Authenticate` offers the Bearer scheme. The whole discovery is bounded to 25 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Every URL reached is egress-guarded (private and reserved addresses refused, `https` required for a host the operator has not allowlisted). Requires `integrations:write`. Rate limited to 10 requests per minute.
+         * @description Probes a remote MCP server before any integration exists and returns a manifest proposal for the editor to merge: an MCP `initialize` request (Streamable HTTP; a 404/405 falls back to the SSE transport's GET), then its OAuth protected-resource metadata (RFC 9728) and authorization-server metadata (RFC 8414), plus the site's raster icon. An oauth2 auth is proposed as a public client (`token_endpoint_auth_method: none`) when the authorization server accepts a client this instance provisions itself — a Client ID Metadata Document (`client_id_metadata_document_supported` with RFC 9207 `authorization_response_iss_parameter_supported`, only when `APP_URL` is public https and `INTEGRATION_OAUTH_CIMD` is not `off`) or dynamic client registration (RFC 7591) — else as `client_secret_post` with its `issuer` and a `manual_client_required` warning (`authorization_server_blocked` instead when the advertised authorization server is on a refused address, which is never read); without metadata, a server at the URL's origin offering either is guessed as oauth2, anything else as an API key sent as a Bearer token (auth `primary`, credential field `api_key`). A 401/403 counts as an MCP server only when its `WWW-Authenticate` offers the Bearer scheme. The whole discovery is bounded to 25 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Every URL reached is egress-guarded (private and reserved addresses refused, `https` required for a host the operator has not allowlisted). Requires `integrations:write`. Rate limited to 10 requests per minute.
          */
         post: operations["discoverRemoteIntegration"];
         delete?: never;
@@ -1748,7 +1768,7 @@ export interface paths {
         put?: never;
         /**
          * Register a custom OAuth client for an integration auth
-         * @description Registers a NEW custom (BYO-app) client for this auth, in this space — it overrides the org-level clients here. Repeatable — a space may hold N clients per auth (model-provider pattern). The first registered client becomes the default; later ones are non-default until promoted via PUT .../default-client. Rejected for auto-provisioned (DCR) auths. Requires `integrations:configure`, which is never granted to an API key.
+         * @description Registers a NEW custom (BYO-app) client for this auth, in this space — it overrides the org-level clients here. Repeatable — a space may hold N clients per auth (model-provider pattern). The first registered client becomes the default; later ones are non-default until promoted via PUT .../default-client. Rejected for auto-provisioned (client metadata document or DCR) auths. Requires `integrations:configure`, which is never granted to an API key.
          */
         post: operations["createIntegrationOAuthClient"];
         delete?: never;
@@ -3014,7 +3034,7 @@ export interface paths {
         };
         /**
          * List the org-level OAuth clients of an integration auth
-         * @description Returns the org's own clients (`org`, oldest first) plus the default it inherits, the platform-provided system client (`system`), if any. `is_default` marks the org-tier default. Secrets are never returned. Only oauth2 auths whose client is not auto-provisioned (DCR) are listed here — the org's machine client of an auto-provisioned auth is not chosen by an admin; any other auth is a 400. Requires `org-integrations:configure`, which is never granted to an API key.
+         * @description Returns the org's own clients (`org`, oldest first) plus the default it inherits, the platform-provided system client (`system`), if any. `is_default` marks the org-tier default. Secrets are never returned. Only oauth2 auths whose client is not auto-provisioned (client metadata document or DCR) are listed here — the org's machine client of an auto-provisioned auth is not chosen by an admin; any other auth is a 400. Requires `org-integrations:configure`, which is never granted to an API key.
          */
         get: operations["listOrgIntegrationClients"];
         put?: never;
@@ -3056,7 +3076,7 @@ export interface paths {
         put?: never;
         /**
          * Register an org-level OAuth client for an integration auth
-         * @description Registers a custom (BYO-app) client at the org level (`spaceId: null`), inherited by every space of the org. The first one becomes the org default. Rejected (400) for auto-provisioned (DCR) auths, whose org-level client the platform registers itself at the first connect from any space. Requires `org-integrations:configure`, which is never granted to an API key.
+         * @description Registers a custom (BYO-app) client at the org level (`spaceId: null`), inherited by every space of the org. The first one becomes the org default. Rejected (400) for auto-provisioned auths, whose client the platform provisions itself at connect time (its client metadata document, else an org-level client registered by DCR at the first connect from any space). Requires `org-integrations:configure`, which is never granted to an API key.
          */
         post: operations["createOrgIntegrationOAuthClient"];
         delete?: never;
@@ -5547,6 +5567,26 @@ export interface paths {
          * @description Public endpoint. Returns invitation metadata (email, org name, role, inviter).
          */
         get: operations["getInvitationInfo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/oauth/client-metadata/{document}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * OAuth client metadata document
+         * @description Public. This instance's OAuth Client ID Metadata Document (draft-ietf-oauth-client-id-metadata-document) for one authorization server: its URL is the `client_id` an auto-provisioned integration auth (remote MCP, or a server chosen per connection — `token_endpoint_auth_method: none`) presents to a server whose validated metadata advertises `client_id_metadata_document_supported` and RFC 9207 `authorization_response_iss_parameter_supported` (the `iss` check is what refuses a response another server returns on this redirect URI), which fetches it — the client registration MCP 2026-07-28 prefers to dynamic registration (RFC 7591), the fallback otherwise. `document` is `<base64url(issuer)>.json`, and the document names that server's own redirect URI (`/api/integrations/callback/cimd/<tag>`), so each server is given a `client_id` and a redirect URI of its own (RFC 9700 §4.4). Presented only when `APP_URL` is `https` on a public host and `INTEGRATION_OAUTH_CIMD` is not `off`; otherwise connect registers by DCR. Computed from `APP_URL` and the issuer, nothing stored.
+         */
+        get: operations["getOAuthClientMetadataDocument"];
         put?: never;
         post?: never;
         delete?: never;
@@ -13185,6 +13225,38 @@ export interface operations {
             };
         };
     };
+    integrationsOAuthCallbackForMetadataDocument: {
+        parameters: {
+            query?: {
+                /** @description Authorization code returned by the IdP */
+                code?: string;
+                /** @description OAuth state parameter (UUID) */
+                state?: string;
+                /** @description OAuth error code (if the IdP rejected the request) */
+                error?: string;
+                /** @description RFC 9207 issuer identifier of the authorization server that issued the response. Compared with the issuer the request was sent to whenever present. */
+                iss?: string;
+            };
+            header?: never;
+            path: {
+                /** @description The authorization server's tag: the first 22 characters of base64url(SHA-256(issuer)), the issuer of its validated RFC 8414 metadata. */
+                tag: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description HTML page that closes the popup window. Renders either a success page or an error page (missing params, IdP error, response from another authorization server, code exchange failure, identity mismatch, or persistence failure). */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     integrationsOAuthCallbackForServer: {
         parameters: {
             query?: {
@@ -13501,7 +13573,7 @@ export interface operations {
                                 id: string;
                                 name: string;
                             }[];
-                            /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                            /** @description The OAuth client that minted this connection: a system env id, a custom `integration_oauth_clients.id`, or the URL of this instance's client metadata document (its `client_id`, under `/oauth/client-metadata`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                             client_ref: string | null;
                             /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
                             variables: {
@@ -13812,7 +13884,7 @@ export interface operations {
                                     id: string;
                                     name: string;
                                 }[];
-                                /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                                /** @description The OAuth client that minted this connection: a system env id, a custom `integration_oauth_clients.id`, or the URL of this instance's client metadata document (its `client_id`, under `/oauth/client-metadata`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                                 client_ref: string | null;
                                 /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
                                 variables: {
@@ -13829,7 +13901,7 @@ export interface operations {
                             has_oauth_client: boolean;
                             /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when neither the space nor the org has flagged a default client of its own, so the auth is connectable without a pre-registered client. */
                             has_system_client: boolean;
-                            /** @description True for an oauth2 auth declaring `token_endpoint_auth_method: "none"` on a remote MCP integration (`source.kind: "remote"`) or with an authorization server chosen per connection. Its OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414), then RFC 7591 dynamic registration of a public client — so no pre-registered client is required. */
+                            /** @description True for an oauth2 auth declaring `token_endpoint_auth_method: "none"` on a remote MCP integration (`source.kind: "remote"`) or with an authorization server chosen per connection. Its OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414), then this instance's Client ID Metadata Document of that server as a public client (`GET /oauth/client-metadata/{document}`) when its metadata advertises `client_id_metadata_document_supported` and RFC 9207 `authorization_response_iss_parameter_supported`, `APP_URL` is public https and `INTEGRATION_OAUTH_CIMD` is not `off`, else RFC 7591 dynamic registration of a public client — so no pre-registered client is required. */
                             client_auto_provisioned: boolean;
                         }[];
                         tool_catalog: {
@@ -13913,7 +13985,7 @@ export interface operations {
                             source: "system" | "org" | "space";
                             /** @description For `space` / `org` clients, the registered OAuth client_id. For `system` clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
-                            /** @description True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client. */
+                            /** @description True for the client that mints new connections at the listed tier, chosen among the manual clients. Every listed client but an `auto_provisioned` one is a valid `client_ref` for PUT .../default-client: an auto-provisioned (DCR) client is listed for display and deletion, never a default. */
                             is_default: boolean;
                             auto_provisioned: boolean;
                             has_client_secret: boolean;
@@ -14022,7 +14094,7 @@ export interface operations {
                             id: string;
                             name: string;
                         }[];
-                        /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                        /** @description The OAuth client that minted this connection: a system env id, a custom `integration_oauth_clients.id`, or the URL of this instance's client metadata document (its `client_id`, under `/oauth/client-metadata`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                         client_ref: string | null;
                         /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
                         variables: {
@@ -14268,7 +14340,7 @@ export interface operations {
                             source: "system" | "org" | "space";
                             /** @description For `space` / `org` clients, the registered OAuth client_id. For `system` clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
-                            /** @description True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client. */
+                            /** @description True for the client that mints new connections at the listed tier, chosen among the manual clients. Every listed client but an `auto_provisioned` one is a valid `client_ref` for PUT .../default-client: an auto-provisioned (DCR) client is listed for display and deletion, never a default. */
                             is_default: boolean;
                             auto_provisioned: boolean;
                             has_client_secret: boolean;
@@ -14434,7 +14506,7 @@ export interface operations {
                                 id: string;
                                 name: string;
                             }[];
-                            /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                            /** @description The OAuth client that minted this connection: a system env id, a custom `integration_oauth_clients.id`, or the URL of this instance's client metadata document (its `client_id`, under `/oauth/client-metadata`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                             client_ref: string | null;
                             /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
                             variables: {
@@ -14533,7 +14605,7 @@ export interface operations {
                             id: string;
                             name: string;
                         }[];
-                        /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                        /** @description The OAuth client that minted this connection: a system env id, a custom `integration_oauth_clients.id`, or the URL of this instance's client metadata document (its `client_id`, under `/oauth/client-metadata`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                         client_ref: string | null;
                         /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
                         variables: {
@@ -15434,7 +15506,7 @@ export interface operations {
                                     id: string;
                                     name: string;
                                 }[];
-                                /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                                /** @description The OAuth client that minted this connection: a system env id, a custom `integration_oauth_clients.id`, or the URL of this instance's client metadata document (its `client_id`, under `/oauth/client-metadata`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                                 client_ref: string | null;
                                 /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
                                 variables: {
@@ -15451,7 +15523,7 @@ export interface operations {
                             has_oauth_client: boolean;
                             /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when neither the space nor the org has flagged a default client of its own, so the auth is connectable without a pre-registered client. */
                             has_system_client: boolean;
-                            /** @description True for an oauth2 auth declaring `token_endpoint_auth_method: "none"` on a remote MCP integration (`source.kind: "remote"`) or with an authorization server chosen per connection. Its OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414), then RFC 7591 dynamic registration of a public client — so no pre-registered client is required. */
+                            /** @description True for an oauth2 auth declaring `token_endpoint_auth_method: "none"` on a remote MCP integration (`source.kind: "remote"`) or with an authorization server chosen per connection. Its OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414), then this instance's Client ID Metadata Document of that server as a public client (`GET /oauth/client-metadata/{document}`) when its metadata advertises `client_id_metadata_document_supported` and RFC 9207 `authorization_response_iss_parameter_supported`, `APP_URL` is public https and `INTEGRATION_OAUTH_CIMD` is not `off`, else RFC 7591 dynamic registration of a public client — so no pre-registered client is required. */
                             client_auto_provisioned: boolean;
                         }[];
                         tool_catalog: {
@@ -16761,7 +16833,7 @@ export interface operations {
                             id: string;
                             name: string;
                         }[];
-                        /** @description The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
+                        /** @description The OAuth client that minted this connection: a system env id, a custom `integration_oauth_clients.id`, or the URL of this instance's client metadata document (its `client_id`, under `/oauth/client-metadata`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting. */
                         client_ref: string | null;
                         /** @description The connection variables (AFPS §7.12) the connection's upstream was chosen with — non-secret and displayable (e.g. an instance URL). Null when the integration declares none. Changing them is a reconnect. */
                         variables: {
@@ -19470,7 +19542,7 @@ export interface operations {
                             source: "system" | "org" | "space";
                             /** @description For `space` / `org` clients, the registered OAuth client_id. For `system` clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
-                            /** @description True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client. */
+                            /** @description True for the client that mints new connections at the listed tier, chosen among the manual clients. Every listed client but an `auto_provisioned` one is a valid `client_ref` for PUT .../default-client: an auto-provisioned (DCR) client is listed for display and deletion, never a default. */
                             is_default: boolean;
                             auto_provisioned: boolean;
                             has_client_secret: boolean;
@@ -19536,7 +19608,7 @@ export interface operations {
                             source: "system" | "org" | "space";
                             /** @description For `space` / `org` clients, the registered OAuth client_id. For `system` clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
-                            /** @description True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client. */
+                            /** @description True for the client that mints new connections at the listed tier, chosen among the manual clients. Every listed client but an `auto_provisioned` one is a valid `client_ref` for PUT .../default-client: an auto-provisioned (DCR) client is listed for display and deletion, never a default. */
                             is_default: boolean;
                             auto_provisioned: boolean;
                             has_client_secret: boolean;
@@ -28967,6 +29039,81 @@ export interface operations {
                      *       "request_id": "req_pqr678"
                      *     }
                      */
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    getOAuthClientMetadataDocument: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description `<base64url(issuer)>.json`, the issuer in its canonical encoding: an `https` URL, or `http` for a host listed in `EGRESS_ALLOW_INTERNAL_HOSTS`. */
+                document: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The client metadata document */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    /** @description `public, max-age=300` — an authorization server may cache the document. */
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "client_id": "https://app.example.com/oauth/client-metadata/aHR0cHM6Ly9tY3Aubm90aW9uLmNvbQ.json",
+                     *       "client_name": "Appstrate (app.example.com)",
+                     *       "client_uri": "https://app.example.com",
+                     *       "redirect_uris": [
+                     *         "https://app.example.com/api/integrations/callback/cimd/ZUGRhbwa83_JyNgKjMOax-"
+                     *       ],
+                     *       "grant_types": [
+                     *         "authorization_code",
+                     *         "refresh_token"
+                     *       ],
+                     *       "response_types": [
+                     *         "code"
+                     *       ],
+                     *       "token_endpoint_auth_method": "none"
+                     *     }
+                     */
+                    "application/json": {
+                        /**
+                         * Format: uri
+                         * @description The URL this document is served at, exactly (the draft requires equality).
+                         */
+                        client_id: string;
+                        /** @description `Appstrate (<APP_URL host>)`. */
+                        client_name: string;
+                        /**
+                         * Format: uri
+                         * @description This instance's `APP_URL`.
+                         */
+                        client_uri: string;
+                        /** @description The one redirect URI the connect flow sends with this `client_id`: the server's own `<APP_URL>/api/integrations/callback/cimd/<tag>` — never the shared callback, nor the `/callback/<tag>` a DCR client of the same server registers (mix-up, RFC 9700 §4.4). */
+                        redirect_uris: string[];
+                        grant_types: ("authorization_code" | "refresh_token")[];
+                        response_types: "code"[];
+                        /**
+                         * @description A public client (PKCE): no secret, no key.
+                         * @enum {string}
+                         */
+                        token_endpoint_auth_method: "none";
+                    };
+                };
+            };
+            /** @description `document` encodes no admissible issuer (not an `https` URL — or `http` on an allowlisted host —, not in its canonical encoding, or longer than 2048 characters) */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };

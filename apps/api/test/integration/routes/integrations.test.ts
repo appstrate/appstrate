@@ -1491,7 +1491,9 @@ describe("OAuth2 connect initiate", () => {
     // The error names the specific provisioning failure (no registration
     // endpoint discovered against the unreachable AS) and carries its remedy.
     const body = (await res.json()) as { detail: string };
-    expect(body.detail).toContain("did not advertise dynamic client registration");
+    expect(body.detail).toContain(
+      "advertises neither client metadata documents nor dynamic client registration",
+    );
     expect(body.detail).toContain("register an OAuth client manually");
   });
 

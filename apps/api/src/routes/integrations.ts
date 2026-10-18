@@ -182,6 +182,7 @@ import {
   deleteOrgDefault,
 } from "../services/integration-org-defaults-service.ts";
 import { oauthStateStore } from "../services/connect/oauth-state-store.ts";
+import { clientMetadataRedirectTag } from "../lib/integration-callback-url.ts";
 import {
   buildConnectUrl,
   connectClaimsFor,
@@ -884,9 +885,10 @@ export function createIntegrationsRouter() {
     return c.json(listResponse(projected, { hasMore, total }));
   });
 
-  // One handler for the shared `/callback` and the per-authorization-server
-  // `/callback/:tag` of a server chosen per connection (AFPS §7.3): the state
-  // names which of the two the response must arrive at, both ways.
+  // One handler for the shared `/callback`, the per-authorization-server
+  // `/callback/:tag` of a DCR client of a server chosen per connection (AFPS
+  // §7.3) and the `/callback/cimd/:tag` of a metadata-document client: the
+  // state names which one the response must arrive at, every way.
   const oauthCallback = async (c: Context<AppEnv>, redirectTag: string | null) => {
     const code = c.req.query("code");
     const state = c.req.query("state");
@@ -1031,6 +1033,9 @@ export function createIntegrationsRouter() {
   };
   router.get("/callback", (c) => oauthCallback(c, null));
   router.get("/callback/:tag", (c) => oauthCallback(c, c.req.param("tag")));
+  router.get("/callback/cimd/:tag", (c) =>
+    oauthCallback(c, clientMetadataRedirectTag(c.req.param("tag"))),
+  );
 
   // The credential proxy's journal for this space: every call made here, whatever the connection
   // and whoever owns it. Under `configure`, the permission that governs which credential the

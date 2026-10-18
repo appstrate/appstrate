@@ -921,7 +921,13 @@ describe("integration OAuth mix-up defence (RFC 9207, RFC 9700 §4.4)", () => {
     });
   }
 
-  async function initiate(opts: { issSupported?: boolean; redirectTag?: string } = {}) {
+  async function initiate(
+    opts: {
+      issSupported?: boolean;
+      redirectTag?: string;
+      authorizationServer?: { issuer: string; issParameterSupported: boolean };
+    } = {},
+  ) {
     return initiateIntegrationOAuth(store, {
       packageId: "@org/forge",
       authKey: "oauth",
@@ -935,6 +941,7 @@ describe("integration OAuth mix-up defence (RFC 9207, RFC 9700 §4.4)", () => {
       discover: discoverFor(opts.issSupported ?? false),
       variables: { base_url: ISSUER },
       ...(opts.redirectTag ? { redirectTag: opts.redirectTag } : {}),
+      ...(opts.authorizationServer ? { authorizationServer: opts.authorizationServer } : {}),
     });
   }
 
@@ -965,6 +972,84 @@ describe("integration OAuth mix-up defence (RFC 9207, RFC 9700 §4.4)", () => {
       redirectTag: "T".repeat(22),
       variables: { base_url: ISSUER },
     });
+  });
+
+  it("takes the issuer and the iss requirement from the caller's binding, not a second discovery", async () => {
+    // The client was chosen on metadata requiring `iss`; this call's discovery (a cache expiry,
+    // a server answering differently) says otherwise and names nothing new: the binding wins.
+    const { state } = await initiate({
+      issSupported: false,
+      authorizationServer: { issuer: ISSUER, issParameterSupported: true },
+    });
+    expect(store._data.get(state)?.integration).toMatchObject({
+      issuer: ISSUER,
+      issParameterSupported: true,
+    });
+    const before = tokenStub.calls.length;
+    await refusal(
+      handleIntegrationOAuthCallback(store, resolverFor(), "CODE", state, tokenStub.impl, {
+        redirectTag: null,
+      }),
+    );
+    expect(tokenStub.calls.length).toBe(before);
+  });
+
+  it("a discovery advertising iss still adds the requirement to a binding without it", async () => {
+    const withIt = await initiate({
+      issSupported: true,
+      authorizationServer: { issuer: ISSUER, issParameterSupported: false },
+    });
+    expect(store._data.get(withIt.state)?.integration?.issParameterSupported).toBe(true);
+    const without = await initiate({
+      issSupported: false,
+      authorizationServer: { issuer: ISSUER, issParameterSupported: false },
+    });
+    expect(store._data.get(without.state)?.integration?.issParameterSupported).toBeUndefined();
+  });
+
+  it("refuses a response on a document's redirect URI for a state that requires no iss", async () => {
+    // A state carrying a `cimd/` tag without the issuer + RFC 9207 requirement (a row's redirect URI
+    // on the documents' path): the tag matches, an honest server's iss is present — still refused.
+    for (const opts of [
+      // Issuer recorded, requirement not: even a matching iss does not complete it.
+      { issSupported: false, redirectTag: "cimd/" + "T".repeat(22), iss: ISSUER },
+      // No issuer at all: the iss compare would be skipped.
+      {
+        issSupported: true,
+        redirectTag: "cimd/" + "T".repeat(22),
+        noIssuer: true,
+        iss: "https://honest-b.example.com",
+      },
+    ]) {
+      const { state } = await initiateIntegrationOAuth(store, {
+        packageId: "@org/forge",
+        authKey: "oauth",
+        ...(opts.noIssuer ? {} : { issuer: ISSUER }),
+        authorizationEndpoint: `${ISSUER}/oauth/authorize`,
+        tokenEndpoint: `${ISSUER}/oauth/token`,
+        clientId: "client-id",
+        clientRef: "client-ref",
+        redirectUri: `http://localhost:3000/api/integrations/callback/${opts.redirectTag}`,
+        orgId: "org_1",
+        spaceId: "spc_1",
+        actor: { type: "user", id: "u_1" },
+        discover: opts.noIssuer
+          ? async () => ({
+              authorizationEndpoint: `${ISSUER}/oauth/authorize`,
+              tokenEndpoint: `${ISSUER}/oauth/token`,
+            })
+          : discoverFor(opts.issSupported),
+        redirectTag: opts.redirectTag,
+      });
+      const before = tokenStub.calls.length;
+      await refusal(
+        handleIntegrationOAuthCallback(store, resolverFor(), "CODE", state, tokenStub.impl, {
+          iss: opts.iss,
+          redirectTag: opts.redirectTag,
+        }),
+      );
+      expect(tokenStub.calls.length).toBe(before);
+    }
   });
 
   it("accepts a matching iss and returns the issuer and variables", async () => {

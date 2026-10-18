@@ -33,6 +33,7 @@ import {
 } from "../lib/egress-host-guard.ts";
 import { readBodyPrefix, readBodyUnder } from "../lib/capped-body.ts";
 import { logger } from "../lib/logger.ts";
+import { presentsClientMetadataDocument } from "../lib/integration-client-metadata.ts";
 import { fetchServerIcon, siteIconFetch } from "./integration-icon.ts";
 
 type Provenance = "detected" | "guessed";
@@ -369,7 +370,7 @@ interface DiscoveredAuth {
 
 /**
  * RFC 9728 metadata → an oauth2 auth on its authorization server. Without it, an
- * authorization server at the URL's origin offering DCR → oauth2 (guessed);
+ * authorization server at the URL's origin provisioning a client by itself → oauth2 (guessed);
  * else an API key sent as a Bearer token (guessed), shaped as the editor's blank one.
  */
 async function discoverAuth(
@@ -394,7 +395,7 @@ async function discoverAuth(
       scopeTokens(challengeScopes ?? md.scopesSupported ?? []),
       endpoints.scopesSupported,
     );
-    const autoClient = endpoints.registrationEndpoint !== undefined;
+    const autoClient = provisionsClientItself(endpoints);
     const warning = !issuer
       ? {
           code: "authorization_server_blocked",
@@ -404,7 +405,7 @@ async function discoverAuth(
         ? null
         : {
             code: "manual_client_required",
-            message: `The authorization server ${advertised} offers no dynamic client registration: an administrator must register an OAuth client for this integration.`,
+            message: `The authorization server ${advertised} offers no client registration this instance can use (client metadata documents need a public https APP_URL; no dynamic client registration): an administrator must register an OAuth client for this integration.`,
           };
     return {
       key: "oauth",
@@ -424,7 +425,7 @@ async function discoverAuth(
   }
 
   const atOrigin = await resolveOAuthEndpoints({ issuer: origin, fetchImpl });
-  if (atOrigin.registrationEndpoint) {
+  if (provisionsClientItself(atOrigin)) {
     const scopes = withOfflineAccess(scopeTokens(challengeScopes ?? []), atOrigin.scopesSupported);
     return {
       key: "oauth",
@@ -434,6 +435,20 @@ async function discoverAuth(
     };
   }
   return { key: "primary", auth: apiKeyAuth(origin), provenance: "guessed", warnings: [] };
+}
+
+/**
+ * Whether connect can provision a public client at this server on its own: this instance's client
+ * metadata document (when the server accepts one and the instance can serve it), else DCR — the
+ * same two the connect path tries (`ensureIntegrationOAuthClient`).
+ */
+function provisionsClientItself(endpoints: {
+  issuer?: string;
+  clientIdMetadataDocumentSupported?: boolean;
+  authorizationResponseIssParameterSupported?: boolean;
+  registrationEndpoint?: string;
+}): boolean {
+  return presentsClientMetadataDocument(endpoints) || endpoints.registrationEndpoint !== undefined;
 }
 
 /**

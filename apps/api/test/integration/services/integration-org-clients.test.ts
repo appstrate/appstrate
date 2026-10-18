@@ -464,7 +464,8 @@ describe("org-level integration OAuth clients", () => {
         { clientId: "dcr", clientSecret: "", tokenEndpointAuthMethod: "none" },
         { autoProvisioned: true },
       );
-      expect(dcr).toMatchObject({ spaceId: null, autoProvisioned: true, isDefault: true });
+      // A machine client is found by its issuer, never the default.
+      expect(dcr).toMatchObject({ spaceId: null, autoProvisioned: true, isDefault: false });
     });
 
     it("rejects an integration of another org", async () => {
@@ -663,7 +664,8 @@ describe("org-level integration OAuth clients", () => {
         id,
         spaceId: null,
         autoProvisioned: true,
-        isDefault: true,
+        // Moved, not made default: the auto-provisioned path finds it by its issuer.
+        isDefault: false,
       });
       const [row] = await db
         .select()

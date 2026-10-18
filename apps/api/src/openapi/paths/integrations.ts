@@ -383,7 +383,7 @@ export const integrationConnectionSchema = {
     client_ref: {
       type: ["string", "null"],
       description:
-        "The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting.",
+        "The OAuth client that minted this connection: a system env id, a custom `integration_oauth_clients.id`, or the URL of this instance's client metadata document (its `client_id`, under `/oauth/client-metadata`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting.",
     },
     variables: {
       type: ["object", "null"],
@@ -435,7 +435,7 @@ export const integrationClientsListSchema = {
           is_default: {
             type: "boolean",
             description:
-              "True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client.",
+              "True for the client that mints new connections at the listed tier, chosen among the manual clients. Every listed client but an `auto_provisioned` one is a valid `client_ref` for PUT .../default-client: an auto-provisioned (DCR) client is listed for display and deletion, never a default.",
           },
           auto_provisioned: { type: "boolean" },
           has_client_secret: { type: "boolean" },
@@ -605,7 +605,7 @@ const authStatusSchema = {
     client_auto_provisioned: {
       type: "boolean",
       description:
-        'True for an oauth2 auth declaring `token_endpoint_auth_method: "none"` on a remote MCP integration (`source.kind: "remote"`) or with an authorization server chosen per connection. Its OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414), then RFC 7591 dynamic registration of a public client — so no pre-registered client is required.',
+        'True for an oauth2 auth declaring `token_endpoint_auth_method: "none"` on a remote MCP integration (`source.kind: "remote"`) or with an authorization server chosen per connection. Its OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414), then this instance\'s Client ID Metadata Document of that server as a public client (`GET /oauth/client-metadata/{document}`) when its metadata advertises `client_id_metadata_document_supported` and RFC 9207 `authorization_response_iss_parameter_supported`, `APP_URL` is public https and `INTEGRATION_OAUTH_CIMD` is not `off`, else RFC 7591 dynamic registration of a public client — so no pre-registered client is required.',
     },
   },
 } as const;
@@ -1014,7 +1014,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Integration OAuth2 callback (popup)",
       description:
-        "Browser-side OAuth callback for an authorization server fixed by the manifest. Exchanges code + state for tokens, persists the connection, and returns an HTML page that closes the popup window. A response for a flow started with an authorization server chosen per connection is refused here: it must arrive at that server's own `/callback/{tag}`. When the response carries `iss` (RFC 9207) it must name the authorization server the request was sent to, and a response without it is refused from a server that advertises `authorization_response_iss_parameter_supported`.",
+        "Browser-side OAuth callback for an authorization server fixed by the manifest. Exchanges code + state for tokens, persists the connection, and returns an HTML page that closes the popup window. A response for a flow started with a per-server redirect URI is refused here: one with an authorization server chosen per connection must arrive at that server's own `/callback/{tag}`, one with a client metadata document at `/callback/cimd/{tag}`. When the response carries `iss` (RFC 9207) it must name the authorization server the request was sent to, and a response without it is refused from a server that advertises `authorization_response_iss_parameter_supported`.",
       parameters: oauthCallbackQueryParameters,
       responses: oauthCallbackResponses,
     },
@@ -1026,7 +1026,28 @@ export const integrationsPaths = {
       summary:
         "Integration OAuth2 callback of an authorization server chosen per connection (popup)",
       description:
-        "The redirect URI registered with, and sent to, an authorization server chosen per connection (AFPS §7.3: an oauth2 auth whose `issuer` or `source.remote.url` is a URL template over connection variables). One per server — the RFC 9700 §4.4 mix-up defence — so the response must arrive at the tag of the server the request was sent to: a mismatch is refused, as is a response for a fixed server. Otherwise identical to `integrationsOAuthCallback`, including the RFC 9207 `iss` check.",
+        "The redirect URI registered with, and sent to, an authorization server chosen per connection (AFPS §7.3: an oauth2 auth whose `issuer` or `source.remote.url` is a URL template over connection variables). One per server — the RFC 9700 §4.4 mix-up defence — so the response must arrive at the tag of the server the request was sent to: a mismatch is refused, as is a response for a fixed server or for a client metadata document (`/callback/cimd/{tag}`). Otherwise identical to `integrationsOAuthCallback`, including the RFC 9207 `iss` check.",
+      parameters: [
+        {
+          name: "tag",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^[A-Za-z0-9_-]{22}$" },
+          description:
+            "The authorization server's tag: the first 22 characters of base64url(SHA-256(issuer)), the issuer of its validated RFC 8414 metadata.",
+        },
+        ...oauthCallbackQueryParameters,
+      ],
+      responses: oauthCallbackResponses,
+    },
+  },
+  "/api/integrations/callback/cimd/{tag}": {
+    get: {
+      operationId: "integrationsOAuthCallbackForMetadataDocument",
+      tags: ["Integrations"],
+      summary: "Integration OAuth2 callback of a client metadata document (popup)",
+      description:
+        "The redirect URI a Client ID Metadata Document of this instance lists (`GET /oauth/client-metadata/{document}`), one per authorization server, in a namespace dynamic registration never uses: a response here only completes a flow started with a metadata-document client of the server whose tag it carries — never one started with a DCR or administrator client, and never at `/callback` or `/callback/{tag}`. Any server can fetch any document, so such a flow also requires RFC 9207 `iss` naming the server the request was sent to; a response without it, or naming another server, is refused (RFC 9700 §4.4 mix-up defence). Otherwise identical to `integrationsOAuthCallback`.",
       parameters: [
         {
           name: "tag",
@@ -1047,7 +1068,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Propose an integration manifest from a remote MCP server URL",
       description:
-        "Probes a remote MCP server before any integration exists and returns a manifest proposal for the editor to merge: an MCP `initialize` request (Streamable HTTP; a 404/405 falls back to the SSE transport's GET), then its OAuth protected-resource metadata (RFC 9728) and authorization-server metadata (RFC 8414), plus the site's raster icon. An oauth2 auth is proposed as a public client (`token_endpoint_auth_method: none`) when the authorization server offers dynamic client registration (RFC 7591), else as `client_secret_post` with its `issuer` and a `manual_client_required` warning (`authorization_server_blocked` instead when the advertised authorization server is on a refused address, which is never read); without metadata, a server at the URL's origin offering DCR is guessed as oauth2, anything else as an API key sent as a Bearer token (auth `primary`, credential field `api_key`). A 401/403 counts as an MCP server only when its `WWW-Authenticate` offers the Bearer scheme. The whole discovery is bounded to 25 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Every URL reached is egress-guarded (private and reserved addresses refused, `https` required for a host the operator has not allowlisted). Requires `integrations:write`. Rate limited to 10 requests per minute.",
+        "Probes a remote MCP server before any integration exists and returns a manifest proposal for the editor to merge: an MCP `initialize` request (Streamable HTTP; a 404/405 falls back to the SSE transport's GET), then its OAuth protected-resource metadata (RFC 9728) and authorization-server metadata (RFC 8414), plus the site's raster icon. An oauth2 auth is proposed as a public client (`token_endpoint_auth_method: none`) when the authorization server accepts a client this instance provisions itself — a Client ID Metadata Document (`client_id_metadata_document_supported` with RFC 9207 `authorization_response_iss_parameter_supported`, only when `APP_URL` is public https and `INTEGRATION_OAUTH_CIMD` is not `off`) or dynamic client registration (RFC 7591) — else as `client_secret_post` with its `issuer` and a `manual_client_required` warning (`authorization_server_blocked` instead when the advertised authorization server is on a refused address, which is never read); without metadata, a server at the URL's origin offering either is guessed as oauth2, anything else as an API key sent as a Bearer token (auth `primary`, credential field `api_key`). A 401/403 counts as an MCP server only when its `WWW-Authenticate` offers the Bearer scheme. The whole discovery is bounded to 25 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Every URL reached is egress-guarded (private and reserved addresses refused, `https` required for a host the operator has not allowlisted). Requires `integrations:write`. Rate limited to 10 requests per minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1385,7 +1406,7 @@ export const integrationsPaths = {
         "space may hold N clients per auth (model-provider pattern). The first " +
         "registered client becomes the default; later ones are non-default until " +
         "promoted via PUT .../default-client. Rejected for auto-provisioned " +
-        "(DCR) auths. Requires `integrations:configure`, which is never granted to an API key.",
+        "(client metadata document or DCR) auths. Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
