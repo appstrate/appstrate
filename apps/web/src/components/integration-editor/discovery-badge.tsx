@@ -4,6 +4,11 @@ import { useTranslation } from "react-i18next";
 import { Badge } from "@appstrate/ui/components/badge";
 import type { DiscoveryBadges } from "../../lib/integration-discovery-merge";
 
+const LABEL_KEYS = {
+  detected: "integrationEditor.discover.detected",
+  guessed: "integrationEditor.discover.guessed",
+} as const;
+
 /** Whether a field of the integration draft was read from the server or inferred by the analysis. */
 export function DiscoveryBadge({
   provenance,
@@ -14,7 +19,7 @@ export function DiscoveryBadge({
   if (!provenance) return null;
   return (
     <Badge variant={provenance === "detected" ? "secondary" : "outline"} className="font-normal">
-      {t(`integrationEditor.discover.${provenance}`)}
+      {t(LABEL_KEYS[provenance])}
     </Badge>
   );
 }
