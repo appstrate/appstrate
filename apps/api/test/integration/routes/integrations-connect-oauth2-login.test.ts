@@ -11,6 +11,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test"
 import { eq } from "drizzle-orm";
 import { integrationConnections } from "@appstrate/db/schema";
 import { truncateAll, db } from "../../helpers/db.ts";
+import { flushRedis } from "../../helpers/redis.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage } from "../../helpers/seed.ts";
 import { getTestApp } from "../../helpers/app.ts";
@@ -65,10 +66,12 @@ beforeAll(() => {
   ]);
 });
 
-afterAll(() => {
+afterAll(async () => {
   server.stop(true);
   restoreEgress();
   initSystemIntegrations([]);
+  // The hosted doors are rate-limited per IP; leave the counters clean for the next file.
+  await flushRedis();
 });
 
 /** Open the hosted form once (mint → dispatch → context) and submit it as often as asked. */
@@ -108,6 +111,7 @@ describe("oauth2 acquired by connect.login — connect routes", () => {
 
   beforeEach(async () => {
     await truncateAll();
+    await flushRedis();
     exchanged = [];
     tokenStatus = 200;
     ctx = await createTestContext({ orgSlug: "myorg" });
