@@ -150,6 +150,14 @@ export function useRunLauncher(packageId: string) {
 
 export type RunLauncher = ReturnType<typeof useRunLauncher>;
 
+/** What every import door answers, a bundle included: the package to open (its root). */
+export interface ImportedPackage {
+  packageId: string;
+  type: string;
+  version?: string;
+  warnings?: string[];
+}
+
 /** After an import: refresh every package cache and surface the non-blocking import-time warnings. */
 function afterImport(qc: QueryClient, data: { type: string; warnings?: string[] }) {
   // An import REPLACES the draft artifact: without the file caches the explorer shows the pre-import index.
@@ -168,10 +176,13 @@ export function useImportPackage(meta?: MutationMeta) {
     mutationFn: async ({
       file,
       force,
+      type,
     }: {
       file: File;
       force?: boolean;
-    }): Promise<{ packageId: string; type: string; version?: string; warnings?: string[] }> => {
+      /** The type imported for: an archive of another type is refused before anything is written. */
+      type?: PackageType;
+    }): Promise<ImportedPackage> => {
       const fd = new FormData();
       fd.append("file", file);
       // Multi-package bundles route to a different endpoint; the
@@ -179,18 +190,20 @@ export function useImportPackage(meta?: MutationMeta) {
       // extension so users can drag both kinds into the same modal.
       if (file.name.toLowerCase().endsWith(".afps-bundle")) {
         const { data } = await client.POST("/api/packages/import-bundle", {
+          params: { query: { type } },
           // Multipart gap: the generated body types the binary part as `string`; FormData passes through the serializer.
           body: { file },
           bodySerializer: () => fd,
         });
         return {
           packageId: data!.root_package_id,
-          type: "agent" as const,
+          type: data!.root_type,
+          version: data!.root_version,
           warnings: data!.warnings,
         };
       }
       const { data } = await client.POST("/api/packages/import", {
-        params: { query: force ? { force: true } : undefined },
+        params: { query: { force: force || undefined, type } },
         // Multipart gap — see above.
         body: { file },
         bodySerializer: () => fd,
@@ -205,8 +218,11 @@ export function useImportFromGithub() {
   const qc = useQueryClient();
   return useMutation({
     meta: { errorHandledByCaller: true },
-    mutationFn: async (url: string) => {
-      const { data } = await client.POST("/api/packages/import-github", { body: { url } });
+    mutationFn: async ({ url, type }: { url: string; type?: PackageType }) => {
+      const { data } = await client.POST("/api/packages/import-github", {
+        params: { query: { type } },
+        body: { url },
+      });
       return data!;
     },
     onSuccess: (data) => afterImport(qc, data),

@@ -7,7 +7,12 @@ import { FormModal } from "./form-modal";
 import { cn } from "@appstrate/ui/cn";
 import { Field, FieldError, FieldLabel, FieldSeparator } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
-import { useImportPackage, useImportFromGithub } from "../hooks/use-mutations";
+import {
+  useImportPackage,
+  useImportFromGithub,
+  type ImportedPackage,
+} from "../hooks/use-mutations";
+import type { PackageType } from "../hooks/use-packages";
 import { ApiError } from "../api/errors";
 import { packageDetailPath } from "../lib/package-paths";
 import { errorMessage, onMutationError } from "../lib/mutation-error";
@@ -15,12 +20,18 @@ import { errorMessage, onMutationError } from "../lib/mutation-error";
 interface ImportModalProps {
   onClose: () => void;
   /**
+   * The package type imported for, when the import is opened from that type's
+   * page or field: the server refuses an archive of another type before
+   * writing anything. Absent, any type is accepted.
+   */
+  type?: PackageType;
+  /**
    * Stay where you are and hand the result back, instead of opening the
    * imported package. For an import made from inside another form — the
    * integration editor importing its local server — navigating would throw
    * away the form.
    */
-  onImported?: (result: { packageId: string; type: string }) => void;
+  onImported?: (result: ImportedPackage) => void;
 }
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
@@ -33,7 +44,7 @@ function fileRefusal(f: File): "import.errZip" | "import.errSize" | null {
   return f.size > MAX_SIZE ? "import.errSize" : null;
 }
 
-export function ImportModal({ onClose, onImported }: ImportModalProps) {
+export function ImportModal({ onClose, type, onImported }: ImportModalProps) {
   const { t } = useTranslation(["agents", "common"]);
   const [file, setFile] = useState<File | null>(null);
   const [githubUrl, setGithubUrl] = useState("");
@@ -81,7 +92,7 @@ export function ImportModal({ onClose, onImported }: ImportModalProps) {
   };
 
   /** A finished import opens the package, or hands it back to the form it was made from. */
-  const finish = (result: { packageId: string; type: string }) => {
+  const finish = (result: ImportedPackage) => {
     if (onImported) {
       onImported(result);
       onClose();
@@ -94,7 +105,7 @@ export function ImportModal({ onClose, onImported }: ImportModalProps) {
     if (file) {
       const force = !!confirmOverwrite || !!confirmIntegrity;
       importPackage.mutate(
-        { file, force },
+        { file, force, type },
         {
           onSuccess: finish,
           onError: (err) => {
@@ -116,10 +127,13 @@ export function ImportModal({ onClose, onImported }: ImportModalProps) {
         },
       );
     } else if (hasUrl) {
-      importGithub.mutate(githubUrl.trim(), {
-        onSuccess: finish,
-        onError: (err) => setError(errorMessage(err)),
-      });
+      importGithub.mutate(
+        { url: githubUrl.trim(), type },
+        {
+          onSuccess: finish,
+          onError: (err) => setError(errorMessage(err)),
+        },
+      );
     }
   };
 

@@ -189,6 +189,7 @@
   "apiError.webhook_limit_reached": "Nombre maximal de webhooks atteint : {{message}}",
   "apiError.blocked_url": "Adresse refusée, elle pointe vers un réseau privé ou réservé : {{message}}",
   "apiError.name_collision": "Un package porte déjà cet identifiant. Choisissez-en un autre.",
+  "apiError.unexpected_package_type": "Cette archive contient un package d'un autre type que celui attendu ici.",
   "apiError.type_mismatch": "Un package d'un autre type porte déjà cet identifiant : {{message}}",
   "apiError.wrong_package_type": "Ce package n'est pas du type attendu pour cette opération.",
   "apiError.chat_enforced_not_skill": "Seul un skill peut être imposé dans le chat.",

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { MessageSquareText, PencilLine } from "lucide-react";
+import { MessageSquareText, PencilLine, Upload } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { buildChatCreationDraft, type CreationResource } from "../lib/creation-handoff";
 import { useCanReach } from "../hooks/use-can-reach";
@@ -11,21 +11,29 @@ import { Modal } from "./modal";
 interface CreationHandoffModalProps {
   resource: CreationResource;
   onClose: () => void;
-  onManual: () => void;
+  /** Absent for a type that cannot be written by hand (a local MCP server embeds its code). */
+  onManual?: () => void;
   onChat: (prompt: string) => void;
+  /** Importing a type takes the same grant as creating it, so whoever opens this may import. */
+  onImport: () => void;
 }
 
+/**
+ * The three ways to make a package, the same for every type: by hand, with the
+ * chat, or from an archive. A way a type does not have, or the chat when it
+ * is out of reach, stays listed, disabled, with the reason.
+ */
 export function CreationHandoffModal({
   resource,
   onClose,
   onManual,
   onChat,
+  onImport,
 }: CreationHandoffModalProps) {
   const { t } = useTranslation("settings");
   const canReach = useCanReach();
   const translatePrompt = (key: string, values?: Record<string, string>) => t(key, values);
   const chatPrompt = buildChatCreationDraft(resource, translatePrompt);
-  const manualIsImport = resource === "mcp-server";
   // The chat route gate covers both the feature flag and the `chat:read` permission.
   const chatAvailable = canReach("/chat");
 
@@ -33,12 +41,12 @@ export function CreationHandoffModal({
     {
       id: "manual",
       icon: PencilLine,
-      title: t(manualIsImport ? "creation.manual.importTitle" : "creation.manual.title"),
+      title: t("creation.manual.title"),
       description: t(
-        manualIsImport ? "creation.manual.importDescription" : "creation.manual.description",
+        onManual ? "creation.manual.description" : "creation.manual.unavailableDescription",
       ),
-      onClick: onManual,
-      disabled: false,
+      onClick: () => onManual?.(),
+      disabled: !onManual,
     },
     {
       id: "chat",
@@ -49,6 +57,14 @@ export function CreationHandoffModal({
       ),
       onClick: () => onChat(chatPrompt),
       disabled: !chatAvailable,
+    },
+    {
+      id: "import",
+      icon: Upload,
+      title: t("creation.import.title"),
+      description: t("creation.import.description"),
+      onClick: onImport,
+      disabled: false,
     },
   ];
 

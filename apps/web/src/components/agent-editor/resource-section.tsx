@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { type ChangeEvent, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { cn } from "@appstrate/ui/cn";
@@ -9,7 +9,8 @@ import { PackageVersionSelect } from "../package-version-select";
 import { packageDetailPath } from "../../lib/package-paths";
 import { matchesSearch } from "../../lib/strings";
 import { usePackageList, type PackageType } from "../../hooks/use-packages";
-import { useImportPackage } from "../../hooks/use-mutations";
+import type { ImportedPackage } from "../../hooks/use-mutations";
+import { ImportModal } from "../import-modal";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Button } from "@appstrate/ui/components/button";
 import {
@@ -70,7 +71,6 @@ export function ResourceSection({
   onChange: (update: (prev: ResourceEntry[]) => ResourceEntry[]) => void;
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   // The picker offers what this space RUNS: activation governs what a space
   // offers — hints, CLI sync, this list — so the index (placed here and
   // switched on, every type) is the offer. It is narrower than what a manifest
@@ -81,7 +81,7 @@ export function ResourceSection({
   // Without the type's read the catalog never loads: the declared
   // entries are then all this section knows, listed by id.
   const canReadCatalog = usePermissions().can(packagePermission(type, "read"));
-  const upload = useImportPackage();
+  const [importing, setImporting] = useState(false);
   const [picking, setPicking] = useState(false);
   const [toolsId, setToolsId] = useState<string | null>(null);
   const toolsEntry = selectedEntries.find((entry) => entry.id === toolsId);
@@ -119,25 +119,14 @@ export function ResourceSection({
         }),
     ]);
 
-  const handleUpload = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    try {
-      const result = await upload.mutateAsync({ file });
-      const newId = result.packageId;
-      const newVersion = result.version;
-      if (!newVersion) return;
-
-      onChange((prev) => {
-        if (prev.some((e) => e.id === newId)) return prev;
-        return [...prev, { id: newId, version: caretRange(newVersion) }];
-      });
-    } catch {
-      // Reported by the mutation cache.
-    }
-
-    if (fileInputRef.current) fileInputRef.current.value = "";
+  /** An imported package becomes a dependency, pinned to the version it was imported at. */
+  const addImported = ({ packageId, version }: ImportedPackage) => {
+    if (!version) return;
+    onChange((prev) =>
+      prev.some((e) => e.id === packageId)
+        ? prev
+        : [...prev, { id: packageId, version: caretRange(version) }],
+    );
   };
 
   const toolsSummary = (entry: ResourceEntry) =>
@@ -156,14 +145,6 @@ export function ResourceSection({
           <h3 className="text-sm font-semibold">{title}</h3>
           <Badge variant="secondary">{selectedEntries.length}</Badge>
         </div>
-        <input
-          type="file"
-          accept=".afps"
-          ref={fileInputRef}
-          onChange={handleUpload}
-          className="hidden"
-          disabled={upload.isPending}
-        />
         <PageActionsMenu
           actions={[
             {
@@ -175,10 +156,9 @@ export function ResourceSection({
             },
             {
               id: "import",
-              label: t("editor.importZip"),
+              label: t("common:nav.import"),
               icon: Upload,
-              onSelect: () => fileInputRef.current?.click(),
-              disabled: upload.isPending,
+              onSelect: () => setImporting(true),
             },
           ]}
         />
@@ -318,6 +298,9 @@ export function ResourceSection({
         </div>
       )}
 
+      {importing && (
+        <ImportModal type={type} onClose={() => setImporting(false)} onImported={addImported} />
+      )}
       {picking && (
         <ResourcePicker
           title={t("editor.resourceAddTitle", { kind: title })}
