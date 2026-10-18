@@ -139,6 +139,11 @@ export interface ChatHost {
   modelCredentials: readonly PickerCredential[];
   /** A byte count in the language the host renders (`2,0 Ko` in French). */
   formatBytes: (bytes: number) => string;
+  /**
+   * The assistant created or imported a package: the host refreshes what lists
+   * packages, as its own editor and import dialog do after a write.
+   */
+  onPackagesChanged: () => void;
 }
 
 /**

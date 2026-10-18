@@ -11007,8 +11007,8 @@ export interface operations {
                     messages: Record<string, never>[];
                     modelId?: string;
                     generation?: components["schemas"]["ModelGenerationSettings"];
-                    /** @description Lets the assistant author agents (create, edit, compose inline) this turn; absent = on. Narrows the caller's own grants, never widens them. */
-                    agent_authoring?: boolean;
+                    /** @description Lets the assistant author packages of every type this turn (create, import, edit; for an agent, also compose one inline); absent = on. Narrows the caller's own grants, never widens them. */
+                    package_authoring?: boolean;
                     /**
                      * @description The conversation's skill mode (see ChatSession `skill_mode`), written onto the session by this turn. Sent with `pinned_skills` or not at all; absent = the stored selection (`auto` for a new conversation).
                      * @enum {string}

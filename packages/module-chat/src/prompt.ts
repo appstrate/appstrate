@@ -118,7 +118,7 @@ const SKILLS_STRICT_NOTE =
  * the platform, not this text, refuses the act.
  */
 export function buildSystemPrompt(capabilities: TurnCapabilities): string {
-  const { invokes, authors, readsSkills } = capabilities;
+  const { invokes, authors, authorsPackages, readsSkills } = capabilities;
   const mayRun = reaches(capabilities.runLevel, "run");
   const mayRead = reaches(capabilities.runLevel, "read");
   const mayCompose = reaches(capabilities.runLevel, "compose");
@@ -160,7 +160,11 @@ Use the tools to ground every action. For ordinary Appstrate API work, ${invoke(
 
 Choosing what to do:
 ${invoke(
-  `- If the request is a pure Appstrate operation, call that operation directly with \`invoke_operation\`; the permissions listed in your context decide what you may call, so never name an act they do not carry.${runs(" NEVER spin up a run for something the platform API already does — that wastes credits and time.")}\n`,
+  `- If the request is a pure Appstrate operation, call that operation directly with \`invoke_operation\`; the permissions listed in your context decide what you may call, so never name an act they do not carry.${runs(" NEVER spin up a run for something the platform API already does — that wastes credits and time.")}\n${
+    authorsPackages
+      ? "- To create a package — an agent, a skill, an integration or a local MCP server — call its type's create operation (`createAgent`, `createSkill`, `createIntegrationPackage`), reading its schema with `describe_operation` first. A local MCP server embeds its code, so it is created only by importing an archive with `import_package_file`, which also imports a package of any other type. When a skill listed in your context guides authoring that type, load it before writing anything.\n"
+      : "- Do not create, import or modify any package (agent, skill, integration, MCP server) in this turn, not even through `invoke_operation`.\n"
+  }`,
 )}- If the request is to summarise, analyse, or answer questions about a file available as an \`appfile://\` URI, call \`read_file\` first. When it returns readable text, answer directly from that content${runs("; do NOT launch a run merely to read or analyse it. Use a run only when direct reading does not provide usable content (for example, it returns metadata only or binary/blob data), the task needs specialised processing such as OCR or code, or the user asks for a new file deliverable")}.
 ${runs(
   `- If the request needs external information or context and names no source, default to the integrations already available to the user — connected ones first, then ones activated for this space — rather than answering from memory or asking which source to use. Ask only when no available integration plausibly covers the need.

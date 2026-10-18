@@ -12,13 +12,14 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   ChatHeadersProvider,
   ChatPage,
   SelectConversationProvider,
   type OpenFile,
 } from "@appstrate/module-chat/ui";
-import { bindAgentAuthoringUser } from "@appstrate/module-chat/agent-authoring";
+import { bindPackageAuthoringUser } from "@appstrate/module-chat/package-authoring";
 import { useAuth } from "../../hooks/use-auth";
 import { useFileDownload, useFileImageSrc } from "../../hooks/use-files";
 import { formatBytes } from "../../lib/format-bytes";
@@ -39,15 +40,16 @@ import {
   useProvidersRegistry,
 } from "../../hooks/use-model-provider-credentials";
 import { pickerCredentials } from "../../lib/model-picker";
+import { refreshPackageLists } from "../../hooks/use-mutations";
 
 // One element for the page's lifetime: it sits in the composer slot, which the
 // chat memoizes, and the chip keeps itself current through its own hooks.
 const COMPOSER_ACTIONS = <ChatAccessChip />;
 
 export function ChatModulePage() {
-  // The agent-authoring preference is per user: bind it before the composer paints.
+  // The package-authoring preference is per user: bind it before the composer paints.
   const userId = useAuth().user?.id ?? null;
-  useLayoutEffect(() => bindAgentAuthoringUser(userId), [userId]);
+  useLayoutEffect(() => bindPackageAuthoringUser(userId), [userId]);
   // Conversation id lives in the URL (`/chat/:conversationId`) so a refresh or
   // deep-link restores the open conversation. `replace` keeps message/title
   // updates out of the back-history.
@@ -125,6 +127,9 @@ export function ChatModulePage() {
   // refresh of the org storage gauge. The chat composer stages files through
   // it instead of re-implementing the 2-step upload.
   const uploadFile = useUploadClient();
+  const queryClient = useQueryClient();
+  // The assistant creates and imports packages: the lists show them as the editor's would.
+  const onPackagesChanged = useCallback(() => refreshPackageLists(queryClient), [queryClient]);
   // The chat's tools (run agents, inspect runs, search…) are served by the
   // `mcp` module, which is a hard peer requirement of `chat` (enforced at
   // boot) — so tools are always available when the chat is reachable.
@@ -158,6 +163,7 @@ export function ChatModulePage() {
               personalModelCredentials={orgSettings?.personal_model_credentials}
               modelCredentials={modelCredentials}
               formatBytes={formatBytes}
+              onPackagesChanged={onPackagesChanged}
             />
           </div>
           <ConversationSidebar

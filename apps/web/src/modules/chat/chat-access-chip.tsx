@@ -10,7 +10,7 @@
 
 import { useTranslation } from "react-i18next";
 import { BotOffIcon, CheckIcon, EyeIcon, ShieldIcon, XIcon } from "lucide-react";
-import { useAgentAuthoringEnabled } from "@appstrate/module-chat/agent-authoring";
+import { usePackageAuthoringEnabled } from "@appstrate/module-chat/package-authoring";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
@@ -29,7 +29,7 @@ export function ChatAccessChip() {
   const spaceId = useCurrentSpaceId();
   const { data: spaces } = useSpaces();
   const persona = useViewAs();
-  const authoring = useAgentAuthoringEnabled();
+  const authoring = usePackageAuthoringEnabled();
 
   // `can` answers `false` while a set is in flight, which looks like a denial: hold the box.
   if (!ready || orgRole === null) return <Skeleton className="h-7 w-24 rounded-md" />;

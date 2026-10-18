@@ -1,18 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The composer's agent-authoring switch, client side: a per-user preference,
+ * The composer's package-authoring switch, client side: a per-user preference,
  * on unless that user opted out. The gate itself is `agents:write`, dropped
  * from the turn's token server-side (`chat-stream-handler.test.ts`).
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import {
-  bindAgentAuthoringUser,
-  getAgentAuthoringEnabled,
-  setAgentAuthoringEnabled,
-  subscribeAgentAuthoring,
-} from "../src/ui/agent-authoring-store.ts";
+  bindPackageAuthoringUser,
+  getPackageAuthoringEnabled,
+  setPackageAuthoringEnabled,
+  subscribePackageAuthoring,
+} from "../src/ui/package-authoring-store.ts";
 
 /** This runner has no `localStorage`; a Map-backed one stands in. */
 function installStorage(): Map<string, string> {
@@ -27,54 +27,54 @@ function installStorage(): Map<string, string> {
   return data;
 }
 
-beforeEach(() => bindAgentAuthoringUser(null));
+beforeEach(() => bindPackageAuthoringUser(null));
 afterEach(() => {
-  bindAgentAuthoringUser(null);
-  setAgentAuthoringEnabled(true);
+  bindPackageAuthoringUser(null);
+  setPackageAuthoringEnabled(true);
   delete (globalThis as { localStorage?: unknown }).localStorage;
 });
 
-describe("the agent-authoring preference", () => {
+describe("the package-authoring preference", () => {
   it("is on by default", () => {
-    expect(getAgentAuthoringEnabled()).toBe(true);
+    expect(getPackageAuthoringEnabled()).toBe(true);
   });
 
   it("is kept per user: one account's choice never carries over to another", () => {
     installStorage();
-    bindAgentAuthoringUser("usr_a");
-    setAgentAuthoringEnabled(false);
+    bindPackageAuthoringUser("usr_a");
+    setPackageAuthoringEnabled(false);
 
-    bindAgentAuthoringUser("usr_b");
-    expect(getAgentAuthoringEnabled()).toBe(true);
+    bindPackageAuthoringUser("usr_b");
+    expect(getPackageAuthoringEnabled()).toBe(true);
 
-    bindAgentAuthoringUser("usr_a");
-    expect(getAgentAuthoringEnabled()).toBe(false);
+    bindPackageAuthoringUser("usr_a");
+    expect(getPackageAuthoringEnabled()).toBe(false);
   });
 
   it("persists nothing while no user is bound", () => {
     const data = installStorage();
-    setAgentAuthoringEnabled(false);
+    setPackageAuthoringEnabled(false);
     expect(data.size).toBe(0);
   });
 
   it("round-trips without storage at all", () => {
     expect(typeof localStorage).toBe("undefined");
-    bindAgentAuthoringUser("usr_a");
-    setAgentAuthoringEnabled(false);
-    expect(getAgentAuthoringEnabled()).toBe(false);
+    bindPackageAuthoringUser("usr_a");
+    setPackageAuthoringEnabled(false);
+    expect(getPackageAuthoringEnabled()).toBe(false);
   });
 
   it("notifies subscribers on a real change only", () => {
     let notifications = 0;
-    const unsubscribe = subscribeAgentAuthoring(() => {
+    const unsubscribe = subscribePackageAuthoring(() => {
       notifications += 1;
     });
     try {
-      setAgentAuthoringEnabled(true);
+      setPackageAuthoringEnabled(true);
       expect(notifications).toBe(0);
-      setAgentAuthoringEnabled(false);
+      setPackageAuthoringEnabled(false);
       expect(notifications).toBe(1);
-      setAgentAuthoringEnabled(false);
+      setPackageAuthoringEnabled(false);
       expect(notifications).toBe(1);
     } finally {
       unsubscribe();

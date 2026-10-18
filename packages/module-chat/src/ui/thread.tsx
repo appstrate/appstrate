@@ -40,6 +40,7 @@ import {
   InvokeOperationToolUI,
   SearchOperationsToolUI,
   DescribeOperationToolUI,
+  ImportPackageFileToolUI,
   RunAndWaitToolUI,
 } from "./tool-uis.tsx";
 import { parseResume, INTEGRATION_RESUME_MARKER } from "./auth-offer.ts";
@@ -77,6 +78,7 @@ export function Thread({
       <RunAndWaitToolUI />
       <SearchOperationsToolUI />
       <DescribeOperationToolUI />
+      <ImportPackageFileToolUI />
 
       {/* Empty: composer centered mid-screen for a strong first impression.
           Non-empty: classic scrollable transcript with a sticky footer. */}

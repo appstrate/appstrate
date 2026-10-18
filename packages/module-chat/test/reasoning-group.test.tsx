@@ -60,6 +60,7 @@ const host: ChatHost = {
   personalModelCredentials: true,
   modelCredentials: [],
   formatBytes: String,
+  onPackagesChanged: () => {},
 };
 
 function Turn({ helpers }: { helpers: ChatHelpers }) {

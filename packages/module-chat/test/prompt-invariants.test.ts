@@ -595,3 +595,34 @@ describe("the persona of a turn that can look but not act", () => {
     expect(FULL).toContain("instead of attempting it");
   });
 });
+
+describe("the persona and package authoring", () => {
+  const CREATES = "To create a package — an agent, a skill, an integration or a local MCP server";
+  const FORBIDS = "Do not create, import or modify any package";
+
+  it("teaches creating every package type on a write on any one of them", () => {
+    for (const write of [
+      "agents:write",
+      "skills:write",
+      "integrations:write",
+      "mcp-servers:write",
+    ]) {
+      const prompt = promptFor([...MCP, write]);
+      expect(prompt).toContain(CREATES);
+      expect(prompt).toContain("`import_package_file`");
+      expect(prompt).not.toContain(FORBIDS);
+    }
+  });
+
+  it("forbids it when the turn holds no package write — the switch off", () => {
+    const prompt = promptFor([...MCP, "agents:run", "runs:read", "skills:read"]);
+    expect(prompt).toContain(FORBIDS);
+    expect(prompt).not.toContain(CREATES);
+  });
+
+  it("says nothing of it to a turn that cannot dispatch", () => {
+    const prompt = promptFor(["mcp:read", "agents:write"]);
+    expect(prompt).not.toContain(CREATES);
+    expect(prompt).not.toContain(FORBIDS);
+  });
+});

@@ -400,10 +400,10 @@ export const chatPaths = {
                 },
                 modelId: { type: "string" },
                 generation: { $ref: "#/components/schemas/ModelGenerationSettings" },
-                agent_authoring: {
+                package_authoring: {
                   type: "boolean",
                   description:
-                    "Lets the assistant author agents (create, edit, compose inline) this turn; absent = on. Narrows the caller's own grants, never widens them.",
+                    "Lets the assistant author packages of every type this turn (create, import, edit; for an agent, also compose one inline); absent = on. Narrows the caller's own grants, never widens them.",
                 },
                 skill_mode: {
                   type: "string",

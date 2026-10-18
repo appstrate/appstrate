@@ -160,10 +160,19 @@ export interface ImportedPackage {
 
 /** After an import: refresh every package cache and surface the non-blocking import-time warnings. */
 function afterImport(qc: QueryClient, data: { type: string; warnings?: string[] }) {
+  refreshPackageLists(qc, data.type);
+  for (const message of data.warnings ?? []) toast.warning(message);
+}
+
+/**
+ * After a package write made outside an editor (an import, the chat): refresh
+ * every package cache, the integration ones when it may be an integration
+ * (`type` unknown: refresh them too), and the libraries.
+ */
+export function refreshPackageLists(qc: QueryClient, type?: string) {
   // An import REPLACES the draft artifact: without the file caches the explorer shows the pre-import index.
   invalidatePackageCaches(qc);
-  if (data.type === "integration") void invalidateIntegrationQueries(qc);
-  for (const message of data.warnings ?? []) toast.warning(message);
+  if (type === undefined || type === "integration") void invalidateIntegrationQueries(qc);
   // The library feeds the integration editor's picker, which imports in place.
   void invalidateLibraries(qc);
 }
