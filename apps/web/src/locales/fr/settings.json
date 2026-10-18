@@ -804,7 +804,7 @@
   "creation.title.integration": "Créer une nouvelle intégration",
   "creation.title.mcp-server": "Créer un nouveau serveur MCP local",
   "creation.manual.title": "Créer manuellement",
-  "creation.manual.description": "Ouvrir l’éditeur existant et configurer vous-même la ressource.",
+  "creation.manual.description": "Renseigner l’essentiel dans un court formulaire, puis régler le reste dans ses paramètres.",
   "creation.manual.unavailableDescription": "Un serveur MCP local embarque son code : il se crée par import.",
   "creation.import.title": "Importer un package",
   "creation.import.description": "Téléverser une archive .afps ou .zip, ou l’importer depuis GitHub.",
@@ -1508,7 +1508,5 @@
   "models.choice.manualConfirm": "Ajouter à la liste",
   "models.form.subscriptionRequired": "Choisissez un abonnement de l'organisation ou « Clé perso ».",
   "creation.fromUrl.title": "À partir d’une URL MCP",
-  "creation.fromUrl.description": "Collez l’adresse d’un serveur MCP. Appstrate vous guide pour ajouter ses outils.",
-  "creation.manual.integrationTitle": "Configuration manuelle",
-  "creation.manual.integrationDescription": "Définissez vous-même la source, l’authentification et les outils."
+  "creation.fromUrl.description": "Collez l’adresse d’un serveur MCP. Appstrate vous guide pour ajouter ses outils."
 }

@@ -10,7 +10,7 @@
 
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { $api } from "../api/client";
 import { DetailBar } from "../components/detail-bar";
@@ -45,7 +45,6 @@ import {
   integrationWizardStep,
   isCurrentAnalysis,
   isRemoteSource,
-  manualCreationState,
   proposalEdits,
   toolsPublishVersion,
   type DiscoveryResult,
@@ -91,7 +90,6 @@ interface Review {
 /** Before the package exists: the address and the review. Nothing is stored. */
 function NewIntegrationWizard() {
   const { t } = useTranslation("agents");
-  const navigate = useNavigate();
   const { user } = useAuth();
   const { currentOrg } = useOrg();
   const [url, setUrl] = useState("");
@@ -102,6 +100,8 @@ function NewIntegrationWizard() {
     meta: { errorHandledByCaller: true },
   });
   const create = useCreatePackage("integration");
+  // « Continuer en configuration manuelle » creates the package as the creation dialog does, then opens it.
+  const [manual, setManual] = useState(false);
 
   // While a creation is in flight nothing it was built from may change: its controls are disabled.
   const changeUrl = (next: string) => {
@@ -145,7 +145,11 @@ function NewIntegrationWizard() {
     );
 
   // Rendered, not a mutate callback: a re-render during the request cannot lose the package.
-  if (create.data) return <Navigate to={wizardResumePath(create.data.id)} replace />;
+  if (create.data) {
+    const created = create.data.id;
+    const to = manual ? packageDetailPath("integration", created) : wizardResumePath(created);
+    return <Navigate to={to} replace />;
+  }
 
   return (
     <>
@@ -168,14 +172,18 @@ function NewIntegrationWizard() {
             create.reset();
           }}
           icon={review.icon}
-          creating={create.isPending}
+          creating={create.isPending ? (manual ? "manual" : "guided") : null}
           createError={create.error}
           onCreate={() => {
-            if (!create.isPending) create.mutate(wizardCreateBody(accepted(review)));
+            if (create.isPending) return;
+            setManual(false);
+            create.mutate(wizardCreateBody(accepted(review), "guided"));
           }}
-          onManual={() =>
-            navigate("/integrations/new", { state: manualCreationState(accepted(review)) })
-          }
+          onManual={() => {
+            if (create.isPending) return;
+            setManual(true);
+            create.mutate(wizardCreateBody(accepted(review), "manual"));
+          }}
         />
       )}
       <div>

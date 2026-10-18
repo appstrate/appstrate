@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ResourceEntry } from "./types";
-import type { EditorState } from "../../hooks/use-editor-state";
 import type { MetadataState } from "./metadata-section";
 import type { SchemaField } from "./types";
 import {
@@ -34,27 +33,25 @@ export function caretRange(version: string): string {
   return `^${version}`;
 }
 
-// ─── Default state ──────────────────────────────────────────
+// ─── Default manifests ──────────────────────────────────────
 
-export function defaultEditorState(orgSlug?: string, userEmail?: string): EditorState {
+export function defaultAgentManifest(
+  orgSlug?: string,
+  userEmail?: string,
+): Record<string, unknown> {
   return {
-    manifest: {
-      $schema: AFPS_SCHEMA_URLS.agent,
-      schema_version: AFPS_SCHEMA_VERSION,
-      type: "agent",
-      name: orgSlug ? `@${orgSlug}/` : "",
-      version: "1.0.0",
-      display_name: "",
-      description: "",
-      author: userEmail ?? "",
-      timeout: 300,
-      dependencies: {},
-    },
-    operations: [{ op: "write", path: "prompt.md", text: "" }],
+    $schema: AFPS_SCHEMA_URLS.agent,
+    schema_version: AFPS_SCHEMA_VERSION,
+    type: "agent",
+    name: orgSlug ? `@${orgSlug}/` : "",
+    version: "1.0.0",
+    display_name: "",
+    description: "",
+    author: userEmail ?? "",
+    timeout: 300,
+    dependencies: {},
   };
 }
-
-// ─── Default manifests for skill/tool ───────────────────────
 
 export function defaultSkillManifest(
   orgSlug?: string,
@@ -71,9 +68,6 @@ export function defaultSkillManifest(
     author: userEmail ?? "",
   };
 }
-
-/** Deliberately not yet valid: a new skill has no package id to prefill `name` from. */
-export const DEFAULT_SKILL_CONTENT = "---\nname: \ndescription: \n---\n\n";
 
 // ─── Default manifest for integration ───────────────────────
 

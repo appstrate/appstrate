@@ -332,7 +332,6 @@ export function PackageFilesView({
                 version={fileVersion}
                 entry={sourceEntryOf(activeFile)}
                 className="h-full flex-1 rounded-none border-0"
-                hideHeader
               />
             </div>
           ) : !bundleIndex && !bundleError ? (
@@ -369,7 +368,6 @@ export function PackageFilesView({
               packageId={packageId}
               entry={sourceEntryOf(editedFile)}
               path={editingPath}
-              commit="apply"
               onCommit={(text) => {
                 if (staged.stage([fileTextOperation(editingPath, text)])) setEditingPath(null);
               }}

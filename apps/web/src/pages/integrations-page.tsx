@@ -25,6 +25,7 @@ import type { MenuAction } from "../lib/menu-action";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { ImportModal } from "../components/import-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
+import { CreatePackageModal } from "../components/create-package-modal";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
 import {
   INTEGRATION_EXECUTIONS,
@@ -35,7 +36,6 @@ import {
   filterIntegrations,
 } from "../lib/integration-collection";
 import { readList, useListParams } from "../lib/list-params";
-import { packageNewPath } from "../lib/package-paths";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useConnectionCounts } from "../hooks/use-me-connections";
 import { usePackageList } from "../hooks/use-packages";
@@ -61,6 +61,7 @@ export function IntegrationsPage() {
   const canCreate = can(packagePermission("integration", "write"));
   const canBrowse = can(spacePackagePermission("integration", "activate"));
   const creation = useCreationHandoff("integration", canCreate);
+  const [creating, setCreating] = useState(false);
   const createAction: MenuAction = {
     id: "create",
     label: t("integrations.create"),
@@ -241,13 +242,19 @@ export function IntegrationsPage() {
           resource="integration"
           onClose={creation.close}
           onFromUrl={() => creation.leave("/integrations/new/mcp")}
-          onManual={() => creation.leave(packageNewPath("integration"))}
+          onManual={() => {
+            creation.close();
+            setCreating(true);
+          }}
           onImport={() => {
             creation.close();
             setImporting(true);
           }}
           onChat={creation.openChat}
         />
+      )}
+      {creating && canCreate && (
+        <CreatePackageModal type="integration" onClose={() => setCreating(false)} />
       )}
     </div>
   );

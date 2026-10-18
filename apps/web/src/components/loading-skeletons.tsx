@@ -314,11 +314,11 @@ export function EditorSkeleton({ height }: { height?: string | number }) {
   );
 }
 
-/** A form page with its header and tabs in the shell header (the package editor). */
+/** A form page with its title in the shell header and no tabs (the MCP URL wizard). */
 export function FormPageSkeleton() {
   return (
     <Waiting>
-      <DetailBarSkeleton tabCount={3} />
+      <DetailBarSkeleton tabCount={0} />
       <SettingsSkeleton rows={4} />
     </Waiting>
   );

@@ -208,13 +208,13 @@ describe("routeOf", () => {
   });
 
   it("ranks a concrete URL the way the router does: static segments first", () => {
-    expect(routeOf("/skills/new")).toBe("/skills/new");
     expect(routeOf("/agents/@acme/triage")).toBe("/agents/:scope/:name");
     expect(routeOf("/agents/@acme/triage/1.2.0")).toBe("/agents/:scope/:name/:version");
     expect(routeOf("/agents/@acme/triage/runs/run_1?tab=logs#x")).toBe(
       "/agents/:scope/:name/runs/:runId",
     );
     expect(routeOf("/integrations/@acme/gmail#configuration")).toBe("/integrations/:scope/:name");
+    expect(routeOf("/integrations/new/mcp?package=@acme/gmail")).toBe("/integrations/new/mcp");
   });
 
   it("covers no URL outside the declarations", () => {

@@ -9,7 +9,7 @@ import { afterAll, describe, expect, it } from "bun:test";
 import type { PackageEditor } from "../package-editor/use-package-editor.ts";
 import { installFakeStorage } from "../../test/fake-storage.ts";
 
-// The frame's JSON editor loads the theme store, which reads the system theme
+// The frame's manifest editor loads the theme store, which reads the system theme
 // and tags the root element at module init; the auth client reads the origin.
 installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
@@ -37,7 +37,6 @@ function frame(isPending: boolean) {
   const editor = {
     type: "agent",
     packageId: "@scope/agent",
-    isEdit: true,
     state: { manifest: {} },
     activeTab: "general",
     error: null,

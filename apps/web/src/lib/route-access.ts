@@ -58,7 +58,6 @@ export const ROUTE_ACCESS = {
   "/schedules/:id": { anyOf: ["schedules:read"], operations: ["getSchedule"] },
 
   "/skills": { anyOf: ["skills:read"], operations: ["listSkills"] },
-  "/skills/new": { anyOf: ["skills:write"], operations: ["createSkill"] },
   "/skills/:scope/:name": { anyOf: ["skills:read"], operations: ["getSkill"] },
   "/skills/:scope/:name/:version": {
     anyOf: ["skills:read"],
@@ -66,10 +65,6 @@ export const ROUTE_ACCESS = {
   },
 
   "/integrations": { anyOf: ["integrations:read"], operations: ["listIntegrations"] },
-  "/integrations/new": {
-    anyOf: ["integrations:write"],
-    operations: ["createIntegrationPackage"],
-  },
   "/integrations/new/mcp": {
     anyOf: ["integrations:write"],
     operations: ["discoverRemoteIntegration", "createIntegrationPackage"],

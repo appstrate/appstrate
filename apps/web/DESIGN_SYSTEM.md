@@ -691,10 +691,10 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   (`components/new-schedule-modal.tsx` is the example to follow). **Creating a package**
   (agent, skill, integration, MCP server): the creation hand-off modal
   (`components/creation-handoff-modal.tsx`, `hooks/use-creation-handoff.ts`:
-  manual / chat / coding agent), then, for the manual way, the editor page: an agent
-  is created from `components/create-agent-modal.tsx` (name, identifier, description, prompt)
-  and edited on its own page; skills and integrations keep a creation page. An integration
-  is also added from an MCP server URL, the hand-off's first card (`onFromUrl`): one page,
+  manual / chat / coding agent), then, for the manual way, `components/create-package-modal.tsx`
+  (name, identifier, description, plus an agent's prompt or an integration's server URL), after
+  which the new package's page takes the rest, its files included. An MCP server is imported. An integration is also added
+  from an MCP server URL, the hand-off's first card (`onFromUrl`): one page,
   `pages/integration-from-mcp-url.tsx`, whose steps (`components/integration-wizard/`) appear
   in turn, each heading taking the focus; nothing of it is stored but `?package=<id>` once the
   package exists, and the step is read from the package (`integrationWizardStep`).
@@ -782,8 +782,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   bar sends them in one write; `useUnsavedChanges` blocks navigation while dirty.
 - **An agent's input and output schemas** are edited one way: `SchemaFieldList`
   (`components/agent-editor/schema-field-list.tsx`, a table and a modal at
-  `?field-input=` / `?field-output=`), in Paramètres › Schémas and on the creation
-  page.
+  `?field-input=` / `?field-output=`), in Paramètres › Schémas.
 - **Code and JSON editors** are Monaco, only through the lazy facade
   `components/monaco/index.tsx` (`CodeEditor`, `CodeDiff`: the one theme and base options; self-hosted,
   never import `monaco-editor` elsewhere). `JsonEditor` for a JSON value,

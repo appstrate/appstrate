@@ -2,7 +2,6 @@
 
 import { Fragment, useCallback, useContext, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { useLocation } from "react-router-dom";
 import type { Versioned } from "../hooks/use-packages";
 import type {
   AgentDetail,
@@ -10,12 +9,7 @@ import type {
   OrgPackageItemDetail,
 } from "@appstrate/shared-types";
 import { $api } from "../api/client";
-import { useAuth } from "../hooks/use-auth";
-import { useOrg } from "../hooks/use-org";
 import type { AgentDefinitionSection } from "../lib/settings-section-href";
-import { primaryDisplayFile } from "../lib/package-files";
-import { newPackageContent } from "../lib/package-file-drafts";
-import { skillFrontmatterError } from "../lib/skill-frontmatter";
 import { EditorDirtyReportContext, type EditorState } from "../hooks/use-editor-state";
 import { FormField } from "../components/form-field";
 import {
@@ -38,9 +32,6 @@ import { IntegrationToolsSection } from "../components/integration-editor/integr
 import type { ServerSyncResult } from "../components/integration-editor/sync-from-server";
 
 import {
-  defaultSkillManifest,
-  defaultIntegrationManifest,
-  DEFAULT_SKILL_CONTENT,
   manifestToSchemaFields,
   manifestSchemaWrapper,
   getResourceEntries,
@@ -58,7 +49,6 @@ import {
   type ServerSyncBody,
 } from "../lib/integration-server-sync";
 import { encodeIconDataUri } from "../lib/icon-image";
-import { readManualCreationManifest } from "../lib/integration-wizard";
 
 const asNumber = (value: unknown) => (typeof value === "number" ? value : undefined);
 
@@ -69,7 +59,6 @@ function AgentEditorInner({
   packageId,
   effectiveTimeoutSeconds,
   tab,
-  onTabRequest,
 }: {
   initialState: EditorState;
   packageId: string;
@@ -81,7 +70,6 @@ function AgentEditorInner({
   effectiveTimeoutSeconds?: number;
   /** The section is the settings rail's, not the editor's. */
   tab: PackageEditorTab;
-  onTabRequest: (tab: PackageEditorTab) => void;
 }) {
   const { t } = useTranslation(["agents", "common"]);
 
@@ -90,7 +78,6 @@ function AgentEditorInner({
     initialState,
     packageId,
     tab,
-    onTabRequest,
   });
   const { state, setState, updateManifest, activeTab } = editor;
 
@@ -183,7 +170,6 @@ function AgentEditorInner({
         <MetadataSection
           value={editor.metadata}
           onChange={editor.onMetadataChange}
-          isEdit
           identityChildren={
             <AgentAppearanceFields
               packageId={packageId}
@@ -295,11 +281,9 @@ function DraftEditorMount({
 export function AgentDefinitionEditor({
   detail,
   section,
-  onSection,
 }: {
   detail: Versioned<AgentDetail>;
   section: AgentDefinitionSection;
-  onSection: (section: AgentDefinitionSection) => void;
 }) {
   return (
     <DraftEditorMount id={detail.id} etag={detail.etag}>
@@ -311,7 +295,6 @@ export function AgentDefinitionEditor({
         packageId={detail.id}
         effectiveTimeoutSeconds={detail.effective_timeout_seconds}
         tab={section}
-        onTabRequest={(next) => onSection(next as AgentDefinitionSection)}
       />
     </DraftEditorMount>
   );
@@ -326,49 +309,20 @@ function PackageEditorInner({
 }: {
   type: "skill" | "mcp-server";
   initialState: EditorState;
-  /** Undefined on the creation page; set to edit the package in its Package AFPS (Identité). */
-  packageId: string | undefined;
+  packageId: string;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const isEdit = packageId !== undefined;
-  const editor = usePackageEditor({
-    type,
-    initialState,
-    packageId,
-    validate: (s) => {
-      if (isEdit || type !== "skill") return null;
-      const content = newPackageContent(type, s.operations ?? []);
-      if (!content.trim()) {
-        return { error: t("editor.errorContent"), tab: "files" };
-      }
-      // The same checker the write routes run — fixed here, not via a 400.
-      const frontmatter = skillFrontmatterError(content);
-      if (frontmatter) {
-        return { error: t(frontmatter.key, frontmatter.params), tab: "files" };
-      }
-      return null;
-    },
-  });
+  const editor = usePackageEditor({ type, initialState, packageId, tab: "general" });
 
   return (
     <PackageEditorFrame
       editor={editor}
-      tabs={[
-        { id: "general", label: t("editor.tabGeneral") },
-        { id: "files", label: t("files.tabLabel"), createOnly: true },
-        { id: "json", label: t("editor.tabJson"), createOnly: true },
-      ]}
+      tabs={[{ id: "general", label: t("editor.tabGeneral") }]}
       descriptions={
         type === "mcp-server" ? { general: t("mcpServerEditor.description.general") } : undefined
       }
     >
-      {editor.activeTab === "general" && (
-        <MetadataSection
-          value={editor.metadata}
-          onChange={editor.onMetadataChange}
-          isEdit={isEdit}
-        />
-      )}
+      <MetadataSection value={editor.metadata} onChange={editor.onMetadataChange} />
     </PackageEditorFrame>
   );
 }
@@ -379,32 +333,27 @@ function IntegrationEditorInner({
   initialState,
   packageId,
   tab,
-  onTabRequest,
   toolCatalog,
   syncBody,
 }: {
   initialState: EditorState;
-  /** Undefined on the creation page; set to edit the integration in its Package AFPS. */
-  packageId: string | undefined;
-  tab?: PackageEditorTab;
-  onTabRequest?: (tab: PackageEditorTab) => void;
-  /** Editing: the saved package's tool catalog, shown with the draft's policy. */
-  toolCatalog?: IntegrationToolCatalogEntry[];
-  /** Editing: the sync request, when the published version's server can be asked. */
+  packageId: string;
+  tab: PackageEditorTab;
+  /** The saved package's tool catalog, shown with the draft's policy. */
+  toolCatalog: IntegrationToolCatalogEntry[];
+  /** The sync request, when the published version's server can be asked. */
   syncBody?: ServerSyncBody;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const isEdit = packageId !== undefined;
   const editor = usePackageEditor({
     type: "integration",
     initialState,
     packageId,
     tab,
-    onTabRequest,
     validate: (s) => {
       const source = getSource(s.manifest);
       if (source.kind === "remote" && !isRemoteSourceUrl(source.remoteUrl)) {
-        return { error: t("integrationEditor.source.errorRemoteUrl"), tab: "source" };
+        return { error: t("integrationEditor.source.errorRemoteUrl") };
       }
       return null;
     },
@@ -423,8 +372,6 @@ function IntegrationEditorInner({
       })
       .catch(() => {});
   };
-
-  const canSync = isEdit && syncBody !== undefined;
 
   const sync = $api.useMutation("post", "/api/integrations/{packageId}/discover", {
     meta: { errorHandledByCaller: true },
@@ -458,8 +405,6 @@ function IntegrationEditorInner({
         { id: "source", label: t("integrationEditor.tabSource") },
         { id: "auths", label: t("integrationEditor.tabAuthMethods") },
         { id: "tools", label: t("integrationEditor.tabTools") },
-        { id: "files", label: t("files.tabLabel"), createOnly: true },
-        { id: "json", label: t("editor.tabJson"), createOnly: true },
       ]}
       descriptions={{
         general: t("integrationEditor.description.general"),
@@ -472,7 +417,6 @@ function IntegrationEditorInner({
         <MetadataSection
           value={editor.metadata}
           onChange={editor.onMetadataChange}
-          isEdit={isEdit}
           identityChildren={
             <IntegrationIconField
               icon={typeof state.manifest.icon === "string" ? state.manifest.icon : undefined}
@@ -492,10 +436,10 @@ function IntegrationEditorInner({
 
       {activeTab === "tools" && (
         <IntegrationToolsSection
-          tools={toolCatalog ?? []}
+          tools={toolCatalog}
           edit={{ manifest: state.manifest, onChange: onManifestChange }}
           sync={
-            canSync && packageId
+            syncBody
               ? {
                   run: (connectionId) =>
                     sync.mutate({
@@ -520,13 +464,11 @@ export type IntegrationDefinitionSection = "general" | "source" | "auths" | "too
 export function IntegrationDefinitionEditor({
   detail,
   section,
-  onSection,
   toolCatalog,
   syncBody,
 }: {
   detail: Versioned<OrgPackageItemDetail>;
   section: IntegrationDefinitionSection;
-  onSection: (section: IntegrationDefinitionSection) => void;
   toolCatalog: IntegrationToolCatalogEntry[];
   /**
    * The sync request, set when the published version is served by a Streamable HTTP server at a
@@ -541,7 +483,6 @@ export function IntegrationDefinitionEditor({
         initialState={{ manifest: detail.manifest ?? {}, etag: detail.etag }}
         packageId={detail.id}
         tab={section}
-        onTabRequest={(next) => onSection(next as IntegrationDefinitionSection)}
         toolCatalog={toolCatalog}
         syncBody={syncBody}
       />
@@ -571,42 +512,5 @@ export function PackageDefinitionEditor({
         packageId={detail.id}
       />
     </DraftEditorMount>
-  );
-}
-
-// ─── Page Wrapper ───────────────────────────────────────────────────
-
-/** The creation route of a skill or an integration: an existing package is edited in its settings; an agent is created from a dialog. */
-export function PackageEditorPage({ type }: { type: "skill" | "integration" }) {
-  const { user } = useAuth();
-  const { currentOrg } = useOrg();
-  const location = useLocation();
-  // The manifest accepted in the MCP URL wizard, read once: nothing of it is stored.
-  const [accepted] = useState(() =>
-    type === "integration" ? readManualCreationManifest(location.state) : undefined,
-  );
-
-  if (type === "integration") {
-    return (
-      <IntegrationEditorInner
-        initialState={{
-          manifest: accepted ?? defaultIntegrationManifest(currentOrg?.slug, user?.email),
-        }}
-        packageId={undefined}
-      />
-    );
-  }
-
-  return (
-    <PackageEditorInner
-      type={type}
-      initialState={{
-        manifest: defaultSkillManifest(currentOrg?.slug, user?.email),
-        operations: [
-          { op: "write", path: primaryDisplayFile(type).name, text: DEFAULT_SKILL_CONTENT },
-        ],
-      }}
-      packageId={undefined}
-    />
   );
 }

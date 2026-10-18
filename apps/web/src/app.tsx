@@ -86,7 +86,6 @@ const UnifiedPackageDetailPage = lazyPage(
   () => import("./pages/unified-package-detail"),
   "UnifiedPackageDetailPage",
 );
-const PackageEditorPage = lazyPage(() => import("./pages/package-editor"), "PackageEditorPage");
 const IntegrationFromMcpUrlPage = lazyPage(
   () => import("./pages/integration-from-mcp-url"),
   "IntegrationFromMcpUrlPage",
@@ -275,11 +274,9 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/schedules": <SchedulesListPage />,
   "/schedules/:id": <ScheduleDetailPage />,
   "/skills": <SkillsPage />,
-  "/skills/new": <PackageEditorPage type="skill" />,
   "/skills/:scope/:name": <UnifiedPackageDetailPage type="skill" />,
   "/skills/:scope/:name/:version": <UnifiedPackageDetailPage type="skill" />,
   "/integrations": <IntegrationsPage />,
-  "/integrations/new": <PackageEditorPage type="integration" />,
   "/integrations/new/mcp": <IntegrationFromMcpUrlPage />,
   "/integrations/:scope/:name": <IntegrationDetailPage />,
   "/mcp-servers": <McpServersPage />,
@@ -371,7 +368,7 @@ function skeletonOf(path: RoutePath): ReactNode {
   if (isOverlayPath(path)) return <OverlayPanelSkeleton list />;
   if (path === "/chat/:conversationId") return <ChatConversationSkeleton />;
   if (isUnder(path, "/chat")) return <ChatPanelSkeleton />;
-  if (path.endsWith("/new") || path.includes("/new/")) return <FormPageSkeleton />;
+  if (path === "/integrations/new/mcp") return <FormPageSkeleton />;
   if (path === "/agents/:scope/:name/runs/:runId") return <RunDetailSkeleton />;
   if (path === "/schedules/:id") return <ScheduleDetailSkeleton />;
   const packageType = DETAIL_PACKAGE_TYPE.find(([prefix]) => path.startsWith(prefix))?.[1];

@@ -18,19 +18,9 @@ interface ContentEditorProps {
   /** Monaco language id — `languageForPath` for a file, a literal for a fixed one. */
   language: string;
   height?: string;
-  readOnly?: boolean;
-  /** The pane's accessible name: focus lands on mount, so a label around the pane is announced too early; Monaco's default is generic. */
-  ariaLabel?: string;
 }
 
-export function ContentEditor({
-  value,
-  onChange,
-  language,
-  height = "500px",
-  readOnly = false,
-  ariaLabel,
-}: ContentEditorProps) {
+export function ContentEditor({ value, onChange, language, height = "500px" }: ContentEditorProps) {
   const handleMount: OnMount = useCallback((editor) => {
     editor.focus();
   }, []);
@@ -44,8 +34,6 @@ export function ContentEditor({
         onChange={(v) => onChange(v ?? "")}
         onMount={handleMount}
         options={{
-          readOnly,
-          ariaLabel,
           wordWrap: language === "markdown" ? "on" : "off",
           lineNumbers: "on",
           padding: { top: 12, bottom: 12 },
