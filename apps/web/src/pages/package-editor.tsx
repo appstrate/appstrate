@@ -50,9 +50,13 @@ import {
 } from "../components/agent-editor/utils";
 import type { ResourceEntry, SchemaField } from "../components/agent-editor/types";
 import {
+  hasIntegrationDoc,
   mergeDiscovery,
+  mergeServerSync,
+  badgeUnder,
   type DiscoveryBadges,
   type DiscoveryProposal,
+  type ServerSyncProposal,
 } from "../lib/integration-discovery-merge";
 import { encodeIconDataUri } from "../lib/icon-image";
 
@@ -377,6 +381,8 @@ function IntegrationEditorInner({
   tab,
   onTabRequest,
   toolCatalog,
+  syncable,
+  hasIntegrationDoc: hasDoc,
 }: {
   initialState: EditorState;
   /** Undefined on the creation page; set to edit the integration in its Package AFPS. */
@@ -385,6 +391,10 @@ function IntegrationEditorInner({
   onTabRequest?: (tab: PackageEditorTab) => void;
   /** Editing: the saved package's tool catalog, shown with the draft's policy. */
   toolCatalog?: IntegrationToolCatalogEntry[];
+  /** Editing: the caller holds a connection to this integration, so its server can be asked. */
+  syncable?: boolean;
+  /** Editing: the package already has an `INTEGRATION.md`, which a sync never replaces. */
+  hasIntegrationDoc?: boolean;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const isEdit = packageId !== undefined;
@@ -408,24 +418,56 @@ function IntegrationEditorInner({
   const [badges, setBadges] = useState<DiscoveryBadges>({});
   const [warnings, setWarnings] = useState<DiscoveryProposal["warnings"]>([]);
 
+  // A raster the manifest does not accept as is (ICO, large PNG) is re-encoded here; one the
+  // browser cannot decode is skipped.
+  const fillIcon = (
+    proposal: { icon_source: string | null; manifest: { icon?: string } },
+    merged: Record<string, unknown>,
+  ) => {
+    if (!proposal.icon_source || proposal.manifest.icon || merged.icon) return;
+    void encodeIconDataUri(proposal.icon_source)
+      .then((icon) => {
+        editor.setState((s) => (s.manifest.icon ? s : { ...s, manifest: { ...s.manifest, icon } }));
+        setBadges((b) => ({ ...b, "/icon": "detected" }));
+      })
+      .catch(() => {});
+  };
+
   const applyProposal = (proposal: DiscoveryProposal) => {
     const defaults = defaultIntegrationManifest(currentOrg?.slug, user?.email);
     const merged = mergeDiscovery(state.manifest, defaults, proposal);
     onManifestChange(merged.manifest);
     setBadges(merged.badges);
     setWarnings(proposal.warnings);
-    // A raster the manifest does not accept as is (ICO, large PNG) is re-encoded here; one the
-    // browser cannot decode is skipped.
-    if (proposal.icon_source && !proposal.manifest.icon && !merged.manifest.icon) {
-      void encodeIconDataUri(proposal.icon_source)
-        .then((icon) => {
-          editor.setState((s) =>
-            s.manifest.icon ? s : { ...s, manifest: { ...s.manifest, icon } },
-          );
-          setBadges((b) => ({ ...b, "/icon": "detected" }));
-        })
-        .catch(() => {});
+    fillIcon(proposal, merged.manifest);
+  };
+
+  const [syncResult, setSyncResult] = useState<{
+    count: number;
+    warnings: ServerSyncProposal["warnings"];
+  } | null>(null);
+  const sourceNow = getSource(state.manifest);
+  const canSync =
+    isEdit && syncable && sourceNow.kind === "remote" && sourceNow.remoteTransport !== "sse";
+
+  const applySync = (proposal: ServerSyncProposal) => {
+    const merged = mergeServerSync(state.manifest, proposal);
+    onManifestChange(merged.manifest);
+    setBadges(merged.badges);
+    setSyncResult({ count: proposal.manifest.default_tools.length, warnings: proposal.warnings });
+    if (proposal.instructions && !hasDoc) {
+      const operation = {
+        op: "write",
+        path: "INTEGRATION.md",
+        text: proposal.instructions,
+      } as const;
+      editor.setState((s) =>
+        (s.operations ?? []).some((o) => o.op === "write" && o.path === operation.path)
+          ? s
+          : { ...s, operations: [...(s.operations ?? []), operation] },
+      );
     }
+    fillIcon(proposal, merged.manifest);
   };
 
   return (
@@ -479,6 +521,16 @@ function IntegrationEditorInner({
         <IntegrationToolsSection
           tools={toolCatalog ?? []}
           edit={{ manifest: state.manifest, onChange: onManifestChange }}
+          sync={
+            canSync
+              ? {
+                  packageId,
+                  onProposal: applySync,
+                  result: syncResult,
+                  badge: badgeUnder(badges, "/default_tools"),
+                }
+              : undefined
+          }
         />
       )}
     </PackageEditorFrame>
@@ -493,11 +545,14 @@ export function IntegrationDefinitionEditor({
   section,
   onSection,
   toolCatalog,
+  syncable,
 }: {
   detail: Versioned<OrgPackageItemDetail>;
   section: IntegrationDefinitionSection;
   onSection: (section: IntegrationDefinitionSection) => void;
   toolCatalog: IntegrationToolCatalogEntry[];
+  /** The caller holds a connection to the integration. */
+  syncable: boolean;
 }) {
   return (
     <DraftEditorMount id={detail.id} etag={detail.etag}>
@@ -507,6 +562,8 @@ export function IntegrationDefinitionEditor({
         tab={section}
         onTabRequest={(next) => onSection(next as IntegrationDefinitionSection)}
         toolCatalog={toolCatalog}
+        syncable={syncable}
+        hasIntegrationDoc={hasIntegrationDoc(detail.content)}
       />
     </DraftEditorMount>
   );

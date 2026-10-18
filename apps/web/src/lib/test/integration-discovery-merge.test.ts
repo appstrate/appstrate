@@ -4,8 +4,11 @@ import { describe, expect, it } from "bun:test";
 import { defaultIntegrationManifest } from "../../components/agent-editor/utils.ts";
 import {
   mergeDiscovery,
+  mergeServerSync,
+  hasIntegrationDoc,
   badgeUnder,
   type DiscoveryProposal,
+  type ServerSyncProposal,
 } from "../integration-discovery-merge.ts";
 
 const defaults = defaultIntegrationManifest("acme", "me@acme.test");
@@ -85,5 +88,61 @@ describe("mergeDiscovery", () => {
     const current = structuredClone(defaults);
     mergeDiscovery(current, defaults, proposal);
     expect(current).toEqual(defaults);
+  });
+});
+
+describe("mergeServerSync", () => {
+  const sync = (manifest: Record<string, unknown>) =>
+    ({ manifest }) as unknown as Pick<ServerSyncProposal, "manifest">;
+
+  it("replaces default_tools and keeps the policy of tools still listed", () => {
+    const current = {
+      default_tools: ["a", "gone"],
+      tools_policy: {
+        a: { required_scopes: { oauth: ["x"] } },
+        gone: { required_scopes: { oauth: ["y"] } },
+      },
+    };
+    const { manifest, badges } = mergeServerSync(
+      current,
+      sync({ default_tools: ["a", "b"], tools_policy: { a: {}, b: {} } }),
+    );
+    expect(manifest.default_tools).toEqual(["a", "b"]);
+    expect(manifest.tools_policy).toEqual({ a: { required_scopes: { oauth: ["x"] } }, b: {} });
+    expect(badges["/default_tools"]).toBe("detected");
+  });
+
+  it("fills identity only when empty", () => {
+    const { manifest, badges } = mergeServerSync(
+      { display_name: "Mine", description: "" },
+      sync({
+        default_tools: [],
+        tools_policy: {},
+        display_name: "Theirs",
+        description: "Server",
+        homepage: "https://x.test",
+      }),
+    );
+    expect(manifest.display_name).toBe("Mine");
+    expect(manifest.description).toBe("Server");
+    expect(manifest.homepage).toBe("https://x.test");
+    expect(badges["/display_name"]).toBeUndefined();
+    expect(badges["/description"]).toBe("detected");
+  });
+
+  it("does not mutate the current manifest", () => {
+    const current = { default_tools: ["a"], tools_policy: { a: {} } };
+    const copy = structuredClone(current);
+    mergeServerSync(current, sync({ default_tools: ["b"], tools_policy: { b: {} } }));
+    expect(current).toEqual(copy);
+  });
+});
+
+describe("hasIntegrationDoc", () => {
+  it("tells an authored markdown from the manifest text a draft falls back to", () => {
+    expect(hasIntegrationDoc("# Notion\n\nUse it.")).toBe(true);
+    expect(hasIntegrationDoc('{"name":"@a/b"}')).toBe(false);
+    expect(hasIntegrationDoc("")).toBe(false);
+    expect(hasIntegrationDoc(null)).toBe(false);
   });
 });

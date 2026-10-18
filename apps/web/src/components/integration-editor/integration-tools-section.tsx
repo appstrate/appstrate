@@ -30,7 +30,10 @@ import { SettingRow, SettingsGroup } from "../settings/setting-row";
 import { PageActionsMenu } from "../page-actions-menu";
 import { PackageToolCatalog, type PackageTool } from "../package-detail/package-tool-catalog";
 import { TableRowActions } from "../table-row-actions";
+import { DiscoveryBadge } from "./discovery-badge";
 import { RequiredScopesField } from "./required-scopes-field";
+import { SyncFromServer } from "./sync-from-server";
+import type { DiscoveryBadges, ServerSyncProposal } from "../../lib/integration-discovery-merge";
 import {
   getAllowUndeclaredTools,
   getAuths,
@@ -44,6 +47,7 @@ export function IntegrationToolsSection({
   tools,
   allowUndeclaredTools,
   edit,
+  sync,
 }: {
   /** The saved package's effective tool catalog (`tool_catalog`). */
   tools: IntegrationToolCatalogEntry[];
@@ -51,6 +55,13 @@ export function IntegrationToolsSection({
   allowUndeclaredTools?: boolean;
   /** The draft manifest, when the reader may change the package. */
   edit?: { manifest: Record<string, unknown>; onChange: (next: Record<string, unknown>) => void };
+  /** Offered only when the integration can be asked for its tools (remote, connected). */
+  sync?: {
+    packageId: string;
+    onProposal: (proposal: ServerSyncProposal) => void;
+    result: { count: number; warnings: ServerSyncProposal["warnings"] } | null;
+    badge: DiscoveryBadges[string] | undefined;
+  };
 }) {
   const { t } = useTranslation(["agents", "settings", "common"]);
   // The tool being edited, or "new" for a tool added by name.
@@ -77,6 +88,12 @@ export function IntegrationToolsSection({
 
   return (
     <div className="flex flex-col gap-4">
+      {edit && sync && (
+        <div className="flex flex-col gap-2">
+          <SyncFromServer {...sync} />
+          {sync.badge && <DiscoveryBadge provenance={sync.badge} />}
+        </div>
+      )}
       {edit ? (
         <AllowUndeclaredToggle manifest={edit.manifest} onChange={edit.onChange} />
       ) : (

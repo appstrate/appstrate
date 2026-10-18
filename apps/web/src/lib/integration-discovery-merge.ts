@@ -5,6 +5,9 @@ import type { paths } from "../api/schema";
 export type DiscoveryProposal =
   paths["/api/integrations/discover"]["post"]["responses"][200]["content"]["application/json"];
 
+export type ServerSyncProposal =
+  paths["/api/integrations/{packageId}/discover"]["post"]["responses"][200]["content"]["application/json"];
+
 type Manifest = Record<string, unknown>;
 export type DiscoveryBadges = Record<string, "detected" | "guessed">;
 
@@ -90,4 +93,51 @@ export function badgeUnder(
 ): DiscoveryBadges[string] | undefined {
   const pointer = Object.keys(badges).find((p) => p === prefix || p.startsWith(`${prefix}/`));
   return pointer ? badges[pointer] : undefined;
+}
+
+/** Identity fields a sync fills only when the author left them empty. */
+const SYNC_IDENTITY = ["display_name", "description", "homepage", "icon"] as const;
+
+/**
+ * Applies what a connected server reports over an existing integration. The author asked for the
+ * sync, so the tool list replaces `default_tools`; `tools_policy` keeps the entry of every tool
+ * still listed (its `required_scopes` are the author's) and drops the others. Identity is the
+ * author's: a field is only filled when empty.
+ */
+export function mergeServerSync(
+  current: Manifest,
+  proposal: Pick<ServerSyncProposal, "manifest">,
+): { manifest: Manifest; badges: DiscoveryBadges } {
+  const proposed: Manifest = proposal.manifest;
+  const manifest: Manifest = { ...current };
+  const badges: DiscoveryBadges = {};
+  const tools = proposal.manifest.default_tools;
+  const policy = asRecord(current.tools_policy);
+
+  manifest.default_tools = tools;
+  manifest.tools_policy = Object.fromEntries(
+    tools.map((name) => [name, name in policy ? policy[name] : {}]),
+  );
+  badges["/default_tools"] = "detected";
+  badges["/tools_policy"] = "detected";
+
+  for (const key of SYNC_IDENTITY) {
+    if (proposed[key] === undefined || !isEmpty(current[key])) continue;
+    manifest[key] = proposed[key];
+    badges[`/${key}`] = "detected";
+  }
+  return { manifest, badges };
+}
+
+/**
+ * Whether a package content is an authored `INTEGRATION.md`. A draft without one stores the
+ * manifest text in the same column, which is a JSON object — never valid markdown guidance.
+ */
+export function hasIntegrationDoc(content: string | null | undefined): boolean {
+  if (!content?.trim()) return false;
+  try {
+    return typeof JSON.parse(content) !== "object";
+  } catch {
+    return true;
+  }
 }

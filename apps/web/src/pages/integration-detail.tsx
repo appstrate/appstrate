@@ -196,6 +196,7 @@ function IntegrationSettings({
                 if (railId) void navigate(href(railId));
               }}
               toolCatalog={detail.tool_catalog ?? []}
+              syncable={detail.auths.some((auth) => auth.connections.length > 0)}
             />
           </Suspense>
         ) : isPackageCommonSection(active) ? (

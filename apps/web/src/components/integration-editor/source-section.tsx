@@ -2,13 +2,13 @@
 
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
-import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Spinner } from "@appstrate/ui/components/spinner";
 import { $api } from "../../api/client";
 import { errorMessage } from "../../lib/mutation-error";
 import type { DiscoveryBadges, DiscoveryProposal } from "../../lib/integration-discovery-merge";
 import { FormField } from "../form-field";
 import { DiscoveryBadge } from "./discovery-badge";
+import { DiscoveryWarnings } from "./discovery-warnings";
 import { LocalServerField } from "./local-server-field";
 import { getSource, setSource, type SourceKind } from "./utils";
 
@@ -84,15 +84,7 @@ export function SourceSection({ manifest, onChange, discovery }: SourceSectionPr
               {errorMessage(analyse.error)}
             </p>
           )}
-          {discovery?.warnings.map((warning) => (
-            <Alert key={warning.code} variant="warning">
-              <AlertDescription>
-                {t(`integrationEditor.discover.warning.${warning.code}`, {
-                  defaultValue: warning.message,
-                })}
-              </AlertDescription>
-            </Alert>
-          ))}
+          {discovery && <DiscoveryWarnings warnings={discovery.warnings} />}
           <FormField
             id="int-source-transport"
             label={t("integrationEditor.source.transport")}

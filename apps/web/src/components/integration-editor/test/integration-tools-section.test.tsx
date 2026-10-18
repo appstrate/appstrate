@@ -34,3 +34,30 @@ describe("IntegrationToolsSection without a saved catalog", () => {
     expect(html).toContain('data-testid="integration-editor-allow-undeclared-tools"');
   });
 });
+
+describe("IntegrationToolsSection sync", () => {
+  const button = 'data-testid="integration-editor-sync-button"';
+  const sync = {
+    packageId: "@acme/notion",
+    onProposal: () => {},
+    result: { count: 3, warnings: [{ code: "tools_truncated" as const, message: "en" }] },
+    badge: "detected" as const,
+  };
+
+  it("offers the sync, its confirmation and warnings when given", () => {
+    const html = render(
+      <IntegrationToolsSection tools={[]} edit={{ manifest, onChange: () => {} }} sync={sync} />,
+    );
+    expect(html).toContain(button);
+    expect(html).toContain("Synchroniser depuis le serveur");
+    expect(html).toContain("3 outils synchronisés");
+    expect(html).toContain("détecté");
+  });
+
+  it("offers nothing without it", () => {
+    const html = render(
+      <IntegrationToolsSection tools={[]} edit={{ manifest, onChange: () => {} }} />,
+    );
+    expect(html).not.toContain(button);
+  });
+});
