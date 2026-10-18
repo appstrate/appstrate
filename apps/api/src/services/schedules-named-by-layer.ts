@@ -5,12 +5,11 @@
  * removing the layer applies to the ones it leaves unnamed: an unattended run never falls back to
  * another account, however many connections its actor holds. Re-enabling goes through the schedule
  * write rule (`schedule-connections.ts`). Which fired versions resolve a set for the integration
- * is the resolver's answer, read outside any transaction (the resolver reads on `db`): once before
- * the removal's, and once more after it committed, judging in a second transaction the schedules
- * the first read missed; every layer fact is read from rows, inside them. Every armed schedule
- * write takes `lockIntegrationGovernance` for the integrations its judgment relied on and re-checks
+ * is the resolver's answer, read on the removal's transaction along with every layer fact.
+ * Every armed schedule write takes `lockIntegrationGovernance` for the integrations its judgment
+ * relied on and re-checks
  * that governance (`assertScheduleGovernanceUnchanged`), and every removal takes it first: a write
- * either commits before the removal's does, so before the second read (found there), or re-checks
+ * either commits before the removal's read (found there), or re-checks
  * after it (refused).
  *
  * Removing an imposed FLOOR (an admin pin, an enforced org default, or the enforcement itself) also
@@ -36,8 +35,9 @@ import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
 import { integrationsResolvedForRun } from "./integration-connection-resolver.ts";
 import { getPackage } from "./package-catalog.ts";
 import { seedPinnedIntegrationManifests } from "./run-pipeline.ts";
-import { lockIntegrationGovernance } from "./integration-pins-service.ts";
 import { disableSchedules } from "./schedules-naming-connection.ts";
+import { parseManifestIntegrations } from "@appstrate/core/dependencies";
+import { fetchIntegrationManifest } from "./integration-service.ts";
 
 /** A layer naming `integrationId`'s set in a space: its org default, or a pin on one agent. */
 export type NamingLayer = { spaceId: string; integrationId: string } & (
@@ -99,10 +99,10 @@ function inLayerScope(layer: NamingLayer): SQL | undefined {
 }
 
 /**
- * Nothing but `layer`'s own row names its integration's set for a schedule: it is enabled, with no
- * key in `connection_overrides`, no admin pin or pin of its actor on its agent, no org default.
+ * No layer names the enabled schedule's set. Only a preview excludes the layer it simulates
+ * removing; mutation checks count every layer currently present.
  */
-function leftUnnamed(layer: NamingLayer): SQL | undefined {
+function leftUnnamed(layer: NamingLayer, excludeOwnLayer = false): SQL | undefined {
   const besides = (own: SQL | undefined) => own && sql`(${own}) IS NOT TRUE`;
   return and(
     eq(schedules.enabled, true),
@@ -117,7 +117,7 @@ function leftUnnamed(layer: NamingLayer): SQL | undefined {
             eq(integrationPins.packageId, schedules.packageId),
             eq(integrationPins.integrationId, layer.integrationId),
             or(isNull(integrationPins.userId), eq(integrationPins.userId, schedules.userId)),
-            besides(pinOf(layer)),
+            excludeOwnLayer ? besides(pinOf(layer)) : undefined,
           ),
         ),
     ),
@@ -129,7 +129,7 @@ function leftUnnamed(layer: NamingLayer): SQL | undefined {
           and(
             eq(integrationOrgDefaults.spaceId, schedules.spaceId),
             eq(integrationOrgDefaults.integrationId, layer.integrationId),
-            besides(orgDefaultOf(layer)),
+            excludeOwnLayer ? besides(orgDefaultOf(layer)) : undefined,
           ),
         ),
     ),
@@ -140,21 +140,32 @@ async function unnamedAmong(
   executor: DbOrTx,
   layer: NamingLayer,
   scheduleIds: readonly string[],
+  excludeOwnLayer = false,
 ): Promise<string[]> {
   if (scheduleIds.length === 0) return [];
   const rows = await executor
     .select({ id: schedules.id })
     .from(schedules)
-    .where(and(inArray(schedules.id, [...scheduleIds]), leftUnnamed(layer)));
+    .where(
+      and(
+        inArray(schedules.id, [...scheduleIds]),
+        inLayerScope(layer),
+        leftUnnamed(layer, excludeOwnLayer),
+      ),
+    );
   return rows.map((row) => row.id);
 }
 
 /** The definition `schedule` fires, or `null` when none resolves: that fire fails on its own. */
-async function firedDefinition(schedule: ScheduleRow): Promise<LoadedPackage | null> {
-  const draft = await getPackage(schedule.packageId, schedule.orgId);
+async function firedDefinition(
+  schedule: ScheduleRow,
+  executor: DbOrTx,
+): Promise<LoadedPackage | null> {
+  const draft = await getPackage(schedule.packageId, schedule.orgId, { executor });
   if (!draft) return null;
   try {
-    return (await resolveAgentRunVersion(draft, schedule.versionOverride ?? undefined)).agent;
+    return (await resolveAgentRunVersion(draft, schedule.versionOverride ?? undefined, executor))
+      .agent;
   } catch (err) {
     if (err instanceof ApiError) return null;
     throw err;
@@ -162,28 +173,38 @@ async function firedDefinition(schedule: ScheduleRow): Promise<LoadedPackage | n
 }
 
 /** The integrations `schedule`'s fire resolves a set for, under its `dependency_overrides`. */
-async function integrationsFired(schedule: ScheduleRow): Promise<string[]> {
-  const agent = await firedDefinition(schedule);
+async function integrationsFired(schedule: ScheduleRow, executor: DbOrTx): Promise<string[]> {
+  const agent = await firedDefinition(schedule, executor);
   if (!agent) return [];
   const { orgId, dependencyOverrides } = schedule;
-  return integrationsResolvedForRun(
-    agent.manifest as Record<string, unknown>,
-    await seedPinnedIntegrationManifests({ agent, orgId, dependencyOverrides }),
-  );
+  const manifestCache = await seedPinnedIntegrationManifests({
+    agent,
+    orgId,
+    dependencyOverrides,
+    executor,
+  });
+  // Soft/unresolved dependencies fall back to their draft: seed those on the same transaction too.
+  for (const entry of parseManifestIntegrations(agent.manifest)) {
+    await fetchIntegrationManifest(entry.id, manifestCache, executor);
+  }
+  return integrationsResolvedForRun(agent.manifest as Record<string, unknown>, manifestCache);
 }
 
 /**
  * The schedules of `layer`'s scope, enabled or not, whose fire resolves a set for its integration
  * ({@link integrationsFired}). It asks no layer fact: the layer may hold no row.
  */
-export async function schedulesLayerMayName(layer: NamingLayer): Promise<string[]> {
-  const candidates = await db.select().from(schedules).where(inLayerScope(layer));
+export async function schedulesLayerMayName(
+  layer: NamingLayer,
+  executor: DbOrTx = db,
+): Promise<string[]> {
+  const candidates = await executor.select().from(schedules).where(inLayerScope(layer));
   const fired = new Map<string, string[]>();
   const using: string[] = [];
   for (const schedule of candidates) {
     const { packageId, versionOverride, dependencyOverrides } = schedule;
     const fire = JSON.stringify([packageId, versionOverride, dependencyOverrides]);
-    if (!fired.has(fire)) fired.set(fire, await integrationsFired(schedule));
+    if (!fired.has(fire)) fired.set(fire, await integrationsFired(schedule, executor));
     if (fired.get(fire)!.includes(layer.integrationId)) using.push(schedule.id);
   }
   return using;
@@ -191,7 +212,7 @@ export async function schedulesLayerMayName(layer: NamingLayer): Promise<string[
 
 /** The schedules removing `layer` would disable, read while it stands. */
 export async function schedulesLeftUnnamedWithout(layer: NamingLayer): Promise<string[]> {
-  return unnamedAmong(db, layer, await schedulesLayerMayName(layer));
+  return unnamedAmong(db, layer, await schedulesLayerMayName(layer), true);
 }
 
 /**
@@ -297,32 +318,10 @@ export async function disableSchedulesSelectingWithin(
 }
 
 /**
- * The second pass of `layer`'s removal, once committed: read the fires again
- * ({@link schedulesLayerMayName}, outside any transaction), and disable with `reason`, in a
- * transaction behind `lockIntegrationGovernance`, those the removal did not judge (`judged`) that
- * it leaves unnamed — `leftUnnamed` re-asks every layer, so one re-created meanwhile keeps them
- * armed. A write that committed before this read is found here; one committing after re-checks the
- * governance behind the same lock and is refused. Returns them, whose jobs the caller removes.
- */
-export async function disableUnnamedSince(
-  layer: NamingLayer,
-  judged: readonly string[],
-  reason: ScheduleDisabledReason,
-): Promise<string[]> {
-  const read = new Set(judged);
-  const since = (await schedulesLayerMayName(layer)).filter((id) => !read.has(id));
-  if (since.length === 0) return [];
-  return db.transaction(async (tx) => {
-    await lockIntegrationGovernance(tx, layer.spaceId, layer.integrationId);
-    return disableSchedulesLeftUnnamed(tx, layer, since, reason);
-  });
-}
-
-/**
  * Remove `layer` with `remove` (`previous: null` when there was no row); when there was one, disable
- * the schedules that leaves unnamed, and those selecting within the floor it imposed, if any. The
- * schedules written between the first read of the fires and the removal's commit are judged by
- * {@link disableUnnamedSince}.
+ * the schedules that leaves unnamed, and those selecting within the floor it imposed, if any.
+ * The caller takes the governance lock first. Resolution and disabling share its transaction:
+ * a failure rolls back the removal, and a recreated layer cannot race a post-commit cleanup.
  */
 export async function removeNamingLayer<
   R extends { previous: unknown; removedFloor?: readonly string[] | null },
@@ -330,17 +329,14 @@ export async function removeNamingLayer<
   layer: NamingLayer,
   remove: (tx: Tx) => Promise<R>,
 ): Promise<R & { disabledScheduleIds: string[] }> {
-  const mayName = await schedulesLayerMayName(layer);
-  const removed = await db.transaction(async (tx) => {
+  return db.transaction(async (tx) => {
     const removed = await remove(tx);
     if (removed.previous === null) return { ...removed, disabledScheduleIds: [] };
+    const mayName = await schedulesLayerMayName(layer, tx);
     const unnamed = await disableSchedulesLeftUnnamed(tx, layer, mayName, "connection_set_unnamed");
     const selectingWithin = removed.removedFloor
       ? await disableSchedulesSelectingWithin(tx, layer, removed.removedFloor)
       : [];
     return { ...removed, disabledScheduleIds: [...unnamed, ...selectingWithin] };
   });
-  if (removed.previous === null) return removed;
-  const late = await disableUnnamedSince(layer, mayName, "connection_set_unnamed");
-  return { ...removed, disabledScheduleIds: [...removed.disabledScheduleIds, ...late] };
 }

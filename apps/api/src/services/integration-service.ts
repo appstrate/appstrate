@@ -26,6 +26,7 @@ import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 import { logger } from "../lib/logger.ts";
 import { formatZodIssues } from "../lib/zod-format.ts";
 import { likeContains } from "../lib/like-pattern.ts";
+import type { DbOrTx } from "../lib/db-helpers.ts";
 
 // ---------------------------------------------------------------------------
 // Manifest loading
@@ -85,11 +86,12 @@ export type IntegrationManifestCache = Map<string, Promise<IntegrationManifestLo
 export async function fetchIntegrationManifest(
   packageId: string,
   cache?: IntegrationManifestCache,
+  executor: DbOrTx = db,
 ): Promise<IntegrationManifestLoadResult> {
-  if (!cache) return fetchIntegrationManifestUncached(packageId);
+  if (!cache) return fetchIntegrationManifestUncached(packageId, executor);
   const hit = cache.get(packageId);
   if (hit) return hit;
-  const promise = fetchIntegrationManifestUncached(packageId);
+  const promise = fetchIntegrationManifestUncached(packageId, executor);
   cache.set(packageId, promise);
   return promise;
 }
@@ -106,8 +108,9 @@ export function parseIntegrationManifest(raw: unknown): IntegrationManifestLoadR
 
 async function fetchIntegrationManifestUncached(
   packageId: string,
+  executor: DbOrTx = db,
 ): Promise<IntegrationManifestLoadResult> {
-  const [pkgRow] = await db
+  const [pkgRow] = await executor
     .select({ manifest: packages.draftManifest, type: packages.type })
     .from(packages)
     .where(eq(packages.id, packageId))
@@ -214,6 +217,7 @@ async function resolvePublishedManifest(
   expectedType: "integration" | "mcp-server",
   orgId: string,
   pin?: string | null,
+  executor: DbOrTx = db,
 ): Promise<PublishedManifestResolution> {
   // System packages are loaded once at boot and answered from the in-memory
   // registry by id, which holds ONE version per id — so there is no version to
@@ -227,7 +231,7 @@ async function resolvePublishedManifest(
     return { ok: true, rawManifest: sys.manifest, version: null, source: "system" };
   }
 
-  const [pkgRow] = await db
+  const [pkgRow] = await executor
     .select({ type: packages.type })
     .from(packages)
     .where(and(eq(packages.id, packageId), orgOrSystemFilter(orgId)))
@@ -242,7 +246,7 @@ async function resolvePublishedManifest(
   // N published versions would otherwise pull N manifest jsonb blobs to keep
   // exactly one. The winner's manifest is fetched by itself below.
   const [versionRows, tagRows] = await Promise.all([
-    db
+    executor
       .select({
         version: packageVersions.version,
         integrity: packageVersions.integrity,
@@ -258,7 +262,7 @@ async function resolvePublishedManifest(
       )
       .where(eq(packageVersions.packageId, packageId))
       .orderBy(desc(packageVersions.createdAt)),
-    db
+    executor
       .select({ tag: packageDistTags.tag, version: packageVersions.version })
       .from(packageDistTags)
       .innerJoin(packageVersions, eq(packageDistTags.versionId, packageVersions.id))
@@ -277,7 +281,7 @@ async function resolvePublishedManifest(
   // Manifest of the WINNING version only — same tenant boundary as the list
   // read above, so the two reads cannot skew across a concurrent
   // delete/recreate of the package id.
-  const [manifestRow] = await db
+  const [manifestRow] = await executor
     .select({ manifest: packageVersions.manifest })
     .from(packageVersions)
     .innerJoin(packages, and(eq(packages.id, packageVersions.packageId), orgOrSystemFilter(orgId)))
@@ -424,8 +428,9 @@ export function resolvedIntegrationVersionToDescriptor(
 export async function readIntegrationManifestAt(
   packageId: string,
   descriptor: SpawnVersionDescriptor,
+  executor: DbOrTx = db,
 ): Promise<IntegrationManifestLoadResult> {
-  if (descriptor.kind === "draft") return fetchIntegrationManifestUncached(packageId);
+  if (descriptor.kind === "draft") return fetchIntegrationManifestUncached(packageId, executor);
 
   if (descriptor.kind === "system") {
     const sys = getSystemPackages().get(packageId);
@@ -433,7 +438,7 @@ export async function readIntegrationManifestAt(
     return parseIntegrationManifest(sys.manifest);
   }
 
-  const [row] = await db
+  const [row] = await executor
     .select({ manifest: packageVersions.manifest })
     .from(packageVersions)
     .where(
@@ -526,6 +531,7 @@ export async function resolveRunIntegrationVersions(params: {
   orgId: string;
   dependencyOverrides?: Record<string, string> | null;
   manifestCache?: IntegrationManifestCache;
+  executor?: DbOrTx;
 }): Promise<RunIntegrationVersionsResult> {
   const entries = parseManifestIntegrations(params.agentManifest);
   const versions: ResolvedIntegrationVersionMap = {};
@@ -540,7 +546,13 @@ export async function resolveRunIntegrationVersions(params: {
     } else {
       // A non-draft override replaces the manifest pin; otherwise the pin wins.
       const spec = override ?? entry.version;
-      const res = await resolvePublishedManifest(entry.id, "integration", params.orgId, spec);
+      const res = await resolvePublishedManifest(
+        entry.id,
+        "integration",
+        params.orgId,
+        spec,
+        params.executor,
+      );
       if (res.ok) {
         descriptor =
           res.source === "system" ? { kind: "system" } : { kind: "version", version: res.version! };
@@ -564,7 +576,10 @@ export async function resolveRunIntegrationVersions(params: {
     // pinned manifest transparently (one entry per integration, overwriting any
     // draft entry an earlier readiness pass may have memoized).
     if (params.manifestCache) {
-      params.manifestCache.set(entry.id, readIntegrationManifestAt(entry.id, descriptor));
+      params.manifestCache.set(
+        entry.id,
+        readIntegrationManifestAt(entry.id, descriptor, params.executor),
+      );
     }
     versions[entry.id] = descriptorToResolved(descriptor);
   }

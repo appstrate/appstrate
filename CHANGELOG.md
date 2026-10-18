@@ -302,6 +302,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   as such a layer, and the check covers every write leaving a schedule enabled.
   Deleting a connection that empties a member pin (`DELETE /api/me/connections/{id}`,
   an OAuth client delete) is covered too, disabling with `connection_deleted`.
+  Resolution and disabling commit with the removal: a failure rolls everything
+  back, and recreating a pin or default cannot race a later cleanup.
 
 - **The run page of an inline run no longer gets two 404s** (#2068).
   `GET …/persistence` answered `agent_not_found` for the run's shadow agent, so

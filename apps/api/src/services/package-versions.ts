@@ -253,11 +253,12 @@ export async function getLatestVersionId(
 /** Get the latest version ID + version string + createdAt for dirty-check at run time. */
 export async function getLatestVersionInfo(
   packageId: string,
+  executor: DbOrTx = db,
 ): Promise<{ id: number; version: string; createdAt: Date } | null> {
-  const versionId = await getLatestVersionId(packageId);
+  const versionId = await getLatestVersionId(packageId, executor);
   if (!versionId) return null;
 
-  const [row] = await db
+  const [row] = await executor
     .select({
       id: packageVersions.id,
       version: packageVersions.version,

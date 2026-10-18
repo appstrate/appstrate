@@ -11,6 +11,7 @@ import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts
 import { extractSkillIdsFromManifest, parseDraftManifest } from "../lib/manifest-utils.ts";
 import { isPackageReadableInSpace } from "../lib/package-access.ts";
 import { placementReadFilter, placementRowJoin } from "./package-placement.ts";
+import type { DbOrTx } from "../lib/db-helpers.ts";
 
 interface DbPackageRow {
   id: string;
@@ -161,12 +162,12 @@ export async function resolveDeclaredSkills(
 export async function getPackage(
   id: string,
   orgId: string,
-  opts: { includeEphemeral?: boolean } = {},
+  opts: { includeEphemeral?: boolean; executor?: DbOrTx } = {},
 ): Promise<LoadedPackage | null> {
   const conditions = [eq(packages.id, id), orgOrSystemFilter(orgId)];
   if (!opts.includeEphemeral) conditions.push(notEphemeralFilter());
 
-  const pkgRows = await db
+  const pkgRows = await (opts.executor ?? db)
     .select({
       id: packages.id,
       draftManifest: packages.draftManifest,

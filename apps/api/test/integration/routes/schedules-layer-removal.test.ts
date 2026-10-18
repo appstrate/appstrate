@@ -48,7 +48,6 @@ import {
 } from "../../../src/services/integration-pins-service.ts";
 import {
   disableSchedulesLeftUnnamed,
-  disableUnnamedSince,
   pinLayer,
   removeNamingLayer,
   schedulesLayerMayName,
@@ -197,6 +196,19 @@ describe("removing the layer that names a schedule's connection set", () => {
       .where(eq(auditEvents.action, action));
     const after = audit!.after as { disabledScheduleIds: string[] } | null;
     return after ? [...after.disabledScheduleIds].sort() : null;
+  }
+
+  async function withScheduleDisableFailure(check: () => Promise<void>): Promise<void> {
+    await db.execute(sql`CREATE FUNCTION refuse_schedule_disable_fn() RETURNS trigger AS $$
+      BEGIN RAISE EXCEPTION 'schedule disable failed'; END $$ LANGUAGE plpgsql`);
+    await db.execute(sql`CREATE TRIGGER refuse_schedule_disable_trg BEFORE UPDATE ON package_schedules
+      FOR EACH ROW WHEN (NEW.enabled = false) EXECUTE FUNCTION refuse_schedule_disable_fn()`);
+    try {
+      await check();
+    } finally {
+      await db.execute(sql`DROP TRIGGER refuse_schedule_disable_trg ON package_schedules`);
+      await db.execute(sql`DROP FUNCTION refuse_schedule_disable_fn()`);
+    }
   }
 
   describe("a member pin — DELETE /api/me/integration-pins/{agent}/integrations/{integration}", () => {
@@ -764,9 +776,8 @@ describe("removing the layer that names a schedule's connection set", () => {
       });
     }
 
-    // A trigger stands in for a schedule write relying on the pin alone, stored after the read of
-    // the fires and committed with the delete: no candidate of its first pass, judged by the second
-    // once the delete committed (both fail with the first pass alone, verified).
+    // A trigger inserts after the ordered row locks: resolution after the pin delete must still
+    // find and disable the schedule in that same transaction.
     const doors = [
       {
         door: "DELETE /api/me/connections/{id}",
@@ -810,6 +821,54 @@ describe("removing the layer that names a schedule's connection set", () => {
         });
         expect(await auditedAs(audit)).toEqual([id]);
       });
+
+      it(`${door} rolls back the connection and pin deletion if disabling a late schedule fails`, async () => {
+        const gone = await seedIntegrationConnection(ctx, INTEGRATION);
+        await ownPin([gone]);
+        const clientId = door === "an OAuth client delete" ? await clientMinting([gone]) : null;
+        const path = clientId
+          ? `/api/integrations/${INTEGRATION}/oauth-clients/${clientId}`
+          : `/api/me/connections/${gone}`;
+        const id = `sched_${crypto.randomUUID()}`;
+        await db.execute(
+          sql.raw(`CREATE FUNCTION late_schedule_fn() RETURNS trigger AS $$
+          BEGIN
+            INSERT INTO package_schedules (id, package_id, org_id, space_id, user_id, enabled, cron_expression)
+            VALUES ('${id}', OLD.package_id, '${ctx.orgId}', OLD.space_id, OLD.user_id, true, '0 * * * *');
+            RETURN NULL;
+          END $$ LANGUAGE plpgsql`),
+        );
+        await db.execute(sql`CREATE TRIGGER late_schedule_trg AFTER DELETE ON integration_pins
+          FOR EACH ROW EXECUTE FUNCTION late_schedule_fn()`);
+        try {
+          await withScheduleDisableFailure(async () => {
+            const response = await app.request(path, {
+              method: "DELETE",
+              headers: authHeaders(ctx),
+            });
+            expect(response.status).toBe(500);
+          });
+        } finally {
+          await db.execute(sql`DROP TRIGGER late_schedule_trg ON integration_pins`);
+          await db.execute(sql`DROP FUNCTION late_schedule_fn()`);
+        }
+        expect(
+          await db.select().from(integrationConnections).where(eq(integrationConnections.id, gone)),
+        ).toHaveLength(1);
+        expect(await ownPins()).toHaveLength(1);
+        expect(await db.select().from(schedules).where(eq(schedules.id, id))).toEqual([]);
+        if (clientId)
+          expect(
+            await db
+              .select()
+              .from(integrationOauthClients)
+              .where(eq(integrationOauthClients.id, clientId)),
+          ).toHaveLength(1);
+        // The failure left the old configuration intact, so an ordinary retry succeeds.
+        const retried = await app.request(path, { method: "DELETE", headers: authHeaders(ctx) });
+        expect(retried.status, await retried.clone().text()).toBe(204);
+        expect(await ownPins()).toEqual([]);
+      });
     }
 
     // The member pin is in the governance a write was judged under, re-checked behind the lock the
@@ -833,9 +892,56 @@ describe("removing the layer that names a schedule's connection set", () => {
     });
   });
 
-  // What a removal runs once committed: the schedules stored on the layer since its read of the
-  // fires, judged behind the governance lock (fails when it judges nothing, verified).
-  describe("the second pass of a removal (disableUnnamedSince)", () => {
+  describe("the current layers and atomic removal", () => {
+    for (const kind of ["member_pin", "admin_pin", "org_default"] as const) {
+      it(`counts the recreated ${kind} when judging the current connection set`, async () => {
+        const connection = await sharedConnection();
+        if (kind === "org_default") await orgDefault([connection]);
+        else await pin([connection], { userId: kind === "member_pin" ? ctx.user.id : null });
+        const late = await armedSchedule();
+        const current: NamingLayer =
+          kind === "org_default"
+            ? { kind, spaceId: ctx.defaultSpaceId, integrationId: INTEGRATION }
+            : pinLayer(
+                { spaceId: ctx.defaultSpaceId, integrationId: INTEGRATION, agentPackageId: AGENT },
+                kind === "member_pin" ? ctx.user.id : null,
+              );
+
+        const disabled = await db.transaction(async (tx) => {
+          await lockIntegrationGovernance(tx, current.spaceId, current.integrationId);
+          return disableSchedulesLeftUnnamed(tx, current, [late.id], "connection_set_unnamed");
+        });
+        expect(disabled).toEqual([]);
+        expect((await rowOf(late.id)).enabled).toBe(true);
+      });
+    }
+
+    it("rolls back a removal when disabling a schedule written after the initial read fails", async () => {
+      await ownPin([await sharedConnection()]);
+      const current = layer();
+      const id = `sched_${crypto.randomUUID()}`;
+      await withScheduleDisableFailure(async () => {
+        await expect(
+          removeNamingLayer(current, async (tx) => {
+            await lockIntegrationGovernance(tx, current.spaceId, current.integrationId);
+            await tx.insert(schedules).values({
+              id,
+              packageId: AGENT,
+              orgId: ctx.orgId,
+              spaceId: ctx.defaultSpaceId,
+              userId: ctx.user.id,
+              enabled: true,
+              cronExpression: "0 * * * *",
+            });
+            const [previous] = await tx.delete(integrationPins).returning();
+            return { previous: previous ?? null };
+          }),
+        ).rejects.toMatchObject({ cause: { message: "schedule disable failed" } });
+      });
+      expect(await db.select().from(integrationPins)).toHaveLength(1);
+      expect(await db.select().from(schedules).where(eq(schedules.id, id))).toEqual([]);
+    });
+
     const layer = (): NamingLayer => ({
       kind: "member_pin",
       spaceId: ctx.defaultSpaceId,
@@ -844,31 +950,35 @@ describe("removing the layer that names a schedule's connection set", () => {
       userId: ctx.user.id,
     });
 
-    it("disables, with the reason given, a schedule the layer leaves unnamed that the removal did not judge", async () => {
-      const judged = await armedSchedule();
+    it("disables, with the reason given, a schedule with no remaining layer", async () => {
       const late = await armedSchedule();
 
-      expect(await disableUnnamedSince(layer(), [judged.id], "connection_deleted")).toEqual([
-        late.id,
-      ]);
+      expect(
+        await db.transaction((tx) =>
+          disableSchedulesLeftUnnamed(tx, layer(), [late.id], "connection_deleted"),
+        ),
+      ).toEqual([late.id]);
       expect(await rowOf(late.id)).toMatchObject({
         enabled: false,
         disabledReason: "connection_deleted",
         nextRunAt: null,
       });
-      expect((await rowOf(judged.id)).enabled).toBe(true);
     });
 
     it("spares it when another layer names the set by then", async () => {
       await orgDefault([await sharedConnection()]);
       const late = await armedSchedule();
 
-      expect(await disableUnnamedSince(layer(), [], "connection_deleted")).toEqual([]);
+      expect(
+        await db.transaction((tx) =>
+          disableSchedulesLeftUnnamed(tx, layer(), [late.id], "connection_deleted"),
+        ),
+      ).toEqual([]);
       expect((await rowOf(late.id)).enabled).toBe(true);
     });
   });
 
-  // The fires are read before the removal's transaction opens; every layer fact is read inside it.
+  // The row-level helper re-reads current connection choices and layers after locking schedules.
   describe("writes landing between the read of the fires and the removal", () => {
     const pinLayer = () =>
       ({
@@ -1165,9 +1275,7 @@ describe("removing the layer that names a schedule's connection set", () => {
       expect(await unnamed()).toEqual([created.id]);
     });
 
-    // A schedule relying on the layer alone, no key of its own, is no candidate of the removal's
-    // first read when stored after it: the second pass, once the removal committed, judges it
-    // (fails with the first pass alone, verified).
+    // Resolution runs after the removal callback, on its transaction, so it includes these rows.
     for (const owner of ["an admin pin", "a member pin"] as const) {
       it(`the removal of ${owner} disables a schedule relying on it stored after the read of the fires`, async () => {
         const userId = owner === "a member pin" ? ctx.user.id : null;

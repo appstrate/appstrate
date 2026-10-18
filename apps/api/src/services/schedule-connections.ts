@@ -356,8 +356,8 @@ export async function readScheduleGovernance(
  * write) selects (sorted, one order for every writer), re-read their governance on `tx`, and refuse
  * with 409 `schedule_governance_changed` when it differs from `judged`. A removal of a layer takes
  * the same lock: the schedules narrowing a floor are read behind it
- * (`disableSchedulesSelectingWithin`), and those it may leave unnamed are read again once it
- * committed (`removeNamingLayer`). So the write commits first and the removal sees it, or the
+ * (`disableSchedulesSelectingWithin`), and those it may leave unnamed are resolved and disabled
+ * in its transaction (`removeNamingLayer`). So the write commits first and the removal sees it, or the
  * removal does and the write is refused. An optimistic re-check, not a lock held across the
  * judgment, which reads on `db` (PGlite's one connection would deadlock).
  */

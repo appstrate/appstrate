@@ -167,10 +167,8 @@ import {
 } from "./schedules-naming-connection.ts";
 import {
   disableSchedulesLeftUnnamed,
-  disableUnnamedSince,
   pinLayer,
   schedulesLayerMayName,
-  type NamingLayer,
 } from "./schedules-named-by-layer.ts";
 import { lockIntegrationGovernance } from "./integration-pins-service.ts";
 import {
@@ -2370,12 +2368,12 @@ export async function deleteIntegrationOAuthClient(
     .select({ id: integrationConnections.id, userId: integrationConnections.userId })
     .from(integrationConnections)
     .where(and(eq(integrationConnections.clientRef, clientId), connectionSpaces));
-  const schedulesByPin = await schedulesByPinNaming(
-    mintedBefore.map((c) => c.id),
-    mintedBefore.flatMap((c) => (c.userId ? [c.userId] : [])),
-  );
-  const removal = await db.transaction(async (tx) => {
-    await lockPinsGovernance(tx, schedulesByPin);
+  return db.transaction(async (tx) => {
+    const schedulesByPin = await schedulesByPinNaming(
+      tx,
+      mintedBefore.map((c) => c.id),
+      mintedBefore.flatMap((c) => (c.userId ? [c.userId] : [])),
+    );
     // The client, then its rows — the order a connect and a promote take.
     const [client] = await tx
       .select({ id: integrationOauthClients.id })
@@ -2452,22 +2450,15 @@ export async function deleteIntegrationOAuthClient(
         .for("update");
     }
     const disabledScheduleIds: string[] = [];
-    const emptied: EmptiedPin[] = [];
     for (const row of deletedConns) {
-      const forgot = await forgetDeletedConnection(tx, row, schedulesByPin);
-      disabledScheduleIds.push(...forgot.disabled);
-      emptied.push(...forgot.emptied);
+      disabledScheduleIds.push(...(await forgetDeletedConnection(tx, row, schedulesByPin)));
     }
     return {
       client: toPublicClient(projectClientWithSecret(deleted!)),
       deletedConnections: deletedConns.length,
       disabledScheduleIds,
-      emptied,
     };
   });
-  const { emptied, ...result } = removal;
-  result.disabledScheduleIds.push(...(await disableUnnamedSinceEmptied(emptied)));
-  return result;
 }
 
 // ─────────────────────────────────────────────
@@ -3585,12 +3576,12 @@ export async function deleteOwnConnection(
   connectionId: string,
 ): Promise<{ orgId: string; disabledScheduleIds: string[] } | null> {
   const { actor } = principal;
-  const schedulesByPin = await schedulesByPinNaming(
-    [connectionId],
-    actor.type === "user" ? [actor.id] : [],
-  );
-  const deleted = await db.transaction(async (tx) => {
-    await lockPinsGovernance(tx, schedulesByPin);
+  return db.transaction(async (tx) => {
+    const schedulesByPin = await schedulesByPinNaming(
+      tx,
+      [connectionId],
+      actor.type === "user" ? [actor.id] : [],
+    );
     const [row] = await tx
       .select({
         ...deletedConnectionOwner,
@@ -3614,16 +3605,11 @@ export async function deleteOwnConnection(
     }
     await assertConnectionsUnpinned(tx, [connectionId], "Connection cannot be deleted");
     await tx.delete(integrationConnections).where(eq(integrationConnections.id, row.id));
-    return { orgId: row.orgId, ...(await forgetDeletedConnection(tx, row, schedulesByPin)) };
+    return {
+      orgId: row.orgId,
+      disabledScheduleIds: await forgetDeletedConnection(tx, row, schedulesByPin),
+    };
   });
-  if (!deleted) return null;
-  return {
-    orgId: deleted.orgId,
-    disabledScheduleIds: [
-      ...deleted.disabled,
-      ...(await disableUnnamedSinceEmptied(deleted.emptied)),
-    ],
-  };
 }
 
 const deletedConnectionOwner = {
@@ -3632,27 +3618,26 @@ const deletedConnectionOwner = {
   endUserId: integrationConnections.endUserId,
 };
 
-/** A member pin a connection delete may drop, as read before its transaction opens. */
+/** A member pin a connection delete may drop, and its schedules to lock in id order. */
 interface PinNaming {
   spaceId: string;
   integrationId: string;
-  /** The schedules it may name a set for ({@link schedulesLayerMayName}). */
+  /** Every schedule in its scope, before resolving which ones use its integration. */
   scheduleIds: string[];
 }
 
 /**
- * By pin id, each member pin of `ownerIds` naming one of `connectionIds` ({@link PinNaming}): read
- * before the delete's transaction opens, which takes the governance lock of each
- * ({@link lockPinsGovernance}) and judges those schedules; the ones written since are judged once
- * it committed ({@link disableUnnamedSinceEmptied}).
+ * Read the member pins, take their governance locks before any row lock, then read the schedules
+ * to lock together. The actual fired definitions are resolved after the pin is removed, on `tx`.
  */
 async function schedulesByPinNaming(
+  tx: Tx,
   connectionIds: string[],
   ownerIds: string[],
 ): Promise<Map<string, PinNaming>> {
   const schedulesByPin = new Map<string, PinNaming>();
   if (connectionIds.length === 0 || ownerIds.length === 0) return schedulesByPin;
-  const pins = await db
+  const pins = await tx
     .select({ ...pinForgetColumns, userId: integrationPins.userId })
     .from(integrationPins)
     .where(
@@ -3663,8 +3648,21 @@ async function schedulesByPinNaming(
     );
   for (const pin of pins) {
     const { spaceId, integrationId } = pin;
-    const scheduleIds = await schedulesLayerMayName(pinLayer(pin, pin.userId));
-    schedulesByPin.set(pin.id, { spaceId, integrationId, scheduleIds });
+    schedulesByPin.set(pin.id, { spaceId, integrationId, scheduleIds: [] });
+  }
+  await lockPinsGovernance(tx, schedulesByPin);
+  for (const pin of pins) {
+    const rows = await tx
+      .select({ id: schedules.id })
+      .from(schedules)
+      .where(
+        and(
+          eq(schedules.spaceId, pin.spaceId),
+          eq(schedules.packageId, pin.agentPackageId),
+          eq(schedules.userId, pin.userId!),
+        ),
+      );
+    schedulesByPin.get(pin.id)!.scheduleIds = rows.map((row) => row.id);
   }
   return schedulesByPin;
 }
@@ -3676,8 +3674,8 @@ function schedulesIn(schedulesByPin: ReadonlyMap<string, PinNaming>): SQL | unde
 }
 
 /**
- * `lockIntegrationGovernance` for each (space, integration) of `schedulesByPin`, sorted: the FIRST
- * statements of a delete's transaction. An armed schedule write takes it, then writes its schedule
+ * `lockIntegrationGovernance` for each (space, integration) of `schedulesByPin`, sorted, before any
+ * row lock. An armed schedule write takes it, then writes its schedule
  * row; taken after the delete's row locks, it would deadlock against one.
  */
 async function lockPinsGovernance(
@@ -3694,36 +3692,17 @@ async function lockPinsGovernance(
   for (const pin of sorted) await lockIntegrationGovernance(tx, pin.spaceId, pin.integrationId);
 }
 
-/** A member pin a delete emptied: its layer, and the schedules its transaction judged. */
-interface EmptiedPin {
-  layer: NamingLayer;
-  judged: string[];
-}
-
-/**
- * Once the delete committed, the second pass of each pin it emptied ({@link disableUnnamedSince}):
- * the schedules written on it since the read of the fires. Returns those it disabled.
- */
-async function disableUnnamedSinceEmptied(emptied: readonly EmptiedPin[]): Promise<string[]> {
-  const late: string[] = [];
-  for (const { layer, judged } of emptied) {
-    late.push(...(await disableUnnamedSince(layer, judged, "connection_deleted")));
-  }
-  return late;
-}
-
 /**
  * Drop a deleted connection from its OWNER's member pins and schedule overrides, and disable other
  * actors' schedules naming it ({@link planConnectionForget}) and those of `schedulesByPin` a pin it
  * drops leaves unnamed ({@link schedulesByPinNaming}). Returns the schedules it disabled, whose
- * jobs the caller removes once committed (importing the scheduler here would close a cycle), and
- * the pins it dropped, whose second pass the caller runs then.
+ * jobs the caller removes once committed (importing the scheduler here would close a cycle).
  */
 async function forgetDeletedConnection(
   tx: Tx,
   row: { id: string; userId: string | null; endUserId: string | null },
   schedulesByPin: ReadonlyMap<string, PinNaming>,
-): Promise<{ disabled: string[]; emptied: EmptiedPin[] }> {
+): Promise<string[]> {
   // `integration_connections` holds exactly one owner id.
   const owner = actorFromIds(row.userId, row.endUserId)!;
   const plan = await planConnectionForget(
@@ -3732,7 +3711,6 @@ async function forgetDeletedConnection(
     { lock: true, alsoLock: schedulesIn(schedulesByPin) },
   );
   const unnamed: string[] = [];
-  const emptied: EmptiedPin[] = [];
   for (const pin of plan.pins) {
     // An emptied set drops the pin: only an explicit write pins to none.
     if (pin.nextConnectionIds.length === 0) {
@@ -3742,9 +3720,8 @@ async function forgetDeletedConnection(
       if (!naming) await lockIntegrationGovernance(tx, pin.spaceId, pin.integrationId);
       await tx.delete(integrationPins).where(eq(integrationPins.id, pin.id));
       const layer = pinLayer(pin, owner.id);
-      const judged = naming?.scheduleIds ?? [];
+      const judged = await schedulesLayerMayName(layer, tx);
       unnamed.push(...(await disableSchedulesLeftUnnamed(tx, layer, judged, "connection_deleted")));
-      emptied.push({ layer, judged });
     } else {
       await tx
         .update(integrationPins)
@@ -3765,14 +3742,11 @@ async function forgetDeletedConnection(
       .where(eq(schedules.id, schedule.id));
   }
   await disableSchedules(tx, plan.foreignScheduleIds, "connection_deleted");
-  return {
-    disabled: [
-      ...plan.schedules.flatMap((s) => (s.disables ? [s.id] : [])),
-      ...plan.foreignScheduleIds,
-      ...unnamed,
-    ],
-    emptied,
-  };
+  return [
+    ...plan.schedules.flatMap((s) => (s.disables ? [s.id] : [])),
+    ...plan.foreignScheduleIds,
+    ...unnamed,
+  ];
 }
 
 /** One of the owner's member pins naming the connection. */
