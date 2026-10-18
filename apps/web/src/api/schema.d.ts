@@ -14234,7 +14234,15 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
-            503: components["responses"]["EncryptionKeyUnavailable"];
+            /** @description `authorization_server_unreachable` — the metadata (RFC 8414) of an auto-provisioned client's authorization server did not answer (network failure, timeout, 5xx): nothing was registered, and the same request may succeed shortly. `encryption_key_unavailable` — a stored credential this operation needs is encrypted under a key id missing from the platform's keyring. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     initiateIntegrationConnect: {

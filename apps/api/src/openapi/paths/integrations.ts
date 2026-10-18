@@ -1739,7 +1739,15 @@ export const integrationsPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "429": { $ref: "#/components/responses/RateLimited" },
-        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
+        "503": {
+          description:
+            "`authorization_server_unreachable` — the metadata (RFC 8414) of an auto-provisioned client's authorization server did not answer (network failure, timeout, 5xx): nothing was registered, and the same request may succeed shortly. `encryption_key_unavailable` — a stored credential this operation needs is encrypted under a key id missing from the platform's keyring.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
   },

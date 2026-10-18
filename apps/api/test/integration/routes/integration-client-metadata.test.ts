@@ -76,6 +76,8 @@ interface Advertise {
   scopes?: string[];
   /** The status every metadata probe answers instead of the document. */
   metadataStatus?: number;
+  /** The status the OIDC probes answer instead (default `metadataStatus`). */
+  oidcStatus?: number;
 }
 
 /** The remote MCP server and its authorization server's metadata, fronting `provider`. */
@@ -109,11 +111,12 @@ function startMetadataServer(advertise: Advertise): MetadataServer {
       if (url.pathname === "/.well-known/oauth-protected-resource/mcp") {
         return json({ resource: `${base}/mcp`, authorization_servers: [base] });
       }
-      if (advertise.metadataStatus && url.pathname.startsWith("/.well-known/o")) {
-        if (!url.pathname.includes("protected-resource")) {
-          return new Response("no", { status: advertise.metadataStatus });
-        }
-      }
+      const probeStatus = url.pathname.includes("openid-configuration")
+        ? (advertise.oidcStatus ?? advertise.metadataStatus)
+        : url.pathname.startsWith("/.well-known/oauth-authorization-server")
+          ? advertise.metadataStatus
+          : undefined;
+      if (probeStatus) return new Response("no", { status: probeStatus });
       if (url.pathname === "/.well-known/oauth-authorization-server") {
         return json({
           issuer: base,
@@ -717,6 +720,25 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
     expect(started.status).toBe(403);
     expect(meta.provider!.authorizeRequests).toHaveLength(0);
     expect(meta.registrations).toBe(0);
+  });
+
+  it("answers 503 when one probe is absent (404) and another unavailable (503), then recovers", async () => {
+    const advertise: Advertise = {
+      cimd: false,
+      registration: true,
+      metadataStatus: 404,
+      oidcStatus: 503,
+    };
+    await install(advertise, { clientId: "dcr-1" });
+    const res = await postConnect();
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { code: string }).code).toBe("authorization_server_unreachable");
+    expect(meta.registrations).toBe(0);
+    // Not remembered: once the server answers, the next connect registers and redirects.
+    delete advertise.metadataStatus;
+    delete advertise.oidcStatus;
+    expect((await begin()).searchParams.get("client_id")).toBe("dcr-1");
+    expect(meta.registrations).toBe(1);
   });
 
   it("uses no stored client while the server's metadata does not answer (503)", async () => {

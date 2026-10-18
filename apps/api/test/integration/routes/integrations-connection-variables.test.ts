@@ -41,6 +41,8 @@ interface Forge {
   iss: boolean;
   /** Advertise `code_challenge_methods_supported: ["S256"]`. */
   pkce: boolean;
+  /** The status the RFC 8414 / OIDC metadata probes answer instead of the document. */
+  metadataStatus?: number;
   stop: () => void;
 }
 
@@ -89,6 +91,12 @@ function startForge(): Forge {
           resource: `${base}${path}`,
           authorization_servers: advertise.get(prefix) ?? [`${base}${prefix}`],
         });
+      }
+      if (
+        handle.metadataStatus &&
+        /^\/\.well-known\/(oauth-authorization-server|openid)/.test(url.pathname)
+      ) {
+        return new Response("no", { status: handle.metadataStatus });
       }
       if (req.method === "GET" && url.pathname === "/.well-known/oauth-authorization-server") {
         return json({
@@ -440,6 +448,7 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     forge.cimd = false;
     forge.iss = true;
     forge.pkce = true;
+    forge.metadataStatus = undefined;
     ctx = await createTestContext({ orgSlug: "myorg" });
     await seedIntegration(ctx.orgId, forgeManifest("@myorg/forge"));
   });
@@ -605,6 +614,18 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     });
     expect(res.status).toBe(400);
     expect(JSON.stringify(await res.json())).toContain("per connection");
+  });
+
+  it("answers 503 when the chosen server's metadata does not answer, registering nothing", async () => {
+    forge.metadataStatus = 503;
+    const res = await app.request("/api/integrations/@myorg/forge/auths/oauth/connect/oauth2", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ variables: { base_url: base } }),
+    });
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { code: string }).code).toBe("authorization_server_unreachable");
+    expect(forge.registrations).toHaveLength(0);
   });
 
   it("vouches for no server a system integration chooses per connection: no iss, refused", async () => {

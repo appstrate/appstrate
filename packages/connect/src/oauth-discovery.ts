@@ -88,7 +88,7 @@ export interface OAuthEndpointResolution {
   /** The validated document's `issuer`, verbatim: what a client is bound to, `iss` compared with. */
   issuer?: string;
   authorizationResponseIssParameterSupported?: boolean;
-  /** No probe got an answer (network failure, timeout, 5xx): retrying may succeed. */
+  /** No document, and a probe went unanswered (network failure, timeout, 5xx): retry may succeed. */
   metadataUnreachable?: true;
 }
 
@@ -238,12 +238,11 @@ async function discover(
   fetchImpl: typeof fetch | undefined,
 ): Promise<DiscoveredMetadata | undefined> {
   const found: DiscoveredMetadata = {};
-  let answered = false;
+  let unavailable = false;
   for (const url of buildDiscoveryProbes(issuer)) {
     const doc = await fetchDiscoveryDocument(url, fetchImpl);
-    if (doc === UNREACHABLE) continue;
-    answered = true;
-    if (!doc) continue;
+    if (doc === UNREACHABLE) unavailable = true;
+    if (!doc || doc === UNREACHABLE) continue;
     // AFPS §7.3: no field is trusted from a document of another issuer.
     if (!discoveryIssuerMatches(doc.issuer, configuredIssuer)) continue;
     found.issuer ??= doc.issuer as string;
@@ -275,7 +274,8 @@ async function discover(
     }
   }
   if (Object.values(found).some((v) => v !== undefined)) return found;
-  return answered ? undefined : { metadataUnreachable: true };
+  // One probe out (a 404 elsewhere says nothing of it): no verdict on the metadata yet.
+  return unavailable ? { metadataUnreachable: true } : undefined;
 }
 
 function stringArray(value: unknown): string[] | undefined {

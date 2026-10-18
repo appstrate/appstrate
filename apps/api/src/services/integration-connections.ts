@@ -1666,12 +1666,7 @@ export function resolveConnectClient(
     // reason + remedy, authored by whichever step failed. Render it verbatim.
     const failure = resolved.provisioningFailure;
     if (failure?.transient) {
-      throw new ApiError({
-        status: 503,
-        code: "authorization_server_unreachable",
-        title: "Authorization Server Unreachable",
-        detail: `The authorization server of '${integrationId}' auth '${authKey}' could not be reached: ${failure.message}`,
-      });
+      throw authorizationServerUnreachable(integrationId, authKey, failure.message);
     }
     const detail = failure?.message ?? "discovery or client registration failed";
     const statusPart = failure?.status ? ` (HTTP ${failure.status})` : "";
@@ -2063,6 +2058,16 @@ function sameOrigin(a: string, b: string): boolean {
   }
 }
 
+/** An authorization server that did not answer: retryable, unlike a refusal of its metadata. */
+function authorizationServerUnreachable(packageId: string, authKey: string, reason: string) {
+  return new ApiError({
+    status: 503,
+    code: "authorization_server_unreachable",
+    title: "Authorization Server Unreachable",
+    detail: `The authorization server of '${packageId}' auth '${authKey}' could not be reached: ${reason}`,
+  });
+}
+
 /**
  * MCP 2026-07-28 Security Considerations: an MCP server's authorization server whose validated
  * metadata lists no S256 is refused before any client is provisioned, whatever the manifest says.
@@ -2379,6 +2384,13 @@ async function ensurePerConnectionOAuthClient(
     );
   }
   const endpoints = await resolveOAuthEndpoints({ issuer: candidate });
+  if (endpoints.metadataUnreachable) {
+    throw authorizationServerUnreachable(
+      packageId,
+      authKey,
+      `${candidate}'s metadata (RFC 8414) did not answer; retry shortly`,
+    );
+  }
   if (!endpoints.issuer || !endpoints.authorizationEndpoint || !endpoints.tokenEndpoint) {
     throw refuse(
       "authorization_server_unavailable",
