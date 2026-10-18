@@ -30,6 +30,7 @@ import { Badge } from "@appstrate/ui/components/badge";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { SettingsSkeleton } from "@/components/loading-skeletons";
 import { ConfirmModal } from "@/components/confirm-modal";
+import { ErrorState } from "@/components/page-states";
 import { Modal } from "@/components/modal";
 import { GitHubIcon, GoogleIcon } from "@/components/icons";
 import { usePermissions } from "@/hooks/use-permissions";
@@ -76,12 +77,12 @@ export function SpaceAuthTab() {
 
 function SmtpSection({ personal }: { personal: boolean }) {
   const { t } = useTranslation(["settings", "common"]);
-  const { data: config, isLoading } = useSmtpConfig();
+  const { data: config, error } = useSmtpConfig();
   const upsert = useUpsertSmtpConfig();
   const del = useDeleteSmtpConfig();
   const test = useTestSmtp();
   const [testing, setTesting] = useState(false);
-  const [form, setForm] = useSeededForm(config, isLoading, emptySmtp, fromSmtp);
+  const [form, setForm] = useSeededForm(config, emptySmtp, fromSmtp);
   const initial = config ?? null;
 
   function handleSubmit(e: React.FormEvent) {
@@ -111,8 +112,8 @@ function SmtpSection({ personal }: { personal: boolean }) {
         icon={<Mail className="size-5" />}
         title={t("settings:spaceAuth.smtpTitle")}
         hint={t("settings:spaceAuth.smtpHint")}
-        loading={isLoading}
-        configured={!!initial}
+        config={config}
+        error={error}
         personal={personal}
         del={del}
         deleteTitle={t("settings:spaceAuth.smtpDeleteTitle")}
@@ -285,10 +286,10 @@ function SocialSection({
   personal: boolean;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const { data: config, isLoading } = useSocialProvider(provider);
+  const { data: config, error } = useSocialProvider(provider);
   const upsert = useUpsertSocialProvider(provider);
   const del = useDeleteSocialProvider(provider);
-  const [form, setForm] = useSeededForm(config, isLoading, emptySocial, fromSocial);
+  const [form, setForm] = useSeededForm(config, emptySocial, fromSocial);
   const Icon = icon === "github" ? GitHubIcon : GoogleIcon;
 
   function handleSubmit(e: React.FormEvent) {
@@ -313,8 +314,8 @@ function SocialSection({
       icon={<Icon className="size-5" aria-hidden />}
       title={title}
       hint={t("settings:spaceAuth.socialHint", { provider: title })}
-      loading={isLoading}
-      configured={!!config}
+      config={config}
+      error={error}
       personal={personal}
       del={del}
       deleteTitle={t("settings:spaceAuth.socialDeleteTitle")}
@@ -369,20 +370,20 @@ function SocialSection({
 // ─── bits ────────────────────────────────────────────────────────────────────
 
 /**
- * Re-seeds the form from the loaded row on first load and whenever the row's
- * `updatedAt` changes; waits for the fetch so an empty form is never seeded
- * over a row that is still loading.
+ * Re-seeds the form from the read row on first read and whenever the row's
+ * `updatedAt` changes. Seeds only from an answer (`null` = no row): a read
+ * still in flight or failed seeds nothing, so an empty form never stands in
+ * for a row the server has not returned.
  */
 function useSeededForm<C extends { updatedAt: string }, F>(
   config: C | null | undefined,
-  isLoading: boolean,
   empty: () => F,
   from: (c: C) => F,
 ) {
   const [form, setForm] = useState(empty);
   const [seededFor, setSeededFor] = useState<string | null>(null);
   const seedKey = config ? config.updatedAt : "none";
-  if (!isLoading && seededFor !== seedKey) {
+  if (config !== undefined && seededFor !== seedKey) {
     setForm(config ? from(config) : empty());
     setSeededFor(seedKey);
   }
@@ -394,13 +395,17 @@ function useSeededForm<C extends { updatedAt: string }, F>(
  * hint, the form (hidden in a personal space, where an existing row is only
  * deletable) and the delete confirmation. `children` receives the delete
  * button, or null when there is no row to delete.
+ *
+ * Until the read answers, the badge and the form hold their place; a failed
+ * read shows the error and neither: « Non configuré » and a savable empty form
+ * would invite overwriting a row that may exist.
  */
 function ProviderConfigSection({
   icon,
   title,
   hint,
-  loading,
-  configured,
+  config,
+  error,
   personal,
   del,
   deleteTitle,
@@ -411,9 +416,9 @@ function ProviderConfigSection({
   icon: ReactNode;
   title: string;
   hint: string;
-  /** The stored row is still being read: the badge and the form hold their place. */
-  loading: boolean;
-  configured: boolean;
+  /** The stored row: `null` when there is none, `undefined` until the read answers. */
+  config: unknown;
+  error: unknown;
   personal: boolean;
   del: { isPending: boolean; mutate: (v: undefined, o: { onSuccess: () => void }) => void };
   deleteTitle: string;
@@ -423,8 +428,11 @@ function ProviderConfigSection({
 }) {
   const { t } = useTranslation("settings");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const failed = config === undefined && error != null;
+  const loading = config === undefined && !failed;
+  const configured = config != null;
 
-  if (!loading && personal && !configured) return null;
+  if (config === null && personal) return null;
 
   const deleteButton = configured ? (
     <DeleteConfigButton disabled={del.isPending} onClick={() => setConfirmDelete(true)} />
@@ -436,7 +444,7 @@ function ProviderConfigSection({
         <h2 className="flex items-center gap-2 text-lg font-semibold">
           {icon}
           {title}
-          {loading ? (
+          {failed ? null : loading ? (
             <Skeleton className="h-5 w-20" />
           ) : configured ? (
             <Badge variant="running">{t("spaceAuth.configured")}</Badge>
@@ -447,7 +455,9 @@ function ProviderConfigSection({
         <p className="text-muted-foreground text-sm">{hint}</p>
       </header>
 
-      {loading ? (
+      {failed ? (
+        <ErrorState error={error} compact />
+      ) : loading ? (
         <SettingsSkeleton />
       ) : personal ? (
         <div>{deleteButton}</div>
