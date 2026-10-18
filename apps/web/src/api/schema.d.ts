@@ -1900,7 +1900,7 @@ export interface paths {
         put?: never;
         /**
          * Propose manifest fields from the integration's connected MCP server
-         * @description Connects to the remote MCP server of the integration's draft (the working copy being edited, published or not) through the credential proxy, authorized against that draft — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, each exchange journaled like one of its calls (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500 tools over 20 pages of at most 2 MiB each) as an empty `tools_policy` entry each and as an entry of `tools`, and as `default_tools` only the tools annotated `readOnlyHint: true`, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning). The whole sync is bounded to 20 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Only a Streamable HTTP server is supported. Requires `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too) and write authority on the package in its home space. Rate limited to 10 requests per minute.
+         * @description Connects to the remote MCP server of the integration's draft (the working copy being edited, published or not) through the credential proxy, authorized against that draft — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, each exchange journaled like one of its calls (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500 tools over 20 pages of at most 2 MiB each) as an empty `tools_policy` entry each and as an entry of `tools`, and as `default_tools` only the tools annotated `readOnlyHint: true` and not `destructiveHint: true`, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning). The whole sync is bounded to 20 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Only a Streamable HTTP server is supported. Requires `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too) and write authority on the package in its home space. Rate limited to 10 requests per minute.
          */
         post: operations["syncIntegrationFromServer"];
         delete?: never;
@@ -13844,6 +13844,16 @@ export interface operations {
                         block_user_connections: boolean;
                         /** Format: uri */
                         platform_redirect_uri: string;
+                        /** @description What a credential-proxy call outside a run (`/api/credential-proxy/proxy` with no `X-Run-Id` and no `X-Connection-Id`) would bind for THIS caller in the current space: the same selection, under the caller's reach (`credential-proxy:call` reaches the connections usable in the space, `credential-proxy:call-own` alone the caller's own), with the space's org default applied. Unlike `auths[].ready`, it is the governed answer. It names no connection. The proxy also requires the integration to be active here (`active`), which this verdict does not repeat. */
+                        proxy_connection: {
+                            /**
+                             * @description `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal).
+                             * @enum {string}
+                             */
+                            status: "ready" | "must_choose" | "needs_reconnection" | "none" | "not_permitted" | "default_unavailable" | "unusable";
+                            /** @description An ENFORCED org default governs the integration in this space: its connection is the space admins' to set, never the caller's. */
+                            imposed: boolean;
+                        };
                     };
                 };
             };
@@ -14915,7 +14925,7 @@ export interface operations {
                     "application/json": {
                         /** @description A partial AFPS integration manifest: only the fields the server reported. */
                         manifest: {
-                            /** @description The selection an agent inherits: only the tools the server annotates `readOnlyHint: true`, in server order; empty when it annotates none. Discovering a tool never selects it otherwise. */
+                            /** @description The selection an agent inherits: only the tools the server annotates `readOnlyHint: true` and not `destructiveHint: true`, in server order; empty when it annotates none. Discovering a tool never selects it otherwise. */
                             default_tools: string[];
                             /** @description Every tool listed, each with an empty policy. */
                             tools_policy: {
@@ -14940,6 +14950,8 @@ export interface operations {
                             description?: string;
                             /** @description True only when the server annotates the tool `readOnlyHint: true`. */
                             read_only: boolean;
+                            /** @description True only when the server annotates the tool `destructiveHint: true`. An untrusted hint like `read_only`; a destructive tool is never in the proposal's `default_tools`, even when also annotated read-only. */
+                            destructive: boolean;
                         }[];
                         warnings: {
                             /** @enum {string} */
@@ -15454,6 +15466,16 @@ export interface operations {
                         block_user_connections: boolean;
                         /** Format: uri */
                         platform_redirect_uri: string;
+                        /** @description What a credential-proxy call outside a run (`/api/credential-proxy/proxy` with no `X-Run-Id` and no `X-Connection-Id`) would bind for THIS caller in the current space: the same selection, under the caller's reach (`credential-proxy:call` reaches the connections usable in the space, `credential-proxy:call-own` alone the caller's own), with the space's org default applied. Unlike `auths[].ready`, it is the governed answer. It names no connection. The proxy also requires the integration to be active here (`active`), which this verdict does not repeat. */
+                        proxy_connection: {
+                            /**
+                             * @description `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal).
+                             * @enum {string}
+                             */
+                            status: "ready" | "must_choose" | "needs_reconnection" | "none" | "not_permitted" | "default_unavailable" | "unusable";
+                            /** @description An ENFORCED org default governs the integration in this space: its connection is the space admins' to set, never the caller's. */
+                            imposed: boolean;
+                        };
                     };
                 };
             };

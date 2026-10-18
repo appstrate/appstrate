@@ -205,7 +205,7 @@ function ExistingPackageWizard({ packageId }: { packageId: string }) {
     remote: isRemoteSource(manifest),
     active: detail.active,
     published,
-    connected: detail.auths.some((auth) => auth.ready),
+    connection: detail.proxy_connection.status,
     // The detail reads the published version, else the draft.
     toolsDeclared: declaredToolNames(manifest).length > 0,
   });
@@ -321,10 +321,9 @@ function ReadyStep({
         {t("integrationWizard.tools.declared", { count: declaredToolNames(manifest).length })}{" "}
         {t("integrationWizard.tools.selectedCount", { count: defaultToolCount(manifest) })}
       </p>
-      {/* `auth.ready` is not the connection a run binds: the space's rules decide that. */}
-      <p className="text-muted-foreground text-sm">
-        {t("integrationWizard.ready.connectionCheck")}
-      </p>
+      {detail.proxy_connection.status === "must_choose" && (
+        <p className="text-muted-foreground text-sm">{t("integrationWizard.ready.mustChoose")}</p>
+      )}
       <div className="flex flex-wrap gap-2">
         {/* The agent creation hand-off; it opens only for a caller who may create one. */}
         {can("agents:write") && (

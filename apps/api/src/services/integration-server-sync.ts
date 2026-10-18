@@ -49,6 +49,8 @@ export interface DiscoveredTool {
   description?: string;
   /** The server's `readOnlyHint` annotation: an untrusted hint, it only pre-selects. */
   readOnly: boolean;
+  /** The server's `destructiveHint` annotation: an untrusted hint, it forbids the pre-selection. */
+  destructive: boolean;
 }
 
 /** The sync reads, and the proxy authorizes against, the draft its route lets a home writer edit. */
@@ -243,8 +245,11 @@ export async function proposalFromServer(
   const tools = discoveredTools(server.tools);
   const names = tools.map((tool) => tool.name);
   const manifest: Record<string, unknown> = {
-    // Discovering is not authorizing: an agent inherits only the tools the server marks read-only.
-    default_tools: tools.filter((tool) => tool.readOnly).map((tool) => tool.name),
+    // Discovering is not authorizing: an agent inherits only the tools the server marks read-only,
+    // and never one it also marks destructive.
+    default_tools: tools
+      .filter((tool) => tool.readOnly && !tool.destructive)
+      .map((tool) => tool.name),
     tools_policy: Object.fromEntries(names.map((name) => [name, {}])),
   };
   const displayName = info?.title?.trim() || info?.name?.trim();
@@ -288,6 +293,7 @@ function discoveredTools(listed: Tool[]): DiscoveredTool[] {
       ...(title ? { title } : {}),
       ...(description ? { description } : {}),
       readOnly: tool.annotations?.readOnlyHint === true,
+      destructive: tool.annotations?.destructiveHint === true,
     });
   }
   return [...byName.values()];

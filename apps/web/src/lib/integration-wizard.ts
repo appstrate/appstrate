@@ -91,6 +91,52 @@ export function defaultToolCount(manifest: Record<string, unknown>): number {
 
 export type IntegrationWizardStep = "notRemote" | "inactive" | "connect" | "tools" | "ready";
 
+/** What a credential-proxy call outside a run would bind for the caller here (the detail's verdict). */
+export type ProxyConnectionStatus =
+  paths["/api/integrations/{packageId}"]["get"]["responses"][200]["content"]["application/json"]["proxy_connection"]["status"];
+
+/** The governed verdicts the tools step proceeds on: `must_choose` gets its choice there. */
+function connectionProceeds(status: ProxyConnectionStatus): boolean {
+  return status === "ready" || status === "must_choose";
+}
+
+/** Why the connect step cannot move on, and whether connecting an account of one's own helps. */
+export type ConnectBlocker =
+  | "none"
+  | "reconnect"
+  | "reconnectImposed"
+  | "notPermitted"
+  | "defaultUnavailable"
+  | "unusable"
+  | "unusableImposed";
+
+/**
+ * The connect step's reading of the verdict. Connecting is offered only where a connection of the
+ * caller's own can change it: never under an imposed connection, nor past an org default that
+ * binds before any personal connection, nor without the proxy permission it lacks.
+ */
+export function connectBlocker(verdict: { status: ProxyConnectionStatus; imposed: boolean }): {
+  blocker: ConnectBlocker;
+  offerConnect: boolean;
+} {
+  switch (verdict.status) {
+    case "needs_reconnection":
+      return verdict.imposed
+        ? { blocker: "reconnectImposed", offerConnect: false }
+        : { blocker: "reconnect", offerConnect: true };
+    case "unusable":
+      return verdict.imposed
+        ? { blocker: "unusableImposed", offerConnect: false }
+        : { blocker: "unusable", offerConnect: true };
+    case "not_permitted":
+      return { blocker: "notPermitted", offerConnect: false };
+    case "default_unavailable":
+      return { blocker: "defaultUnavailable", offerConnect: false };
+    default:
+      return { blocker: "none", offerConnect: true };
+  }
+}
+
 interface IntegrationWizardFacts {
   /** The integration is served by a remote MCP server, the only source this wizard handles. */
   remote: boolean;
@@ -98,12 +144,8 @@ interface IntegrationWizardFacts {
   active: boolean;
   /** The package has a published version. */
   published: boolean;
-  /**
-   * A connection the caller can use here, its own or one shared into the space, is not flagged for
-   * reconnection (`auth.ready`). Not the connection a run would bind: the space's org default is
-   * not part of it.
-   */
-  connected: boolean;
+  /** `proxy_connection.status`: the space's governance applied, for this caller. */
+  connection: ProxyConnectionStatus;
   /** The manifest the detail reads declares tools: the published version, else the draft. */
   toolsDeclared: boolean;
 }
@@ -116,7 +158,7 @@ interface IntegrationWizardFacts {
 export function integrationWizardStep(facts: IntegrationWizardFacts): IntegrationWizardStep {
   if (!facts.remote) return "notRemote";
   if (!facts.active) return "inactive";
-  if (!facts.connected) return "connect";
+  if (!connectionProceeds(facts.connection)) return "connect";
   return facts.published && facts.toolsDeclared ? "ready" : "tools";
 }
 
@@ -207,7 +249,9 @@ export function initialToolSelection(
       : undefined;
   if (saved === "*") return new Set(listed);
   if (Array.isArray(saved)) return new Set(listed.filter((name) => saved.includes(name)));
-  return new Set(proposal.manifest.default_tools);
+  // The server already leaves destructive tools out; a destructive hint is never pre-checked.
+  const destructive = new Set(proposal.tools.filter((tool) => tool.destructive).map((t) => t.name));
+  return new Set(proposal.manifest.default_tools.filter((name) => !destructive.has(name)));
 }
 
 const INTEGRATION_DOC = "INTEGRATION.md";

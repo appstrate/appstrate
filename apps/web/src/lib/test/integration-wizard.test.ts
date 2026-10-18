@@ -7,6 +7,7 @@ import type { ServerSyncProposal } from "../integration-server-sync.ts";
 import {
   defaultToolCount,
   catalogSourceKey,
+  connectBlocker,
   docsChoice,
   initialToolSelection,
   integrationCreationManifest,
@@ -110,11 +111,11 @@ describe("integrationWizardStep", () => {
       remote: true,
       active: true,
       published: true,
-      connected: true,
+      connection: "ready" as const,
       toolsDeclared: false,
     };
     expect(integrationWizardStep({ ...facts, remote: false })).toBe("notRemote");
-    expect(integrationWizardStep({ ...facts, connected: false })).toBe("connect");
+    expect(integrationWizardStep({ ...facts, connection: "none" })).toBe("connect");
     expect(integrationWizardStep(facts)).toBe("tools");
     expect(integrationWizardStep({ ...facts, toolsDeclared: true })).toBe("ready");
   });
@@ -124,13 +125,15 @@ describe("integrationWizardStep", () => {
       remote: true,
       active: true,
       published: false,
-      connected: false,
+      connection: "none" as const,
       toolsDeclared: false,
     };
     expect(integrationWizardStep(draft)).toBe("connect");
-    expect(integrationWizardStep({ ...draft, connected: true })).toBe("tools");
+    expect(integrationWizardStep({ ...draft, connection: "ready" })).toBe("tools");
     // A draft that declares tools (saved, its publish failed) is not ready: nothing is published.
-    expect(integrationWizardStep({ ...draft, connected: true, toolsDeclared: true })).toBe("tools");
+    expect(
+      integrationWizardStep({ ...draft, connection: "ready" as const, toolsDeclared: true }),
+    ).toBe("tools");
   });
 
   it("is not ready while no usable connection exists, tools declared or not", () => {
@@ -138,10 +141,73 @@ describe("integrationWizardStep", () => {
       remote: true,
       active: true,
       published: true,
-      connected: false,
+      connection: "none" as const,
       toolsDeclared: true,
     };
     expect(integrationWizardStep(facts)).toBe("connect");
+  });
+});
+
+describe("integrationWizardStep — governed connection", () => {
+  const facts = {
+    remote: true,
+    active: true,
+    published: true,
+    connection: "ready" as const,
+    toolsDeclared: true,
+  };
+
+  it("proceeds on the proxy's verdict alone: ready, or a choice the tools step asks for", () => {
+    expect(integrationWizardStep(facts)).toBe("ready");
+    expect(integrationWizardStep({ ...facts, connection: "must_choose" })).toBe("ready");
+    expect(
+      integrationWizardStep({ ...facts, connection: "must_choose", toolsDeclared: false }),
+    ).toBe("tools");
+  });
+
+  it("stays at the connect step on every verdict a call would be refused with", () => {
+    for (const connection of [
+      "none",
+      "needs_reconnection",
+      "not_permitted",
+      "default_unavailable",
+      "unusable",
+    ] as const) {
+      expect(integrationWizardStep({ ...facts, connection })).toBe("connect");
+    }
+  });
+});
+
+describe("connectBlocker", () => {
+  it("offers a personal connection only where one can change the verdict", () => {
+    expect(connectBlocker({ status: "none", imposed: false })).toEqual({
+      blocker: "none",
+      offerConnect: true,
+    });
+    expect(connectBlocker({ status: "needs_reconnection", imposed: false })).toEqual({
+      blocker: "reconnect",
+      offerConnect: true,
+    });
+    expect(connectBlocker({ status: "needs_reconnection", imposed: true })).toEqual({
+      blocker: "reconnectImposed",
+      offerConnect: false,
+    });
+    expect(connectBlocker({ status: "not_permitted", imposed: true })).toEqual({
+      blocker: "notPermitted",
+      offerConnect: false,
+    });
+    expect(connectBlocker({ status: "default_unavailable", imposed: false })).toEqual({
+      blocker: "defaultUnavailable",
+      offerConnect: false,
+    });
+    expect(connectBlocker({ status: "unusable", imposed: false })).toEqual({
+      blocker: "unusable",
+      offerConnect: true,
+    });
+    expect(connectBlocker({ status: "unusable", imposed: true })).toEqual({
+      blocker: "unusableImposed",
+      offerConnect: false,
+    });
   });
 });
 
@@ -151,11 +217,11 @@ describe("integrationWizardStep — activation", () => {
       remote: true,
       active: false,
       published: true,
-      connected: true,
+      connection: "ready" as const,
       toolsDeclared: true,
     };
     expect(integrationWizardStep(ready)).toBe("inactive");
-    expect(integrationWizardStep({ ...ready, connected: false })).toBe("inactive");
+    expect(integrationWizardStep({ ...ready, connection: "none" })).toBe("inactive");
     expect(integrationWizardStep({ ...ready, remote: false })).toBe("notRemote");
     expect(integrationWizardStep({ ...ready, active: true })).toBe("ready");
   });
@@ -396,6 +462,17 @@ describe("initialToolSelection", () => {
 
   it("starts from the server's read-only pre-selection while the draft declares no tool", () => {
     expect([...initialToolSelection({ name: "@org/acme" }, listed)]).toEqual(["read"]);
+  });
+
+  it("never pre-checks a destructive tool, even one also marked read-only", () => {
+    const both = {
+      manifest: { default_tools: ["read", "purge"], tools_policy: { read: {}, purge: {} } },
+      tools: [
+        { name: "read", read_only: true, destructive: false },
+        { name: "purge", read_only: true, destructive: true },
+      ],
+    } as unknown as Pick<ServerSyncProposal, "manifest" | "tools">;
+    expect([...initialToolSelection({ name: "@org/acme" }, both)]).toEqual(["read"]);
   });
 
   it("keeps a selection already saved in the draft, an explicit empty one included", () => {

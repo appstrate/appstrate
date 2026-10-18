@@ -1102,7 +1102,12 @@ export function createIntegrationsRouter() {
     const packageId = c.req.param("packageId")!;
     const scope = getSpaceScope(c);
     await assertIsIntegration(scope, packageId);
-    const status = await getIntegrationAuthStatuses(scope, packageId, ...spaceListCaller(c));
+    const status = await getIntegrationAuthStatuses(
+      scope,
+      packageId,
+      ...spaceListCaller(c),
+      reachOutsideRun(callerPermissions(c)),
+    );
     return c.json(status);
   });
 
@@ -1669,7 +1674,12 @@ export function createIntegrationsRouter() {
       // 200 + the bare integration resource — same serializer as
       // GET /integrations/:packageId; the toggled gate is part of the
       // resource (`block_user_connections`), not an operation scrap.
-      const detail = await getIntegrationAuthStatuses(scope, packageId, ...spaceListCaller(c));
+      const detail = await getIntegrationAuthStatuses(
+        scope,
+        packageId,
+        ...spaceListCaller(c),
+        reachOutsideRun(callerPermissions(c)),
+      );
       return c.json(detail);
     },
   );

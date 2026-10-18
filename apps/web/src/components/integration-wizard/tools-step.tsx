@@ -296,8 +296,9 @@ export function ToolsChoice({
       <DiscoveryWarnings warnings={proposal.warnings} />
       <div className="flex flex-col gap-1 text-sm">
         <p>
-          {t("integrationWizard.tools.declared", { count: names.length })}{" "}
-          {t("integrationWizard.tools.selectedCount", { count })}
+          {/* Nothing is declared yet: the server offers, the save declares. */}
+          {t("integrationWizard.tools.offered", { count: names.length })}{" "}
+          {t("integrationWizard.tools.toSelectCount", { count })}
         </p>
         <p className="text-muted-foreground">{t("integrationWizard.tools.selectionHint")}</p>
       </div>
@@ -338,11 +339,17 @@ export function ToolsChoice({
             label={
               <span className="flex flex-wrap items-center gap-2">
                 {tool.title ?? <code>{tool.name}</code>}
-                {tool.read_only && (
+                {/* One badge: a server marking a tool both read-only and destructive is shown
+                    read-only, but such a tool is never pre-checked (`initialToolSelection`). */}
+                {tool.read_only ? (
                   <Badge variant="secondary" className="font-normal">
                     {t("integrationWizard.tools.readOnly")}
                   </Badge>
-                )}
+                ) : tool.destructive ? (
+                  <Badge variant="destructive" className="font-normal">
+                    {t("integrationWizard.tools.destructive")}
+                  </Badge>
+                ) : null}
               </span>
             }
             description={

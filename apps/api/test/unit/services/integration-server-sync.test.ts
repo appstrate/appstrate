@@ -38,8 +38,8 @@ describe("proposalFromServer", () => {
       iconSource: null,
       instructions: null,
       tools: [
-        { name: "a", readOnly: false },
-        { name: "b", readOnly: false },
+        { name: "a", readOnly: false, destructive: false },
+        { name: "b", readOnly: false, destructive: false },
       ],
       warnings: [],
     });
@@ -58,6 +58,8 @@ describe("proposalFromServer", () => {
           { ...tool("titled"), annotations: { title: "From annotations", readOnlyHint: true } },
           { ...tool("bare"), title: "", description: "   " },
           { ...tool("destroy"), annotations: { destructiveHint: true } },
+          // Both hints: never pre-selected, whatever the read-only one says.
+          { ...tool("purge"), annotations: { readOnlyHint: true, destructiveHint: true } },
         ],
         truncated: false,
       },
@@ -70,13 +72,15 @@ describe("proposalFromServer", () => {
       "titled",
       "bare",
       "destroy",
+      "purge",
     ]);
     expect(proposal.tools).toEqual([
-      { name: "read", title: "Read", readOnly: true },
-      { name: "write", description: "Writes.", readOnly: false },
-      { name: "titled", title: "From annotations", readOnly: true },
-      { name: "bare", readOnly: false },
-      { name: "destroy", readOnly: false },
+      { name: "read", title: "Read", readOnly: true, destructive: false },
+      { name: "write", description: "Writes.", readOnly: false, destructive: false },
+      { name: "titled", title: "From annotations", readOnly: true, destructive: false },
+      { name: "bare", readOnly: false, destructive: false },
+      { name: "destroy", readOnly: false, destructive: true },
+      { name: "purge", readOnly: true, destructive: true },
     ]);
   });
 

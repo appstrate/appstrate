@@ -134,8 +134,15 @@ const catalog = {
   icon_source: null,
   instructions: "# Acme",
   tools: [
-    { name: "search", title: "Rechercher", description: "Cherche des pages.", read_only: true },
-    { name: "delete_page", read_only: false },
+    {
+      name: "search",
+      title: "Rechercher",
+      description: "Cherche des pages.",
+      read_only: true,
+      destructive: false,
+    },
+    { name: "delete_page", read_only: false, destructive: true },
+    { name: "purge", read_only: true, destructive: true },
   ],
   warnings: [],
 } as unknown as ServerSyncProposal;
@@ -175,16 +182,28 @@ describe("the tools step", () => {
     expect(html).toContain("Cherche des pages.");
     expect(html).toContain("delete_page");
     expect(html.match(new RegExp(agentsFr["integrationWizard.tools.readOnly"], "g"))).toHaveLength(
-      1,
+      2,
     );
     expect(checked(html, "search")).toBe(true);
     expect(checked(html, "delete_page")).toBe(false);
   });
 
+  it("badges a destructive tool, a tool marked both read-only and destructive as read-only", () => {
+    const html = choice(["search"]);
+    const label = agentsFr["integrationWizard.tools.destructive"];
+    // `delete_page` alone: `purge` says both, and read-only wins the badge.
+    expect(html.match(new RegExp(`>${label}<`, "g"))).toHaveLength(1);
+    const at = (name: string) => html.indexOf(`id="integration-wizard-tool-${name}"`);
+    expect(html.slice(at("delete_page"), at("purge"))).toContain(`>${label}<`);
+    expect(html.slice(at("purge"))).not.toContain(`>${label}<`);
+  });
+
   it("counts the declared and selected tools and names the version it publishes", () => {
     const html = choice(["search"]);
-    expect(html).toContain("2 outils déclarés.");
-    expect(html).toContain("1 sélectionné par défaut pour les agents.");
+    // Nothing is declared before the save: the server offers.
+    expect(html).toContain("3 outils proposés par le serveur.");
+    expect(html).not.toContain("déclaré");
+    expect(html).toContain("1 sera sélectionné par défaut pour les agents.");
     expect(html).toContain("Enregistrer et publier la version 1.1.0");
     expect(html).toContain(agentsFr["integrationWizard.tools.docs"]);
   });

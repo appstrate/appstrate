@@ -542,6 +542,73 @@ export async function selectAccessibleConnection(
 }
 
 /**
+ * What a credential-proxy call outside a run would bind for the caller, as one status: the
+ * selection {@link selectAccessibleConnection} makes for an unnamed call under `reach`, its
+ * outcome or refusal mapped one to one. It names no connection and no colleague. The proxy also
+ * requires the integration active in the space, which `active` reports beside it.
+ *
+ *   - `ready` — one connection is bound and passes its health checks.
+ *   - `must_choose` — `must_choose_connection`: several apply (or only colleagues' shared ones),
+ *     a call names one.
+ *   - `needs_reconnection` — `needs_reconnection`: the bound connection must be reconnected.
+ *   - `none` — no connection in reach (`not_connected`).
+ *   - `not_permitted` — `call_permission_required`: an enforced org default governs the
+ *     integration and the caller holds only `credential-proxy:call-own`.
+ *   - `default_unavailable` — the org default cannot bind: `pinned_connection_unavailable` (a
+ *     member is gone or off-auth), `required_integration_unbound` (an empty set),
+ *     `connection_set_too_large`. Pins never apply outside a run, so only the default yields them.
+ *   - `unusable` — the bound connection cannot serve: `insufficient_scopes`,
+ *     `auth_serves_no_selected_tool`, or another resolution refusal (logged).
+ *
+ * `imposed` — an ENFORCED org default governs the integration in this space: the space's admins,
+ * not the caller, decide the connection.
+ */
+export type ProxyConnectionStatus =
+  | "ready"
+  | "must_choose"
+  | "needs_reconnection"
+  | "none"
+  | "not_permitted"
+  | "default_unavailable"
+  | "unusable";
+
+export async function proxyConnectionVerdict(
+  packageId: string,
+  manifest: IntegrationManifest,
+  context: { spaceId: string; actor: Actor; reach: ProxyReach },
+): Promise<{ status: ProxyConnectionStatus; imposed: boolean }> {
+  const imposed = (await listOrgDefaultsForResolver(context.spaceId))[packageId]?.enforce === true;
+  const status = await selectAccessibleConnection(packageId, manifest, null, context).then(
+    (row): ProxyConnectionStatus => (row ? "ready" : "none"),
+    (err: unknown): ProxyConnectionStatus => {
+      if (!(err instanceof ApiError)) throw err;
+      switch (err.code) {
+        case "must_choose_connection":
+          return "must_choose";
+        case "needs_reconnection":
+          return "needs_reconnection";
+        case "call_permission_required":
+          return "not_permitted";
+        case "pinned_connection_unavailable":
+        case "required_integration_unbound":
+        case "connection_set_too_large":
+          return "default_unavailable";
+        case "insufficient_scopes":
+        case "auth_serves_no_selected_tool":
+          return "unusable";
+        default:
+          logger.warn("proxy connection verdict: unmapped selection refusal", {
+            packageId,
+            code: err.code,
+          });
+          return "unusable";
+      }
+    },
+  );
+  return { status, imposed };
+}
+
+/**
  * The rows the actor reaches in `spaceId`, {@link OLDEST_FIRST}: under `usable` what it may bind
  * there ({@link usableInSpace}), under `own` its own ({@link ownUsableInSpace}); of
  * `integrationIds` when given, of every integration otherwise.
@@ -4030,6 +4097,8 @@ export async function getIntegrationAuthStatuses(
   packageId: string,
   caller: ConnectionCaller,
   orgRole: OrgRole | null,
+  /** The caller's proxy reach outside a run (`reachOutsideRun`), for `proxy_connection`. */
+  reach: ProxyReach,
 ): Promise<{
   manifest: IntegrationManifest;
   auths: IntegrationAuthStatus[];
@@ -4082,6 +4151,11 @@ export async function getIntegrationAuthStatuses(
    * an opaque error, so showing the wrong one is worse than showing none.
    */
   platform_redirect_uri: string;
+  /**
+   * What a credential-proxy call outside a run would bind for THIS caller here
+   * ({@link proxyConnectionVerdict}): the governed answer `auths[].ready` is not.
+   */
+  proxy_connection: { status: ProxyConnectionStatus; imposed: boolean };
 }> {
   await assertSpaceInScope(scope);
   const manifest = await loadManifestOrThrow(scope, packageId);
@@ -4166,6 +4240,11 @@ export async function getIntegrationAuthStatuses(
     active: activation.active,
     block_user_connections: activation.blockUserConnections,
     platform_redirect_uri: integrationCallbackUrl(),
+    proxy_connection: await proxyConnectionVerdict(packageId, manifest, {
+      spaceId: scope.spaceId,
+      actor: caller.principal.actor,
+      reach,
+    }),
   };
 }
 
