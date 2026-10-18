@@ -49,12 +49,13 @@ describe("creation handoff", () => {
   });
 
   it("mentions the preselected integration in the agent draft only", () => {
-    expect(buildChatCreationDraft("agent", translator("fr"), "Gmail")).toBe(
-      `${frenchChatDrafts.agent} Il utilise l'intégration Gmail.`,
+    const gmail = { id: "@acme/gmail", name: "Gmail" };
+    expect(buildChatCreationDraft("agent", translator("fr"), gmail)).toBe(
+      `${frenchChatDrafts.agent} Il utilise l’intégration Gmail (@acme/gmail).`,
     );
-    expect(buildChatCreationDraft("skill", translator("fr"), "Gmail")).toBe(frenchChatDrafts.skill);
-    expect(buildChatCreationDraft("agent", translator("en"), "Gmail")).toEndWith(
-      "It uses the Gmail integration.",
+    expect(buildChatCreationDraft("skill", translator("fr"), gmail)).toBe(frenchChatDrafts.skill);
+    expect(buildChatCreationDraft("agent", translator("en"), gmail)).toEndWith(
+      "It uses the Gmail integration (@acme/gmail).",
     );
   });
 

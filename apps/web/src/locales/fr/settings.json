@@ -812,7 +812,7 @@
   "creation.chat.description": "Ouvrir le Chat avec une courte demande modifiable pour cette ressource.",
   "creation.chat.unavailableDescription": "Le Chat ne vous est pas accessible sur cette installation Appstrate.",
   "creation.chat.draft.agent": "Aide-moi à créer un nouvel agent Appstrate. Commence par me poser les questions nécessaires.",
-  "creation.chat.draft.withIntegration": "Il utilise l'intégration {{name}}.",
+  "creation.chat.draft.withIntegration": "Il utilise l’intégration {{name}} ({{id}}).",
   "creation.chat.draft.skill": "Aide-moi à créer un nouveau skill Appstrate. Commence par me poser les questions nécessaires.",
   "creation.chat.draft.integration": "Aide-moi à créer une nouvelle intégration Appstrate. Commence par me poser les questions nécessaires.",
   "creation.chat.draft.mcp-server": "Aide-moi à créer un nouveau serveur MCP local Appstrate. Commence par me poser les questions nécessaires.",

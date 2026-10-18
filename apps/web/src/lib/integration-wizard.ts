@@ -9,8 +9,9 @@ import {
   readDefaultTools,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
-import { bumpVersion } from "@appstrate/core/semver";
+import { bumpVersion, compareVersionsDesc, isValidVersion } from "@appstrate/core/semver";
 import { getSource } from "../components/integration-editor/utils";
+import { ApiError } from "../api/errors";
 import type { paths } from "../api/schema";
 import {
   isToolsTruncated,
@@ -205,10 +206,65 @@ export function toolsPublishVersion(facts: {
   publishedVersion: unknown;
   draftVersion: unknown;
 }): string | null {
-  if (!facts.published) return typeof facts.draftVersion === "string" ? facts.draftVersion : null;
-  return typeof facts.publishedVersion === "string"
-    ? bumpVersion(facts.publishedVersion, "minor")
-    : null;
+  const draft =
+    typeof facts.draftVersion === "string" && isValidVersion(facts.draftVersion)
+      ? facts.draftVersion
+      : null;
+  if (!facts.published) return draft;
+  const next =
+    typeof facts.publishedVersion === "string"
+      ? bumpVersion(facts.publishedVersion, "minor")
+      : null;
+  // Never below the draft's own version: a draft already set past the next minor keeps it.
+  if (!next) return null;
+  return draft && compareVersionsDesc(draft, next) < 0 ? draft : next;
+}
+
+/** A JSON value with its object keys sorted: two equal values give one string. */
+function canonicalJson(value: unknown): string {
+  return JSON.stringify(value, (_key, v: unknown) =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(
+          Object.entries(v as Record<string, unknown>).sort(([a], [b]) =>
+            a < b ? -1 : a > b ? 1 : 0,
+          ),
+        )
+      : v,
+  );
+}
+
+/**
+ * Whether the draft holds changes the tools step's publish would ship that the wizard does not
+ * write and that change what is called: its `source` or its `auths`. The identity, the tools,
+ * the version and `INTEGRATION.md` are the wizard's own (a reload after its failed publish
+ * leaves them), and warn about nothing.
+ */
+export function draftChangesBeyondWizard(
+  draft: Record<string, unknown>,
+  published: Record<string, unknown>,
+): boolean {
+  return (["source", "auths"] as const).some(
+    (key) => canonicalJson(draft[key] ?? null) !== canonicalJson(published[key] ?? null),
+  );
+}
+
+/** A publish refused because the draft moved since its save (`412`): the next submit saves again. */
+export function isStalePublish(error: unknown): boolean {
+  return (
+    error instanceof ApiError && (error.status === 412 || error.code === "precondition_failed")
+  );
+}
+
+/**
+ * A server sync that needs an account first — none in reach of the draft's auths
+ * (`integration_not_connected`), or one to reconnect (`needs_reconnection`): the connect step,
+ * not a dead error. A published integration whose draft changed auths lands here.
+ */
+export function syncNeedsConnection(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    (error.code === "integration_not_connected" || error.code === "needs_reconnection")
+  );
 }
 
 /** The create body of the wizard: the draft alone, activated here, published with its tools. */
@@ -231,6 +287,20 @@ export function catalogSourceKey(draft: Record<string, unknown>): string {
     })
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   return JSON.stringify([source.kind, source.remoteUrl, source.remoteTransport, auths]);
+}
+
+/**
+ * The connections a read of the catalogue went through, as its cache key: one added or
+ * reconnected since is a reason to read the server again.
+ */
+export function catalogConnectionsKey(detail: {
+  auths: readonly { connections: readonly { id: string; needs_reconnection: boolean }[] }[];
+}): string {
+  return JSON.stringify(
+    detail.auths
+      .flatMap((auth) => auth.connections.map((c) => `${c.id}:${c.needs_reconnection}`))
+      .sort(),
+  );
 }
 
 /**

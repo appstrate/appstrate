@@ -150,7 +150,12 @@ const catalog = {
 describe("the tools step", () => {
   const choice = (
     selected: string[],
-    over: { proposal?: ServerSyncProposal; otherDraftChanges?: boolean; pending?: boolean } = {},
+    over: {
+      proposal?: ServerSyncProposal;
+      otherDraftChanges?: boolean;
+      pending?: boolean;
+      draftMoved?: boolean;
+    } = {},
   ) =>
     render(
       <ToolsChoice
@@ -168,6 +173,7 @@ describe("the tools step", () => {
         pending={over.pending ?? false}
         saveError={null}
         publishError={null}
+        draftMoved={over.draftMoved ?? false}
       />,
     );
   /** Whether the tool's box renders checked (Radix draws it as a `button`). */
@@ -224,6 +230,13 @@ describe("the tools step", () => {
       expect(button(choice(["search"]), label)).not.toContain(" disabled=");
       expect(button(choice(["search"], { pending: true }), label)).toContain(" disabled=");
     }
+  });
+
+  it("says the draft moved after a publish refused with 412, and offers the full submit again", () => {
+    expect(choice(["search"])).not.toContain("integration-wizard-draft-moved");
+    const html = choice(["search"], { draftMoved: true });
+    expect(html).toContain("integration-wizard-draft-moved");
+    expect(html).toContain("Enregistrer et publier la version 1.1.0");
   });
 
   it("offers no publish when the server lists no tool", () => {

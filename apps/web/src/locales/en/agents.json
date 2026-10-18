@@ -1015,6 +1015,7 @@
   "integrationWizard.tools.docs": "Add the server's instructions as documentation (INTEGRATION.md)",
   "integrationWizard.tools.docsPreview": "Preview the instructions",
   "integrationWizard.tools.publishFailed": "The tools are saved, but version {{version}} was not published.",
+  "integrationWizard.tools.draftMoved": "The draft changed in the meantime: version {{version}} was not published. The next submit saves your tools again on the current draft, then publishes.",
   "integrationWizard.tools.retryPublish": "Publish version {{version}}",
   "integrationWizard.tools.submit": "Save and publish version {{version}}",
   "integrationWizard.resume.draft": "“{{name}}” was created as a draft and activated in this space. Nothing is published until its tools are chosen. You can leave this page and finish later by coming back to it.",

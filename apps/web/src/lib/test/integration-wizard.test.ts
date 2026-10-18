@@ -4,10 +4,15 @@ import { describe, expect, it } from "bun:test";
 import { defaultIntegrationManifest } from "../../components/agent-editor/utils.ts";
 import { packageCreateBody } from "../package-file-drafts.ts";
 import type { ServerSyncProposal } from "../integration-server-sync.ts";
+import { ApiError } from "../../api/errors.ts";
 import {
   defaultToolCount,
+  catalogConnectionsKey,
   catalogSourceKey,
   connectBlocker,
+  draftChangesBeyondWizard,
+  isStalePublish,
+  syncNeedsConnection,
   docsChoice,
   initialToolSelection,
   integrationCreationManifest,
@@ -304,10 +309,106 @@ describe("toolsPublishVersion", () => {
   });
 
   it("bumps the minor of the published version afterwards", () => {
-    const base = { published: true, draftVersion: "9.9.9" };
+    const base = { published: true, draftVersion: "1.0.0" };
     expect(toolsPublishVersion({ ...base, publishedVersion: "1.0.0" })).toBe("1.1.0");
     expect(toolsPublishVersion({ ...base, publishedVersion: "2.3.4" })).toBe("2.4.0");
     expect(toolsPublishVersion({ ...base, publishedVersion: undefined })).toBeNull();
+  });
+});
+
+describe("toolsPublishVersion — never lower", () => {
+  it("keeps a draft version already past the next minor, and labels that one", () => {
+    const facts = { published: true, publishedVersion: "1.0.0" };
+    expect(toolsPublishVersion({ ...facts, draftVersion: "2.0.0" })).toBe("2.0.0");
+    expect(toolsPublishVersion({ ...facts, draftVersion: "1.1.0" })).toBe("1.1.0");
+    expect(toolsPublishVersion({ ...facts, draftVersion: "1.0.5" })).toBe("1.1.0");
+    // A draft version that is not semver never wins.
+    expect(toolsPublishVersion({ ...facts, draftVersion: "next" })).toBe("1.1.0");
+  });
+});
+
+describe("isStalePublish", () => {
+  it("re-saves only on a publish refused because the draft moved (412)", () => {
+    expect(isStalePublish(new ApiError("precondition_failed", "moved", 412))).toBe(true);
+    expect(isStalePublish(new ApiError("version_exists", "taken", 409))).toBe(false);
+    expect(isStalePublish(new Error("network"))).toBe(false);
+  });
+});
+
+describe("syncNeedsConnection", () => {
+  it("sends a sync that lacks an account to the connect step", () => {
+    expect(syncNeedsConnection(new ApiError("integration_not_connected", "none", 409))).toBe(true);
+    expect(syncNeedsConnection(new ApiError("needs_reconnection", "dead", 409))).toBe(true);
+    expect(syncNeedsConnection(new ApiError("must_choose_connection", "pick", 409))).toBe(false);
+    expect(syncNeedsConnection(new ApiError("bad_gateway", "down", 502))).toBe(false);
+    expect(syncNeedsConnection(null)).toBe(false);
+  });
+});
+
+describe("draftChangesBeyondWizard", () => {
+  const published = {
+    name: "@org/acme",
+    version: "1.0.0",
+    display_name: "Acme",
+    source: proposal.source,
+    auths: { oauth },
+  };
+
+  it("says nothing about what the wizard itself writes (a reload after its failed publish)", () => {
+    const saved = {
+      ...published,
+      version: "1.1.0",
+      display_name: "Acme MCP",
+      tools_policy: { read: {} },
+      default_tools: ["read"],
+      // Same values, another key order.
+      auths: { oauth: Object.fromEntries(Object.entries(oauth).reverse()) },
+    };
+    expect(draftChangesBeyondWizard(saved, published)).toBe(false);
+  });
+
+  it("warns when the draft's source or auths differ", () => {
+    const moved = {
+      ...published,
+      source: { kind: "remote", remote: { url: "https://b.test/mcp" } },
+    };
+    expect(draftChangesBeyondWizard(moved, published)).toBe(true);
+    const reauthed = { ...published, auths: { oauth: { ...oauth, default_scopes: ["x"] } } };
+    expect(draftChangesBeyondWizard(reauthed, published)).toBe(true);
+  });
+});
+
+describe("catalogConnectionsKey", () => {
+  const detail = (connections: { id: string; needs_reconnection: boolean }[]) => ({
+    auths: [{ connections }],
+  });
+
+  it("changes when a connection is added or reconnected, not with their order", () => {
+    const key = catalogConnectionsKey(detail([{ id: "a", needs_reconnection: true }]));
+    expect(catalogConnectionsKey(detail([{ id: "a", needs_reconnection: false }]))).not.toBe(key);
+    expect(
+      catalogConnectionsKey(
+        detail([
+          { id: "a", needs_reconnection: true },
+          { id: "b", needs_reconnection: false },
+        ]),
+      ),
+    ).not.toBe(key);
+    expect(
+      catalogConnectionsKey(
+        detail([
+          { id: "b", needs_reconnection: false },
+          { id: "a", needs_reconnection: true },
+        ]),
+      ),
+    ).toBe(
+      catalogConnectionsKey(
+        detail([
+          { id: "a", needs_reconnection: true },
+          { id: "b", needs_reconnection: false },
+        ]),
+      ),
+    );
   });
 });
 

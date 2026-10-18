@@ -246,6 +246,8 @@ function ExistingPackageWizard({ packageId }: { packageId: string }) {
           <ToolsStep
             packageId={packageId}
             draft={draft.data}
+            detail={detail}
+            connect={<ConnectStep packageId={packageId} detail={detail} />}
             version={version}
             published={published}
           />

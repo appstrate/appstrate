@@ -385,7 +385,7 @@ async function discoverAuth(
 
   const atOrigin = await resolveOAuthEndpoints({ issuer: origin, fetchImpl });
   if (atOrigin.registrationEndpoint) {
-    const scopes = scopeTokens(challengeScopes ?? []);
+    const scopes = withOfflineAccess(scopeTokens(challengeScopes ?? []), atOrigin.scopesSupported);
     return {
       key: "oauth",
       auth: oauth2Auth(origin, { issuer: origin, method: "none", scopes, catalog: scopes }),
@@ -397,11 +397,13 @@ async function discoverAuth(
 }
 
 /**
- * The OIDC `offline_access` scope added when the authorization server advertises it: without it
- * such a server issues no refresh token, and a connection that cannot renew is refused.
+ * The OIDC `offline_access` scope added to a proposed list when the authorization server
+ * advertises it: without it such a server issues no refresh token, and a connection that cannot
+ * renew is refused. An empty list stays empty: the request then names no scope and the server
+ * applies its defaults, which one added scope would replace.
  */
 function withOfflineAccess(scopes: string[], asScopes: string[] | undefined): string[] {
-  return asScopes?.includes(OFFLINE_ACCESS) && !scopes.includes(OFFLINE_ACCESS)
+  return scopes.length > 0 && asScopes?.includes(OFFLINE_ACCESS) && !scopes.includes(OFFLINE_ACCESS)
     ? [...scopes, OFFLINE_ACCESS]
     : scopes;
 }

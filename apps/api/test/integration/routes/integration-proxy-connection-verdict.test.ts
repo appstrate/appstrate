@@ -11,9 +11,10 @@ import {
   integrationConnections,
   integrationConnectionShares,
   integrationOrgDefaults,
+  spacePackages,
 } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
-import { seedApiKey } from "../../helpers/seed.ts";
+import { seedApiKey, seedPackage } from "../../helpers/seed.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import {
@@ -150,6 +151,47 @@ describe("GET /api/integrations/{packageId} — proxy_connection", () => {
     expect((await proxied(caller, "credential-proxy:call-own")).code).toBe(
       "call_permission_required",
     );
+  });
+
+  it("is not_permitted for a caller holding neither proxy permission, as the proxy refuses", async () => {
+    const caller = await memberHolding(ctx, ["integrations:read", "integrations:connect"]);
+    await seedProxyConnection(caller, ID, "api", { api_key: "own" }, "own");
+    expect(await verdict(caller)).toEqual({ status: "not_permitted", imposed: false });
+  });
+
+  it("judges a never-published integration on its draft, the manifest the detail serves", async () => {
+    const draftOnly = "@verdict/draft";
+    await seedPackage({
+      id: draftOnly,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      // An auth only the draft declares: a connection on it is selected.
+      draftManifest: localIntegrationManifest({
+        name: draftOnly,
+        auths: {
+          draft_auth: {
+            type: "api_key",
+            authorizedUris: ["https://1.1.1.1/**"],
+            delivery: httpHeaderDelivery({
+              name: "Authorization",
+              prefix: "Bearer ",
+              field: "api_key",
+            }),
+          },
+        },
+      }),
+    });
+    await db
+      .insert(spacePackages)
+      .values({ enabled: true, spaceId: ctx.defaultSpaceId, packageId: draftOnly });
+    const res = (id: string) =>
+      getTestApp().request(`/api/integrations/${id}`, { headers: authHeaders(ctx) });
+    const read = async () =>
+      ((await (await res(draftOnly)).json()) as { proxy_connection: unknown }).proxy_connection;
+    expect(await read()).toEqual({ status: "none", imposed: false });
+    await seedProxyConnection(ctx, draftOnly, "draft_auth", { api_key: "sk" });
+    expect(await read()).toEqual({ status: "ready", imposed: false });
   });
 
   it("lets a call caller reach a colleague's shared connection only by naming it", async () => {

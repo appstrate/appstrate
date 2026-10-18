@@ -28,9 +28,10 @@ export function readChatComposerDraft(state: unknown): string | undefined {
 export function buildChatCreationDraft(
   resource: CreationResource,
   t: CreationPromptTranslate,
-  integrationName?: string,
+  /** Named by its display name AND its id: two integrations may share a name. */
+  integration?: { id: string; name: string },
 ): string {
   const draft = t(`creation.chat.draft.${resource}`);
-  if (resource !== "agent" || !integrationName) return draft;
-  return `${draft} ${t("creation.chat.draft.withIntegration", { name: integrationName })}`;
+  if (resource !== "agent" || !integration) return draft;
+  return `${draft} ${t("creation.chat.draft.withIntegration", { name: integration.name, id: integration.id })}`;
 }

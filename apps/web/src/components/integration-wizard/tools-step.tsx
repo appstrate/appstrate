@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
@@ -35,12 +35,18 @@ import {
 } from "../../lib/integration-server-sync";
 import { packageDetailPath } from "../../lib/package-paths";
 import {
+  catalogConnectionsKey,
   catalogSourceKey,
   docsChoice,
+  draftChangesBeyondWizard,
+  isStalePublish,
+  syncNeedsConnection,
   initialToolSelection,
   toolsUpdateBody,
 } from "../../lib/integration-wizard";
 import { WizardSection } from "./wizard-section";
+import type { IntegrationDetailWire } from "../../hooks/use-integrations";
+import { packageKeys } from "../../lib/query-keys";
 
 /**
  * The server's tools, read through the caller's connection once the step shows, to choose from
@@ -49,12 +55,18 @@ import { WizardSection } from "./wizard-section";
 export function ToolsStep({
   packageId,
   draft,
+  detail,
+  connect,
   version,
   published,
 }: {
   packageId: string;
   /** The package's working copy, saved under its `ETag`. */
   draft: Versioned<OrgPackageItemDetail>;
+  /** The integration detail: its published manifest and connections. */
+  detail: IntegrationDetailWire;
+  /** The connect step, shown when the server read needs an account first (the page's own). */
+  connect: ReactNode;
   /** The version the tools are published as. */
   version: string;
   /** A version is already published: the draft's other changes ship with this one. */
@@ -76,6 +88,8 @@ export function ToolsStep({
         <ServerCatalog
           packageId={packageId}
           draft={draft}
+          detail={detail}
+          connect={connect}
           version={version}
           published={published}
         />
@@ -87,11 +101,15 @@ export function ToolsStep({
 function ServerCatalog({
   packageId,
   draft,
+  detail,
+  connect,
   version,
   published,
 }: {
   packageId: string;
   draft: Versioned<OrgPackageItemDetail>;
+  detail: IntegrationDetailWire;
+  connect: ReactNode;
   version: string;
   published: boolean;
 }) {
@@ -111,6 +129,8 @@ function ServerCatalog({
       spaceId,
       packageId,
       catalogSourceKey(draft.manifest ?? {}),
+      // A connection added or reconnected since (the connect step below) is read again.
+      catalogConnectionsKey(detail),
       connectionId ?? null,
     ],
     queryFn: async () => {
@@ -130,19 +150,34 @@ function ServerCatalog({
   const [saved, setSaved] = useState<{ etag: string | null }>();
   // Whether a save of THIS session wrote `INTEGRATION.md`: only that file is ever deleted.
   const [docsWritten, setDocsWritten] = useState(false);
-  // Read before this step saves anything: afterwards the draft differs from the version by our save.
   // Before the first publish the whole draft IS what is published: there is nothing to warn about.
-  const [otherDraftChanges] = useState(published && draft.has_unarchived_changes === true);
+  const otherDraftChanges =
+    published && draftChangesBeyondWizard(draft.manifest ?? {}, detail.manifest);
+  // A publish refused because the draft moved after our save: the next submit saves it again.
+  const [draftMoved, setDraftMoved] = useState(false);
   const update = useUpdatePackage("integration", packageId);
   const publish = useCreateVersion("integration", packageId);
   const detailPath = packageDetailPath("integration", packageId);
   // A changed choice is no longer the save a failed publish would retry: the next submit saves it.
   const unsave = () => {
     setSaved(undefined);
+    setDraftMoved(false);
     publish.reset();
   };
 
   if (catalog.isLoading) return <TextSkeleton lines={4} />;
+  // No account the draft's auths reach (a published integration whose draft changed them, a
+  // connection gone): connect one here; the read runs again once the detail lists it.
+  if (syncNeedsConnection(catalog.error)) {
+    return (
+      <div className="flex flex-col items-start gap-3">
+        {connect}
+        <Button type="button" variant="outline" onClick={() => void catalog.refetch()}>
+          {t("integrationWizard.tools.retry")}
+        </Button>
+      </div>
+    );
+  }
   if (catalog.error || !catalog.data) {
     const choosing = syncConnectionCandidates(catalog.error) !== null;
     return (
@@ -192,8 +227,19 @@ function ServerCatalog({
         etag = result.etag;
         setSaved({ etag });
         setDocsWritten(docs.written);
+        setDraftMoved(false);
       }
-      await publish.mutateAsync({ version, etag });
+      try {
+        await publish.mutateAsync({ version, etag });
+      } catch (err) {
+        if (isStalePublish(err)) {
+          // That save is not the draft any more: re-read it and save again on the next submit.
+          setSaved(undefined);
+          setDraftMoved(true);
+          await qc.invalidateQueries({ queryKey: packageKeys.all });
+        }
+        throw err;
+      }
       // The published version is what the detail reads: once it lists the tools, the step is done.
       await invalidateIntegrationQueries(qc);
     } catch {
@@ -223,6 +269,7 @@ function ServerCatalog({
       pending={update.isPending || publish.isPending}
       saveError={update.error}
       publishError={saved ? publish.error : null}
+      draftMoved={draftMoved}
     />
   );
 }
@@ -242,6 +289,7 @@ export function ToolsChoice({
   pending,
   saveError,
   publishError,
+  draftMoved = false,
   otherDraftChanges,
   detailPath,
   onRetry,
@@ -258,6 +306,8 @@ export function ToolsChoice({
   saveError: unknown;
   /** The draft was saved but its version not published. */
   publishError: unknown;
+  /** The publish found the draft changed since the save: the next submit saves it again. */
+  draftMoved?: boolean;
   /** The draft already differs from the published version: those changes are published too. */
   otherDraftChanges: boolean;
   detailPath: string;
@@ -401,6 +451,15 @@ export function ToolsChoice({
         {saveError != null && (
           <p role="alert" className="text-destructive text-sm">
             {errorMessage(saveError)}
+          </p>
+        )}
+        {draftMoved && (
+          <p
+            role="alert"
+            className="text-destructive text-sm"
+            data-testid="integration-wizard-draft-moved"
+          >
+            {t("integrationWizard.tools.draftMoved", { version })}
           </p>
         )}
         {publishError != null && (

@@ -99,9 +99,16 @@ function PackageIndexBody({
   const canActivate = can(spacePackagePermission(type, "activate"));
   const creation = useCreationHandoff(type, canCreate);
   // An id that resolves to nothing (typo, out of reach) is not offered: the draft stays plain.
-  const integrationName = useIntegrationDetail(
+  const integrationDetail = useIntegrationDetail(
     creation.isOpen ? (creation.integrationId ?? undefined) : undefined,
-  ).data?.manifest.display_name;
+  ).data;
+  const integration =
+    integrationDetail && creation.integrationId
+      ? {
+          id: creation.integrationId,
+          name: integrationDetail.manifest.display_name ?? creation.integrationId,
+        }
+      : undefined;
   const words = presentation(type, t);
   const createAction: MenuAction = {
     id: "create",
@@ -185,7 +192,7 @@ function PackageIndexBody({
             setImporting(true);
           }}
           onChat={creation.openChat}
-          integrationName={integrationName}
+          integration={integration}
         />
       )}
     </>

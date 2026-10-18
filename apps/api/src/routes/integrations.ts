@@ -101,7 +101,10 @@ import { auditDiff, recordAuditAs, recordAuditFromContext } from "./../services/
 import { listIntegrations, listIntegrationsAtRemoteUrl } from "../services/integration-service.ts";
 import { discoverRemoteIntegration } from "../services/integration-discovery.ts";
 import { syncIntegrationFromServer } from "../services/integration-server-sync.ts";
-import { reachOutsideRun } from "../services/credential-proxy/access.ts";
+import {
+  reachOutsideRun,
+  reachOutsideRunIfPermitted,
+} from "../services/credential-proxy/access.ts";
 import { assertPackageMutationAccess } from "../lib/package-access.ts";
 import { getActor } from "../lib/actor.ts";
 import {
@@ -1106,7 +1109,7 @@ export function createIntegrationsRouter() {
       scope,
       packageId,
       ...spaceListCaller(c),
-      reachOutsideRun(callerPermissions(c)),
+      reachOutsideRunIfPermitted(callerPermissions(c)),
     );
     return c.json(status);
   });
@@ -1678,7 +1681,7 @@ export function createIntegrationsRouter() {
         scope,
         packageId,
         ...spaceListCaller(c),
-        reachOutsideRun(callerPermissions(c)),
+        reachOutsideRunIfPermitted(callerPermissions(c)),
       );
       return c.json(detail);
     },

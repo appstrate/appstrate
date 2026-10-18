@@ -38,6 +38,9 @@ const HOSTS = [
   "mcp.modern.test",
   "mcp.offline.test",
   "mcp.online.test",
+  "mcp.noscope.test",
+  "mcp.guessoffline.test",
+  "mcp.guessempty.test",
 ];
 
 let previousAllowlist: string | undefined;
@@ -242,6 +245,55 @@ describe("discoverRemoteIntegration", () => {
     );
     const auth = (manifest.auths as Record<string, Record<string, unknown>>).oauth!;
     expect(auth.default_scopes).toEqual(["mcp:read"]);
+  });
+
+  it("keeps an empty scope list empty, offline_access advertised or not", async () => {
+    const { fetchImpl } = fakeFetch(
+      protectedServer("mcp.noscope.test", { asScopes: ["openid", "offline_access"] }),
+    );
+    const { manifest } = await discoverRemoteIntegration(
+      { url: "https://mcp.noscope.test/mcp", orgSlug: "acme" },
+      { fetchImpl },
+    );
+    const auth = (manifest.auths as Record<string, Record<string, unknown>>).oauth!;
+    // No scope named: the authorization server applies its defaults.
+    expect(auth.default_scopes).toEqual([]);
+  });
+
+  /** An origin authorization server with DCR and no protected-resource metadata. */
+  const guessedOrigin = (host: string, challenge: string) => {
+    const origin = `https://${host}`;
+    return fakeFetch({
+      [`POST ${origin}/mcp`]: () => unauthorized(challenge),
+      [`GET ${origin}/.well-known/oauth-authorization-server`]: () =>
+        json({
+          issuer: origin,
+          authorization_endpoint: `${origin}/authorize`,
+          token_endpoint: `${origin}/token`,
+          registration_endpoint: `${origin}/register`,
+          scopes_supported: ["read", "offline_access"],
+        }),
+    });
+  };
+
+  it("adds offline_access on a guessed origin server that advertises it", async () => {
+    const { fetchImpl } = guessedOrigin("mcp.guessoffline.test", 'Bearer scope="read"');
+    const { manifest } = await discoverRemoteIntegration(
+      { url: "https://mcp.guessoffline.test/mcp", orgSlug: "acme" },
+      { fetchImpl },
+    );
+    const auth = (manifest.auths as Record<string, Record<string, unknown>>).oauth!;
+    expect(auth.default_scopes).toEqual(["read", "offline_access"]);
+  });
+
+  it("keeps a guessed origin server's empty scope list empty", async () => {
+    const { fetchImpl } = guessedOrigin("mcp.guessempty.test", 'Bearer realm="OAuth"');
+    const { manifest } = await discoverRemoteIntegration(
+      { url: "https://mcp.guessempty.test/mcp", orgSlug: "acme" },
+      { fetchImpl },
+    );
+    const auth = (manifest.auths as Record<string, Record<string, unknown>>).oauth!;
+    expect(auth.default_scopes).toEqual([]);
   });
 
   it("drops scopes that are not one RFC 6749 scope token", async () => {

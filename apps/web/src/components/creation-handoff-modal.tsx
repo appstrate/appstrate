@@ -15,8 +15,8 @@ interface CreationHandoffChoicesProps {
   onChat: (prompt: string) => void;
   /** Importing a type takes the same grant as creating it, so whoever opens this may import. */
   onImport: () => void;
-  /** Display name of the integration an agent starts with, mentioned in the Chat draft. */
-  integrationName?: string;
+  /** The integration an agent starts with (its id and display name), mentioned in the Chat draft. */
+  integration?: { id: string; name: string };
   /** The guided way from an MCP server URL, offered first when set (integrations). */
   onFromUrl?: () => void;
 }
@@ -56,12 +56,12 @@ export function CreationHandoffChoices({
   onChat,
   onImport,
   onFromUrl,
-  integrationName,
+  integration,
 }: CreationHandoffChoicesProps) {
   const { t } = useTranslation("settings");
   const canReach = useCanReach();
   const translatePrompt = (key: string, values?: Record<string, string>) => t(key, values);
-  const chatPrompt = buildChatCreationDraft(resource, translatePrompt, integrationName);
+  const chatPrompt = buildChatCreationDraft(resource, translatePrompt, integration);
   const manual = MANUAL_KEYS[resource] ?? {
     title: "creation.manual.title",
     description: "creation.manual.description",
