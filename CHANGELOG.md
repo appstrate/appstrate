@@ -376,6 +376,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`{ns}__api_call` now tells the agent to send generated content through a
+  workspace file, never through its arguments.** An agent that had built a file
+  in the workspace re-typed its base64 into `body`, lost its place mid-string in
+  a single long turn, and the upstream accepted the truncated value: the
+  committed file was corrupt and nothing failed. The body description, on the
+  sidecar tool and on the in-process (CLI) tool alike, now states the rule —
+  write the complete request body to a file and pass `{ fromFile }`, including a
+  JSON body that embeds a file's base64, with the `Content-Type` header a
+  `{ fromFile }` body does not get by default — and `{ fromBytes }` is framed as
+  a small inline payload only. Both surfaces read the wording from one
+  constant, `API_CALL_BODY_FROM_FILE_RULE` (`@appstrate/afps-runtime/resolvers`).
+
 - **A schedule saved while the pin or default naming its connections was removed
   no longer stays armed with no connection named.** It is now disabled
   (`connection_set_unnamed`) by the removal, or its write is refused with

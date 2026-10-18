@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — `API_CALL_BODY_FROM_FILE_RULE`
+
+- `@appstrate/afps-runtime/resolvers` exports `API_CALL_BODY_FROM_FILE_RULE`,
+  the request-body rule every `api_call` surface states: never re-type file
+  contents or base64 into the arguments, write the complete body to a workspace
+  file and pass `{ fromFile }`. `makeApiCallTool`'s default description and the
+  `body` / `fromBytes` descriptions of `apiCallRequestSchema` now carry it;
+  `fromBytes` is described as a small inline payload only.
+
 ### Changed — catalogs resolve per dependency section (#2005, BREAKING)
 
 - `PackageCatalog.resolve(name, versionSpec, section)` takes a required third

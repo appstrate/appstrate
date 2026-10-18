@@ -14,6 +14,7 @@
 import { describe, it, expect } from "bun:test";
 import { z } from "zod";
 import {
+  API_CALL_BODY_FROM_FILE_RULE,
   apiCallRequestSchema,
   apiCallTargetJsonSchema,
   makeApiCallTool,
@@ -642,5 +643,30 @@ describe("generated JSON schema structure", () => {
     const body = props["body"] as Record<string, unknown>;
     expect(typeof body.description).toBe("string");
     expect((body.description as string).length).toBeGreaterThan(0);
+  });
+
+  // A model that re-types a generated file (or its base64) into the
+  // arguments corrupts it silently; the body guidance must steer it to a
+  // workspace file passed as { fromFile } instead.
+  it("states the write-the-body-to-a-file rule on the body field and the tool", () => {
+    const props = schema.properties as Record<string, unknown>;
+    const body = props["body"] as Record<string, unknown>;
+    expect(body.description as string).toContain(API_CALL_BODY_FROM_FILE_RULE);
+    expect(API_CALL_BODY_FROM_FILE_RULE).toContain("Never re-type");
+    expect(API_CALL_BODY_FROM_FILE_RULE).toContain("{ fromFile: <path> }");
+    expect(API_CALL_BODY_FROM_FILE_RULE).toContain('"Content-Type": "application/json"');
+    expect(makeTool().description).toContain("never re-type it into the arguments");
+  });
+
+  it("frames fromBytes as a small payload, never a workspace file", () => {
+    const props = schema.properties as Record<string, unknown>;
+    const body = props["body"] as { anyOf?: Array<Record<string, unknown>> };
+    const fromBytes = body.anyOf
+      ?.map(
+        (v) => (v.properties as Record<string, { description?: string }> | undefined)?.fromBytes,
+      )
+      .find((p) => p !== undefined);
+    expect(fromBytes?.description).toContain("SMALL binary payload");
+    expect(fromBytes?.description).toContain("Never the base64 of a workspace file");
   });
 });

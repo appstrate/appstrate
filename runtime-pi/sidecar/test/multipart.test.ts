@@ -26,6 +26,7 @@ import { createTestApp } from "./helpers/authed-app.ts";
 import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import { MAX_REQUEST_BODY_SIZE } from "../helpers.ts";
 import type { CredentialsResponse } from "../helpers.ts";
+import { API_CALL_BODY_FROM_FILE_RULE } from "@appstrate/afps-runtime/resolvers";
 
 // The multipart body shape is exercised through the generic
 // `{ns}__api_call` integration tool — the credential-injecting MCP tool.
@@ -526,6 +527,25 @@ describe("POST /mcp — api_call multipart/form-data", () => {
     expect(proxy.inputSchema.properties.body?.oneOf?.length).toBe(5);
     expect(proxy.inputSchema.properties.body?.description).toContain("multipart");
     expect(proxy.inputSchema.properties.body?.description).toContain("fromFile");
+  });
+
+  it("steers request bodies to a workspace file instead of re-typed content", async () => {
+    const app = await makeMultipartApp();
+    const res = await rpc(app, { method: "tools/list" });
+    const result = res.json.result as {
+      tools: Array<{
+        name: string;
+        description?: string;
+        inputSchema: { properties: { body?: { description?: string } } };
+      }>;
+    };
+    const proxy = result.tools.find((t) => t.name === "test__api_call")!;
+    const bodyDescription = proxy.inputSchema.properties.body?.description ?? "";
+    // Same wording as the in-process api_call tool — one source.
+    expect(bodyDescription).toContain(API_CALL_BODY_FROM_FILE_RULE);
+    expect(bodyDescription).toContain("Never the base64 of a workspace file");
+    expect(bodyDescription).not.toContain("Use this for ordinary JSON request bodies");
+    expect(proxy.description).toContain("never re-type it into the arguments");
   });
 
   it("dispatches a multipart JSON-RPC call without crashing the MCP transport", async () => {
