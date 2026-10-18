@@ -245,6 +245,52 @@ describe("integration-editor auths", () => {
     expect(a.credentials.schema.properties.api_key.description).toBe("key");
   });
 
+  it("keeps the credentials and connect block of an oauth2 auth acquired by connect.login", () => {
+    const credentials = {
+      schema: {
+        type: "object",
+        required: ["refresh_token"],
+        properties: { refresh_token: { type: "string", description: "token" } },
+      },
+    };
+    const connect = {
+      login: {
+        request: {
+          method: "POST",
+          url: "https://x.test/token",
+          content_type: "application/x-www-form-urlencoded",
+          body: "grant_type=refresh_token&refresh_token={{refresh_token}}",
+        },
+      },
+    };
+    const imported = {
+      auths: {
+        primary: {
+          type: "oauth2",
+          token_endpoint: "https://x.test/token",
+          authorized_uris: ["https://x.test/**"],
+          credentials,
+          connect,
+        },
+        code: {
+          type: "oauth2",
+          authorization_endpoint: "https://x.test/authorize",
+          token_endpoint: "https://x.test/token",
+          authorized_uris: ["https://x.test/**"],
+          credentials,
+        },
+      },
+    };
+    const auths = getAuths(imported);
+    auths[0]!.tokenEndpoint = "https://x.test/token2";
+    const out = setAuths(imported, auths).auths as any;
+    expect(out.primary.token_endpoint).toBe("https://x.test/token2");
+    expect(out.primary.credentials).toEqual(credentials);
+    expect(out.primary.connect).toEqual(connect);
+    // An authorization-code oauth2 auth still carries no credentials.
+    expect(out.code.credentials).toBeUndefined();
+  });
+
   it("keeps an mtls auth mtls across an edit", () => {
     // A type the form does not know is read back as `api_key` and SAVED as one.
     const imported = {

@@ -407,6 +407,11 @@ describe("parseConnectResult", () => {
     expect(api.message).toContain("Invalid password for user a@b.c");
     // …and remedy.
     expect(api.message).toContain("Check the credentials you submitted");
+    // The tool's own words, for a client to show beside its own sentence.
+    expect(api.extensions).toEqual({
+      login_refusal: "integration",
+      integration_diagnostic: "Invalid password for user a@b.c.",
+    });
   });
 
   it("falls back to a neutral diagnostic when the login tool reported no text", () => {
@@ -419,6 +424,7 @@ describe("parseConnectResult", () => {
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).status).toBe(400);
     expect((err as ApiError).message).toContain("rejected the submitted credentials");
+    expect((err as ApiError).extensions).toBeUndefined();
   });
 
   it("clips a runaway integration-authored diagnostic", () => {

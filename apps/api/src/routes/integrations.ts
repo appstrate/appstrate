@@ -151,6 +151,7 @@ import {
   getVariablesSchema,
 } from "../services/integration-manifest-helpers.ts";
 import {
+  acquiresByConnectLogin,
   partitionScopesByAuthCatalog,
   scopesNotCovered,
   scopeTokenSchema,
@@ -1183,7 +1184,7 @@ export function createIntegrationsRouter() {
         : null;
       try {
         const { auth } = await readIntegrationAuth(scope, packageId, authKey);
-        if (auth.type === "oauth2") {
+        if (auth.type === "oauth2" && !acquiresByConnectLogin(auth)) {
           throw invalidRequest(
             `Auth '${authKey}' is type '${auth.type}' — use the OAuth flow, not the fields flow`,
           );
@@ -1249,9 +1250,11 @@ export function createIntegrationsRouter() {
         : null;
 
       const { auth } = await readIntegrationAuth(scope, packageId, authKey);
-      if (auth.type !== "oauth2") {
+      if (auth.type !== "oauth2" || acquiresByConnectLogin(auth)) {
         throw invalidRequest(
-          `Auth '${authKey}' is type '${auth.type}' — use the fields flow instead`,
+          auth.type === "oauth2"
+            ? `Auth '${authKey}' acquires its first token by connect.login — use the fields flow instead`
+            : `Auth '${authKey}' is type '${auth.type}' — use the fields flow instead`,
         );
       }
       assertScopesInAuthCatalog(auth, authKey, body.scopes);
@@ -1377,7 +1380,11 @@ export function createIntegrationsRouter() {
 
     // An integration declaring connection variables (AFPS §7.12) collects them on the hosted form
     // first: its oauth2 begins from `/connect/submit`, once the user has chosen the upstream.
-    if (auth.type === "oauth2" && getVariablesSchema(manifest) === null) {
+    if (
+      auth.type === "oauth2" &&
+      !acquiresByConnectLogin(auth) &&
+      getVariablesSchema(manifest) === null
+    ) {
       const begun = await beginHostedOAuth(claims, manifest, auth);
       if ("redirectUrl" in begun) return c.redirect(begun.redirectUrl);
       if ("connectionGone" in begun) {
@@ -1410,10 +1417,9 @@ export function createIntegrationsRouter() {
       );
     }
 
-    // Non-oauth, or oauth2 with connection variables → hand off to the hosted
-    // SPA form. Pin the page cookie so the form can read context via
-    // GET /connect/context (no token in the URL). The oauth2 branch above never
-    // reaches here, so the cookie is set only when the hosted form needs it.
+    // Non-oauth, oauth2 acquired by connect.login, or oauth2 with connection
+    // variables → hand off to the hosted SPA form. Pin the page cookie so the
+    // form can read context via GET /connect/context (no token in the URL).
     setConnectPageCookie(c, claims);
     return c.redirect("/connect");
   });
@@ -1444,6 +1450,28 @@ export function createIntegrationsRouter() {
     });
   });
 
+  /**
+   * Ends the page session on a refusal, and says so with the RFC 9457 extension member
+   * `connect_session_ended: true`: a resubmission would meet no session, so the form must not
+   * offer one — the connection restarts from the application.
+   */
+  function endConnectSession(c: Context<AppEnv>, err: ApiError): ApiError {
+    clearConnectPageCookie(c);
+    return new ApiError({
+      status: err.status,
+      code: err.code,
+      title: err.title,
+      detail: err.message,
+      param: err.param,
+      retryAfter: err.retryAfter,
+      errors: err.fieldErrors,
+      headers: err.headers,
+      extensions: { ...err.extensions, connect_session_ended: true },
+      // Only the original cause: the error handler logs any cause at error level.
+      cause: err.cause,
+    });
+  }
+
   // POST /connect/submit — hosted-form credential submit. Context + actor come
   // from the page cookie; the request carries only the credentials + CSRF nonce.
   // Rate-limited per IP like `/connect/start`: no session, and an oauth2 submit
@@ -1460,13 +1488,16 @@ export function createIntegrationsRouter() {
     const scope = scopeFromClaims(claims);
     const actor = actorFromClaims(claims);
     const body = await readJsonBody(c, connectSubmitSchema, { allowEmpty: true });
+    // An oauth2 `connect.login` submission spends the page cookie's jti like an authorization
+    // flow: a rotating grant presented twice is redeemed once and refused once.
+    const loginJti = { consumed: false, grantPresented: false };
     try {
       const { manifest, auth } = await readIntegrationAuth(
         scope,
         claims.package_id,
         claims.auth_key,
       );
-      if (auth.type === "oauth2") {
+      if (auth.type === "oauth2" && !acquiresByConnectLogin(auth)) {
         if (body.credentials) {
           throw invalidRequest(
             "This integration uses OAuth: submit its connection variables only",
@@ -1484,8 +1515,7 @@ export function createIntegrationsRouter() {
           return c.json({ ok: true, redirect_url: begun.redirectUrl });
         }
         if ("connectionGone" in begun) {
-          clearConnectPageCookie(c);
-          throw notFound("Connection not found");
+          throw endConnectSession(c, notFound("Connection not found"));
         }
         if ("refused" in begun && begun.refused.code === "validation_failed") {
           // A variable to fix, shown beside its field: the form may be submitted again.
@@ -1494,9 +1524,8 @@ export function createIntegrationsRouter() {
         }
         const reusable = "refused" in begun ? begun.reusable : begun.beforeEgress;
         if (reusable) await releaseJti(claims.jti);
-        else clearConnectPageCookie(c);
         if ("refused" in begun) {
-          throw new ApiError({
+          const notReady = new ApiError({
             status: begun.refused.status,
             code: "connection_not_ready",
             title: "Connection Not Ready",
@@ -1504,14 +1533,24 @@ export function createIntegrationsRouter() {
               reusable ? "submit this form again" : "request a new connection link"
             }.`,
           });
+          throw reusable ? notReady : endConnectSession(c, notReady);
         }
         if (begun.beforeEgress) throw internalError();
-        throw new ApiError({
-          status: 502,
-          code: "connect_start_failed",
-          title: "Bad Gateway",
-          detail: "Could not start the connection. Please request a new connection link.",
-        });
+        throw endConnectSession(
+          c,
+          new ApiError({
+            status: 502,
+            code: "connect_start_failed",
+            title: "Bad Gateway",
+            detail: "Could not start the connection. Please request a new connection link.",
+          }),
+        );
+      }
+      if (auth.type === "oauth2") {
+        if (!(await consumeJti(claims.jti, claims.exp))) {
+          throw notFound("No active connect session");
+        }
+        loginJti.consumed = true;
       }
       if (!body.credentials) {
         throw invalidRequest("credentials payload cannot be empty", "credentials");
@@ -1550,6 +1589,13 @@ export function createIntegrationsRouter() {
         ...(target ? { target } : {}),
         ...(claims.delegated ? { delegated: true } : {}),
         ...(body.variables ? { variables: body.variables } : {}),
+        ...(loginJti.consumed
+          ? {
+              onGrantPresented: () => {
+                loginJti.grantPresented = true;
+              },
+            }
+          : {}),
       };
       const strategy = resolveStrategy(auth, { connectToolExecutor: createConnectRunExecutor() });
       const { conn, audits } = await completeConnect(strategy, ctx, {
@@ -1570,9 +1616,15 @@ export function createIntegrationsRouter() {
           : {}),
       });
     } catch (err) {
-      if (err instanceof ApiError) throw err;
-      logger.error("Hosted connect submit failed", { err: String(err) });
-      throw internalError();
+      if (!(err instanceof ApiError))
+        logger.error("Hosted connect submit failed", { err: String(err) });
+      const apiErr = err instanceof ApiError ? err : internalError();
+      if (loginJti.consumed) {
+        // Refused before the grant left the platform: the form can be fixed and submitted again.
+        if (loginJti.grantPresented) throw endConnectSession(c, apiErr);
+        await releaseJti(claims.jti);
+      }
+      throw apiErr;
     }
   });
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
+import { acquiresByConnectLogin } from "@appstrate/core/integration";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { CopyBlock } from "../copy-block";
 import { SettingValue } from "../settings/setting-row";
@@ -94,7 +95,10 @@ export function ConfigAuthBlock({
           autoProvisioned={status.client_auto_provisioned}
         />
       )}
-      {isOAuth && <AuthTechnicalSettings packageId={packageId} authKey={status.auth_key} />}
+      {/* A token acquired by connect.login is never redirected: no redirect URI to register. */}
+      {isOAuth && !acquiresByConnectLogin(authDecl) && (
+        <AuthTechnicalSettings packageId={packageId} authKey={status.auth_key} />
+      )}
     </section>
   );
 }
