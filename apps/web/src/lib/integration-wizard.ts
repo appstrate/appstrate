@@ -85,12 +85,17 @@ export function defaultToolCount(manifest: Record<string, unknown>): number {
   return defaults?.length ?? 0;
 }
 
-export type IntegrationWizardStep = "unpublished" | "connect" | "tools" | "ready";
+export type IntegrationWizardStep = "notRemote" | "unpublished" | "connect" | "tools" | "ready";
 
 interface IntegrationWizardFacts {
+  /** The integration is served by a remote MCP server, the only source this wizard handles. */
+  remote: boolean;
   /** The package has a published version. */
   published: boolean;
-  /** The caller holds a connection that is not flagged for reconnection. */
+  /**
+   * A connection the caller can use here, its own or one shared into the space, is not flagged for
+   * reconnection (`auth.ready`).
+   */
   connected: boolean;
   /** The published version declares tools. */
   toolsDeclared: boolean;
@@ -98,9 +103,19 @@ interface IntegrationWizardFacts {
 
 /** Where an integration being added stands, read from the package alone. */
 export function integrationWizardStep(facts: IntegrationWizardFacts): IntegrationWizardStep {
+  if (!facts.remote) return "notRemote";
   if (!facts.published) return "unpublished";
-  if (facts.toolsDeclared) return "ready";
-  return facts.connected ? "tools" : "connect";
+  if (!facts.connected) return "connect";
+  return facts.toolsDeclared ? "ready" : "tools";
+}
+
+export function isRemoteSource(manifest: Record<string, unknown>): boolean {
+  return getSource(manifest).kind === "remote";
+}
+
+/** An analysis answers the input only while the input still holds the address it was asked for. */
+export function isCurrentAnalysis(latestInput: string, requested: string): boolean {
+  return latestInput.trim() === requested;
 }
 
 /** Whether the integration page offers to resume the wizard: a published remote server with no tool declared, which the caller may write. */
@@ -112,7 +127,7 @@ export function needsWizardFinish(facts: {
   return (
     facts.published &&
     facts.writable &&
-    getSource(facts.manifest).kind === "remote" &&
+    isRemoteSource(facts.manifest) &&
     declaredToolNames(facts.manifest).length === 0
   );
 }

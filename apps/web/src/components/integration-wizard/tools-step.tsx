@@ -3,8 +3,10 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import type { OrgPackageItemDetail } from "@appstrate/shared-types";
+import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
 import {
@@ -31,6 +33,7 @@ import {
   syncConnectionCandidates,
   type ServerSyncProposal,
 } from "../../lib/integration-server-sync";
+import { packageDetailPath } from "../../lib/package-paths";
 import { toolsUpdateBody } from "../../lib/integration-wizard";
 import { WizardSection } from "./wizard-section";
 
@@ -102,8 +105,16 @@ function ServerCatalog({
   const [includeDocs, setIncludeDocs] = useState(true);
   // Set once the draft is saved: a failed publish is retried alone, on that save.
   const [saved, setSaved] = useState<{ etag: string | null }>();
+  // Read before this step saves anything: afterwards the draft differs from the version by our save.
+  const [otherDraftChanges] = useState(draft.has_unarchived_changes === true);
   const update = useUpdatePackage("integration", packageId);
   const publish = useCreateVersion("integration", packageId);
+  const detailPath = packageDetailPath("integration", packageId);
+  // A changed choice is no longer the save a failed publish would retry: the next submit saves it.
+  const unsave = () => {
+    setSaved(undefined);
+    publish.reset();
+  };
 
   if (catalog.isLoading) return <TextSkeleton lines={4} />;
   if (catalog.error || !catalog.data) {
@@ -117,9 +128,16 @@ function ServerCatalog({
         )}
         <SyncConnectionChoice error={catalog.error} onChoose={setConnectionId} />
         {!choosing && (
-          <Button type="button" variant="outline" onClick={() => void catalog.refetch()}>
-            {t("integrationWizard.tools.retry")}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" onClick={() => void catalog.refetch()}>
+              {t("integrationWizard.tools.retry")}
+            </Button>
+            {connectionId && (
+              <Button type="button" variant="outline" onClick={() => setConnectionId(undefined)}>
+                {t("integrationWizard.tools.otherConnection")}
+              </Button>
+            )}
+          </div>
         )}
       </div>
     );
@@ -154,9 +172,19 @@ function ServerCatalog({
     <ToolsChoice
       proposal={proposal}
       selected={selected}
-      onSelectedChange={setSelection}
+      onSelectedChange={(next) => {
+        setSelection(next);
+        unsave();
+      }}
       includeDocs={includeDocs}
-      onIncludeDocsChange={setIncludeDocs}
+      onIncludeDocsChange={(next) => {
+        setIncludeDocs(next);
+        unsave();
+      }}
+      otherDraftChanges={otherDraftChanges}
+      detailPath={detailPath}
+      onRetry={() => void catalog.refetch()}
+      refetching={catalog.isFetching}
       version={version}
       onSubmit={() => void submit()}
       pending={update.isPending || publish.isPending}
@@ -181,6 +209,10 @@ export function ToolsChoice({
   pending,
   saveError,
   publishError,
+  otherDraftChanges,
+  detailPath,
+  onRetry,
+  refetching,
 }: {
   proposal: ServerSyncProposal;
   selected: ReadonlySet<string>;
@@ -193,9 +225,32 @@ export function ToolsChoice({
   saveError: unknown;
   /** The draft was saved but its version not published. */
   publishError: unknown;
+  /** The draft already differs from the published version: those changes are published too. */
+  otherDraftChanges: boolean;
+  detailPath: string;
+  /** Reads the server's tools again. */
+  onRetry: () => void;
+  refetching: boolean;
 }) {
   const { t } = useTranslation("agents");
   const names = proposal.tools.map((tool) => tool.name);
+  if (names.length === 0)
+    return (
+      <div className="flex flex-col items-start gap-3">
+        <DiscoveryWarnings warnings={proposal.warnings} />
+        <p className="text-sm" data-testid="integration-wizard-no-tools">
+          {t("integrationWizard.tools.none")}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <PendingButton type="button" variant="outline" onClick={onRetry} pending={refetching}>
+            {t("integrationWizard.tools.retry")}
+          </PendingButton>
+          <Button type="button" variant="outline" asChild>
+            <Link to={detailPath}>{t("integrationWizard.open")}</Link>
+          </Button>
+        </div>
+      </div>
+    );
   const count = names.filter((name) => selected.has(name)).length;
   const toggle = (name: string, checked: boolean) => {
     const next = new Set(selected);
@@ -242,6 +297,7 @@ export function ToolsChoice({
           <CheckboxField
             key={tool.name}
             id={`integration-wizard-tool-${tool.name}`}
+            disabled={pending}
             checked={selected.has(tool.name)}
             onCheckedChange={(checked) => toggle(tool.name, checked === true)}
             label={
@@ -257,14 +313,12 @@ export function ToolsChoice({
             description={tool.description}
           />
         ))}
-        {names.length === 0 && (
-          <p className="text-muted-foreground text-sm">{t("integrationWizard.tools.none")}</p>
-        )}
       </div>
       {proposal.instructions && (
         <div className="flex flex-col gap-2">
           <CheckboxField
             id="integration-wizard-docs"
+            disabled={pending}
             checked={includeDocs}
             onCheckedChange={(checked) => onIncludeDocsChange(checked === true)}
             label={t("integrationWizard.tools.docs")}
@@ -285,6 +339,16 @@ export function ToolsChoice({
         </div>
       )}
       <div className="border-border flex flex-col gap-3 border-t pt-4">
+        {otherDraftChanges && (
+          <Alert variant="warning" data-testid="integration-wizard-draft-changes">
+            <AlertDescription>
+              {t("integrationWizard.tools.otherDraftChanges", { version })}{" "}
+              <Link className="underline underline-offset-4" to={detailPath}>
+                {t("integrationWizard.tools.reviewDraft")}
+              </Link>
+            </AlertDescription>
+          </Alert>
+        )}
         {saveError != null && (
           <p role="alert" className="text-destructive text-sm">
             {errorMessage(saveError)}

@@ -9,7 +9,7 @@
 
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { $api } from "../api/client";
 import { DetailBar } from "../components/detail-bar";
@@ -40,6 +40,8 @@ import {
   defaultToolCount,
   integrationCreationManifest,
   integrationWizardStep,
+  isCurrentAnalysis,
+  isRemoteSource,
   manualCreationState,
   nextMinorVersion,
   proposalEdits,
@@ -50,6 +52,7 @@ import {
 } from "../lib/integration-wizard";
 
 const PROGRESS: Record<IntegrationWizardStep, WizardStepId | null> = {
+  notRemote: null,
   unpublished: "review",
   connect: "connect",
   tools: "tools",
@@ -96,7 +99,9 @@ function NewIntegrationWizard() {
   });
   const create = useCreatePackage("integration");
 
+  // While a creation is in flight nothing it was built from may change: its controls are disabled.
   const changeUrl = (next: string) => {
+    if (create.isPending) return;
     latestUrl.current = next;
     setUrl(next);
     setReview(null);
@@ -110,7 +115,7 @@ function NewIntegrationWizard() {
       { body: { url: requested } },
       {
         onSuccess: (result) => {
-          if (latestUrl.current.trim() !== requested) return;
+          if (!isCurrentAnalysis(latestUrl.current, requested)) return;
           setReview({ result, edits: proposalEdits(result.manifest), icon: result.manifest.icon });
           // A raster the manifest does not take as is is re-encoded; it lands only on this result.
           if (!result.manifest.icon && result.icon_source) {
@@ -135,6 +140,9 @@ function NewIntegrationWizard() {
       current.icon,
     );
 
+  // Rendered, not a mutate callback: a re-render during the request cannot lose the package.
+  if (create.data) return <Navigate to={wizardResumePath(create.data.id)} replace />;
+
   return (
     <>
       <WizardProgress current={review ? "review" : "address"} />
@@ -143,6 +151,7 @@ function NewIntegrationWizard() {
         onUrlChange={changeUrl}
         onSubmit={analyse}
         pending={analysis.isPending}
+        disabled={create.isPending}
         error={analysis.error}
       />
       {review && (
@@ -150,17 +159,17 @@ function NewIntegrationWizard() {
           result={review.result}
           edits={review.edits}
           onEditsChange={(edits) => {
+            if (create.isPending) return;
             setReview({ ...review, edits });
             create.reset();
           }}
           icon={review.icon}
           creating={create.isPending}
           createError={create.error}
-          onCreate={() =>
-            create.mutate(packageCreateBody({ manifest: accepted(review) }, "integration"), {
-              onSuccess: (data) => navigate(wizardResumePath(data.id), { replace: true }),
-            })
-          }
+          onCreate={() => {
+            if (!create.isPending)
+              create.mutate(packageCreateBody({ manifest: accepted(review) }, "integration"));
+          }}
           onManual={() =>
             navigate("/integrations/new", { state: manualCreationState(accepted(review)) })
           }
@@ -189,6 +198,7 @@ function ExistingPackageWizard({ packageId }: { packageId: string }) {
   const detail = integration.data;
   const manifest = detail.manifest as Record<string, unknown>;
   const step = integrationWizardStep({
+    remote: isRemoteSource(manifest),
     published: (draft.data.version_count ?? 0) > 0,
     connected: detail.auths.some((auth) => auth.ready),
     toolsDeclared: declaredToolNames(manifest).length > 0,
@@ -200,7 +210,7 @@ function ExistingPackageWizard({ packageId }: { packageId: string }) {
   return (
     <>
       <WizardProgress current={PROGRESS[step]} />
-      {step !== "ready" && (
+      {step !== "ready" && step !== "notRemote" && (
         <p className="text-muted-foreground text-sm">
           {t(
             step === "unpublished"
@@ -209,6 +219,18 @@ function ExistingPackageWizard({ packageId }: { packageId: string }) {
             { name, version: detail.manifest.version },
           )}
         </p>
+      )}
+      {step === "notRemote" && (
+        <WizardSection
+          title={t("integrationWizard.notRemote.title")}
+          description={t("integrationWizard.notRemote.description", { name })}
+        >
+          <div>
+            <Button asChild>
+              <Link to={detailPath}>{t("integrationWizard.open")}</Link>
+            </Button>
+          </div>
+        </WizardSection>
       )}
       {step === "unpublished" && (
         <WizardSection
@@ -232,10 +254,13 @@ function ExistingPackageWizard({ packageId }: { packageId: string }) {
           <ErrorState />
         ))}
       {step === "ready" && <ReadyStep detail={detail} detailPath={detailPath} />}
-      {step !== "ready" && (
-        <div>
+      {step !== "ready" && step !== "notRemote" && (
+        <div className="flex flex-wrap gap-2">
           <Button variant="outline" asChild>
             <Link to="/integrations">{t("integrationWizard.resume.later")}</Link>
+          </Button>
+          <Button variant="ghost" asChild>
+            <Link to={detailPath}>{t("integrationWizard.open")}</Link>
           </Button>
         </div>
       )}

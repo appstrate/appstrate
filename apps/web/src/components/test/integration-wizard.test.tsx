@@ -112,10 +112,17 @@ const catalog = {
 } as unknown as ServerSyncProposal;
 
 describe("the tools step", () => {
-  const choice = (selected: string[]) =>
+  const choice = (
+    selected: string[],
+    over: { proposal?: ServerSyncProposal; otherDraftChanges?: boolean } = {},
+  ) =>
     render(
       <ToolsChoice
-        proposal={catalog}
+        proposal={over.proposal ?? catalog}
+        otherDraftChanges={over.otherDraftChanges ?? false}
+        detailPath="/integrations/@org/acme"
+        onRetry={noop}
+        refetching={false}
         selected={new Set(selected)}
         onSelectedChange={noop}
         includeDocs
@@ -151,5 +158,22 @@ describe("the tools step", () => {
     expect(html).toContain("1 sélectionné par défaut pour les agents.");
     expect(html).toContain("Enregistrer et publier la version 1.1.0");
     expect(html).toContain(agentsFr["integrationWizard.tools.docs"]);
+  });
+
+  it("warns that the draft's other unpublished changes ship with the tools", () => {
+    expect(choice(["search"])).not.toContain("integration-wizard-draft-changes");
+    const html = choice(["search"], { otherDraftChanges: true });
+    expect(html).toContain("integration-wizard-draft-changes");
+    expect(html).toContain('href="/integrations/@org/acme"');
+    expect(html).toContain("Enregistrer et publier la version 1.1.0");
+  });
+
+  it("offers no publish when the server lists no tool", () => {
+    const empty = { ...catalog, tools: [], instructions: null } as ServerSyncProposal;
+    const html = choice([], { proposal: empty });
+    expect(html).toContain(agentsFr["integrationWizard.tools.none"]);
+    expect(html).toContain(agentsFr["integrationWizard.tools.retry"]);
+    expect(html).toContain('href="/integrations/@org/acme"');
+    expect(html).not.toContain("integration-wizard-publish");
   });
 });

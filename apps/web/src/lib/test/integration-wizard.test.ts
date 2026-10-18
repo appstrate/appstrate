@@ -8,6 +8,8 @@ import {
   defaultToolCount,
   integrationCreationManifest,
   integrationWizardStep,
+  isCurrentAnalysis,
+  isRemoteSource,
   manualCreationState,
   needsWizardFinish,
   nextMinorVersion,
@@ -91,14 +93,32 @@ describe("wizardAuthKind", () => {
 
 describe("integrationWizardStep", () => {
   it("reads the step from the package alone", () => {
-    const facts = { published: true, connected: true, toolsDeclared: false };
+    const facts = { remote: true, published: true, connected: true, toolsDeclared: false };
+    expect(integrationWizardStep({ ...facts, remote: false })).toBe("notRemote");
     expect(integrationWizardStep({ ...facts, published: false })).toBe("unpublished");
     expect(integrationWizardStep({ ...facts, connected: false })).toBe("connect");
     expect(integrationWizardStep(facts)).toBe("tools");
     expect(integrationWizardStep({ ...facts, toolsDeclared: true })).toBe("ready");
-    expect(integrationWizardStep({ ...facts, connected: false, toolsDeclared: true })).toBe(
-      "ready",
-    );
+  });
+
+  it("is not ready while no usable connection exists, tools declared or not", () => {
+    const facts = { remote: true, published: true, connected: false, toolsDeclared: true };
+    expect(integrationWizardStep(facts)).toBe("connect");
+  });
+});
+
+describe("isRemoteSource", () => {
+  it("handles only a remote MCP source", () => {
+    expect(isRemoteSource({ source: proposal.source })).toBe(true);
+    expect(isRemoteSource({ source: { kind: "local", server: { name: "@org/x" } } })).toBe(false);
+    expect(isRemoteSource({ source: { kind: "none" } })).toBe(false);
+  });
+});
+
+describe("isCurrentAnalysis", () => {
+  it("drops an answer for an address the input no longer holds", () => {
+    expect(isCurrentAnalysis(" https://a.test/mcp ", "https://a.test/mcp")).toBe(true);
+    expect(isCurrentAnalysis("https://b.test/mcp", "https://a.test/mcp")).toBe(false);
   });
 });
 

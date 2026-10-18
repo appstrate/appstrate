@@ -95,6 +95,7 @@ export function ReviewStep({
             required
             value={edits.display_name}
             onChange={(display_name) => onEditsChange({ ...edits, display_name })}
+            disabled={creating}
             badge={<DiscoveryBadge provenance={provenance["/display_name"]} />}
           />
           <FormField
@@ -103,6 +104,7 @@ export function ReviewStep({
             required
             value={edits.name}
             onChange={(name) => onEditsChange({ ...edits, name })}
+            disabled={creating}
             description={t("integrationWizard.review.identifierHint")}
             badge={<DiscoveryBadge provenance={provenance["/name"]} />}
             error={nameTaken ? errorMessage(createError) : undefined}

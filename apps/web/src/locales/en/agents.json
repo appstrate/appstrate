@@ -1000,7 +1000,7 @@
   "integrationWizard.tools.selectNone": "Select none",
   "integrationWizard.tools.listLabel": "Server tools",
   "integrationWizard.tools.readOnly": "Read-only",
-  "integrationWizard.tools.none": "The server announces no tools.",
+  "integrationWizard.tools.none": "The server lists no tools: there is nothing to publish. Try again once the server is ready, or open the integration.",
   "integrationWizard.tools.docs": "Add the server's instructions as documentation (INTEGRATION.md)",
   "integrationWizard.tools.docsPreview": "Preview the instructions",
   "integrationWizard.tools.publishFailed": "The tools are saved, but version {{version}} was not published.",
@@ -1015,5 +1015,11 @@
   "integrationWizard.ready.title": "Integration ready",
   "integrationWizard.ready.description": "Version {{version}} of “{{name}}” declares its tools: an agent can now use it.",
   "integrationWizard.ready.useInAgent": "Use in an agent",
-  "integrationWizard.ready.open": "View the integration"
+  "integrationWizard.ready.open": "View the integration",
+  "integrationWizard.open": "Open the integration",
+  "integrationWizard.tools.otherConnection": "Choose another connection",
+  "integrationWizard.tools.otherDraftChanges": "This integration's draft already holds unpublished changes: they will be published with the tools in version {{version}}.",
+  "integrationWizard.tools.reviewDraft": "Review them on the integration page",
+  "integrationWizard.notRemote.title": "Integration not handled here",
+  "integrationWizard.notRemote.description": "“{{name}}” is not served by a remote MCP server: this wizard only handles remote MCP servers. Configure it from its page."
 }

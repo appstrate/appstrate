@@ -13,12 +13,15 @@ export function AddressStep({
   onUrlChange,
   onSubmit,
   pending,
+  disabled = false,
   error,
 }: {
   url: string;
   onUrlChange: (url: string) => void;
   onSubmit: () => void;
   pending: boolean;
+  /** The address is no longer the user's to change (a creation is in flight). */
+  disabled?: boolean;
   error: unknown;
 }) {
   const { t } = useTranslation("agents");
@@ -32,7 +35,7 @@ export function AddressStep({
         className="flex flex-col gap-3 sm:flex-row sm:items-start"
         onSubmit={(event) => {
           event.preventDefault();
-          if (url.trim()) onSubmit();
+          if (url.trim() && !disabled) onSubmit();
         }}
       >
         <FormItem
@@ -46,12 +49,18 @@ export function AddressStep({
             inputMode="url"
             autoComplete="url"
             required
+            disabled={disabled}
             value={url}
             onChange={(event) => onUrlChange(event.target.value)}
             placeholder={t("integrationWizard.address.placeholder")}
           />
         </FormItem>
-        <PendingButton type="submit" pending={pending} disabled={!url.trim()} className="sm:mt-6">
+        <PendingButton
+          type="submit"
+          pending={pending}
+          disabled={disabled || !url.trim()}
+          className="sm:mt-6"
+        >
           {t("integrationWizard.address.submit")}
         </PendingButton>
       </form>
