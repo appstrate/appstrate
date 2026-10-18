@@ -299,8 +299,8 @@ describe("handleChatStream", () => {
       parts?: unknown[];
       /** The kind the auth pipeline resolved; production reaches here as `user` only. */
       principalKind?: PrincipalKind;
-      /** The composer's agent-authoring switch for this turn; omitted = on. */
-      agentAuthoring?: boolean;
+      /** The composer's package-authoring switch for this turn; omitted = on. */
+      packageAuthoring?: boolean;
       /** Earlier turns replayed ahead of the new user message. */
       history?: unknown[];
       /** Extra body fields, e.g. the picker's `skill_mode` / `pinned_skills`. */
@@ -350,9 +350,9 @@ describe("handleChatStream", () => {
           },
         ],
         ...(generation ? { generation } : {}),
-        ...(overrides?.agentAuthoring === undefined
+        ...(overrides?.packageAuthoring === undefined
           ? {}
-          : { agent_authoring: overrides.agentAuthoring }),
+          : { package_authoring: overrides.packageAuthoring }),
         ...overrides?.body,
       }),
     });
@@ -1226,7 +1226,7 @@ describe("handleChatStream", () => {
     expect(second.calls[0]!.system).not.toContain("@acme/report");
   }, 20_000);
 
-  describe("the composer's agent-authoring switch", () => {
+  describe("the composer's package-authoring switch", () => {
     /** The one argument a model needs to compose an inline agent, whatever the prose. */
     const INLINE_MARKER = 'kind:"inline"';
     const REDUCED_MARKER = "Do not create or modify an agent in this turn";
@@ -1251,13 +1251,13 @@ describe("handleChatStream", () => {
 
     async function turn(
       permissions: Set<string>,
-      agentAuthoring?: boolean,
+      packageAuthoring?: boolean,
       context?: () => Response,
     ) {
       const { engine, calls } = scriptedEngine();
       const res = await postChat(mintSessionId(), undefined, engine, {
         permissions,
-        ...(agentAuthoring === undefined ? {} : { agentAuthoring }),
+        ...(packageAuthoring === undefined ? {} : { packageAuthoring }),
         ...(context === undefined ? {} : { context }),
       });
       expect(res.status).toBe(200);

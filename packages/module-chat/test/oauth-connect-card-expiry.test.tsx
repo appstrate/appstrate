@@ -41,6 +41,7 @@ const host: ChatHost = {
   personalModelCredentials: true,
   modelCredentials: [],
   formatBytes: String,
+  onPackagesChanged: () => {},
 };
 
 function Card({ expiresAt }: { expiresAt?: string }) {

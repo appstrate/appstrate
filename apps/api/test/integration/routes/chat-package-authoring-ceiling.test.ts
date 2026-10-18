@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The chat composer's agent-authoring switch, platform half. The handler mints
+ * The chat composer's package-authoring switch, platform half. The handler mints
  * the turn's MCP loopback bearer from `turnPermissions(...)`; here a real
  * `builder` presents a bearer minted both ways, and the platform's own guards
  * must refuse the authoring surfaces only on the narrowed one. Every refusal
@@ -47,7 +47,14 @@ beforeEach(async () => {
   const { data } = (await listed.json()) as { data: ListedSpace[] };
   const resolved = data.find((space) => space.id === builder.defaultSpaceId)!.permissions;
   // The premise: the role grants both, so a 403 below can only come from the token.
-  for (const permission of ["agents:write", "agents:run", "mcp:read", "skills:read"]) {
+  for (const permission of [
+    "agents:write",
+    "agents:run",
+    "mcp:read",
+    "skills:read",
+    "skills:write",
+    "integrations:write",
+  ]) {
     expect(resolved).toContain(permission);
   }
 
@@ -77,7 +84,7 @@ function postEmpty(path: string, authoring: boolean) {
   });
 }
 
-describe("a chat turn with agent authoring switched off", () => {
+describe("a chat turn with package authoring switched off", () => {
   it("is refused by POST /api/runs/inline although the builder's role grants it", async () => {
     const off = await postEmpty("/api/runs/inline", false);
     expect(off.status, await off.clone().text()).toBe(403);
@@ -90,6 +97,29 @@ describe("a chat turn with agent authoring switched off", () => {
     expect(off.status, await off.clone().text()).toBe(403);
     const on = await postEmpty("/api/packages/agents", true);
     expect(on.status, await on.clone().text()).toBe(400);
+  });
+
+  it("is refused creating and importing any other package type too", async () => {
+    for (const path of ["/api/packages/skills", "/api/packages/integrations"]) {
+      const off = await postEmpty(path, false);
+      expect(off.status, `${path}: ${await off.clone().text()}`).toBe(403);
+      const on = await postEmpty(path, true);
+      expect(on.status, `${path}: ${await on.clone().text()}`).toBe(400);
+    }
+    // The type-agnostic import door opens on any package write: none is left.
+    const form = () => {
+      const body = new FormData();
+      body.append("file", new File([new Uint8Array([0])], "x.zip"));
+      return body;
+    };
+    const importWith = (authoring: boolean) =>
+      app.request("/api/packages/import", {
+        method: "POST",
+        headers: bearer(authoring),
+        body: form(),
+      });
+    expect((await importWith(false)).status).toBe(403);
+    expect((await importWith(true)).status).toBe(400);
   });
 
   it("gets a `run_and_wait` that offers existing agents only", async () => {
