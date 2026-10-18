@@ -209,7 +209,8 @@ function IntegrationConnectionCell({
 
   if (!detail) {
     // A placeholder only while a fetch is in flight: a disabled read (no `integrations:read`) never settles.
-    if (isLoading) return <Skeleton className="h-4 w-28" />;
+    // The picker's own wait (`LoadingPicker`), so the cell keeps one shape.
+    if (isLoading) return <Skeleton className="h-7 w-32 rounded-md" />;
     if (isNotPlaced(error))
       return <InactiveIntegration packageId={packageId} required={required} />;
     // Any other failure is named; a disabled read has none to name.
@@ -393,13 +394,16 @@ function IntegrationStatusCell({
   agentPackageId: string;
 }) {
   const { t } = useTranslation("agents");
-  const { data: entry, isPending } = useIntegrationReadinessEntry(packageId, agentPackageId);
+  const { data: entry, isLoading } = useIntegrationReadinessEntry(packageId, agentPackageId);
   if (!spaceActive) {
     return <Badge variant="pending">{t("detail.connectionsTable.inactive")}</Badge>;
   }
-  if (isPending || !entry) {
+  if (isLoading) {
     return <Badge variant="pending">{t("detail.connectionsTable.checking")}</Badge>;
   }
+  // Settled without a verdict (a failed read, or none for this integration): no status to give,
+  // and "checking" would never end.
+  if (!entry) return <span className="text-muted-foreground text-xs">—</span>;
   if (describeResolution(entry.resolution).resolved) {
     return <Badge variant="success">{t("detail.connectionsTable.ready")}</Badge>;
   }

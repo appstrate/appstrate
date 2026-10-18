@@ -11,7 +11,7 @@ import { FolderTree, History, IdCard } from "lucide-react";
 import type { OrgPackageItemDetail } from "@appstrate/shared-types";
 import type { Versioned } from "../../hooks/use-packages";
 import type { PackageSettingsSection } from "../../lib/settings-section-href";
-import { SettingsSkeleton } from "../loading-skeletons";
+import { EditorPanelSkeleton } from "../loading-skeletons";
 import { SettingsRailView } from "../settings/settings-rail-view";
 import { PackageCommonSection, type PackageVersionsProps } from "./package-common-section";
 
@@ -76,7 +76,7 @@ export function PackageSettingsView({
     >
       {({ active, file, href }) =>
         active === "general" && detail ? (
-          <Suspense fallback={<SettingsSkeleton />}>
+          <Suspense fallback={<EditorPanelSkeleton />}>
             <PackageDefinitionEditor type={type} detail={detail} />
           </Suspense>
         ) : (

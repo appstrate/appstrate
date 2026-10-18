@@ -315,8 +315,10 @@ function GeneralForm({
                       value={activeDefaultRole}
                       options={presetOptions}
                       fallbackLabel={t(`roles.preset.${activeDefaultRole}`)}
-                      disabled={updateMutation.isPending}
-                      loading={rolesLoading || !rolesKnown}
+                      // Without the catalogue (failed or not readable) the stored preset still
+                      // shows, read-only; `RoleCatalogState` below says why.
+                      disabled={updateMutation.isPending || !rolesKnown}
+                      loading={rolesLoading}
                       onValueChange={(value) => commitDefaultRole(value as SpaceRolePreset)}
                     />
                     <p className="text-muted-foreground text-xs">

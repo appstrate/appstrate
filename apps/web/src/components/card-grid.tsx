@@ -29,17 +29,7 @@ export function CardGrid<T>({
 
   if (verdict !== "items") {
     return (
-      <CollectionStates
-        verdict={verdict}
-        state={state}
-        skeleton={
-          <Grid min={min}>
-            {Array.from({ length: SKELETON_CARDS }, (_, i) => (
-              <Skeleton key={i} className="h-28 rounded-lg" />
-            ))}
-          </Grid>
-        }
-      />
+      <CollectionStates verdict={verdict} state={state} skeleton={<CardGridSkeleton min={min} />} />
     );
   }
 
@@ -53,6 +43,17 @@ export function CardGrid<T>({
         <div key={itemKey(item)} className="h-full [&>*]:h-full">
           {renderCard(item)}
         </div>
+      ))}
+    </Grid>
+  );
+}
+
+/** The grid's wait, also a collection route's fallback when its list is shown as cards. */
+export function CardGridSkeleton({ min = "20rem" }: { min?: string }) {
+  return (
+    <Grid min={min}>
+      {Array.from({ length: SKELETON_CARDS }, (_, i) => (
+        <Skeleton key={i} className="h-28 rounded-lg" />
       ))}
     </Grid>
   );

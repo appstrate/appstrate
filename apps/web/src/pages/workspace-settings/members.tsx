@@ -463,7 +463,7 @@ function AddSpaceMemberModal({
           <Field data-disabled={usersLoading || !!usersError || isPending}>
             <Label htmlFor="space-member-user">{t("spaceMembers.userLabel")}</Label>
             {usersLoading ? (
-              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-10 w-full" />
             ) : (
               <Select
                 value={userId}

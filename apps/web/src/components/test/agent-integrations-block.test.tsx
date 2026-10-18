@@ -91,7 +91,7 @@ function unbound(over: Partial<Resolution> = {}): Resolution {
 
 function renderCard(
   resolution: Resolution,
-  entry: { required?: boolean; blocking?: boolean; active?: boolean } = {},
+  entry: { required?: boolean; blocking?: boolean; active?: boolean; absent?: boolean } = {},
 ): string {
   const qc = new QueryClient();
   qc.setQueryData(
@@ -111,15 +111,17 @@ function renderCard(
     {
       blocks_run: entry.blocking ?? false,
       errors: [],
-      integrations: [
-        {
-          integration_package_id: GMAIL,
-          required: entry.required ?? false,
-          run_blocking: entry.blocking ?? false,
-          inert: false,
-          resolution,
-        },
-      ],
+      integrations: entry.absent
+        ? []
+        : [
+            {
+              integration_package_id: GMAIL,
+              required: entry.required ?? false,
+              run_blocking: entry.blocking ?? false,
+              inert: false,
+              resolution,
+            },
+          ],
     },
   );
   return render(
@@ -330,6 +332,12 @@ describe("AgentIntegrationsBlock — the list", () => {
     expect(html).toContain(label("connectionsTable.account"));
     expect(html).toContain(label("connectionsTable.unbound"));
     expect(html).not.toContain("<table");
+  });
+
+  it("claims no check in progress once the verdict answered without the integration", () => {
+    const html = renderCard(unbound(), { absent: true });
+    expect(html).not.toContain(`>${label("connectionsTable.checking")}<`);
+    expect(html).toContain(">—<");
   });
 
   it("shows no status on a schedule's blocks", () => {

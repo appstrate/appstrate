@@ -25,6 +25,7 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
     agentName: (pin) => editor.agentName(pin.agent_package_id),
     pinnable: editor.pinnable,
     connections: editor.connections,
+    connectionsLoading: editor.connectionsLoading,
     isDeleting: editor.isDeleting,
     onEdit: editor.edit,
     onDelete: editor.remove,

@@ -13,6 +13,8 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { FormModal } from "@/components/form-modal";
+import { ErrorState } from "@/components/page-states";
+import { TextSkeleton } from "@/components/loading-skeletons";
 import { RowsEditor } from "@/components/rows-editor";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
@@ -69,7 +71,7 @@ export function OAuthClientFormModal({ client, level, onClose, onCreated }: Prop
   const isSpaceLevel = formLevel === "space";
   const createMutation = useCreateOAuthClient(effectiveLevel ?? level);
   const updateMutation = useUpdateOAuthClient({ errorHandledByCaller: true });
-  const { data: availableScopes } = useOAuthScopes();
+  const { data: availableScopes, error: scopesError } = useOAuthScopes();
   const isPending = createMutation.isPending || updateMutation.isPending;
 
   const [redirectUris, setRedirectUris] = useState<string[]>(() =>
@@ -307,38 +309,12 @@ export function OAuthClientFormModal({ client, level, onClose, onCreated }: Prop
       <div className="flex flex-col gap-2">
         <Label className="mb-0">{t("settings:apiKeys.scopes")}</Label>
         <p className="text-muted-foreground text-xs">{t("settings:oauthClients.scopesHint")}</p>
-        <div className="flex flex-col gap-1.5">
-          {(availableScopes ?? Array.from(REQUIRED_SCOPES)).map((scope) => {
-            const required = REQUIRED_SCOPES.has(scope);
-            return (
-              <CheckboxField
-                key={scope}
-                id={`oauth-scope-${scope}`}
-                checked={selectedScopes.has(scope)}
-                disabled={required}
-                onCheckedChange={() => toggleScope(scope)}
-                label={
-                  <span className="flex items-center gap-2">
-                    <span>
-                      {t(`oauthClients.scopeLabels.${scope}`, {
-                        ns: "settings",
-                        keySeparator: false,
-                        nsSeparator: false,
-                        defaultValue: scope,
-                      })}
-                    </span>
-                    {required && (
-                      <span className="text-muted-foreground text-xs">
-                        ({t("settings:oauthClients.scopeRequired")})
-                      </span>
-                    )}
-                  </span>
-                }
-                description={<span className="font-mono">{scope}</span>}
-              />
-            );
-          })}
-        </div>
+        <ScopeList
+          scopes={availableScopes}
+          error={scopesError}
+          selected={selectedScopes}
+          onToggle={toggleScope}
+        />
       </div>
 
       {can("oauth-clients:write") && (
@@ -377,6 +353,58 @@ export function OAuthClientFormModal({ client, level, onClose, onCreated }: Prop
         />
       )}
     </FormModal>
+  );
+}
+
+/**
+ * The scope checklist. The catalogue is the server's: until it answers there is no list to draw
+ * (only the required scopes would show, then the rest would grow the modal).
+ */
+export function ScopeList({
+  scopes,
+  error,
+  selected,
+  onToggle,
+}: {
+  scopes: string[] | undefined;
+  error: unknown;
+  selected: ReadonlySet<string>;
+  onToggle: (scope: string) => void;
+}) {
+  const { t } = useTranslation("settings");
+  if (!scopes) return error ? <ErrorState error={error} compact /> : <TextSkeleton lines={6} />;
+  return (
+    <div className="flex flex-col gap-1.5">
+      {scopes.map((scope) => {
+        const required = REQUIRED_SCOPES.has(scope);
+        return (
+          <CheckboxField
+            key={scope}
+            id={`oauth-scope-${scope}`}
+            checked={selected.has(scope)}
+            disabled={required}
+            onCheckedChange={() => onToggle(scope)}
+            label={
+              <span className="flex items-center gap-2">
+                <span>
+                  {t(`oauthClients.scopeLabels.${scope}`, {
+                    keySeparator: false,
+                    nsSeparator: false,
+                    defaultValue: scope,
+                  })}
+                </span>
+                {required && (
+                  <span className="text-muted-foreground text-xs">
+                    ({t("oauthClients.scopeRequired")})
+                  </span>
+                )}
+              </span>
+            }
+            description={<span className="font-mono">{scope}</span>}
+          />
+        );
+      })}
+    </div>
   );
 }
 

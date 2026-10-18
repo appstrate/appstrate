@@ -41,7 +41,7 @@ export function WebhookDetailPage() {
       {webhook ? (
         <p className="text-muted-foreground font-mono text-sm break-all">{webhook.url}</p>
       ) : (
-        <Skeleton className="h-4 w-80 max-w-full" />
+        <Skeleton className="h-5 w-80 max-w-full" />
       )}
       {/* The overlay has no shell header to carry the tabs: they sit under the
           page, on a rule of their own (the band's, in a header). */}

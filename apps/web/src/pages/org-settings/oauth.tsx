@@ -19,7 +19,7 @@ const OAuthClientsTab = lazy(() =>
 
 export function OrgSettingsOAuthPage() {
   const { t } = useTranslation(["settings", "common"]);
-  const { data: orgSettings, isLoading, failureReason } = useOrgSettings();
+  const { data: orgSettings, isLoading, error } = useOrgSettings();
   // Switching collaborator SSO is `org:settings` (enforced by the toggle, as the API requires);
   // reading the clients below stays open to whoever reached the page.
 
@@ -29,7 +29,9 @@ export function OrgSettingsOAuthPage() {
     void loadOAuthClientsTab();
   }, []);
 
-  if (failureReason) return <ErrorState error={failureReason} />;
+  // `error`, not `failureReason`: the latter is set by the first failed attempt, so a retry that
+  // succeeds would flash the whole page into an error and back.
+  if (error) return <ErrorState error={error} />;
 
   return (
     <>

@@ -2,6 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Pencil, Trash2 } from "lucide-react";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import type { DataColumn } from "../data-table";
 import { rowActionsColumn } from "../row-actions-column";
 import { TableRowActions } from "../table-row-actions";
@@ -15,6 +16,7 @@ export function usePinColumns({
   agentName,
   pinnable,
   connections,
+  connectionsLoading,
   isDeleting,
   onEdit,
   onDelete,
@@ -22,8 +24,10 @@ export function usePinColumns({
   agentName: (pin: IntegrationPin) => string;
   /** The connections shared into this space: the ones a pin can name. */
   pinnable: IntegrationConnection[];
-  /** Undefined while loading: an unknown connection is then not yet "unavailable". */
+  /** Undefined until read: an unknown connection is then not yet "unavailable". */
   connections: IntegrationConnection[] | undefined;
+  /** The connections read is in flight: their cell waits (a failed read says nothing more). */
+  connectionsLoading: boolean;
   /** Only the row being deleted shows the spinner. */
   isDeleting: (pin: IntegrationPin) => boolean;
   /** Undefined while the connections load: the form needs them to tell an unavailable one. */
@@ -54,11 +58,13 @@ export function usePinColumns({
         if (pin.connection_ids.length === 0) {
           return <CellText>{t("integration.admin.pinManagement.noConnection")}</CellText>;
         }
-        // An unknown connection is not yet "unavailable" while they load.
+        // An unknown connection is not yet "unavailable" while they load: the cell waits.
+        if (connections === undefined) {
+          return connectionsLoading ? <Skeleton className="h-4 w-24" /> : <CellText>—</CellText>;
+        }
         const entries = pin.connection_ids.flatMap((id) => {
           const connection = pinnable.find((c) => c.id === id);
           if (connection) return [{ id, label: connectionOptionLabel(connection), missing: false }];
-          if (connections === undefined) return [];
           return [{ id, label: t("integration.admin.unavailableConnection"), missing: true }];
         });
         return (

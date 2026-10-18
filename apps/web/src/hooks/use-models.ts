@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useQuery, useMutation, useQueryClient, type MutationMeta } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useQuery,
+  useMutation,
+  useQueryClient,
+  type MutationMeta,
+} from "@tanstack/react-query";
 import { $api, client, type components } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
@@ -71,6 +77,8 @@ export function useOpenRouterModels(search: string | undefined) {
     { params: { query: { q: search || undefined } } },
     {
       enabled: search !== undefined,
+      // Each debounced search keeps the previous list drawn until the new one answers.
+      placeholderData: keepPreviousData,
       staleTime: 5 * 60 * 1000,
       gcTime: 10 * 60 * 1000,
       // The spec marks every item field optional — normalize to the

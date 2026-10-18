@@ -65,7 +65,7 @@ export function OrgSettingToggle({
           }
         />
       ) : (
-        <Skeleton className="h-5 w-9 rounded-full" />
+        <Skeleton className="h-6 w-11 rounded-full" />
       )}
     </SettingRow>
   );
