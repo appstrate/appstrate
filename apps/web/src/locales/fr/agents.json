@@ -657,6 +657,7 @@
   "integrationEditor.discover.warning.instructions_truncated": "Les instructions du serveur dépassent la limite : elles sont coupées à la dernière ligne qui tient.",
   "integrationEditor.discover.warning.tools_truncated": "Le serveur a renvoyé plus d’outils que la limite : la liste est tronquée.",
   "integrationEditor.sync.button": "Synchroniser depuis le serveur",
+  "integrationEditor.sync.chooseConnection": "Choisir la connexion à utiliser",
   "integrationEditor.sync.docProposed": "Les instructions du serveur sont proposées comme INTEGRATION.md.",
   "integrationEditor.sync.done_one": "{{count}} outil synchronisé",
   "integrationEditor.sync.done_other": "{{count}} outils synchronisés",

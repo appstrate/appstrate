@@ -6,6 +6,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
+import { ApiError } from "../../../api/errors.ts";
 import { i18nReady } from "../../../i18n.ts";
 import { render } from "../../../test/render.tsx";
 import { IntegrationToolsSection } from "../integration-tools-section.tsx";
@@ -56,6 +57,29 @@ describe("IntegrationToolsSection sync", () => {
     expect(html).toContain("Synchroniser depuis le serveur");
     expect(html).toContain("3 outils synchronisés");
     expect(html).toContain("INTEGRATION.md");
+  });
+
+  it("offers the refusal's candidates when the sync must choose a connection", () => {
+    const candidate = {
+      id: "conn_b",
+      label: "Notion",
+      account_id: "b@acme.test",
+      owned_by_actor: true,
+      needs_reconnection: false,
+      scopes_granted: [],
+      missing_scopes: [],
+    };
+    const error = new ApiError("must_choose_connection", "en", 409, [
+      { field: "integrations.@acme/notion", candidate_connections: [candidate] },
+    ]);
+    const html = render(
+      <IntegrationToolsSection
+        tools={[]}
+        edit={{ manifest, onChange: () => {} }}
+        sync={{ ...sync, result: null, error }}
+      />,
+    );
+    expect(html).toContain('aria-label="Choisir la connexion à utiliser"');
   });
 
   it("offers nothing without it", () => {

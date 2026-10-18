@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Label } from "@appstrate/ui/components/label";
 import { useIntegrationConnections } from "../hooks/use-integrations";
 import { useIntegrationName } from "../hooks/use-integration-name";
-import type { ConnectionChoice } from "../lib/connection-choice";
+import { candidateDescription, type ConnectionChoice } from "../lib/connection-choice";
 import type { ConnectionSet } from "../lib/connection-set";
 import { ClearChoiceButton } from "./integration-connect/clear-choice-button";
 import { ConnectionSetPicker } from "./integration-connect/connection-choice-menu";
@@ -138,14 +138,10 @@ function ScheduleCandidatePicker({
   const options: SetOption[] = choice.candidates.map((c) => ({
     id: c.id,
     name: c.label,
-    description: [
-      // "default" is the placeholder of a connection with no account identity.
-      c.account_id !== "default" ? c.account_id : null,
-      !c.owned_by_actor ? t("schedule.connectionOverrides.sharedByOther") : null,
-      c.needs_reconnection ? t("schedule.connectionOverrides.needsReconnection") : null,
-    ]
-      .filter((part): part is string => part !== null)
-      .join(" · "),
+    description: candidateDescription(c, {
+      sharedByOther: t("schedule.connectionOverrides.sharedByOther"),
+      needsReconnection: t("schedule.connectionOverrides.needsReconnection"),
+    }),
     // A dead connection fails the fire it is picked for; unticking stays open.
     disabled: c.needs_reconnection,
   }));

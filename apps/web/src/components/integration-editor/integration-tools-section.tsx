@@ -55,7 +55,7 @@ export function IntegrationToolsSection({
   edit?: { manifest: Record<string, unknown>; onChange: (next: Record<string, unknown>) => void };
   /** Offered only when the integration can be asked for its tools (remote, connected). */
   sync?: {
-    run: () => void;
+    run: (connectionId?: string) => void;
     isPending: boolean;
     error: unknown;
     result: ServerSyncResult | null;

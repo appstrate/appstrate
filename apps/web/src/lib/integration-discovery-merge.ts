@@ -4,8 +4,8 @@ import {
   resolveIntegrationToolCatalog,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
-import { isToolsWildcard } from "@appstrate/core/dependencies";
-import type { paths } from "../api/schema";
+import { ApiError } from "../api/errors";
+import type { components, paths } from "../api/schema";
 import { getSource, setSource } from "../components/integration-editor/utils";
 import { isConnectionOwnedBy } from "../components/integration-connect/connection-ownership";
 
@@ -27,16 +27,25 @@ const isEmpty = (v: unknown) =>
 /** Top-level manifest fields a proposal fills when the author has not touched them. */
 const FILLABLE = ["display_name", "name", "documentation", "privacy_policies", "icon"] as const;
 
+/** Whether the draft still analyses `analysedUrl`: an answer for another source is stale. */
+export function isDiscoveryCurrent(manifest: Manifest, analysedUrl: string): boolean {
+  const source = getSource(manifest);
+  return source.kind === "remote" && source.remoteUrl === analysedUrl;
+}
+
 /**
  * A field is overwritten only while empty, the skeleton (`defaults`) or the previous analysis's
- * value, so a second analysis replaces the first; `source.remote` always follows the URL.
+ * value, so a second analysis replaces the first; `source.remote` follows the URL. A stale
+ * answer (see `isDiscoveryCurrent`) touches nothing.
  */
 export function mergeDiscovery(
   current: Manifest,
   defaults: Manifest,
   proposal: Pick<DiscoveryProposal, "manifest">,
+  analysedUrl: string,
   previous?: Manifest,
 ): Manifest {
+  if (!isDiscoveryCurrent(current, analysedUrl)) return current;
   const proposed: Manifest = proposal.manifest;
   const manifest: Manifest = { ...current };
   // The skeleton as typing the URL left it: its auth's allowlist follows the URL (`setSource`).
@@ -119,8 +128,9 @@ const SYNC_IDENTITY = ["display_name", "description", "homepage", "icon"] as con
 
 /**
  * `tools_policy` keeps each still-listed tool's entry (its scopes are the author's) and drops the
- * rest unless the list was truncated. `default_tools` is the author's: it only loses unexposed
- * tools, and when empty becomes every exposed listed tool. Identity is filled only when empty.
+ * rest unless the list was truncated. `default_tools` is the author's (`[]` and `*` included): it
+ * only loses unexposed tools, and when absent becomes every exposed listed tool. Identity is
+ * filled only when empty.
  */
 export function mergeServerSync(
   current: Manifest,
@@ -144,9 +154,9 @@ export function mergeServerSync(
     ),
   );
   const authored = current.default_tools;
-  if (Array.isArray(authored) && authored.length > 0) {
+  if (Array.isArray(authored)) {
     manifest.default_tools = authored.filter((name) => exposed.has(name));
-  } else if (!isToolsWildcard(authored)) {
+  } else if (authored === undefined) {
     manifest.default_tools = listed.filter((name) => exposed.has(name));
   }
 
@@ -174,36 +184,33 @@ export type ServerSyncBody = NonNullable<
 >["content"]["application/json"];
 
 /**
- * The sync names the caller's own usable connection, since the proxy asks for a choice when there
- * are several. No picker (KISS): the one a pin or org default locks, else the first. Without one,
- * the proxy's own selection decides.
+ * The caller's one own connection, when it is the only one and live. Otherwise the proxy decides
+ * (pin, org default) or asks for a choice (`syncConnectionCandidates`): never a silent switch
+ * from a dead account to another.
  */
 export function serverSyncBody(
   auths: { connections: (Parameters<typeof isConnectionOwnedBy>[0] & ConnectionHealth)[] }[],
   userId: string | undefined,
 ): ServerSyncBody {
-  const usable = auths
+  const own = auths
     .flatMap((auth) => auth.connections)
-    .filter((c) => isConnectionOwnedBy(c, userId) && !c.needs_reconnection);
-  const chosen = usable.find((c) => c.locked_by) ?? usable[0];
-  return chosen ? { connection_id: chosen.id } : {};
+    .filter((c) => isConnectionOwnedBy(c, userId));
+  return own.length === 1 && !own[0]!.needs_reconnection ? { connection_id: own[0]!.id } : {};
 }
 
 interface ConnectionHealth {
   id: string;
   needs_reconnection: boolean;
-  locked_by?: string | null;
 }
 
-/**
- * Whether a package content is an authored `INTEGRATION.md`. A draft without one stores the
- * manifest text in the same column, which is a JSON object — never valid markdown guidance.
- */
-export function hasIntegrationDoc(content: string | null | undefined): boolean {
-  if (!content?.trim()) return false;
-  try {
-    return typeof JSON.parse(content) !== "object";
-  } catch {
-    return true;
-  }
+export type SyncCandidate = NonNullable<
+  components["schemas"]["ConnectionResolutionItem"]["candidate_connections"]
+>[number];
+
+/** The connections a `409 must_choose_connection` sync refusal offers; `null` for any other error. */
+export function syncConnectionCandidates(err: unknown): SyncCandidate[] | null {
+  if (!(err instanceof ApiError) || err.code !== "must_choose_connection") return null;
+  return (err.errors ?? []).flatMap(
+    (item) => (item as { candidate_connections?: SyncCandidate[] }).candidate_connections ?? [],
+  );
 }
