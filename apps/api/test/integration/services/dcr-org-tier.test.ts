@@ -20,11 +20,17 @@ import {
   ensureIntegrationOAuthClient,
   persistCredentialBundle,
   promoteIntegrationOAuthClient,
+  readCredentialRevision,
   resolveConnectClient,
   resolveIntegrationClientById,
 } from "../../../src/services/integration-connections.ts";
 import { usableInSpace } from "../../../src/services/connection-reach.ts";
-import { integrationCallbackUrlFor } from "../../../src/lib/integration-callback-url.ts";
+import {
+  integrationCallbackUrl,
+  integrationCallbackUrlFor,
+} from "../../../src/lib/integration-callback-url.ts";
+import { refreshConnectionCredential } from "../../../src/services/integration-token-refresh.ts";
+import { allowLoopbackOAuthEgress } from "../../helpers/strict-authorization-server.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
@@ -36,11 +42,13 @@ const AUTH_KEY = "oauth";
 interface AuthServer {
   base: string;
   registrations: number;
+  /** The `client_id` of every refresh-token grant received. */
+  refreshedBy: string[];
   stop: () => void;
 }
 
 function startAuthServer(): AuthServer {
-  const handle: AuthServer = { base: "", registrations: 0, stop: () => {} };
+  const handle: AuthServer = { base: "", registrations: 0, refreshedBy: [], stop: () => {} };
   let n = 0;
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), {
@@ -85,6 +93,12 @@ function startAuthServer(): AuthServer {
           201,
         );
       }
+      if (req.method === "POST" && url.pathname === "/oauth/token") {
+        const form = new URLSearchParams(await req.text());
+        if (form.get("grant_type") !== "refresh_token") return json({ error: "unsupported" }, 400);
+        handle.refreshedBy.push(form.get("client_id") ?? "");
+        return json({ access_token: "at-2", refresh_token: "rt-2", expires_in: 3600 });
+      }
       return new Response("not found", { status: 404 });
     },
   });
@@ -102,7 +116,9 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
   let spaceA: SpaceScope;
   let spaceB: SpaceScope;
 
+  let restoreEgress: () => void;
   beforeAll(() => {
+    restoreEgress = allowLoopbackOAuthEgress();
     as = startAuthServer();
     auth = {
       type: "oauth2",
@@ -124,11 +140,15 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
       auths: { [AUTH_KEY]: auth },
     } as unknown as IntegrationManifest;
   });
-  afterAll(() => as.stop());
+  afterAll(() => {
+    as.stop();
+    restoreEgress();
+  });
 
   beforeEach(async () => {
     await truncateAll();
     as.registrations = 0;
+    as.refreshedBy = [];
     ctx = await createTestContext({ orgSlug: "myorg" });
     actor = { type: "user", id: ctx.user.id };
     spaceA = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
@@ -159,8 +179,15 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
     return conn!.id;
   }
 
-  /** A space-tier DCR client of the integration's server, as registered before #1870. */
-  async function seedLegacySpaceClient(spaceId: string, clientId = "legacy"): Promise<string> {
+  /**
+   * A space-tier DCR client as registered before #1870 and before clients were bound to their
+   * server (issuer NULL, the shared callback); `bound` gives it this server's issuer and tag.
+   */
+  async function seedLegacySpaceClient(
+    spaceId: string,
+    clientId = "legacy",
+    bound = false,
+  ): Promise<string> {
     const [row] = await db
       .insert(integrationOauthClients)
       .values({
@@ -173,8 +200,9 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
         tokenEndpointAuthMethod: "none",
         isDefault: true,
         autoProvisioned: true,
-        issuer: as.base,
-        redirectUri: integrationCallbackUrlFor(as.base),
+        ...(bound
+          ? { issuer: as.base, redirectUri: integrationCallbackUrlFor(as.base) }
+          : { redirectUri: integrationCallbackUrl() }),
       })
       .returning({ id: integrationOauthClients.id });
     return row!.id;
@@ -249,12 +277,7 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
 
     expect(
       await resolveIntegrationClientById(legacy, spaceA.spaceId, REMOTE, AUTH_KEY, "none"),
-    ).toEqual({
-      clientId: "legacy",
-      clientSecret: "",
-      tokenEndpointAuthMethod: "none",
-      issuer: as.base,
-    });
+    ).toEqual({ clientId: "legacy", clientSecret: "", tokenEndpointAuthMethod: "none" });
     expect(await usableIds(spaceB.spaceId)).toEqual([]);
 
     const clientRef = await connectClientRef(spaceA);
@@ -303,8 +326,8 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
     expect(await usableIds(spaceA.spaceId)).toEqual([conn]);
   });
 
-  it("promotes a legacy space client to the org, which every space then reuses", async () => {
-    const legacy = await seedLegacySpaceClient(spaceB.spaceId);
+  it("promotes a space client bound to the server to the org, which every space then reuses", async () => {
+    const legacy = await seedLegacySpaceClient(spaceB.spaceId, "legacy", true);
     expect(await promoteIntegrationOAuthClient(spaceB, REMOTE, legacy)).toMatchObject({
       client: { id: legacy, spaceId: null, autoProvisioned: true },
     });
@@ -312,8 +335,8 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
     expect(as.registrations).toBe(0);
   });
 
-  it("refuses to promote a legacy space client once the org holds its own (409)", async () => {
-    const legacy = await seedLegacySpaceClient(spaceB.spaceId);
+  it("refuses to promote a bound space client once the org holds its own (409)", async () => {
+    const legacy = await seedLegacySpaceClient(spaceB.spaceId, "legacy", true);
     await connect(spaceA, "alice@a");
     await expect(promoteIntegrationOAuthClient(spaceB, REMOTE, legacy)).rejects.toMatchObject({
       status: 409,
@@ -324,5 +347,58 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
       .from(integrationOauthClients)
       .where(eq(integrationOauthClients.id, legacy));
     expect(row!.spaceId).toBe(spaceB.spaceId);
+  });
+
+  /** A refresh of `connectionId` forced by an upstream 401, as the proxy runs it. */
+  async function forceRefresh(connectionId: string, authDef: AfpsManifestAuth) {
+    const [row] = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connectionId));
+    return refreshConnectionCredential({
+      connection: { ...row!, credentialRevision: (await readCredentialRevision(connectionId))! },
+      integrationId: REMOTE,
+      manifest,
+      authDef,
+      scope: spaceA,
+      actor,
+      trigger: { kind: "rejected", revision: null },
+    });
+  }
+
+  async function connectThrough(clientRef: string): Promise<string> {
+    const conn = await persistCredentialBundle(
+      { kind: "insert", scope: spaceA, actor },
+      {
+        credentials: { access_token: "at", refresh_token: "rt" },
+        packageId: REMOTE,
+        authKey: AUTH_KEY,
+        accountId: "alice@a",
+        clientRef,
+      },
+    );
+    return conn!.id;
+  }
+
+  it("refreshes a connection of a bound client against its own server", async () => {
+    const id = await connectThrough(await connectClientRef(spaceA));
+    expect((await forceRefresh(id, auth)).status).toBe("refreshed");
+    const [client] = await db.select().from(integrationOauthClients);
+    expect(client).toMatchObject({
+      issuer: as.base,
+      redirectUri: integrationCallbackUrlFor(as.base),
+    });
+    expect(as.refreshedBy).toEqual([client!.clientId]);
+  });
+
+  it("a legacy row (issuer NULL, shared callback) refreshes its connection and serves no new flow", async () => {
+    const legacy = await seedLegacySpaceClient(spaceA.spaceId);
+    const id = await connectThrough(legacy);
+    // Unbound, its server is the manifest's: one declaring an issuer still refreshes it.
+    expect((await forceRefresh(id, { ...auth, issuer: as.base })).status).toBe("refreshed");
+    expect(as.refreshedBy).toEqual(["legacy"]);
+    // A manifest declaring neither issuer nor token_endpoint names no server to refresh at.
+    expect((await forceRefresh(id, auth)).status).not.toBe("refreshed");
+    expect(await connectClientRef(spaceA)).not.toBe(legacy);
   });
 });

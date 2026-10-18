@@ -37,6 +37,8 @@ interface Forge {
   cimd: boolean;
   /** Advertise RFC 9207 `authorization_response_iss_parameter_supported` and send `iss`. */
   iss: boolean;
+  /** Advertise `code_challenge_methods_supported: ["S256"]`. */
+  pkce: boolean;
   stop: () => void;
 }
 
@@ -51,6 +53,7 @@ function startForge(): Forge {
     advertise,
     cimd: false,
     iss: true,
+    pkce: true,
     stop: () => {},
   };
   let n = 0;
@@ -92,7 +95,7 @@ function startForge(): Forge {
           token_endpoint: `${base}/oauth/token`,
           registration_endpoint: `${base}/oauth/register`,
           grant_types_supported: ["authorization_code", "refresh_token"],
-          code_challenge_methods_supported: ["S256"],
+          ...(handle.pkce ? { code_challenge_methods_supported: ["S256"] } : {}),
           ...(handle.iss ? { authorization_response_iss_parameter_supported: true } : {}),
           ...(handle.cimd ? { client_id_metadata_document_supported: true } : {}),
         });
@@ -434,6 +437,7 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     forge.advertise.clear();
     forge.cimd = false;
     forge.iss = true;
+    forge.pkce = true;
     ctx = await createTestContext({ orgSlug: "myorg" });
     await seedIntegration(ctx.orgId, forgeManifest("@myorg/forge"));
   });
@@ -497,6 +501,15 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     expect(clients.map((c) => c.issuer).sort()).toEqual([base, otherBase].sort());
     expect(new Set(clients.map((c) => c.redirectUri)).size).toBe(2);
     expect(forge.registrations).toHaveLength(2);
+  });
+
+  it("refuses a server chosen per connection whose metadata lists no PKCE S256, registering nothing", async () => {
+    forge.pkce = false;
+    const { res } = await beginHosted(base);
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe("connection_not_ready");
+    expect(forge.registrations).toHaveLength(0);
+    expect(await db.select().from(integrationOauthClients)).toEqual([]);
   });
 
   it("registers a server's client once for the org: another space reuses it", async () => {

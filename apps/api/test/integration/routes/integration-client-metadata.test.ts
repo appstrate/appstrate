@@ -48,6 +48,7 @@ import {
   resolveIntegrationClientById,
 } from "../../../src/services/integration-connections.ts";
 import { oauthStateStore } from "../../../src/services/connect/oauth-state-store.ts";
+import { initiateIntegrationOAuth } from "@appstrate/connect";
 import { authorizationServerTag } from "../../../src/lib/integration-callback-url.ts";
 import type { AfpsManifestAuth } from "../../../src/services/integration-manifest-helpers.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
@@ -540,6 +541,41 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
     await install({ cimd: false, registration: true, iss: false, pkce: ["plain", "S256"] });
     const authUrl = await begin();
     expect(authUrl.searchParams.get("code_challenge_method")).toBe("S256");
+  });
+
+  it("completes a flow begun before clients were bound: untagged state, shared callback", async () => {
+    // A machine client registered on the shared callback, issuer NULL, and a state it started then.
+    await install({ cimd: false, registration: true, iss: false }, { clientId: "dcr-1" });
+    const [legacy] = await db
+      .insert(integrationOauthClients)
+      .values({
+        orgId: ctx.orgId,
+        integrationId: INTEGRATION,
+        authKey: AUTH_KEY,
+        clientId: "dcr-1",
+        clientSecretEncrypted: "",
+        tokenEndpointAuthMethod: "none",
+        autoProvisioned: true,
+        redirectUri: CALLBACK,
+      })
+      .returning();
+    const { authUrl } = await initiateIntegrationOAuth(oauthStateStore, {
+      packageId: INTEGRATION,
+      authKey: AUTH_KEY,
+      issuer: meta.base,
+      clientId: "dcr-1",
+      clientRef: legacy!.id,
+      scopes: ["read"],
+      redirectUri: CALLBACK,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      authorizationServer: { issuer: meta.base, issParameterSupported: false },
+    });
+    const back = await consent(new URL(authUrl));
+    expect(back.pathname).toBe("/api/integrations/callback");
+    expect(await callbackText(back)).not.toContain("error");
+    expect(meta.provider!.tokenRequests).toHaveLength(1);
   });
 
   it("refuses a document client bound to another server than the state's (issuer_mismatch)", async () => {

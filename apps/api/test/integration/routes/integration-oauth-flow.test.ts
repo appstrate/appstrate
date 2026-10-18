@@ -82,6 +82,8 @@ async function setup(
     authorizationParams?: Record<string, string>;
     refreshTokenIssuance?: "default" | "not_supported";
     resource?: string;
+    /** Declare `code_challenge_methods_supported: ["S256"]` (default true). */
+    declaresPkce?: boolean;
   },
   client: { clientId: string; clientSecret: string },
   tier: "space" | "org" = "space",
@@ -100,7 +102,7 @@ async function setup(
           tokenEndpoint: provider.tokenEndpoint,
           defaultScopes: SCOPES,
           tokenEndpointAuthMethod: manifest.tokenEndpointAuthMethod,
-          codeChallengeMethodsSupported: ["S256"],
+          ...(manifest.declaresPkce === false ? {} : { codeChallengeMethodsSupported: ["S256"] }),
           ...(manifest.authorizationParams
             ? { authorizationParams: manifest.authorizationParams }
             : {}),
@@ -525,6 +527,23 @@ describe("integration OAuth2 flow (conformant provider)", () => {
 
     expect(completionOf(html)).toEqual(expect.objectContaining({ ok: true }));
     expect(completionOf(html)).not.toHaveProperty("scopesDenied");
+  });
+
+  it("a classic integration with static endpoints and no metadata still connects with S256", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post", declaresPkce: false },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+    const authUrl = new URL(await beginConnect(ctx));
+    expect(authUrl.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(completionOf(await consentAndCallback(authUrl.toString()))).toMatchObject({ ok: true });
   });
 
   it("never reports offline_access as denied: the server decides on refresh tokens", async () => {
