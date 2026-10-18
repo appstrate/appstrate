@@ -73,6 +73,11 @@ export interface OAuthEndpointResolution {
    * MCP). `undefined` when the document omits the field.
    */
   grantTypesSupported?: string[];
+  /**
+   * RFC 8414 §2 `scopes_supported`. Tells whether the AS issues refresh tokens on the OIDC
+   * `offline_access` scope, which an MCP client then requests (`undefined` when omitted).
+   */
+  scopesSupported?: string[];
   /** The validated document's `issuer`, verbatim: what a client is bound to, `iss` compared with. */
   issuer?: string;
   authorizationResponseIssParameterSupported?: boolean;
@@ -161,6 +166,7 @@ interface DiscoveredMetadata {
   userinfoEndpoint?: string;
   registrationEndpoint?: string;
   grantTypesSupported?: string[];
+  scopesSupported?: string[];
   issuer?: string;
   authorizationResponseIssParameterSupported?: boolean;
 }
@@ -239,6 +245,7 @@ async function discover(
     found.userinfoEndpoint ??= urlString(doc.userinfo_endpoint);
     found.registrationEndpoint ??= urlString(doc.registration_endpoint);
     found.grantTypesSupported ??= stringArray(doc.grant_types_supported);
+    found.scopesSupported ??= stringArray(doc.scopes_supported);
     if (
       found.authorizationEndpoint &&
       found.tokenEndpoint &&
@@ -269,6 +276,7 @@ interface DiscoveryDocument {
   code_challenge_methods_supported?: unknown;
   registration_endpoint?: unknown;
   grant_types_supported?: unknown;
+  scopes_supported?: unknown;
   authorization_response_iss_parameter_supported?: unknown;
 }
 

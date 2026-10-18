@@ -7,50 +7,12 @@ import { SourceSection } from "../source-section.tsx";
 
 await i18nReady;
 
-const remote = { source: { kind: "remote", remote: { url: "https://x.test/mcp" } } };
-const discovery = {
-  analyse: () => {},
-  isPending: false,
-  error: null,
-  badges: {},
-  warnings: [],
-};
-const analyse = 'data-testid="integration-editor-analyse"';
-
-describe("SourceSection analyse button", () => {
-  it("is offered on creation for a remote source", () => {
-    const html = render(
-      <SourceSection manifest={remote} onChange={() => {}} discovery={discovery} />,
-    );
-    expect(html).toContain(analyse);
-    expect(html).toContain("Analyser");
-  });
-
-  it("is hidden when editing", () => {
-    expect(render(<SourceSection manifest={remote} onChange={() => {}} />)).not.toContain(analyse);
-  });
-
-  it("is hidden for a local source", () => {
-    const local = { source: { kind: "local", server: { name: "s" } } };
-    const html = render(
-      <SourceSection manifest={local} onChange={() => {}} discovery={discovery} />,
-    );
-    expect(html).not.toContain(analyse);
-  });
-
-  it("shows the badge on the transport and the translated warning", () => {
-    const html = render(
-      <SourceSection
-        manifest={remote}
-        onChange={() => {}}
-        discovery={{
-          ...discovery,
-          badges: { "/source/remote/transport": "guessed" },
-          warnings: [{ code: "manual_client_required", message: "en" }],
-        }}
-      />,
-    );
-    expect(html).toContain("suggéré");
-    expect(html).toContain("enregistrement dynamique");
+describe("SourceSection", () => {
+  it("renders no analyse control: typing a URL is a plain config edit", () => {
+    const remote = { source: { kind: "remote", remote: { url: "https://x.test/mcp" } } };
+    const html = render(<SourceSection manifest={remote} onChange={() => {}} />);
+    expect(html).toContain("https://x.test/mcp");
+    expect(html).not.toContain("integration-editor-analyse");
+    expect(html).not.toContain("Analyser");
   });
 });

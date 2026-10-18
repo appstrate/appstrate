@@ -16,6 +16,7 @@ import type { IntegrationManifest } from "@appstrate/core/integration";
 import { mcpServerManifestSchema, type McpServerManifest } from "@appstrate/core/mcp-server";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { BundleError } from "@appstrate/afps-runtime/bundle";
+import { canonicalUrl } from "@appstrate/afps-shared/authorized-uris";
 import { getSystemPackages } from "./system-packages.ts";
 import type { IntegrationSummary } from "@appstrate/shared-types";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
@@ -841,4 +842,21 @@ export async function listIntegrations(
     });
   }
   return out;
+}
+
+/**
+ * The integrations {@link listIntegrations} shows in `scope` whose remote MCP server is `url`:
+ * equal after {@link canonicalUrl}, nothing looser. Ordered by package id.
+ */
+export async function listIntegrationsAtRemoteUrl(
+  scope: SpaceScope,
+  url: string,
+): Promise<IntegrationSummary[]> {
+  const target = canonicalUrl(url);
+  if (!target) return [];
+  const summaries = await listIntegrations(scope);
+  return summaries.filter(({ manifest }) => {
+    const source = manifest.source;
+    return source?.kind === "remote" && canonicalUrl(source.remote.url) === target;
+  });
 }

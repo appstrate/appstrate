@@ -10,10 +10,18 @@
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { ListToolsRequestSchema, type Implementation } from "@modelcontextprotocol/sdk/types.js";
+import {
+  ListToolsRequestSchema,
+  type Implementation,
+  type ToolAnnotations,
+} from "@modelcontextprotocol/sdk/types.js";
+
+/** A name alone gets the description `Tool <name>` and no annotations. */
+export type FakeMcpTool =
+  string | { name: string; title?: string; description?: string; annotations?: ToolAnnotations };
 
 export interface FakeMcpServerOptions {
-  tools?: string[];
+  tools?: FakeMcpTool[];
   /** Tools per `tools/list` page; omitted = one page. */
   pageSize?: number;
   serverInfo?: Implementation;
@@ -38,9 +46,8 @@ export interface FakeMcpServer {
 }
 
 export function startFakeMcpServer(opts: FakeMcpServerOptions = {}): FakeMcpServer {
-  const tools = (opts.tools ?? []).map((name) => ({
-    name,
-    description: `Tool ${name}`,
+  const tools = (opts.tools ?? []).map((tool) => ({
+    ...(typeof tool === "string" ? { name: tool, description: `Tool ${tool}` } : tool),
     inputSchema: { type: "object" as const, properties: {} },
   }));
   const pageSize = opts.pageSize ?? Math.max(tools.length, 1);

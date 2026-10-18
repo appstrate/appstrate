@@ -1,5 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
+/** Companion of `?create=agent`: the integration the new agent starts with. */
+export const CREATE_INTEGRATION_PARAM = "integration";
+
+/** `/agents?create=agent&integration=<id>`: the agent creation hand-off, the integration preselected. */
+export function agentCreationWithIntegrationPath(integrationId: string): string {
+  const params = new URLSearchParams({
+    create: "agent",
+    [CREATE_INTEGRATION_PARAM]: integrationId,
+  });
+  return `/agents?${params}`;
+}
+
 export type CreationResource = "agent" | "skill" | "integration" | "mcp-server";
 export type CreationPromptTranslate = (key: string, values?: Record<string, string>) => string;
 
@@ -16,6 +28,10 @@ export function readChatComposerDraft(state: unknown): string | undefined {
 export function buildChatCreationDraft(
   resource: CreationResource,
   t: CreationPromptTranslate,
+  /** Named by its display name AND its id: two integrations may share a name. */
+  integration?: { id: string; name: string },
 ): string {
-  return t(`creation.chat.draft.${resource}`);
+  const draft = t(`creation.chat.draft.${resource}`);
+  if (resource !== "agent" || !integration) return draft;
+  return `${draft} ${t("creation.chat.draft.withIntegration", { name: integration.name, id: integration.id })}`;
 }

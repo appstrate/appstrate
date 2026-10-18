@@ -31,10 +31,13 @@ import {
   LayoutGrid,
   Server,
   Settings2,
+  Info,
 } from "lucide-react";
 import { InlineMarkdown } from "../components/markdown";
 import { authMethodLabel } from "../lib/integration-presentation";
 import { Button } from "@appstrate/ui/components/button";
+import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
+import { needsWizardFinish, wizardResumePath } from "../lib/integration-wizard";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { ErrorState, ResourceErrorState } from "../components/page-states";
@@ -59,7 +62,7 @@ import { AccessRulesSection } from "../components/integration-detail/access-rule
 import { ConnectionsTable } from "../components/integration-detail/connections-table";
 import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
 import { readIntegrationSource } from "../lib/package-manifest";
-import { serverSyncBody } from "../lib/integration-discovery-merge";
+import { serverSyncBody } from "../lib/integration-server-sync";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { usePackageDetail, usePackageDownload, type Versioned } from "../hooks/use-packages";
 import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-integrations";
@@ -117,12 +120,14 @@ function IntegrationSettings({
   const { t } = useTranslation(["settings", "agents"]);
   const navigate = useNavigate();
   const { can } = usePermissions();
-  // `detail.manifest` is the published version, the one the sync's server call goes to.
-  const published = readIntegrationSource(detail.manifest.source);
+  // The sync calls the server of the DRAFT, published or not: the copy this editor writes.
+  const draftSource = definition
+    ? readIntegrationSource((definition.manifest as Record<string, unknown>).source)
+    : null;
   const syncable =
-    published?.kind === "remote" &&
-    published.transport !== "sse" &&
-    !isVariableTemplate(published.url) &&
+    draftSource?.kind === "remote" &&
+    draftSource.transport !== "sse" &&
+    !isVariableTemplate(draftSource.url) &&
     can("credential-proxy:call-own") &&
     detail.auths.some((auth) => auth.connections.length > 0);
   const resolve = (requested: string | null): IntegrationSettingsSection =>
@@ -377,7 +382,8 @@ export function IntegrationDetailPage() {
     else params.delete("connectionMethod");
     void navigate({ search: params.toString(), hash: "connections" });
   };
-  const canBrowseIntegrations = useCanReach()("/integrations");
+  const canReach = useCanReach();
+  const canBrowseIntegrations = canReach("/integrations");
 
   // Only the integration detail gates the page; the package detail brings `source` and
   // follows in place (badges, read-only alert, actions menu).
@@ -468,6 +474,25 @@ export function IntegrationDetailPage() {
         draftReadOnly={pkg?.definition === "draft" && !homeWritable}
         pending={pkgLoading}
       />
+
+      {needsWizardFinish({
+        manifest: m,
+        homeWritable: !!homeWritable,
+        canOpenWizard: canReach("/integrations/new/mcp"),
+      }) && (
+        <Alert variant="info" className="mb-4" data-testid="integration-wizard-finish">
+          <Info />
+          <AlertTitle>{t("integrationWizard.finish.title", { ns: "agents" })}</AlertTitle>
+          <AlertDescription>
+            <p>{t("integrationWizard.finish.description", { ns: "agents" })}</p>
+            <Button variant="outline" size="sm" className="mt-2" asChild>
+              <Link to={wizardResumePath(packageId)}>
+                {t("integrationWizard.finish.action", { ns: "agents" })}
+              </Link>
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* One connected-accounts table, with each row retaining its auth context. */}
       <DetailTabPanel value="connections">
