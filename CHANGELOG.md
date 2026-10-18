@@ -39,6 +39,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `image:<version>` and empties the `orgs` bucket. See
   `scripts/migration/README.md`. (#2046)
 
+- Existing rows are not rewritten for the reserved package scopes (#2072). Before deploying, check that both
+  queries return nothing:
+  `SELECT slug FROM organizations WHERE slug IN ('inline', 'appstrate');` and
+  `SELECT id, org_id FROM packages WHERE (id LIKE '@inline/%' AND ephemeral = false) OR (id LIKE '@appstrate/%' AND org_id IS NOT NULL);`.
+  A row in either is data to handle with a `scripts/migration/` script, never
+  left in place: a non-ephemeral `@inline/` agent is no longer served by the
+  persistence read.
+
 ### Changed
 
 - **Agent persistence: one visibility rule for pinned slots and memories** (#2070). A caller holding
@@ -300,13 +308,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   its carried dependencies, and the MCP `validate_package_file` /
   `import_package_file` pair) answers `400 scope_reserved` for such an id; a
   system package carried by a bundle is still reused.
-  **Operators:** existing rows are not rewritten. Before deploying, check that both
-  queries return nothing:
-  `SELECT slug FROM organizations WHERE slug IN ('inline', 'appstrate');` and
-  `SELECT id, org_id FROM packages WHERE (id LIKE '@inline/%' AND ephemeral = false) OR (id LIKE '@appstrate/%' AND org_id IS NOT NULL);`.
-  A row in either is data to handle with a `scripts/migration/` script, never
-  left in place: a non-ephemeral `@inline/` agent is no longer served by the
-  persistence read.
 - **An `api_call` target can carry a `{{field}}` in its path or query**
   (#2063). The target's published JSON schema said `format: "uri"`, which the
   agent's tool-argument validator applies before the call leaves the agent: it
