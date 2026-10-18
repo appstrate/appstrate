@@ -11,7 +11,11 @@ import { installFakeStorage } from "../../test/fake-storage.ts";
 import type { IntegrationIndexItem } from "@appstrate/shared-types";
 import { packageKeys } from "../../lib/query-keys.ts";
 
-installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
+// The page's creation dialog reaches the auth client, which reads the origin when it loads.
+installFakeStorage({
+  __APP_CONFIG__: { features: {}, trustedOrigins: [] },
+  location: { origin: "http://localhost:3000" },
+});
 
 const { IntegrationsPage } = await import("../integrations-page.tsx");
 const { spaceStore } = await import("../../stores/space-store.ts");
