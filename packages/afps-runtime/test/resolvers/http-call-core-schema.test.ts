@@ -276,6 +276,17 @@ describe("apiCallRequestSchema — invalid inputs", () => {
     expect(result.error.issues.some((i) => i.path.includes("method"))).toBe(true);
   });
 
+  // The in-process surface has no plain-object body (its description
+  // advertises none): a JSON body goes as a string or a { fromFile }.
+  it("rejects a plain JSON object body", () => {
+    const result = apiCallRequestSchema.safeParse({
+      method: "PUT",
+      target: "https://api.example.com/x",
+      body: { branch: "main", message: "m", content: "aGk=" },
+    });
+    expect(result.success).toBe(false);
+  });
+
   it("rejects body.fromFile as non-string", () => {
     const result = apiCallRequestSchema.safeParse({
       method: "POST",
