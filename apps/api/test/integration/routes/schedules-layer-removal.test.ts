@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { asRecord } from "@appstrate/core/safe-json";
 import { isEmbeddedDb, reservePgConnection } from "@appstrate/db/client";
 import {
@@ -48,6 +48,7 @@ import {
 } from "../../../src/services/integration-pins-service.ts";
 import {
   disableSchedulesLeftUnnamed,
+  pinLayer,
   removeNamingLayer,
   schedulesLayerMayName,
   type NamingLayer,
@@ -195,6 +196,19 @@ describe("removing the layer that names a schedule's connection set", () => {
       .where(eq(auditEvents.action, action));
     const after = audit!.after as { disabledScheduleIds: string[] } | null;
     return after ? [...after.disabledScheduleIds].sort() : null;
+  }
+
+  async function withScheduleDisableFailure(check: () => Promise<void>): Promise<void> {
+    await db.execute(sql`CREATE FUNCTION refuse_schedule_disable_fn() RETURNS trigger AS $$
+      BEGIN RAISE EXCEPTION 'schedule disable failed'; END $$ LANGUAGE plpgsql`);
+    await db.execute(sql`CREATE TRIGGER refuse_schedule_disable_trg BEFORE UPDATE ON package_schedules
+      FOR EACH ROW WHEN (NEW.enabled = false) EXECUTE FUNCTION refuse_schedule_disable_fn()`);
+    try {
+      await check();
+    } finally {
+      await db.execute(sql`DROP TRIGGER refuse_schedule_disable_trg ON package_schedules`);
+      await db.execute(sql`DROP FUNCTION refuse_schedule_disable_fn()`);
+    }
   }
 
   describe("a member pin — DELETE /api/me/integration-pins/{agent}/integrations/{integration}", () => {
@@ -712,6 +726,34 @@ describe("removing the layer that names a schedule's connection set", () => {
       expect(spared.updatedAt).toEqual(schedule.updatedAt);
     });
 
+    /** An OAuth client of the space that minted `minted`. */
+    async function clientMinting(minted: string[]): Promise<string> {
+      const [client] = await db
+        .insert(integrationOauthClients)
+        .values({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          integrationId: INTEGRATION,
+          authKey: "primary",
+          clientId: "byo-app",
+          clientSecretEncrypted: "x",
+        })
+        .returning({ id: integrationOauthClients.id });
+      await db
+        .update(integrationConnections)
+        .set({ clientRef: client!.id })
+        .where(inArray(integrationConnections.id, minted));
+      return client!.id;
+    }
+
+    async function deleteClient(clientId: string): Promise<void> {
+      const res = await app.request(`/api/integrations/${INTEGRATION}/oauth-clients/${clientId}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(res.status, await res.clone().text()).toBe(204);
+    }
+
     for (const minting of [1, 2]) {
       // With two, the first forget shrinks the pin and the second drops it.
       it(`disables it when an OAuth client delete drops a pin of ${minting} minted connection(s)`, async () => {
@@ -719,33 +761,12 @@ describe("removing the layer that names a schedule's connection set", () => {
         while (minted.length < minting) {
           minted.push(await seedIntegrationConnection(ctx, INTEGRATION));
         }
-        const [client] = await db
-          .insert(integrationOauthClients)
-          .values({
-            orgId: ctx.orgId,
-            spaceId: ctx.defaultSpaceId,
-            integrationId: INTEGRATION,
-            authKey: "primary",
-            clientId: "byo-app",
-            clientSecretEncrypted: "x",
-          })
-          .returning({ id: integrationOauthClients.id });
-        await db
-          .update(integrationConnections)
-          .set({ clientRef: client!.id })
-          .where(inArray(integrationConnections.id, minted));
+        const clientId = await clientMinting(minted);
         await ownPin(minted);
         const schedule = await armedSchedule();
 
-        const res = await app.request(
-          `/api/integrations/${INTEGRATION}/oauth-clients/${client!.id}`,
-          {
-            method: "DELETE",
-            headers: authHeaders(ctx),
-          },
-        );
+        await deleteClient(clientId);
 
-        expect(res.status, await res.clone().text()).toBe(204);
         expect(await ownPins()).toEqual([]);
         expect(await rowOf(schedule.id)).toMatchObject({
           enabled: false,
@@ -754,9 +775,210 @@ describe("removing the layer that names a schedule's connection set", () => {
         expect(await auditedAs("integration.oauth_client.deleted")).toEqual([schedule.id]);
       });
     }
+
+    // A trigger inserts after the ordered row locks: resolution after the pin delete must still
+    // find and disable the schedule in that same transaction.
+    const doors = [
+      {
+        door: "DELETE /api/me/connections/{id}",
+        audit: "integration.connection.deleted",
+        remove: (gone: string) => deleteConnection(gone),
+      },
+      {
+        door: "an OAuth client delete",
+        audit: "integration.oauth_client.deleted",
+        remove: async (gone: string) => deleteClient(await clientMinting([gone])),
+      },
+    ];
+    for (const { door, audit, remove: removeBy } of doors) {
+      it(`${door} disables a schedule armed on the pin it empties after the read of the fires`, async () => {
+        const gone = await seedIntegrationConnection(ctx, INTEGRATION);
+        await ownPin([gone]);
+        const id = `sched_${crypto.randomUUID()}`;
+        await db.execute(
+          sql.raw(`CREATE OR REPLACE FUNCTION late_schedule_fn() RETURNS trigger AS $$
+            BEGIN
+              INSERT INTO package_schedules (id, package_id, org_id, space_id, user_id, enabled, cron_expression)
+              VALUES ('${id}', OLD.package_id, '${ctx.orgId}', OLD.space_id, OLD.user_id, true, '0 * * * *');
+              RETURN NULL;
+            END $$ LANGUAGE plpgsql`),
+        );
+        await db.execute(sql`
+          CREATE TRIGGER late_schedule_trg AFTER DELETE ON integration_pins
+          FOR EACH ROW EXECUTE FUNCTION late_schedule_fn()`);
+        try {
+          await removeBy(gone);
+        } finally {
+          await db.execute(sql`DROP TRIGGER IF EXISTS late_schedule_trg ON integration_pins`);
+          await db.execute(sql`DROP FUNCTION IF EXISTS late_schedule_fn()`);
+        }
+
+        expect(await ownPins()).toEqual([]);
+        expect(await rowOf(id)).toMatchObject({
+          enabled: false,
+          disabledReason: "connection_deleted",
+          nextRunAt: null,
+        });
+        expect(await auditedAs(audit)).toEqual([id]);
+      });
+
+      it(`${door} rolls back the connection and pin deletion if disabling a late schedule fails`, async () => {
+        const gone = await seedIntegrationConnection(ctx, INTEGRATION);
+        await ownPin([gone]);
+        const clientId = door === "an OAuth client delete" ? await clientMinting([gone]) : null;
+        const path = clientId
+          ? `/api/integrations/${INTEGRATION}/oauth-clients/${clientId}`
+          : `/api/me/connections/${gone}`;
+        const id = `sched_${crypto.randomUUID()}`;
+        await db.execute(
+          sql.raw(`CREATE FUNCTION late_schedule_fn() RETURNS trigger AS $$
+          BEGIN
+            INSERT INTO package_schedules (id, package_id, org_id, space_id, user_id, enabled, cron_expression)
+            VALUES ('${id}', OLD.package_id, '${ctx.orgId}', OLD.space_id, OLD.user_id, true, '0 * * * *');
+            RETURN NULL;
+          END $$ LANGUAGE plpgsql`),
+        );
+        await db.execute(sql`CREATE TRIGGER late_schedule_trg AFTER DELETE ON integration_pins
+          FOR EACH ROW EXECUTE FUNCTION late_schedule_fn()`);
+        try {
+          await withScheduleDisableFailure(async () => {
+            const response = await app.request(path, {
+              method: "DELETE",
+              headers: authHeaders(ctx),
+            });
+            expect(response.status).toBe(500);
+          });
+        } finally {
+          await db.execute(sql`DROP TRIGGER late_schedule_trg ON integration_pins`);
+          await db.execute(sql`DROP FUNCTION late_schedule_fn()`);
+        }
+        expect(
+          await db.select().from(integrationConnections).where(eq(integrationConnections.id, gone)),
+        ).toHaveLength(1);
+        expect(await ownPins()).toHaveLength(1);
+        expect(await db.select().from(schedules).where(eq(schedules.id, id))).toEqual([]);
+        if (clientId)
+          expect(
+            await db
+              .select()
+              .from(integrationOauthClients)
+              .where(eq(integrationOauthClients.id, clientId)),
+          ).toHaveLength(1);
+        // The failure left the old configuration intact, so an ordinary retry succeeds.
+        const retried = await app.request(path, { method: "DELETE", headers: authHeaders(ctx) });
+        expect(retried.status, await retried.clone().text()).toBe(204);
+        expect(await ownPins()).toEqual([]);
+      });
+    }
+
+    // The member pin is in the governance a write was judged under, re-checked behind the lock the
+    // delete takes first. Sequential: that lock serializing the two in flight is not observable on
+    // PGlite, so this holds without it.
+    it("a create judged under the member pin a connection delete empties is refused, and stores nothing", async () => {
+      const gone = await seedIntegrationConnection(ctx, INTEGRATION);
+      await ownPin([gone]);
+      const judgedGovernance = await readScheduleGovernance(ctx.defaultSpaceId, AGENT, ctx.user.id);
+      await deleteConnection(gone);
+
+      await expect(
+        createSchedule(
+          { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+          AGENT,
+          { type: "user", id: ctx.user.id },
+          { cronExpression: "0 * * * *", judgedGovernance },
+        ),
+      ).rejects.toMatchObject({ status: 409, code: "schedule_governance_changed" });
+      expect(await db.select().from(schedules)).toEqual([]);
+    });
   });
 
-  // The fires are read before the removal's transaction opens; every layer fact is read inside it.
+  describe("the current layers and atomic removal", () => {
+    for (const kind of ["member_pin", "admin_pin", "org_default"] as const) {
+      it(`counts the recreated ${kind} when judging the current connection set`, async () => {
+        const connection = await sharedConnection();
+        if (kind === "org_default") await orgDefault([connection]);
+        else await pin([connection], { userId: kind === "member_pin" ? ctx.user.id : null });
+        const late = await armedSchedule();
+        const current: NamingLayer =
+          kind === "org_default"
+            ? { kind, spaceId: ctx.defaultSpaceId, integrationId: INTEGRATION }
+            : pinLayer(
+                { spaceId: ctx.defaultSpaceId, integrationId: INTEGRATION, agentPackageId: AGENT },
+                kind === "member_pin" ? ctx.user.id : null,
+              );
+
+        const disabled = await db.transaction(async (tx) => {
+          await lockIntegrationGovernance(tx, current.spaceId, current.integrationId);
+          return disableSchedulesLeftUnnamed(tx, current, [late.id], "connection_set_unnamed");
+        });
+        expect(disabled).toEqual([]);
+        expect((await rowOf(late.id)).enabled).toBe(true);
+      });
+    }
+
+    it("rolls back a removal when disabling a schedule written after the initial read fails", async () => {
+      await ownPin([await sharedConnection()]);
+      const current = layer();
+      const id = `sched_${crypto.randomUUID()}`;
+      await withScheduleDisableFailure(async () => {
+        await expect(
+          removeNamingLayer(current, async (tx) => {
+            await lockIntegrationGovernance(tx, current.spaceId, current.integrationId);
+            await tx.insert(schedules).values({
+              id,
+              packageId: AGENT,
+              orgId: ctx.orgId,
+              spaceId: ctx.defaultSpaceId,
+              userId: ctx.user.id,
+              enabled: true,
+              cronExpression: "0 * * * *",
+            });
+            const [previous] = await tx.delete(integrationPins).returning();
+            return { previous: previous ?? null };
+          }),
+        ).rejects.toMatchObject({ cause: { message: "schedule disable failed" } });
+      });
+      expect(await db.select().from(integrationPins)).toHaveLength(1);
+      expect(await db.select().from(schedules).where(eq(schedules.id, id))).toEqual([]);
+    });
+
+    const layer = (): NamingLayer => ({
+      kind: "member_pin",
+      spaceId: ctx.defaultSpaceId,
+      integrationId: INTEGRATION,
+      agentPackageId: AGENT,
+      userId: ctx.user.id,
+    });
+
+    it("disables, with the reason given, a schedule with no remaining layer", async () => {
+      const late = await armedSchedule();
+
+      expect(
+        await db.transaction((tx) =>
+          disableSchedulesLeftUnnamed(tx, layer(), [late.id], "connection_deleted"),
+        ),
+      ).toEqual([late.id]);
+      expect(await rowOf(late.id)).toMatchObject({
+        enabled: false,
+        disabledReason: "connection_deleted",
+        nextRunAt: null,
+      });
+    });
+
+    it("spares it when another layer names the set by then", async () => {
+      await orgDefault([await sharedConnection()]);
+      const late = await armedSchedule();
+
+      expect(
+        await db.transaction((tx) =>
+          disableSchedulesLeftUnnamed(tx, layer(), [late.id], "connection_deleted"),
+        ),
+      ).toEqual([]);
+      expect((await rowOf(late.id)).enabled).toBe(true);
+    });
+  });
+
+  // The row-level helper re-reads current connection choices and layers after locking schedules.
   describe("writes landing between the read of the fires and the removal", () => {
     const pinLayer = () =>
       ({
@@ -986,7 +1208,7 @@ describe("removing the layer that names a schedule's connection set", () => {
     /** `[]` under the admin pin of one connection: "no addition", judged while the pin stands. */
     async function judgedUnderPin() {
       await pin([await sharedConnection()]);
-      return readScheduleGovernance(ctx.defaultSpaceId, AGENT);
+      return readScheduleGovernance(ctx.defaultSpaceId, AGENT, ctx.user.id);
     }
     const narrowing = { [INTEGRATION]: [] };
     const refusedAsChanged = { status: 409, code: "schedule_governance_changed" };
@@ -1051,6 +1273,109 @@ describe("removing the layer that names a schedule's connection set", () => {
       // The pin it was judged under goes after it stored: the removal sees it and disables it.
       expect(await remove(ADMIN_PIN_PATH)).toBe(1);
       expect(await unnamed()).toEqual([created.id]);
+    });
+
+    // Resolution runs after the removal callback, on its transaction, so it includes these rows.
+    for (const owner of ["an admin pin", "a member pin"] as const) {
+      it(`the removal of ${owner} disables a schedule relying on it stored after the read of the fires`, async () => {
+        const userId = owner === "a member pin" ? ctx.user.id : null;
+        await pin([await sharedConnection()], { userId });
+        const id = `sched_${crypto.randomUUID()}`;
+
+        const layer = pinLayer(
+          { spaceId: ctx.defaultSpaceId, agentPackageId: AGENT, integrationId: INTEGRATION },
+          userId,
+        );
+        const { disabledScheduleIds } = await removeNamingLayer(layer, async (tx) => {
+          await lockIntegrationGovernance(tx, ctx.defaultSpaceId, INTEGRATION);
+          // On `tx` (PGlite has one connection): after the read, committed with the removal.
+          await tx.insert(schedules).values({
+            id,
+            packageId: AGENT,
+            orgId: ctx.orgId,
+            spaceId: ctx.defaultSpaceId,
+            userId: ctx.user.id,
+            enabled: true,
+            cronExpression: "0 * * * *",
+          });
+          const [row] = await tx
+            .delete(integrationPins)
+            .where(
+              and(
+                eq(integrationPins.packageId, AGENT),
+                userId === null
+                  ? isNull(integrationPins.userId)
+                  : eq(integrationPins.userId, userId),
+              ),
+            )
+            .returning({ connectionIds: integrationPins.connectionIds });
+          return { previous: row ?? null };
+        });
+
+        expect(disabledScheduleIds).toEqual([id]);
+        expect(await rowOf(id)).toMatchObject({
+          enabled: false,
+          disabledReason: "connection_set_unnamed",
+        });
+      });
+    }
+
+    /** The actor's own pin of one connection naming the set, judged while it stands. */
+    async function judgedUnderOwnPin() {
+      await ownPin([await sharedConnection()]);
+      return readScheduleGovernance(ctx.defaultSpaceId, AGENT, ctx.user.id);
+    }
+    const removeOwnPin = () => deletePin(scope(), AGENT, INTEGRATION, ctx.user.id);
+
+    // The member pin is in the fingerprint, and an armed write re-checks it with no override
+    // stored (both fail without the member pin's layer and the re-check of every armed write).
+    it("a create relying on the actor's member pin, removed before it stores, is refused and stores nothing", async () => {
+      const judgedGovernance = await judgedUnderOwnPin();
+      await removeOwnPin();
+
+      await expect(
+        createSchedule(
+          scope(),
+          AGENT,
+          { type: "user", id: ctx.user.id },
+          { cronExpression: "0 * * * *", judgedGovernance },
+        ),
+      ).rejects.toMatchObject(refusedAsChanged);
+      expect(await db.select().from(schedules)).toEqual([]);
+    });
+
+    it("a patch arming a schedule on the actor's member pin, removed before it stores, is refused and writes nothing", async () => {
+      // Paused: the removal leaves it as it was.
+      const seeded = await armedSchedule({ enabled: false, nextRunAt: null });
+      const judged = (await getSchedule(seeded.id, scope(), null, undefined))!;
+      const judgedGovernance = await judgedUnderOwnPin();
+      await removeOwnPin();
+
+      await expect(
+        updateSchedule(scope(), judged, { enabled: true, judgedGovernance }, null, undefined),
+      ).rejects.toMatchObject(refusedAsChanged);
+      expect(await rowOf(seeded.id)).toMatchObject({
+        enabled: false,
+        updatedAt: seeded.updatedAt,
+      });
+    });
+
+    // It fires nothing, and arming it later is judged then (fails while any write storing a set
+    // re-checks, verified).
+    it("a patch leaving the schedule paused is not refused by a governance change", async () => {
+      const seeded = await armedSchedule({ enabled: false, nextRunAt: null });
+      const judged = (await getSchedule(seeded.id, scope(), null, undefined))!;
+      const judgedGovernance = await judgedUnderPin();
+      await deletePin(scope(), AGENT, INTEGRATION, null);
+
+      const updated = await updateSchedule(
+        scope(),
+        judged,
+        { connectionOverrides: narrowing, judgedGovernance },
+        null,
+        undefined,
+      );
+      expect(updated).toMatchObject({ enabled: false, connection_overrides: narrowing });
     });
   });
 });

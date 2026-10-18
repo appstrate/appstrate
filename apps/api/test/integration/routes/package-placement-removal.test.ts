@@ -34,7 +34,7 @@ import {
 } from "../../helpers/seed.ts";
 import { describeRequiresRedis } from "../../helpers/tier.ts";
 import { closeRedis, flushRedis } from "../../helpers/redis.ts";
-import { createSchedule } from "../../../src/services/scheduler.ts";
+import { createJudgedSchedule } from "../../helpers/schedule-fixtures.ts";
 import { getRedisQueueConnection } from "../../../src/lib/redis.ts";
 
 const app = getTestApp();
@@ -346,7 +346,7 @@ describeRequiresRedis("the disabled schedules' jobs", () => {
 
   it("are removed once the withdrawal commits", async () => {
     expect((await share(owner(), { kind: "space", spaceId: teamId })).status).toBe(200);
-    const schedule = await createSchedule(
+    const schedule = await createJudgedSchedule(
       { orgId: ctx.orgId, spaceId: teamId },
       AGENT,
       { type: "user", id: ctx.user.id },

@@ -295,6 +295,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A schedule saved while the pin or default naming its connections was removed
+  no longer stays armed with no connection named.** It is now disabled
+  (`connection_set_unnamed`) by the removal, or its write is refused with
+  `409 schedule_governance_changed`; the member pin of the schedule's actor counts
+  as such a layer, and the check covers every write leaving a schedule enabled.
+  Deleting a connection that empties a member pin (`DELETE /api/me/connections/{id}`,
+  an OAuth client delete) is covered too, disabling with `connection_deleted`.
+  Resolution and disabling commit with the removal: a failure rolls everything
+  back, and recreating a pin or default cannot race a later cleanup.
+
 - **The run page of an inline run no longer gets two 404s** (#2068).
   `GET …/persistence` answered `agent_not_found` for the run's shadow agent, so
   the memories and pinned slots an inline run wrote with `note`/`pin` were

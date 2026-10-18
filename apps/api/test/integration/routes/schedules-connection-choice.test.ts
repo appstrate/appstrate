@@ -41,7 +41,11 @@ import {
   seedSchedule,
 } from "../../helpers/seed.ts";
 import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
-import { seedDivergedAgent, seedSchedulableAgent } from "../../helpers/schedule-fixtures.ts";
+import {
+  seedDivergedAgent,
+  seedSchedulableAgent,
+  updateJudgedSchedule,
+} from "../../helpers/schedule-fixtures.ts";
 import {
   createFakeOrchestrator,
   seedConnectionTestIntegration,
@@ -51,11 +55,7 @@ import {
 } from "../../helpers/run-connection-fixtures.ts";
 import { twoAuthApiIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
-import {
-  getSchedule,
-  triggerScheduledRun,
-  updateSchedule,
-} from "../../../src/services/scheduler.ts";
+import { getSchedule, triggerScheduledRun } from "../../../src/services/scheduler.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
 import { seedShares } from "../../helpers/connection-shares.ts";
 
@@ -662,14 +662,10 @@ describe("schedule writes for another actor — only what both reach", () => {
       .where(eq(schedules.id, seeded.id));
 
     await expect(
-      updateSchedule(
+      updateJudgedSchedule(
         scope,
         judged,
-        {
-          connectionOverrides: { [INTEGRATION]: [own] },
-          enabled: true,
-          judgedGovernance: new Map(),
-        },
+        { connectionOverrides: { [INTEGRATION]: [own] }, enabled: true },
         null,
         undefined,
       ),

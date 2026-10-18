@@ -379,12 +379,13 @@ export async function listOpenAdminPinAgents(
 }
 
 /**
- * Serialize the writers of a (space, integration)'s governance — the admin pin upsert and delete,
- * the org default upsert and delete, and the member pin upsert — for the rest of the transaction.
- * Each writer checks the OTHER side, or purges the member pins it masks, and then writes its own,
- * and under READ COMMITTED two concurrent writers can both pass the check before either commits;
- * with the lock the second one reads the first's committed rows: refused, or purging the member pin
- * written in between. Taken FIRST, before any read.
+ * Serialize the writers of a (space, integration)'s governance — the admin and member pin upsert
+ * and delete, the org default upsert and delete, and an armed schedule write's re-check
+ * (`assertScheduleGovernanceUnchanged`) — for the rest of the transaction. Each writer checks the
+ * OTHER side, or purges the member pins it masks, and then writes its own, and under READ
+ * COMMITTED two concurrent writers can both pass the check before either commits; with the lock the
+ * second one reads the first's committed rows: refused, or purging the member pin written in
+ * between. Taken FIRST, before any read.
  */
 export async function lockIntegrationGovernance(
   tx: Tx,
@@ -549,10 +550,11 @@ async function assertMemberPinBinds(
 /**
  * Delete one pin row — the admin pin for `userId: null`, else that member's — and disable the
  * schedules that leaves unnamed ({@link removeNamingLayer}); `previous` is the state it held, `null`
- * when there was none. An admin pin delete takes {@link lockIntegrationGovernance} first, purges the
- * member pins it masked ({@link purgeMemberPins}) before the schedules are judged — a schedule that
- * relied on one is disabled as unnamed with the rest — and removes its floor, so the schedules of
- * the agent narrowing it are disabled too (`removedFloor`).
+ * when there was none. Either takes {@link lockIntegrationGovernance} first: a schedule write
+ * relying on the pin re-checks it behind the same lock. An admin pin delete purges the member pins
+ * it masked ({@link purgeMemberPins}) before the schedules are judged — a schedule that relied on
+ * one is disabled as unnamed with the rest — and removes its floor, so the schedules of the agent
+ * narrowing it are disabled too (`removedFloor`).
  */
 export async function deletePin(
   scope: SpaceScope,
@@ -568,7 +570,7 @@ export async function deletePin(
   const { previous, memberPinsCleared, disabledScheduleIds } = await removeNamingLayer(
     pinLayer(pin, userId),
     async (tx) => {
-      if (userId === null) await lockIntegrationGovernance(tx, scope.spaceId, integrationId);
+      await lockIntegrationGovernance(tx, scope.spaceId, integrationId);
       const [row] = await tx
         .delete(integrationPins)
         .where(pinKey(scope, agentPackageId, integrationId, userId))

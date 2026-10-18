@@ -960,7 +960,7 @@ export async function createSchedule(
     versionOverride?: string | null;
     connectionOverrides?: ConnectionOverrides | null;
     dependencyOverrides?: Record<string, string> | null;
-    /** The governance `connectionOverrides` was judged under: required when it is set. */
+    /** The governance the write was judged under: a created schedule is armed, so required. */
     judgedGovernance?: ScheduleGovernance;
   },
 ): Promise<EnrichedSchedule> {
@@ -994,20 +994,17 @@ export async function createSchedule(
         nextRunAt: nextRun ?? null,
       })
       .returning();
-  const overrides = data.connectionOverrides ?? null;
-  const [row] =
-    overrides === null
-      ? await insert(db)
-      : await db.transaction(async (tx) => {
-          await assertScheduleGovernanceUnchanged(
-            tx,
-            scope.spaceId,
-            packageId,
-            data.judgedGovernance,
-            overrides,
-          );
-          return insert(tx);
-        });
+  const [row] = await db.transaction(async (tx) => {
+    await assertScheduleGovernanceUnchanged(
+      tx,
+      scope.spaceId,
+      packageId,
+      actor,
+      data.judgedGovernance,
+      data.connectionOverrides ?? null,
+    );
+    return insert(tx);
+  });
 
   if (!row) {
     throw internalError();
@@ -1027,14 +1024,23 @@ export async function createSchedule(
 /** The caller's read of the row a write is judged against: the `updatedAt` token + fallbacks. */
 export type ScheduleWriteSnapshot = Pick<
   ScheduleWireDto,
-  "id" | "packageId" | "updatedAt" | "enabled" | "cron_expression" | "timezone"
+  | "id"
+  | "packageId"
+  | "userId"
+  | "endUserId"
+  | "updatedAt"
+  | "enabled"
+  | "cron_expression"
+  | "timezone"
+  | "connection_overrides"
 >;
 
 /**
  * Merge-update a schedule as a compare-and-set on `expected.updatedAt` (409 otherwise) — not a
  * held lock, which PGlite's single connection would deadlock the caller's `db` checks on. A patch
- * storing a `connectionOverrides` set also re-checks, in the same transaction, the governance it
- * was judged under (409 `schedule_governance_changed`, `assertScheduleGovernanceUnchanged`).
+ * leaving the schedule armed also re-checks, in the same transaction, the governance it was judged
+ * under (409 `schedule_governance_changed`, `assertScheduleGovernanceUnchanged`); one leaving it
+ * disabled needs none: it fires nothing, and arming it later is judged then.
  */
 export async function updateSchedule(
   scope: SpaceScope,
@@ -1051,7 +1057,7 @@ export async function updateSchedule(
     versionOverride?: string | null;
     connectionOverrides?: ConnectionOverrides | null;
     dependencyOverrides?: Record<string, string> | null;
-    /** The governance `connectionOverrides` was judged under: required when it is set. */
+    /** The governance the write was judged under: required when it leaves the schedule armed. */
     judgedGovernance?: ScheduleGovernance;
     // Re-point the schedule's execution identity. When set, overwrites
     // both `userId` and `endUserId` (one non-null, mirroring create). Never
@@ -1108,20 +1114,21 @@ export async function updateSchedule(
         }),
       )
       .returning();
-  const overrides = data.connectionOverrides ?? null;
-  const [row] =
-    overrides === null
-      ? await update(db)
-      : await db.transaction(async (tx) => {
-          await assertScheduleGovernanceUnchanged(
-            tx,
-            scope.spaceId,
-            expected.packageId,
-            data.judgedGovernance,
-            overrides,
-          );
-          return update(tx);
-        });
+  const [row] = !enabled
+    ? await update(db)
+    : await db.transaction(async (tx) => {
+        await assertScheduleGovernanceUnchanged(
+          tx,
+          scope.spaceId,
+          expected.packageId,
+          data.actor ?? actorFromIds(expected.userId, expected.endUserId)!,
+          data.judgedGovernance,
+          data.connectionOverrides !== undefined
+            ? data.connectionOverrides
+            : expected.connection_overrides,
+        );
+        return update(tx);
+      });
 
   // Changed or deleted since the caller read it: every check it ran judged another row.
   if (!row) {

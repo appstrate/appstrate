@@ -55,6 +55,7 @@ import {
   type VersionDetail,
 } from "./package-versions.ts";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
+import type { DbOrTx } from "../lib/db-helpers.ts";
 
 // Both keywords are reserved names (`isProtectedTag` in
 // `@appstrate/core/dist-tags`): they resolve here BEFORE any dist-tag lookup,
@@ -114,6 +115,7 @@ function substituteVersion(
 export async function resolveAgentRunVersion(
   agent: LoadedPackage,
   selector: string | undefined,
+  executor?: DbOrTx,
 ): Promise<ResolvedRunAgent> {
   // System agents ship their definition with the platform — no published
   // versions exist, the selector is ignored (pre-existing route behavior).
@@ -125,7 +127,7 @@ export async function resolveAgentRunVersion(
   if (sel === VERSION_SELECTOR_DRAFT) return { agent };
 
   if (sel === undefined || sel === VERSION_SELECTOR_PUBLISHED) {
-    const latest = await getLatestVersionInfo(agent.id).catch(() => null);
+    const latest = await getLatestVersionInfo(agent.id, executor).catch(() => null);
     if (!latest) {
       // Nothing published — no silent draft fallback. An agent run without a
       // selector is an explicit error, not a surprise draft execution; the
@@ -137,7 +139,10 @@ export async function resolveAgentRunVersion(
         detail: `Agent '${agent.id}' has no published version — publish one or run with version=draft`,
       });
     }
-    const detail = await getVersionDetail(agent.id, latest.version, { forExecution: true });
+    const detail = await getVersionDetail(agent.id, latest.version, {
+      forExecution: true,
+      executor,
+    });
     if (!detail) {
       throw notFound(`Version '${latest.version}' of '${agent.id}' is not available`);
     }
@@ -145,7 +150,7 @@ export async function resolveAgentRunVersion(
   }
 
   // Explicit spec: exact version → dist-tag → semver range.
-  const detail = await getVersionDetail(agent.id, sel, { forExecution: true });
+  const detail = await getVersionDetail(agent.id, sel, { forExecution: true, executor });
   if (!detail) {
     throw notFound(`Version '${sel}' not found`);
   }

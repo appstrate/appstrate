@@ -12,7 +12,8 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace } from "../../helpers/seed.ts";
-import { createSchedule, triggerScheduledRun } from "../../../src/services/scheduler.ts";
+import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
+import { createJudgedSchedule } from "../../helpers/schedule-fixtures.ts";
 
 describe("scheduled runs respect current space access", () => {
   let ctx: TestContext;
@@ -37,7 +38,7 @@ describe("scheduled runs respect current space access", () => {
       }
       const pkg = await seedPackage({ orgId: ctx.orgId, id: `@${ctx.org.slug}/scheduled-access` });
       const actor = { type: "user", id: member.id } as const;
-      const schedule = await createSchedule(
+      const schedule = await createJudgedSchedule(
         { orgId: ctx.orgId, spaceId: space.id },
         pkg.id,
         actor,

@@ -24,6 +24,9 @@ import { db } from "./db.ts";
 import { seedAgent } from "./seed.ts";
 import { createVersionFromDraft } from "../../src/services/package-versions.ts";
 import { activatePackage } from "../../src/services/space-packages.ts";
+import { readScheduleGovernance } from "../../src/services/schedule-connections.ts";
+import { createSchedule, updateSchedule } from "../../src/services/scheduler.ts";
+import { actorFromIds, type Actor } from "../../src/lib/actor.ts";
 
 /** Minimal agent manifest — `version` is what publish snapshots under. */
 function agentManifest(id: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
@@ -107,4 +110,28 @@ export async function seedDivergedAgent(args: {
     manifest: args.published,
   });
   await db.update(packages).set({ draftManifest: args.draft }).where(eq(packages.id, args.id));
+}
+
+const governanceNow = (spaceId: string, packageId: string, actor: Actor) =>
+  readScheduleGovernance(spaceId, packageId, actor.type === "user" ? actor.id : null);
+
+/**
+ * `createSchedule` as its route calls it: judged under the governance standing now. For a test
+ * about something else than the re-check (`assertScheduleGovernanceUnchanged`), which a test about
+ * it reads itself.
+ */
+export async function createJudgedSchedule(
+  ...[scope, packageId, actor, data]: Parameters<typeof createSchedule>
+): ReturnType<typeof createSchedule> {
+  const judgedGovernance = await governanceNow(scope.spaceId, packageId, actor);
+  return createSchedule(scope, packageId, actor, { ...data, judgedGovernance });
+}
+
+/** `updateSchedule` as its route calls it, for the schedule's actor after the patch. */
+export async function updateJudgedSchedule(
+  ...[scope, expected, data, viewer, visibility]: Parameters<typeof updateSchedule>
+): ReturnType<typeof updateSchedule> {
+  const actor = data.actor ?? actorFromIds(expected.userId, expected.endUserId)!;
+  const judgedGovernance = await governanceNow(scope.spaceId, expected.packageId, actor);
+  return updateSchedule(scope, expected, { ...data, judgedGovernance }, viewer, visibility);
 }

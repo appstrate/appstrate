@@ -548,9 +548,13 @@ export function createSchedulesRouter() {
       }
 
       // Armed: its actor must be able to fire it, and its connection choice is made now — under
-      // the governance read here, which the insert re-checks when it stores a set.
+      // the governance read here, which the insert re-checks.
       await assertScheduleActorValid(actor, scope.orgId, scope.spaceId);
-      const judgedGovernance = await readScheduleGovernance(scope.spaceId, agent.id);
+      const judgedGovernance = await readScheduleGovernance(
+        scope.spaceId,
+        agent.id,
+        actor.type === "user" ? actor.id : null,
+      );
       await assertScheduleOverridesReachable({
         spaceId: scope.spaceId,
         actor,
@@ -829,8 +833,12 @@ export function createSchedulesRouter() {
         nextOverrides,
       );
     }
-    // Read before any judgment of the set: the update re-checks it when it stores one.
-    const judgedGovernance = await readScheduleGovernance(scope.spaceId, existing.packageId);
+    // Read before any judgment of the set: the update re-checks it when it leaves the row armed.
+    const judgedGovernance = await readScheduleGovernance(
+      scope.spaceId,
+      existing.packageId,
+      nextActor.type === "user" ? nextActor.id : null,
+    );
     // On EVERY write: a disabled row must not store a pick that arming it later would trust.
     await assertScheduleOverridesReachable({
       spaceId: scope.spaceId,
