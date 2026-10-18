@@ -34,9 +34,13 @@ import {
   localIntegrationManifest,
   remoteIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
-import { startFakeMcpServer, type FakeMcpServer } from "../../helpers/fake-mcp-server.ts";
+import {
+  startFakeMcpServer,
+  type FakeMcpServer,
+  type FakeMcpTool,
+} from "../../helpers/fake-mcp-server.ts";
 import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
-import { serverSyncBody } from "../../../../web/src/lib/integration-discovery-merge.ts";
+import { serverSyncBody } from "../../../../web/src/lib/integration-server-sync.ts";
 import type { IntegrationAuthStatus } from "@appstrate/shared-types";
 
 /** A 1×1 PNG header: what `isIconImage` reads (signature + `IHDR` size). */
@@ -49,7 +53,21 @@ const ICON = `data:image/png;base64,${PNG.toBase64()}`;
 const SVG = `data:image/svg+xml;base64,${btoa("<svg xmlns='http://www.w3.org/2000/svg'/>")}`;
 const TOKEN = "tok-live-123";
 const ID = "@acme/docs";
-const TOOLS = ["search", "fetch", "create", "update", "delete"];
+/** Annotated read-only, explicitly not, and not at all: only the first two are pre-selected. */
+const TOOLS: FakeMcpTool[] = [
+  {
+    name: "search",
+    title: "Search documents",
+    description: "Full-text search.",
+    annotations: { readOnlyHint: true },
+  },
+  { name: "fetch", annotations: { readOnlyHint: true } },
+  { name: "create", description: "Create a document.", annotations: { readOnlyHint: false } },
+  "update",
+  { name: "delete", annotations: { destructiveHint: true } },
+];
+const TOOL_NAMES = ["search", "fetch", "create", "update", "delete"];
+const READ_ONLY = ["search", "fetch"];
 
 let server: FakeMcpServer;
 let restoreEgress: () => void;
@@ -118,7 +136,7 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     server.methods.length = 0;
   });
 
-  it("lists every tool through the proxy, with the connection's bearer, and maps serverInfo", async () => {
+  it("lists every tool through the proxy, with the connection's bearer, pre-selecting the read-only ones", async () => {
     await seedProxyIntegration(ctx, remote());
     const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
 
@@ -126,8 +144,8 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       manifest: {
-        default_tools: TOOLS,
-        tools_policy: Object.fromEntries(TOOLS.map((name) => [name, {}])),
+        default_tools: READ_ONLY,
+        tools_policy: Object.fromEntries(TOOL_NAMES.map((name) => [name, {}])),
         display_name: "Acme Docs",
         description: "Search and edit Acme documents.",
         homepage: "https://acme.example/",
@@ -135,6 +153,18 @@ describe("POST /api/integrations/{packageId}/discover", () => {
       },
       icon_source: ICON,
       instructions: "Call search before fetch.",
+      tools: [
+        {
+          name: "search",
+          title: "Search documents",
+          description: "Full-text search.",
+          read_only: true,
+        },
+        { name: "fetch", read_only: true },
+        { name: "create", description: "Create a document.", read_only: false },
+        { name: "update", description: "Tool update", read_only: false },
+        { name: "delete", read_only: false },
+      ],
       warnings: [],
     });
     // initialize + initialized + three tools/list pages, each carrying the injected credential;
@@ -217,7 +247,7 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     expect(res.status).toBe(200);
     expect(
       ((await res.json()) as { manifest: { default_tools: string[] } }).manifest.default_tools,
-    ).toEqual(TOOLS);
+    ).toEqual(READ_ONLY);
   });
 
   it("syncs with the imposed org connection instead of the caller's only own account", async () => {
@@ -251,7 +281,7 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     expect(res.status).toBe(200);
     expect(
       ((await res.json()) as { manifest: { default_tools: string[] } }).manifest.default_tools,
-    ).toEqual(TOOLS);
+    ).toEqual(READ_ONLY);
     expect(server.authorizations.every((value) => value === `Bearer ${TOKEN}`)).toBe(true);
   });
 

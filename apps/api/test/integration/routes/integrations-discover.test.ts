@@ -16,6 +16,8 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { allowLoopbackOAuthEgress } from "../../helpers/strict-authorization-server.ts";
+import { seedPackage, seedUnreachableSpace } from "../../helpers/seed.ts";
+import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 
 /** A 1×1 PNG header: what `isIconImage` reads (signature + `IHDR` size). */
@@ -74,6 +76,27 @@ afterAll(() => {
   restoreEgress();
 });
 
+/** A remote integration of `orgId` (null: the system's) at `url`, homed in `homeSpaceId` if given. */
+const seedRemote = (
+  id: string,
+  url: string,
+  orgId: string | null,
+  opts: { displayName?: string; homeSpaceId?: string } = {},
+) =>
+  seedPackage({
+    id,
+    orgId,
+    type: "integration",
+    source: orgId === null ? "system" : "local",
+    ...(opts.homeSpaceId ? { homeSpaceId: opts.homeSpaceId } : {}),
+    draftManifest: remoteIntegrationManifest({
+      name: id,
+      url,
+      ...(opts.displayName ? { displayName: opts.displayName } : {}),
+      auths: { api_key: { type: "api_key", authorizedUris: [`${new URL(url).origin}/**`] } },
+    }),
+  });
+
 const discover = (ctx: TestContext, body: unknown) =>
   getTestApp().request("/api/integrations/discover", {
     method: "POST",
@@ -98,6 +121,7 @@ describe("POST /api/integrations/discover", () => {
       icon_source: string | null;
       provenance: Record<string, string>;
       warnings: unknown[];
+      existing: unknown[];
     };
     expect(body).toEqual({
       manifest: {
@@ -138,7 +162,30 @@ describe("POST /api/integrations/discover", () => {
         "/auths/oauth": "detected",
       },
       warnings: [],
+      existing: [],
     });
+  });
+
+  it("names the integrations the caller already lists at the same URL, and only those", async () => {
+    const url = `${origin}/mcp`;
+    await seedRemote("@acme/tracker", url, ctx.orgId, { displayName: "Acme Tracker" });
+    await seedRemote("@acme/other-path", `${origin}/other`, ctx.orgId);
+    await seedRemote("@acme/trailing-slash", `${url}/`, ctx.orgId);
+    // Homed in a space the caller does not reach, with nothing placing it here.
+    await seedRemote("@acme/elsewhere", url, ctx.orgId, {
+      homeSpaceId: await seedUnreachableSpace(ctx.orgId),
+    });
+    const stranger = await createTestContext({ orgSlug: "stranger" });
+    await seedRemote("@stranger/tracker", url, stranger.orgId);
+    await seedRemote("@appstrate/tracker", url, null);
+
+    const res = await discover(ctx, { url });
+    expect(res.status).toBe(200);
+    const { existing } = (await res.json()) as { existing: unknown[] };
+    expect(existing).toEqual([
+      { package_id: "@acme/tracker", display_name: "Acme Tracker" },
+      { package_id: "@appstrate/tracker", display_name: "@appstrate/tracker" },
+    ]);
   });
 
   it("proposes a manifest every write-path validator accepts", async () => {

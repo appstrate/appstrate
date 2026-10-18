@@ -35,7 +35,17 @@ export interface ServerSyncProposal {
   iconSource: string | null;
   /** The server's `instructions`, for the editor to propose as `INTEGRATION.md`. */
   instructions: string | null;
+  /** Every tool listed, in server order, for the editor to show and select from. */
+  tools: DiscoveredTool[];
   warnings: { code: string; message: string }[];
+}
+
+export interface DiscoveredTool {
+  name: string;
+  title?: string;
+  description?: string;
+  /** The server's `readOnlyHint` annotation: an untrusted hint, it only pre-selects. */
+  readOnly: boolean;
 }
 
 const SYNC_TIMEOUT_MS = 20_000;
@@ -48,6 +58,8 @@ const MAX_EXCHANGE_BYTES = 2 * 1024 * 1024;
 const MAX_SERVER_ICONS = 4;
 /** `instructions` is the server's free text, proposed as a file: bounded like one. */
 const MAX_INSTRUCTIONS_BYTES = 32 * 1024;
+const MAX_TOOL_TITLE_CHARS = 200;
+const MAX_TOOL_DESCRIPTION_CHARS = 1024;
 
 export async function syncIntegrationFromServer(input: {
   scope: SpaceScope;
@@ -222,9 +234,11 @@ export async function proposalFromServer(
   fetchImpl: typeof fetch,
 ): Promise<ServerSyncProposal> {
   const { info } = server;
-  const names = [...new Set(server.tools.map((tool) => tool.name))];
+  const tools = discoveredTools(server.tools);
+  const names = tools.map((tool) => tool.name);
   const manifest: Record<string, unknown> = {
-    default_tools: names,
+    // Discovering is not authorizing: an agent inherits only the tools the server marks read-only.
+    default_tools: tools.filter((tool) => tool.readOnly).map((tool) => tool.name),
     tools_policy: Object.fromEntries(names.map((name) => [name, {}])),
   };
   const displayName = info?.title?.trim() || info?.name?.trim();
@@ -253,7 +267,35 @@ export async function proposalFromServer(
       message: `The server's instructions exceed ${MAX_INSTRUCTIONS_BYTES / 1024} KiB: they are cut at the last line that fits.`,
     });
   }
-  return { manifest, iconSource, instructions: instructions.text || null, warnings };
+  return { manifest, iconSource, instructions: instructions.text || null, tools, warnings };
+}
+
+/** One entry per tool name (the first listed wins), with its display text bounded. */
+function discoveredTools(listed: Tool[]): DiscoveredTool[] {
+  const byName = new Map<string, DiscoveredTool>();
+  for (const tool of listed) {
+    if (byName.has(tool.name)) continue;
+    const title = capText(tool.title ?? tool.annotations?.title, MAX_TOOL_TITLE_CHARS);
+    const description = capText(tool.description, MAX_TOOL_DESCRIPTION_CHARS);
+    byName.set(tool.name, {
+      name: tool.name,
+      ...(title ? { title } : {}),
+      ...(description ? { description } : {}),
+      readOnly: tool.annotations?.readOnlyHint === true,
+    });
+  }
+  return [...byName.values()];
+}
+
+/** Trimmed, at most `max` code points (an ellipsis marking a cut); empty when absent. */
+function capText(text: unknown, max: number): string {
+  if (typeof text !== "string") return "";
+  const chars = [...text.trim()];
+  if (chars.length <= max) return chars.join("");
+  return `${chars
+    .slice(0, max - 1)
+    .join("")
+    .trimEnd()}…`;
 }
 
 /** At most {@link MAX_INSTRUCTIONS_BYTES} of UTF-8, cut after the last whole line that fits. */

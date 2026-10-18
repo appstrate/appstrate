@@ -98,7 +98,7 @@ import { listSpacesForPrincipal } from "../services/spaces.ts";
 import { getSpaceScope, type OrgScope, type SpaceScope } from "../lib/scope.ts";
 import type { AuditPayload } from "@appstrate/core/module";
 import { auditDiff, recordAuditAs, recordAuditFromContext } from "./../services/audit.ts";
-import { listIntegrations } from "../services/integration-service.ts";
+import { listIntegrations, listIntegrationsAtRemoteUrl } from "../services/integration-service.ts";
 import { discoverRemoteIntegration } from "../services/integration-discovery.ts";
 import { syncIntegrationFromServer } from "../services/integration-server-sync.ts";
 import { reachOutsideRun } from "../services/credential-proxy/access.ts";
@@ -1047,11 +1047,17 @@ export function createIntegrationsRouter() {
       { url, orgSlug: c.get("orgSlug") },
       { signal: c.req.raw.signal },
     );
+    // What the caller can already reach at this URL, under the listing's own visibility.
+    const existing = await listIntegrationsAtRemoteUrl(getSpaceScope(c), url);
     return c.json({
       manifest: proposal.manifest,
       icon_source: proposal.iconSource,
       provenance: proposal.provenance,
       warnings: proposal.warnings,
+      existing: existing.map(({ id, manifest }) => ({
+        package_id: id,
+        display_name: manifest.display_name || id,
+      })),
     });
   });
 
@@ -1085,6 +1091,7 @@ export function createIntegrationsRouter() {
         manifest: proposal.manifest,
         icon_source: proposal.iconSource,
         instructions: proposal.instructions,
+        tools: proposal.tools.map(({ readOnly, ...tool }) => ({ ...tool, read_only: readOnly })),
         warnings: proposal.warnings,
       });
     },

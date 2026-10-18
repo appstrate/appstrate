@@ -1000,7 +1000,7 @@ export const integrationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["manifest", "icon_source", "provenance", "warnings"],
+                required: ["manifest", "icon_source", "provenance", "warnings", "existing"],
                 properties: {
                   manifest: {
                     type: "object",
@@ -1056,6 +1056,23 @@ export const integrationsPaths = {
                       },
                     },
                   },
+                  existing: {
+                    type: "array",
+                    description:
+                      "The integrations already backed by this server: those `GET /api/integrations` lists to the caller in the current space (the organization's and the system's, placed in this space, never an ephemeral one) whose `source` is remote and whose `source.remote.url` equals the request's `url` once both are canonicalized (WHATWG serialization, userinfo and fragment dropped) — nothing looser, no match on name or domain. Never names a package the caller cannot list. Ordered by `package_id`; empty when none.",
+                    items: {
+                      type: "object",
+                      required: ["package_id", "display_name"],
+                      properties: {
+                        package_id: { type: "string" },
+                        display_name: {
+                          type: "string",
+                          description: "The manifest's `display_name`, else the package id.",
+                        },
+                      },
+                      additionalProperties: false,
+                    },
+                  },
                 },
               },
             },
@@ -1087,7 +1104,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Propose manifest fields from the integration's connected MCP server",
       description:
-        "Connects to the remote MCP server of the integration's latest published version through the credential proxy — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, each exchange journaled like one of its calls (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500 tools over 20 pages of at most 2 MiB each) as `default_tools` with an empty `tools_policy` entry each, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning). The whole sync is bounded to 20 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Only a Streamable HTTP server is supported. Requires `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too) and write authority on the package in its home space. Rate limited to 10 requests per minute.",
+        "Connects to the remote MCP server of the integration's latest published version through the credential proxy — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, each exchange journaled like one of its calls (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500 tools over 20 pages of at most 2 MiB each) as an empty `tools_policy` entry each and as an entry of `tools`, and as `default_tools` only the tools annotated `readOnlyHint: true`, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning). The whole sync is bounded to 20 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Only a Streamable HTTP server is supported. Requires `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too) and write authority on the package in its home space. Rate limited to 10 requests per minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1120,7 +1137,7 @@ export const integrationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["manifest", "icon_source", "instructions", "warnings"],
+                required: ["manifest", "icon_source", "instructions", "tools", "warnings"],
                 properties: {
                   manifest: {
                     type: "object",
@@ -1128,10 +1145,16 @@ export const integrationsPaths = {
                     description:
                       "A partial AFPS integration manifest: only the fields the server reported.",
                     properties: {
-                      default_tools: { type: "array", items: { type: "string" } },
+                      default_tools: {
+                        type: "array",
+                        items: { type: "string" },
+                        description:
+                          "The selection an agent inherits: only the tools the server annotates `readOnlyHint: true`, in server order; empty when it annotates none. Discovering a tool never selects it otherwise.",
+                      },
                       tools_policy: {
                         type: "object",
                         additionalProperties: { type: "object" },
+                        description: "Every tool listed, each with an empty policy.",
                       },
                       display_name: { type: "string" },
                       description: { type: "string" },
@@ -1148,6 +1171,36 @@ export const integrationsPaths = {
                     type: ["string", "null"],
                     description:
                       "The server's `initialize` instructions, for the editor to propose as `INTEGRATION.md`; null when it sent none, or when the package's draft already holds an `INTEGRATION.md` (whatever its content, empty included).",
+                  },
+                  tools: {
+                    type: "array",
+                    description:
+                      "Every tool listed, in server order, one entry per name (the first listed wins), for the editor to show and select from. MCP annotations are the server's untrusted hints: `read_only` only drives the `default_tools` pre-selection.",
+                    items: {
+                      type: "object",
+                      required: ["name", "read_only"],
+                      properties: {
+                        name: { type: "string" },
+                        title: {
+                          type: "string",
+                          maxLength: 200,
+                          description:
+                            "The tool's `title` (else `annotations.title`), trimmed, at most 200 characters (a cut ends with `…`); absent when empty.",
+                        },
+                        description: {
+                          type: "string",
+                          maxLength: 1024,
+                          description:
+                            "The tool's `description`, trimmed, at most 1024 characters (a cut ends with `…`); absent when empty.",
+                        },
+                        read_only: {
+                          type: "boolean",
+                          description:
+                            "True only when the server annotates the tool `readOnlyHint: true`.",
+                        },
+                      },
+                      additionalProperties: false,
+                    },
                   },
                   warnings: {
                     type: "array",
