@@ -795,7 +795,9 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
 ## 13. Chat
 
 The chat is `@appstrate/module-chat` (UI in `packages/module-chat/src/ui/`, built
-on assistant-ui) inside the shared shell (its list: `modules/chat/chat-sidebar.tsx`). It
+on assistant-ui). Its lightweight `@appstrate/module-chat/conversation-skeleton`
+is shared by the route fallback and the history wait. The chat sits inside the
+shared shell (its list: `modules/chat/chat-sidebar.tsx`). It
 uses `@appstrate/ui` primitives and the host's `t` (`chat.json`), it cannot
 import from `apps/web`. A tool call is a `ToolCallCard` (`tool-uis.tsx`),
 reasoning a collapsible group (`reasoning.tsx`), a run started from the chat a

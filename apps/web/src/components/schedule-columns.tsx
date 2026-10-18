@@ -63,7 +63,7 @@ export function useScheduleColumns({
               did not say it at all. */}
           {showAgentName &&
             (agentPending ? (
-              <Skeleton className="mt-0.5 h-4 w-24" />
+              <Skeleton className="my-0.5 h-3 w-24" />
             ) : (
               <CellText>{agentName(schedule)}</CellText>
             ))}

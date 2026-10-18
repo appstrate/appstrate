@@ -25,7 +25,7 @@ import { ContextSelector } from "../../components/settings/context-selector";
 import { cn } from "@appstrate/ui/cn";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { PanelLayout } from "../../components/panel-layout";
-import { SettingsSkeleton } from "../../components/loading-skeletons";
+import { PanelTitleBlock, SettingsSkeleton } from "../../components/loading-skeletons";
 import { useSpaces } from "../../hooks/use-spaces";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
@@ -219,6 +219,9 @@ export function UnifiedSettingsLayout() {
         ) : null
       }
     >
+      {/* Until the permissions land no entry is reachable, so none is active yet: hold the
+          title row's place rather than push the page down when it appears. */}
+      {!ready && <PanelTitleBlock />}
       {activeItem && (
         <div className="mb-6 flex min-h-9 items-center justify-between gap-3 md:gap-4">
           <SettingsHeading className="mb-0" title={label(activeItem.labelKey)} />

@@ -10,6 +10,7 @@ import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
 import { OptionSelect } from "@/components/app-ui/option-select";
 import { TextSkeleton } from "./loading-skeletons";
+import { ErrorState } from "./page-states";
 import { ScopeMultiSelect, ScopeSummaryBadges } from "./scope-multi-select";
 import { useCreateApiKey, useAvailableScopes } from "../hooks/use-api-keys";
 import { errorMessage } from "../lib/mutation-error";
@@ -21,7 +22,7 @@ function computeExpiresAt(expiresIn: string): string | null {
 
 export function ApiKeyCreateModal({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation(["settings", "common"]);
-  const { data: availableScopes } = useAvailableScopes();
+  const { data: availableScopes, error: scopesError } = useAvailableScopes();
   const [created, setCreated] = useState<{ key: string; scopes: string[] } | null>(null);
 
   if (created) {
@@ -53,6 +54,7 @@ export function ApiKeyCreateModal({ onClose }: { onClose: () => void }) {
   return (
     <ApiKeyCreateForm
       availableScopes={availableScopes}
+      scopesError={scopesError}
       onClose={onClose}
       onCreated={(key, scopes) => setCreated({ key, scopes })}
     />
@@ -61,10 +63,12 @@ export function ApiKeyCreateModal({ onClose }: { onClose: () => void }) {
 
 function ApiKeyCreateForm({
   availableScopes,
+  scopesError,
   onClose,
   onCreated,
 }: {
   availableScopes: string[] | undefined;
+  scopesError: unknown;
   onClose: () => void;
   onCreated: (key: string, scopes: string[]) => void;
 }) {
@@ -147,6 +151,8 @@ function ApiKeyCreateForm({
             selected={effectiveScopes}
             onChange={setSelectedScopes}
           />
+        ) : scopesError ? (
+          <ErrorState error={scopesError} compact />
         ) : (
           <TextSkeleton lines={4} />
         )}

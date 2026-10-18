@@ -147,21 +147,33 @@ export function useIntegrationsById(
   for (let i = 0; i < unique.length; i += IDS_PER_REQUEST) {
     chunks.push(unique.slice(i, i + IDS_PER_REQUEST));
   }
-  return useQueries({
-    queries: chunks.map((chunk) => ({
-      ...$api.queryOptions("get", "/api/integrations", {
-        params: { query: { id: chunk, limit: IDS_PER_REQUEST }, header: scope.header },
-      }),
-      enabled: scope.enabled && (options?.enabled ?? true),
-    })),
-    combine: (results) => ({
-      data: results.every((result) => result.data)
-        ? results.flatMap((result) => result.data!.data as IntegrationSummaryWire[])
+  const orgId = scope.header["X-Org-Id"];
+  const spaceId = scope.header["X-Space-Id"];
+  const query = useQuery({
+    queryKey: ["get", "/api/integrations", "by-id", orgId, spaceId, unique],
+    queryFn: async ({ signal }) => {
+      const responses = await Promise.all(
+        chunks.map((chunk) =>
+          client.GET("/api/integrations", {
+            params: { query: { id: chunk, limit: IDS_PER_REQUEST }, header: scope.header },
+            signal,
+          }),
+        ),
+      );
+      return responses.flatMap((response) => response.data!.data as IntegrationSummaryWire[]);
+    },
+    enabled: scope.enabled && (options?.enabled ?? true),
+    // One observer retains the combined result; useQueries cannot retain changed keys.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[3] === orgId && previousQuery?.queryKey[4] === spaceId
+        ? previous
         : undefined,
-      isLoading: results.some((result) => result.isLoading),
-      error: results.find((result) => result.error)?.error ?? null,
-    }),
   });
+  return {
+    data: unique.length === 0 ? [] : query.data,
+    isLoading: unique.length > 0 && query.isLoading,
+    error: query.error,
+  };
 }
 
 export function useIntegrationDetail(packageId: string | undefined) {

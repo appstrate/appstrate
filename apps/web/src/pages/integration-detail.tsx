@@ -469,6 +469,7 @@ export function IntegrationDetailPage() {
         isOwned={isOwned}
         forkedFrom={pkg?.forked_from ?? null}
         draftReadOnly={pkg?.definition === "draft" && !homeWritable}
+        pending={pkgLoading}
       />
 
       {needsWizardFinish({

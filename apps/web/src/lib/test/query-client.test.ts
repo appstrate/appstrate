@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach, afterEach, spyOn, type Mock } from "b
 import { toast } from "sonner";
 import { ApiError } from "../../api/errors.ts";
 import { queryClient, shouldRetryQuery } from "../query-client.ts";
+import { fileBlobKeys } from "../query-keys.ts";
 import i18n, { i18nReady } from "../../i18n.ts";
 
 // The i18n instance is shared by every file of the process, and the forbidden
@@ -98,5 +99,20 @@ describe("failed mutations", () => {
     );
 
     expect(toastError).not.toHaveBeenCalled();
+  });
+});
+
+describe("file blob cache", () => {
+  it("revokes the object URL when the entry leaves the cache", () => {
+    const revoke = spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    try {
+      queryClient.setQueryData(fileBlobKeys.detail("file_1", {}), "blob:one");
+      queryClient.setQueryData(["other", "file_1"], "blob:untouched");
+      queryClient.removeQueries({ queryKey: [fileBlobKeys.root] });
+      queryClient.removeQueries({ queryKey: ["other"] });
+      expect(revoke.mock.calls).toEqual([["blob:one"]]);
+    } finally {
+      revoke.mockRestore();
+    }
   });
 });

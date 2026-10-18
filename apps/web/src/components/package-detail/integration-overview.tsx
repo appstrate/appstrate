@@ -125,7 +125,7 @@ export function IntegrationOverview({
           <dl className="divide-y">
             <OperationalStat
               label={t("integration.summary.agentsCount")}
-              value={agentsLoading ? <Skeleton className="h-6 w-10" /> : (agents?.length ?? "—")}
+              value={agentsLoading ? <Skeleton className="h-7 w-10" /> : (agents?.length ?? "—")}
             />
             <OperationalStat
               label={t("integration.summary.agentPreview")}

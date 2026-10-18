@@ -36,6 +36,7 @@ function facts(
     inputCount?: number;
     hasMore?: boolean;
     filesDenied?: boolean;
+    loading?: boolean;
   } = {},
 ): string {
   const run: EnrichedRun = makeRun({
@@ -48,7 +49,7 @@ function facts(
       run={run}
       files={files}
       hasMore={extra.hasMore ?? false}
-      isLoading={false}
+      isLoading={extra.loading ?? false}
       error={null}
       filesDenied={extra.filesDenied ?? false}
     />,
@@ -61,6 +62,18 @@ describe("the files the run consumed", () => {
     expect(html).toContain("brief.pdf");
     expect(html).toContain("source.csv");
     expect(html).not.toContain("rapport.md");
+  });
+});
+
+describe("the files row while the files load", () => {
+  it("is not drawn for a run that consumed no file (nothing will land there)", () => {
+    const html = facts([], { input: { topic: "x" }, inputCount: 0, loading: true });
+    expect(html).not.toContain("animate-pulse");
+    expect(html).not.toContain(agentsFr["run.snapshotInputFiles"]);
+  });
+
+  it("holds a skeleton for a run that consumed files", () => {
+    expect(facts([], { inputCount: 2, loading: true })).toContain("animate-pulse");
   });
 });
 

@@ -10,6 +10,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./ui": "./src/ui/index.tsx",
+    "./conversation-skeleton": "./src/ui/conversation-skeleton.tsx",
     "./unread": "./src/ui/use-sessions.ts",
     "./agent-authoring": "./src/ui/agent-authoring-store.ts",
     "./capabilities": "./src/capabilities.ts"

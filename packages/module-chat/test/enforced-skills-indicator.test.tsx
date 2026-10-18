@@ -12,7 +12,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TooltipProvider } from "@appstrate/ui/components/tooltip";
 
 import { EnforcedSkillsIndicator } from "../src/ui/enforced-skills.tsx";
-import { ChatHostProvider, type ChatHost } from "../src/ui/runtime-context.ts";
+import { ChatHostProvider, type ChatHost, type GetHeaders } from "../src/ui/runtime-context.ts";
 import type { SkillHint } from "../src/skills.ts";
 
 const host: ChatHost = {
@@ -29,14 +29,15 @@ const host: ChatHost = {
 const getHeaders = () => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" });
 
 /** Seeds the shared read, so the render is the answer and not a fetch. */
-function render(enforced: SkillHint[]): string {
+function render(enforced: SkillHint[] | null, headers: GetHeaders = getHeaders): string {
   const qc = new QueryClient();
-  qc.setQueryData(["chat", "enforced-skills", "spc_a"], enforced);
+  // `null`: nothing seeded, the read is on its way.
+  if (enforced) qc.setQueryData(["chat", "enforced-skills", "spc_a"], enforced);
   return renderToString(
     <QueryClientProvider client={qc}>
       <ChatHostProvider value={host}>
         <TooltipProvider>
-          <EnforcedSkillsIndicator getHeaders={getHeaders} />
+          <EnforcedSkillsIndicator getHeaders={headers} />
         </TooltipProvider>
       </ChatHostProvider>
     </QueryClientProvider>,
@@ -46,6 +47,14 @@ function render(enforced: SkillHint[]): string {
 describe("EnforcedSkillsIndicator", () => {
   it("renders nothing when the space imposes nothing", () => {
     expect(render([])).toBe("");
+  });
+
+  it("holds its place while the space's read is on its way", () => {
+    expect(render(null)).toContain("animate-pulse");
+  });
+
+  it("never waits on a read that does not run: no space, no placeholder", () => {
+    expect(render([], () => ({ "X-Org-Id": "org_1" }))).toBe("");
   });
 
   it("names every enforced skill, falling back to the package id", () => {

@@ -471,7 +471,8 @@ export function RunInputFacts({
   // `hasMore` describes the whole container: the inputs are cut only when
   // fewer of them arrived than the run says it consumed.
   const inputsCut = hasMore && inputDocuments.length < inputFileCount;
-  const showFiles = inputFileCount > 0 || inputDocuments.length > 0 || isLoading || Boolean(error);
+  // The run already says how many input files it consumed: a run with none has no files row to wait for.
+  const showFiles = inputFileCount > 0 || inputDocuments.length > 0 || Boolean(error);
 
   if (inputValueEntries.length === 0 && !showFiles) {
     return <p className="text-muted-foreground text-sm">{t("run.snapshotNoInput")}</p>;

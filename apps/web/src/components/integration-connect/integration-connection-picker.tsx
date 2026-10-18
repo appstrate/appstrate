@@ -71,10 +71,15 @@ type LoadedPickerProps = Omit<ConnectionPickerOptions, "persistence"> & {
 function LoadedPicker({ persistence = DEFAULT_PERSISTENCE, ...options }: LoadedPickerProps) {
   const { integrationId, agentPackageId, version } = options;
   const picker = useConnectionPicker({ ...options, persistence });
-  const { isError } = useIntegrationReadinessEntry(integrationId, agentPackageId, version);
+  const { data: entry, isError } = useIntegrationReadinessEntry(
+    integrationId,
+    agentPackageId,
+    version,
+  );
 
-  // Failure first: `isPending` is false once a query failed, so a missing verdict alone would spin forever.
-  if (isError) return <FailedPicker integrationId={integrationId} />;
+  // Failure first: `isPending` is false once a query failed, so a missing verdict alone would
+  // spin forever. A read that answered without this integration (`null`) is no verdict either.
+  if (isError || entry === null) return <FailedPicker integrationId={integrationId} />;
   if (!picker) return <LoadingPicker integrationId={integrationId} />;
 
   const { canAddConnection, closedLock, additionsAllowed, candidates, authKeys, explicitIds } =

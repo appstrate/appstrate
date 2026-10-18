@@ -6,8 +6,9 @@ import type { GetHeaders } from "./runtime-context.ts";
 import { spaceIdFromHeaders } from "./sessions.ts";
 
 /**
- * Shared by the picker and the read-only indicator. Default staleness: each
- * mount refetches, so a library toggle shows without a cross-module invalidation.
+ * Shared by the picker and the read-only indicator. Default staleness (30 s):
+ * a library toggle shows on the next mount past it, without a cross-module
+ * invalidation.
  */
 export function useEnforcedSkills(getHeaders: GetHeaders | undefined) {
   const spaceId = spaceIdFromHeaders(getHeaders);

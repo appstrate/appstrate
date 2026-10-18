@@ -5,6 +5,7 @@
 import { MutationCache, QueryClient } from "@tanstack/react-query";
 import { ApiError, isTransientError } from "../api/errors";
 import { onMutationError } from "./mutation-error";
+import { fileBlobKeys } from "./query-keys";
 
 declare module "@tanstack/react-query" {
   interface Register {
@@ -41,4 +42,12 @@ export const queryClient = new QueryClient({
       refetchOnWindowFocus: false,
     },
   },
+});
+
+// An object URL is not garbage collected with the cache entry that holds it: revoke it when the
+// entry is removed (gc, `clear()`), the one moment nobody can render it any more.
+queryClient.getQueryCache().subscribe((event) => {
+  if (event.type !== "removed" || event.query.queryKey[0] !== fileBlobKeys.root) return;
+  const url = event.query.state.data;
+  if (typeof url === "string") URL.revokeObjectURL(url);
 });
