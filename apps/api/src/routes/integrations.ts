@@ -1055,7 +1055,7 @@ export function createIntegrationsRouter() {
       provenance: proposal.provenance,
       warnings: proposal.warnings,
       existing: existing.map(({ id, manifest }) => ({
-        package_id: id,
+        integration_package_id: id,
         display_name: manifest.display_name || id,
       })),
     });

@@ -1059,12 +1059,12 @@ export const integrationsPaths = {
                   existing: {
                     type: "array",
                     description:
-                      "The integrations already backed by this server: those `GET /api/integrations` lists to the caller in the current space (the organization's and the system's, placed in this space, never an ephemeral one) whose `source` is remote and whose `source.remote.url` equals the request's `url` once both are canonicalized (WHATWG serialization, userinfo and fragment dropped) — nothing looser, no match on name or domain. Never names a package the caller cannot list. Ordered by `package_id`; empty when none.",
+                      "The integrations already backed by this server: those `GET /api/integrations` lists to the caller in the current space (the organization's and the system's, placed in this space, never an ephemeral one) whose `source` is remote and whose `source.remote.url` equals the request's `url` once both are canonicalized (WHATWG serialization, userinfo and fragment dropped) — nothing looser, no match on name or domain. Never names a package the caller cannot list. Ordered by `integration_package_id`; empty when none.",
                     items: {
                       type: "object",
-                      required: ["package_id", "display_name"],
+                      required: ["integration_package_id", "display_name"],
                       properties: {
-                        package_id: { type: "string" },
+                        integration_package_id: { type: "string" },
                         display_name: {
                           type: "string",
                           description: "The manifest's `display_name`, else the package id.",

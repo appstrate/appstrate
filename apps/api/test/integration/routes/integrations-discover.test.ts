@@ -183,8 +183,8 @@ describe("POST /api/integrations/discover", () => {
     expect(res.status).toBe(200);
     const { existing } = (await res.json()) as { existing: unknown[] };
     expect(existing).toEqual([
-      { package_id: "@acme/tracker", display_name: "Acme Tracker" },
-      { package_id: "@appstrate/tracker", display_name: "@appstrate/tracker" },
+      { integration_package_id: "@acme/tracker", display_name: "Acme Tracker" },
+      { integration_package_id: "@appstrate/tracker", display_name: "@appstrate/tracker" },
     ]);
   });
 

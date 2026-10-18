@@ -64,7 +64,7 @@ const discovery = {
   icon_source: null,
   provenance: { "/display_name": "detected", "/name": "guessed", "/auths/oauth": "detected" },
   warnings: [],
-  existing: [{ package_id: "@org/acme-old", display_name: "Acme (ancienne)" }],
+  existing: [{ integration_package_id: "@org/acme-old", display_name: "Acme (ancienne)" }],
 } as unknown as DiscoveryResult;
 
 describe("the review", () => {

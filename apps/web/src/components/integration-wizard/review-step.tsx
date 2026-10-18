@@ -69,14 +69,16 @@ export function ReviewStep({
             <p>{t("integrationWizard.review.existing.description")}</p>
             <ul className="mt-2 flex flex-col gap-1">
               {result.existing.map((match) => (
-                <li key={match.package_id}>
+                <li key={match.integration_package_id}>
                   <Link
                     className="text-foreground font-medium underline-offset-4 hover:underline"
-                    to={packageDetailPath("integration", match.package_id)}
+                    to={packageDetailPath("integration", match.integration_package_id)}
                   >
                     {match.display_name}
                   </Link>{" "}
-                  <code className="text-muted-foreground text-xs">{match.package_id}</code>
+                  <code className="text-muted-foreground text-xs">
+                    {match.integration_package_id}
+                  </code>
                 </li>
               ))}
             </ul>
