@@ -634,23 +634,17 @@ function buildSidecarTools(options: MountMcpOptions): {
       },
       body: {
         description:
-          "Request body.\n" +
-          API_CALL_BODY_FROM_FILE_RULE +
-          "\nShapes:\n" +
-          '  - JSON object (e.g. { "url": "https://…" }): small hand-written JSON bodies — a ' +
-          "few fields with short values. Serialized to a JSON string and sent with " +
-          "Content-Type: application/json by default (unless you set the header yourself).\n" +
-          "  - string: small pre-serialized text/JSON/XML/form bodies. No Content-Type is added " +
+          `Request body. ${API_CALL_BODY_FROM_FILE_RULE} Shapes:\n` +
+          '  - JSON object (e.g. { "url": "https://…" }): serialized to a JSON ' +
+          "string and sent with Content-Type: application/json by default (unless you set " +
+          "the header yourself).\n" +
+          "  - string: pre-serialized text/JSON/XML/form bodies. No Content-Type is added " +
           "automatically — set it yourself when the endpoint needs one.\n" +
-          "  - { fromFile: <workspace-relative path> }: send a workspace file's bytes verbatim " +
-          "as the body — the shape for any body that is already in the workspace, is generated " +
-          "by a command, or is longer than a few KB. Resolved agent-side before the call, so " +
-          "the file never enters the model context and arrives byte-exact. No Content-Type is " +
-          "added: set it in `headers`. Capped at SIDECAR_MAX_REQUEST_BODY_BYTES (buffered over " +
-          "MCP, not streamed — use api_upload for larger).\n" +
-          "  - { fromBytes: <base64>, encoding: 'base64' }: a SMALL binary payload you already " +
-          "hold as a short base64 string (a few hundred bytes). Never the base64 of a workspace " +
-          "file — use { fromFile } for that. " +
+          "  - { fromFile: <workspace-relative path> }: send a workspace file's bytes as the " +
+          "body without base64-encoding it into this argument. Resolved agent-side (read + " +
+          "base64) before the call, so the file never enters the model context. Capped at " +
+          "SIDECAR_MAX_REQUEST_BODY_BYTES (buffered over MCP, not streamed — use api_upload for larger).\n" +
+          "  - { fromBytes: <base64>, encoding: 'base64' }: small binary payloads only. " +
           "Standard base64 (RFC 4648 §4) only — no URL-safe alphabet, no whitespace.\n" +
           "  - { multipart: [...] }: multipart/form-data uploads. The sidecar " +
           "builds a `FormData` from the supplied parts and lets `fetch()` set the " +
@@ -659,10 +653,7 @@ function buildSidecarTools(options: MountMcpOptions): {
           "must match the body bytes). Each part is either " +
           "`{ name, value }` (a string field) or " +
           "`{ name, filename, bytes: <base64>, encoding: 'base64', contentType? }` " +
-          "(a file part). A file part's bytes are inline base64, so keep it to a small " +
-          "payload; for a workspace file, send it as the whole body with { fromFile } (or " +
-          "api_upload when large) if the endpoint accepts that. " +
-          "Decoded byte sizes summed across all parts must fit " +
+          "(a file part). Decoded byte sizes summed across all parts must fit " +
           "SIDECAR_MAX_REQUEST_BODY_BYTES.",
         oneOf: [
           { type: "string" },
@@ -674,8 +665,7 @@ function buildSidecarTools(options: MountMcpOptions): {
               fromFile: {
                 type: "string",
                 description:
-                  "Workspace-relative path; the runtime reads the file and sends its bytes " +
-                  "verbatim as the request body. Set Content-Type in `headers`.",
+                  "Workspace-relative path; the runtime reads the file and sends its bytes as the request body.",
               },
             },
           },
@@ -835,11 +825,8 @@ function buildSidecarTools(options: MountMcpOptions): {
           `Make an authenticated request through the "${integ.integrationId}" integration's ` +
           "credential-injecting proxy. The sidecar injects the integration's resolved " +
           "credential and forwards the request to the supplied target URL, which must match " +
-          "the integration auth's `authorizedUris`. To send content you produced or that sits " +
-          "in the workspace (a file, its base64, a large JSON body), write the complete request " +
-          "body to a workspace file and pass body: { fromFile } — never re-type it into the " +
-          "arguments. Binary upstream responses spill to MCP `resources` and are returned as a " +
-          "`resource_link`.",
+          "the integration auth's `authorizedUris`. Binary upstream responses spill to MCP " +
+          "`resources` and are returned as a `resource_link`.",
         inputSchema:
           CREDENTIAL_PROXY_INPUT_SCHEMA as unknown as AppstrateToolDefinition["descriptor"]["inputSchema"],
         // Capability marker (read agent-side by `direct.ts`) — routes this
