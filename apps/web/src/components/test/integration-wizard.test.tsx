@@ -99,6 +99,13 @@ describe("the review", () => {
     expect(html).not.toContain("streamable-http");
   });
 
+  it("creates without publishing, and says so", () => {
+    const html = review();
+    expect(html).toContain(">Créer</button>");
+    expect(html).not.toContain("publier</button>");
+    expect(agentsFr["integrationWizard.review.effect"]).toContain("Rien n’est publié");
+  });
+
   it("stops marking a name or identifier the user changed as detected or suggested", () => {
     const html = render(
       <ReviewStep
@@ -132,7 +139,7 @@ const catalog = {
 describe("the tools step", () => {
   const choice = (
     selected: string[],
-    over: { proposal?: ServerSyncProposal; otherDraftChanges?: boolean } = {},
+    over: { proposal?: ServerSyncProposal; otherDraftChanges?: boolean; pending?: boolean } = {},
   ) =>
     render(
       <ToolsChoice
@@ -147,7 +154,7 @@ describe("the tools step", () => {
         onIncludeDocsChange={noop}
         version="1.1.0"
         onSubmit={noop}
-        pending={false}
+        pending={over.pending ?? false}
         saveError={null}
         publishError={null}
       />,
@@ -184,6 +191,16 @@ describe("the tools step", () => {
     expect(html).toContain("integration-wizard-draft-changes");
     expect(html).toContain('href="/integrations/@org/acme"');
     expect(html).toContain("Enregistrer et publier la version 1.1.0");
+  });
+
+  it("freezes the whole selection, the select-all and select-none buttons included, while saving", () => {
+    const button = (html: string, label: string) =>
+      new RegExp(`<button[^>]*>${label}</button>`).exec(html)?.[0] ?? "";
+    for (const key of ["integrationWizard.tools.selectAll", "integrationWizard.tools.selectNone"]) {
+      const label = agentsFr[key as keyof typeof agentsFr];
+      expect(button(choice(["search"]), label)).not.toContain(" disabled=");
+      expect(button(choice(["search"], { pending: true }), label)).toContain(" disabled=");
+    }
   });
 
   it("offers no publish when the server lists no tool", () => {

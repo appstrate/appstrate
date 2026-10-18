@@ -2,9 +2,10 @@
 
 /**
  * Adding an integration from an MCP server URL, guided: analyse the address, review the proposal,
- * create and publish 1.0.0, connect an account, choose the server's tools, publish them. The only
- * state carried across a reload is `?package=<id>` once the package exists: every later step is
- * read from the package (published version, usable connection, declared tools).
+ * create the draft (activated here, nothing published), connect an account, choose the server's
+ * tools, then publish once — the draft's own version (1.0.0) — with them. The only state carried
+ * across a reload is `?package=<id>` once the package exists: every later step is read from the
+ * package (published version, usable connection, declared tools).
  */
 
 import { useRef, useState } from "react";
@@ -32,9 +33,7 @@ import { useCreatePackage } from "../hooks/use-mutations";
 import { usePackageDetail } from "../hooks/use-packages";
 import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-integrations";
 import { encodeIconDataUri } from "../lib/icon-image";
-import { packageCreateBody } from "../lib/package-file-drafts";
 import { packageDetailPath } from "../lib/package-paths";
-import { integrationSettingsHref } from "../lib/settings-section-href";
 import {
   declaredToolNames,
   defaultToolCount,
@@ -43,17 +42,17 @@ import {
   isCurrentAnalysis,
   isRemoteSource,
   manualCreationState,
-  nextMinorVersion,
   proposalEdits,
+  toolsPublishVersion,
   type DiscoveryResult,
   type IntegrationWizardStep,
+  wizardCreateBody,
   wizardResumePath,
   type WizardEdits,
 } from "../lib/integration-wizard";
 
 const PROGRESS: Record<IntegrationWizardStep, WizardStepId | null> = {
   notRemote: null,
-  unpublished: "review",
   connect: "connect",
   tools: "tools",
   ready: null,
@@ -167,8 +166,7 @@ function NewIntegrationWizard() {
           creating={create.isPending}
           createError={create.error}
           onCreate={() => {
-            if (!create.isPending)
-              create.mutate(packageCreateBody({ manifest: accepted(review) }, "integration"));
+            if (!create.isPending) create.mutate(wizardCreateBody(accepted(review)));
           }}
           onManual={() =>
             navigate("/integrations/new", { state: manualCreationState(accepted(review)) })
@@ -197,13 +195,19 @@ function ExistingPackageWizard({ packageId }: { packageId: string }) {
 
   const detail = integration.data;
   const manifest = detail.manifest as Record<string, unknown>;
+  const published = (draft.data.version_count ?? 0) > 0;
   const step = integrationWizardStep({
     remote: isRemoteSource(manifest),
-    published: (draft.data.version_count ?? 0) > 0,
+    published,
     connected: detail.auths.some((auth) => auth.ready),
+    // The detail reads the published version, else the draft.
     toolsDeclared: declaredToolNames(manifest).length > 0,
   });
-  const version = nextMinorVersion(detail.manifest.version);
+  const version = toolsPublishVersion({
+    published,
+    publishedVersion: detail.manifest.version,
+    draftVersion: draft.data.manifest?.version,
+  });
   const detailPath = packageDetailPath("integration", packageId);
   const name = detail.manifest.display_name ?? packageId;
 
@@ -212,12 +216,9 @@ function ExistingPackageWizard({ packageId }: { packageId: string }) {
       <WizardProgress current={PROGRESS[step]} />
       {step !== "ready" && step !== "notRemote" && (
         <p className="text-muted-foreground text-sm">
-          {t(
-            step === "unpublished"
-              ? "integrationWizard.resume.createdUnpublished"
-              : "integrationWizard.resume.created",
-            { name, version: detail.manifest.version },
-          )}
+          {published
+            ? t("integrationWizard.resume.published", { name, version: detail.manifest.version })
+            : t("integrationWizard.resume.draft", { name })}
         </p>
       )}
       {step === "notRemote" && (
@@ -232,24 +233,15 @@ function ExistingPackageWizard({ packageId }: { packageId: string }) {
           </div>
         </WizardSection>
       )}
-      {step === "unpublished" && (
-        <WizardSection
-          title={t("integrationWizard.unpublished.title")}
-          description={t("integrationWizard.unpublished.description")}
-        >
-          <div className="flex flex-wrap gap-2">
-            <Button asChild>
-              <Link to={integrationSettingsHref(detailPath, "identity")}>
-                {t("integrationWizard.unpublished.edit")}
-              </Link>
-            </Button>
-          </div>
-        </WizardSection>
-      )}
       {step === "connect" && <ConnectStep packageId={packageId} detail={detail} />}
       {step === "tools" &&
         (version ? (
-          <ToolsStep packageId={packageId} draft={draft.data} version={version} />
+          <ToolsStep
+            packageId={packageId}
+            draft={draft.data}
+            version={version}
+            published={published}
+          />
         ) : (
           <ErrorState />
         ))}

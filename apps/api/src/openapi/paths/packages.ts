@@ -2187,6 +2187,12 @@ export const packagesPaths = {
                   type: "string",
                   description: "Primary package file content (manifest file).",
                 },
+                publish: {
+                  type: "boolean",
+                  default: true,
+                  description:
+                    "`false` skips the initial version snapshot of `manifest.version`: the package is created as a draft only (`version_count: 0`), and still activated in its home space (the current space), so it can be connected and its draft synchronized from its server. The manifest is validated exactly as with `true`, `version` included. Until a version is published, a run declaring the integration fails with `422 dependency_unresolved`. Omitted or `true`, the version is published when the manifest allows it, and the package is activated only when it was.",
+                },
               },
               additionalProperties: false,
             },

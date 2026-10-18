@@ -25,7 +25,10 @@ import { trackAudit } from "./audit.ts";
 import { recordConnectionCall, type ConnectionCall } from "./credential-proxy/call-journal.ts";
 import { proxyCall, ProxyCallError } from "./credential-proxy/core.ts";
 import type { ProxyReach } from "./integration-connections.ts";
-import { readIntegrationManifestForProxy } from "./integration-service.ts";
+import {
+  readIntegrationManifestForRun,
+  type ResolvedIntegrationVersion,
+} from "./integration-service.ts";
 import { downloadPackageFiles } from "./package-items/storage.ts";
 import { getCredentialProxyLimits } from "./proxy-limits.ts";
 import { fetchSiteIcon, rasterIcon, siteIconFetch } from "./integration-icon.ts";
@@ -48,6 +51,8 @@ export interface DiscoveredTool {
   readOnly: boolean;
 }
 
+/** The sync reads, and the proxy authorizes against, the draft its route lets a home writer edit. */
+const DRAFT: ResolvedIntegrationVersion = { source: "draft", version: null };
 const SYNC_TIMEOUT_MS = 20_000;
 const MAX_TOOLS = 500;
 /** Bounds a server answering `nextCursor` forever with empty pages. */
@@ -73,14 +78,14 @@ export async function syncIntegrationFromServer(input: {
   signal?: AbortSignal;
 }): Promise<ServerSyncProposal> {
   const { scope, packageId } = input;
-  // The published version: the one `proxyCall` authorizes the call against.
-  const loaded = await readIntegrationManifestForProxy(packageId, scope.orgId, null);
+  // The draft being edited, published or not: `proxyCall` authorizes the exchange against it too.
+  const loaded = await readIntegrationManifestForRun(packageId, DRAFT);
   if (!loaded.ok) {
     throw new ApiError({
-      status: 409,
-      code: "integration_not_published",
-      title: "Integration Not Published",
-      detail: `Integration '${packageId}' has no usable published version.`,
+      status: 400,
+      code: "invalid_draft_manifest",
+      title: "Invalid Draft Manifest",
+      detail: `Draft for '${packageId}' is invalid; fix the manifest before synchronizing.`,
     });
   }
   const source = loaded.manifest.source;
@@ -144,6 +149,7 @@ export async function syncIntegrationFromServer(input: {
         actor: input.actor,
         ...(input.connectionId ? { connectionId: input.connectionId } : {}),
         reach: input.reach,
+        version: DRAFT,
         integrationId: packageId,
         method,
         target: href,

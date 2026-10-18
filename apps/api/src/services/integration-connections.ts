@@ -434,8 +434,8 @@ export interface RunBoundSelection {
 export type ProxyReach = "own" | "usable";
 
 /** What a proxy call selects from: a run's bound set, or the caller's reach outside a run. */
-export type ProxySelectionPath<R extends RunBoundSelection = RunBoundSelection> =
-  { run: R; reach?: never } | { reach: ProxyReach; run?: never };
+type ProxySelectionPath =
+  { run: RunBoundSelection; reach?: never } | { reach: ProxyReach; run?: never };
 
 type ConnectionSelectionContext = { spaceId: string; actor: Actor } & ProxySelectionPath;
 

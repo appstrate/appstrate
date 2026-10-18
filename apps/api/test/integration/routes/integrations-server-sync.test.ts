@@ -11,6 +11,7 @@ import {
   connectionCalls,
   integrationConnectionShares,
   integrationOrgDefaults,
+  packages,
   spacePackages,
 } from "@appstrate/db/schema";
 import { drainAudits } from "../../../src/services/audit.ts";
@@ -315,21 +316,74 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     expect(server.methods).toEqual([]);
   });
 
-  it("answers 409 integration_not_published for a draft never published", async () => {
-    const manifest = remote();
+  it("syncs a draft never published, through the draft's auth, journaling each exchange", async () => {
     await seedPackage({
       id: ID,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
-      draftManifest: manifest,
+      draftManifest: remote(),
     });
     await db
       .insert(spacePackages)
       .values({ enabled: true, spaceId: ctx.defaultSpaceId, packageId: ID });
+    const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+    const res = await sync(ctx, { connection_id: connectionId });
+    expect(res.status).toBe(200);
+    expect(
+      ((await res.json()) as { manifest: { default_tools: string[] } }).manifest.default_tools,
+    ).toEqual(READ_ONLY);
+    expect(server.authorizations.every((a) => a === `Bearer ${TOKEN}`)).toBe(true);
+    await drainAudits(5_000);
+    const rows = await db
+      .select()
+      .from(connectionCalls)
+      .where(eq(connectionCalls.connectionId, connectionId));
+    expect(rows).toHaveLength(5);
+  });
+
+  it("authorizes against the draft, not the published version", async () => {
+    // Published: the server's origin authorized. Draft: another host only.
+    await seedProxyIntegration(ctx, remote());
+    await db
+      .update(packages)
+      .set({ draftManifest: remote({ authorizedUris: ["https://api.example.com/**"] }) })
+      .where(eq(packages.id, ID));
+    await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
     const res = await sync(ctx, {});
-    expect(res.status).toBe(409);
-    expect(((await res.json()) as { code: string }).code).toBe("integration_not_published");
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe("unauthorized_target");
+    expect(server.methods).toEqual([]);
+  });
+
+  it("reads the draft's source: a draft no longer remote is refused", async () => {
+    await seedProxyIntegration(ctx, remote());
+    await db
+      .update(packages)
+      .set({
+        draftManifest: localIntegrationManifest({
+          name: ID,
+          auths: { api_key: { type: "api_key" } },
+        }),
+      })
+      .where(eq(packages.id, ID));
+    const res = await sync(ctx, {});
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { code: string }).code).toBe("integration_not_remote");
+  });
+
+  it("answers 404 for a draft not active in the space", async () => {
+    await seedPackage({
+      id: ID,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: remote(),
+    });
+    await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+    const res = await sync(ctx, {});
+    expect(res.status).toBe(404);
     expect(server.methods).toEqual([]);
   });
 

@@ -34,23 +34,26 @@ import {
   type ServerSyncProposal,
 } from "../../lib/integration-server-sync";
 import { packageDetailPath } from "../../lib/package-paths";
-import { toolsUpdateBody } from "../../lib/integration-wizard";
+import { docsChoice, initialToolSelection, toolsUpdateBody } from "../../lib/integration-wizard";
 import { WizardSection } from "./wizard-section";
 
 /**
  * The server's tools, read through the caller's connection once the step shows, to choose from
- * before anything is saved; then one save and one publish of the next version.
+ * before anything is saved; then one save and one publish: the draft's first version, or the next.
  */
 export function ToolsStep({
   packageId,
   draft,
   version,
+  published,
 }: {
   packageId: string;
   /** The package's working copy, saved under its `ETag`. */
   draft: Versioned<OrgPackageItemDetail>;
   /** The version the tools are published as. */
   version: string;
+  /** A version is already published: the draft's other changes ship with this one. */
+  published: boolean;
 }) {
   const { t } = useTranslation("agents");
   const { can } = usePermissions();
@@ -65,7 +68,12 @@ export function ToolsStep({
       ) : !can("credential-proxy:call-own") ? (
         <RoleLimitNotice>{t("integrationWizard.tools.noPermission")}</RoleLimitNotice>
       ) : (
-        <ServerCatalog packageId={packageId} draft={draft} version={version} />
+        <ServerCatalog
+          packageId={packageId}
+          draft={draft}
+          version={version}
+          published={published}
+        />
       )}
     </WizardSection>
   );
@@ -75,10 +83,12 @@ function ServerCatalog({
   packageId,
   draft,
   version,
+  published,
 }: {
   packageId: string;
   draft: Versioned<OrgPackageItemDetail>;
   version: string;
+  published: boolean;
 }) {
   const { t } = useTranslation("agents");
   const qc = useQueryClient();
@@ -105,8 +115,11 @@ function ServerCatalog({
   const [includeDocs, setIncludeDocs] = useState(true);
   // Set once the draft is saved: a failed publish is retried alone, on that save.
   const [saved, setSaved] = useState<{ etag: string | null }>();
+  // Whether a save of THIS session wrote `INTEGRATION.md`: only that file is ever deleted.
+  const [docsWritten, setDocsWritten] = useState(false);
   // Read before this step saves anything: afterwards the draft differs from the version by our save.
-  const [otherDraftChanges] = useState(draft.has_unarchived_changes === true);
+  // Before the first publish the whole draft IS what is published: there is nothing to warn about.
+  const [otherDraftChanges] = useState(published && draft.has_unarchived_changes === true);
   const update = useUpdatePackage("integration", packageId);
   const publish = useCreateVersion("integration", packageId);
   const detailPath = packageDetailPath("integration", packageId);
@@ -144,21 +157,28 @@ function ServerCatalog({
   }
 
   const proposal = catalog.data;
-  const selected = selection ?? new Set(proposal.manifest.default_tools);
+  const selected = selection ?? initialToolSelection(draft.manifest ?? {}, proposal);
   const submit = async () => {
     try {
       let etag = saved?.etag;
       if (!saved) {
+        const docs = docsChoice({
+          include: includeDocs,
+          instructions: proposal.instructions,
+          written: docsWritten,
+        });
         const result = await update.mutateAsync({
           etag: draft.etag ?? "",
           body: toolsUpdateBody(draft.manifest ?? {}, proposal, {
             selected: proposal.tools.map((tool) => tool.name).filter((name) => selected.has(name)),
             version,
-            instructions: includeDocs ? proposal.instructions : null,
+            instructions: docs.instructions,
+            removeDocs: docs.removeDocs,
           }),
         });
         etag = result.etag;
         setSaved({ etag });
+        setDocsWritten(docs.written);
       }
       await publish.mutateAsync({ version, etag });
       // The published version is what the detail reads: once it lists the tools, the step is done.
@@ -274,6 +294,7 @@ export function ToolsChoice({
             type="button"
             variant="outline"
             size="sm"
+            disabled={pending}
             onClick={() => onSelectedChange(new Set(names))}
           >
             {t("integrationWizard.tools.selectAll")}
@@ -282,6 +303,7 @@ export function ToolsChoice({
             type="button"
             variant="outline"
             size="sm"
+            disabled={pending}
             onClick={() => onSelectedChange(new Set())}
           >
             {t("integrationWizard.tools.selectNone")}

@@ -363,11 +363,16 @@ const packageFileOperationsSchema = z
   // bounded by the body limit, `file_too_large` and `tree_too_large`.
   .min(1);
 
+/**
+ * The create body of a type whose content file is optional — `integration` alone. `publish: false`
+ * skips the initial version snapshot; the package is activated in its home all the same.
+ */
 export const packageJsonCreateSchema = z
   .object({
     manifest: z.record(z.string(), z.unknown()),
     content: z.string().optional(),
     operations: packageFileOperationsSchema.optional(),
+    publish: z.boolean().optional(),
   })
   .strict();
 
@@ -699,6 +704,8 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     const user = c.get("user");
 
     let draft: Parameters<typeof createPackageDraft>[0];
+    // Only the integration body carries `publish`; every other create snapshots its version.
+    let publish = true;
     // Validate the complete tree before either store is written.
     if (rcfg.jsonBodyCreate) {
       // The two create bodies differ only in whether `content` is mandatory,
@@ -711,6 +718,7 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
         rcfg.requireContent ? packageJsonCreateWithContentSchema : packageJsonCreateSchema,
       );
 
+      if ("publish" in body && body.publish === false) publish = false;
       const manifest = body.manifest;
       let content = body.content ?? "";
 
@@ -833,20 +841,23 @@ function makeCreateHandler(rcfg: PackageRouteConfig) {
     const packageId = createdItem.id;
     const manifest = asRecord(createdItem.draftManifest);
     // Snapshot the committed draft manifest, including its storage normalization.
-    const versionCreated = await createVersionSafe({
-      packageId,
-      orgId,
-      userId: user.id,
-      manifest,
-      normalizedFiles: draft.files,
-      lockVersion: createdItem.lockVersion,
-    });
+    const versionCreated = publish
+      ? await createVersionSafe({
+          packageId,
+          orgId,
+          userId: user.id,
+          manifest,
+          normalizedFiles: draft.files,
+          lockVersion: createdItem.lockVersion,
+        })
+      : false;
     // The package was just created HERE (`homeSpaceId: spaceId` above), so the
     // placement rule is satisfied and this is an upsert that cannot conflict.
     // WARN nonetheless: a create whose package never became active in the space
-    // is a half-finished act, and it has to be visible to an operator.
+    // is a half-finished act, and it has to be visible to an operator. A create
+    // that declined its snapshot is activated too: activation at home needs no version.
     const spaceId = c.get("spaceId");
-    if (spaceId && versionCreated) {
+    if (spaceId && (versionCreated || !publish)) {
       await activatePackage({ orgId, spaceId }, packageId).catch((e: unknown) =>
         logger.warn("auto-activation skipped", { packageId, spaceId, err: getErrorMessage(e) }),
       );

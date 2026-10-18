@@ -120,12 +120,14 @@ function IntegrationSettings({
   const { t } = useTranslation(["settings", "agents"]);
   const navigate = useNavigate();
   const { can } = usePermissions();
-  // `detail.manifest` is the published version, the one the sync's server call goes to.
-  const published = readIntegrationSource(detail.manifest.source);
+  // The sync calls the server of the DRAFT, published or not: the copy this editor writes.
+  const draftSource = definition
+    ? readIntegrationSource((definition.manifest as Record<string, unknown>).source)
+    : null;
   const syncable =
-    published?.kind === "remote" &&
-    published.transport !== "sse" &&
-    !isVariableTemplate(published.url) &&
+    draftSource?.kind === "remote" &&
+    draftSource.transport !== "sse" &&
+    !isVariableTemplate(draftSource.url) &&
     can("credential-proxy:call-own") &&
     detail.auths.some((auth) => auth.connections.length > 0);
   const resolve = (requested: string | null): IntegrationSettingsSection =>
@@ -472,11 +474,7 @@ export function IntegrationDetailPage() {
         pending={pkgLoading}
       />
 
-      {needsWizardFinish({
-        manifest: m,
-        published: (pkg?.version_count ?? 0) > 0,
-        writable: !!homeWritable,
-      }) && (
+      {needsWizardFinish({ manifest: m, writable: !!homeWritable }) && (
         <Alert variant="info" className="mb-4" data-testid="integration-wizard-finish">
           <Info />
           <AlertTitle>{t("integrationWizard.finish.title", { ns: "agents" })}</AlertTitle>
