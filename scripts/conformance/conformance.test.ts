@@ -783,9 +783,7 @@ describe("listAllTools — pagination", () => {
   function fakeClient(pages: Array<{ tools: { name: string }[]; nextCursor?: string }>) {
     let call = 0;
     return {
-      client: {
-        listTools: async () => pages[call++ % pages.length],
-      },
+      listToolsPage: async () => pages[call++ % pages.length],
     } as unknown as AppstrateMcpClient;
   }
 

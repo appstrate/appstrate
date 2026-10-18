@@ -369,7 +369,7 @@ export class McpHost {
       });
     }
 
-    // Capture the upstream's MCP `initialize` snapshot so operator
+    // Capture the upstream's MCP identity snapshot (`server/discover` or `initialize`) so operator
     // dashboards can audit which third-party server version is actually
     // wired (versions on disk drift from versions on the wire), and so
     // we can skip `tools/list` against a server that didn't advertise
@@ -383,6 +383,8 @@ export class McpHost {
       data: {
         event: "upstream_registered",
         serverInfo: serverVersion ?? null,
+        // `modern` (2026-07-28, stateless) or `legacy` (`initialize`), and the revision.
+        protocol: effectiveUpstream.client.getProtocol() ?? null,
         capabilities: capabilities ?? null,
       },
     });

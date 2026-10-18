@@ -127,8 +127,6 @@ export function useCanCreateOrg(): boolean {
 }
 
 export function useAuth() {
-  initAuth();
-
   const state = useStore(authStore);
 
   // Email/password login (OSS form, invite acceptance). In OIDC mode these forms never render

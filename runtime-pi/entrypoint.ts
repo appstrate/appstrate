@@ -510,6 +510,8 @@ try {
   mcpClient = await createMcpHttpClient(`${sidecarUrl.replace(/\/$/, "")}/mcp`, {
     clientInfo: { name: "appstrate-runtime-pi", version: "1.0" },
     extraHeaders: { [SIDECAR_AUTH_HEADER]: sidecarAuthToken },
+    // The sidecar's `/mcp` is on the v1 SDK, legacy by construction: no era probe per run.
+    era: "legacy",
     // Operator-tunable per-call tool timeout (absent →
     // SDK default). The same `APPSTRATE_MCP_TOOL_TIMEOUT_MS` knob is
     // honoured sidecar-side, so both legs of an integration tool call

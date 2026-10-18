@@ -2,18 +2,17 @@
 
 /**
  * What a remote MCP server URL says about the integration it would back: its
- * transport, its auth (an MCP `initialize` probe, then RFC 9728 → RFC 8414) and
- * its identity, as a manifest proposal the editor merges. Persists nothing.
+ * transport, its auth (an unauthenticated MCP connect, in whichever protocol era
+ * the server speaks, then RFC 9728 → RFC 8414) and its identity (`server/discover`
+ * or `initialize`, when the server answers either without a credential), as a
+ * manifest proposal the editor merges. Persists nothing.
  * `provenance` marks each proposed field `detected` (the server published it)
  * or `guessed` (inferred), keyed by JSON pointer into the manifest.
  */
 
-import {
-  LATEST_PROTOCOL_VERSION,
-  SUPPORTED_PROTOCOL_VERSIONS,
-} from "@modelcontextprotocol/sdk/types.js";
+import type { Implementation } from "@modelcontextprotocol/sdk/types.js";
 import { parse as parseHost } from "tldts";
-import { DEFAULT_CLIENT_INFO } from "@appstrate/mcp-transport";
+import { createMcpHttpClient, httpStatusOf } from "@appstrate/mcp-transport";
 import {
   discoverProtectedResourceMetadata,
   parseResourceMetadataChallenge,
@@ -24,7 +23,7 @@ import { isIconImage } from "@appstrate/core/appearance";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { scopeTokenSchema } from "@appstrate/core/integration";
 import { toSlug } from "@appstrate/core/naming";
-import { parseSseFrames, parseSseJsonData } from "@appstrate/core/sse";
+import { parseSseFrames } from "@appstrate/core/sse";
 import { ApiError, badGateway, invalidRequest } from "../lib/errors.ts";
 import {
   checkEgressUrl,
@@ -32,10 +31,10 @@ import {
   fetchWithin,
   isBlockedEgressUrl,
 } from "../lib/egress-host-guard.ts";
-import { readBodyPrefix } from "../lib/capped-body.ts";
+import { readBodyPrefix, readBodyUnder } from "../lib/capped-body.ts";
 import { logger } from "../lib/logger.ts";
 import { presentsClientMetadataDocument } from "../lib/integration-client-metadata.ts";
-import { fetchSiteIcon, siteIconFetch } from "./integration-icon.ts";
+import { fetchServerIcon, siteIconFetch } from "./integration-icon.ts";
 
 type Provenance = "detected" | "guessed";
 type Transport = "streamable-http" | "sse";
@@ -50,15 +49,19 @@ export interface RemoteIntegrationProposal {
 const PROBE_TIMEOUT_MS = 10_000;
 /** The whole discovery (probe, auth metadata, icon), each request keeping its own timeout. */
 const DISCOVERY_TIMEOUT_MS = 25_000;
+/** The SSE fallback reads the head of a stream that may never end. */
 const PROBE_BODY_MAX_BYTES = 64 * 1024;
-/** JSON-RPC codes of the 2026-07-28 revision's refusals (-32020 is defined there only). */
-const HEADER_MISMATCH = -32020;
-const METHOD_NOT_FOUND = -32601;
+/** One MCP answer of the probe (`server/discover`, `initialize`, a first `tools/list` page). */
+const PROBE_EXCHANGE_MAX_BYTES = 1024 * 1024;
 
 /** An MCP server that answered the probe with a challenge: it wants a credential. */
 interface ProtectedServer {
   transport: Transport;
+  /** Whether the transport was seen answering, rather than guessed from the URL. */
+  transportDetected: boolean;
   challenge: string;
+  /** What the server says it is, when it answered `server/discover` or `initialize` openly. */
+  identity: Implementation | undefined;
 }
 
 export async function discoverRemoteIntegration(
@@ -94,23 +97,32 @@ export async function discoverRemoteIntegration(
       return found;
     }),
     // Best-effort: past the deadline it finds nothing.
-    fetchSiteIcon(url, iconFetch),
+    fetchServerIcon(url, server.identity, iconFetch),
   ]);
 
-  const displayName = auth.resourceName ?? hostDisplayName(url);
+  const identity = serverIdentityFields(server.identity);
+  const detectedName = server.identity?.title?.trim() || auth.resourceName;
   const provenance: Record<string, Provenance> = {
-    "/display_name": auth.resourceName ? "detected" : "guessed",
+    "/display_name": detectedName || identity.display_name ? "detected" : "guessed",
     // From the host, not `resource_name`: a server's label ("Notion MCP (Beta)") makes a poor id.
     "/name": "guessed",
-    "/source/remote/transport": "guessed",
+    "/source/remote/transport": server.transportDetected ? "detected" : "guessed",
     [`/auths/${auth.key}`]: auth.provenance,
   };
   const manifest: Record<string, unknown> = {
-    display_name: displayName,
+    display_name: detectedName || identity.display_name || hostDisplayName(url),
     name: `@${input.orgSlug}/${toSlug(hostDisplayName(url))}`,
     source: { kind: "remote", remote: { url, transport: server.transport } },
     auths: { [auth.key]: auth.auth },
   };
+  if (identity.description) {
+    manifest.description = identity.description;
+    provenance["/description"] = "detected";
+  }
+  if (identity.homepage) {
+    manifest.homepage = identity.homepage;
+    provenance["/homepage"] = "detected";
+  }
   if (auth.documentation) {
     manifest.documentation = auth.documentation;
     provenance["/documentation"] = "detected";
@@ -128,54 +140,127 @@ export async function discoverRemoteIntegration(
 }
 
 /**
- * POST `initialize` (Streamable HTTP); a 404/405 falls back to the SSE transport's GET. A
- * 2026-07-28 server refuses it with a JSON-RPC error (400, or 404 for an unknown method): read
- * before any fallback, as that revision's backward compatibility asks.
+ * An unauthenticated connect through the MCP transport, which picks the era: `server/discover`
+ * first (MCP 2026-07-28), the legacy `initialize` when the server gives no modern evidence. A
+ * Bearer challenge on the way is a server wanting a credential. A server answering the connect
+ * openly is read (its identity), then asked for its tools: a challenge there still makes it a
+ * protected server, an answer an open one. A 404/405 to every POST falls back to the SSE
+ * transport's GET, as the spec's backward compatibility asks.
  */
 async function probeServer(url: string, fetchImpl: typeof fetch): Promise<ProtectedServer> {
-  const res = await reach(url, fetchImpl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json, text/event-stream",
-      // A modern server reads it to answer a probe it refuses with a recognizable, versioned error.
-      "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
-    },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "initialize",
-      params: {
-        protocolVersion: LATEST_PROTOCOL_VERSION,
-        capabilities: {},
-        clientInfo: DEFAULT_CLIENT_INFO,
-      },
-    }),
-  });
-  const challenge = bearerChallenge(res);
-  if (challenge !== undefined) {
-    await res.body?.cancel();
-    // A server refusing before `initialize` says nothing of its transport.
-    const transport = new URL(url).pathname.endsWith("/sse") ? "sse" : "streamable-http";
-    return { transport, challenge };
-  }
-  if (res.ok) {
-    const answered = await readOrFail(url, () => answersJsonRpc(res));
-    throw answered ? authNotSupported(url) : notAnMcpServer(url);
-  }
-  if (res.status === 400 || res.status === 404 || res.status === 405) {
-    // It refused on protocol grounds, past any credential check: an open MCP server. On a
-    // 404/405 only a modern server's own error says so; a legacy server's generic JSON-RPC
-    // body there still owes the SSE fallback its turn.
-    const error = await readOrFail(url, () => jsonRpcError(res));
-    if (error && (res.status === 400 || isModernError(error))) {
-      throw modernOnly(url, error) ?? authNotSupported(url);
-    }
-  } else {
-    await res.body?.cancel().catch(() => {});
-  }
-  if (res.status !== 404 && res.status !== 405) throw notAnMcpServer(url);
+  const seen: ProbeObservation = {};
+  const probeFetch = observingFetch(url, fetchImpl, seen);
+  // A server refusing before it answers says nothing of its transport.
+  const guessed = (): Transport =>
+    new URL(url).pathname.endsWith("/sse") ? "sse" : "streamable-http";
 
+  let client;
+  try {
+    client = await createMcpHttpClient(url, { fetch: probeFetch });
+  } catch (err) {
+    if (seen.challenge !== undefined) {
+      return {
+        transport: guessed(),
+        transportDetected: false,
+        challenge: seen.challenge,
+        identity: undefined,
+      };
+    }
+    if (seen.failure !== undefined) throw unreachable(url, seen.failure);
+    // A handshake answer past the probe's bound could not be read: no verdict on the server.
+    if (seen.oversized) throw unreachable(url, err);
+    const status = httpStatusOf(err) ?? seen.status;
+    if (status === 404 || status === 405) return probeSse(url, fetchImpl);
+    // A server that could not answer (the probe, then `initialize`): not a verdict on it.
+    if (status !== undefined && status >= 500) throw unreachable(url, err);
+    throw notAnMcpServer(url);
+  }
+  try {
+    const identity = client.getServerVersion();
+    // The tools ask, judged by what it answers: a Bearer challenge is a protected server.
+    let refusal: unknown;
+    await client.listToolsPage().catch((err: unknown) => {
+      refusal = err ?? new Error("tools/list failed");
+    });
+    if (seen.challenge !== undefined) {
+      return {
+        transport: "streamable-http",
+        transportDetected: true,
+        challenge: seen.challenge,
+        identity,
+      };
+    }
+    if (refusal !== undefined && !seen.oversized) {
+      // The same reading as the connect's: a fault on the way is the server unreachable, a
+      // 401/403 without a Bearer challenge not an MCP server asking for a credential, a 5xx
+      // a server that could not answer.
+      if (seen.failure !== undefined) throw unreachable(url, seen.failure);
+      const status = seen.status;
+      if (status === 401 || status === 403) throw notAnMcpServer(url);
+      if (status !== undefined && status >= 500) throw unreachable(url, refusal);
+    }
+    // It listed its tools — or answered the ask, if past the probe's bound or with a JSON-RPC
+    // error — without a credential: an open server.
+    throw authNotSupported(url);
+  } finally {
+    await client.close().catch(() => {});
+  }
+}
+
+interface ProbeObservation {
+  /** The Bearer challenge of the last 401/403 offering one. */
+  challenge?: string;
+  /** The status of the last answer. */
+  status?: number;
+  /** The fault of the last exchange that failed (a request, or its body cut short). */
+  failure?: unknown;
+  /** The last answer exceeded the probe's bound: the server answered, at length. */
+  oversized?: boolean;
+}
+
+/**
+ * The probe's `fetch`: each POST bounded in time and size and its body read whole (an answer cut
+ * short is the server's fault, recorded as such), what it says recorded; the SSE stream a legacy
+ * connect opens by GET is answered 405 here, as a server without one would — a probe never reads
+ * it.
+ */
+function observingFetch(
+  url: string,
+  fetchImpl: typeof fetch,
+  seen: ProbeObservation,
+): typeof fetch {
+  return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    if ((init?.method ?? "GET").toUpperCase() !== "POST") {
+      return new Response(null, { status: 405, headers: { Allow: "POST" } });
+    }
+    const timeout = AbortSignal.timeout(PROBE_TIMEOUT_MS);
+    const signal = init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout;
+    try {
+      const res = await fetchImpl(input, { ...init, signal });
+      seen.status = res.status;
+      const challenge = bearerChallenge(res);
+      if (challenge !== undefined) seen.challenge = challenge;
+      seen.failure = undefined;
+      seen.oversized = false;
+      const body = await readBodyUnder(res, PROBE_EXCHANGE_MAX_BYTES);
+      if (body === null) {
+        seen.oversized = true;
+        throw new Error(`an MCP answer of ${originOf(url)} exceeds the probe's bound`);
+      }
+      return new Response(body, {
+        status: res.status,
+        statusText: res.statusText,
+        headers: res.headers,
+      });
+    } catch (err) {
+      if (!seen.oversized) seen.failure = err;
+      throw err;
+    }
+  }) as typeof fetch;
+}
+
+/** The deprecated HTTP+SSE transport: a GET opening a stream whose first event names the endpoint. */
+async function probeSse(url: string, fetchImpl: typeof fetch): Promise<ProtectedServer> {
   const sse = await reach(url, fetchImpl, {
     method: "GET",
     headers: { Accept: "text/event-stream" },
@@ -183,7 +268,12 @@ async function probeServer(url: string, fetchImpl: typeof fetch): Promise<Protec
   const sseChallenge = bearerChallenge(sse);
   if (sseChallenge !== undefined) {
     await sse.body?.cancel();
-    return { transport: "sse", challenge: sseChallenge };
+    return {
+      transport: "sse",
+      transportDetected: true,
+      challenge: sseChallenge,
+      identity: undefined,
+    };
   }
   if (sse.ok && sse.headers.get("content-type")?.includes("text/event-stream")) {
     const isEndpoint = (text: string) =>
@@ -194,6 +284,26 @@ async function probeServer(url: string, fetchImpl: typeof fetch): Promise<Protec
     await sse.body?.cancel().catch(() => {});
   }
   throw notAnMcpServer(url);
+}
+
+/**
+ * The manifest fields a server's self-reported `Implementation` fills: its display name, its
+ * description, its website as the homepage (http(s) only). Self-reported, so only a proposal.
+ */
+export function serverIdentityFields(info: Implementation | undefined): {
+  display_name?: string;
+  description?: string;
+  homepage?: string;
+} {
+  const fields: { display_name?: string; description?: string; homepage?: string } = {};
+  const displayName = info?.title?.trim() || info?.name?.trim();
+  if (displayName) fields.display_name = displayName;
+  if (info?.description?.trim()) fields.description = info.description.trim();
+  const homepage = info?.websiteUrl ? URL.parse(info.websiteUrl) : null;
+  if (homepage?.protocol === "https:" || homepage?.protocol === "http:") {
+    fields.homepage = homepage.href;
+  }
+  return fields;
 }
 
 /**
@@ -230,76 +340,6 @@ function unreachable(url: string, err: unknown): ApiError {
   const origin = originOf(url);
   logger.warn("integration discovery: server unreachable", { origin, error: getErrorMessage(err) });
   return badGateway(`The server at ${origin} could not be reached.`);
-}
-
-/** Whether a JSON or SSE answer carries a JSON-RPC response (notifications before it skipped). */
-async function answersJsonRpc(res: Response): Promise<boolean> {
-  if (!res.headers.get("content-type")?.includes("text/event-stream")) {
-    const head = await readBodyPrefix(res, PROBE_BODY_MAX_BYTES);
-    const parsed = parseSseJsonData(head);
-    // A body cut at the prefix does not parse: its head still says JSON-RPC 2.0.
-    if (parsed === null) return /^\s*\{[\s\S]*?"jsonrpc"\s*:\s*"2\.0"/.test(head);
-    return isJsonRpcResponse(parsed);
-  }
-  const answered = (text: string) =>
-    parseSseFrames(text, "").frames.some((frame) =>
-      isJsonRpcResponse(parseSseJsonData(frame.data)),
-    );
-  // A last frame the stream ended without its blank line still counts.
-  return answered(`${await readBodyPrefix(res, PROBE_BODY_MAX_BYTES, answered)}\n\n`);
-}
-
-/** The `error` of a JSON-RPC error answer, else null. */
-async function jsonRpcError(res: Response): Promise<Record<string, unknown> | null> {
-  const parsed = parseSseJsonData(await readBodyPrefix(res, PROBE_BODY_MAX_BYTES));
-  if (!isJsonRpcResponse(parsed)) return null;
-  const { error } = parsed as { error?: unknown };
-  return typeof error === "object" && error !== null ? (error as Record<string, unknown>) : null;
-}
-
-/** An error only a 2026-07-28 server gives a legacy probe: version list, header mismatch, unknown method. */
-function isModernError(error: Record<string, unknown>): boolean {
-  const data = error.data as { supported?: unknown } | null | undefined;
-  return (
-    Array.isArray(data?.supported) ||
-    error.code === HEADER_MISMATCH ||
-    error.code === METHOD_NOT_FOUND
-  );
-}
-
-/** Whether the refusal means the server speaks only revisions this client does not. */
-function modernOnly(url: string, error: Record<string, unknown>): ApiError | null {
-  // HeaderMismatch exists only in 2026-07-28: the server took the probe as a modern request.
-  if (error.code === HEADER_MISMATCH) {
-    return new ApiError({
-      status: 422,
-      code: "remote_mcp_modern_only",
-      title: "MCP Version Not Supported",
-      detail: `The server at ${originOf(url)} serves only the stateless MCP revision (2026-07-28 or later); Appstrate speaks MCP up to ${LATEST_PROTOCOL_VERSION}.`,
-    });
-  }
-  const supported = (error.data as { supported?: unknown } | null | undefined)?.supported;
-  const versions = Array.isArray(supported)
-    ? supported.filter((v): v is string => typeof v === "string")
-    : [];
-  if (versions.length === 0 || versions.some((v) => SUPPORTED_PROTOCOL_VERSIONS.includes(v))) {
-    return null;
-  }
-  return new ApiError({
-    status: 422,
-    code: "remote_mcp_modern_only",
-    title: "MCP Version Not Supported",
-    detail: `The server at ${originOf(url)} serves only MCP ${versions.join(", ")}; Appstrate speaks MCP up to ${LATEST_PROTOCOL_VERSION}.`,
-  });
-}
-
-function isJsonRpcResponse(value: unknown): boolean {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    (value as { jsonrpc?: unknown }).jsonrpc === "2.0" &&
-    ("result" in value || "error" in value)
-  );
 }
 
 const notAnMcpServer = (url: string) =>

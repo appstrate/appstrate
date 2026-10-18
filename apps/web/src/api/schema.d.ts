@@ -13724,10 +13724,13 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        /** @description A partial AFPS integration manifest: `display_name`, `name` (`@<org slug>/<slug>`), `source` (`kind: remote`), `auths` (one auth, `oauth` or `api_key`), and when published `documentation`, `privacy_policies` and `icon` (only an icon image the manifest accepts as is). */
+                        /** @description A partial AFPS integration manifest: `display_name`, `name` (`@<org slug>/<slug>`), `source` (`kind: remote`), `auths` (one auth, `oauth` or `api_key`), and when published `description` and `homepage` (from the identity the server gives without a credential, in `server/discover` or `initialize`), `documentation`, `privacy_policies` and `icon` (only an icon image the manifest accepts as is: the server's own icon, else its site's). */
                         manifest: {
                             display_name: string;
                             name: string;
+                            description?: string;
+                            /** Format: uri */
+                            homepage?: string;
                             /** Format: uri */
                             documentation?: string;
                             privacy_policies?: string[];
@@ -13746,7 +13749,7 @@ export interface operations {
                                 [key: string]: Record<string, never>;
                             };
                         };
-                        /** @description The site's raster icon (PNG, JPEG, WebP, GIF or ICO, at most 256 KiB) as a base64 data URI, for the editor to re-encode; null when none was found. Never an SVG, never a URL. */
+                        /** @description The server's own raster icon (its `icons`, read without a credential), else its site's (PNG, JPEG, WebP, GIF or ICO, at most 256 KiB) as a base64 data URI, for the editor to re-encode; null when none was found. Never an SVG, never a URL. */
                         icon_source: string | null;
                         /** @description Per proposed field, keyed by JSON pointer into `manifest` (`/display_name`, `/auths/oauth`, …): `detected` when the server published it, `guessed` when inferred. */
                         provenance: {
@@ -13768,7 +13771,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
-            /** @description `not_an_mcp_server` — the URL answered, but not as a Streamable HTTP or SSE MCP server (a 401/403 without a Bearer challenge included); `remote_mcp_auth_not_supported` — it serves MCP without authentication (it answered the probe, or refused it with a JSON-RPC error rather than a Bearer challenge), which integrations do not support yet; `remote_mcp_modern_only` — it refused the probe as an `UnsupportedProtocolVersionError` listing only MCP versions newer than the 2025-11-25 Appstrate speaks. */
+            /** @description `not_an_mcp_server` — the URL answered, but not as a Streamable HTTP or SSE MCP server of either protocol era (a 401/403 without a Bearer challenge included); `remote_mcp_auth_not_supported` — it serves MCP without authentication (it answered the connect and its first `tools/list` without a Bearer challenge), which integrations do not support yet. */
             422: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];

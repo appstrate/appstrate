@@ -8,9 +8,12 @@
  * only speaks MCP over it. Persists nothing.
  */
 
-import { StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Implementation, Tool } from "@modelcontextprotocol/sdk/types.js";
-import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
+import {
+  createMcpHttpClient,
+  httpStatusOf,
+  type AppstrateMcpClient,
+} from "@appstrate/mcp-transport";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { isIconImage } from "@appstrate/core/appearance";
 import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
@@ -31,7 +34,8 @@ import {
 } from "./integration-service.ts";
 import { downloadPackageFiles } from "./package-items/storage.ts";
 import { getCredentialProxyLimits } from "./proxy-limits.ts";
-import { fetchSiteIcon, rasterIcon, siteIconFetch } from "./integration-icon.ts";
+import { fetchServerIcon, siteIconFetch } from "./integration-icon.ts";
+import { serverIdentityFields } from "./integration-discovery.ts";
 
 export interface ServerSyncProposal {
   manifest: Record<string, unknown>;
@@ -61,8 +65,6 @@ const MAX_TOOLS = 500;
 const MAX_PAGES = 20;
 /** Per MCP exchange: a `tools/list` page is kilobytes, not the proxy's general ceiling (an operator cap below it wins). */
 const MAX_EXCHANGE_BYTES = 2 * 1024 * 1024;
-/** `serverInfo.icons` entries tried before the site's own icon. */
-const MAX_SERVER_ICONS = 4;
 /** `instructions` is the server's free text, proposed as a file: bounded like one. */
 const MAX_INSTRUCTIONS_BYTES = 32 * 1024;
 const MAX_TOOL_TITLE_CHARS = 200;
@@ -180,13 +182,17 @@ export async function syncIntegrationFromServer(input: {
   let client: AppstrateMcpClient | undefined;
   let exchanged;
   try {
-    client = await createMcpHttpClient(url, { fetch: proxied, signal: deadline });
+    client = await createMcpHttpClient(url, {
+      fetch: proxied,
+      signal: deadline,
+      onWarning: (message, data) => logger.warn(message, { packageId, ...data }),
+    });
     const { tools, truncated } = await listAllTools(client, deadline);
     exchanged = {
       tools,
       truncated,
       info: client.getServerVersion(),
-      instructions: client.client.getInstructions(),
+      instructions: client.getInstructions(),
     };
   } catch (err) {
     throw syncFailure(err, packageId, url);
@@ -221,7 +227,7 @@ async function listAllTools(
   const tools: Tool[] = [];
   let cursor: string | undefined;
   for (let page = 0; page < MAX_PAGES; page++) {
-    const res = await client.client.listTools(cursor ? { cursor } : undefined, { signal });
+    const res = await client.listToolsPage({ ...(cursor ? { cursor } : {}), signal });
     tools.push(...res.tools);
     cursor = res.nextCursor;
     if (!cursor || tools.length >= MAX_TOOLS) break;
@@ -252,15 +258,9 @@ export async function proposalFromServer(
       .map((tool) => tool.name),
     tools_policy: Object.fromEntries(names.map((name) => [name, {}])),
   };
-  const displayName = info?.title?.trim() || info?.name?.trim();
-  if (displayName) manifest.display_name = displayName;
-  if (info?.description?.trim()) manifest.description = info.description.trim();
-  const homepage = info?.websiteUrl ? URL.parse(info.websiteUrl) : null;
-  if (homepage?.protocol === "https:" || homepage?.protocol === "http:") {
-    manifest.homepage = homepage.href;
-  }
+  Object.assign(manifest, serverIdentityFields(info));
 
-  const iconSource = await serverIcon(server.url, info, fetchImpl);
+  const iconSource = await fetchServerIcon(server.url, info, fetchImpl);
   // Only an icon the manifest accepts as is; any other raster is the editor's to re-encode.
   if (iconSource && isIconImage(iconSource)) manifest.icon = iconSource;
 
@@ -322,19 +322,6 @@ function capInstructions(text: string): { text: string; truncated: boolean } {
   return { text: (lineEnd > 0 ? head.slice(0, lineEnd) : head).trimEnd(), truncated: true };
 }
 
-/** A raster of `serverInfo.icons` (never SVG: `rasterIcon` sniffs the bytes), else the site's. */
-async function serverIcon(
-  url: string,
-  info: Implementation | undefined,
-  fetchImpl: typeof fetch,
-): Promise<string | null> {
-  for (const icon of (info?.icons ?? []).slice(0, MAX_SERVER_ICONS)) {
-    const raster = await rasterIcon(icon.src, url, fetchImpl);
-    if (raster) return raster;
-  }
-  return fetchSiteIcon(url, fetchImpl);
-}
-
 const notConnected = (detail: string) =>
   new ApiError({
     status: 409,
@@ -369,9 +356,10 @@ function syncFailure(err: unknown, packageId: string, url: string): Error {
     origin,
     error: getErrorMessage(err),
   });
-  if (err instanceof StreamableHTTPError && (err.code === 401 || err.code === 403)) {
+  const status = httpStatusOf(err);
+  if (status === 401 || status === 403) {
     return badGateway(
-      `The MCP server at ${origin} refused the connection's credential (HTTP ${err.code}); reconnect the integration.`,
+      `The MCP server at ${origin} refused the connection's credential (HTTP ${status}); reconnect the integration.`,
     );
   }
   return badGateway(`The MCP server at ${origin} could not be synchronized.`);
