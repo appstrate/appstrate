@@ -19,7 +19,6 @@ import { describe, it, expect } from "bun:test";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
 import { NotificationContent } from "../notification-bell.tsx";
-import type { RoutePath } from "../../lib/route-access.ts";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -30,7 +29,7 @@ type Notifications = Parameters<typeof NotificationContent>[0]["notifications"];
 
 function renderList(
   notifications: Notifications,
-  canReach: (path: RoutePath) => boolean = () => true,
+  canReach: (target: string) => boolean = () => true,
 ): string {
   return render(
     <NotificationContent
@@ -64,7 +63,7 @@ describe("NotificationContent", () => {
 
     expect(html).toContain(`Alice Martin vous a partagé ${PACKAGE_ID}`);
     // One share, one decision: the link opens THAT package's sheet.
-    expect(html).toContain('href="/catalogue/discover/agent?package=%40acme%2Fworker"');
+    expect(html).toContain('href="/catalogue/agent?package=%40acme%2Fworker"');
     // Not a run: no run-scoped link, and nothing that reads as a dead agent.
     expect(html).not.toContain("Agent supprimé");
     expect(html).not.toContain('href="/runs/');
@@ -83,7 +82,7 @@ describe("NotificationContent", () => {
     ]);
 
     // A shared SKILL opens on its own kind, on the package itself.
-    expect(html).toContain('href="/catalogue/discover/skill?package=%40acme%2Fhelper"');
+    expect(html).toContain('href="/catalogue/skill?package=%40acme%2Fhelper"');
   });
 
   it("still renders a run notification as the agent and its status", () => {

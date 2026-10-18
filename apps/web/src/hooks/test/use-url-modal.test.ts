@@ -151,16 +151,17 @@ describe("opening a modal on another address", () => {
   it("closes it the way Back does, to the list it was opened from", async () => {
     // A link into the catalogue opens a package's sheet on its own kind.
     const router = createMemoryRouter([{ path: "*" }], {
-      initialEntries: ["/catalogue/placed/agent"],
+      initialEntries: ["/catalogue/agent?view=spaces"],
     });
     const from = router.state.location;
-    await router.navigate("/catalogue/discover/skill?package=%40acme%2Fnotes", {
+    await router.navigate("/catalogue/skill?package=%40acme%2Fnotes", {
       state: modalOpeningState(from.state, "package"),
     });
     const { location } = router.state;
     expect(modalParamStep(location, "package", null)).toEqual({ back: true });
     await router.navigate(-1);
-    expect(router.state.location.pathname).toBe("/catalogue/placed/agent");
+    expect(router.state.location.pathname).toBe("/catalogue/agent");
+    expect(router.state.location.search).toBe("?view=spaces");
   });
 
   it("keeps the entry's other state", () => {

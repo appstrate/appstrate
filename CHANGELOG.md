@@ -41,6 +41,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **Agent persistence: one visibility rule for pinned slots and memories** (#2070). A caller holding
+  `persistence:delete` (admin, builder) who names no actor in `GET /api/agents/{scope}/{name}/persistence`
+  now sees every actor's memories, as it already did for pinned slots, with or without `runId`. A
+  colleague's run page now lists that run's memories. On the agent page, "Mine" now covers only the
+  signed-in user's rows; other actors' rows get their own "Other actors" filter and badge.
 - **Connection use and sharing are separate** (#2041). “Multi-space use” describes the owner's
   reach; the sharing control grants access to other members. “All spaces” includes current and
   future team spaces and hides the individual list. Any effective withdrawal switches atomically
@@ -70,7 +75,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **The dashboard is redesigned** (#1937): settings and preferences open as
   routed overlays, every real dialog has a URL, tables share one component, and
   one connection menu and one model picker serve every screen. SPA routes moved
-  without redirects: `/library` is `/catalogue`, `/webhooks`, `/end-users` and
+  without redirects: `/library` is `/catalogue/<type>` (its per-space table
+  `/catalogue/<type>?view=spaces`), `/webhooks`, `/end-users` and
   `/org-settings/space/*` live under `/workspace-settings/*`, and
   `/schedules/new` and the `…/edit` routes are gone (editing happens in a
   package's settings). The API changes behind it:
@@ -258,7 +264,74 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **« Mes connexions » filters an integration's Connexions** (#2043), replacing
   the « Partage » filter (Partagée / Personnelle).
 
+### Added
+
+- **Garmin LiveTrack — an agent reads where a Garmin device is (#2064).**
+  `@appstrate/garmin-livetrack@1.0.0` reads the owner's last known position and
+  LiveTrack sessions through `api_call`, from one `custom` auth whose only field
+  is the owner's public personal link (`https://livetrack.garmin.com/<name>` or
+  `https://live.garmin.com/<name>`); nothing secret is injected. Garmin has no
+  public API: the integration reads the undocumented JSON API behind the
+  LiveTrack web page, which may break if Garmin changes it, and automated
+  reading may fall outside Garmin's terms of use. Its `INTEGRATION.md` gives the
+  call sequence: load the page (`{{livetrack_url}}`, spilled to a workspace
+  file) for its CSRF token and `garminGuid`, list the sessions, read the latest
+  session's track points, each API call sending `Livetrack-Csrf-Token` while the
+  run's cookie jar replays the `livetrack_csrf` cookie. A `403` with an empty
+  body is retried once from the page; a `403` with a JSON `errors` body is
+  reported as is. Only sessions visible to everyone are read; passcode-protected
+  links are refused with a clear message.
+
 ### Fixed
+
+- **The run page of an inline run no longer gets two 404s** (#2068).
+  `GET …/persistence` answered `agent_not_found` for the run's shadow agent, so
+  the memories and pinned slots an inline run wrote with `note`/`pin` were
+  unreachable. The read route now serves them to a caller who may read the
+  run in that space; every other agent route is unchanged.
+- **The platform's package scopes can no longer be claimed** (#2072). `@appstrate/`
+  is the system packages' namespace and `@inline/` the inline runs' shadow
+  packages', but an organization could take `inline` or `appstrate` as its slug,
+  and any organization could create a package under either scope by naming it
+  in a manifest. Creating or renaming an organization to one of these slugs now
+  answers `400 slug_reserved`, explicit or derived from the name; the
+  bootstrap organization takes `appstrate-2` instead. Every door that writes an
+  organization package (JSON create, ZIP and GitHub import, bundle import with
+  its carried dependencies, and the MCP `validate_package_file` /
+  `import_package_file` pair) answers `400 scope_reserved` for such an id; a
+  system package carried by a bundle is still reused.
+  **Operators:** existing rows are not rewritten. Before deploying, check that both
+  queries return nothing:
+  `SELECT slug FROM organizations WHERE slug IN ('inline', 'appstrate');` and
+  `SELECT id, org_id FROM packages WHERE (id LIKE '@inline/%' AND ephemeral = false) OR (id LIKE '@appstrate/%' AND org_id IS NOT NULL);`.
+  A row in either is data to handle with a `scripts/migration/` script, never
+  left in place: a non-ephemeral `@inline/` agent is no longer served by the
+  persistence read.
+- **An `api_call` target can carry a `{{field}}` in its path or query**
+  (#2063). The target's published JSON schema said `format: "uri"`, which the
+  agent's tool-argument validator applies before the call leaves the agent: it
+  refused `{` and `}`, so `https://share.garmin.com/feed/share/{{mapshare_id}}`
+  (or Twilio's `/Accounts/{{account_sid}}/…`) never reached the sidecar,
+  although the sidecar renders such a field as one percent-encoded component.
+  The schema is now a pattern on `http(s)://`, shared by `api_upload` (which
+  published the same `format: "uri"`); the rendered URL is still parsed and
+  matched against the allowlist. The validator also refuses `ftp:` or
+  `javascript:` targets it used to let through. A base-URL field may now be
+  followed by a query or fragment (`{{base_url}}?d1=…`), not only a path.
+- **`responseMode.toFile` writes under a workspace reached through a symlink**
+  (#2063). The escape check compared the real path of the target directory to
+  the workspace path as given, so under `RUN_ADAPTER=process` on macOS (the
+  temp dir is `/var` → `/private/var`) every `toFile` was refused as "escapes
+  the workspace via a symlink". The workspace root is now resolved the same
+  way; a symlinked subdirectory pointing outside is still refused. A refused
+  `toFile` no longer creates directories outside the workspace before refusing.
+- **`api_upload` no longer sends back a server-supplied session URL holding
+  `{{`** (#2063). A tus or Google `Location`, or a Microsoft `uploadUrl`,
+  becomes the target of the next call, and the sidecar would have rendered its
+  `{{field}}` as a credential placeholder. A relative tus `Location` under a
+  templated target resolves only where rendering cannot change the result,
+  otherwise it is refused. A tus `Location` that is not an http(s) URL, or that
+  holds `{{` once parsed, is an `UploadError`.
 
 - **A link to a catalogue sheet opens it from the package id alone** (#2013).
   `/catalogue?package=<id>[&version=…]`, or a link naming the wrong kind,

@@ -8,6 +8,8 @@ import {
   buildPackageId,
   encodePackageIdPath,
   isOwnedByOrg,
+  isReservedScope,
+  INLINE_SHADOW_SCOPE,
   isValidToolName,
   TOOL_NAME_MAX_LEN,
   sanitizeFilename,
@@ -80,6 +82,21 @@ describe("parseScopedName", () => {
 
   it('"@org123/pkg-name" (alphanumeric with hyphens) → valid', () => {
     expect(parseScopedName("@org123/pkg-name")).toEqual({ scope: "org123", name: "pkg-name" });
+  });
+});
+
+describe("isReservedScope", () => {
+  it("reserves the system scope and the inline shadow scope", () => {
+    expect(isReservedScope("appstrate")).toBe(true);
+    expect(isReservedScope(INLINE_SHADOW_SCOPE)).toBe(true);
+    expect(INLINE_SHADOW_SCOPE).toBe("inline");
+  });
+
+  it("leaves every other slug free, prefixes and suffixes included", () => {
+    expect(isReservedScope("acme")).toBe(false);
+    expect(isReservedScope("inline-2")).toBe(false);
+    expect(isReservedScope("appstrate-labs")).toBe(false);
+    expect(isReservedScope("@inline")).toBe(false);
   });
 });
 

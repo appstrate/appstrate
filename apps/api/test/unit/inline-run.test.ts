@@ -8,7 +8,6 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  INLINE_SHADOW_SCOPE,
   isInlineShadowPackageId,
   generateShadowPackageId,
   buildShadowLoadedPackage,
@@ -35,12 +34,6 @@ const FILE_SCHEMA = {
 } as unknown as JSONSchemaObject;
 
 describe("inline-run helpers", () => {
-  describe("INLINE_SHADOW_SCOPE", () => {
-    it("is the reserved 'inline' scope", () => {
-      expect(INLINE_SHADOW_SCOPE).toBe("inline");
-    });
-  });
-
   describe("isInlineShadowPackageId", () => {
     it("returns true for valid inline shadow ids", () => {
       expect(isInlineShadowPackageId("@inline/r-deadbeef")).toBe(true);

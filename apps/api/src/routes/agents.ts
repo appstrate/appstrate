@@ -28,7 +28,7 @@ import {
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import type { AgentManifest } from "../types/index.ts";
-import { requireActiveAgent, requireAgent } from "../middleware/guards.ts";
+import { requireActiveAgent, requireAgent, requireAgentOrInlineRun } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
@@ -494,7 +494,7 @@ export function createAgentsRouter() {
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/persistence`,
     requirePermission("persistence", "read"),
-    requireAgent(),
+    requireAgentOrInlineRun(),
     async (c) => {
       const agent = c.get("package");
       const spaceId = c.get("spaceId");
@@ -503,9 +503,7 @@ export function createAgentsRouter() {
       const actorIdParam = c.req.query("actor_id");
       const runIdParam = c.req.query("runId");
 
-      // Default scope = caller's actor. Admin filtering by other actors
-      // is controlled by `persistence:read` (admin-grade); members see
-      // their own actor's view through this endpoint.
+      // Default scope = caller's actor.
       const callerScope = scopeFromActor(getActor(c));
 
       // Optional explicit scope override. `persistence:read` gates the route
@@ -525,16 +523,19 @@ export function createAgentsRouter() {
         throw invalidRequest("kind must be 'pinned' or 'memory'");
       }
 
-      // A cross-actor reader inspecting at agent-level (no scope override, no
-      // runId) sees every actor's pinned slots; everyone else is narrowed to
-      // their scope.
-      const pinnedScope = canReadEveryActor && !scopeOverride ? undefined : scope;
+      // A cross-actor reader naming no actor sees every actor's rows, in both
+      // halves, with or without `runId` — which only filters rows, never
+      // widens or narrows the actor scope. Everyone else is narrowed to their
+      // scope (own + shared).
+      const visibleScope = canReadEveryActor && !scopeOverride ? undefined : scope;
 
       const [pinned, memories] = await Promise.all([
         wantsPinned
-          ? listPinnedSlots(agent.id, spaceId, pinnedScope, runIdParam)
+          ? listPinnedSlots(agent.id, spaceId, visibleScope, runIdParam)
           : Promise.resolve([]),
-        wantsMemory ? listMemories(agent.id, spaceId, scope, runIdParam) : Promise.resolve([]),
+        wantsMemory
+          ? listMemories(agent.id, spaceId, visibleScope, runIdParam)
+          : Promise.resolve([]),
       ]);
 
       // One resource, not a list: a snapshot of both halves under the SAME

@@ -21,7 +21,6 @@ import {
 } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
 import { useCanReach } from "../hooks/use-can-reach";
-import type { RoutePath } from "../lib/route-access";
 import { useIsMobile } from "@appstrate/ui/use-mobile";
 import { formatDateField } from "../lib/format-date";
 import { catalogueHref } from "../lib/catalogue-link";
@@ -38,14 +37,14 @@ type NotificationItem =
 function notificationTarget(
   notification: NotificationItem,
   packageId: string | null,
-  canReach: (path: RoutePath) => boolean,
+  canReach: (target: string) => boolean,
 ): string | null {
   if (notification.type === "package_shared") {
     // One share, one decision: open THAT package's sheet, not a list to search.
     const share = notification.payload;
-    return share && canReach("/catalogue/:reading/:type")
-      ? catalogueHref(share.package_type, { packageId: share.packageId })
-      : null;
+    if (!share) return null;
+    const href = catalogueHref(share.package_type, { packageId: share.packageId });
+    return canReach(href) ? href : null;
   }
   if (packageId && notification.runId) {
     return canReach("/agents/:scope/:name/runs/:runId")
@@ -81,7 +80,7 @@ export function NotificationContent({
   unread: number;
   notifications: NotificationItem[];
   agentNameMap: Map<string, string>;
-  canReach: (path: RoutePath) => boolean;
+  canReach: (target: string) => boolean;
   onItemClick: (notificationId: string) => void;
   onClose: () => void;
   markAllRead: () => void;

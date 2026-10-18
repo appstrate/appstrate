@@ -176,8 +176,13 @@ function RecentAgents({
   agents: AgentListItem[];
   unreadCounts: Record<string, number> | undefined;
 }) {
+  const { t } = useTranslation("common");
   return (
-    <div className="flex gap-3 overflow-x-auto pb-1">
+    <div
+      className="no-scrollbar scroll-fade-x scroll-buttons-x flex gap-3 overflow-x-auto pb-1"
+      data-scroll-prev={t("pagination.previous")}
+      data-scroll-next={t("pagination.next")}
+    >
       {agents.map((agent) => (
         <div key={agent.id} className="w-[19rem] shrink-0">
           <PackageCard {...agentCardItem(agent, unreadCounts?.[agent.id])} headingLevel={3} />
