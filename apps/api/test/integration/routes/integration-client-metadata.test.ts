@@ -506,78 +506,99 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
     expect(await db.select().from(integrationOauthClients)).toEqual([]);
   });
 
-  it("refuses an administrator's client redirect_uri in the documents' callback namespace", async () => {
-    await install(
-      { cimd: true, registration: true },
-      { method: "client_secret_post", clientId: "admin-app", clientSecret: "shh" },
-    );
-    const reserved = `${CALLBACK}/cimd/${authorizationServerTag("https://honest-b.example.com")}`;
-    const send = (method: string, path: string, headers: Record<string, string>, body: unknown) =>
-      app.request(path, {
-        method,
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+  // The platform's per-server callbacks: a metadata document's, and a per-connection DCR client's.
+  const RESERVED = {
+    document: `${CALLBACK}/cimd/${authorizationServerTag("https://honest-b.example.com")}`,
+    "per-server DCR": `${CALLBACK}/${authorizationServerTag("https://honest-x.example.com")}`,
+  };
+
+  it.each(Object.entries(RESERVED))(
+    "refuses an administrator's client redirect_uri on a %s callback",
+    async (_kind, reserved) => {
+      await install(
+        { cimd: true, registration: true },
+        { method: "client_secret_post", clientId: "admin-app", clientSecret: "shh" },
+      );
+      const send = (method: string, path: string, headers: Record<string, string>, body: unknown) =>
+        app.request(path, {
+          method,
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      const body = { client_id: "admin-app", client_secret: "shh", redirect_uri: reserved };
+      for (const [path, headers] of [
+        [`/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/oauth-clients`, authHeaders(ctx)],
+        [
+          `/api/org-integrations/${INTEGRATION}/auths/${AUTH_KEY}/oauth-clients`,
+          orgOnlyHeaders(ctx),
+        ],
+      ] as const) {
+        const res = await send("POST", path, headers, body);
+        expect(res.status).toBe(400);
+        expect(((await res.json()) as { code: string }).code).toBe("redirect_uri_reserved");
+      }
+      expect(await db.select().from(integrationOauthClients)).toEqual([]);
+
+      // Update: a client registered without the URI cannot be moved into the namespace either.
+      const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+      const admin = await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
+        clientId: "admin-app",
+        clientSecret: "shh",
       });
-    const body = { client_id: "admin-app", client_secret: "shh", redirect_uri: reserved };
-    for (const [path, headers] of [
-      [`/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/oauth-clients`, authHeaders(ctx)],
-      [`/api/org-integrations/${INTEGRATION}/auths/${AUTH_KEY}/oauth-clients`, orgOnlyHeaders(ctx)],
-    ] as const) {
-      const res = await send("POST", path, headers, body);
-      expect(res.status).toBe(400);
-      expect(((await res.json()) as { code: string }).code).toBe("redirect_uri_reserved");
-    }
-    expect(await db.select().from(integrationOauthClients)).toEqual([]);
+      const patched = await send(
+        "PATCH",
+        `/api/integrations/${INTEGRATION}/oauth-clients/${admin.id}`,
+        authHeaders(ctx),
+        { redirect_uri: reserved },
+      );
+      expect(patched.status).toBe(400);
+      expect(((await patched.json()) as { code: string }).code).toBe("redirect_uri_reserved");
+      // The shared callback stays registrable.
+      const shared = await send(
+        "PATCH",
+        `/api/integrations/${INTEGRATION}/oauth-clients/${admin.id}`,
+        authHeaders(ctx),
+        { redirect_uri: CALLBACK },
+      );
+      expect(shared.status).toBe(200);
+    },
+  );
 
-    // Update: a client registered without the URI cannot be moved into the namespace either.
-    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
-    const admin = await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
-      clientId: "admin-app",
-      clientSecret: "shh",
-    });
-    const patched = await send(
-      "PATCH",
-      `/api/integrations/${INTEGRATION}/oauth-clients/${admin.id}`,
-      authHeaders(ctx),
-      { redirect_uri: reserved },
-    );
-    expect(patched.status).toBe(400);
-    expect(((await patched.json()) as { code: string }).code).toBe("redirect_uri_reserved");
-  });
-
-  it("refuses to connect through a stored client whose redirect_uri is a document's (rows written before)", async () => {
-    // The insider scenario: an admin client on the document path of an honest CIMD server B would
-    // put B's document tag in a state requiring no iss. Written straight to the table, as before
-    // the write guard existed; connect refuses it before any redirect.
-    await install(
-      { cimd: true, registration: true },
-      { method: "client_secret_post", clientId: "admin-app", clientSecret: "shh" },
-    );
-    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
-    const admin = await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
-      clientId: "admin-app",
-      clientSecret: "shh",
-    });
-    await db
-      .update(integrationOauthClients)
-      .set({
-        redirectUri: `${CALLBACK}/cimd/${authorizationServerTag("https://honest-b.example.com")}`,
-      })
-      .where(eq(integrationOauthClients.id, admin.id));
-    const res = await app.request(
-      `/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/connect/oauth2`,
-      {
-        method: "POST",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      },
-    );
-    expect(res.status).toBe(403);
-    expect(((await res.json()) as { detail: string }).detail).toContain(
-      "client metadata document callback namespace",
-    );
-    expect(meta.provider!.authorizeRequests).toHaveLength(0);
-  });
+  it.each(Object.entries(RESERVED))(
+    "refuses to connect through a stored client on a %s callback (rows written before)",
+    async (_kind, reserved) => {
+      // The insider scenario: an admin client on the callback of an honest server (a CIMD server B,
+      // a per-connection DCR server X without iss) would put that server's tag in a state requiring
+      // nothing of it. Written straight to the table, as before the write guard existed; connect
+      // refuses it before any redirect.
+      await install(
+        { cimd: true, registration: true },
+        { method: "client_secret_post", clientId: "admin-app", clientSecret: "shh" },
+      );
+      const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+      const admin = await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
+        clientId: "admin-app",
+        clientSecret: "shh",
+      });
+      await db
+        .update(integrationOauthClients)
+        .set({ redirectUri: reserved })
+        .where(eq(integrationOauthClients.id, admin.id));
+      const res = await app.request(
+        `/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/connect/oauth2`,
+        {
+          method: "POST",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        },
+      );
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { detail: string }).detail).toContain(
+        "reserved for the platform's per-server callbacks",
+      );
+      expect(meta.provider!.authorizeRequests).toHaveLength(0);
+    },
+  );
 
   it("keeps an administrator's client on an auth that is not auto-provisioned", async () => {
     await install(
