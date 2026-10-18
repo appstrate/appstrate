@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { fetchSiteIcon, iconOrigins } from "../../../src/services/integration-icon.ts";
+import { fetchSiteIcon, iconOrigins, rasterIcon } from "../../../src/services/integration-icon.ts";
 
 /** A PNG header the byte sniffer reads as `image/png`. */
 const PNG = new Uint8Array([
@@ -80,5 +80,26 @@ describe("fetchSiteIcon", () => {
     big.set(PNG);
     const { fetchImpl } = fakeFetch({ "https://big.test/favicon.ico": () => image(big) });
     expect(await fetchSiteIcon("https://big.test/mcp", fetchImpl)).toBeNull();
+  });
+});
+
+describe("rasterIcon", () => {
+  const png = `data:image/png;base64,${PNG.toBase64()}`;
+  const noFetch = (() => Promise.reject(new Error("no network"))) as unknown as typeof fetch;
+
+  it("sniffs a data URI's bytes, never its declared type", async () => {
+    expect(await rasterIcon(png, noFetch)).toBe(png);
+    expect(await rasterIcon(`data:image/x-icon;base64,${ICO.toBase64()}`, noFetch)).toBe(
+      `data:image/x-icon;base64,${ICO.toBase64()}`,
+    );
+    expect(await rasterIcon(`data:image/png;base64,${SVG.toBase64()}`, noFetch)).toBeNull();
+    expect(await rasterIcon("data:image/png,not-base64", noFetch)).toBeNull();
+  });
+
+  it("fetches an http(s) URL and refuses any other scheme", async () => {
+    const { fetchImpl, seen } = fakeFetch({ "https://cdn.test/logo.png": () => image(PNG) });
+    expect(await rasterIcon("https://cdn.test/logo.png", fetchImpl)).toBe(png);
+    expect(await rasterIcon("file:///etc/passwd", fetchImpl)).toBeNull();
+    expect(seen).toEqual(["https://cdn.test/logo.png"]);
   });
 });

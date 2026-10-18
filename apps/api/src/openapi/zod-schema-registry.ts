@@ -136,6 +136,7 @@ import {
   connectSubmitSchema,
   setDefaultClientSchema,
   discoverIntegrationSchema,
+  syncFromServerSchema,
 } from "../routes/integrations.ts";
 
 // ---------------------------------------------------------------------------
@@ -579,6 +580,12 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     path: "/api/integrations/discover",
     jsonSchema: toJsonSchema(discoverIntegrationSchema),
     description: "Propose an integration manifest from a remote MCP server URL",
+  },
+  {
+    method: "POST",
+    path: "/api/integrations/{packageId}/discover",
+    jsonSchema: toJsonSchema(syncFromServerSchema),
+    description: "Propose manifest fields from the integration's connected MCP server",
   },
   {
     method: "POST",

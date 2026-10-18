@@ -83,6 +83,23 @@ async function linkedIcons(pageUrl: string, fetchImpl: typeof fetch): Promise<st
     .map((f) => f.href);
 }
 
+/**
+ * An icon a server names (an MCP `Implementation.icons[].src`) as a raster data URI, or null: an
+ * `http(s)` URL fetched through `fetchImpl`, or a `data:` URI decoded, both sniffed the same way.
+ */
+export async function rasterIcon(src: string, fetchImpl: typeof fetch): Promise<string | null> {
+  const url = URL.parse(src);
+  if (url?.protocol === "http:" || url?.protocol === "https:")
+    return fetchRaster(url.href, fetchImpl);
+  const data = /^data:[^,]*;base64,([A-Za-z0-9+/=\s]+)$/i.exec(src);
+  if (!data) return null;
+  try {
+    return await rasterDataUri(Uint8Array.fromBase64(data[1]!.replace(/\s/g, "")));
+  } catch {
+    return null;
+  }
+}
+
 async function fetchRaster(url: string, fetchImpl: typeof fetch): Promise<string | null> {
   try {
     const res = await fetchImpl(url, {
@@ -94,10 +111,14 @@ async function fetchRaster(url: string, fetchImpl: typeof fetch): Promise<string
       return null;
     }
     const bytes = await readBodyUnder(res, ICON_MAX_BYTES);
-    if (!bytes || bytes.length === 0) return null;
-    const type = (await fileTypeFromBuffer(bytes))?.mime;
-    return type && RASTER_TYPES.has(type) ? `data:${type};base64,${bytes.toBase64()}` : null;
+    return bytes ? await rasterDataUri(bytes) : null;
   } catch {
     return null;
   }
+}
+
+async function rasterDataUri(bytes: Uint8Array): Promise<string | null> {
+  if (bytes.length === 0 || bytes.length > ICON_MAX_BYTES) return null;
+  const type = (await fileTypeFromBuffer(bytes))?.mime;
+  return type && RASTER_TYPES.has(type) ? `data:${type};base64,${bytes.toBase64()}` : null;
 }

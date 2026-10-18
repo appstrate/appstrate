@@ -14,6 +14,7 @@
  * spells it — `POST /api/spaces/{spaceId}/packages` and
  * `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}` (RBAC spec §6.10).
  *   - `GET    /:packageId`                           — manifest + per-auth status for caller
+ *   - `POST   /:packageId/discover`                  — a manifest proposal from the connected server
  *   - `GET    /:packageId/auths/:authKey/clients`    — admin: list available OAuth clients
  *   - `PUT    /:packageId/auths/:authKey/default-client` — admin: choose the default client
  *   - `POST   /:packageId/auths/:authKey/oauth-clients`  — admin: register a custom OAuth client
@@ -89,7 +90,7 @@ import {
   personaFor,
   personaMemberships,
 } from "../lib/view-as.ts";
-import { ceilingAllows } from "../lib/permissions.ts";
+import { callerPermissions, ceilingAllows } from "../lib/permissions.ts";
 import { assertSpaceId } from "../lib/ids.ts";
 import type { OrgRole } from "@appstrate/core/permissions";
 import type { ConnectionCaller, SpaceSeen } from "../services/connection-reach.ts";
@@ -99,6 +100,10 @@ import type { AuditPayload } from "@appstrate/core/module";
 import { auditDiff, recordAuditAs, recordAuditFromContext } from "./../services/audit.ts";
 import { listIntegrations } from "../services/integration-service.ts";
 import { discoverRemoteIntegration } from "../services/integration-discovery.ts";
+import { syncIntegrationFromServer } from "../services/integration-server-sync.ts";
+import { reachOutsideRun } from "../services/credential-proxy/access.ts";
+import { assertPackageMutationAccess } from "../lib/package-access.ts";
+import { getActor } from "../lib/actor.ts";
 import {
   assertConnectionBelongsToActor,
   assertIsIntegration,
@@ -284,6 +289,8 @@ export const setOrgDefaultSchema = z
 export const connectionShareAllSpacesSchema = z.object({ share_all_spaces: z.boolean() }).strict();
 
 export const discoverIntegrationSchema = z.object({ url: z.url() }).strict();
+
+export const syncFromServerSchema = z.object({ connection_id: z.uuid().optional() }).strict();
 
 export const updateConnectionSchema = z
   .object({
@@ -1024,6 +1031,36 @@ export function createIntegrationsRouter() {
       warnings: proposal.warnings,
     });
   });
+
+  // What the connected server says about this integration (tools, serverInfo, instructions), for
+  // its editor. The MCP exchange rides the credential proxy, under the proxy's own permission
+  // outside a run; editing the result needs write authority on the package's home.
+  router.post(
+    "/:packageId{@[^/]+/[^/]+}/discover",
+    rateLimit(10),
+    requirePermission("credential-proxy", "call-own"),
+    async (c) => {
+      const packageId = c.req.param("packageId")!;
+      await assertPackageMutationAccess(c, packageId, "write");
+      const scope = getSpaceScope(c);
+      await assertIsIntegration(scope, packageId);
+      const body = await readJsonBody(c, syncFromServerSchema, { allowEmpty: true });
+      const proposal = await syncIntegrationFromServer({
+        scope,
+        actor: getActor(c),
+        packageId,
+        ...(body.connection_id ? { connectionId: body.connection_id } : {}),
+        reach: reachOutsideRun(callerPermissions(c)),
+      });
+      return c.json({
+        manifest: proposal.manifest,
+        icon_source: proposal.iconSource,
+        instructions: proposal.instructions,
+        provenance: proposal.provenance,
+        warnings: proposal.warnings,
+      });
+    },
+  );
 
   router.get("/:packageId{@[^/]+/[^/]+}", requirePermission("integrations", "read"), async (c) => {
     const packageId = c.req.param("packageId")!;

@@ -1050,6 +1050,126 @@ export const integrationsPaths = {
       },
     },
   },
+  "/api/integrations/{packageId}/discover": {
+    post: {
+      operationId: "syncIntegrationFromServer",
+      tags: ["Integrations"],
+      summary: "Propose manifest fields from the integration's connected MCP server",
+      description:
+        "Connects to the remote MCP server of the integration's latest published version through the credential proxy — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy` — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500) as `default_tools` with an empty `tools_policy` entry each, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions`. Persists nothing. Only a Streamable HTTP server is supported. Requires `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too) and write authority on the package in its home space. Rate limited to 10 requests per minute.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        packageIdParam,
+      ],
+      requestBody: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              properties: {
+                connection_id: {
+                  type: "string",
+                  format: "uuid",
+                  description:
+                    "The connection to call the server with; omitted, the proxy's selection (`X-Connection-Id` semantics).",
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description: "The manifest proposal.",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["manifest", "icon_source", "instructions", "provenance", "warnings"],
+                properties: {
+                  manifest: {
+                    type: "object",
+                    required: ["default_tools", "tools_policy"],
+                    description:
+                      "A partial AFPS integration manifest: only the fields the server reported.",
+                    properties: {
+                      default_tools: { type: "array", items: { type: "string" } },
+                      tools_policy: {
+                        type: "object",
+                        additionalProperties: { type: "object" },
+                      },
+                      display_name: { type: "string" },
+                      description: { type: "string" },
+                      homepage: { type: "string", format: "uri" },
+                      icon: { type: "string" },
+                    },
+                  },
+                  icon_source: {
+                    type: ["string", "null"],
+                    description:
+                      "The server's raster icon (PNG, JPEG, WebP, GIF or ICO, at most 256 KiB) as a base64 data URI, for the editor to re-encode; null when none was found. Never an SVG, never a URL.",
+                  },
+                  instructions: {
+                    type: ["string", "null"],
+                    description:
+                      "The server's `initialize` instructions, for the editor to propose as `INTEGRATION.md`; null when it sent none.",
+                  },
+                  provenance: {
+                    type: "object",
+                    description:
+                      "Per proposed field, keyed by JSON pointer into `manifest`: always `detected`.",
+                    additionalProperties: { type: "string", enum: ["detected"] },
+                  },
+                  warnings: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      required: ["code", "message"],
+                      properties: {
+                        code: { type: "string", enum: ["tools_truncated"] },
+                        message: { type: "string" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "403": {
+          description:
+            "Missing permission or write authority on the package, or the proxy refused the call (`unauthorized_target`: the server URL is outside the auth's `authorized_uris`; `blocked_target`: egress guard).",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "`integration_not_connected` — no connection of the integration usable by the caller in this space (or no published version); the proxy's own connection-selection conflicts (`needs_reconnection`, `must_choose_connection`) are relayed.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "422": {
+          description:
+            "`integration_not_remote` — the integration is not backed by a remote MCP server; `sync_transport_unsupported` — its server uses the SSE transport.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "429": { $ref: "#/components/responses/RateLimited" },
+        "502": {
+          description:
+            "`bad_gateway` — the server could not be reached, did not answer as an MCP server within 20 s, or refused the credential; the proxy's `upstream_*` and `credential_unusable` codes are relayed.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+      },
+    },
+  },
   "/api/integrations/{packageId}": {
     get: {
       operationId: "getIntegration",

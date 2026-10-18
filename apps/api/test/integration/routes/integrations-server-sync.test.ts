@@ -1,0 +1,217 @@
+// SPDX-License-Identifier: Apache-2.0
+/**
+ * `POST /api/integrations/{packageId}/discover` at the route boundary: a remote integration's
+ * MCP server on loopback (reached through the operator's `EGRESS_ALLOW_INTERNAL_HOSTS` opt-in),
+ * called through the credential proxy with the caller's connection.
+ */
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
+import { getTestApp } from "../../helpers/app.ts";
+import { truncateAll } from "../../helpers/db.ts";
+import { flushRedis } from "../../helpers/redis.ts";
+import {
+  authHeaders,
+  createTestContext,
+  memberHolding,
+  type TestContext,
+} from "../../helpers/auth.ts";
+import { allowLoopbackOAuthEgress } from "../../helpers/strict-authorization-server.ts";
+import {
+  seedProxyConnection,
+  seedProxyIntegration,
+} from "../../helpers/credential-proxy-fixtures.ts";
+import {
+  localIntegrationManifest,
+  remoteIntegrationManifest,
+} from "../../helpers/integration-manifests.ts";
+import { startFakeMcpServer, type FakeMcpServer } from "../../helpers/fake-mcp-server.ts";
+
+/** A 1×1 PNG header: what `isIconImage` reads (signature + `IHDR` size). */
+const PNG = new Uint8Array([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 1,
+  0, 0, 0, 1, 8, 6, 0, 0, 0,
+]);
+const ICON = `data:image/png;base64,${PNG.toBase64()}`;
+/** Listed first: an SVG is never taken, whatever its declared type. */
+const SVG = `data:image/svg+xml;base64,${btoa("<svg xmlns='http://www.w3.org/2000/svg'/>")}`;
+const TOKEN = "tok-live-123";
+const ID = "@acme/docs";
+const TOOLS = ["search", "fetch", "create", "update", "delete"];
+
+let server: FakeMcpServer;
+let restoreEgress: () => void;
+
+beforeAll(() => {
+  restoreEgress = allowLoopbackOAuthEgress();
+  server = startFakeMcpServer({
+    tools: TOOLS,
+    pageSize: 2,
+    bearer: TOKEN,
+    serverInfo: {
+      name: "acme-docs-mcp",
+      title: "Acme Docs",
+      version: "2.0.0",
+      description: "Search and edit Acme documents.",
+      websiteUrl: "https://acme.example/",
+      icons: [{ src: SVG, mimeType: "image/svg+xml" }, { src: ICON }],
+    },
+    instructions: "Call search before fetch.",
+  });
+});
+
+afterAll(() => {
+  server.stop();
+  restoreEgress();
+});
+
+const remote = (opts: { url?: string; transport?: string; authorizedUris?: string[] } = {}) =>
+  remoteIntegrationManifest({
+    name: ID,
+    url: opts.url ?? server.url,
+    ...(opts.transport ? { transport: opts.transport } : {}),
+    auths: {
+      api_key: {
+        type: "api_key",
+        authorizedUris: opts.authorizedUris ?? [`${server.origin}/**`],
+        credentialFields: ["token"],
+        requiredCredentialFields: ["token"],
+        delivery: {
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer ",
+            value: "{$credential.token}",
+          },
+        },
+      },
+    },
+  });
+
+const sync = (ctx: TestContext, body?: unknown) =>
+  getTestApp().request(`/api/integrations/${ID}/discover`, {
+    method: "POST",
+    headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+
+describe("POST /api/integrations/{packageId}/discover", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    ctx = await createTestContext({ orgSlug: "acme" });
+    server.authorizations.length = 0;
+    server.methods.length = 0;
+  });
+
+  it("lists every tool through the proxy, with the connection's bearer, and maps serverInfo", async () => {
+    await seedProxyIntegration(ctx, remote());
+    const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+    const res = await sync(ctx, { connection_id: connectionId });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      manifest: {
+        default_tools: TOOLS,
+        tools_policy: Object.fromEntries(TOOLS.map((name) => [name, {}])),
+        display_name: "Acme Docs",
+        description: "Search and edit Acme documents.",
+        homepage: "https://acme.example/",
+        icon: ICON,
+      },
+      icon_source: ICON,
+      instructions: "Call search before fetch.",
+      provenance: {
+        "/default_tools": "detected",
+        "/tools_policy": "detected",
+        "/display_name": "detected",
+        "/description": "detected",
+        "/homepage": "detected",
+        "/icon": "detected",
+      },
+      warnings: [],
+    });
+    // initialize + initialized + three tools/list pages, each carrying the injected credential;
+    // the standalone GET stream is never opened.
+    expect(server.methods).toEqual(["POST", "POST", "POST", "POST", "POST"]);
+    expect(server.authorizations.every((a) => a === `Bearer ${TOKEN}`)).toBe(true);
+  });
+
+  it("selects the caller's connection when none is named (empty body)", async () => {
+    await seedProxyIntegration(ctx, remote());
+    await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+    const res = await sync(ctx);
+    expect(res.status).toBe(200);
+    expect(
+      ((await res.json()) as { manifest: { default_tools: string[] } }).manifest.default_tools,
+    ).toEqual(TOOLS);
+  });
+
+  it("answers 409 integration_not_connected without a connection", async () => {
+    await seedProxyIntegration(ctx, remote());
+    const res = await sync(ctx, {});
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("integration_not_connected");
+    expect(server.methods).toEqual([]);
+  });
+
+  it("is refused without write authority on the package", async () => {
+    await seedProxyIntegration(ctx, remote());
+    const member = await memberHolding(ctx, [
+      "integrations:read",
+      "integrations:connect",
+      "credential-proxy:call-own",
+    ]);
+    await seedProxyConnection(member, ID, "api_key", { token: TOKEN });
+    const res = await sync(member, {});
+    expect(res.status).toBe(403);
+    expect(server.methods).toEqual([]);
+  });
+
+  it("is refused without credential-proxy:call-own", async () => {
+    await seedProxyIntegration(ctx, remote());
+    const member = await memberHolding(ctx, ["integrations:read", "integrations:write"]);
+    const res = await sync(member, {});
+    expect(res.status).toBe(403);
+  });
+
+  it("enforces the auth's authorized_uris: a server URL outside it is never reached", async () => {
+    await seedProxyIntegration(ctx, remote({ authorizedUris: ["https://api.example.com/**"] }));
+    await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+    const res = await sync(ctx, {});
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe("unauthorized_target");
+    expect(server.methods).toEqual([]);
+  });
+
+  it("answers 422 for an SSE server", async () => {
+    await seedProxyIntegration(ctx, remote({ transport: "sse" }));
+    await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+    const res = await sync(ctx, {});
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { code: string }).code).toBe("sync_transport_unsupported");
+  });
+
+  it("answers 422 for an integration that is not remote", async () => {
+    await seedProxyIntegration(
+      ctx,
+      localIntegrationManifest({ name: ID, auths: { api_key: { type: "api_key" } } }),
+    );
+    const res = await sync(ctx, {});
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { code: string }).code).toBe("integration_not_remote");
+  });
+
+  it("answers 502 when the server refuses the credential", async () => {
+    await seedProxyIntegration(ctx, remote());
+    await seedProxyConnection(ctx, ID, "api_key", { token: "wrong" });
+    const res = await sync(ctx, {});
+    expect(res.status).toBe(502);
+    expect(((await res.json()) as { code: string }).code).toBe("bad_gateway");
+  });
+
+  it("refuses an unknown body field", async () => {
+    await seedProxyIntegration(ctx, remote());
+    expect((await sync(ctx, { url: server.url })).status).toBe(400);
+  });
+});

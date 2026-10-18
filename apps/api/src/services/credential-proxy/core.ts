@@ -140,6 +140,9 @@ type ProxyCallInput = {
    */
   maxResponseBytes?: number;
 
+  /** Cancels the upstream exchange (each hop, and the 401 replay). */
+  signal?: AbortSignal;
+
   /** Transport override (tests): keeps every per-hop guard, disables the address pin. */
   fetch?: typeof fetch;
   resolveHost?: HostResolver;
@@ -318,6 +321,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     method: input.method,
     headers: first.headers,
     body: first.body,
+    ...(input.signal ? { signal: input.signal } : {}),
   };
   // fetch spec: streaming body requires `duplex: "half"`.
   if (isStreamBody) {
