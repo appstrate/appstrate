@@ -12,6 +12,20 @@
     "kind": "none"
   },
   "default_tools": ["api_call"],
+  "setup_guide": {
+    "steps": [
+      {
+        "label": "Aucune application à créer chez Garmin : l'intégration utilise le client public de l'application mobile Garmin Connect"
+      },
+      {
+        "label": "Enregistrer un client OAuth public (sans secret) d'identifiant GARMIN_CONNECT_MOBILE_ANDROID_DI_2025Q2, ou le déclarer dans SYSTEM_INTEGRATIONS"
+      },
+      {
+        "label": "Chaque membre obtient ensuite son refresh token avec python-garminconnect (commande dans l'aide du formulaire de connexion)",
+        "url": "https://github.com/cyberjunky/python-garminconnect"
+      }
+    ]
+  },
   "auths": {
     "primary": {
       "type": "oauth2",
