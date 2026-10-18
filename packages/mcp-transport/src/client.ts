@@ -82,9 +82,29 @@ const legacyOrigins = createCache<true>({
   ttlMs: LEGACY_VERDICT_TTL_MS,
 });
 
+/**
+ * Origins assumed legacy because a probe said nothing (5xx, timeout) and `initialize` then
+ * answered. Kept briefly: a legacy server that fails the probe is not re-probed on every
+ * connect, and a dual-era server whose probe failed once is not pinned to legacy for long.
+ */
+const ASSUMED_LEGACY_TTL_MS = 2 * 60_000;
+const assumedLegacyOrigins = createCache<true>({
+  name: "mcp-transport.assumed-legacy-origins",
+  ttlMs: ASSUMED_LEGACY_TTL_MS,
+});
+
+const isRememberedLegacy = (origin: string) =>
+  legacyOrigins.peek(origin) === true || assumedLegacyOrigins.peek(origin) === true;
+
+function forgetLegacy(origin: string): void {
+  if (legacyOrigins.peek(origin)) legacyOrigins.invalidate(origin);
+  if (assumedLegacyOrigins.peek(origin)) assumedLegacyOrigins.invalidate(origin);
+}
+
 /** Forget every era verdict: each origin's next connect probes. For tests (`./testing`). */
 export function forgetProtocolEras(): void {
   legacyOrigins.clear();
+  assumedLegacyOrigins.clear();
 }
 
 /**
@@ -322,12 +342,12 @@ async function connectOnce(
 ): Promise<AppstrateMcpClient> {
   if (options.era === "legacy") return connectAttempt(targetUrl, headers, options, "legacy");
   const origin = targetUrl.origin;
-  if (legacyOrigins.peek(origin)) {
+  if (isRememberedLegacy(origin)) {
     try {
       return await connectAttempt(targetUrl, headers, options, "legacy");
     } catch (err) {
       if (options.signal?.aborted || isAuthRefusal(err)) throw err;
-      legacyOrigins.invalidate(origin);
+      forgetLegacy(origin);
     }
   }
   return probeThenFallback(targetUrl, headers, options);
@@ -350,7 +370,9 @@ async function probeThenFallback(
   } catch (err) {
     if (!(err instanceof ProbeInconclusive) || options.signal?.aborted) throw err;
     try {
-      return await connectAttempt(targetUrl, headers, options, "legacy");
+      const connected = await connectAttempt(targetUrl, headers, options, "legacy");
+      assumedLegacyOrigins.set(targetUrl.origin, true);
+      return connected;
     } catch (fallback) {
       if (options.signal?.aborted) throw fallback;
       const status = httpStatusOf(fallback);
@@ -432,12 +454,12 @@ async function connectAttempt(
     if (era === "auto" && !pastProbe && isInconclusiveProbe(err)) throw new ProbeInconclusive(err);
     throw err;
   }
-  // A verdict only the SDK's own negotiation reached: never one assumed (the cached path, the
-  // fallback after an inconclusive probe, a caller's pin), or a busy origin would never be
-  // re-probed and a dual-era server answering a probe 5xx once would stay legacy.
+  // The long verdict is one only the SDK's own negotiation reached: never renewed on the cached
+  // path (a busy origin would never be re-probed), never set by a caller's pin. The fallback
+  // after an inconclusive probe keeps a short one of its own (`probeThenFallback`).
   if (era === "auto") {
     if (client.getProtocolEra() === "legacy") legacyOrigins.set(targetUrl.origin, true);
-    else if (legacyOrigins.peek(targetUrl.origin)) legacyOrigins.invalidate(targetUrl.origin);
+    else forgetLegacy(targetUrl.origin);
   }
   return buildClient(
     dualEraSession(client, options.onWarning),
@@ -479,10 +501,13 @@ export function httpStatusOf(err: unknown): number | undefined {
  * ends the probe's request. A retry loop is not an alternative bound — it wraps attempts, it
  * cannot interrupt one — which is why the signal goes here rather than only around the loop.
  *
+ * An abort always fails the connect: one the SDK did not act on is checked once `connect`
+ * returns, since the transport it resolved on is closed by then.
+ *
  * RESIDUAL, on purpose: on the legacy path `connect` awaits one more POST after `initialize`
  * settles — `notifications/initialized` — and the SDK passes that one no signal. An abort
- * landing in that window is not honoured and the connect resolves once the POST returns. It is a
- * single round trip against a server that has just proved it answers, so it is left alone
+ * landing in that window fails the connect only once that POST returns, not at once. It is a
+ * single round trip against a server that has just proved it answers, so the wait is left alone
  * rather than papered over with a second timer. `client-connect-residual` in the tests pins it,
  * so this note cannot quietly become false.
  *
@@ -504,6 +529,9 @@ async function connectWithSignal(
       ...(signal ? { signal } : {}),
       ...(knownLegacy ? { prior: { kind: "legacy" } } : {}),
     });
+    // An abort the connect did not see (a fetch deaf to its signal, or one landing after the
+    // last request) has still closed the transport: the client it resolved is dead.
+    signal?.throwIfAborted();
   } finally {
     signal?.removeEventListener("abort", onAbort);
   }
@@ -804,6 +832,12 @@ interface SdkSession {
   close(): Promise<void>;
 }
 
+/** The bounds of a call, for the listing it needs: its signal and its per-call timeout. */
+const refreshOptions = (options: SessionRequestOptions): SessionRequestOptions => ({
+  ...(options.signal ? { signal: options.signal } : {}),
+  ...(options.timeout ? { timeout: options.timeout } : {}),
+});
+
 /** MCP 2026-07-28 `HeaderMismatch`: mirrored headers do not match the request body. */
 const HEADER_MISMATCH = -32020;
 
@@ -835,6 +869,8 @@ function dualEraSession(
     return read;
   };
   const listAll = async (options: SessionRequestOptions) => {
+    // A listing replaces the definitions: one the server no longer lists must not be mirrored.
+    listed.clear();
     const tools: Tool[] = [];
     let cursor: string | undefined;
     for (let n = 0; n < MAX_TOOL_PAGES; n++) {
@@ -859,6 +895,11 @@ function dualEraSession(
       return { tools: read.tools, ...(read.nextCursor ? { nextCursor: read.nextCursor } : {}) };
     },
     async callTool(args, options) {
+      const modern = client.getProtocolEra() === "modern";
+      // On a modern connection every call carries the definition its headers mirror: the
+      // session's own listing, taken first when it has none, so the SDK never falls back to its
+      // own cache — whose recovery refetches, retries and writes to the console.
+      if (modern && listed.size === 0) await listAll(refreshOptions(options));
       const call = () => {
         const toolDefinition = listed.get(args.name);
         return client.callTool(args, {
@@ -866,14 +907,16 @@ function dualEraSession(
           ...(toolDefinition ? { toolDefinition: toolDefinition as never } : {}),
         }) as Promise<CallToolResult>;
       };
+      const mirrored = modern && listed.has(args.name);
       try {
         return await call();
       } catch (err) {
-        // A `HeaderMismatch` says the definition the headers were mirrored from is stale: the
-        // SDK refetches and retries itself, but only from its own cache, which a passed
-        // `toolDefinition` bypasses — so this session does the same, once.
-        if ((err as { code?: unknown } | null)?.code !== HEADER_MISMATCH) throw err;
-        await listAll({ ...(options.signal ? { signal: options.signal } : {}) });
+        // `HeaderMismatch` is the transport's rejection BEFORE the tool runs, and only on a
+        // modern connection mirroring headers (SEP-2243): there the definition is stale, so it
+        // is refreshed and the call sent once more. Elsewhere -32020 is the server's own code
+        // for a call that may have run: never resent.
+        if (!mirrored || (err as { code?: unknown } | null)?.code !== HEADER_MISMATCH) throw err;
+        await listAll(refreshOptions(options));
         return await call();
       }
     },

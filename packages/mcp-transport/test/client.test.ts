@@ -251,16 +251,14 @@ describe("createMcpHttpClient — connect cancellation", () => {
 
 /**
  * `client-connect-residual` — the documented gap in {@link connectWithSignal}'s
- * bound, pinned so the docstring cannot drift back into claiming the signal
- * covers the whole connect. `Client.connect` awaits a
+ * bound, pinned so the docstring cannot drift. `Client.connect` awaits a
  * `notifications/initialized` POST AFTER the options-bounded `initialize`, and
- * the SDK gives that call no options, hence no signal.
- *
- * This asserts CURRENT behaviour, not a fix: it passes before and after. Delete
- * it only together with the residual paragraph it guards.
+ * the SDK gives that call no signal: an abort landing there fails the connect
+ * (its client would be dead, the transport closed), but only once that POST
+ * returns. Delete it only together with the residual paragraph it guards.
  */
 describe("createMcpHttpClient — client-connect-residual", () => {
-  it("does not honour an abort landing after initialize settles", async () => {
+  it("fails the connect on an abort landing after initialize, once the POST returns", async () => {
     const NOTIFY_DELAY_MS = 200;
     const { fetch: base, url } = mountStandalone([echoTool()]);
     const ac = new AbortController();
@@ -276,10 +274,41 @@ describe("createMcpHttpClient — client-connect-residual", () => {
     }) as typeof fetch;
 
     const started = Date.now();
-    const client = await createMcpHttpClient(url, { fetch: fetcher, signal: ac.signal });
-    // Resolved despite the abort, and only after the POST came back.
-    expect(Date.now() - started).toBeGreaterThanOrEqual(NOTIFY_DELAY_MS);
-    await client.close();
+    const caught = await createMcpHttpClient(url, {
+      fetch: fetcher,
+      signal: ac.signal,
+      era: "legacy",
+    }).catch((err: unknown) => err);
+    expect((caught as Error).message).toBe("caller gave up");
+    // Not at once: only after the unbounded POST came back.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(NOTIFY_DELAY_MS - 5);
+  }, 5_000);
+
+  it("never resolves a dead client when the fetch ignores the abort", async () => {
+    const { fetch: base, url } = mountStandalone([echoTool()]);
+    const ac = new AbortController();
+    // Deaf to its signal: answers the handshake after the caller gave up.
+    const deaf: typeof fetch = (async (req: Request | string | URL, init?: RequestInit) => {
+      const request = req instanceof Request ? req : new Request(req as string, init);
+      const body = await request.clone().text();
+      if (body.includes('"initialize"')) {
+        ac.abort(new Error("caller gave up"));
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      return base(
+        new Request(request.url, {
+          method: request.method,
+          headers: request.headers,
+          ...(body ? { body } : {}),
+        }),
+      );
+    }) as typeof fetch;
+    const caught = await createMcpHttpClient(url, {
+      fetch: deaf,
+      signal: ac.signal,
+      era: "legacy",
+    }).catch((err: unknown) => err);
+    expect((caught as Error).message).toBe("caller gave up");
   }, 5_000);
 });
 

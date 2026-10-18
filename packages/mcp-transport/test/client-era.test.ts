@@ -505,25 +505,52 @@ describe("createMcpHttpClient — convergence of the era fallback", () => {
     expect(httpStatusOf(caught)).toBe(503);
   });
 
-  it("does not remember legacy from a fallback after an inconclusive probe", async () => {
+  it("remembers a fallback's legacy only briefly (2 min), then probes again", async () => {
+    let now = Date.now();
+    setCacheClock(() => now);
+    try {
+      const url = freshUrl();
+      const { fetch, seen } = recorded(
+        flakyProbe(
+          1,
+          modernMcpHandler({ tools: [echo], legacy: legacyMcpHandler({ tools: [echo] }) }),
+        ),
+      );
+      const first = await createMcpHttpClient(url, { fetch });
+      expect(first.getProtocol()?.era).toBe("legacy");
+      await first.close();
+      // Within the short verdict: no probe.
+      seen.length = 0;
+      await (await createMcpHttpClient(url, { fetch })).close();
+      expect(methods(seen)).not.toContain("server/discover");
+      // Past it: the dual-era server is probed, and answers modern.
+      now += 2 * 60_000 + 1;
+      seen.length = 0;
+      const later = await createMcpHttpClient(url, { fetch });
+      try {
+        expect(methods(seen)[0]).toBe("server/discover");
+        expect(later.getProtocol()?.era).toBe("modern");
+      } finally {
+        await later.close();
+      }
+    } finally {
+      setCacheClock(null);
+    }
+  });
+
+  it("does not re-probe on every connect a legacy server that 5xxs the probe", async () => {
     const url = freshUrl();
     const { fetch, seen } = recorded(
-      flakyProbe(
-        1,
-        modernMcpHandler({ tools: [echo], legacy: legacyMcpHandler({ tools: [echo] }) }),
+      probeAnswered(
+        async () => new Response("no", { status: 500 }),
+        legacyMcpHandler({ tools: [echo] }),
       ),
     );
-    const first = await createMcpHttpClient(url, { fetch });
-    expect(first.getProtocol()?.era).toBe("legacy");
-    await first.close();
+    await (await createMcpHttpClient(url, { fetch })).close();
     seen.length = 0;
-    const second = await createMcpHttpClient(url, { fetch });
-    try {
-      expect(methods(seen)[0]).toBe("server/discover");
-      expect(second.getProtocol()?.era).toBe("modern");
-    } finally {
-      await second.close();
-    }
+    await (await createMcpHttpClient(url, { fetch })).close();
+    expect(methods(seen)[0]).toBe("initialize");
+    expect(methods(seen)).not.toContain("server/discover");
   });
 
   it("does not renew a legacy verdict on each cached connect: it expires from the probe", async () => {
@@ -586,6 +613,99 @@ describe("createMcpHttpClient — convergence of the era fallback", () => {
       expect(res.content).toEqual([{ type: "text", text: "ok" }]);
       expect(methods(seen)).toEqual(["tools/call", "tools/list", "tools/call"]);
       expect(seen[0]!.status).toBe(400);
+    } finally {
+      await client.close();
+    }
+  });
+});
+
+describe("createMcpHttpClient — tools/call retries", () => {
+  /** Counts `tools/call` POSTs, answering each as `answer` (the rest as `handler`). */
+  const countingCalls = (handler: McpHandler, answer?: (request: Request) => Promise<Response>) => {
+    let calls = 0;
+    const fetch = handlerFetch(async (request) => {
+      const text = request.method === "POST" ? await request.clone().text() : "";
+      if (text.includes('"tools/call"')) {
+        calls += 1;
+        if (answer) return answer(request);
+      }
+      return handler(request);
+    });
+    return { fetch, calls: () => calls };
+  };
+  const mismatch = async (request: Request) => {
+    const { id } = (await request.clone().json()) as { id: number };
+    return Response.json(
+      { jsonrpc: "2.0", id, error: { code: -32020, message: "Header mismatch" } },
+      { status: 400 },
+    );
+  };
+
+  it("never resends a tools/call a legacy server answered -32020", async () => {
+    const { fetch, calls } = countingCalls(legacyMcpHandler({ tools: [echo] }), async (request) => {
+      const { id } = (await request.clone().json()) as { id: number };
+      return Response.json({ jsonrpc: "2.0", id, error: { code: -32020, message: "app error" } });
+    });
+    const client = await createMcpHttpClient(freshUrl(), { fetch });
+    try {
+      await client.listTools();
+      await expect(client.callTool({ name: "echo", arguments: { msg: "x" } })).rejects.toThrow();
+      expect(calls()).toBe(1);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("sends a modern tools/call at most twice on a persistent HeaderMismatch", async () => {
+    const { fetch, calls } = countingCalls(modernMcpHandler({ tools: [echo] }), mismatch);
+    const client = await createMcpHttpClient(freshUrl(), { fetch });
+    try {
+      // Never listed: the session lists first, so its own definition is the one mirrored.
+      await expect(client.callTool({ name: "echo", arguments: { msg: "x" } })).rejects.toThrow();
+      expect(calls()).toBe(2);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("drops a definition a refreshed listing no longer carries", async () => {
+    const other: AppstrateToolDefinition = {
+      descriptor: { name: "other", inputSchema: { type: "object" } },
+      handler: async () => ({ content: [] }),
+    };
+    let handler = modernMcpHandler({ tools: [echo, other] });
+    const fetch = handlerFetch((request) => handler(request));
+    const client = await createMcpHttpClient(freshUrl(), { fetch });
+    try {
+      expect((await client.listTools()).tools).toHaveLength(2);
+      handler = modernMcpHandler({ tools: [echo] });
+      expect((await client.listTools()).tools.map((t) => t.name)).toEqual(["echo"]);
+      // `other` is gone from the session: a call to it carries no stale definition, so the
+      // server's own refusal comes back rather than a mirrored-header retry.
+      await expect(client.callTool({ name: "other" })).rejects.toThrow(/Unknown tool/);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("bounds the refresh listing by the call's own timeout", async () => {
+    let listing = false;
+    const modern = modernMcpHandler({ tools: [echo] });
+    const fetch = handlerFetch(async (request) => {
+      const text = request.method === "POST" ? await request.clone().text() : "";
+      if (text.includes('"tools/list"') && listing) return silent(request);
+      if (text.includes('"tools/call"')) {
+        listing = true;
+        return mismatch(request);
+      }
+      return modern(request);
+    });
+    const client = await createMcpHttpClient(freshUrl(), { fetch });
+    try {
+      await client.listTools();
+      const started = Date.now();
+      await expect(client.callTool({ name: "echo" }, { timeoutMs: 150 })).rejects.toThrow();
+      expect(Date.now() - started).toBeLessThan(3_000);
     } finally {
       await client.close();
     }
