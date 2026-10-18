@@ -25,7 +25,7 @@ describe("connectSubmitBody", () => {
   it("sends the credentials and the trimmed declared variables for a non-oauth auth", () => {
     expect(
       connectSubmitBody({
-        authType: "api_key",
+        authorizationFlow: false,
         credentials: { api_key: "tok" },
         variableNames: VARS,
         variableValues: { base_url: "  https://coolify.example.com ", stale: "x" },
@@ -39,7 +39,7 @@ describe("connectSubmitBody", () => {
   it("sends the variables alone for an oauth2 auth", () => {
     expect(
       connectSubmitBody({
-        authType: "oauth2",
+        authorizationFlow: true,
         credentials: {},
         variableNames: VARS,
         variableValues: { base_url: "https://gitlab.com" },
@@ -50,7 +50,7 @@ describe("connectSubmitBody", () => {
   it("sends no variables member for an integration that declares none", () => {
     expect(
       connectSubmitBody({
-        authType: "basic",
+        authorizationFlow: false,
         credentials: { username: "u", password: "p" },
         variableNames: null,
         variableValues: {},
@@ -71,7 +71,7 @@ describe("submitHostedConnect", () => {
     const visited: string[] = [];
     const outcome = await submitHostedConnect(
       {
-        authType: "oauth2",
+        authorizationFlow: true,
         credentials: {},
         variableNames: VARS,
         variableValues: { base_url: "https://git.example.com" },
@@ -93,7 +93,7 @@ describe("submitHostedConnect", () => {
     const visited: string[] = [];
     await expect(
       submitHostedConnect(
-        { authType: "oauth2", credentials: {}, variableNames: VARS, variableValues: {} },
+        { authorizationFlow: true, credentials: {}, variableNames: VARS, variableValues: {} },
         { post: async () => ({ ok: true }), navigate: (url) => visited.push(url) },
       ),
     ).rejects.toThrow();
@@ -104,7 +104,7 @@ describe("submitHostedConnect", () => {
     const visited: string[] = [];
     const outcome = await submitHostedConnect(
       {
-        authType: "api_key",
+        authorizationFlow: false,
         credentials: { api_key: "tok" },
         variableNames: null,
         variableValues: {},

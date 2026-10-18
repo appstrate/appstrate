@@ -144,6 +144,7 @@ import {
   getVariablesSchema,
 } from "../services/integration-manifest-helpers.ts";
 import {
+  acquiresByConnectLogin,
   partitionScopesByAuthCatalog,
   scopesNotCovered,
   scopeTokenSchema,
@@ -1111,7 +1112,7 @@ export function createIntegrationsRouter() {
         : null;
       try {
         const { auth } = await readIntegrationAuth(scope, packageId, authKey);
-        if (auth.type === "oauth2") {
+        if (auth.type === "oauth2" && !acquiresByConnectLogin(auth)) {
           throw invalidRequest(
             `Auth '${authKey}' is type '${auth.type}' — use the OAuth flow, not the fields flow`,
           );
@@ -1177,9 +1178,11 @@ export function createIntegrationsRouter() {
         : null;
 
       const { auth } = await readIntegrationAuth(scope, packageId, authKey);
-      if (auth.type !== "oauth2") {
+      if (auth.type !== "oauth2" || acquiresByConnectLogin(auth)) {
         throw invalidRequest(
-          `Auth '${authKey}' is type '${auth.type}' — use the fields flow instead`,
+          auth.type === "oauth2"
+            ? `Auth '${authKey}' acquires its first token by connect.login — use the fields flow instead`
+            : `Auth '${authKey}' is type '${auth.type}' — use the fields flow instead`,
         );
       }
       assertScopesInAuthCatalog(auth, authKey, body.scopes);
@@ -1305,7 +1308,11 @@ export function createIntegrationsRouter() {
 
     // An integration declaring connection variables (AFPS §7.12) collects them on the hosted form
     // first: its oauth2 begins from `/connect/submit`, once the user has chosen the upstream.
-    if (auth.type === "oauth2" && getVariablesSchema(manifest) === null) {
+    if (
+      auth.type === "oauth2" &&
+      !acquiresByConnectLogin(auth) &&
+      getVariablesSchema(manifest) === null
+    ) {
       const begun = await beginHostedOAuth(claims, manifest, auth);
       if ("redirectUrl" in begun) return c.redirect(begun.redirectUrl);
       if ("connectionGone" in begun) {
@@ -1338,10 +1345,11 @@ export function createIntegrationsRouter() {
       );
     }
 
-    // Non-oauth, or oauth2 with connection variables → hand off to the hosted
-    // SPA form. Pin the page cookie so the form can read context via
-    // GET /connect/context (no token in the URL). The oauth2 branch above never
-    // reaches here, so the cookie is set only when the hosted form needs it.
+    // Non-oauth, oauth2 acquired by connect.login, or oauth2 with connection
+    // variables → hand off to the hosted SPA form. Pin the page cookie so the
+    // form can read context via GET /connect/context (no token in the URL). The
+    // oauth2 branch above never reaches here, so the cookie is set only when the
+    // hosted form needs it.
     setConnectPageCookie(c, claims);
     return c.redirect("/connect");
   });
@@ -1394,7 +1402,7 @@ export function createIntegrationsRouter() {
         claims.package_id,
         claims.auth_key,
       );
-      if (auth.type === "oauth2") {
+      if (auth.type === "oauth2" && !acquiresByConnectLogin(auth)) {
         if (body.credentials) {
           throw invalidRequest(
             "This integration uses OAuth: submit its connection variables only",

@@ -4,6 +4,7 @@ import { META_NAMESPACE_KEY_REGEX } from "@appstrate/core/validation";
 import { findRetiredDependencyKeys } from "@appstrate/core/dependencies";
 import { normalizeMime } from "@appstrate/core/mime";
 import { headerNamed } from "@appstrate/afps-shared/request-template";
+import { acquiresByConnectLogin } from "@appstrate/core/integration";
 
 /**
  * Collect import-time warnings for AFPS 1.x `dependencies` keys AFPS 2.0
@@ -65,15 +66,19 @@ interface LoginShape {
 /**
  * Warn on a `connect.login` that posts a form and declares no `success_criteria`. Any 2xx then
  * counts as success, and a web app commonly answers a wrong password with `200` and its login
- * page: the connection would be stored with a dead session. Pure; `[]` for any other manifest.
+ * page: the connection would be stored with a dead session. An oauth2 login is a token request
+ * whose answer is judged as a token response, so it declares no criteria. Pure; `[]` for any
+ * other manifest.
  */
 export function collectLoginCriteriaWarnings(manifest: unknown): string[] {
   const auths = (manifest as { auths?: unknown } | null)?.auths;
   if (typeof auths !== "object" || auths === null) return [];
   const warnings: string[] = [];
   for (const [key, auth] of Object.entries(auths)) {
-    const login = (auth as { connect?: { login?: LoginShape } } | null)?.connect?.login;
+    const declared = (auth ?? {}) as { type?: unknown; connect?: { login?: LoginShape } };
+    const login = declared.connect?.login;
     if (!login?.request || (login.success_criteria?.length ?? 0) > 0) continue;
+    if (acquiresByConnectLogin(declared)) continue;
     const header = headerNamed(login.request.headers ?? {}, "content-type");
     if (
       normalizeMime(header ?? login.request.content_type) !== "application/x-www-form-urlencoded"

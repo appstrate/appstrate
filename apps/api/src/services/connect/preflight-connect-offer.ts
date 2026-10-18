@@ -31,7 +31,7 @@
 import { buildConnectUrl, connectClaimsFor } from "./connect-session.ts";
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "../integration-service.ts";
 import { isUserConnectionCreationBlocked } from "../integration-connection-resolver.ts";
-import { partitionScopesByAuthCatalog } from "@appstrate/core/integration";
+import { acquiresByConnectLogin, partitionScopesByAuthCatalog } from "@appstrate/core/integration";
 import type { ResolutionFieldError } from "../../lib/errors.ts";
 import type { ConnectOfferPolicy } from "../../lib/connect-offer-policy.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
@@ -112,13 +112,14 @@ export async function attachConnectOffers(params: {
       const target = connectOfferTarget(e);
       if (!target) return e;
       try {
-        // The auth must still exist AND be oauth2. Non-oauth2 auths connect
-        // through the hosted credential form, where the human types a secret —
-        // a link that opens a blank form is not a remedy the card can present.
+        // The auth must still exist AND be oauth2 with a consent screen. Other auths —
+        // an oauth2 one acquired by connect.login included — connect through the hosted
+        // credential form, where the human types a secret: a link that opens a blank form
+        // is not a remedy the card can present.
         const loaded = await fetchIntegrationManifest(target.integrationId, params.manifestCache);
         if (!loaded.ok) return e;
         const auth = loaded.manifest.auths?.[target.authKey];
-        if (auth?.type !== "oauth2") return e;
+        if (auth?.type !== "oauth2" || acquiresByConnectLogin(auth)) return e;
 
         // `required_scopes` is derived from the agent manifest's own
         // `integrations_configuration[id].scopes`, which on the inline-run

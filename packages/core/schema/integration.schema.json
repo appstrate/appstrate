@@ -869,6 +869,20 @@
     "allow_undeclared_tools": {
       "type": "boolean"
     },
+    "default_tools": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "type": "string",
+          "const": "*"
+        }
+      ]
+    },
     "setup_guide": {
       "type": "object",
       "properties": {

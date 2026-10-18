@@ -292,6 +292,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   body is retried once from the page; a `403` with a JSON `errors` body is
   reported as is. Only sessions visible to everyone are read; passcode-protected
   links are refused with a clear message.
+- **An oauth2 connection can be acquired through `connect.login`** (AFPS §7.7,
+  afps-spec/afps-spec#44, #2083). For a provider whose sign-in no redirect flow
+  can drive (a mobile-app SSO), an oauth2 auth declares `connect.login` as a token
+  request to its `token_endpoint` whose body holds only the grant parameters
+  (`grant_type=refresh_token&refresh_token={{refresh_token}}`), and the fields the
+  user submits in `credentials.schema`. The fields doors (`connect/fields`, the
+  hosted form, which the portal now opens instead of an authorization server) take
+  them; the platform renders the grant, adds the client authentication of the
+  auth's default client — the client later refreshes use — and the RFC 8707
+  `resource` it sends, and posts it through the same token request refreshes run,
+  before anything is stored. A grant the server refuses is a 400
+  `login_rejected` on the form, a refused client a 502 `oauth_client_rejected`, a
+  client that no longer resolves a 409 `connection_not_ready`, and a failure
+  after a successful token request says the grant was redeemed. Identity comes
+  from the token response, an `id_token` and `userinfo_endpoint`; a response
+  without `refresh_token` keeps the submitted one. The connection is then an
+  ordinary oauth2 one: proactive and on-401 refresh, rotated tokens written back.
+  `connect/oauth2` refuses such an auth and connect offers skip it.
+  `@afps-spec/schema` enforces the manifest rules (URL equal to `token_endpoint`,
+  form body, no `outputs`, no client parameters); Appstrate's own rule that a
+  `connect.login` declares `outputs` now applies to `custom` auths only.
 
 ### Fixed
 

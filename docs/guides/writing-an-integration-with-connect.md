@@ -34,6 +34,7 @@ variables also references them as `{$variable.<name>}` ([Connection variables](#
 | `auth.type` | `connect` | `connect.tool` `run_at` | Strategy     | Flow                                                |
 | ----------- | --------- | ----------------------- | ------------ | --------------------------------------------------- |
 | `oauth2`    | —         | —                       | OAuth2       | OAuth 2.0 + PKCE, discovery + auto-refresh          |
+| `oauth2`    | `login`   | —                       | OAuth2       | first token from a submitted grant, auto-refresh    |
 | `api_key`   | —         | —                       | Fields       | paste-the-bag (user submits the credential)         |
 | `basic`     | —         | —                       | Fields       | paste-the-bag (username + password)                 |
 | `mtls`      | —         | —                       | Fields       | paste-the-bag (client cert + key, mounted as files) |
@@ -232,6 +233,61 @@ provider's `.well-known/openid-configuration` can be copy-pasted.
 > Note: the field is `resource` (RFC 8707 — the protected-resource indicator), **not**
 > `audience`. Send it for forward compatibility even when the AS is known to ignore
 > it; the resource server validates the token audience independently.
+
+### First token by `connect.login`
+
+For a provider whose sign-in no redirect flow can drive (a mobile-app SSO), the user
+obtains a grant outside Appstrate — typically a refresh token — and submits it. The auth
+declares `connect.login` as a token request to its own `token_endpoint` (AFPS §7.7, _On
+an `oauth2` auth method_):
+
+```jsonc
+"oauth": {
+  "type": "oauth2",
+  "token_endpoint": "https://idp.example.com/oauth/token",
+  "token_endpoint_auth_method": "none",
+  "userinfo_endpoint": "https://idp.example.com/userinfo",
+  "credentials": {
+    "schema": {
+      "type": "object",
+      "properties": { "refresh_token": { "type": "string", "title": "Refresh token" } },
+      "required": ["refresh_token"]
+    }
+  },
+  "connect": {
+    "login": {
+      "request": {
+        "method": "POST",
+        "url": "https://idp.example.com/oauth/token",
+        "content_type": "application/x-www-form-urlencoded",
+        "body": "grant_type=refresh_token&refresh_token={{refresh_token}}"
+      }
+    }
+  },
+  "authorized_uris": ["https://api.example.com/**"],
+  "delivery": { "http": { "in": "header", "name": "Authorization", "prefix": "Bearer ", "value": "{$credential.access_token}" } }
+}
+```
+
+- The request is a `POST` of `application/x-www-form-urlencoded` to exactly
+  `token_endpoint`, without `headers`; its `body` holds only the grant parameters
+  (`grant_type` and its own). `authorization_endpoint` and `issuer` are not required.
+- The platform adds the client authentication itself, with the auth's default client —
+  the one later refreshes use: a Basic header for `client_secret_basic`, `client_id` and
+  `client_secret` in the body for `client_secret_post`, `client_id` alone for a public
+  client (`none`). The body never carries `client_id`, `client_secret`,
+  `client_assertion*` or `resource`.
+- No `outputs`, `success_criteria`, `expires_in_output` or `identity_outputs`: the answer
+  is read as a token response, and identity comes from `identity_claims` over it, an
+  `id_token` and `userinfo_endpoint`, as for the authorization-code flow. A response
+  without `refresh_token` keeps the submitted `refresh_token`.
+- No `scope_catalog`, no templated `issuer`, no `remote` source.
+
+The user submits the fields through the hosted form or `connect/fields`;
+`connect/oauth2` refuses the auth. Nothing is stored unless the token request succeeds:
+a grant the server refuses is a `400 login_rejected`, a refused OAuth client a
+`502 oauth_client_rejected`. Once connected, it is an ordinary `oauth2` connection.
+Reference package: `@appstrate/garmin-connect`.
 
 ### `identity_claims` — naming the connected account
 
@@ -1260,8 +1316,9 @@ rejects it.
 - The login secret travels in the run's `inputs` plane and is substituted
   **proxy-side** by the sidecar's MITM — the integration's tool code never reads it,
   and it is never logged.
-- `connect` is only valid on `type: "custom"`; declare **exactly one** of `login` or
-  `tool`.
+- `connect` is valid on `type: "custom"`, and its `login` mode on `type: "oauth2"`
+  too ([First token by `connect.login`](#first-token-by-connectlogin)); declare
+  **exactly one** of `login` or `tool`.
 - The declarative `login` request is bounded by `limits` (`request_timeout_ms`,
   `max_response_bytes`); the orchestrated `tool` runs in the sandboxed runner with
   the per-run CA and MITM envelope.

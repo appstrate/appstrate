@@ -11,18 +11,29 @@
  *                  state and owns the `OAuthCallbackError` UX mapping); this
  *                  consumes the already-exchanged result.
  *
+ * An auth declaring `connect.login` (`acquiresByConnectLogin`, AFPS §7.7) has no
+ * `begin`: `complete` takes the submitted `fields`, renders the login's grant from
+ * them and posts it to the token endpoint with the auth's client — the token request
+ * a later refresh sends — then extracts identity and persists the same way.
+ *
  * Re-acquisition (refresh) is not a strategy method — the live resolvers call
  * `refreshConnectionCredential`, since only `oauth2` refreshes.
  */
 
 import { decodeJwtPayload } from "@appstrate/core/jwt";
+import { acquiresByConnectLogin } from "@appstrate/core/integration";
 import {
   initiateIntegrationOAuth,
+  performTokenRequest,
+  RefreshError,
   resolveOAuthEndpoints,
   oauthEgressFetch,
   SsrfBlockedError,
+  type RefreshExchangeResult,
 } from "@appstrate/connect";
-import { invalidRequest } from "../../lib/errors.ts";
+import { LoginError, renderTokenGrant, type LoginConfig } from "@appstrate/connect/connect";
+import { ApiError, invalidRequest } from "../../lib/errors.ts";
+import { buildIntegrationOAuthRefreshContext } from "../integration-token-refresh.ts";
 import {
   authorizationServerTag,
   integrationCallbackUrl,
@@ -46,12 +57,17 @@ import {
   saveIntegrationConnection,
   type IntegrationConnectionSummary,
 } from "../integration-connections.ts";
-import type {
-  BeginOptions,
-  BeginResult,
-  ConnectContext,
-  ConnectCompleteInput,
-  IntegrationConnectStrategy,
+import {
+  assertCredentialsMatchSchema,
+  loginInputUnencodable,
+  loginRejected,
+  loginUpstreamUnavailable,
+  requireNonEmptyCredentials,
+  type BeginOptions,
+  type BeginResult,
+  type ConnectContext,
+  type ConnectCompleteInput,
+  type IntegrationConnectStrategy,
 } from "./strategy.ts";
 
 /**
@@ -78,6 +94,90 @@ function refreshTokenIssuance(auth: Record<string, unknown>): string | undefined
   return typeof value === "string" ? value : undefined;
 }
 
+/**
+ * Build the identity source for `extractIdentity`. Three layers, applied in
+ * order so later layers don't overwrite earlier ones:
+ *   1. Token response top-level (some IdPs put identity there).
+ *   2. `id_token` JWT claims — OIDC providers. No sig check: the channel that
+ *      delivered the token was already vetted; claims are identity hints only.
+ *   3. `userinfoUrl` GET — non-OIDC OAuth2 (GitHub, Slack, Notion, …).
+ *      Without it, accountId falls back to "default" and every new
+ *      connection collapses onto the same row.
+ */
+async function identitySourceFor(
+  tokenResponse: Record<string, unknown>,
+  accessToken: string,
+  userinfoUrl: string | undefined,
+  log: { packageId: string; authKey: string },
+): Promise<Record<string, unknown>> {
+  const identitySource: Record<string, unknown> = { ...tokenResponse };
+  const idToken = tokenResponse.id_token;
+  if (typeof idToken === "string") {
+    const claims = decodeJwtPayload(idToken);
+    if (claims) {
+      for (const [k, v] of Object.entries(claims)) {
+        if (identitySource[k] === undefined) identitySource[k] = v;
+      }
+    }
+  }
+  if (!userinfoUrl) return identitySource;
+  try {
+    // SSRF-guarded: `userinfoUrl` is manifest-declared and fetched with the
+    // user's access token. `oauthEgressFetch` does per-hop DNS + blocklist
+    // and refuses loopback / RFC1918 / link-local / metadata targets
+    // (throwing SsrfBlockedError, caught below) so a malicious manifest
+    // can't exfiltrate the token to internal infra — unless the operator
+    // opted the host into EGRESS_ALLOW_INTERNAL_HOSTS.
+    const res = await oauthEgressFetch(userinfoUrl, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/json",
+        "User-Agent": "Appstrate",
+      },
+      // Bounded on purpose — `oauthEgressFetch` imposes no deadline of its
+      // own. This runs after the token exchange has already succeeded, so a
+      // provider that accepts the exchange and then stalls its userinfo
+      // endpoint would hold the connect open and leave the connection
+      // unsaved, losing a credential the user already granted. Identity is
+      // best-effort enrichment (a timeout degrades to accountId "default");
+      // it must never decide whether the connection persists.
+      signal: AbortSignal.timeout(USERINFO_TIMEOUT_MS),
+    });
+    if (res.ok) {
+      const body = (await res.json()) as unknown;
+      if (body && typeof body === "object") {
+        for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
+          if (identitySource[k] === undefined) identitySource[k] = v;
+        }
+      }
+    } else {
+      logger.warn("Integration userinfo fetch non-2xx", { ...log, status: res.status });
+    }
+  } catch (err) {
+    if (err instanceof SsrfBlockedError) {
+      // Best-effort: a blocked userinfo host skips enrichment (accountId
+      // falls back to the manifest chain). Never log the access token.
+      logger.warn("Integration userinfo URL blocked by SSRF guard", log);
+    } else {
+      logger.warn("Integration userinfo fetch failed", { ...log, err: String(err) });
+    }
+  }
+  return identitySource;
+}
+
+/** A grant the submitted fields cannot render, as its 400; a manifest fault stays the caller's 500. */
+function grantRefusal(err: unknown): unknown {
+  if (!(err instanceof LoginError)) return err;
+  if (err.reason === "invalid_input") return loginInputUnencodable(err.field!);
+  if (err.reason === "unresolved_placeholder") {
+    return invalidRequest(
+      `The submitted credentials leave the token request incomplete (${err.message}).`,
+      "credentials",
+    );
+  }
+  return err;
+}
+
 export class OAuth2Strategy implements IntegrationConnectStrategy {
   async begin(ctx: ConnectContext, opts: BeginOptions): Promise<BeginResult> {
     const { manifest, auth: rawAuth } = await readIntegrationAuth(
@@ -86,6 +186,11 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       ctx.authKey,
     );
     const auth = rawAuth as unknown as AfpsManifestAuth;
+    if (acquiresByConnectLogin(auth)) {
+      throw invalidRequest(
+        `Auth '${ctx.authKey}' acquires its first token by connect.login, not through an authorization flow — use the fields flow`,
+      );
+    }
     // AFPS §7.12: validated before anything leaves the platform; carried in the OAuth state and
     // persisted with the credential at the callback.
     const variables = await resolveConnectionVariables(manifest, auth, ctx.variables);
@@ -193,9 +298,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     ctx: ConnectContext,
     input: ConnectCompleteInput,
   ): Promise<IntegrationConnectionSummary> {
-    if (input.kind !== "oauth2-result") {
-      throw new Error(`OAuth2Strategy.complete: unexpected input kind '${input.kind}'`);
-    }
+    if (input.kind === "fields") return this.completeFromLogin(ctx, input.credentials);
     const result = input.result;
     const { manifest, auth } = await readIntegrationAuth(ctx.scope, ctx.integrationId, ctx.authKey);
     // A server chosen per connection (AFPS §7.3) is the validated issuer the state carried, the one
@@ -211,24 +314,6 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
           ...(auth.token_endpoint ? { tokenEndpoint: auth.token_endpoint } : {}),
         };
 
-    // Build the identity source for `extractIdentity`. Three layers, applied
-    // in order so later layers don't overwrite earlier ones:
-    //   1. Token response top-level (some IdPs put identity there).
-    //   2. `id_token` JWT claims — OIDC providers. No sig check: PKCE + signed
-    //      state already vetted the channel; claims are identity hints only.
-    //   3. `userinfoUrl` GET — non-OIDC OAuth2 (GitHub, Slack, Notion, …).
-    //      Without it, accountId falls back to "default" and every new
-    //      connection collapses onto the same row.
-    const identitySource: Record<string, unknown> = { ...result.tokenResponse };
-    const idToken = result.tokenResponse.id_token;
-    if (typeof idToken === "string") {
-      const claims = decodeJwtPayload(idToken);
-      if (claims) {
-        for (const [k, v] of Object.entries(claims)) {
-          if (identitySource[k] === undefined) identitySource[k] = v;
-        }
-      }
-    }
     // Userinfo URL precedence (AFPS §7.3): mirror the same fallback chain
     // we apply for `code_challenge_methods_supported` —
     //   1. Manifest-declared `userinfo_endpoint` (authoritative).
@@ -253,61 +338,12 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       }
     }
     const userinfoUrl = manifestUserinfo ?? discoveredUserinfo;
-    if (userinfoUrl) {
-      try {
-        // SSRF-guarded: `userinfoUrl` is manifest-declared and fetched with the
-        // user's access token. `oauthEgressFetch` does per-hop DNS + blocklist
-        // and refuses loopback / RFC1918 / link-local / metadata targets
-        // (throwing SsrfBlockedError, caught below) so a malicious manifest
-        // can't exfiltrate the token to internal infra — unless the operator
-        // opted the host into EGRESS_ALLOW_INTERNAL_HOSTS.
-        const res = await oauthEgressFetch(userinfoUrl, {
-          headers: {
-            Authorization: `Bearer ${result.accessToken}`,
-            Accept: "application/json",
-            "User-Agent": "Appstrate",
-          },
-          // Bounded on purpose — `oauthEgressFetch` imposes no deadline of its
-          // own. This call runs INSIDE the OAuth callback, after the token
-          // exchange has already succeeded, so a provider that accepts the
-          // exchange and then stalls its userinfo endpoint would hold the
-          // callback open and leave the connection unsaved, losing a
-          // credential the user already granted. Identity is best-effort
-          // enrichment (a timeout degrades to accountId "default"); it must
-          // never decide whether the connection persists.
-          signal: AbortSignal.timeout(USERINFO_TIMEOUT_MS),
-        });
-        if (res.ok) {
-          const body = (await res.json()) as unknown;
-          if (body && typeof body === "object") {
-            for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
-              if (identitySource[k] === undefined) identitySource[k] = v;
-            }
-          }
-        } else {
-          logger.warn("Integration userinfo fetch non-2xx", {
-            packageId: result.packageId,
-            authKey: result.authKey,
-            status: res.status,
-          });
-        }
-      } catch (err) {
-        if (err instanceof SsrfBlockedError) {
-          // Best-effort: a blocked userinfo host skips enrichment (accountId
-          // falls back to the manifest chain). Never log the access token.
-          logger.warn("Integration userinfo URL blocked by SSRF guard", {
-            packageId: result.packageId,
-            authKey: result.authKey,
-          });
-        } else {
-          logger.warn("Integration userinfo fetch failed", {
-            packageId: result.packageId,
-            authKey: result.authKey,
-            err: String(err),
-          });
-        }
-      }
-    }
+    const identitySource = await identitySourceFor(
+      result.tokenResponse,
+      result.accessToken,
+      userinfoUrl,
+      { packageId: result.packageId, authKey: result.authKey },
+    );
 
     const { accountId, identityClaims } = extractIdentity(manifest, result.authKey, identitySource);
     // AFPS §7.4 — refuse the connection if any `required_identity_claims`
@@ -411,6 +447,193 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       clientRef: result.clientRef,
       variables: result.variables ?? null,
       ...(result.resource ? { oauthResource: result.resource } : {}),
+    });
+  }
+
+  /**
+   * `connect.login` acquisition (AFPS §7.7): the grant rendered from the submitted fields is posted
+   * to the token endpoint with the auth's default client before anything is stored, so a dead,
+   * mistyped or already-spent grant is a 400 on the form and never a born-dead connection. The
+   * request is the one every later refresh sends (`performTokenRequest`), on the context the
+   * refresh builds from the pinned client.
+   */
+  private async completeFromLogin(
+    ctx: ConnectContext,
+    submitted: Record<string, unknown>,
+  ): Promise<IntegrationConnectionSummary> {
+    const { manifest, auth: rawAuth } = await readIntegrationAuth(
+      ctx.scope,
+      ctx.integrationId,
+      ctx.authKey,
+    );
+    const auth = rawAuth as unknown as AfpsManifestAuth;
+    const login = acquiresByConnectLogin(auth) ? auth.connect?.login : undefined;
+    if (!login) {
+      throw invalidRequest(
+        `Auth '${ctx.authKey}' is type 'oauth2' — use the OAuth flow, not the fields flow`,
+      );
+    }
+    requireNonEmptyCredentials(submitted);
+    const credentials = assertCredentialsMatchSchema(auth.credentials?.schema, submitted);
+    let grant: Record<string, string>;
+    try {
+      grant = renderTokenGrant(login as LoginConfig["login"], credentials);
+    } catch (err) {
+      throw grantRefusal(err);
+    }
+
+    const variables = await resolveConnectionVariables(manifest, auth, ctx.variables);
+    const resolved = await ensureIntegrationOAuthClient(
+      ctx.scope,
+      ctx.integrationId,
+      ctx.authKey,
+      manifest,
+      auth,
+      integrationCallbackUrl(),
+      variables ?? {},
+    );
+    const { clientRef } = resolveConnectClient(
+      ctx.integrationId,
+      ctx.authKey,
+      manifest,
+      auth,
+      resolved,
+      ctx.target?.spaceId === null,
+    );
+    const oauthResource = resolved.resource ?? auth.resource ?? null;
+    const log = { packageId: ctx.integrationId, authKey: ctx.authKey };
+    let tokenContext: Awaited<ReturnType<typeof buildIntegrationOAuthRefreshContext>>;
+    try {
+      tokenContext = await buildIntegrationOAuthRefreshContext(
+        ctx.integrationId,
+        ctx.authKey,
+        auth,
+        ctx.scope.spaceId,
+        { clientRef, oauthResource },
+      );
+    } catch (err) {
+      if (err instanceof RefreshError && err.kind === "transient") {
+        throw loginUpstreamUnavailable(undefined);
+      }
+      throw err;
+    }
+    // The manifest schema guarantees a token endpoint; a client that no longer resolves is the one
+    // setup gap left.
+    if (!tokenContext) {
+      logger.warn("Integration connect.login: no token request context", log);
+      throw new ApiError({
+        status: 409,
+        code: "connection_not_ready",
+        title: "Connection Not Ready",
+        detail:
+          "This integration is not ready to be connected. Ask an administrator to finish setting it up, then try again.",
+      });
+    }
+
+    let exchanged: RefreshExchangeResult;
+    try {
+      exchanged = await performTokenRequest(tokenContext, grant, {
+        label: `Integration connect.login for '${ctx.integrationId}' auth '${ctx.authKey}'`,
+        // RFC 6749 §6 / AFPS §7.7: a response without `refresh_token` keeps the submitted one.
+        ...(typeof credentials.refresh_token === "string"
+          ? { keepRefreshToken: credentials.refresh_token }
+          : {}),
+      });
+    } catch (err) {
+      if (!(err instanceof RefreshError)) throw err;
+      logger.warn("Integration connect.login token request refused", {
+        ...log,
+        kind: err.kind,
+        status: err.status,
+      });
+      if (err.kind === "revoked") {
+        throw loginRejected(
+          "The service refused the submitted grant: it is invalid, expired or already used.",
+        );
+      }
+      if (err.kind === "client_rejected") {
+        throw new ApiError({
+          status: 502,
+          code: "oauth_client_rejected",
+          title: "OAuth Client Rejected",
+          detail:
+            "The service rejected this integration's OAuth client. Ask an administrator to check its client registration.",
+        });
+      }
+      throw loginUpstreamUnavailable(undefined);
+    }
+
+    // The request redeemed the submitted grant (a rotating server invalidates a refresh token), so
+    // a failure from here on must say so: retrying with the same values cannot work.
+    try {
+      return await this.storeExchangedConnection(ctx, manifest, auth, exchanged, {
+        clientRef,
+        oauthResource,
+        variables,
+        log,
+      });
+    } catch (err) {
+      logger.error("Integration connect.login: token request succeeded, connection not stored", {
+        ...log,
+        err: String(err),
+      });
+      if (!(err instanceof ApiError)) throw err;
+      throw new ApiError({
+        status: err.status,
+        code: err.code,
+        title: err.title,
+        detail: `${err.message} The submitted grant was already redeemed: obtain a new one before trying again.`,
+        ...(err.param !== undefined ? { param: err.param } : {}),
+        cause: err,
+      });
+    }
+  }
+
+  /** Identity and persistence for {@link completeFromLogin}, once the token request succeeded. */
+  private async storeExchangedConnection(
+    ctx: ConnectContext,
+    manifest: Awaited<ReturnType<typeof readIntegrationAuth>>["manifest"],
+    auth: AfpsManifestAuth,
+    { parsed, raw }: RefreshExchangeResult,
+    pinned: {
+      clientRef: string;
+      oauthResource: string | null;
+      variables: Awaited<ReturnType<typeof resolveConnectionVariables>>;
+      log: { packageId: string; authKey: string };
+    },
+  ): Promise<IntegrationConnectionSummary> {
+    const { clientRef, oauthResource, variables, log } = pinned;
+    const identitySource = await identitySourceFor(
+      raw,
+      parsed.accessToken,
+      auth.userinfo_endpoint,
+      log,
+    );
+    const { accountId, identityClaims } = extractIdentity(manifest, ctx.authKey, identitySource);
+    assertRequiredIdentityClaims(manifest, ctx.authKey, identityClaims);
+
+    const scopesGranted = parsed.scopesReturned ?? [];
+    return saveIntegrationConnection(ctx.scope, {
+      packageId: ctx.integrationId,
+      authKey: ctx.authKey,
+      accountId,
+      credentials: {
+        access_token: parsed.accessToken,
+        ...(parsed.refreshToken ? { refresh_token: parsed.refreshToken } : {}),
+        ...(typeof raw.token_type === "string" ? { token_type: raw.token_type } : {}),
+        ...(typeof raw.id_token === "string" ? { id_token: raw.id_token } : {}),
+        scope: scopesGranted.join(" "),
+      },
+      identityClaims,
+      scopesGranted,
+      expiresAt: parsed.expiresAt ? new Date(parsed.expiresAt) : null,
+      actor: ctx.actor,
+      ...(ctx.target ? { connectionId: ctx.target.id } : {}),
+      ...(ctx.delegated ? { delegated: true } : {}),
+      ...(ctx.onScopeWidened ? { onScopeWidened: ctx.onScopeWidened } : {}),
+      clientRef,
+      variables: variables ?? null,
+      ...(oauthResource ? { oauthResource } : {}),
     });
   }
 }
