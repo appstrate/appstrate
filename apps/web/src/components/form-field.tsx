@@ -23,6 +23,8 @@ interface FormFieldProps {
   min?: number;
   /** Shown beside the label (e.g. a discovery provenance badge). */
   badge?: ReactNode;
+  /** The field's error; nothing when it is valid. */
+  error?: ReactNode;
 }
 
 export function FormField({
@@ -40,6 +42,7 @@ export function FormField({
   disabled,
   min,
   badge,
+  error,
 }: FormFieldProps) {
   const renderInput = () => {
     if (enumValues) {
@@ -98,6 +101,7 @@ export function FormField({
         )
       }
       hint={description}
+      error={error}
     >
       {renderInput()}
     </FormItem>

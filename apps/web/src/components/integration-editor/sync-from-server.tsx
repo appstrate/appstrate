@@ -4,14 +4,10 @@ import { useTranslation } from "react-i18next";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "@appstrate/ui/components/spinner";
-import { candidateSelectOption } from "../../lib/connection-choice";
 import { errorMessage } from "../../lib/mutation-error";
-import {
-  syncConnectionCandidates,
-  type ServerSyncProposal,
-} from "../../lib/integration-discovery-merge";
-import { OptionSelect } from "../app-ui/option-select";
+import type { ServerSyncProposal } from "../../lib/integration-server-sync";
 import { DiscoveryWarnings } from "./discovery-warnings";
+import { SyncConnectionChoice } from "./sync-connection-choice";
 
 export interface ServerSyncResult {
   count: number;
@@ -39,7 +35,6 @@ export function SyncFromServer({
   result: ServerSyncResult | null;
 }) {
   const { t } = useTranslation("agents");
-  const candidates = syncConnectionCandidates(error);
   return (
     <div className="flex flex-col gap-3" data-testid="integration-editor-sync">
       <div className="flex flex-col items-start gap-2">
@@ -65,22 +60,7 @@ export function SyncFromServer({
           {errorMessage(error)}
         </p>
       )}
-      {candidates && candidates.length > 0 && (
-        <OptionSelect
-          value={undefined}
-          onValueChange={run}
-          disabled={isPending}
-          className="max-w-sm"
-          aria-label={t("integrationEditor.sync.chooseConnection")}
-          placeholder={t("integrationEditor.sync.chooseConnection")}
-          options={candidates.map((c) =>
-            candidateSelectOption(c, {
-              sharedByOther: t("schedule.connectionOverrides.sharedByOther"),
-              needsReconnection: t("schedule.connectionOverrides.needsReconnection"),
-            }),
-          )}
-        />
-      )}
+      <SyncConnectionChoice error={error} onChoose={run} disabled={isPending} />
       {result && <DiscoveryWarnings warnings={result.warnings} />}
     </div>
   );

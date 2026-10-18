@@ -10,8 +10,6 @@ import { FieldError } from "@appstrate/ui/components/field";
 import { FormItem } from "@/components/app-ui/form-item";
 import { Label } from "@appstrate/ui/components/label";
 import { FormField } from "../form-field";
-import { DiscoveryBadge } from "./discovery-badge";
-import { badgeUnder, type DiscoveryBadges } from "../../lib/integration-discovery-merge";
 import { RowsEditor } from "../rows-editor";
 import { StringListInput } from "../app-ui/string-list-input";
 import {
@@ -27,11 +25,9 @@ import {
 interface AuthsSectionProps {
   manifest: Record<string, unknown>;
   onChange: (manifest: Record<string, unknown>) => void;
-  /** Provenance of the fields a discovery filled. */
-  badges?: DiscoveryBadges;
 }
 
-export function AuthsSection({ manifest, onChange, badges }: AuthsSectionProps) {
+export function AuthsSection({ manifest, onChange }: AuthsSectionProps) {
   const { t } = useTranslation(["agents", "common", "settings"]);
   // Local row state preserves in-progress rows (e.g. a momentarily-empty key)
   // that setAuths drops from the manifest. Initialised once per mount; the tab
@@ -66,10 +62,7 @@ export function AuthsSection({ manifest, onChange, badges }: AuthsSectionProps) 
 
   return (
     <section className="flex max-w-2xl flex-col gap-5">
-      <div className="flex items-center justify-between">
-        <span>
-          <DiscoveryBadge provenance={badges && badgeUnder(badges, "/auths")} />
-        </span>
+      <div className="flex items-center justify-end">
         <Button type="button" size="sm" variant="outline" onClick={addAuth}>
           <Plus />
           {t("common:btn.add")}

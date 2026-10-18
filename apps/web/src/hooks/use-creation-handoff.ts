@@ -1,11 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useNavigate } from "react-router-dom";
-import { chatDraftNavigationState, type CreationResource } from "../lib/creation-handoff";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import {
+  CREATE_INTEGRATION_PARAM,
+  chatDraftNavigationState,
+  type CreationResource,
+} from "../lib/creation-handoff";
 import { useUrlModal } from "./use-url-modal";
 
+const COMPANIONS = [CREATE_INTEGRATION_PARAM];
+
 export function useCreationHandoff(resource: CreationResource, canCreate: boolean) {
-  const param = useUrlModal("create");
+  const param = useUrlModal("create", COMPANIONS);
+  const [search] = useSearchParams();
   const navigate = useNavigate();
 
   const open = () => {
@@ -18,10 +25,12 @@ export function useCreationHandoff(resource: CreationResource, canCreate: boolea
   };
 
   return {
+    /** The integration an agent creation starts with (`?integration=`); unverified, the creation resolves it. */
+    integrationId: resource === "agent" ? search.get(CREATE_INTEGRATION_PARAM) : null,
     isOpen: canCreate && param.value === resource,
     open,
     close: param.close,
-    /** Leaves the chooser for the manual creation page. */
+    /** Leaves the chooser for a creation page: the manual editor or the MCP URL wizard. */
     leave: (to: string) => navigate(to, { replace: true }),
     openChat,
   };

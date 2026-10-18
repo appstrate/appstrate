@@ -21,6 +21,12 @@ describe("modal open state in the URL", () => {
     });
   });
 
+  it("drops the companions with the modal on close", () => {
+    expect(
+      modalParamStep(at("?create=agent&integration=%40a%2Fb"), "create", null, ["integration"]),
+    ).toMatchObject({ search: "", replace: true });
+  });
+
   it("closes a modal it pushed by going back over its entry", () => {
     expect(
       modalParamStep(at("?editModel=m_1", { openedModal: "editModel" }), "editModel", null),

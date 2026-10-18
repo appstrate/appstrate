@@ -700,7 +700,13 @@ describe("org-level integration OAuth clients", () => {
 
   it("has_oauth_client is true when only an org client exists", async () => {
     await seedClient({ spaceId: null, clientId: "org-client", isDefault: true });
-    const { auths } = await getIntegrationAuthStatuses(spaceA, INTEGRATION, memberReader(), null);
+    const { auths } = await getIntegrationAuthStatuses(
+      spaceA,
+      INTEGRATION,
+      memberReader(),
+      null,
+      "usable",
+    );
     expect(auths.find((a) => a.auth_key === AUTH_KEY)?.has_oauth_client).toBe(true);
     expect(auths.find((a) => a.auth_key === "key")?.has_oauth_client).toBe(false);
   });
@@ -713,7 +719,13 @@ describe("org-level integration OAuth clients", () => {
     manifest.auths[AUTH_KEY]!._meta = { "dev.appstrate/auth": { required: true } };
     await db.update(packages).set({ draftManifest: manifest }).where(eq(packages.id, INTEGRATION));
 
-    const { auths } = await getIntegrationAuthStatuses(spaceA, INTEGRATION, memberReader(), null);
+    const { auths } = await getIntegrationAuthStatuses(
+      spaceA,
+      INTEGRATION,
+      memberReader(),
+      null,
+      "usable",
+    );
     expect(auths.find((a) => a.auth_key === AUTH_KEY)?.required).toBe(true);
     expect(auths.find((a) => a.auth_key === "key")?.required).toBe(false);
   });

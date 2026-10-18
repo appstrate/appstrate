@@ -240,6 +240,7 @@ export function IntegrationsPage() {
         <CreationHandoffModal
           resource="integration"
           onClose={creation.close}
+          onFromUrl={() => creation.leave("/integrations/new/mcp")}
           onManual={() => creation.leave(packageNewPath("integration"))}
           onImport={() => {
             creation.close();

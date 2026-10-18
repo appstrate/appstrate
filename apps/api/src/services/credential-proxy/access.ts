@@ -29,6 +29,19 @@ export function reachOutsideRun(permissions: ReadonlySet<string>): ProxyReach {
   return permissions.has(PROXY_CALL_PERMISSION) ? "usable" : "own";
 }
 
+/** Outside a run: `credential-proxy:call-own`, which `credential-proxy:call` implies. */
+const PROXY_CALL_OWN_PERMISSION = "credential-proxy:call-own" satisfies Permission;
+
+/**
+ * {@link reachOutsideRun} for a caller the proxy route may not have admitted: `null` when it
+ * holds neither proxy permission, the caller the route refuses outright.
+ */
+export function reachOutsideRunIfPermitted(permissions: ReadonlySet<string>): ProxyReach | null {
+  return permissions.has(PROXY_CALL_PERMISSION) || permissions.has(PROXY_CALL_OWN_PERMISSION)
+    ? reachOutsideRun(permissions)
+    : null;
+}
+
 /** Throws unless the caller may call the proxy for the run it names with `X-Run-Id`. */
 export async function authorizeProxyCall(input: {
   /** The caller's effective permissions in the space. */

@@ -4,6 +4,7 @@ import { describe, expect, it } from "bun:test";
 import settingsEn from "../../locales/en/settings.json";
 import settingsFr from "../../locales/fr/settings.json";
 import {
+  agentCreationWithIntegrationPath,
   buildChatCreationDraft,
   chatDraftNavigationState,
   readChatComposerDraft,
@@ -45,5 +46,22 @@ describe("creation handoff", () => {
     expect(readChatComposerDraft(state)).toBe("Create an agent");
     expect(readChatComposerDraft({ composerDraft: "" })).toBeUndefined();
     expect(readChatComposerDraft({ composerDraft: 42 })).toBeUndefined();
+  });
+
+  it("mentions the preselected integration in the agent draft only", () => {
+    const gmail = { id: "@acme/gmail", name: "Gmail" };
+    expect(buildChatCreationDraft("agent", translator("fr"), gmail)).toBe(
+      `${frenchChatDrafts.agent} Il utilise l’intégration Gmail (@acme/gmail).`,
+    );
+    expect(buildChatCreationDraft("skill", translator("fr"), gmail)).toBe(frenchChatDrafts.skill);
+    expect(buildChatCreationDraft("agent", translator("en"), gmail)).toEndWith(
+      "It uses the Gmail integration (@acme/gmail).",
+    );
+  });
+
+  it("builds the agent creation address with the integration encoded", () => {
+    expect(agentCreationWithIntegrationPath("@scope/name")).toBe(
+      "/agents?create=agent&integration=%40scope%2Fname",
+    );
   });
 });
