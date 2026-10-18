@@ -868,10 +868,12 @@ describe("createMcpHttpClient — the session's tool listing under concurrency",
     }
   });
 
-  it("bounds the listing before a call by the call's own timeout", async () => {
+  it("bounds the listing before a call by the call's own timeout, and never sends it late", async () => {
+    let calls = 0;
     const modern = modernMcpHandler({ tools: [echo] });
     const handler: McpHandler = async (request) => {
       const text = request.method === "POST" ? await request.clone().text() : "";
+      if (text.includes('"tools/call"')) calls += 1;
       return text.includes('"tools/list"') ? silent(request) : modern(request);
     };
     const warnings: string[] = [];
@@ -882,12 +884,42 @@ describe("createMcpHttpClient — the session's tool listing under concurrency",
     });
     try {
       const started = Date.now();
-      await client
+      const caught = await client
         .callTool({ name: "echo", arguments: { msg: "x" } }, { timeoutMs: 300 })
-        .catch(() => {});
+        .catch((err: unknown) => err);
       expect(Date.now() - started).toBeLessThan(1_500);
+      expect((caught as { code?: unknown }).code).toBe(-32001);
+      // The time was spent: the call was not sent with what was left of it.
+      expect(calls).toBe(0);
       expect(warnings).toHaveLength(1);
     } finally {
+      await client.close();
+    }
+  });
+
+  it("starts no listing for a caller already aborted (no unobserved rejection)", async () => {
+    let lists = 0;
+    const modern = modernMcpHandler({ tools: [echo] });
+    const fetch = handlerFetch(async (request) => {
+      const text = request.method === "POST" ? await request.clone().text() : "";
+      if (text.includes('"tools/list"')) lists += 1;
+      return modern(request);
+    });
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    const client = await createMcpHttpClient(freshUrl(), { fetch });
+    try {
+      const ac = new AbortController();
+      ac.abort(new Error("gone"));
+      await expect(client.callTool({ name: "echo" }, { signal: ac.signal })).rejects.toThrow(
+        "gone",
+      );
+      await new Promise((r) => setTimeout(r, 20));
+      expect(lists).toBe(0);
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
       await client.close();
     }
   });

@@ -835,7 +835,11 @@ interface SdkSession {
 /** `promise`, or the signal's reason as soon as it aborts. */
 function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (!signal) return promise;
-  if (signal.aborted) return Promise.reject(abortReason(signal));
+  if (signal.aborted) {
+    // Nobody else may be waiting on it: its rejection must not go unobserved.
+    promise.catch(() => {});
+    return Promise.reject(abortReason(signal));
+  }
   return new Promise<T>((resolve, reject) => {
     const onAbort = () => reject(abortReason(signal));
     signal.addEventListener("abort", onAbort, { once: true });
@@ -915,7 +919,9 @@ function dualEraSession(
     }
     throw new Error(`tools/list did not end within ${MAX_TOOL_PAGES} pages`);
   };
-  const listAll = (options: SessionRequestOptions): Promise<{ tools: Tool[] }> => {
+  const listAll = async (options: SessionRequestOptions): Promise<{ tools: Tool[] }> => {
+    // Never start a walk for a caller that has already given up: nobody would await it.
+    if (options.signal?.aborted) throw abortReason(options.signal);
     inflight ??= walk(options).finally(() => {
       inflight = undefined;
     });
@@ -961,10 +967,17 @@ function dualEraSession(
           );
         }
         if (options.timeout && !options.onprogress) {
-          callOptions = {
-            ...options,
-            timeout: Math.max(1, options.timeout - (Date.now() - started)),
-          };
+          const remaining = options.timeout - (Date.now() - started);
+          // The listing spent the call's whole time: sending it now could run the tool on the
+          // server while the caller is told it timed out.
+          if (budget?.aborted || remaining <= 0) {
+            throw new McpError(
+              ErrorCode.RequestTimeout,
+              `Request timed out before calling '${args.name}': the tools/list before it used the whole ${options.timeout} ms`,
+              { timeout: options.timeout },
+            );
+          }
+          callOptions = { ...options, timeout: remaining };
         }
       }
       const send = (toolDefinition: Tool | undefined) =>
