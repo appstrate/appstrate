@@ -49,6 +49,7 @@ const RESOLUTION_ERROR_KEYS = {
   auth_serves_no_selected_tool: "error.authServesNoSelectedTool",
   auth_key_serves_no_selected_tool: "error.authKeyServesNoSelectedTool",
   override_outranked: "error.overrideOutranked",
+  connection_set_too_large: "error.connectionSetTooLarge",
   required_integration_unbound: "error.requiredIntegrationUnbound",
   undeclared_connection_override: "error.connectionOverridesRefused",
   undeclared_dependency_override: "error.dependencyOverridesRefused",

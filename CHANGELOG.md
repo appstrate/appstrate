@@ -6,6 +6,47 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Operators
+
+- **Run the read-only pre-flight `scripts/migration/0050-report-narrowing-overrides.ts`
+  before deploying the release that carries migration `0102`** (#2043):
+  `DATABASE_URL=<platform> bun scripts/migration/0050-report-narrowing-overrides.ts`
+  (the image ships it, see "The image ships `scripts/migration/`" below). It
+  lists the schedules whose `connection_overrides` are `[]` or a strict subset of
+  a set an admin pin or an enforced org default imposes. Until now such an override
+  bound just that subset; after the deploy the whole imposed set binds, so each
+  listed schedule's bound set widens at its next fire. `[]` entries are expected:
+  until now the run and schedule form's locked picker let a user store `[]`
+  (« Aucune connexion ») under an admin pin or an enforced default for a
+  non-required integration, and those schedules bind the whole imposed set after
+  the deploy. Only a non-empty strict subset could not come from the interface.
+  Every listed schedule is a decision for its owner before the deploy; the script
+  rewrites nothing. Migration `0102` itself
+  rewrites no data: every existing admin pin stays closed.
+  Member pins masked under an existing admin pin or an enforced default are
+  deleted at the next governance write on that (space, integration): no action
+  is needed for runs, which already ignored them, but a deleted closed pin will
+  no longer revive them.
+
+- After deploying this version, run
+  `scripts/migration/0047-connection-personal-shares.sql` (the app may keep
+  running; PGlite: app stopped). It removes redundant personal-space shares,
+  each audited. See `scripts/migration/README.md`. (#2041)
+
+- Only where `0097` was applied before this release (staging, never production),
+  run `scripts/migration/0049-org-icon-images.ts --apply` in the same window as
+  `0101`, right after it: it clears the organization icons `0097` left as
+  `image:<version>` and empties the `orgs` bucket. See
+  `scripts/migration/README.md`. (#2046)
+
+- Existing rows are not rewritten for the reserved package scopes (#2072). Before deploying, check that both
+  queries return nothing:
+  `SELECT slug FROM organizations WHERE slug IN ('inline', 'appstrate');` and
+  `SELECT id, org_id FROM packages WHERE (id LIKE '@inline/%' AND ephemeral = false) OR (id LIKE '@appstrate/%' AND org_id IS NOT NULL);`.
+  A row in either is data to handle with a `scripts/migration/` script, never
+  left in place: a non-ephemeral `@inline/` agent is no longer served by the
+  persistence read.
+
 ### Changed
 
 - **Agent persistence: one visibility rule for pinned slots and memories** (#2070). A caller holding
@@ -18,10 +59,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   future team spaces and hides the individual list. Any effective withdrawal switches atomically
   to specific-space sharing, preserving pin checks and schedule revocation. Personal spaces are
   excluded from sharing targets and rejected by the API.
-  **Operators:** after deploying this version, run `scripts/migration/0047-connection-personal-shares.sql`
-  (the app may keep running; PGlite: app stopped). It removes redundant personal-space shares, each
-  audited.
-  See `scripts/migration/README.md`.
 
 - **Organizations, team spaces and agents carry one visual identity,
   `{ icon, color }`** (#2046), both always present on the wire, both nullable.
@@ -42,11 +79,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   palette key. Migrations `0097_org_logo` (a nullable `organizations.logo`), then
   `0101_identity_appearance` (renames it `icon`; adds `color` to organizations,
   `icon` and `color` to spaces; caps each `icon` at 16 384 bytes with a CHECK).
-  **Operators:** only where `0097` was applied before this release (staging, never
-  production), run `scripts/migration/0049-org-icon-images.ts --apply` in the
-  same window as `0101`, right after it: it clears the organization icons `0097`
-  left as `image:<version>` and empties the `orgs` bucket. See
-  `scripts/migration/README.md`.
 
 - **The dashboard is redesigned** (#1937): settings and preferences open as
   routed overlays, every real dialog has a URL, tables share one component, and
@@ -155,6 +187,93 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `--local --integrations local` it therefore needs credentials for every
     `api_call` integration the exported agent declares, as a local bundle
     read from disk already did.
+- **BREAKING: an admin pin or an enforced org default is a floor, and an
+  override no longer narrows it** (#2043). Its connections are always bound,
+  whatever a run's or a schedule's `connection_overrides` or a member's pin say.
+  An override naming only imposed connections, or `[]`, is a no-op (`[]` means
+  "no addition", never "no connection"); before, it bound just that subset. Under
+  an imposed set the selection is the launch override, else the member's pin when
+  the admin pin allows additions, else nothing: a soft org default and the actor
+  fallback add nothing. An override naming a connection outside a set that
+  allows no additions is still refused (`override_outranked`), at the run, the
+  API, the MCP tools and a schedule write. `[]` on an integration the agent marks
+  `required` is no longer refused at the write (the `400 validation_failed` item
+  `required_integration_unbound` and its entry in `OVERRIDE_REFUSAL_CODES` are
+  gone): under an imposed set the floor binds; elsewhere the resolver answers it
+  as a `409 missing_integration_connection` item (`source: run_override` at a
+  launch, `schedule_override` at a schedule write) and as a `400` item on
+  `integrations.<id>` from the inline `/validate`. A floor plus additions above
+  20 connections is refused with the new `connection_set_too_large` (in
+  `CONNECTION_RESOLUTION_ERROR_CODES`), never truncated. Each bound connection
+  carries its `source` in the run's snapshot: `admin_pin` or
+  `org_default_enforced` for the floor, `run_override`, `schedule_override` or
+  `member_pin` for an addition. Under a closed imposed set of two connections or
+  more, a member can no longer narrow it to one: a locally executed run
+  (`POST /api/runs/remote`) is refused with `remote_binds_one_connection` until
+  an admin changes the pin. Removing an imposed set (deleting an admin pin or an
+  enforced org default, or writing the default with `enforce: false`) disables
+  (`connection_set_unnamed`), in the same transaction, every enabled schedule it
+  governed that nothing governs afterwards and whose `connection_overrides` for
+  the integration strictly narrows the removed set (fewer of its connections, `[]`
+  included; ids compared case-insensitively): without the set it would bind fewer
+  connections than written. The org default `PUT` removes their jobs and audits
+  them. A schedule write storing `connection_overrides` while the admin pin or org
+  default of one of its integrations changes answers the new
+  `409 schedule_governance_changed` and writes nothing. The credential proxy
+  outside a run is unchanged.
+
+- **BREAKING: governance writes delete member pins, and a member pin write can
+  be refused** (#2043). No member pin survives under a closed imposed set. Every
+  admin pin `PUT` or `DELETE` where the pin is, or was, closed, and every org
+  default `PUT` or `DELETE` where the default is, or was, enforced, deletes in
+  the same transaction the member pins of that space and integration (that
+  agent's for a pin, every agent's for a default); the audit records list them as
+  `memberPinsCleared: [{ userId, agentPackageId, connectionIds }]`. Migration
+  `0102` makes every existing pin closed, so the first admin write to one deletes
+  the member pins it was masking, and deleting a closed pin no longer revives
+  them. An open pin written where there was none, rewritten, or deleted keeps
+  them, except the ones strictly narrowing its connections on a delete and all of
+  them where the space enforces a default (it governs once the pin is gone); a
+  schedule that relied on a deleted pin is disabled like the others above.
+  `PUT /api/me/integration-pins/…` now answers `409 connection_additions_blocked`
+  under an admin pin closed to additions, an enforced org default, or an open pin
+  under one, and `409 connection_set_too_large` under an open pin when the set
+  takes the imposed connections past 20; before, it always succeeded. Nothing is
+  stored; `DELETE` is always allowed.
+
+### Added
+
+- **An admin pin can let members add connections to the imposed ones**
+  (#2043). `PUT` of an integration pin takes `allow_additional_connections`
+  (default `false`, also when absent on the replacing `PUT`; `true` with
+  `connection_ids: []` is a `400`). The pin responses return it with
+  `agent_active` (the pin's agent is active in the space; always `true` on a
+  write's response), the audit record carries `allowAdditionalConnections`, each
+  integration's readiness verdict returns `additional_connections_allowed`, and
+  the org default `PUT` returns `schedules_disabled_count`. The dashboard offers
+  the pin's mode, « Exactement ces connexions » (default) or « Ces connexions,
+  plus celles de l'utilisateur »: in the latter a run binds the imposed
+  connections plus those the actor chose among the ones they can use in the space
+  (`block_user_connections` still bounds them); nothing is added automatically.
+  An open pin and an enforced org default exclude each other on one space and
+  integration: opening one while the other exists is the new
+  `409 connection_additions_conflict`, on the pin `PUT` and on the org default
+  `PUT` with `enforce: true` (an admin pin of an agent not active in the space
+  does not count); at resolution an enforced default closes the additions.
+  Migration `0102_integration_pin_additions` adds the column and two `CHECK`s: a
+  member pin is never open, and an open pin imposes at least one connection.
+  Rewriting an open pin with more imposed connections does not judge the member
+  pins already stored: where the imposed set plus one of them exceeds 20, that
+  member's runs fail with `connection_set_too_large`. The connection picker shows
+  the imposed connections locked and edits the additions only.
+
+- **The admin edits an agent's pin from its Connexions** (#2043): the « … » menu
+  of each active integration offers « Définir des connexions spécifiques », or
+  « Modifier les connexions spécifiques » and « Retirer les connexions
+  spécifiques », in the same dialogs as the integration page.
+
+- **« Mes connexions » filters an integration's Connexions** (#2043), replacing
+  the « Partage » filter (Partagée / Personnelle).
 
 ### Added
 
@@ -192,13 +311,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   its carried dependencies, and the MCP `validate_package_file` /
   `import_package_file` pair) answers `400 scope_reserved` for such an id; a
   system package carried by a bundle is still reused.
-  **Operators:** existing rows are not rewritten. Before deploying, check that both
-  queries return nothing:
-  `SELECT slug FROM organizations WHERE slug IN ('inline', 'appstrate');` and
-  `SELECT id, org_id FROM packages WHERE (id LIKE '@inline/%' AND ephemeral = false) OR (id LIKE '@appstrate/%' AND org_id IS NOT NULL);`.
-  A row in either is data to handle with a `scripts/migration/` script, never
-  left in place: a non-ephemeral `@inline/` agent is no longer served by the
-  persistence read.
 - **An `api_call` target can carry a `{{field}}` in its path or query**
   (#2063). The target's published JSON schema said `format: "uri"`, which the
   agent's tool-argument validator applies before the call leaves the agent: it

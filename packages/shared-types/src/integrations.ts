@@ -222,14 +222,19 @@ export interface AccessibleIntegrationConnection extends ConnectionReach {
 }
 
 /**
- * An admin pin (`integration_pins`, `user_id IS NULL`) governing which
- * connections an agent uses for an integration. Wire shape for the
- * `/api/integrations/:packageId/pins` surface.
+ * A connection pin (`integration_pins`). Wire shape for the
+ * `/api/integrations/:packageId/pins` surface (admin pins) and for the
+ * member pin write of `/api/me/integration-pins/...`.
  */
 export interface IntegrationPin {
   agent_package_id: string;
   integration_package_id: string;
+  /** An admin pin's floor, bound by every run of the agent; a member pin's selection. */
   connection_ids: string[];
+  /** Admin pin: whether the run's selection may add to the floor. Never on `[]` nor a member pin. */
+  allow_additional_connections: boolean;
+  /** Whether the pin's agent is active in the space; a pin of an inactive agent still stands. */
+  agent_active: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -275,7 +280,9 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  * "which connection does this run use?" logic.
  *
  * The verdict is the resolver's own vocabulary, three fields:
- *  - `source`     — the layer that bound the set, or the layer whose set failed
+ *  - `source`     — the layer that bound the set's FIRST connection (under
+ *                   governance the floor's; per-connection provenance is in the
+ *                   run's `resolved_connections`), or the layer whose set failed
  *                   (an unreachable or unhealthy member); `null` when no layer
  *                   bound anything (the fallback's `not_connected` /
  *                   `must_choose_connection`, `auth_key_mismatch`,
@@ -287,6 +294,10 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  *                   launch's `warnings[]` item itself, else `null`.
  * All three `null` with nothing resolved: an inert integration nothing binds,
  * or one whose manifest could not be loaded.
+ *
+ * Under governance the floor is `admin_pinned_connection_ids`, else the enforced
+ * `org_default_connection_ids`; any other id of `resolved_connection_ids` is the
+ * member pin's addition.
  */
 export interface IntegrationAgentResolution {
   source: ConnectionResolutionSource | null;
@@ -308,6 +319,8 @@ export interface IntegrationAgentResolution {
    */
   org_default_connection_ids: string[] | null;
   org_default_enforced: boolean;
+  /** An admin pin open to additions, with no enforced org default: `false` with nothing imposed. */
+  additional_connections_allowed: boolean;
   /** Whether the actor may add a connection (admin OR not blocked). */
   can_add_connection: boolean;
   /** Own + shared connections on an auth serving the selected tools, annotated for the dropdown. */

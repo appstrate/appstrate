@@ -62,12 +62,19 @@ describe("scheduleConnectionChoices", () => {
         code: "required_integration_unbound",
         message: "required",
       },
+      // The imposed set and the schedule's additions over the cap: fewer additions clear it.
+      {
+        field: "integrations.@acme/drive",
+        code: "connection_set_too_large",
+        message: "too many",
+      },
     ]);
     expect(scheduleConnectionChoices(err)).toEqual([
       { integrationId: "@acme/gmail", code: "must_choose_connection", candidates: [CANDIDATE] },
       { integrationId: "@acme/notion", code: "override_connection_unavailable", candidates: [] },
       { integrationId: "@acme/ssh", code: "auth_serves_no_selected_tool", candidates: [] },
       { integrationId: "@acme/crm", code: "required_integration_unbound", candidates: [] },
+      { integrationId: "@acme/drive", code: "connection_set_too_large", candidates: [] },
     ]);
   });
 
@@ -211,6 +218,7 @@ describe("refusalReasonKey", () => {
     expect(key("override_connection_unavailable")).toBe("schedule.connectionOverrides.unavailable");
     expect(key("auth_serves_no_selected_tool")).toBe("error.authServesNoSelectedTool");
     expect(key("override_outranked")).toBe("error.overrideOutranked");
+    expect(key("connection_set_too_large")).toBe("error.connectionSetTooLarge");
     expect(key("required_integration_unbound")).toBe("error.requiredIntegrationUnbound");
   });
 });

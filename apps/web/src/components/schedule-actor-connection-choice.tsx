@@ -4,13 +4,12 @@ import { Card } from "@appstrate/ui/components/card";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Label } from "@appstrate/ui/components/label";
+import { CheckboxField } from "@/components/app-ui/checkbox-field";
 import { useIntegrationConnections } from "../hooks/use-integrations";
 import { useIntegrationName } from "../hooks/use-integration-name";
 import type { ConnectionChoice } from "../lib/connection-choice";
-import type { ConnectionSet } from "../lib/connection-set";
+import { toggleCapped, type ConnectionSet } from "../lib/connection-set";
 import { ClearChoiceButton } from "./integration-connect/clear-choice-button";
-import { ConnectionSetPicker } from "./integration-connect/connection-choice-menu";
-import type { SetOption } from "./integration-connect/connection-set-option";
 
 /**
  * The connection section of a schedule running as someone other than the viewer, whose own
@@ -18,11 +17,11 @@ import type { SetOption } from "./integration-connect/connection-set-option";
  * control instead — only connections the viewer reaches too, so the list can be empty: the
  * actor's private connections are theirs (or an admin's) to pin. Why each was refused is said
  * once, by the form-level `ScheduleConnectionRefusals`. Stored picks nothing refused are shown
- * read-only, each integration's clearable. "No connection" (`[]`) is offered for each integration
- * the agent does not require.
+ * read-only, each integration's clearable. "No connection" (`[]`) is a box of its own for each
+ * integration the agent does not require; nothing ticked is no choice (`null`).
  *
- * « Hériter » is offered only where nothing was refused: a refusal is the server saying the
- * actor's own resolution cannot decide, so inheriting is the very thing that is not an answer.
+ * Where nothing was refused, no choice is the actor's own resolution, which is said. A refusal is
+ * the server saying that resolution cannot decide, so there no choice is no answer.
  */
 export function ScheduleActorConnectionChoice({
   choices,
@@ -87,15 +86,16 @@ export function ScheduleActorConnectionChoice({
             integrationId={integrationId}
             testId={`schedule-actor-none-${integrationId}`}
           >
-            <ConnectionSetPicker
-              options={[]}
+            <NoneBox
+              integrationId={integrationId}
               value={value[integrationId] ?? null}
               onChange={(next) => onChange(integrationId, next)}
-              testPrefix="sched-choice-pick"
-              testKey={integrationId}
-              allowNone
-              inheritDescription={t("schedule.connectionOverrides.inheritActor")}
             />
+            {value[integrationId] === undefined && (
+              <p className="text-muted-foreground text-xs">
+                {t("schedule.connectionOverrides.inheritActor")}
+              </p>
+            )}
           </IntegrationChoiceBox>
         ),
       )}
@@ -122,7 +122,7 @@ function IntegrationChoiceBox({
   );
 }
 
-/** A refused save's candidates as the choice: own or shared by another member, and whether it is dead. */
+/** A refused save's candidates as boxes: own or shared by another member, and whether it is dead. */
 function ScheduleCandidatePicker({
   choice,
   value,
@@ -135,28 +135,62 @@ function ScheduleCandidatePicker({
   onChange: (next: ConnectionSet) => void;
 }) {
   const { t } = useTranslation(["agents"]);
-  const options: SetOption[] = choice.candidates.map((c) => ({
-    id: c.id,
-    name: c.label,
-    description: [
-      // "default" is the placeholder of a connection with no account identity.
-      c.account_id !== "default" ? c.account_id : null,
-      !c.owned_by_actor ? t("schedule.connectionOverrides.sharedByOther") : null,
-      c.needs_reconnection ? t("schedule.connectionOverrides.needsReconnection") : null,
-    ]
-      .filter((part): part is string => part !== null)
-      .join(" · "),
-    // A dead connection fails the fire it is picked for; unticking stays open.
-    disabled: c.needs_reconnection,
-  }));
+  const picked = value ?? [];
   return (
-    <ConnectionSetPicker
-      options={options}
-      value={value}
-      onChange={onChange}
-      testPrefix="sched-choice-pick"
-      testKey={choice.integrationId}
-      allowNone={allowNone}
+    <div role="group" className="flex flex-col gap-3">
+      {choice.candidates.map((c) => {
+        const checked = picked.includes(c.id);
+        return (
+          <CheckboxField
+            key={c.id}
+            id={`sched-choice-pick-option-${c.id}`}
+            data-testid={`sched-choice-pick-option-${c.id}`}
+            label={c.label}
+            description={[
+              // "default" is the placeholder of a connection with no account identity.
+              c.account_id !== "default" ? c.account_id : null,
+              !c.owned_by_actor ? t("schedule.connectionOverrides.sharedByOther") : null,
+              c.needs_reconnection ? t("schedule.connectionOverrides.needsReconnection") : null,
+            ]
+              .filter((part): part is string => part !== null)
+              .join(" · ")}
+            checked={checked}
+            // A dead connection fails the fire it is picked for; unticking stays open.
+            disabled={!checked && c.needs_reconnection}
+            onCheckedChange={() => {
+              // Unticking the last box is no choice at this layer, never « no connection ».
+              const next = toggleCapped(picked, c.id);
+              onChange(next.length > 0 ? next : null);
+            }}
+          />
+        );
+      })}
+      {allowNone && (
+        <NoneBox integrationId={choice.integrationId} value={value} onChange={onChange} />
+      )}
+    </div>
+  );
+}
+
+/** « Aucune connexion » (`[]`), for an integration the agent does not require; unticked, no choice. */
+function NoneBox({
+  integrationId,
+  value,
+  onChange,
+}: {
+  integrationId: string;
+  value: ConnectionSet;
+  onChange: (next: ConnectionSet) => void;
+}) {
+  const { t } = useTranslation(["agents"]);
+  return (
+    <CheckboxField
+      id={`sched-choice-pick-none-${integrationId}`}
+      data-testid={`sched-choice-pick-none-${integrationId}`}
+      label={t("detail.integrationMemberPicker.none")}
+      description={t("detail.integrationMemberPicker.noneHint")}
+      checked={value?.length === 0}
+      onCheckedChange={(checked) => onChange(checked === true ? [] : null)}
     />
   );
 }

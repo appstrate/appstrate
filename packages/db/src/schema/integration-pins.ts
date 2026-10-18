@@ -1,27 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-(space, agent, integration, user?) connection pin — the SET of
- * connections (`connection_ids`) a run of that agent binds.
- *
+ * Per-(space, agent, integration, user?) connection pin — a SET of connections (`connection_ids`).
  * Two scopes share this table, discriminated by `user_id`:
  *
- *   - `user_id IS NULL` — **admin force pin**. Applies to every actor
- *     running this agent. Written via admin-only endpoints. Cannot be
- *     overridden by the launch override (run or schedule), member pins, or fallback.
+ *   - `user_id IS NULL` — **admin pin**: the FLOOR every run of this agent binds, whoever runs it,
+ *     written via admin-only endpoints. `allow_additional_connections` opens it to the run's
+ *     selection (launch override, else the member pin), bound after it; closed, nothing adds.
+ *   - `user_id IS NOT NULL` — **member pin**: the member's own selection for their runs of this
+ *     agent, written via `/api/me/integration-pins/...`. Never open (CHECK below).
  *
- *   - `user_id IS NOT NULL` — **member preference pin**. The member's
- *     persisted "for MY runs of this agent, use MY connections X, Y" choice.
- *     Written via `/api/me/integration-pins/...` by the member themselves.
- *
- * A pin must reference connections accessible to the actor at run time.
- * For admin pins, validation lives in the pin service (admin can't pin
- * a member's personal connection — would let them coerce credentials by
- * sleight of hand). For member pins, validation also lives in the
- * service (member can only pin a connection they themselves can see).
+ * Targets are checked on write and at run time: an admin pin names only connections SHARED into the
+ * space (pinning a member's personal connection would coerce their credential onto everyone), a
+ * member pin also their own. How the resolver binds them, and when a member pin is refused or
+ * purged: `apps/api/src/services/integration-pins-service.ts` (`purgeMemberPins`).
  */
 
-import { pgTable, text, uuid, timestamp, index, uniqueIndex, check } from "drizzle-orm/pg-core";
+import {
+  pgTable,
+  text,
+  uuid,
+  boolean,
+  timestamp,
+  index,
+  uniqueIndex,
+  check,
+} from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { user } from "./auth.ts";
 import { spaces } from "./spaces.ts";
@@ -50,6 +54,8 @@ export const integrationPins = pgTable(
     userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
     /** The bound set; `{}` pins to no connection (no row = no pin). */
     connectionIds: uuid("connection_ids").array().notNull(),
+    /** Admin pin only: whether the run's selection may add to the floor (see the table doc). */
+    allowAdditionalConnections: boolean("allow_additional_connections").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -74,6 +80,16 @@ export const integrationPins = pgTable(
     check(
       "integration_pins_connection_ids_cardinality",
       sql`cardinality(connection_ids) BETWEEN 0 AND 20`,
+    ),
+    // A member pin is a selection, never a floor: only an admin pin opens.
+    check(
+      "integration_pins_additions_admin_only",
+      sql`user_id IS NULL OR NOT allow_additional_connections`,
+    ),
+    // An empty floor imposes nothing to add to: `[]` stays a pin to no connection, closed.
+    check(
+      "integration_pins_additions_need_imposed",
+      sql`NOT allow_additional_connections OR cardinality(connection_ids) > 0`,
     ),
   ],
 );
