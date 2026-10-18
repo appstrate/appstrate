@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Agent authoring — the composer's switch for whether the assistant may create
- * agents (persistent, or composed on the fly for a one-off task).
+ * Package authoring — the composer's switch for whether the assistant may
+ * create, import or edit packages of any type (agents, persistent or composed
+ * on the fly for a one-off task, skills, integrations, local MCP servers).
  *
- * A PREFERENCE, not a permission: `agents:write` is checked server-side, and
- * off, the server drops it from the turn's token. Persisted per user, so a
+ * A PREFERENCE, not a permission: each type's `<type>:write` is checked
+ * server-side, and off, the server drops them all from the turn's token. Persisted per user, so a
  * choice made under one account never carries over to another in the same
  * browser; on unless that user's stored value says `"off"`. Unbound (no user
  * yet), it reads on and persists nothing.
@@ -13,7 +14,7 @@
 
 import { useSyncExternalStore } from "react";
 
-const KEY_PREFIX = "appstrate.chat.agentAuthoring:";
+const KEY_PREFIX = "appstrate.chat.packageAuthoring:";
 
 let key: string | null = null;
 let cache = true;
@@ -33,7 +34,7 @@ function notify(): void {
 }
 
 /** Scope the preference to the signed-in user; the host calls it on sign-in and switch. */
-export function bindAgentAuthoringUser(userId: string | null): void {
+export function bindPackageAuthoringUser(userId: string | null): void {
   const next = userId ? `${KEY_PREFIX}${userId}` : null;
   if (next === key) return;
   key = next;
@@ -43,16 +44,16 @@ export function bindAgentAuthoringUser(userId: string | null): void {
   notify();
 }
 
-export function subscribeAgentAuthoring(listener: () => void): () => void {
+export function subscribePackageAuthoring(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
 
-export function getAgentAuthoringEnabled(): boolean {
+export function getPackageAuthoringEnabled(): boolean {
   return cache;
 }
 
-export function setAgentAuthoringEnabled(enabled: boolean): void {
+export function setPackageAuthoringEnabled(enabled: boolean): void {
   if (cache === enabled) return;
   cache = enabled;
   if (key !== null) {
@@ -66,6 +67,6 @@ export function setAgentAuthoringEnabled(enabled: boolean): void {
   notify();
 }
 
-export function useAgentAuthoringEnabled(): boolean {
-  return useSyncExternalStore(subscribeAgentAuthoring, getAgentAuthoringEnabled, () => true);
+export function usePackageAuthoringEnabled(): boolean {
+  return useSyncExternalStore(subscribePackageAuthoring, getPackageAuthoringEnabled, () => true);
 }

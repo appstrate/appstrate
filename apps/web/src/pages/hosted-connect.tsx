@@ -19,8 +19,9 @@ import type { IntegrationManifestAuth } from "../hooks/use-integrations";
 import { errorMessage } from "../lib/mutation-error";
 import {
   missingVariables,
+  hostedConnectFailure,
   submitHostedConnect,
-  variableFieldErrors,
+  usesAuthorizationFlow,
 } from "../lib/hosted-connect-submit";
 
 /**
@@ -41,7 +42,8 @@ type ConnectContext = Omit<
   "auth"
 > & { auth: IntegrationManifestAuth };
 
-type Phase = "loading" | "form" | "submitting" | "done" | "error";
+/** `ended`: a refusal spent the page session, so the form is not offered again. */
+type Phase = "loading" | "form" | "submitting" | "done" | "error" | "ended";
 
 const closeWindow = () => {
   try {
@@ -100,7 +102,7 @@ export function HostedConnectPage() {
 
   const fields = context?.variables ? variableFields(context.variables.schema) : [];
   const variableLabels = Object.fromEntries(fields.map((f) => [f.name, f.title ?? f.name]));
-  const isOAuth = context?.auth.type === "oauth2";
+  const isOAuth = context !== null && usesAuthorizationFlow(context.auth);
   const variablesLocked = Object.keys(context?.variables?.values ?? {}).length > 0;
 
   const changeVariable = (name: string, value: string) => {
@@ -136,7 +138,7 @@ export function HostedConnectPage() {
     try {
       const outcome = await submitHostedConnect(
         {
-          authType: context.auth.type,
+          authorizationFlow: isOAuth,
           credentials: values,
           variableNames,
           variableValues,
@@ -164,9 +166,14 @@ export function HostedConnectPage() {
       else setTimeout(closeWindow, 1200);
       setPhase("done");
     } catch (err) {
-      const { byName, complete } = variableFieldErrors(err, variableLabels);
-      setVariableErrors(byName);
-      setError(complete ? null : errorMessage(err));
+      const failure = hostedConnectFailure(err, variableLabels);
+      if (failure.kind === "ended") {
+        setError(failure.message);
+        setPhase("ended");
+        return;
+      }
+      setVariableErrors(failure.fieldErrors);
+      setError(failure.message);
       setPhase("form");
     }
   };
@@ -190,6 +197,20 @@ export function HostedConnectPage() {
             </p>
             {errorDetail && (
               <p className="text-muted-foreground/60 font-mono text-xs">{errorDetail}</p>
+            )}
+          </div>
+        )}
+
+        {phase === "ended" && (
+          <div className="flex flex-col gap-3 text-center" data-testid="connect-ended">
+            <h1 className="text-lg font-semibold">{t("integration.connect.hosted.endedTitle")}</h1>
+            <p className="text-muted-foreground text-sm">
+              {t("integration.connect.hosted.endedBody")}
+            </p>
+            {error && (
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
             )}
           </div>
         )}

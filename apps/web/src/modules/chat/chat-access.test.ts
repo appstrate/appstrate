@@ -54,10 +54,15 @@ function verdicts(ctx: ChatAccessContext): Record<string, boolean> {
 const CONVERSES = ["chat:write", "mcp:read", "mcp:invoke"];
 
 /** Every permission any row reads — a caller who holds the lot. */
+const PACKAGE_WRITES = ["agents:write", "skills:write", "integrations:write", "mcp-servers:write"];
+
 const EVERYTHING = [
   ...CONVERSES,
   "agents:run",
   "agents:write",
+  "skills:write",
+  "integrations:write",
+  "mcp-servers:write",
   "runs:read",
   "runs:read-all",
   "files:read",
@@ -114,7 +119,11 @@ describe("each row's own permission", () => {
       refuses: ["runAgents", "readRuns"],
     },
     { row: "runAgents", removes: ["agents:run"], refuses: ["runAgents"] },
-    { row: "createAgents", removes: ["agents:write"], refuses: ["createAgents"] },
+    {
+      row: "createPackages",
+      removes: PACKAGE_WRITES,
+      refuses: ["createPackages"],
+    },
     { row: "browseFiles", removes: ["files:read"], refuses: ["browseFiles"] },
     {
       row: "connectIntegrations",
@@ -145,24 +154,24 @@ describe("each row's own permission", () => {
   });
 });
 
-describe("the agent-authoring switch", () => {
+describe("the package-authoring switch", () => {
   function verdictOf(ctx: ChatAccessContext, id: string) {
     return resolveChatCapabilities(ctx).find((c) => c.id === id)?.verdict;
   }
 
-  it("turns off a held `createAgents` row, and only while it is off", () => {
-    expect(verdictOf(context(EVERYTHING, {}, false), "createAgents")).toBe("off");
-    expect(verdictOf(context(EVERYTHING, {}, true), "createAgents")).toBe("granted");
+  it("turns off a held `createPackages` row, and only while it is off", () => {
+    expect(verdictOf(context(EVERYTHING, {}, false), "createPackages")).toBe("off");
+    expect(verdictOf(context(EVERYTHING, {}, true), "createPackages")).toBe("granted");
   });
 
   it("leaves a row the caller does not hold denied, not off", () => {
-    const without = EVERYTHING.filter((p) => p !== "agents:write");
-    expect(verdictOf(context(without, {}, false), "createAgents")).toBe("denied");
+    const without = EVERYTHING.filter((p) => !PACKAGE_WRITES.includes(p));
+    expect(verdictOf(context(without, {}, false), "createPackages")).toBe("denied");
   });
 
   it("never turns off another row", () => {
     const others = resolveChatCapabilities(context(EVERYTHING, {}, false)).filter(
-      (c) => c.id !== "createAgents",
+      (c) => c.id !== "createPackages",
     );
     expect(others.length).toBe(ROW_IDS.length - 1);
     for (const c of others) expect(c.verdict).toBe("granted");
@@ -202,10 +211,12 @@ describe("creating an agent", () => {
     // never use — and the server persona drops the authoring half for the same
     // reason. A row keyed on `agents:write` alone would show a granted chip
     // whose act is unreachable, and hide the composer's toggle behind it.
-    expect(verdicts(context(["chat:write", "mcp:read", "agents:write"])).createAgents).toBe(false);
+    expect(verdicts(context(["chat:write", "mcp:read", "agents:write"])).createPackages).toBe(
+      false,
+    );
     // Control: the same set plus the dispatching tool holds the row.
     expect(
-      verdicts(context(["chat:write", "mcp:read", "mcp:invoke", "agents:write"])).createAgents,
+      verdicts(context(["chat:write", "mcp:read", "mcp:invoke", "agents:write"])).createPackages,
     ).toBe(true);
   });
 });

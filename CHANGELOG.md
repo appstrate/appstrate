@@ -292,6 +292,87 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   body is retried once from the page; a `403` with a JSON `errors` body is
   reported as is. Only sessions visible to everyone are read; passcode-protected
   links are refused with a clear message.
+- **An oauth2 connection can be acquired through `connect.login`** (AFPS §7.7,
+  afps-spec/afps-spec#44, #2083). For a provider whose sign-in no redirect flow
+  can drive (a mobile-app SSO), an oauth2 auth declares `connect.login` as a token
+  request to its `token_endpoint` whose body holds only the grant parameters
+  (`grant_type=refresh_token&refresh_token={{refresh_token}}`), and the fields the
+  user submits in `credentials.schema`. The fields doors (`connect/fields`, the
+  hosted form, which the portal now opens instead of an authorization server) take
+  them; the platform renders the grant, adds the client authentication of the
+  auth's default client — the client later refreshes use — and the RFC 8707
+  `resource` it sends, and posts it through the same token request refreshes run,
+  before anything is stored. A grant the server refuses (`invalid_grant`, or a
+  400 or 401) is a 400 `login_rejected` on the form, a refused client a 502
+  `oauth_client_rejected`, an unreachable, throttled, refusing (any other 4xx)
+  or failing server a 502 `login_upstream_unavailable` that says the grant may
+  have been redeemed when the request may have reached it (never on a 4xx), an
+  auth with no usable OAuth client (none registered, a secret that cannot be
+  decrypted) a 403, a chosen client removed before the token request or one
+  authenticating with a method the platform does not implement (anything but
+  `client_secret_basic`, `client_secret_post` and `none`) a 409
+  `connection_not_ready`, and a failure after a successful token request says
+  the grant may have been redeemed. Every refusal saying so carries the RFC 9457
+  extension member `grant_may_be_redeemed: true`, which the hosted form turns
+  into a sentence of its own. When the auth declares an `issuer`, its metadata
+  must answer and name the token endpoint the client is presented to before
+  anything is sent (400 `invalid_request` on a contradiction, 502
+  `login_upstream_unavailable` when unreadable). The answer must carry
+  `token_type` `Bearer` (any case), else a 502 that may have redeemed the grant.
+  Identity comes from the token response and `userinfo_endpoint` (discovered
+  from the `issuer` when not declared), never from an `id_token`, which is not
+  validated on this path; a response without `scope` is granted the grant's
+  `scope` parameter, if any; a `refresh_token` grant answered without
+  `refresh_token` keeps the one it presented. A hosted form submits its grant
+  once: the page session is spent before the token request, so a repeated or
+  concurrent submission is a 404, and it is handed back only when the refusal
+  preceded any request (an invalid field, no usable client, an issuer or egress
+  refusal), so the form can be fixed and submitted again. Every refusal that ends
+  the page session — on this path or an authorization flow begun from the form —
+  carries the RFC 9457 extension member `connect_session_ended: true`, and the
+  hosted form then stops on the spent link, telling the user to restart the
+  connection from the application (with the redemption sentence when
+  `grant_may_be_redeemed` is set) instead of offering a submission that would be
+  a 404. A `login_rejected` names what was refused in the extension member
+  `login_refusal` — `grant` for an oauth2 token request, `integration` for a
+  login tool, whose own text rides `integration_diagnostic` — and the SPA words
+  each case in the reader's language: it no longer interpolates the server's
+  English detail into its sentence (any `connect.login` or `connect.tool` auth).
+  The connection is then an
+  ordinary oauth2 one: proactive and on-401 refresh, rotated tokens written back.
+  `connect/oauth2` refuses such an auth and connect offers skip it.
+  `@afps-spec/schema` enforces the manifest rules (URL equal to `token_endpoint`,
+  form body, no `outputs`, no client parameters); Appstrate's own rule that a
+  `connect.login` declares `outputs` now applies to `custom` auths only.
+- **Garmin Connect — an agent reads the owner's activities.**
+  `@appstrate/garmin-connect@1.0.0` lists activities by date and reads their
+  summary, dense track and time series (`details`), laps, heart-rate zones,
+  weather, GPX and original FIT files through `api_call`, on
+  `connectapi.garmin.com`. Its description presents it as advanced: connecting
+  needs a refresh token obtained with python-garminconnect (uv/Python). The auth
+  requires the `userName` identity claim, so a reconnect whose profile read
+  fails is refused (the existing connection keeps its identity and tokens; the
+  refusal says the submitted grant may have been redeemed) instead of falling
+  back to the `default` account and replacing another account's tokens. It is
+  the first oauth2 auth acquired through
+  `connect.login`: the user obtains a refresh token once with
+  python-garminconnect (Garmin's mobile sign-in, MFA included) and pastes it;
+  Garmin rotates it at each refresh and it lapses after 30 days unused. Garmin
+  has no public API for individuals: the integration reads the undocumented API
+  of the Garmin Connect mobile app, which may break, and automated reading may
+  fall outside Garmin's terms of use. It also reads daily health data
+  (sleep, body battery, stress, heart rate, HRV, respiration, SpO2, training
+  readiness). `authorized_uris` covers all of `connectapi.garmin.com` and
+  `INTEGRATION.md` tells the agent to use `GET` only, but nothing enforces a
+  method: the token can also edit and delete the owner's data (activities,
+  settings, workouts, gear).
+
+  **Operators:** the auth needs a public client. Declare it in
+  `SYSTEM_INTEGRATIONS` —
+  `{"id":"@appstrate/garmin-connect","clients":[{"id":"garmin-connect-mobile","auth_key":"primary","client_id":"GARMIN_CONNECT_MOBILE_ANDROID_DI_2025Q2","token_endpoint_auth_method":"none"}]}`
+  — or register it as an organization OAuth client. The `client_id` must be the
+  one the refresh token was issued to (python-garminconnect stores it as
+  `di_client_id`).
 
 ### Fixed
 

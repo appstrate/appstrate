@@ -21,6 +21,7 @@
 import * as React from "react";
 import { makeAssistantToolUI, type ToolCallMessagePartProps } from "@assistant-ui/react";
 import {
+  ArrowUpRightIcon,
   BookOpenIcon,
   BracesIcon,
   PencilIcon,
@@ -28,6 +29,7 @@ import {
   PlusIcon,
   SearchIcon,
   Trash2Icon,
+  UploadIcon,
   ZapIcon,
   type LucideIcon,
 } from "lucide-react";
@@ -56,6 +58,12 @@ import {
   isStartedRunResult,
 } from "./auth-offer.ts";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
+import {
+  packageCreatedByImport,
+  packageCreatedByOperation,
+  packagePageHref,
+  type CreatedPackage,
+} from "./package-created.ts";
 import { unwrapMcpResult } from "@appstrate/core/mcp-result";
 import {
   definedEntries,
@@ -174,6 +182,7 @@ export function ToolCallCard({
   isError,
   toolCallId,
   timing,
+  footer,
 }: {
   phase: ToolPhase;
   Icon: LucideIcon;
@@ -186,6 +195,8 @@ export function ToolCallCard({
   isError?: boolean;
   toolCallId: string;
   timing?: unknown;
+  /** Under the header, e.g. the link to the package the call created. */
+  footer?: React.ReactNode;
 }) {
   const { t } = useChatHost();
   const title = labelKey ? t(labelKey) : (label ?? "");
@@ -226,6 +237,7 @@ export function ToolCallCard({
       {errorMsg ? (
         <div className="text-destructive border-t px-3 py-2 text-xs break-words">{errorMsg}</div>
       ) : null}
+      {footer}
       {open ? (
         <Modal
           title={
@@ -387,6 +399,8 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
       Icon: ZapIcon,
       labelKey: "tool.op.other",
     };
+    const created =
+      phase === "success" ? packageCreatedByOperation(opId, unwrapMcpResult(result)) : null;
     return (
       <ToolCallCard
         phase={phase}
@@ -398,6 +412,66 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
         isError={props.isError}
         toolCallId={props.toolCallId}
         timing={props.timing}
+        footer={
+          created ? <CreatedPackageLink created={created} toolCallId={props.toolCallId} /> : null
+        }
+      />
+    );
+  },
+});
+
+/** Tool calls whose package write the host was already told about, this page life. */
+const announcedPackageWrites = new Set<string>();
+
+/**
+ * The package a tool call created, one click away. Mounting it tells the host
+ * once per call, so its package lists show what the assistant just made.
+ */
+function CreatedPackageLink({
+  created,
+  toolCallId,
+}: {
+  created: CreatedPackage;
+  toolCallId: string;
+}) {
+  const { t, onPackagesChanged } = useChatHost();
+  React.useEffect(() => {
+    if (announcedPackageWrites.has(toolCallId)) return;
+    announcedPackageWrites.add(toolCallId);
+    onPackagesChanged();
+  }, [toolCallId, onPackagesChanged]);
+  return (
+    <a
+      href={packagePageHref(created)}
+      className="text-primary hover:bg-muted/40 flex items-center gap-1.5 border-t px-3 py-2 text-xs font-medium"
+    >
+      <ArrowUpRightIcon className="size-3.5 shrink-0" />
+      {t("tool.packageCreated.open")}
+      <code className="text-muted-foreground truncate font-normal">{created.packageId}</code>
+    </a>
+  );
+}
+
+export const ImportPackageFileToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
+  toolName: "import_package_file",
+  render: (props: AnyToolProps) => {
+    const phase = deriveToolPhase(props);
+    const created =
+      phase === "success" ? packageCreatedByImport(unwrapMcpResult(props.result)) : null;
+    return (
+      <ToolCallCard
+        phase={phase}
+        Icon={UploadIcon}
+        labelKey="tool.importPackageFile"
+        idText={stringArg(props.args, "file_uri")}
+        args={props.args}
+        result={props.result}
+        isError={props.isError}
+        toolCallId={props.toolCallId}
+        timing={props.timing}
+        footer={
+          created ? <CreatedPackageLink created={created} toolCallId={props.toolCallId} /> : null
+        }
       />
     );
   },

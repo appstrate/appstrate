@@ -4,7 +4,7 @@
  * Strategy selector (spec §4.2). Maps a manifest auth declaration to its
  * acquisition strategy:
  *
- *   - `oauth2`                                  → OAuth2Strategy
+ *   - `oauth2` (`connect.login` included)       → OAuth2Strategy
  *   - `custom` + `connect.login`                → LoginStrategy (declarative)
  *   - `custom` + `connect.tool`                 → OrchestratedStrategy (code, needs executor)
  *   - `api_key` / `basic` / `mtls` / bare custom → FieldsStrategy (paste-the-bag)

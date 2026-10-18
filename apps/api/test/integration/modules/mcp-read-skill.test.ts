@@ -41,7 +41,7 @@ import {
   AGENT_PACKAGES_BUCKET,
   versionZipKey,
 } from "../../../src/services/package-storage-keys.ts";
-// By path, as `chat-agent-authoring-ceiling.test.ts` does: the minting secret is
+// By path, as `chat-package-authoring-ceiling.test.ts` does: the minting secret is
 // process-local to the module instance whose auth strategy the app registered.
 import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
 import { turnPermissions } from "../../../../../packages/module-chat/src/turn-permissions.ts";

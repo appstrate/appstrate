@@ -30,8 +30,8 @@ export { OAuthCallbackError } from "./oauth.ts";
 // apps/api's OAuth2 strategy so every secret-bearing OAuth request is fail-closed.
 export { oauthEgressFetch, isAllowedInternalIdpHost, SsrfBlockedError } from "./oauth-egress.ts";
 
-// Token refresh
-export { RefreshError, performRefreshTokenExchange } from "./token-refresh.ts";
+// Token requests (refresh, and a `connect.login` grant on an oauth2 auth)
+export { RefreshError, performRefreshTokenExchange, performTokenRequest } from "./token-refresh.ts";
 export type { RefreshExchangeResult } from "./token-refresh.ts";
 
 // The token-endpoint symbols that cross the package boundary: apps/api's

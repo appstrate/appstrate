@@ -7,7 +7,7 @@
  * return NEW objects so dirty detection (JSON.stringify) stays correct.
  */
 
-import { API_META_KEY } from "@appstrate/core/integration";
+import { API_META_KEY, acquiresByConnectLogin } from "@appstrate/core/integration";
 import { parseUrlTemplate } from "@appstrate/afps-shared/connection-variables";
 
 type Rec = Record<string, unknown>;
@@ -248,7 +248,9 @@ function patchAuth(base: Rec, a: AuthState): Rec {
     if (a.scopeCatalog.length > 0)
       out.scope_catalog = mergeScopeCatalog(base.scope_catalog, a.scopeCatalog);
     else delete out.scope_catalog;
-    delete out.credentials;
+    // A `connect.login` grant (AFPS §7.7) is rendered from `credentials.schema`, which the form does
+    // not surface on oauth2: it survives untouched, like the `connect` block.
+    if (!acquiresByConnectLogin(out)) delete out.credentials;
   } else {
     if (a.credentialFields.length > 0)
       out.credentials = mergeCredentials(base.credentials, a.credentialFields);

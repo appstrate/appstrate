@@ -40,6 +40,7 @@ import {
   findUnexposedDefaultTools,
   findInvalidScopeTokens,
   scopeTokenSchema,
+  acquiresByConnectLogin,
 } from "../src/integration.ts";
 import { validateManifest, metaSchema } from "../src/validation.ts";
 import { TOOL_NAME_MAX_LEN } from "../src/naming.ts";
@@ -199,6 +200,103 @@ describe("integrationManifestSchema — oauth2 discovery + manual", () => {
     auths.oauth!.identity_claims = { account_id: "$.sub", email: "$.email" };
     auths.oauth!.required_identity_claims = ["sub"];
     expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────
+// OAuth2 — first token by `connect.login` (AFPS §7.7)
+// ─────────────────────────────────────────────
+
+const TOKEN_ENDPOINT = "https://idp.example.com/oauth/token";
+
+/** A none-source oauth2 auth acquiring its first token from a submitted refresh token. */
+function oauth2LoginManifest(login: Record<string, unknown> = {}): Record<string, unknown> {
+  return baseManifest({
+    source: { kind: "none" },
+    auths: {
+      oauth: {
+        type: "oauth2",
+        token_endpoint: TOKEN_ENDPOINT,
+        token_endpoint_auth_method: "none",
+        credentials: {
+          schema: {
+            type: "object",
+            properties: { refresh_token: { type: "string" } },
+            required: ["refresh_token"],
+          },
+        },
+        connect: {
+          login: {
+            request: {
+              method: "POST",
+              url: TOKEN_ENDPOINT,
+              content_type: "application/x-www-form-urlencoded",
+              body: "grant_type=refresh_token&refresh_token={{refresh_token}}",
+            },
+            ...login,
+          },
+        },
+        authorized_uris: ["https://api.example.com/**"],
+        delivery: {
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer ",
+            value: "{$credential.access_token}",
+          },
+        },
+      },
+    },
+  });
+}
+
+describe("integrationManifestSchema — oauth2 connect.login", () => {
+  it("accepts a token-request login without outputs, delivering the access token", () => {
+    expect(errorPaths(oauth2LoginManifest())).toEqual([]);
+  });
+
+  it("refuses a request url other than token_endpoint", () => {
+    const m = oauth2LoginManifest({
+      request: {
+        method: "POST",
+        url: "https://idp.example.com/other",
+        content_type: "application/x-www-form-urlencoded",
+        body: "grant_type=refresh_token&refresh_token={{refresh_token}}",
+      },
+    });
+    expect(errorPaths(m)).toEqual(["auths.oauth.connect.login.request.url"]);
+  });
+
+  it("refuses outputs on an oauth2 login", () => {
+    expect(errorPaths(oauth2LoginManifest({ outputs: { t: "$response.body#/t" } }))).toEqual([
+      "auths.oauth.connect.login.outputs",
+    ]);
+  });
+
+  it("still asks a custom connect.login for outputs", () => {
+    const m = oauth2LoginManifest();
+    const auth = (m.auths as Record<string, Record<string, unknown>>).oauth!;
+    auth.type = "custom";
+    delete auth.token_endpoint;
+    delete auth.token_endpoint_auth_method;
+    auth.delivery = { env: { TOKEN: { value: "{$credential.token}" } } };
+    expect(errorPaths(m)).toContain("auths.oauth.connect.login.outputs");
+  });
+});
+
+describe("acquiresByConnectLogin", () => {
+  const auths = (m: Record<string, unknown>) => m.auths as Record<string, Record<string, unknown>>;
+
+  it("is true for an oauth2 auth declaring connect.login", () => {
+    expect(acquiresByConnectLogin(auths(oauth2LoginManifest()).oauth!)).toBe(true);
+  });
+
+  it("is false for an oauth2 auth without connect.login, and for a custom login", () => {
+    expect(acquiresByConnectLogin(auths(baseManifest()).oauth!)).toBe(false);
+    expect(acquiresByConnectLogin({ type: "oauth2", connect: { tool: {} } })).toBe(false);
+    expect(acquiresByConnectLogin({ type: "custom", connect: { login: { request: {} } } })).toBe(
+      false,
+    );
   });
 });
 

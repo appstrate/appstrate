@@ -12,11 +12,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { LibraryBig, Plus, Upload } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
-import {
-  PACKAGE_WRITE_PERMISSIONS,
-  packagePermission,
-  spacePackagePermission,
-} from "@appstrate/core/permissions";
+import { packagePermission, spacePackagePermission } from "@appstrate/core/permissions";
 import { useAgents, usePackageList } from "../hooks/use-packages";
 import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { useListParams } from "../lib/list-params";
@@ -59,19 +55,8 @@ function presentation(type: IndexType, t: TFunction) {
   };
 }
 
-export function PackageIndexPage({
-  type,
-  manualCreation = "editor",
-}: {
-  type: IndexType;
-  /** Where « create manually » goes: the editor, or the import (MCP servers). */
-  manualCreation?: "editor" | "import";
-}) {
-  return type === "agent" ? (
-    <AgentIndex />
-  ) : (
-    <PackageIndex type={type} manualCreation={manualCreation} />
-  );
+export function PackageIndexPage({ type }: { type: IndexType }) {
+  return type === "agent" ? <AgentIndex /> : <PackageIndex type={type} />;
 }
 
 /** Agents also carry their unread runs. */
@@ -79,47 +64,23 @@ function AgentIndex() {
   const { data: agents, isLoading, error } = useAgents();
   const { data: unreadCounts } = useUnreadCountsByAgent();
   const items = agents?.map((agent) => agentCardItem(agent, unreadCounts?.[agent.id]));
-  return (
-    <PackageIndexBody
-      type="agent"
-      manualCreation="editor"
-      items={items}
-      isLoading={isLoading}
-      error={error}
-    />
-  );
+  return <PackageIndexBody type="agent" items={items} isLoading={isLoading} error={error} />;
 }
 
-function PackageIndex({
-  type,
-  manualCreation,
-}: {
-  type: Exclude<IndexType, "agent">;
-  manualCreation: "editor" | "import";
-}) {
+function PackageIndex({ type }: { type: Exclude<IndexType, "agent"> }) {
   // What works in THIS space; the rest of the org is one action away.
   const { data: rows, isLoading, error } = usePackageList(type);
   const items = rows?.map((row) => packageCardItem(row, type));
-  return (
-    <PackageIndexBody
-      type={type}
-      manualCreation={manualCreation}
-      items={items}
-      isLoading={isLoading}
-      error={error}
-    />
-  );
+  return <PackageIndexBody type={type} items={items} isLoading={isLoading} error={error} />;
 }
 
 function PackageIndexBody({
   type,
-  manualCreation,
   items,
   isLoading,
   error,
 }: {
   type: IndexType;
-  manualCreation: "editor" | "import";
   items: CardItem[] | undefined;
   isLoading: boolean;
   error: Error | null;
@@ -131,11 +92,10 @@ function PackageIndexBody({
   const list = useListParams(["origin", "activity"]);
   const [view, setView] = useListView(type);
   const { columns, menu } = useColumnVisibility(`packages-${type}`, usePackageColumns(type));
-  // Creating is a write on the package type, as its route is.
+  // Creating — by hand, with the chat or by import — is a write on the package
+  // type, as its routes are. The import names the type, so the server refuses
+  // an archive of another one.
   const canCreate = can(packagePermission(type, "write"));
-  // An import may carry any package type, so any authoring grant opens it;
-  // the server re-checks the type it finds.
-  const canImport = PACKAGE_WRITE_PERMISSIONS.some(can);
   const canActivate = can(spacePackagePermission(type, "activate"));
   const creation = useCreationHandoff(type, canCreate);
   // An id that resolves to nothing (typo, out of reach) is not offered: the draft stays plain.
@@ -158,7 +118,7 @@ function PackageIndexBody({
         variant="collection"
         breadcrumbs={[{ label: words.title }]}
         actions={
-          canCreate || canImport || canActivate ? (
+          canCreate || canActivate ? (
             <PageActionsMenu
               actions={[
                 {
@@ -173,7 +133,7 @@ function PackageIndexBody({
                   label: t("nav.import", { ns: "common" }),
                   icon: Upload,
                   onSelect: () => setImporting(true),
-                  hidden: !canImport,
+                  hidden: !canCreate,
                 },
                 createAction,
               ]}
@@ -198,7 +158,7 @@ function PackageIndexBody({
         view={view}
         onViewChange={setView}
       />
-      {importing && canImport && <ImportModal onClose={() => setImporting(false)} />}
+      {importing && canCreate && <ImportModal type={type} onClose={() => setImporting(false)} />}
       {creatingAgent !== null && canCreate && type === "agent" && (
         <CreateAgentModal
           integrationId={creatingAgent.integrationId ?? undefined}
@@ -209,17 +169,20 @@ function PackageIndexBody({
         <CreationHandoffModal
           resource={type}
           onClose={creation.close}
-          onManual={() => {
-            if (manualCreation === "import") {
-              creation.close();
-              setImporting(true);
-              return;
-            }
-            // The chooser hands over to the agent dialog; other types have a page of their own.
-            if (type === "agent") {
-              creation.close();
-              setCreatingAgent({ integrationId: creation.integrationId });
-            } else creation.leave(packageNewPath(type));
+          onManual={
+            type === "mcp-server"
+              ? undefined
+              : () => {
+                  // The chooser hands over to the agent dialog; other types have a page of their own.
+                  if (type === "agent") {
+                    creation.close();
+                    setCreatingAgent({ integrationId: creation.integrationId });
+                  } else creation.leave(packageNewPath(type));
+                }
+          }
+          onImport={() => {
+            creation.close();
+            setImporting(true);
           }}
           onChat={creation.openChat}
           integrationName={integrationName}

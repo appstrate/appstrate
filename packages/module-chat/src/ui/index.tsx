@@ -88,13 +88,13 @@ import {
   setModelCatalog,
   setSelectedModel,
 } from "./model-store.ts";
-import { getAgentAuthoringEnabled } from "./agent-authoring-store.ts";
+import { getPackageAuthoringEnabled } from "./package-authoring-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
-import { AgentAuthoringToggle } from "./agent-authoring-toggle.tsx";
+import { PackageAuthoringToggle } from "./package-authoring-toggle.tsx";
 import { SkillsPicker } from "./skills-picker.tsx";
 import { EnforcedSkillsIndicator } from "./enforced-skills.tsx";
 import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "../skills.ts";
-import { canAuthorAgents, canPinSkills } from "../capabilities.ts";
+import { canAuthorPackages, canPinSkills } from "../capabilities.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 import { shouldReconcileHistory } from "./history-reconcile.ts";
 
@@ -173,6 +173,8 @@ export interface ChatPageProps {
   modelCredentials: ChatHost["modelCredentials"];
   /** Renders a byte count in the host's language. Pass a stable function. */
   formatBytes: ChatHost["formatBytes"];
+  /** Refreshes the host's package lists (see `ChatHost`). Pass a stable function. */
+  onPackagesChanged: ChatHost["onPackagesChanged"];
 }
 
 export function ChatPage({
@@ -191,6 +193,7 @@ export function ChatPage({
   personalModelCredentials,
   modelCredentials,
   formatBytes,
+  onPackagesChanged,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -288,6 +291,7 @@ export function ChatPage({
       personalModelCredentials,
       modelCredentials,
       formatBytes,
+      onPackagesChanged,
     }),
     [
       onOpenFile,
@@ -298,6 +302,7 @@ export function ChatPage({
       personalModelCredentials,
       modelCredentials,
       formatBytes,
+      onPackagesChanged,
     ],
   );
 
@@ -317,11 +322,11 @@ export function ChatPage({
   // `Conversation` a new prop each time and defeat its `memo` below. The
   // setters are stable module functions, so the deps are exactly the values
   // the picker displays.
-  const authorsAgents = canAuthorAgents(can);
+  const authorsPackages = canAuthorPackages(can);
   const composerSlot = useMemo(
     () => (
       <div className="flex items-center gap-2">
-        {authorsAgents ? <AgentAuthoringToggle /> : null}
+        {authorsPackages ? <PackageAuthoringToggle /> : null}
         <ModelSelect
           models={models}
           selectedId={selectedModel}
@@ -335,7 +340,7 @@ export function ChatPage({
       </div>
     ),
     [
-      authorsAgents,
+      authorsPackages,
       models,
       selectedModel,
       generation,
@@ -587,7 +592,7 @@ function ConversationInner({
               messages,
               generation: getCompatibleGenerationSettings(),
               // Read at request time, like the model above, for the same reason.
-              agent_authoring: getAgentAuthoringEnabled(),
+              package_authoring: getPackageAuthoringEnabled(),
               ...(skills && {
                 skill_mode: skills.skillMode,
                 pinned_skills: skills.pinnedSkills,

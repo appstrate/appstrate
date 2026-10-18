@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Link2, MessageSquareText, PencilLine } from "lucide-react";
+import { Link2, MessageSquareText, PencilLine, Upload } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { buildChatCreationDraft, type CreationResource } from "../lib/creation-handoff";
 import { useCanReach } from "../hooks/use-can-reach";
@@ -10,22 +10,22 @@ import { Modal } from "./modal";
 
 interface CreationHandoffChoicesProps {
   resource: CreationResource;
-  onManual: () => void;
+  /** Absent for a type that cannot be written by hand (a local MCP server embeds its code). */
+  onManual?: () => void;
   onChat: (prompt: string) => void;
+  /** Importing a type takes the same grant as creating it, so whoever opens this may import. */
+  onImport: () => void;
   /** Display name of the integration an agent starts with, mentioned in the Chat draft. */
   integrationName?: string;
   /** The guided way from an MCP server URL, offered first when set (integrations). */
   onFromUrl?: () => void;
 }
 
+/** An integration's manual way says what it configures, beside the guided one from a URL. */
 const MANUAL_KEYS: Partial<Record<CreationResource, { title: string; description: string }>> = {
   integration: {
     title: "creation.manual.integrationTitle",
     description: "creation.manual.integrationDescription",
-  },
-  "mcp-server": {
-    title: "creation.manual.importTitle",
-    description: "creation.manual.importDescription",
   },
 };
 
@@ -45,11 +45,16 @@ export function CreationHandoffModal({
   );
 }
 
-/** The ways to create, as the modal lists them. */
+/**
+ * The ways to make a package, the same for every type: by hand, with the chat, or from an
+ * archive, and for an integration first the guided way from an MCP server URL. A way a type does
+ * not have, or the chat when it is out of reach, stays listed, disabled, with the reason.
+ */
 export function CreationHandoffChoices({
   resource,
   onManual,
   onChat,
+  onImport,
   onFromUrl,
   integrationName,
 }: CreationHandoffChoicesProps) {
@@ -81,9 +86,9 @@ export function CreationHandoffChoices({
       id: "manual",
       icon: PencilLine,
       title: t(manual.title),
-      description: t(manual.description),
-      onClick: onManual,
-      disabled: false,
+      description: t(onManual ? manual.description : "creation.manual.unavailableDescription"),
+      onClick: () => onManual?.(),
+      disabled: !onManual,
     },
     {
       id: "chat",
@@ -94,6 +99,14 @@ export function CreationHandoffChoices({
       ),
       onClick: () => onChat(chatPrompt),
       disabled: !chatAvailable,
+    },
+    {
+      id: "import",
+      icon: Upload,
+      title: t("creation.import.title"),
+      description: t("creation.import.description"),
+      onClick: onImport,
+      disabled: false,
     },
   ];
 

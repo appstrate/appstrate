@@ -63,6 +63,7 @@ function hostWith(granted: string[]): ChatHost {
     personalModelCredentials: true,
     modelCredentials: [],
     formatBytes: String,
+    onPackagesChanged: () => {},
   };
 }
 

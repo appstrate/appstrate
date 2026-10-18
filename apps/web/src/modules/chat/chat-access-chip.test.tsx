@@ -211,8 +211,8 @@ describe("the capability list", () => {
   it("marks a row the composer switch turns off, without calling it refused", () => {
     const create = (verdict: "granted" | "off") => [
       {
-        id: "createAgents",
-        labelKey: "access.capability.createAgents",
+        id: "createPackages",
+        labelKey: "access.capability.createPackages",
         held: () => true,
         verdict,
       },

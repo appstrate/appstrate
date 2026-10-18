@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`acquiresByConnectLogin(auth)`** (`@appstrate/core/integration`): true for an `oauth2` auth
+  declaring `connect.login` (AFPS §7.7, afps-spec/afps-spec#44) — its first token is acquired by
+  a token request to `token_endpoint` carrying the grant the user submits, instead of the
+  authorization-code flow. `integrationManifestSchema` no longer asks such a login for `outputs`:
+  that rule, and the delivery gating that reads them, stay on `custom` auths.
 - **`isReservedScope(scope)`** and **`INLINE_SHADOW_SCOPE`** (`@appstrate/core/naming`):
   the package scopes the platform owns — `appstrate` (system packages) and `inline`
   (inline runs' shadow packages, `@inline/r-<uuid>`). The API refuses a reserved scope both as

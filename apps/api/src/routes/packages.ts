@@ -19,6 +19,7 @@ import { db } from "@appstrate/db/client";
 import { listResponse } from "../lib/list-response.ts";
 import { postInstallPackage } from "../services/post-install-package.ts";
 import { bundleImportAuditRecords, handleImportBundle } from "../services/bundle-import.ts";
+import { assertImportedType, readExpectedImportType } from "../lib/import-type.ts";
 import {
   activatePackage,
   activatePackageWithin,
@@ -2644,6 +2645,7 @@ export function createPackagesRouter() {
       throw invalidRequest("Only .afps-bundle, .afps, and .zip files are accepted", "file");
     }
 
+    const expectedType = readExpectedImportType(c);
     const bytes = new Uint8Array(await file.arrayBuffer());
     const orgId = c.get("orgId");
     const spaceId = c.get("spaceId");
@@ -2660,6 +2662,7 @@ export function createPackagesRouter() {
         // rule as any activation: through the placement door, when this caller
         // holds the share authority.
         (packageId) => heldPlacementAuthority(c, packageId),
+        expectedType,
       );
     } catch (err) {
       // Typed errors (ApiError — conflicts, invalid request) propagate as-is.
@@ -2703,10 +2706,12 @@ export function createPackagesRouter() {
     if (!file.name.endsWith(".afps") && !file.name.endsWith(".zip")) {
       throw invalidRequest("Only .afps and .zip files are accepted");
     }
+    const expectedType = readExpectedImportType(c);
 
     const upload = Buffer.from(await file.arrayBuffer());
 
     const { parsed, artifact } = await parseZipWithSkillFallback(upload, c.get("orgSlug"));
+    assertImportedType(parsed.type, expectedType);
 
     return handleImport(c, parsed, artifact, c.req.query("force") === "true", "zip");
   });
@@ -2714,6 +2719,7 @@ export function createPackagesRouter() {
   // POST /api/packages/import-github — import a package from a GitHub URL
   router.post("/import-github", rateLimit(10), requireAnyPackageWrite, async (c) => {
     const data = await readJsonBody(c, githubImportSchema, { param: "url" });
+    const expectedType = readExpectedImportType(c);
 
     let zipBytes: Uint8Array;
     try {
@@ -2734,6 +2740,7 @@ export function createPackagesRouter() {
       Buffer.from(zipBytes),
       c.get("orgSlug"),
     );
+    assertImportedType(parsed.type, expectedType);
 
     return handleImport(c, parsed, artifact, false, "github");
   });

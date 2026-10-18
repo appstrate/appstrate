@@ -55,7 +55,8 @@ import {
   assertArchiveContentConforms,
   assertNoManifestViolations,
 } from "./package-items/config.ts";
-import type { PackageType } from "@appstrate/core/validation";
+import { packageTypeEnum, type PackageType } from "@appstrate/core/validation";
+import { assertImportedType } from "../lib/import-type.ts";
 import { assertPackageScopeNotReserved } from "./package-items/crud.ts";
 import { postInstallPackage } from "./post-install-package.ts";
 import { lockPackageVersions } from "./package-locks.ts";
@@ -245,6 +246,8 @@ interface ImportBundleResult {
   root_active: boolean;
   root_package_id: string;
   root_version: string;
+  /** The root package's type: what the import opens, and what `?type=` is checked against. */
+  root_type: PackageType;
   /**
    * Non-blocking import-time warnings, each prefixed with its package identity
    * (e.g. dropped runtime tools, `_meta` soft-fails, retired dependency keys, an expression a
@@ -629,6 +632,7 @@ export async function importBundle(
     root_active: rootActive,
     root_package_id: rootParsed.packageId,
     root_version: rootParsed.version,
+    root_type: bundleRootType(bundle),
     warnings,
   };
 }
@@ -750,6 +754,11 @@ async function assertBundleRootDefaultToolsExposed(
  * packages before it imported — and so `validate_package_file` gives the same
  * answer the import does.
  */
+/** The root package's declared type, validated by the preflight's manifest checks. */
+function bundleRootType(bundle: Bundle): PackageType {
+  return packageTypeEnum.parse(bundle.packages.get(bundle.root)?.manifest.type);
+}
+
 function assertBundleScopesNotReserved(bundle: Bundle): void {
   for (const identity of bundle.packages.keys()) {
     const packageId = parsePackageIdentity(identity)?.packageId;
@@ -783,8 +792,11 @@ export async function handleImportBundle(
   userId: string,
   authorize: (bundle: Bundle) => Promise<void>,
   placeRootAs: (packageId: string) => Promise<PlacementAuthority | null>,
+  expectedRootType?: PackageType,
 ): Promise<ImportBundleResult> {
   const { bundle, conflicts } = await preflightBundleImport(bytes, scope, authorize);
+  // Before the conflict report: a bundle of the wrong kind is refused whatever it collides with.
+  assertImportedType(bundleRootType(bundle), expectedRootType);
   if (conflicts.length > 0) {
     const summary = conflicts
       .map((c) =>

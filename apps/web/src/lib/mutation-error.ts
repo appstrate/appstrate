@@ -133,9 +133,25 @@ export function errorField(err: unknown): string | undefined {
   return err.param ?? fieldErrors(err)[0]?.field;
 }
 
+/**
+ * A `login_rejected`, worded by its `login_refusal` member, never by the server's English detail:
+ * `grant` (an oauth2 token request), `integration` (a login tool, whose own text is shown as is),
+ * or absent (the service refused the credentials).
+ */
+function loginRejectedMessage(details: Record<string, unknown> | undefined): string {
+  const refusal = details?.login_refusal;
+  const diagnostic = details?.integration_diagnostic;
+  if (refusal === "grant") return i18n.t("error.loginRejectedGrant", { ns: "common" });
+  if (refusal === "integration" && typeof diagnostic === "string" && diagnostic !== "") {
+    return i18n.t("error.loginRejectedIntegration", { diagnostic, ns: "common" });
+  }
+  return i18n.t("apiError.login_rejected", { ns: "common" });
+}
+
 /** The translated sentence for a failure, or `null` when it carries no code this SPA knows. */
 function translated(err: unknown): string | null {
   if (!(err instanceof ApiError)) return null;
+  if (err.code === "login_rejected") return loginRejectedMessage(err.details);
   const [first, ...others] = err.code === "validation_failed" ? fieldErrors(err) : [];
   if (!first) return refusalMessage(err);
   // An item code with no sentence keeps the server's own summary, count included.

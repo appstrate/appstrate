@@ -24,6 +24,7 @@ const host: ChatHost = {
   personalModelCredentials: true,
   modelCredentials: [],
   formatBytes: String,
+  onPackagesChanged: () => {},
 };
 
 const getHeaders = () => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" });

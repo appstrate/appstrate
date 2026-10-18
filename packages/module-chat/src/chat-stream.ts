@@ -150,8 +150,8 @@ export const chatStreamSchema = z
       }),
     modelId: z.string().optional(),
     generation: modelGenerationSettingsSchema.optional(),
-    /** The composer's agent-authoring switch; absent = on. See {@link turnPermissions}. */
-    agent_authoring: z.boolean().optional(),
+    /** The composer's package-authoring switch; absent = on. See {@link turnPermissions}. */
+    package_authoring: z.boolean().optional(),
     /** The conversation's skill selection; absent = the one stored on the session. */
     skill_mode: z.enum(chatSkillModeValues).optional(),
     pinned_skills: z
@@ -314,7 +314,7 @@ export async function handleChatStream(
   // inference loopback calls carry a short-lived token only this process
   // can mint, scoped to llm-proxy:call + models:read. The MCP session keeps
   // the caller's own grants (full RBAC fidelity on tool calls, narrowed by
-  // `turnPermissions` when agent authoring is off).
+  // `turnPermissions` when package authoring is off).
   //
   // The token lives 60 s, but a turn fans out into many inference calls over
   // many steps (with a run long-poll blocking for ~55s between them), so the
@@ -347,7 +347,7 @@ export async function handleChatStream(
   // lives on the session row, so the turn's grants follow its upsert.
   const turn = sessionSkills.then((skills) => {
     const permissions = turnPermissions(c.get("permissions"), {
-      authoring: body.agent_authoring !== false,
+      authoring: body.package_authoring !== false,
       skillMode: skills.skillMode,
     });
     const capabilities = turnCapabilities((permission) => permissions.includes(permission));

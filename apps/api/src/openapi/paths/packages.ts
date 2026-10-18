@@ -166,6 +166,16 @@ const fileOperationsProperty = {
     "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates are guarded by the same `If-Match` as the manifest; a stale draft returns 412 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations.",
 } as const;
 
+/** `?type=` on the three import doors: refuse an archive of another package type before writing. */
+const importTypeParameter = {
+  name: "type",
+  in: "query",
+  required: false,
+  description:
+    "The package type the import is made for. When set, an archive whose package (for a bundle, its root) is another type is refused with 400 `unexpected_package_type` before anything is written.",
+  schema: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
+} as const;
+
 export const packagesPaths = {
   "/api/packages/import-bundle": {
     post: {
@@ -177,6 +187,7 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
+        importTypeParameter,
       ],
       requestBody: {
         required: true,
@@ -216,6 +227,7 @@ export const packagesPaths = {
                   "root_active",
                   "root_package_id",
                   "root_version",
+                  "root_type",
                   "warnings",
                 ],
                 properties: {
@@ -254,6 +266,11 @@ export const packagesPaths = {
                   },
                   root_package_id: { type: "string" },
                   root_version: { type: "string" },
+                  root_type: {
+                    type: "string",
+                    enum: ["agent", "skill", "mcp-server", "integration"],
+                    description: "The root package's type.",
+                  },
                   warnings: {
                     type: "array",
                     items: { type: "string" },
@@ -267,7 +284,7 @@ export const packagesPaths = {
         },
         "400": {
           description:
-            "Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, or `post_install_failed`. A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. " +
+            "Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `unexpected_package_type` (the root is not the `type` asked for), or `post_install_failed`. A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. " +
             SCOPE_RESERVED_RULE,
           content: {
             "application/problem+json": {
@@ -300,6 +317,7 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
+        importTypeParameter,
         {
           name: "force",
           in: "query",
@@ -361,7 +379,7 @@ export const packagesPaths = {
         },
         "400": {
           description:
-            "Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `type_mismatch` (existing package has a different type), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. " +
+            "Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `type_mismatch` (existing package has a different type), `unexpected_package_type` (the archive is not the `type` asked for), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. " +
             SCOPE_RESERVED_RULE,
           content: {
             "application/problem+json": {
@@ -394,6 +412,7 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
+        importTypeParameter,
       ],
       requestBody: {
         required: true,
@@ -447,7 +466,7 @@ export const packagesPaths = {
         },
         "400": {
           description:
-            "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`type_mismatch`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. " +
+            "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`type_mismatch`, `unexpected_package_type`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. " +
             SCOPE_RESERVED_RULE,
           content: {
             "application/problem+json": {

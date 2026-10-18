@@ -34,6 +34,7 @@ describe("the creation hand-off", () => {
         onFromUrl={noop}
         onManual={noop}
         onChat={noop}
+        onImport={noop}
       />,
     );
     const url = html.indexOf(settingsFr["creation.fromUrl.title"]);
@@ -42,10 +43,13 @@ describe("the creation hand-off", () => {
     expect(manual).toBeGreaterThan(url);
     expect(html).toContain(settingsFr["creation.manual.integrationDescription"]);
     expect(html).toContain(settingsFr["creation.chat.title"]);
+    expect(html).toContain(settingsFr["creation.import.title"]);
   });
 
   it("keeps a skill's choices as they were", () => {
-    const html = render(<CreationHandoffChoices resource="skill" onManual={noop} onChat={noop} />);
+    const html = render(
+      <CreationHandoffChoices resource="skill" onManual={noop} onChat={noop} onImport={noop} />,
+    );
     expect(html).not.toContain(settingsFr["creation.fromUrl.title"]);
     expect(html).toContain(settingsFr["creation.manual.title"]);
   });

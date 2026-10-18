@@ -3,7 +3,11 @@
 // What a chat turn may do (persona, context block, web chip). The MCP server reads its
 // grants off the routes; apps/api `catalog-requirements.test.ts` pins the two together.
 
-import { agentCapabilities, type RunLevel } from "@appstrate/core/permissions";
+import {
+  agentCapabilities,
+  PACKAGE_WRITE_PERMISSIONS,
+  type RunLevel,
+} from "@appstrate/core/permissions";
 
 export { reaches, type RunLevel } from "@appstrate/core/permissions";
 
@@ -13,6 +17,8 @@ export interface TurnCapabilities {
   readonly invokes: boolean;
   readonly runLevel: RunLevel;
   readonly authors: boolean;
+  /** Dispatch ∧ a write on any package type: the turn may create a package of that type. */
+  readonly authorsPackages: boolean;
   /**
    * `transport` ∧ `skills:read`: the context lists the space's skills on `skills:read`, and
    * `read_skill`, which loads one, is declared on every MCP connection — no dispatch needed.
@@ -27,13 +33,14 @@ export function turnCapabilities(has: (permission: string) => boolean): TurnCapa
     transport,
     invokes,
     ...agentCapabilities(has, invokes),
+    authorsPackages: invokes && PACKAGE_WRITE_PERMISSIONS.some(has),
     readsSkills: transport && has("skills:read"),
   };
 }
 
-/** Creating agents from the chat: the composer's authoring switch and the shell's access row. */
-export function canAuthorAgents(has: (permission: string) => boolean): boolean {
-  return has("chat:write") && turnCapabilities(has).authors;
+/** Creating packages from the chat: the composer's authoring switch and the shell's access row. */
+export function canAuthorPackages(has: (permission: string) => boolean): boolean {
+  return has("chat:write") && turnCapabilities(has).authorsPackages;
 }
 
 /**

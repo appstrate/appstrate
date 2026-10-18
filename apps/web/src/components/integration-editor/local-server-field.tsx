@@ -137,10 +137,9 @@ export function LocalServerField({
 
       {importing && (
         <ImportModal
+          type="mcp-server"
           onClose={() => setImporting(false)}
-          onImported={(result) => {
-            if (result.type === "mcp-server") onChange({ serverName: result.packageId });
-          }}
+          onImported={(result) => onChange({ serverName: result.packageId })}
         />
       )}
     </>

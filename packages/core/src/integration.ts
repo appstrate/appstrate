@@ -98,6 +98,18 @@ export const RESERVED_INTEGRATION_UPLOAD_PROTOCOLS = [
 // ─────────────────────────────────────────────
 
 /**
+ * True for an `oauth2` auth declaring `connect.login` (AFPS §7.7, *On an `oauth2` auth method*):
+ * its first token is acquired by a token request to `token_endpoint` carrying the grant the user
+ * submits through `credentials.schema`, instead of the authorization-code flow. Once acquired, the
+ * connection is an ordinary oauth2 one.
+ */
+export function acquiresByConnectLogin(auth: { type?: unknown; connect?: unknown }): boolean {
+  return (
+    auth.type === "oauth2" && (auth.connect as { login?: unknown } | undefined)?.login !== undefined
+  );
+}
+
+/**
  * The integration manifest validator. The base structural schema comes from
  * `@afps-spec/schema` (snake_case, `source` discriminant, RFC 8414 OAuth,
  * `_meta` extensions). The AFPS schema already enforces its own MUST rules
@@ -507,9 +519,10 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
     // only reference declared connect outputs. We only enforce the gating
     // when a declarative `login` is present (the AFPS `tool` mode declares
     // its outputs out-of-band via `produces`, which the loose schema doesn't
-    // surface here).
+    // surface here). An oauth2 login declares no outputs — its response is a
+    // token response, its credential the oauth2 token bundle — so none of it applies.
     const login = auth.connect?.login;
-    if (login) {
+    if (login && !acquiresByConnectLogin(auth)) {
       const declaredOutputs = new Set(Object.keys(login.outputs ?? {}));
       if (declaredOutputs.size === 0) {
         ctx.addIssue({
