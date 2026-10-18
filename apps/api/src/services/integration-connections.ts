@@ -70,9 +70,8 @@ import {
 import { egressFetchImpl, isBlockedEgressUrl } from "../lib/egress-host-guard.ts";
 import {
   clientMetadataDocumentUrl,
-  clientMetadataDocumentsServable,
-  clientMetadataRedirectUri,
-  parseClientMetadataDocumentRef,
+  issuerOfClientMetadataDocumentRef,
+  presentsClientMetadataDocument,
   platformClientName,
 } from "../lib/integration-client-metadata.ts";
 import {
@@ -135,6 +134,7 @@ import {
 import {
   integrationCallbackUrl,
   integrationCallbackUrlFor,
+  redirectTagOf,
 } from "../lib/integration-callback-url.ts";
 import { CONNECTION_LABEL_MAX, toMintedLabel } from "../lib/connection-label.ts";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
@@ -1329,16 +1329,23 @@ interface ResolvedConnectClient {
   clientId: string;
   /** Pre-registered redirect URI override, or null to use the platform default. */
   redirectUri: string | null;
+  /**
+   * The tag of `redirectUri` when it is a per-server callback (`…/callback/<tag>`): recorded in the
+   * OAuth state so the callback refuses a response arriving through any other path (mix-up).
+   */
+  redirectTag?: string;
   clientRef: string;
 }
 
 /**
- * This instance's Client ID Metadata Document as the connect-time client of `issuer`'s server
- * (`null` = the manifest's): no row, the document URL is both `client_id` and `client_ref`.
+ * This instance's Client ID Metadata Document of `issuer`'s server as the connect-time client: no
+ * row, the document URL is both `client_id` and `client_ref`, and the redirect URI is the server's
+ * own (`<callback>/<tag>`) — never the shared callback, whatever the auth.
  */
-function metadataDocumentClient(issuer: string | null): ResolvedConnectClient {
+function metadataDocumentClient(issuer: string): ResolvedConnectClient {
   const url = clientMetadataDocumentUrl(issuer);
-  return { clientId: url, redirectUri: clientMetadataRedirectUri(issuer), clientRef: url };
+  const redirectUri = integrationCallbackUrlFor(issuer);
+  return { clientId: url, redirectUri, redirectTag: redirectTagOf(redirectUri)!, clientRef: url };
 }
 
 /** Project a registered system client into the connect-time resolved shape. */
@@ -1398,9 +1405,11 @@ function assertConnectClientUsable(client: IntegrationOAuthClientWithSecret): vo
 function customConnectClient(client: IntegrationOAuthClientWithSecret): ResolvedConnectClient {
   // Before the authorize redirect, never after the user has consented.
   assertConnectClientUsable(client);
+  const redirectTag = client.redirect_uri ? redirectTagOf(client.redirect_uri) : undefined;
   return {
     clientId: client.client_id,
     redirectUri: client.redirect_uri ?? null,
+    ...(redirectTag ? { redirectTag } : {}),
     clientRef: client.id,
   };
 }
@@ -1524,12 +1533,9 @@ export async function resolveIntegrationClientById(
   }
 
   // 2) A metadata document of this instance: public by construction, whatever the manifest says.
-  const document = parseClientMetadataDocumentRef(clientRef);
-  if (document) {
-    return {
-      ...resolved(clientRef, "", "none"),
-      ...(document.issuer !== null ? { issuer: document.issuer } : {}),
-    };
+  const documentIssuer = issuerOfClientMetadataDocumentRef(clientRef);
+  if (documentIssuer !== null) {
+    return { ...resolved(clientRef, "", "none"), issuer: documentIssuer };
   }
 
   // A custom client id is the row's UUID PK. Anything else — a since-removed
@@ -1961,9 +1967,10 @@ export async function ensureIntegrationOAuthClient(
   };
 
   // CIMD ahead of DCR, even of a machine client DCR registered before: its connections keep it
-  // (their `client_ref`), new ones take the document.
-  if (endpoints.clientIdMetadataDocumentSupported === true && clientMetadataDocumentsServable()) {
-    return { ...resolved, metadataDocumentClient: metadataDocumentClient(null) };
+  // (their `client_ref`), new ones take the document — the one of the server whose validated
+  // metadata advertised it, with that server's own redirect URI.
+  if (presentsClientMetadataDocument(discovered)) {
+    return { ...resolved, metadataDocumentClient: metadataDocumentClient(discovered.issuer) };
   }
 
   // Auto-provisioned by DCR: there is exactly one machine client, registered once.
@@ -2069,8 +2076,7 @@ async function ensurePerConnectionOAuthClient(
       `the authorization server ${candidate} publishes no valid metadata (RFC 8414)`,
     );
   }
-  const byDocument =
-    endpoints.clientIdMetadataDocumentSupported === true && clientMetadataDocumentsServable();
+  const byDocument = presentsClientMetadataDocument(endpoints);
   for (const url of [
     endpoints.authorizationEndpoint,
     endpoints.tokenEndpoint,
@@ -2152,7 +2158,7 @@ async function registerAutoProvisionedClient(
   input: {
     registrationEndpoint: string | undefined;
     grantTypesSupported: string[] | undefined;
-    /** Advertised, but refused for want of a public https `APP_URL`: the failure says so. */
+    /** Advertised, but no document presented (`presentsClientMetadataDocument`): the failure says so. */
     clientIdMetadataDocumentSupported: boolean | undefined;
     redirectUri: string;
     issuer: string | null;
@@ -2178,10 +2184,10 @@ async function registerAutoProvisionedClient(
       issuer === null ? "the authorization server" : `the authorization server ${issuer}`;
     const message =
       input.clientIdMetadataDocumentSupported === true
-        ? `${server} accepts client metadata documents but not dynamic client registration, and it can fetch a document only from a public https APP_URL, which this instance's is not; ${
+        ? `${server} accepts client metadata documents but not dynamic client registration, and this instance presents no document: it takes a server that also advertises RFC 9207 iss (authorization_response_iss_parameter_supported), a public https APP_URL the server can fetch, and INTEGRATION_OAUTH_CIMD not set to 'off'; ${
             issuer === null
-              ? "serve the instance from a public https APP_URL, or register an OAuth client manually"
-              : "serve the instance from a public https APP_URL to connect to it"
+              ? "register an OAuth client manually, or meet those conditions"
+              : "meet those conditions to connect to it"
           }`
         : issuer === null
           ? `${server} advertises neither client metadata documents nor dynamic client registration; register an OAuth client manually, or retry once the server advertises one of them`

@@ -46,3 +46,16 @@ export function authorizationServerTag(issuer: string): string {
 export function integrationCallbackUrlFor(issuer: string): string {
   return `${integrationCallbackUrl()}/${authorizationServerTag(issuer)}`;
 }
+
+/**
+ * The tag of a per-server redirect URI (`…/callback/<tag>`), `undefined` for the shared callback or
+ * any other URI. The connect flow records it in the OAuth state whenever the redirect URI it sends
+ * carries one, so the callback refuses a response that comes back through another path.
+ */
+export function redirectTagOf(redirectUri: string): string | undefined {
+  if (!URL.canParse(redirectUri)) return undefined;
+  const { pathname } = new URL(redirectUri);
+  return INTEGRATION_TAGGED_CALLBACK_PATH.test(pathname)
+    ? pathname.slice(INTEGRATION_CALLBACK_PATH.length + 1)
+    : undefined;
+}

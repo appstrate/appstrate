@@ -100,7 +100,12 @@ function protectedServer(
         token_endpoint: `${origin}/token`,
         code_challenge_methods_supported: ["S256"],
         ...(opts.registration === false ? {} : { registration_endpoint: `${origin}/register` }),
-        ...(opts.cimd ? { client_id_metadata_document_supported: true } : {}),
+        ...(opts.cimd
+          ? {
+              client_id_metadata_document_supported: true,
+              authorization_response_iss_parameter_supported: true,
+            }
+          : {}),
       }),
   };
 }

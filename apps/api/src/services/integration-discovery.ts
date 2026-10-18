@@ -34,7 +34,7 @@ import {
 } from "../lib/egress-host-guard.ts";
 import { readBodyPrefix } from "../lib/capped-body.ts";
 import { logger } from "../lib/logger.ts";
-import { clientMetadataDocumentsServable } from "../lib/integration-client-metadata.ts";
+import { presentsClientMetadataDocument } from "../lib/integration-client-metadata.ts";
 import { fetchSiteIcon, siteIconFetch } from "./integration-icon.ts";
 
 type Provenance = "detected" | "guessed";
@@ -400,13 +400,12 @@ async function discoverAuth(
  * same two the connect path tries (`ensureIntegrationOAuthClient`).
  */
 function provisionsClientItself(endpoints: {
+  issuer?: string;
   clientIdMetadataDocumentSupported?: boolean;
+  authorizationResponseIssParameterSupported?: boolean;
   registrationEndpoint?: string;
 }): boolean {
-  return (
-    (endpoints.clientIdMetadataDocumentSupported === true && clientMetadataDocumentsServable()) ||
-    endpoints.registrationEndpoint !== undefined
-  );
+  return presentsClientMetadataDocument(endpoints) || endpoints.registrationEndpoint !== undefined;
 }
 
 /** Distinct RFC 6749 §3.3 scope tokens; anything else is dropped. */

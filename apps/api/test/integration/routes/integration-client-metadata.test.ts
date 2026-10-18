@@ -3,14 +3,16 @@
 /**
  * OAuth Client ID Metadata Documents for integration connections (#2076, MCP 2026-07-28 client
  * registration): an auto-provisioned auth (remote MCP, `token_endpoint_auth_method: none`) whose
- * authorization server advertises `client_id_metadata_document_supported` connects with this
- * instance's document URL as `client_id` — nothing registered, nothing stored — when `APP_URL` is
- * public https; it falls back to DCR otherwise.
+ * authorization server advertises `client_id_metadata_document_supported` (and RFC 9207 `iss`)
+ * connects with this instance's document OF THAT SERVER as `client_id` — nothing registered,
+ * nothing stored, the server's own tagged redirect URI — when `APP_URL` is public https and
+ * `INTEGRATION_OAUTH_CIMD` is not `off`; it falls back to DCR otherwise.
  *
  * A loopback server plays the MCP server and its authorization-server metadata (RFC 9728 → RFC
- * 8414, + RFC 7591 registration it counts); the authorize and token endpoints it advertises are a
- * CONFORMANT server's (`strict-authorization-server.ts`), registered with the document URL as its
- * public client, so the exchange and the refresh are protocol-checked.
+ * 8414, + RFC 7591 registration it counts). Its authorize endpoint fronts a CONFORMANT server
+ * (`strict-authorization-server.ts`) and adds `iss`; the token endpoint is the conformant one's,
+ * registered with the document URL as its public client, so the exchange and the refresh are
+ * protocol-checked.
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
@@ -40,6 +42,7 @@ import {
   resolveConnectClient,
   resolveIntegrationClientById,
 } from "../../../src/services/integration-connections.ts";
+import { oauthStateStore } from "../../../src/services/connect/oauth-state-store.ts";
 import { authorizationServerTag } from "../../../src/lib/integration-callback-url.ts";
 import type { AfpsManifestAuth } from "../../../src/services/integration-manifest-helpers.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
@@ -48,21 +51,31 @@ const app = getTestApp();
 const INTEGRATION = "@myorg/remote-mcp";
 const AUTH_KEY = "oauth";
 const PUBLIC_APP_URL = "https://appstrate.example.com";
-const DOCUMENT_URL = `${PUBLIC_APP_URL}/oauth/client-metadata.json`;
 const CALLBACK = `${PUBLIC_APP_URL}/api/integrations/callback`;
 
-/** The remote MCP server and its authorization server's metadata, pointing at `provider`. */
+const documentUrl = (issuer: string, appUrl = PUBLIC_APP_URL) =>
+  `${appUrl}/oauth/client-metadata/${Buffer.from(issuer).toString("base64url")}.json`;
+const documentName = (issuer: string) => `${Buffer.from(issuer).toString("base64url")}.json`;
+
+interface Advertise {
+  cimd: boolean;
+  registration: boolean;
+  /** RFC 9207: advertise `authorization_response_iss_parameter_supported` and send `iss`. */
+  iss?: boolean;
+}
+
+/** The remote MCP server and its authorization server's metadata, fronting `provider`. */
 interface MetadataServer {
   base: string;
   registrations: number;
+  /** Set once the conformant server exists (its client id is this server's document URL). */
+  provider: StrictAuthorizationServer | null;
   stop: () => void;
 }
 
-function startMetadataServer(
-  provider: StrictAuthorizationServer,
-  advertise: { cimd: boolean; registration: boolean },
-): MetadataServer {
-  const handle: MetadataServer = { base: "", registrations: 0, stop: () => {} };
+function startMetadataServer(advertise: Advertise): MetadataServer {
+  const handle: MetadataServer = { base: "", registrations: 0, provider: null, stop: () => {} };
+  const iss = advertise.iss ?? true;
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
   const server = Bun.serve({
@@ -84,13 +97,25 @@ function startMetadataServer(
       if (url.pathname === "/.well-known/oauth-authorization-server") {
         return json({
           issuer: base,
-          authorization_endpoint: provider.authorizationEndpoint,
-          token_endpoint: provider.tokenEndpoint,
+          authorization_endpoint: `${base}/authorize`,
+          token_endpoint: handle.provider!.tokenEndpoint,
           grant_types_supported: ["authorization_code", "refresh_token"],
           code_challenge_methods_supported: ["S256"],
+          ...(iss ? { authorization_response_iss_parameter_supported: true } : {}),
           ...(advertise.registration ? { registration_endpoint: `${base}/register` } : {}),
           ...(advertise.cimd ? { client_id_metadata_document_supported: true } : {}),
         });
+      }
+      if (url.pathname === "/authorize") {
+        // The conformant server decides; this one only stamps its `iss` on the way back.
+        const upstream = await fetch(`${handle.provider!.authorizationEndpoint}${url.search}`, {
+          redirect: "manual",
+        });
+        const location = upstream.headers.get("Location");
+        if (!location) return upstream;
+        const back = new URL(location);
+        if (iss) back.searchParams.set("iss", base);
+        return new Response(null, { status: 302, headers: { Location: back.toString() } });
       }
       if (req.method === "POST" && url.pathname === "/register") {
         const body = (await req.json()) as { redirect_uris: string[] };
@@ -112,78 +137,97 @@ function startMetadataServer(
   return handle;
 }
 
-function setAppUrl(value: string): void {
-  process.env.APP_URL = value;
+function setEnv(name: "APP_URL" | "INTEGRATION_OAUTH_CIMD", value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
   resetEnvCache();
 }
 
-let previousAppUrl: string | undefined;
+let previous: { appUrl?: string; cimd?: string };
 let restoreEgress: () => void;
 
 beforeAll(() => {
-  previousAppUrl = process.env.APP_URL;
+  previous = { appUrl: process.env.APP_URL, cimd: process.env.INTEGRATION_OAUTH_CIMD };
   restoreEgress = allowLoopbackOAuthEgress();
 });
 
 afterAll(() => {
   restoreEgress();
-  if (previousAppUrl === undefined) delete process.env.APP_URL;
-  else process.env.APP_URL = previousAppUrl;
-  resetEnvCache();
+  setEnv("INTEGRATION_OAUTH_CIMD", previous.cimd);
+  setEnv("APP_URL", previous.appUrl);
 });
 
-describe("GET /oauth/client-metadata.json (public)", () => {
-  beforeEach(() => setAppUrl(PUBLIC_APP_URL));
+describe("GET /oauth/client-metadata/{document} (public)", () => {
+  beforeEach(() => setEnv("APP_URL", PUBLIC_APP_URL));
 
-  it("serves the document whose client_id is its own URL", async () => {
-    const res = await app.request("/oauth/client-metadata.json");
+  it("serves the document of the server its name encodes, naming that server's redirect URI", async () => {
+    const issuer = "https://mcp.notion.com";
+    const res = await app.request(`/oauth/client-metadata/${documentName(issuer)}`);
     expect(res.status).toBe(200);
     expect(res.headers.get("Content-Type")).toContain("application/json");
     expect(res.headers.get("Cache-Control")).toBe("public, max-age=300");
     expect(await res.json()).toEqual({
-      client_id: DOCUMENT_URL,
+      client_id: documentUrl(issuer),
       client_name: "Appstrate (appstrate.example.com)",
       client_uri: PUBLIC_APP_URL,
-      redirect_uris: [CALLBACK],
+      redirect_uris: [`${CALLBACK}/${authorizationServerTag(issuer)}`],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
       token_endpoint_auth_method: "none",
     });
   });
 
-  it("serves a per-server document naming that server's own redirect URI", async () => {
-    const issuer = "https://gitlab.example.org";
-    const name = `${Buffer.from(issuer).toString("base64url")}.json`;
-    const res = await app.request(`/oauth/client-metadata/${name}`);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as Record<string, unknown>;
-    expect(body.client_id).toBe(`${PUBLIC_APP_URL}/oauth/client-metadata/${name}`);
-    expect(body.redirect_uris).toEqual([`${CALLBACK}/${authorizationServerTag(issuer)}`]);
-    expect(body.token_endpoint_auth_method).toBe("none");
+  it("serves no shared document", async () => {
+    expect((await app.request("/oauth/client-metadata.json")).status).toBe(404);
   });
 
-  it("404s a name encoding no issuer URL, or not in its canonical encoding", async () => {
-    const notUrl = `${Buffer.from("not a url").toString("base64url")}.json`;
-    // "aHR0cHM6Ly9hLmI" is base64url("https://a.b"); a trailing extra bit spells it twice.
-    for (const name of [notUrl, "aHR0cHM6Ly9hLmJ.json", "x.txt", "%2E%2E.json"]) {
-      const res = await app.request(`/oauth/client-metadata/${name}`);
-      expect(res.status).toBe(404);
+  it("serves an http issuer only on a host the operator allowlisted", async () => {
+    // `localhost` is allowlisted for this file (`allowLoopbackOAuthEgress`).
+    expect(
+      (await app.request(`/oauth/client-metadata/${documentName("http://localhost:9999")}`)).status,
+    ).toBe(200);
+    expect(
+      (await app.request(`/oauth/client-metadata/${documentName("http://idp.example.com")}`))
+        .status,
+    ).toBe(404);
+  });
+
+  it("404s a name encoding no admissible issuer, a non-canonical one, or an overlong one", async () => {
+    const overlong = documentName(`https://idp.example.com/${"a".repeat(1600)}`);
+    expect(overlong.length).toBeGreaterThan(2048);
+    expect(
+      (await app.request(`/oauth/client-metadata/${documentName("https://idp.example.com/ok")}`))
+        .status,
+    ).toBe(200);
+    // "aHR0cHM6Ly9hLmJ" decodes like "aHR0cHM6Ly9hLmI" (base64url("https://a.b")): non-canonical.
+    for (const name of [
+      documentName("not a url"),
+      documentName("ftp://idp.example.com"),
+      "aHR0cHM6Ly9hLmJ.json",
+      "x.txt",
+      overlong,
+    ]) {
+      expect((await app.request(`/oauth/client-metadata/${name}`)).status).toBe(404);
     }
   });
 });
 
 describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
   let ctx: TestContext;
-  let provider: StrictAuthorizationServer;
   let meta: MetadataServer;
 
-  async function install(advertise: { cimd: boolean; registration: boolean }): Promise<void> {
-    provider = createStrictAuthorizationServer({
-      clientId: DOCUMENT_URL,
-      acceptedAuthMethods: ["none"],
+  /** Install the remote integration on a fresh metadata server, its provider bound to `clientId`. */
+  async function install(
+    advertise: Advertise,
+    opts: { method?: "none" | "client_secret_post"; clientSecret?: string; clientId?: string } = {},
+  ): Promise<void> {
+    meta = startMetadataServer(advertise);
+    meta.provider = createStrictAuthorizationServer({
+      clientId: opts.clientId ?? documentUrl(meta.base),
+      ...(opts.clientSecret ? { clientSecret: opts.clientSecret } : {}),
+      ...(opts.clientSecret ? {} : { acceptedAuthMethods: ["none"] as const }),
       expiresIn: 60,
     });
-    meta = startMetadataServer(provider, advertise);
     await seedPackage({
       id: INTEGRATION,
       orgId: ctx.orgId,
@@ -195,9 +239,7 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
         auths: {
           [AUTH_KEY]: {
             type: "oauth2",
-            // Declared so refresh finds the token endpoint (the connection pins no issuer).
-            issuer: meta.base,
-            tokenEndpointAuthMethod: "none",
+            tokenEndpointAuthMethod: opts.method ?? "none",
             defaultScopes: ["read"],
             codeChallengeMethodsSupported: ["S256"],
           },
@@ -221,24 +263,21 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
       auth as AfpsManifestAuth,
       `${process.env.APP_URL}/api/integrations/callback`,
     );
-    return { resolved, manifest, auth };
+    const picked = resolved.provisioningFailure
+      ? null
+      : resolveConnectClient(
+          INTEGRATION,
+          AUTH_KEY,
+          manifest as IntegrationManifest,
+          auth as AfpsManifestAuth,
+          resolved,
+        );
+    return { resolved, picked };
   }
 
-  beforeEach(async () => {
-    setAppUrl(PUBLIC_APP_URL);
-    await truncateAll();
-    ctx = await createTestContext({ orgSlug: "myorg" });
-  });
-
-  afterEach(() => {
-    meta?.stop();
-    provider?.stop();
-  });
-
-  it("connects and refreshes with the document URL as client_id, storing no client", async () => {
-    await install({ cimd: true, registration: true });
-
-    const begin = await app.request(
+  /** POST …/connect/oauth2 → the authorize URL and its `state`. */
+  async function begin(): Promise<URL> {
+    const res = await app.request(
       `/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/connect/oauth2`,
       {
         method: "POST",
@@ -246,19 +285,50 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
         body: JSON.stringify({}),
       },
     );
-    expect(begin.status).toBe(200);
-    const authUrl = new URL(((await begin.json()) as { auth_url: string }).auth_url);
-    expect(authUrl.searchParams.get("client_id")).toBe(DOCUMENT_URL);
-    expect(authUrl.searchParams.get("redirect_uri")).toBe(CALLBACK);
+    expect(res.status).toBe(200);
+    return new URL(((await res.json()) as { auth_url: string }).auth_url);
+  }
 
-    // The browser's consent hop, then the platform's public callback.
-    const consent = await fetch(authUrl, { redirect: "manual" });
-    expect(consent.status).toBe(302);
-    const location = new URL(consent.headers.get("Location")!);
-    const callback = await app.request(
-      `/api/integrations/callback?code=${encodeURIComponent(location.searchParams.get("code")!)}&state=${encodeURIComponent(location.searchParams.get("state")!)}`,
-    );
-    expect(callback.status).toBe(200);
+  /** The browser's consent hop: the URL the authorization server sends it back to. */
+  async function consent(authUrl: URL): Promise<URL> {
+    const res = await fetch(authUrl, { redirect: "manual" });
+    expect(res.status).toBe(302);
+    return new URL(res.headers.get("Location")!);
+  }
+
+  const callbackText = async (url: URL | string) =>
+    (await app.request(typeof url === "string" ? url : url.pathname + url.search)).text();
+
+  beforeEach(async () => {
+    setEnv("APP_URL", PUBLIC_APP_URL);
+    setEnv("INTEGRATION_OAUTH_CIMD", undefined);
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "myorg" });
+  });
+
+  afterEach(() => {
+    meta?.provider?.stop();
+    meta?.stop();
+  });
+
+  it("connects and refreshes with the server's document as client_id, storing no client", async () => {
+    await install({ cimd: true, registration: true });
+    const document = documentUrl(meta.base);
+    const tag = authorizationServerTag(meta.base);
+
+    const authUrl = await begin();
+    expect(authUrl.searchParams.get("client_id")).toBe(document);
+    expect(authUrl.searchParams.get("redirect_uri")).toBe(`${CALLBACK}/${tag}`);
+    // The document the server would fetch lists exactly that redirect URI.
+    const served = await app.request(new URL(document).pathname);
+    expect(await served.json()).toMatchObject({
+      client_id: document,
+      redirect_uris: [`${CALLBACK}/${tag}`],
+    });
+
+    const back = await consent(authUrl);
+    expect(back.pathname).toBe(`/api/integrations/callback/${tag}`);
+    expect(await callbackText(back)).not.toContain("error");
 
     expect(meta.registrations).toBe(0);
     expect(await db.select().from(integrationOauthClients)).toEqual([]);
@@ -266,13 +336,16 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
       .select()
       .from(integrationConnections)
       .where(eq(integrationConnections.integrationId, INTEGRATION));
-    expect(connection!.clientRef).toBe(DOCUMENT_URL);
+    expect(connection!.clientRef).toBe(document);
+    const provider = meta.provider!;
     const exchange = provider.tokenRequests[0]!;
     expect(exchange).toMatchObject({ grantType: "authorization_code", status: 200 });
-    expect(exchange.params.client_id).toBe(DOCUMENT_URL);
+    expect(exchange.params.client_id).toBe(document);
     expect(exchange.params.client_secret).toBeUndefined();
     expect(exchange.authorization).toBeUndefined();
 
+    // The manifest declares no issuer: refresh finds the token endpoint from the issuer the
+    // document's name binds.
     const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const { auth } = await readIntegrationAuth(scope, INTEGRATION, AUTH_KEY);
     const outcome = await refreshConnectionCredential({
@@ -288,65 +361,109 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
     });
     expect(outcome.status).toBe("refreshed");
     expect(provider.tokenRequests[1]).toMatchObject({ grantType: "refresh_token", status: 200 });
-    expect(provider.tokenRequests[1]!.params.client_id).toBe(DOCUMENT_URL);
+    expect(provider.tokenRequests[1]!.params.client_id).toBe(document);
+  });
+
+  it("refuses a response from another server: at the shared callback, without iss, or with its iss", async () => {
+    await install({ cimd: true, registration: true });
+    const refused = "did not come from the authorization server";
+
+    // Server B returning the code to the shared callback (no tag).
+    const first = await consent(await begin());
+    expect(await callbackText(`/api/integrations/callback${first.search}`)).toContain(refused);
+    // B returning it to A's tag, without `iss` (A advertised it) or with its own.
+    const second = await consent(await begin());
+    second.searchParams.delete("iss");
+    expect(await callbackText(second)).toContain(refused);
+    const third = await consent(await begin());
+    third.searchParams.set("iss", "https://honest-b.example.com");
+    expect(await callbackText(third)).toContain(refused);
+
+    expect(meta.provider!.tokenRequests).toHaveLength(0);
+    expect(await db.select().from(integrationConnections)).toEqual([]);
+  });
+
+  it("refuses a document client bound to another server than the state's (issuer_mismatch)", async () => {
+    await install({ cimd: true, registration: true });
+    const back = await consent(await begin());
+    const state = back.searchParams.get("state")!;
+    const record = (await oauthStateStore.get(state))!;
+    await oauthStateStore.set(
+      state,
+      {
+        ...record,
+        integration: { ...record.integration!, clientRef: documentUrl("https://other.example") },
+      },
+      600,
+    );
+    expect(await callbackText(back)).toContain("did not come from the authorization server");
+    expect(meta.provider!.tokenRequests).toHaveLength(0);
+    expect(await db.select().from(integrationConnections)).toEqual([]);
+  });
+
+  it("registers by DCR when the server does not advertise RFC 9207 iss", async () => {
+    await install({ cimd: true, registration: true, iss: false });
+    const { resolved, picked } = await connectClient();
+    expect(resolved.metadataDocumentClient).toBeUndefined();
+    expect(picked!.clientId).toBe("dcr-1");
+    expect(meta.registrations).toBe(1);
   });
 
   it("takes the document over a machine client DCR registered before", async () => {
     await install({ cimd: true, registration: true });
-    setAppUrl("http://localhost:3000");
+    setEnv("INTEGRATION_OAUTH_CIMD", "off");
     const before = await connectClient();
-    const dcrRef = resolveConnectClient(
-      INTEGRATION,
-      AUTH_KEY,
-      before.manifest as IntegrationManifest,
-      before.auth as AfpsManifestAuth,
-      before.resolved,
-    ).clientRef;
     expect(meta.registrations).toBe(1);
 
-    setAppUrl(PUBLIC_APP_URL);
-    const { resolved, manifest, auth } = await connectClient();
-    const picked = resolveConnectClient(
-      INTEGRATION,
-      AUTH_KEY,
-      manifest as IntegrationManifest,
-      auth as AfpsManifestAuth,
-      resolved,
-    );
+    setEnv("INTEGRATION_OAUTH_CIMD", "on");
+    const { picked } = await connectClient();
     expect(picked).toEqual({
-      clientId: DOCUMENT_URL,
-      redirectUri: CALLBACK,
-      clientRef: DOCUMENT_URL,
+      clientId: documentUrl(meta.base),
+      redirectUri: `${CALLBACK}/${authorizationServerTag(meta.base)}`,
+      redirectTag: authorizationServerTag(meta.base),
+      clientRef: documentUrl(meta.base),
     });
     // The registered client stays, for the connections that pinned it.
     expect(
-      await resolveIntegrationClientById(dcrRef, ctx.defaultSpaceId, INTEGRATION, AUTH_KEY, "none"),
+      await resolveIntegrationClientById(
+        before.picked!.clientRef,
+        ctx.defaultSpaceId,
+        INTEGRATION,
+        AUTH_KEY,
+        "none",
+      ),
     ).toMatchObject({ clientId: "dcr-1" });
+    expect(meta.registrations).toBe(1);
+  });
+
+  it("INTEGRATION_OAUTH_CIMD: on (and empty) presents the document, off registers by DCR", async () => {
+    await install({ cimd: true, registration: true });
+    for (const value of ["on", ""]) {
+      setEnv("INTEGRATION_OAUTH_CIMD", value);
+      expect((await connectClient()).picked!.clientRef).toBe(documentUrl(meta.base));
+    }
+    expect(meta.registrations).toBe(0);
+    setEnv("INTEGRATION_OAUTH_CIMD", "off");
+    const { resolved, picked } = await connectClient();
+    expect(resolved.metadataDocumentClient).toBeUndefined();
+    expect(picked!.clientId).toBe("dcr-1");
     expect(meta.registrations).toBe(1);
   });
 
   it("registers by DCR when the server does not advertise CIMD", async () => {
     await install({ cimd: false, registration: true });
-    const { resolved, manifest, auth } = await connectClient();
+    const { resolved, picked } = await connectClient();
     expect(resolved.metadataDocumentClient).toBeUndefined();
-    const picked = resolveConnectClient(
-      INTEGRATION,
-      AUTH_KEY,
-      manifest as IntegrationManifest,
-      auth as AfpsManifestAuth,
-      resolved,
-    );
     const rows = await db.select().from(integrationOauthClients);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ clientId: "dcr-1", autoProvisioned: true });
-    expect(picked.clientRef).toBe(rows[0]!.id);
-    expect(meta.registrations).toBe(1);
+    expect(picked!.clientRef).toBe(rows[0]!.id);
   });
 
   it("registers by DCR on an instance no server can fetch a document from, even if advertised", async () => {
     await install({ cimd: true, registration: true });
     for (const appUrl of ["http://localhost:3000", "https://localhost:3000", "https://10.0.0.5"]) {
-      setAppUrl(appUrl);
+      setEnv("APP_URL", appUrl);
       const { resolved } = await connectClient();
       expect(resolved.metadataDocumentClient).toBeUndefined();
       expect(resolved.orgClients).toHaveLength(1);
@@ -354,79 +471,57 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
     expect(meta.registrations).toBe(1);
   });
 
-  it("says why when the server accepts only documents and the instance cannot serve one", async () => {
+  it("says why when the server accepts only documents and the instance presents none", async () => {
     await install({ cimd: true, registration: false });
-    setAppUrl("http://localhost:3000");
+    setEnv("APP_URL", "http://localhost:3000");
     const { resolved } = await connectClient();
     expect(resolved.provisioningFailure?.message).toContain("public https APP_URL");
+    expect(resolved.provisioningFailure?.message).toContain("INTEGRATION_OAUTH_CIMD");
     expect(await db.select().from(integrationOauthClients)).toEqual([]);
   });
 
   it("keeps an administrator's client on an auth that is not auto-provisioned", async () => {
-    provider = createStrictAuthorizationServer({ clientId: "admin-app", clientSecret: "shh" });
-    meta = startMetadataServer(provider, { cimd: true, registration: true });
-    await seedPackage({
-      id: INTEGRATION,
-      orgId: ctx.orgId,
-      type: "integration",
-      source: "local",
-      draftManifest: remoteIntegrationManifest({
-        name: INTEGRATION,
-        url: `${meta.base}/mcp`,
-        auths: {
-          [AUTH_KEY]: {
-            type: "oauth2",
-            issuer: meta.base,
-            tokenEndpointAuthMethod: "client_secret_post",
-            defaultScopes: ["read"],
-          },
-        },
-      }),
-    });
+    await install(
+      { cimd: true, registration: true },
+      { method: "client_secret_post", clientId: "admin-app", clientSecret: "shh" },
+    );
     const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
     const admin = await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
       clientId: "admin-app",
       clientSecret: "shh",
     });
-    const { resolved, manifest, auth } = await connectClient();
+    const { resolved, picked } = await connectClient();
     expect(resolved.metadataDocumentClient).toBeUndefined();
-    expect(
-      resolveConnectClient(
-        INTEGRATION,
-        AUTH_KEY,
-        manifest as IntegrationManifest,
-        auth as AfpsManifestAuth,
-        resolved,
-      ).clientRef,
-    ).toBe(admin.id);
+    expect(picked!.clientRef).toBe(admin.id);
     expect(meta.registrations).toBe(0);
   });
 });
 
 describe("a metadata-document client_ref resolves without a row", () => {
-  beforeEach(() => setAppUrl(PUBLIC_APP_URL));
+  beforeEach(() => setEnv("APP_URL", PUBLIC_APP_URL));
 
-  it("binds a per-server document to the server its name encodes", async () => {
+  it("binds the document to the server its name encodes", async () => {
     const issuer = "https://gitlab.example.org";
-    const ref = `${PUBLIC_APP_URL}/oauth/client-metadata/${Buffer.from(issuer).toString("base64url")}.json`;
-    expect(
-      await resolveIntegrationClientById(ref, "spc_unused", INTEGRATION, AUTH_KEY, undefined),
-    ).toEqual({ clientId: ref, clientSecret: "", tokenEndpointAuthMethod: "none", issuer });
     expect(
       await resolveIntegrationClientById(
-        DOCUMENT_URL,
+        documentUrl(issuer),
         "spc_unused",
         INTEGRATION,
         AUTH_KEY,
         undefined,
       ),
-    ).toEqual({ clientId: DOCUMENT_URL, clientSecret: "", tokenEndpointAuthMethod: "none" });
+    ).toEqual({
+      clientId: documentUrl(issuer),
+      clientSecret: "",
+      tokenEndpointAuthMethod: "none",
+      issuer,
+    });
   });
 
   it("resolves no document of another origin (an APP_URL the instance moved away from)", async () => {
     expect(
       await resolveIntegrationClientById(
-        "https://old.example.com/oauth/client-metadata.json",
+        documentUrl("https://gitlab.example.org", "https://old.example.com"),
         "spc_unused",
         INTEGRATION,
         AUTH_KEY,

@@ -485,7 +485,7 @@ install dir itself, so use it only when you intend a full wipe.
 ## Production Considerations
 
 - Place a reverse proxy (nginx, Caddy, Traefik) in front of Appstrate for TLS termination
-- Set `APP_URL` to your public HTTPS URL
+- Set `APP_URL` to your public HTTPS URL. Integration authorization servers that support OAuth Client ID Metadata Documents fetch `<APP_URL>/oauth/client-metadata/…` (the instance's OAuth client for them), so it must be reachable from the internet; behind an access proxy, IP allow-list or split DNS, set `INTEGRATION_OAUTH_CIMD=off` to register by dynamic client registration instead. Changing `APP_URL`'s origin later flags the integration connections minted that way `needs_reconnection` at their next token refresh
 - Leave `TRUSTED_ORIGINS` unset unless another browser origin calls the API with cookies or receives the post-login redirect: it adds origins to CORS, Better Auth and that redirect allowlist beyond `APP_URL`'s own, which needs no entry
 - Set `TRUST_PROXY` to the number of proxy hops in front of Appstrate (`1` for the single reverse proxy above) so the per-IP rate limiters and the audit trail read `X-Forwarded-For`. Not optional: behind an HTTPS `APP_URL` the image refuses to boot on `TRUST_PROXY=false`
 

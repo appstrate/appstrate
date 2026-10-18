@@ -74,6 +74,8 @@ Facts worth writing down, because each one is easy to break:
     cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 -R 65532:65532 /data
   ```
 
+- **`APP_URL` must be fetchable from the internet, and its origin must not move casually.** Integration authorization servers that support Client ID Metadata Documents fetch `<APP_URL>/oauth/client-metadata/<base64url(issuer)>.json` — the instance's OAuth `client_id` for them — so an access proxy, IP allow-list or split DNS in front of the instance breaks those connects; `INTEGRATION_OAUTH_CIMD=off` then makes them register by DCR instead. And because that `client_id` is a URL under `APP_URL`, changing `APP_URL`'s origin flags every connection minted with one `needs_reconnection` at its next token refresh: each must be reconnected. A connection whose client is a registered row (DCR, an admin client) refreshes on.
+
 - **`watch_paths` is set to this directory.** Without it, a push anywhere in the monorepo would redeploy production — and a deploy is not free: it re-pulls every image and restarts the whole stack. If you change `docker_compose_location`, change `watch_paths` in the same edit.
 
 ## Rollback

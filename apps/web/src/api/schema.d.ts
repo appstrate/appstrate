@@ -1606,7 +1606,7 @@ export interface paths {
         put?: never;
         /**
          * Propose an integration manifest from a remote MCP server URL
-         * @description Probes a remote MCP server before any integration exists and returns a manifest proposal for the editor to merge: an MCP `initialize` request (Streamable HTTP; a 404/405 falls back to the SSE transport's GET), then its OAuth protected-resource metadata (RFC 9728) and authorization-server metadata (RFC 8414), plus the site's raster icon. An oauth2 auth is proposed as a public client (`token_endpoint_auth_method: none`) when the authorization server accepts a client this instance provisions itself — a Client ID Metadata Document (`client_id_metadata_document_supported`, only when `APP_URL` is public https) or dynamic client registration (RFC 7591) — else as `client_secret_post` with its `issuer` and a `manual_client_required` warning (`authorization_server_blocked` instead when the advertised authorization server is on a refused address, which is never read); without metadata, a server at the URL's origin offering either is guessed as oauth2, anything else as an API key sent as a Bearer token (auth `primary`, credential field `api_key`). A 401/403 counts as an MCP server only when its `WWW-Authenticate` offers the Bearer scheme. The whole discovery is bounded to 25 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Every URL reached is egress-guarded (private and reserved addresses refused, `https` required for a host the operator has not allowlisted). Requires `integrations:write`. Rate limited to 10 requests per minute.
+         * @description Probes a remote MCP server before any integration exists and returns a manifest proposal for the editor to merge: an MCP `initialize` request (Streamable HTTP; a 404/405 falls back to the SSE transport's GET), then its OAuth protected-resource metadata (RFC 9728) and authorization-server metadata (RFC 8414), plus the site's raster icon. An oauth2 auth is proposed as a public client (`token_endpoint_auth_method: none`) when the authorization server accepts a client this instance provisions itself — a Client ID Metadata Document (`client_id_metadata_document_supported` with RFC 9207 `authorization_response_iss_parameter_supported`, only when `APP_URL` is public https and `INTEGRATION_OAUTH_CIMD` is not `off`) or dynamic client registration (RFC 7591) — else as `client_secret_post` with its `issuer` and a `manual_client_required` warning (`authorization_server_blocked` instead when the advertised authorization server is on a refused address, which is never read); without metadata, a server at the URL's origin offering either is guessed as oauth2, anything else as an API key sent as a Bearer token (auth `primary`, credential field `api_key`). A 401/403 counts as an MCP server only when its `WWW-Authenticate` offers the Bearer scheme. The whole discovery is bounded to 25 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Every URL reached is egress-guarded (private and reserved addresses refused, `https` required for a host the operator has not allowlisted). Requires `integrations:write`. Rate limited to 10 requests per minute.
          */
         post: operations["discoverRemoteIntegration"];
         delete?: never;
@@ -5555,26 +5555,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/oauth/client-metadata.json": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * OAuth client metadata document
-         * @description Public. This instance's OAuth Client ID Metadata Document (draft-ietf-oauth-client-id-metadata-document): its URL is the `client_id` an auto-provisioned integration auth (remote MCP, `token_endpoint_auth_method: none`) presents to an authorization server advertising `client_id_metadata_document_supported`, which fetches it — the client registration MCP 2026-07-28 prefers to dynamic registration (RFC 7591), the fallback otherwise. Used only when `APP_URL` is `https` on a public host; a tier-0/localhost instance registers by DCR. Computed from `APP_URL`, nothing stored.
-         */
-        get: operations["getOAuthClientMetadataDocument"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/oauth/client-metadata/{document}": {
         parameters: {
             query?: never;
@@ -5583,10 +5563,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * OAuth client metadata document of a server chosen per connection
-         * @description Public. The Client ID Metadata Document presented to an authorization server chosen per connection (AFPS §7.3): `document` is `<base64url(issuer)>.json`, and the document names that server's own redirect URI (`/api/integrations/callback/<tag>`), so each server is given a redirect URI of its own (RFC 9700 §4.4). Computed from `APP_URL` and the issuer, nothing stored.
+         * OAuth client metadata document
+         * @description Public. This instance's OAuth Client ID Metadata Document (draft-ietf-oauth-client-id-metadata-document) for one authorization server: its URL is the `client_id` an auto-provisioned integration auth (remote MCP, or a server chosen per connection — `token_endpoint_auth_method: none`) presents to a server whose validated metadata advertises `client_id_metadata_document_supported` and RFC 9207 `authorization_response_iss_parameter_supported` (the `iss` check is what refuses a response another server returns on this redirect URI), which fetches it — the client registration MCP 2026-07-28 prefers to dynamic registration (RFC 7591), the fallback otherwise. `document` is `<base64url(issuer)>.json`, and the document names that server's own redirect URI (`/api/integrations/callback/<tag>`), so each server is given a `client_id` and a redirect URI of its own (RFC 9700 §4.4). Presented only when `APP_URL` is `https` on a public host and `INTEGRATION_OAUTH_CIMD` is not `off`; otherwise connect registers by DCR. Computed from `APP_URL` and the issuer, nothing stored.
          */
-        get: operations["getOAuthServerClientMetadataDocument"];
+        get: operations["getOAuthClientMetadataDocument"];
         put?: never;
         post?: never;
         delete?: never;
@@ -13860,7 +13840,7 @@ export interface operations {
                             has_oauth_client: boolean;
                             /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when neither the space nor the org has flagged a default client of its own, so the auth is connectable without a pre-registered client. */
                             has_system_client: boolean;
-                            /** @description True for an oauth2 auth declaring `token_endpoint_auth_method: "none"` on a remote MCP integration (`source.kind: "remote"`) or with an authorization server chosen per connection. Its OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414), then this instance's Client ID Metadata Document as a public client (`GET /oauth/client-metadata.json`) when the server advertises `client_id_metadata_document_supported` and `APP_URL` is public https, else RFC 7591 dynamic registration of a public client — so no pre-registered client is required. */
+                            /** @description True for an oauth2 auth declaring `token_endpoint_auth_method: "none"` on a remote MCP integration (`source.kind: "remote"`) or with an authorization server chosen per connection. Its OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414), then this instance's Client ID Metadata Document of that server as a public client (`GET /oauth/client-metadata/{document}`) when its metadata advertises `client_id_metadata_document_supported` and RFC 9207 `authorization_response_iss_parameter_supported`, `APP_URL` is public https and `INTEGRATION_OAUTH_CIMD` is not `off`, else RFC 7591 dynamic registration of a public client — so no pre-registered client is required. */
                             client_auto_provisioned: boolean;
                         }[];
                         tool_catalog: {
@@ -15448,7 +15428,7 @@ export interface operations {
                             has_oauth_client: boolean;
                             /** @description True when the platform provides a shared system OAuth client for this auth via `SYSTEM_INTEGRATIONS`. Connect falls back to it when neither the space nor the org has flagged a default client of its own, so the auth is connectable without a pre-registered client. */
                             has_system_client: boolean;
-                            /** @description True for an oauth2 auth declaring `token_endpoint_auth_method: "none"` on a remote MCP integration (`source.kind: "remote"`) or with an authorization server chosen per connection. Its OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414), then this instance's Client ID Metadata Document as a public client (`GET /oauth/client-metadata.json`) when the server advertises `client_id_metadata_document_supported` and `APP_URL` is public https, else RFC 7591 dynamic registration of a public client — so no pre-registered client is required. */
+                            /** @description True for an oauth2 auth declaring `token_endpoint_auth_method: "none"` on a remote MCP integration (`source.kind: "remote"`) or with an authorization server chosen per connection. Its OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414), then this instance's Client ID Metadata Document of that server as a public client (`GET /oauth/client-metadata/{document}`) when its metadata advertises `client_id_metadata_document_supported` and RFC 9207 `authorization_response_iss_parameter_supported`, `APP_URL` is public https and `INTEGRATION_OAUTH_CIMD` is not `off`, else RFC 7591 dynamic registration of a public client — so no pre-registered client is required. */
                             client_auto_provisioned: boolean;
                         }[];
                         tool_catalog: {
@@ -28958,71 +28938,8 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description The client metadata document */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    /** @description `public, max-age=300` — an authorization server may cache the document. */
-                    "Cache-Control"?: string;
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "client_id": "https://app.example.com/oauth/client-metadata.json",
-                     *       "client_name": "Appstrate (app.example.com)",
-                     *       "client_uri": "https://app.example.com",
-                     *       "redirect_uris": [
-                     *         "https://app.example.com/api/integrations/callback"
-                     *       ],
-                     *       "grant_types": [
-                     *         "authorization_code",
-                     *         "refresh_token"
-                     *       ],
-                     *       "response_types": [
-                     *         "code"
-                     *       ],
-                     *       "token_endpoint_auth_method": "none"
-                     *     }
-                     */
-                    "application/json": {
-                        /**
-                         * Format: uri
-                         * @description The URL this document is served at, exactly (the draft requires equality).
-                         */
-                        client_id: string;
-                        /** @description `Appstrate (<APP_URL host>)`. */
-                        client_name: string;
-                        /**
-                         * Format: uri
-                         * @description This instance's `APP_URL`.
-                         */
-                        client_uri: string;
-                        /** @description The one redirect URI the connect flow sends with this `client_id`: `<APP_URL>/api/integrations/callback`, or its per-server twin `<APP_URL>/api/integrations/callback/<tag>` for a document of a server chosen per connection. */
-                        redirect_uris: string[];
-                        grant_types: ("authorization_code" | "refresh_token")[];
-                        response_types: "code"[];
-                        /**
-                         * @description A public client (PKCE): no secret, no key.
-                         * @enum {string}
-                         */
-                        token_endpoint_auth_method: "none";
-                    };
-                };
-            };
-        };
-    };
-    getOAuthServerClientMetadataDocument: {
-        parameters: {
-            query?: never;
-            header?: never;
             path: {
-                /** @description `<base64url(issuer)>.json`, the issuer in its canonical encoding. */
+                /** @description `<base64url(issuer)>.json`, the issuer in its canonical encoding: an `https` URL, or `http` for a host listed in `EGRESS_ALLOW_INTERNAL_HOSTS`. */
                 document: string;
             };
             cookie?: never;
@@ -29040,11 +28957,11 @@ export interface operations {
                 content: {
                     /**
                      * @example {
-                     *       "client_id": "https://app.example.com/oauth/client-metadata.json",
+                     *       "client_id": "https://app.example.com/oauth/client-metadata/aHR0cHM6Ly9tY3Aubm90aW9uLmNvbQ.json",
                      *       "client_name": "Appstrate (app.example.com)",
                      *       "client_uri": "https://app.example.com",
                      *       "redirect_uris": [
-                     *         "https://app.example.com/api/integrations/callback"
+                     *         "https://app.example.com/api/integrations/callback/ZUGRhbwa83_JyNgKjMOax-"
                      *       ],
                      *       "grant_types": [
                      *         "authorization_code",
@@ -29069,7 +28986,7 @@ export interface operations {
                          * @description This instance's `APP_URL`.
                          */
                         client_uri: string;
-                        /** @description The one redirect URI the connect flow sends with this `client_id`: `<APP_URL>/api/integrations/callback`, or its per-server twin `<APP_URL>/api/integrations/callback/<tag>` for a document of a server chosen per connection. */
+                        /** @description The one redirect URI the connect flow sends with this `client_id`: the server's own `<APP_URL>/api/integrations/callback/<tag>` — never the shared callback, so a response from another server cannot land on it (mix-up, RFC 9700 §4.4). */
                         redirect_uris: string[];
                         grant_types: ("authorization_code" | "refresh_token")[];
                         response_types: "code"[];
@@ -29081,7 +28998,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description `document` encodes no issuer URL (or not in its canonical encoding) */
+            /** @description `document` encodes no admissible issuer (not an `https` URL — or `http` on an allowlisted host —, not in its canonical encoding, or longer than 2048 characters) */
             404: {
                 headers: {
                     [name: string]: unknown;

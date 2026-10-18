@@ -34,10 +34,7 @@ import {
 import { LoginError, renderTokenGrant, type LoginConfig } from "@appstrate/connect/connect";
 import { ApiError, invalidRequest } from "../../lib/errors.ts";
 import { buildIntegrationOAuthRefreshContext } from "../integration-token-refresh.ts";
-import {
-  authorizationServerTag,
-  integrationCallbackUrl,
-} from "../../lib/integration-callback-url.ts";
+import { integrationCallbackUrl } from "../../lib/integration-callback-url.ts";
 import {
   getRemoteSource,
   hasPerConnectionAuthServer,
@@ -391,6 +388,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     const {
       clientId,
       redirectUri: clientRedirectUri,
+      redirectTag,
       clientRef,
     } = resolveConnectClient(
       ctx.integrationId,
@@ -439,7 +437,9 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       forceAccountSelect: opts.forceAccountSelect ?? false,
       ...(ctx.target ? { connectionId: ctx.target.id } : {}),
       ...(ctx.delegated ? { delegated: true } : {}),
-      ...(perConnection && issuer ? { redirectTag: authorizationServerTag(issuer) } : {}),
+      // A per-server redirect URI (a server chosen per connection, or any metadata-document
+      // client): the callback refuses a response that arrives through another path (mix-up).
+      ...(redirectTag ? { redirectTag } : {}),
       ...(variables ? { variables } : {}),
     });
     return { redirectUrl: result.authUrl, state: result.state };

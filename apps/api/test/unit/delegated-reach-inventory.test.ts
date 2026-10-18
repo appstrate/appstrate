@@ -64,10 +64,6 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     category: "public",
     reason: "OAuth client metadata document an authorization server fetches, no credential",
   },
-  getOAuthServerClientMetadataDocument: {
-    category: "public",
-    reason: "per-server OAuth client metadata document, computed from the issuer in its name",
-  },
   getOpenApiSpec: { category: "public", reason: "static instance spec, skipAuth" },
   getSwaggerUI: { category: "public", reason: "static Swagger UI shell, skipAuth" },
   integrationsOAuthCallback: {
