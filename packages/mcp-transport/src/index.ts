@@ -333,12 +333,12 @@ export type {
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 
-// MCP client factories. The agent connects to the sidecar's `/mcp`
-// over Streamable HTTP; the CLI uses the in-process pair already
-// exported above.
+// MCP client factories. Every HTTP client speaks both protocol eras
+// (2026-07-28 stateless, and the 2025 `initialize` handshake); the
+// in-process pair above stays on the v1 SDK.
 export {
   createMcpHttpClient,
-  DEFAULT_CLIENT_INFO,
+  httpStatusOf,
   wrapClient,
   type AppstrateMcpClient,
 } from "./client.ts";

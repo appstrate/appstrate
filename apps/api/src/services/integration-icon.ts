@@ -8,6 +8,7 @@
  * (MCP icon rules: https, no change of scheme, a server icon on the server's origin).
  */
 
+import type { Implementation } from "@modelcontextprotocol/sdk/types.js";
 import { fileTypeFromBuffer } from "file-type";
 import { parse } from "tldts";
 import { readBodyPrefix, readBodyUnder } from "../lib/capped-body.ts";
@@ -18,6 +19,8 @@ const ICON_MAX_BYTES = 256 * 1024;
 const HTML_HEAD_MAX_BYTES = 256 * 1024;
 const FETCH_TIMEOUT_MS = 5_000;
 const MAX_LINKED_ICONS = 4;
+/** `serverInfo.icons` entries tried before the site's own icon. */
+const MAX_SERVER_ICONS = 4;
 const MAX_REDIRECTS = 5;
 /** Sniffed from the bytes, never the declared type. SVG is a document (scripts), never taken. */
 const RASTER_TYPES = new Set([
@@ -49,6 +52,19 @@ export async function fetchSiteIcon(url: string, fetchImpl: typeof fetch): Promi
     }
   }
   return null;
+}
+
+/** A raster of the server's own `icons` (never SVG: `rasterIcon` sniffs the bytes), else the site's. */
+export async function fetchServerIcon(
+  url: string,
+  info: Implementation | undefined,
+  fetchImpl: typeof fetch,
+): Promise<string | null> {
+  for (const icon of (info?.icons ?? []).slice(0, MAX_SERVER_ICONS)) {
+    const raster = await rasterIcon(icon.src, url, fetchImpl);
+    if (raster) return raster;
+  }
+  return fetchSiteIcon(url, fetchImpl);
 }
 
 /** `<link rel="icon|shortcut icon|apple-touch-icon">` hrefs of a page, apple-touch-icon first. */

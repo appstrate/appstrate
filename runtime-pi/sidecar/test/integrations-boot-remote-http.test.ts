@@ -4,7 +4,13 @@ import { describe, it, expect } from "bun:test";
 import { connectRemoteHttpIntegration, type ConnectRemoteHttpDeps } from "../integrations-boot.ts";
 import { isOperatorTrustedEgressHost } from "../ssrf.ts";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
-import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
+import type { AppstrateMcpClient, AppstrateToolDefinition } from "@appstrate/mcp-transport";
+import {
+  handlerFetch,
+  legacyMcpHandler,
+  modernMcpHandler,
+  type McpHandler,
+} from "@appstrate/mcp-transport/testing";
 import type { IntegrationCredentialsSource } from "../integration-credentials-source.ts";
 import type { IntegrationCredentialsWire } from "@appstrate/connect";
 
@@ -574,4 +580,72 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
       /unsupported source\.remote\.transport.*allowed: "streamable-http" \| "sse"/,
     );
   });
+});
+
+/**
+ * The real Streamable HTTP client behind the credential closure, against a server of each
+ * protocol era (#2082): the sidecar speaks to a 2026-07-28 server statelessly, falls back to
+ * `initialize` for a legacy one, and the closure (credential, egress guard) sees every request.
+ */
+describe("connectRemoteHttpIntegration — protocol eras", () => {
+  const echo: AppstrateToolDefinition = {
+    descriptor: { name: "echo", inputSchema: { type: "object" } },
+    handler: async (args) => ({ content: [{ type: "text", text: JSON.stringify(args) }] }),
+  };
+  const cases: Array<[string, McpHandler, "modern" | "legacy"]> = [
+    ["legacy", legacyMcpHandler({ tools: [echo] }), "legacy"],
+    ["modern", modernMcpHandler({ tools: [echo] }), "modern"],
+    [
+      "dual",
+      modernMcpHandler({ tools: [echo], legacy: legacyMcpHandler({ tools: [echo] }) }),
+      "modern",
+    ],
+    ["retry", modernMcpHandler({ tools: [echo], refuseFirst: 1 }), "modern"],
+  ];
+
+  it.each(cases)(
+    "connects to a %s server through the credential closure",
+    async (label, handler, era) => {
+      const url = `https://mcp-${label}.example.com/mcp`;
+      const initial = wire(
+        [{ authKey: "oauth", authType: "oauth2" }],
+        { oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: "T" } },
+        [`https://mcp-${label}.example.com/**`],
+      );
+      const source = {
+        snapshot: () => initial,
+        refreshOnUnauthorized: async () => false,
+        reportUpstreamSuccess: () => {},
+      } as unknown as IntegrationCredentialsSource;
+      const seen: { method: string | undefined; auth: string | null }[] = [];
+      const serve = handlerFetch(handler);
+      await withGlobalFetch(
+        (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+          const request = new Request(String(input), init);
+          const text = request.method === "POST" ? await request.clone().text() : "";
+          seen.push({
+            method: text ? (JSON.parse(text) as { method?: string }).method : request.method,
+            auth: request.headers.get("authorization"),
+          });
+          return serve(request);
+        }) as typeof fetch,
+        async () => {
+          const { client } = await connectRemoteHttpIntegration(spec(url), source, {
+            resolveHost: async () => [PUBLIC_IP],
+          });
+          try {
+            expect(client.getProtocol()?.era).toBe(era);
+            const { tools } = await client.listTools();
+            expect(tools.map((t) => t.name)).toEqual(["echo"]);
+            const res = await client.callTool({ name: "echo", arguments: { q: 1 } });
+            expect(res.content).toEqual([{ type: "text", text: '{"q":1}' }]);
+          } finally {
+            await client.close();
+          }
+        },
+      );
+      expect(seen.every((s) => s.auth === "Bearer T")).toBe(true);
+      expect(seen.some((s) => s.method === "initialize")).toBe(era === "legacy");
+    },
+  );
 });

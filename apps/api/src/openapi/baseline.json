@@ -5918,13 +5918,20 @@
                     "manifest": {
                       "type": "object",
                       "required": ["display_name", "name", "source", "auths"],
-                      "description": "A partial AFPS integration manifest: `display_name`, `name` (`@<org slug>/<slug>`), `source` (`kind: remote`), `auths` (one auth, `oauth` or `api_key`), and when published `documentation`, `privacy_policies` and `icon` (only an icon image the manifest accepts as is).",
+                      "description": "A partial AFPS integration manifest: `display_name`, `name` (`@<org slug>/<slug>`), `source` (`kind: remote`), `auths` (one auth, `oauth` or `api_key`), and when published `description` and `homepage` (from the identity the server gives without a credential, in `server/discover` or `initialize`), `documentation`, `privacy_policies` and `icon` (only an icon image the manifest accepts as is: the server's own icon, else its site's).",
                       "properties": {
                         "display_name": {
                           "type": "string"
                         },
                         "name": {
                           "type": "string"
+                        },
+                        "description": {
+                          "type": "string"
+                        },
+                        "homepage": {
+                          "type": "string",
+                          "format": "uri"
                         },
                         "documentation": {
                           "type": "string",
@@ -5974,7 +5981,7 @@
                     },
                     "icon_source": {
                       "type": ["string", "null"],
-                      "description": "The site's raster icon (PNG, JPEG, WebP, GIF or ICO, at most 256 KiB) as a base64 data URI, for the editor to re-encode; null when none was found. Never an SVG, never a URL."
+                      "description": "The server's own raster icon (its `icons`, read without a credential), else its site's (PNG, JPEG, WebP, GIF or ICO, at most 256 KiB) as a base64 data URI, for the editor to re-encode; null when none was found. Never an SVG, never a URL."
                     },
                     "provenance": {
                       "type": "object",
@@ -6012,7 +6019,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "422": {
-            "description": "`not_an_mcp_server` — the URL answered, but not as a Streamable HTTP or SSE MCP server (a 401/403 without a Bearer challenge included); `remote_mcp_auth_not_supported` — it serves MCP without authentication (it answered the probe, or refused it with a JSON-RPC error rather than a Bearer challenge), which integrations do not support yet; `remote_mcp_modern_only` — it refused the probe as an `UnsupportedProtocolVersionError` listing only MCP versions newer than the 2025-11-25 Appstrate speaks.",
+            "description": "`not_an_mcp_server` — the URL answered, but not as a Streamable HTTP or SSE MCP server of either protocol era (a 401/403 without a Bearer challenge included); `remote_mcp_auth_not_supported` — it serves MCP without authentication (it answered the connect and its first `tools/list` without a Bearer challenge), which integrations do not support yet.",
             "headers": {
               "Request-Id": {
                 "$ref": "#/components/headers/RequestId"
@@ -18380,6 +18387,16 @@
           },
           {
             "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "description": "The package type the import is made for. When set, an archive whose package (for a bundle, its root) is another type is refused with 400 `unexpected_package_type` before anything is written.",
+            "schema": {
+              "type": "string",
+              "enum": ["agent", "skill", "mcp-server", "integration"]
+            }
           }
         ],
         "requestBody": {
@@ -18420,6 +18437,7 @@
                     "root_active",
                     "root_package_id",
                     "root_version",
+                    "root_type",
                     "warnings"
                   ],
                   "properties": {
@@ -18459,6 +18477,11 @@
                     "root_version": {
                       "type": "string"
                     },
+                    "root_type": {
+                      "type": "string",
+                      "enum": ["agent", "skill", "mcp-server", "integration"],
+                      "description": "The root package's type."
+                    },
                     "warnings": {
                       "type": "array",
                       "items": {
@@ -18472,7 +18495,7 @@
             }
           },
           "400": {
-            "description": "Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, or `post_install_failed`. A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization.",
+            "description": "Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `unexpected_package_type` (the root is not the `type` asked for), or `post_install_failed`. A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -18515,6 +18538,16 @@
           },
           {
             "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "description": "The package type the import is made for. When set, an archive whose package (for a bundle, its root) is another type is refused with 400 `unexpected_package_type` before anything is written.",
+            "schema": {
+              "type": "string",
+              "enum": ["agent", "skill", "mcp-server", "integration"]
+            }
           },
           {
             "name": "force",
@@ -18591,7 +18624,7 @@
             }
           },
           "400": {
-            "description": "Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `type_mismatch` (existing package has a different type), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization.",
+            "description": "Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `type_mismatch` (existing package has a different type), `unexpected_package_type` (the archive is not the `type` asked for), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -18655,6 +18688,16 @@
           },
           {
             "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "description": "The package type the import is made for. When set, an archive whose package (for a bundle, its root) is another type is refused with 400 `unexpected_package_type` before anything is written.",
+            "schema": {
+              "type": "string",
+              "enum": ["agent", "skill", "mcp-server", "integration"]
+            }
           }
         ],
         "requestBody": {
@@ -18717,7 +18760,7 @@
             }
           },
           "400": {
-            "description": "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`type_mismatch`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization.",
+            "description": "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`type_mismatch`, `unexpected_package_type`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization.",
             "content": {
               "application/problem+json": {
                 "schema": {

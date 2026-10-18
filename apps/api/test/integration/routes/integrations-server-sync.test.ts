@@ -34,6 +34,7 @@ import {
   localIntegrationManifest,
   remoteIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
+import { forgetProtocolEras } from "@appstrate/mcp-transport/testing";
 import { startFakeMcpServer, type FakeMcpServer } from "../../helpers/fake-mcp-server.ts";
 import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
 import { serverSyncBody } from "../../../../web/src/lib/integration-discovery-merge.ts";
@@ -116,6 +117,8 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     ctx = await createTestContext({ orgSlug: "acme" });
     server.authorizations.length = 0;
     server.methods.length = 0;
+    // Each sync probes the era: the counts below include it.
+    forgetProtocolEras();
   });
 
   it("lists every tool through the proxy, with the connection's bearer, and maps serverInfo", async () => {
@@ -137,9 +140,9 @@ describe("POST /api/integrations/{packageId}/discover", () => {
       instructions: "Call search before fetch.",
       warnings: [],
     });
-    // initialize + initialized + three tools/list pages, each carrying the injected credential;
-    // the standalone GET stream is never opened.
-    expect(server.methods).toEqual(["POST", "POST", "POST", "POST", "POST"]);
+    // The era probe (refused: a legacy server), initialize + initialized + three tools/list
+    // pages, each carrying the injected credential; the standalone GET stream is never opened.
+    expect(server.methods).toEqual(["POST", "POST", "POST", "POST", "POST", "POST"]);
     expect(server.authorizations.every((a) => a === `Bearer ${TOKEN}`)).toBe(true);
   });
 
@@ -180,8 +183,15 @@ describe("POST /api/integrations/{packageId}/discover", () => {
       .select()
       .from(connectionCalls)
       .where(eq(connectionCalls.connectionId, connectionId));
-    // initialize, the `initialized` notification (202), three `tools/list` pages.
-    expect(rows.map((row) => row.outcome).sort()).toEqual(["200", "200", "200", "200", "202"]);
+    // The era probe (400), initialize, the `initialized` notification (202), three pages.
+    expect(rows.map((row) => row.outcome).sort()).toEqual([
+      "200",
+      "200",
+      "200",
+      "200",
+      "202",
+      "400",
+    ]);
     for (const row of rows) {
       expect(row).toMatchObject({
         connectionId,
@@ -396,8 +406,8 @@ describe("POST /api/integrations/{packageId}/discover", () => {
       await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
       const res = await sync(ctx, {});
       expect(res.status).toBe(200);
-      // Past `initialize`, every MCP exchange (the icon lookup's GETs carry no body).
-      const echoed = hostile.requests.slice(1).filter(({ body }) => body !== "");
+      // Past the era probe and `initialize`, every MCP exchange (the icon lookup's GETs carry no body).
+      const echoed = hostile.requests.slice(2).filter(({ body }) => body !== "");
       expect(echoed).toHaveLength(4);
       for (const { headers } of echoed) {
         expect(headers.get("mcp-session-id")).toBe("{{token}}");
@@ -408,6 +418,51 @@ describe("POST /api/integrations/{packageId}/discover", () => {
       hostile.stop();
     }
   });
+
+  for (const era of ["modern", "dual"] as const) {
+    it(`synchronizes a ${era === "modern" ? "modern-only" : "dual-era"} server statelessly`, async () => {
+      const upstream = startFakeMcpServer({
+        era,
+        tools: TOOLS,
+        pageSize: 2,
+        bearer: TOKEN,
+        serverInfo: { name: "acme-docs-mcp", title: "Acme Docs", version: "3.0.0" },
+        instructions: "Call search before fetch.",
+      });
+      try {
+        await seedProxyIntegration(
+          ctx,
+          remote({ url: upstream.url, authorizedUris: [`${upstream.origin}/**`] }),
+        );
+        await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+        const res = await sync(ctx, {});
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          manifest: Record<string, unknown>;
+          instructions: string | null;
+        };
+        expect(body.manifest.default_tools).toEqual(TOOLS);
+        expect(body.manifest.display_name).toBe("Acme Docs");
+        expect(body.instructions).toBe("Call search before fetch.");
+        const posted = upstream.requests
+          .filter(({ body: text }) => text !== "")
+          .map(({ headers, body: text }) => ({
+            method: (JSON.parse(text) as { method: string }).method,
+            version: headers.get("mcp-protocol-version"),
+          }));
+        // `server/discover`, then three pages: no `initialize`, no session, the credential on each.
+        expect(posted).toEqual([
+          { method: "server/discover", version: "2026-07-28" },
+          { method: "tools/list", version: "2026-07-28" },
+          { method: "tools/list", version: "2026-07-28" },
+          { method: "tools/list", version: "2026-07-28" },
+        ]);
+        expect(upstream.authorizations.every((a) => a === `Bearer ${TOKEN}`)).toBe(true);
+      } finally {
+        upstream.stop();
+      }
+    });
+  }
 
   it("refuses an unknown body field", async () => {
     await seedProxyIntegration(ctx, remote());

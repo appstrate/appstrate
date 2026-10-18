@@ -242,7 +242,6 @@
   "apiError.integration_invalid_manifest": "The manifest of an integration the agent depends on is invalid: {{message}}",
   "apiError.not_an_mcp_server": "This address does not answer as an MCP server (Streamable HTTP or SSE).",
   "apiError.remote_mcp_auth_not_supported": "This MCP server requires no authentication: integrations without authentication are not supported yet.",
-  "apiError.remote_mcp_modern_only": "This server only speaks MCP versions newer than the one Appstrate supports (2025-11-25).",
   "apiError.integration_not_published": "This integration has no published version: publish one before synchronizing it.",
   "apiError.integration_not_connected": "Connect this integration first: no connection usable in this space can reach its server.",
   "apiError.integration_not_remote": "This integration is not served by a remote MCP server.",

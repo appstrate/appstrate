@@ -3,30 +3,38 @@
 /**
  * MCP client factories for first-party callers.
  *
- * Two transports, one client surface. The wiring code in `runtime-pi`
- * branches on transport construction only — `listTools`, `callTool`,
- * `readResource`, and `close` are identical across both modes:
+ * Two SDK lines, one client surface:
  *
- * - `createMcpHttpClient(...)` — Streamable HTTP against the sidecar's
- *   `/mcp` endpoint. Used inside the agent container.
- * - `createInProcessPair(...)` (already exported from `./index.ts`) —
- *   `InMemoryTransport` for CLI mode where the sidecar is in-process.
+ * - `createMcpHttpClient(...)` — Streamable HTTP, on the v2 client SDK
+ *   (`@modelcontextprotocol/client`), which speaks BOTH protocol eras: it probes
+ *   with `server/discover` (MCP 2026-07-28, stateless, version and identity in
+ *   every request's `_meta`) and falls back to the `initialize` handshake of the
+ *   2025 revisions when the server gives no modern evidence — the spec's
+ *   backward-compatibility rules, applied by the SDK. Every consumer reaching an
+ *   upstream MCP server over HTTP goes through it: the sidecar's remote
+ *   integrations, the chat, the platform's server sync and discovery probe, and
+ *   the agent's own hop to the sidecar.
+ * - `wrapClient(...)` — the same surface over a connected v1 SDK `Client`
+ *   (in-process pairs, stdio subprocesses, the deprecated HTTP+SSE transport):
+ *   transports whose servers are 2025-era by construction.
  *
- * Both return an `AppstrateMcpClient` carrying a connected SDK `Client`.
- * Cancellation is honored via `AbortSignal` on every call site — the SDK
- * propagates it as `notifications/cancelled` to the server.
+ * Cancellation is honored via `AbortSignal` on every call site.
  *
  * What this module deliberately does *not* do:
  *
- * - Implement reconnection logic. Stateless transport per request on the
- *   server side means the connection is cheap; on transient errors the
- *   caller decides whether to retry.
- * - Implement OAuth. Sidecar auth is per-run Bearer (constant-time
- *   compared on the server, opaque to the client).
+ * - Implement reconnection logic. On transient errors the caller decides
+ *   whether to retry.
+ * - Implement auth. Credentials ride in the injected `fetch` (the credential
+ *   proxy) or in static headers; the SDK is never given an auth provider.
  */
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { Client as LegacyClient } from "@modelcontextprotocol/sdk/client/index.js";
+import {
+  Client as DualEraClient,
+  SdkError,
+  SdkHttpError,
+  StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 import {
   ErrorCode,
   McpError,
@@ -47,15 +55,37 @@ import {
  */
 const MCP_PROGRESS_CALL_MAX_TOTAL_MS = 60 * 60_000;
 
-/** How Appstrate names itself to an MCP server: in every client, and in a raw `initialize`. */
-export const DEFAULT_CLIENT_INFO: Implementation = {
+/** How Appstrate names itself to an MCP server when its caller names nothing else. */
+const DEFAULT_CLIENT_INFO: Implementation = {
   name: "appstrate-mcp-client",
   version: "0.0.0",
 };
 
+/**
+ * How long a server found legacy is assumed to stay so. The spec asks a client to cache the era
+ * per origin (`basic/versioning`, backward compatibility); a legacy verdict cannot expire on its
+ * own (an upgraded dual-era server still answers `initialize`), so it is re-probed past this.
+ */
+const LEGACY_VERDICT_TTL_MS = 15 * 60_000;
+
+/** Origins found legacy, and until when: their next connect skips the `server/discover` probe. */
+const legacyOrigins = new Map<string, number>();
+
+/** Forget every era verdict: each origin's next connect probes. For tests (`./testing`). */
+export function forgetProtocolEras(): void {
+  legacyOrigins.clear();
+}
+
+/** The protocol a connection speaks: its era, and the revision negotiated when the SDK says. */
+export interface McpProtocol {
+  /** `modern`: 2026-07-28 and later, stateless. `legacy`: the 2025 `initialize` handshake. */
+  era: "modern" | "legacy";
+  version: string | undefined;
+}
+
 /** Options shared by every client factory in this module. */
 export interface AppstrateMcpClientOptions {
-  /** Identification advertised to the server during `initialize`. */
+  /** How the client names itself: in each request's `_meta` (modern) or in `initialize` (legacy). */
   clientInfo?: Implementation;
   /**
    * Per-call timeout in milliseconds. Defaults to 30s — matches the
@@ -83,10 +113,10 @@ export interface McpHttpClientOptions extends AppstrateMcpClientOptions {
   retry?: McpConnectRetryOptions;
   /**
    * Cancellation signal for the entire connect. Honoured on BOTH paths: it
-   * short-circuits the retry loop *and* unwinds the in-flight `initialize`
-   * handshake of every individual attempt (see {@link connectWithSignal}) —
-   * including the single-shot path, which has no loop to short-circuit and
-   * where this used to be read nowhere at all.
+   * short-circuits the retry loop *and* unwinds the in-flight era probe or
+   * `initialize` handshake of every individual attempt (see
+   * {@link connectWithSignal}) — including the single-shot path, which has no
+   * loop to short-circuit.
    *
    * Independent from the retry deadline budget: `signal.abort()` is the
    * caller's own cancellation, the deadline triggers a separate AbortError.
@@ -142,35 +172,41 @@ export interface McpRetryAttemptInfo {
 }
 
 /**
- * The narrowed surface `runtime-pi` consumes. Wraps the SDK `Client` to:
+ * The narrowed surface every consumer reads, whichever SDK line and protocol era is underneath:
  *
- *   1. Force every call to thread an `AbortSignal` (reuses the Pi
- *      `execute(_, _, signal)` contract — agents must be cancellable).
- *   2. Centralise the `Implementation` info advertised on `initialize`.
- *   3. Provide a single `close()` that tears down both client + transport.
+ *   1. Every call threads an `AbortSignal` (reuses the Pi `execute(_, _, signal)` contract —
+ *      agents must be cancellable).
+ *   2. The identity the client advertises is centralised here.
+ *   3. A single `close()` tears down both client and transport.
  */
 export interface AppstrateMcpClient {
-  /** The connected SDK `Client`. Exposed for advanced use cases. */
-  readonly client: Client;
   /**
-   * Server capabilities snapshotted during the MCP `initialize`
-   * handshake. Returns `undefined` if the client hasn't completed
-   * `connect()` yet — callers must check before branching on
-   * `tools` / `resources` / `prompts` / `logging` support.
-   *
-   * The agent uses this to skip `resources/list`
-   * against servers that didn't advertise the capability instead of
-   * paying for a round-trip + JSON-RPC error.
+   * Server capabilities: from `server/discover` (modern) or `initialize` (legacy). `undefined`
+   * before the connect completes — callers check before branching on `tools` / `resources` /
+   * `prompts` / `logging` support (the agent skips `resources/list` against a server that did
+   * not advertise it).
    */
   getServerCapabilities(): ServerCapabilities | undefined;
   /**
-   * Server `Implementation` (`{ name, version }`) snapshotted during
-   * `initialize`. Used by McpHost log lines so operators can audit
-   * which upstream version is actually connected.
+   * The server's self-reported `Implementation` (`name`, `version`, and `title`, `icons`,
+   * `websiteUrl` when it gives them). Required in a legacy `initialize` result, only a SHOULD
+   * in a modern `server/discover`: an anonymous modern server leaves it `undefined`.
    */
   getServerVersion(): Implementation | undefined;
-  /** List server-advertised tools. */
+  /** The server's `instructions`, when it gives any. */
+  getInstructions(): string | undefined;
+  /** The era and revision the connection speaks; `undefined` before the connect completes. */
+  getProtocol(): McpProtocol | undefined;
+  /**
+   * The server's tools. Over HTTP, every page (bounded by the SDK's page cap); over a v1
+   * transport ({@link wrapClient}), the first page.
+   */
   listTools(options?: { signal?: AbortSignal }): Promise<{ tools: Tool[] }>;
+  /** One `tools/list` page: the first without `cursor`, else the page `cursor` names. */
+  listToolsPage(options?: {
+    cursor?: string;
+    signal?: AbortSignal;
+  }): Promise<{ tools: Tool[]; nextCursor?: string }>;
   /** Invoke a tool by name. */
   callTool(
     args: { name: string; arguments?: Record<string, unknown> },
@@ -191,15 +227,27 @@ export interface AppstrateMcpClient {
 }
 
 /**
- * Connect a fresh MCP client to an HTTP server (Streamable HTTP).
+ * Connect a fresh MCP client to an HTTP server (Streamable HTTP), in whichever protocol era the
+ * server speaks.
+ *
+ * Era negotiation is the SDK's `'auto'` mode: a `server/discover` probe carrying the 2026-07-28
+ * `_meta` and `MCP-Protocol-Version` header; a result or a recognised modern error
+ * (`UnsupportedProtocolVersion`, -32022, listing a version both sides speak — the client then
+ * retries with it) keeps the connection modern and stateless; anything else falls back to the
+ * legacy `initialize` handshake. A server found legacy is remembered per origin for
+ * {@link LEGACY_VERDICT_TTL_MS}, so its next connects skip the probe; a connect that then fails
+ * on protocol grounds re-probes once.
+ *
+ * Every request goes through `options.fetch` when given — the credential proxy is injected
+ * there — and redirects are left to it (the SDK's own same-origin redirect policy is turned off:
+ * the injected fetch owns that discipline, egress guard included).
  *
  * The transport uses the `Authorization: Bearer <token>` header when a
  * `bearerToken` is supplied. The server is expected to validate it with
  * a constant-time compare and respond `401` on miss — 401 is treated as
  * a fatal config error and bypasses retry even when retry is enabled.
  *
- * The returned client is **already connected** (we await
- * `client.connect()`). On error, the partially-constructed transport is
+ * The returned client is **already connected**. On error, the partially-constructed transport is
  * cleaned up before the error propagates.
  *
  * When `options.retry` is set, connection-level failures (ECONNREFUSED,
@@ -220,58 +268,122 @@ export async function createMcpHttpClient(
     headers.Authorization = `Bearer ${options.bearerToken}`;
   }
 
-  // Single-shot path — preserves the pre-retry behaviour for callers
-  // that explicitly opt out (and keeps the contract narrow for callers
-  // that have their own retry harness around the factory).
-  if (!options.retry) {
-    const transport = new StreamableHTTPClientTransport(targetUrl, {
-      requestInit: { headers },
-      ...(options.fetch ? { fetch: options.fetch as never } : {}),
-    });
-    const client = new Client(options.clientInfo ?? DEFAULT_CLIENT_INFO);
+  // Single-shot path — callers with their own retry harness around the factory, or none.
+  if (!options.retry) return connectOnce(targetUrl, headers, options);
+  return await connectWithRetry(targetUrl, headers, options, options.retry);
+}
+
+/**
+ * One connect, with the per-origin era verdict: a known-legacy origin is connected without the
+ * probe; if that fails on protocol grounds (the server moved to the modern era) the verdict is
+ * dropped and the connect probes again, once.
+ */
+async function connectOnce(
+  targetUrl: URL,
+  headers: Record<string, string>,
+  options: McpHttpClientOptions,
+): Promise<AppstrateMcpClient> {
+  const origin = targetUrl.origin;
+  const knownLegacy = (legacyOrigins.get(origin) ?? 0) > Date.now();
+  try {
+    return await connectAttempt(targetUrl, headers, options, knownLegacy);
+  } catch (err) {
+    if (!knownLegacy || !isProtocolRefusal(err) || options.signal?.aborted) throw err;
+    legacyOrigins.delete(origin);
+    return await connectAttempt(targetUrl, headers, options, false);
+  }
+}
+
+async function connectAttempt(
+  targetUrl: URL,
+  headers: Record<string, string>,
+  options: McpHttpClientOptions,
+  knownLegacy: boolean,
+): Promise<AppstrateMcpClient> {
+  // The SDK wraps a fault of the era probe's request in an `SdkError` of its own; the fault the
+  // injected fetch threw (a credential proxy's refusal, a socket error) is what the caller asked
+  // for, so it is handed back as itself.
+  const baseFetch = options.fetch ?? fetch;
+  const fetchFaults = new WeakSet<object>();
+  const observedFetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     try {
-      await connectWithSignal(client, transport, options.signal);
+      return await baseFetch(input, init);
     } catch (err) {
-      await transport.close().catch(() => {});
+      if (typeof err === "object" && err !== null) fetchFaults.add(err);
       throw err;
     }
-    return wrapClient(client, transport, options.defaultTimeoutMs);
+  }) as typeof fetch;
+  const transport = new StreamableHTTPClientTransport(targetUrl, {
+    requestInit: { headers },
+    redirectPolicy: "follow",
+    fetch: observedFetch,
+  });
+  const client = new DualEraClient(options.clientInfo ?? DEFAULT_CLIENT_INFO, {
+    versionNegotiation: { mode: "auto" },
+  });
+  try {
+    await connectWithSignal(client, transport, options.signal, knownLegacy);
+  } catch (err) {
+    await transport.close().catch(() => {});
+    const cause = err instanceof SdkError ? err.cause : undefined;
+    throw typeof cause === "object" && cause !== null && fetchFaults.has(cause) ? cause : err;
   }
+  if (client.getProtocolEra() === "legacy") {
+    legacyOrigins.set(targetUrl.origin, Date.now() + LEGACY_VERDICT_TTL_MS);
+  } else {
+    legacyOrigins.delete(targetUrl.origin);
+  }
+  return buildClient(dualEraSession(client), transport, options.defaultTimeoutMs);
+}
 
-  return await connectWithRetry(targetUrl, headers, options, options.retry);
+/** A refusal on protocol grounds: a 4xx other than an auth or rate answer. */
+function isProtocolRefusal(err: unknown): boolean {
+  const status = httpStatusOf(err);
+  return (
+    status !== undefined && status >= 400 && status < 500 && ![401, 403, 408, 429].includes(status)
+  );
+}
+
+/**
+ * The HTTP status an error of this client carries (a refused connect or call), from the SDK's
+ * data or, failing that, its message; `undefined` for any other failure.
+ */
+export function httpStatusOf(err: unknown): number | undefined {
+  if (err instanceof SdkHttpError) return err.status;
+  const msg = err instanceof Error ? err.message : String(err);
+  const match = /\b(?:HTTP|status(?: code)?)[:\s]*(\d{3})\b/i.exec(msg);
+  return match ? Number(match[1]) : undefined;
 }
 
 /**
  * `client.connect`, with the caller's signal actually attached.
  *
- * This is the ONLY cancellation seam a connect has, and it bounds the phase
- * that actually wedges. `Client.connect(transport, options)` forwards `options`
- * to the `initialize` REQUEST, where the SDK's protocol layer both
- * `throwIfAborted()`s up front and registers an abort listener that rejects the
- * pending request; `transport.start()` opens no socket. A retry loop is
- * therefore not an alternative bound — it wraps attempts, it cannot interrupt
- * one — which is why the signal goes here rather than only around the loop.
+ * This is the ONLY cancellation seam a connect has, and it bounds the phases that wedge: the
+ * `server/discover` probe and the legacy `initialize` request both take the connect options'
+ * signal. A retry loop is not an alternative bound — it wraps attempts, it cannot interrupt one
+ * — which is why the signal goes here rather than only around the loop.
  *
- * RESIDUAL, on purpose: `connect` does one more thing after `initialize`
- * settles — it awaits a `notifications/initialized` POST, and the SDK passes
- * that one no options, so no signal reaches it. An abort landing in that window
- * is not honoured and the connect resolves normally once the POST returns. It
- * is a single fire-and-forget round trip against a server that has just proved
- * it answers, not the open-ended wait `initialize` is, so it is left alone
- * rather than papered over with a second timer. `client-connect-residual` in
- * the tests pins it, so this note cannot quietly become false.
+ * RESIDUAL, on purpose: on the legacy path `connect` awaits one more POST after `initialize`
+ * settles — `notifications/initialized` — and the SDK passes that one no signal. An abort
+ * landing in that window is not honoured and the connect resolves once the POST returns. It is a
+ * single round trip against a server that has just proved it answers, so it is left alone
+ * rather than papered over with a second timer. `client-connect-residual` in the tests pins it,
+ * so this note cannot quietly become false.
  *
- * Without it a connect answers only to the SDK's 60 s
- * `DEFAULT_REQUEST_TIMEOUT_MSEC`: a caller's own deadline (a chat turn's stop
- * button, a run's cancellation) does nothing for a full minute while a wedged
- * server sits on the handshake, and the caller cannot tell that it is waiting.
+ * Without it a connect answers only to the SDK's 60 s default request timeout: a caller's own
+ * deadline (a chat turn's stop button, a run's cancellation) does nothing for a full minute while
+ * a wedged server sits on the handshake, and the caller cannot tell that it is waiting.
  */
 async function connectWithSignal(
-  client: Client,
-  transport: Parameters<Client["connect"]>[0],
+  client: DualEraClient,
+  transport: StreamableHTTPClientTransport,
   signal: AbortSignal | undefined,
+  knownLegacy: boolean,
 ): Promise<void> {
-  await client.connect(transport, signal ? { signal } : undefined);
+  await client.connect(transport, {
+    ...(signal ? { signal } : {}),
+    ...(knownLegacy ? { prior: { kind: "legacy" } } : {}),
+  });
 }
 
 /**
@@ -298,8 +410,7 @@ async function connectWithRetry(
 
   // Independent abort: caller signal short-circuits the loop; the
   // deadline timer raises a synthetic AbortError when the budget is
-  // exhausted mid-sleep. Combined via a tiny composite so a single
-  // listener registration covers both.
+  // exhausted mid-sleep.
   const externalSignal = options.signal;
 
   let attempt = 0;
@@ -311,20 +422,11 @@ async function connectWithRetry(
       throw new DOMException("MCP connect aborted by caller signal", "AbortError");
     }
 
-    const transport = new StreamableHTTPClientTransport(targetUrl, {
-      requestInit: { headers },
-      ...(options.fetch ? { fetch: options.fetch as never } : {}),
-    });
-    const client = new Client(options.clientInfo ?? DEFAULT_CLIENT_INFO);
-
     try {
-      // Per ATTEMPT, not just around the sleep below: without it an abort
-      // raised while one handshake is in flight waits out that handshake
-      // before the loop's own `externalSignal?.aborted` check can see it.
-      await connectWithSignal(client, transport, externalSignal);
-      return wrapClient(client, transport, options.defaultTimeoutMs);
+      // The caller's signal reaches each ATTEMPT, not just the sleep below: without it an abort
+      // raised while one handshake is in flight waits out that handshake.
+      return await connectOnce(targetUrl, headers, options);
     } catch (err) {
-      await transport.close().catch(() => {});
       lastError = err;
       lastErrorCode = extractErrorCode(err);
 
@@ -416,8 +518,10 @@ function extractErrorCode(err: unknown): string | undefined {
     visited += 1;
     if (cur == null || typeof cur !== "object" || seen.has(cur)) continue;
     seen.add(cur);
+    // The SDK's own errors carry a string `code` of their own (`ERA_NEGOTIATION_FAILED`,
+    // …) and wrap the network error as `cause`: theirs never names the socket fault.
     const c = (cur as { code?: unknown }).code;
-    if (typeof c === "string") return c;
+    if (typeof c === "string" && !(cur instanceof SdkError)) return c;
     const errs = (cur as { errors?: unknown }).errors;
     if (Array.isArray(errs)) {
       for (const child of errs) queue.push(child);
@@ -489,20 +593,16 @@ function isFatalConnectError(err: unknown): boolean {
   // (malformed URL, bad headers, …). Fatal.
   if (err instanceof TypeError) return true;
 
-  // SDK surfaces HTTP failures as `Error: ... HTTP <status> ...` or
-  // similar. Sniff the message for fatal status codes. 408 and 429 are
-  // retryable per RFC 9110 / common API conventions.
-  const msg = err instanceof Error ? err.message : String(err);
-  const statusMatch = /\b(?:HTTP|status(?: code)?)[:\s]*(\d{3})\b/i.exec(msg);
-  if (statusMatch) {
-    const status = Number(statusMatch[1]);
+  // An HTTP answer: the SDK's `SdkHttpError` carries its status (a v1 error, the
+  // message). 408 and 429 are retryable per RFC 9110 / common API conventions.
+  const status = httpStatusOf(err);
+  if (status !== undefined) {
     if (status === 408 || status === 429) return false;
     if (status >= 400 && status < 500) return true;
     if (status >= 500) return false;
   }
 
-  // Generic "Error POSTing to endpoint (HTTP 401)" shape used by the
-  // SDK — already matched above. Fall through.
+  const msg = err instanceof Error ? err.message : String(err);
   if (/\b(?:Unauthorized|Forbidden|401|403)\b/.test(msg)) return true;
 
   // Common SDK transport reset wording — retryable.
@@ -536,44 +636,146 @@ function buildDeadlineExceededError(
   return err;
 }
 
+/** The options a request takes on either SDK line, in their shared spelling. */
+interface SessionRequestOptions {
+  signal?: AbortSignal;
+  timeout?: number;
+  onprogress?: (progress: Progress) => void;
+  resetTimeoutOnProgress?: boolean;
+}
+
 /**
- * Wrap a connected SDK `Client` (regardless of transport) in the
- * `AppstrateMcpClient` surface. Used by both HTTP and in-memory
- * factories so cancellation + timeout semantics are identical.
+ * What {@link buildClient} needs of a connected SDK client: the one seam between the v1 and v2
+ * SDK lines. The result types are the v1 ones the package exports; the wire JSON is the same, the
+ * v2 types only state it differently (`structuredContent: unknown`, the 2026-07-28 additions).
+ */
+interface SdkSession {
+  capabilities(): ServerCapabilities | undefined;
+  serverVersion(): Implementation | undefined;
+  instructions(): string | undefined;
+  protocol(): McpProtocol | undefined;
+  listTools(options: SessionRequestOptions): Promise<{ tools: Tool[] }>;
+  listToolsPage(
+    cursor: string | undefined,
+    options: SessionRequestOptions,
+  ): Promise<{ tools: Tool[]; nextCursor?: string }>;
+  callTool(
+    args: { name: string; arguments?: Record<string, unknown> },
+    options: SessionRequestOptions,
+  ): Promise<CallToolResult>;
+  readResource(args: { uri: string }, options: SessionRequestOptions): Promise<ReadResourceResult>;
+  close(): Promise<void>;
+}
+
+/** A connected v2 (dual-era) client. */
+function dualEraSession(client: DualEraClient): SdkSession {
+  return {
+    capabilities: () => client.getServerCapabilities() as ServerCapabilities | undefined,
+    serverVersion: () => client.getServerVersion() as Implementation | undefined,
+    instructions: () => client.getInstructions(),
+    protocol() {
+      const era = client.getProtocolEra();
+      return era ? { era, version: client.getNegotiatedProtocolVersion() } : undefined;
+    },
+    async listTools(options) {
+      const result = await client.listTools(undefined, options);
+      return { tools: result.tools as Tool[] };
+    },
+    async listToolsPage(cursor, options) {
+      // A `cursor` asks the SDK for one page; without one it walks them all, so the first page
+      // goes as a raw request.
+      const page = cursor
+        ? await client.listTools({ cursor }, options)
+        : await client.request({ method: "tools/list", params: {} }, options);
+      return {
+        tools: page.tools as Tool[],
+        ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
+      };
+    },
+    async callTool(args, options) {
+      return (await client.callTool(args, options)) as CallToolResult;
+    },
+    async readResource(args, options) {
+      return (await client.readResource(args, options)) as ReadResourceResult;
+    },
+    close: () => client.close(),
+  };
+}
+
+/** A connected v1 client: a 2025-era server by construction. */
+function legacySession(client: LegacyClient): SdkSession {
+  return {
+    capabilities: () => client.getServerCapabilities(),
+    serverVersion: () => client.getServerVersion(),
+    instructions: () => client.getInstructions(),
+    protocol: () =>
+      client.getServerCapabilities() ? { era: "legacy", version: undefined } : undefined,
+    async listTools(options) {
+      const result = await client.listTools(undefined, options);
+      return { tools: result.tools };
+    },
+    async listToolsPage(cursor, options) {
+      const page = await client.listTools(cursor ? { cursor } : undefined, options);
+      return { tools: page.tools, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) };
+    },
+    async callTool(args, options) {
+      return (await client.callTool(args, undefined, options)) as CallToolResult;
+    },
+    readResource: (args, options) => client.readResource(args, options),
+    close: () => client.close(),
+  };
+}
+
+/**
+ * Wrap a connected v1 SDK `Client` (in-process pair, stdio subprocess, HTTP+SSE) in the
+ * `AppstrateMcpClient` surface, with the cancellation and timeout semantics of the HTTP client.
  */
 export function wrapClient(
-  client: Client,
+  client: LegacyClient,
+  transport: { close(): Promise<void> },
+  defaultTimeoutMs?: number,
+  maxTotalMs: number = MCP_PROGRESS_CALL_MAX_TOTAL_MS,
+): AppstrateMcpClient {
+  return buildClient(legacySession(client), transport, defaultTimeoutMs, maxTotalMs);
+}
+
+function buildClient(
+  session: SdkSession,
   transport: { close(): Promise<void> },
   defaultTimeoutMs?: number,
   maxTotalMs: number = MCP_PROGRESS_CALL_MAX_TOTAL_MS,
 ): AppstrateMcpClient {
   let closed = false;
+  const signalOption = (signal: AbortSignal | undefined) => (signal ? { signal } : {});
+  // The v2 SDK answers a `tools/list` on a closed client with an empty list: a closed client
+  // must fail its calls, never read as a server without tools.
+  const live = () => {
+    if (closed) throw new Error("MCP client is closed");
+  };
   return {
-    client,
-    getServerCapabilities() {
-      return client.getServerCapabilities();
-    },
-    getServerVersion() {
-      return client.getServerVersion();
-    },
+    getServerCapabilities: () => session.capabilities(),
+    getServerVersion: () => session.serverVersion(),
+    getInstructions: () => session.instructions(),
+    getProtocol: () => session.protocol(),
     async listTools(options) {
-      const result = await client.listTools(undefined, {
-        ...(options?.signal ? { signal: options.signal } : {}),
-      });
-      return { tools: result.tools };
+      live();
+      return session.listTools(signalOption(options?.signal));
+    },
+    async listToolsPage(options) {
+      live();
+      return session.listToolsPage(options?.cursor, signalOption(options?.signal));
     },
     async callTool(args, options) {
+      live();
       const timeout = options?.timeoutMs ?? defaultTimeoutMs;
       const timeoutOption = timeout ? { timeout } : {};
       if (!options?.onProgress) {
-        return client.callTool(args, undefined, {
-          ...(options?.signal ? { signal: options.signal } : {}),
-          ...timeoutOption,
-        }) as Promise<CallToolResult>;
+        return session.callTool(args, { ...signalOption(options?.signal), ...timeoutOption });
       }
       // With progress, `timeout` is an idle timeout: the total is capped by `maxTotalMs`
-      // through the signal, so the SDK's cancel path sends `notifications/cancelled`.
-      // The SDK's own `maxTotalTimeout` (1.32.1) rejects without telling the server.
+      // through the signal, so the SDK's cancel path tells the server (a
+      // `notifications/cancelled`, or on a modern connection the closed response stream).
+      // The v1 SDK's own `maxTotalTimeout` (1.32.1) rejects without telling the server.
       const total = new AbortController();
       const timer = setTimeout(
         () =>
@@ -589,28 +791,28 @@ export function wrapClient(
         ? AbortSignal.any([options.signal, total.signal])
         : total.signal;
       try {
-        return (await client.callTool(args, undefined, {
+        return await session.callTool(args, {
           onprogress: options.onProgress,
           resetTimeoutOnProgress: true,
           signal,
           ...timeoutOption,
-        })) as CallToolResult;
+        });
       } finally {
         clearTimeout(timer);
       }
     },
     async readResource(args, options) {
-      return client.readResource(args, {
-        ...(options?.signal ? { signal: options.signal } : {}),
-        ...((options?.timeoutMs ?? defaultTimeoutMs)
-          ? { timeout: options?.timeoutMs ?? defaultTimeoutMs }
-          : {}),
+      live();
+      const timeout = options?.timeoutMs ?? defaultTimeoutMs;
+      return session.readResource(args, {
+        ...signalOption(options?.signal),
+        ...(timeout ? { timeout } : {}),
       });
     },
     async close() {
       if (closed) return;
       closed = true;
-      await client.close().catch(() => {});
+      await session.close().catch(() => {});
       await transport.close().catch(() => {});
     },
   };

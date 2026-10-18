@@ -101,6 +101,32 @@ Convenience: returns `{ server, client, close }` where both halves are
 already connected via `InMemoryTransport.createLinkedPair()`. Used for
 first-party tools where subprocess overhead is unjustifiable.
 
+### `createMcpHttpClient(url, options?)`
+
+A connected `AppstrateMcpClient` over Streamable HTTP, on the v2 client SDK
+(`@modelcontextprotocol/client`), speaking **both protocol eras**: it probes
+with `server/discover` (MCP 2026-07-28 — stateless, version and identity in
+each request's `_meta` and `MCP-Protocol-Version` header), retries once on an
+`UnsupportedProtocolVersion` (-32022) listing a shared version, and falls back
+to the 2025 `initialize` handshake when the server gives no modern evidence.
+A legacy verdict is remembered per origin (15 min) so later connects skip the
+probe. `getProtocol()` says which era was negotiated.
+
+Credentials and egress belong to the injected `fetch` (the credential proxy):
+the SDK is never given an auth provider and leaves redirects to it. A fault
+the injected fetch throws during the connect comes back as itself.
+
+`wrapClient(client, transport)` gives the same surface over a connected v1
+SDK `Client` — in-process pairs, stdio subprocesses, the HTTP+SSE transport.
+
+### `@appstrate/mcp-transport/testing`
+
+Fake servers of each era as `Request → Response` handlers, for consumer
+tests: `legacyMcpHandler` (v1 SDK, stateless), `modernMcpHandler` (written
+from the 2026-07-28 spec; `legacy` makes it dual-era, `refuseFirst` answers
+-32022 first), `handlerFetch`, and `forgetProtocolEras()` to reset the
+per-origin era cache between tests.
+
 ### Re-exports from the SDK
 
 ```ts
@@ -108,8 +134,8 @@ import { McpError, ErrorCode } from "@appstrate/mcp-transport";
 import type { CallToolResult, Tool } from "@appstrate/mcp-transport";
 ```
 
-For everything else — transports, request schemas, the `Client` class —
-import directly from `@modelcontextprotocol/sdk`.
+For everything else — server transports, request schemas — import directly
+from `@modelcontextprotocol/sdk` (the server side stays on v1).
 
 ## Stability
 

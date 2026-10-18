@@ -159,8 +159,9 @@ interface BuildPlatformMcpToolsOptions {
   turnBudget: PiTurnBudget;
   /**
    * Transport for every platform hop the tool layer makes. Production passes the
-   * platform's in-process dispatch, so the MCP handshake (`initialize` /
-   * `tools/list`) AND each `run_and_wait`'s launch
+   * platform's in-process dispatch, so the MCP handshake (the era probe — once per
+   * process, the platform's server being legacy — then `initialize` / `tools/list`)
+   * AND each `run_and_wait`'s launch
    * POST + poll loop re-enter the Hono app directly instead of opening real
    * loopback TCP connections to this same process. `run_and_wait` is the heavier
    * half by far — the handshake is at most two hops per turn, a single run is one
@@ -257,7 +258,7 @@ export async function buildPlatformMcpTools(
     const opened = await connect();
     try {
       const listed = await opened.listTools({ signal: opts.signal });
-      surface = { tools: listed.tools, instructions: opened.client.getInstructions() };
+      surface = { tools: listed.tools, instructions: opened.getInstructions() };
     } catch (err) {
       await opened.close().catch(() => {});
       throw err;

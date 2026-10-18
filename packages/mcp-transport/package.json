@@ -5,13 +5,15 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test test/"
   },
   "dependencies": {
+    "@modelcontextprotocol/client": "^2.3.1",
     "@modelcontextprotocol/sdk": "^1.31.0"
   }
 }
