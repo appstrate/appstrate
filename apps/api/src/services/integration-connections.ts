@@ -61,6 +61,7 @@ import {
   OAUTH_STATE_TTL_SECONDS,
   isClientMetadataRedirectTag,
   sameUrlIdentifier,
+  withOfflineAccess,
 } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import {
@@ -2236,6 +2237,7 @@ export async function ensureIntegrationOAuthClient(
     registrationEndpoint: endpoints.registrationEndpoint,
     grantTypesSupported: endpoints.grantTypesSupported,
     clientIdMetadataDocumentSupported: endpoints.clientIdMetadataDocumentSupported,
+    scopesSupported: endpoints.scopesSupported,
     issuer: discovered.issuer,
     chosenPerConnection: false,
     resolved,
@@ -2377,6 +2379,7 @@ async function ensurePerConnectionOAuthClient(
     registrationEndpoint: endpoints.registrationEndpoint,
     grantTypesSupported: endpoints.grantTypesSupported,
     clientIdMetadataDocumentSupported: endpoints.clientIdMetadataDocumentSupported,
+    scopesSupported: endpoints.scopesSupported,
     issuer,
     chosenPerConnection: true,
     resolved,
@@ -2422,6 +2425,8 @@ async function registerAutoProvisionedClient(
     grantTypesSupported: string[] | undefined;
     /** Advertised, but no document presented (`presentsClientMetadataDocument`): the failure says so. */
     clientIdMetadataDocumentSupported: boolean | undefined;
+    /** RFC 8414 `scopes_supported`: the registration asks for the scopes connect requests. */
+    scopesSupported: string[] | undefined;
     issuer: string;
     chosenPerConnection: boolean;
     resolved: ResolvedOAuthConnect;
@@ -2496,14 +2501,13 @@ async function registerAutoProvisionedClient(
     const grantTypes = input.grantTypesSupported?.includes("refresh_token")
       ? ["authorization_code", "refresh_token"]
       : ["authorization_code"];
+    const scopes = withOfflineAccess(auth.default_scopes ?? [], input.scopesSupported);
     const registration = await registerDynamicClient({
       registrationEndpoint,
       redirectUri,
       clientName: platformClientName(),
       grantTypes,
-      ...(auth.default_scopes && auth.default_scopes.length > 0
-        ? { scopes: auth.default_scopes }
-        : {}),
+      ...(scopes.length > 0 ? { scopes } : {}),
       ...(dcrAuthMethod ? { tokenEndpointAuthMethod: dcrAuthMethod } : {}),
       fetchImpl: dcrGuardedFetch,
     });

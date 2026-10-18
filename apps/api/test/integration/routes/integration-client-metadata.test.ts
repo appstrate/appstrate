@@ -77,6 +77,7 @@ interface Advertise {
 interface MetadataServer {
   base: string;
   registrations: number;
+  registeredScope?: string;
   /** Set once the conformant server exists (its client id is this server's document URL). */
   provider: StrictAuthorizationServer | null;
   stop: () => void;
@@ -130,8 +131,9 @@ function startMetadataServer(advertise: Advertise): MetadataServer {
         return new Response(null, { status: 302, headers: { Location: back.toString() } });
       }
       if (req.method === "POST" && url.pathname === "/register") {
-        const body = (await req.json()) as { redirect_uris: string[] };
+        const body = (await req.json()) as { redirect_uris: string[]; scope?: string };
         handle.registrations++;
+        handle.registeredScope = body.scope;
         return json(
           {
             client_id: `dcr-${handle.registrations}`,
@@ -480,6 +482,36 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
       "authorization_server_pkce_unsupported",
     );
     expect(meta.provider!.authorizeRequests).toHaveLength(0);
+  });
+
+  it("requests offline_access once when the MCP authorization server advertises it (#2084)", async () => {
+    await install({
+      cimd: false,
+      registration: true,
+      iss: false,
+      scopes: ["read", "offline_access"],
+    });
+    const authUrl = await begin();
+    expect(authUrl.searchParams.get("scope")).toBe("read offline_access");
+    const state = await oauthStateStore.get(authUrl.searchParams.get("state")!);
+    expect(state!.scopesRequested).toEqual(["read", "offline_access"]);
+    expect(meta.registeredScope).toBe("read offline_access");
+    const res = await app.request(
+      `/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/connect/oauth2`,
+      {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ scopes: ["offline_access"] }),
+      },
+    );
+    const again = new URL(((await res.json()) as { auth_url: string }).auth_url);
+    expect(again.searchParams.get("scope")).toBe("read offline_access");
+  });
+
+  it("adds no offline_access the MCP authorization server does not advertise", async () => {
+    await install({ cimd: false, registration: true, iss: false, scopes: ["read"] });
+    expect((await begin()).searchParams.get("scope")).toBe("read");
+    expect(meta.registeredScope).toBe("read");
   });
 
   it("sends S256 to an MCP authorization server that advertises it beside plain", async () => {

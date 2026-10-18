@@ -38,7 +38,7 @@ export type { RefreshExchangeResult } from "./token-refresh.ts";
 // integration refresh classifies on the first and reads its grant with the second. `parseTokenResponse`, the request
 // builders and the error classifier stay internal — `token-exchange.ts` /
 // `token-refresh.ts` are the only callers and they import the concrete module.
-export { ClientAuthInvariantError, withProvenScopes } from "./token-utils.ts";
+export { ClientAuthInvariantError, withOfflineAccess, withProvenScopes } from "./token-utils.ts";
 
 // Credential-proxy primitives, in the shape the /api/credential-proxy/proxy
 // route's service layer consumes them. The in-container sidecar runs the same

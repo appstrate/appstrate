@@ -29,6 +29,7 @@ import {
   resolveOAuthEndpoints,
   oauthEgressFetch,
   SsrfBlockedError,
+  withOfflineAccess,
   type RefreshExchangeResult,
 } from "@appstrate/connect";
 import { LoginError, renderTokenGrant, type LoginConfig } from "@appstrate/connect/connect";
@@ -421,7 +422,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       ...(tokenEndpoint ? { tokenEndpoint } : {}),
       clientId,
       clientRef,
-      scopes: opts.scopes,
+      scopes: withOfflineAccess(opts.scopes ?? [], metadata?.scopesSupported),
       ...(oauthMeta?.scope_separator ? { scopeSeparator: oauthMeta.scope_separator } : {}),
       ...(resource ? { resource } : {}),
       ...(metadata?.issuer !== undefined

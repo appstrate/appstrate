@@ -525,6 +525,34 @@ describe("integration OAuth2 flow (conformant provider)", () => {
     expect(completionOf(html)).not.toHaveProperty("scopesDenied");
   });
 
+  it("never reports offline_access as denied: the server decides on refresh tokens", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+      declinedScopes: ["offline_access"],
+      offlineParam: { name: "access_type", value: "offline" },
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post", refreshTokenIssuance: "not_supported" },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+
+    const html = await consentAndCallback(await beginConnect(ctx, { scopes: ["offline_access"] }));
+
+    const connection = await storedConnection();
+    expect(connection!.scopesGranted).toEqual(SCOPES);
+    expect(completionOf(html)).not.toHaveProperty("scopesDenied");
+    expect(html).not.toContain("non accordées");
+    const trail = await db
+      .select({ action: auditEvents.action })
+      .from(auditEvents)
+      .where(eq(auditEvents.resourceId, connection!.id));
+    expect(trail.map((r) => r.action)).not.toContain("integration.connection.scopes_denied");
+  });
+
   // #1871: scopes added in place reach every agent bound to the connection.
   it("audits the scopes a reconnect adds, before and after", async () => {
     startProvider({

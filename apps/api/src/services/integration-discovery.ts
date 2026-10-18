@@ -18,6 +18,7 @@ import {
   parseResourceMetadataChallenge,
   parseScopeChallenge,
   resolveOAuthEndpoints,
+  withOfflineAccess,
 } from "@appstrate/connect";
 import { isIconImage } from "@appstrate/core/appearance";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -450,20 +451,6 @@ function provisionsClientItself(endpoints: {
 }): boolean {
   return presentsClientMetadataDocument(endpoints) || endpoints.registrationEndpoint !== undefined;
 }
-
-/**
- * The OIDC `offline_access` scope added to a proposed list when the authorization server
- * advertises it: without it such a server issues no refresh token, and a connection that cannot
- * renew is refused. An empty list stays empty: the request then names no scope and the server
- * applies its defaults, which one added scope would replace.
- */
-function withOfflineAccess(scopes: string[], asScopes: string[] | undefined): string[] {
-  return scopes.length > 0 && asScopes?.includes(OFFLINE_ACCESS) && !scopes.includes(OFFLINE_ACCESS)
-    ? [...scopes, OFFLINE_ACCESS]
-    : scopes;
-}
-
-const OFFLINE_ACCESS = "offline_access";
 
 /** Distinct RFC 6749 §3.3 scope tokens; anything else is dropped. */
 function scopeTokens(scopes: string[]): string[] {
