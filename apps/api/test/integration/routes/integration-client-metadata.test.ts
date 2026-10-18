@@ -637,10 +637,30 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
     expect(begin.status).toBe(403);
     expect(meta.provider!.authorizeRequests).toHaveLength(0);
 
-    const listed = await app.request(`/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/clients`, {
+    // Listed for display and deletion — marked, never the default.
+    const clientsOf = async () => {
+      const res = await app.request(`/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/clients`, {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { data: Array<Record<string, unknown>> }).data;
+    };
+    expect(await clientsOf()).toEqual([
+      expect.objectContaining({
+        client_ref: leftover!.id,
+        auto_provisioned: true,
+        is_default: false,
+      }),
+    ]);
+    // The auth is not connectable through it.
+    const detail = await app.request(`/api/integrations/${INTEGRATION}`, {
       headers: authHeaders(ctx),
     });
-    expect(JSON.stringify(await listed.json())).not.toContain(leftover!.id);
+    const auths = ((await detail.json()) as { auths: Array<Record<string, unknown>> }).auths;
+    expect(auths.find((a) => a.auth_key === AUTH_KEY)).toMatchObject({
+      has_oauth_client: false,
+      client_auto_provisioned: false,
+    });
     const setDefault = await app.request(
       `/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/default-client`,
       {
@@ -650,6 +670,64 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
       },
     );
     expect(setDefault.status).toBe(400);
+
+    // Its inert default flag (written before DCR rows stopped being defaults) holds no slot: a
+    // manual org client registered now is the effective default.
+    const created = await app.request(
+      `/api/org-integrations/${INTEGRATION}/auths/${AUTH_KEY}/oauth-clients`,
+      {
+        method: "POST",
+        headers: { ...orgOnlyHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: "admin-app", client_secret: "shh" }),
+      },
+    );
+    expect(created.status).toBe(201);
+    const after = await clientsOf();
+    expect(after.find((c) => c.client_id === "admin-app")).toMatchObject({ is_default: true });
+    expect(after.find((c) => c.client_id === "dcr-x")).toMatchObject({ is_default: false });
+
+    // And the leftover can be deleted.
+    const removed = await app.request(
+      `/api/org-integrations/${INTEGRATION}/oauth-clients/${leftover!.id}`,
+      { method: "DELETE", headers: orgOnlyHeaders(ctx) },
+    );
+    expect(removed.status).toBeLessThan(300);
+    expect((await clientsOf()).map((c) => c.client_id)).toEqual(["admin-app"]);
+  });
+
+  it("promotes a space client to the org default past a DCR row's inert default flag", async () => {
+    await install(
+      { cimd: true, registration: true },
+      { method: "client_secret_post", clientId: "admin-app", clientSecret: "shh" },
+    );
+    await db.insert(integrationOauthClients).values({
+      orgId: ctx.orgId,
+      spaceId: null,
+      integrationId: INTEGRATION,
+      authKey: AUTH_KEY,
+      clientId: "dcr-legacy",
+      clientSecretEncrypted: "",
+      tokenEndpointAuthMethod: "none",
+      isDefault: true,
+      autoProvisioned: true,
+    });
+    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+    const spaceClient = await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
+      clientId: "admin-app",
+      clientSecret: "shh",
+    });
+    const res = await app.request(
+      `/api/integrations/${INTEGRATION}/oauth-clients/${spaceClient.id}/promote`,
+      { method: "POST", headers: authHeaders(ctx) },
+    );
+    expect(res.status).toBe(200);
+    const [row] = await db
+      .select()
+      .from(integrationOauthClients)
+      .where(eq(integrationOauthClients.id, spaceClient.id));
+    expect(row!.spaceId).toBeNull();
+    const { picked } = await connectClient();
+    expect(picked!.clientRef).toBe(spaceClient.id);
   });
 
   it("binds a per-server DCR row's redirect URI to the flow's own server", async () => {

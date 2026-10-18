@@ -435,7 +435,7 @@ export const integrationClientsListSchema = {
           is_default: {
             type: "boolean",
             description:
-              "True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client.",
+              "True for the client that mints new connections at the listed tier, chosen among the manual clients. Every listed client but an `auto_provisioned` one is a valid `client_ref` for PUT .../default-client: an auto-provisioned (DCR) client is listed for display and deletion, never a default.",
           },
           auto_provisioned: { type: "boolean" },
           has_client_secret: { type: "boolean" },

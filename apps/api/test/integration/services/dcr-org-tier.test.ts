@@ -199,7 +199,8 @@ describe("auto-provisioned OAuth clients at the org tier", () => {
 
     const clients = await db.select().from(integrationOauthClients);
     expect(clients).toHaveLength(1);
-    expect(clients[0]).toMatchObject({ spaceId: null, autoProvisioned: true, isDefault: true });
+    // A machine client is found by its issuer, never the default (no flow or picker reads it).
+    expect(clients[0]).toMatchObject({ spaceId: null, autoProvisioned: true, isDefault: false });
 
     const conns = await db.select().from(integrationConnections);
     expect(conns.find((c) => c.id === fromA)).toMatchObject({

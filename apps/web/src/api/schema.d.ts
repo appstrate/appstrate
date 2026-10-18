@@ -13982,7 +13982,7 @@ export interface operations {
                             source: "system" | "org" | "space";
                             /** @description For `space` / `org` clients, the registered OAuth client_id. For `system` clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
-                            /** @description True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client. */
+                            /** @description True for the client that mints new connections at the listed tier, chosen among the manual clients. Every listed client but an `auto_provisioned` one is a valid `client_ref` for PUT .../default-client: an auto-provisioned (DCR) client is listed for display and deletion, never a default. */
                             is_default: boolean;
                             auto_provisioned: boolean;
                             has_client_secret: boolean;
@@ -14337,7 +14337,7 @@ export interface operations {
                             source: "system" | "org" | "space";
                             /** @description For `space` / `org` clients, the registered OAuth client_id. For `system` clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
-                            /** @description True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client. */
+                            /** @description True for the client that mints new connections at the listed tier, chosen among the manual clients. Every listed client but an `auto_provisioned` one is a valid `client_ref` for PUT .../default-client: an auto-provisioned (DCR) client is listed for display and deletion, never a default. */
                             is_default: boolean;
                             auto_provisioned: boolean;
                             has_client_secret: boolean;
@@ -19539,7 +19539,7 @@ export interface operations {
                             source: "system" | "org" | "space";
                             /** @description For `space` / `org` clients, the registered OAuth client_id. For `system` clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
-                            /** @description True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client. */
+                            /** @description True for the client that mints new connections at the listed tier, chosen among the manual clients. Every listed client but an `auto_provisioned` one is a valid `client_ref` for PUT .../default-client: an auto-provisioned (DCR) client is listed for display and deletion, never a default. */
                             is_default: boolean;
                             auto_provisioned: boolean;
                             has_client_secret: boolean;
@@ -19605,7 +19605,7 @@ export interface operations {
                             source: "system" | "org" | "space";
                             /** @description For `space` / `org` clients, the registered OAuth client_id. For `system` clients, an opaque `sys_`-prefixed fingerprint (truncated SHA-256) — never the real system client_id, which is a deployment secret. Display-only; the connect/refresh keyspace is `client_ref`. */
                             client_id: string;
-                            /** @description True for the client that mints new connections at the listed tier. Every listed client is a valid `client_ref` for PUT .../default-client. */
+                            /** @description True for the client that mints new connections at the listed tier, chosen among the manual clients. Every listed client but an `auto_provisioned` one is a valid `client_ref` for PUT .../default-client: an auto-provisioned (DCR) client is listed for display and deletion, never a default. */
                             is_default: boolean;
                             auto_provisioned: boolean;
                             has_client_secret: boolean;

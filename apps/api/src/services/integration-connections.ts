@@ -977,16 +977,20 @@ function assertClientAuth(
 
 /**
  * `owner`'s custom clients for the auth, decrypted, oldest-first; a space also sees its org's.
- * Manual rows only: an auto-provisioned (DCR) row is the machine client of one server, found by
- * {@link getAutoProvisionedClient} on the auto-provisioned path alone — never a classic flow's
- * client nor a default an admin picks, even once a new version made its auth classic.
+ *
+ * `selectable` (the default) returns the manual rows only — the clients a classic flow and the
+ * default picker choose among: an auto-provisioned (DCR) row is the machine client of one server,
+ * found by {@link getAutoProvisionedClient} on the auto-provisioned path alone — never a classic
+ * flow's client nor a default an admin picks, even once a new version made its auth classic.
+ * `all` adds them back, for the listing that displays them and lets an admin delete them.
  */
 async function loadClientTiers(
   owner: ClientOwner,
   packageId: string,
   authKey: string,
+  rows: "selectable" | "all" = "selectable",
 ): Promise<{ space: IntegrationOAuthClientWithSecret[]; org: IntegrationOAuthClientWithSecret[] }> {
-  const rows = await db
+  const found = await db
     .select()
     .from(integrationOauthClients)
     .where(
@@ -994,11 +998,11 @@ async function loadClientTiers(
         isSpaceOwner(owner) ? spaceVisibleFilter(owner) : tierFilter(owner),
         eq(integrationOauthClients.integrationId, packageId),
         eq(integrationOauthClients.authKey, authKey),
-        eq(integrationOauthClients.autoProvisioned, false),
+        rows === "selectable" ? eq(integrationOauthClients.autoProvisioned, false) : undefined,
       ),
     )
     .orderBy(integrationOauthClients.createdAt);
-  const clients = rows.map(projectClientWithSecret);
+  const clients = found.map(projectClientWithSecret);
   return {
     space: clients.filter((c) => c.spaceId !== null),
     org: clients.filter((c) => c.spaceId === null),
@@ -1083,7 +1087,13 @@ async function hasTierDefault(
     .select({ id: integrationOauthClients.id })
     .from(integrationOauthClients)
     .where(
-      and(tierAuthFilter(owner, packageId, authKey), eq(integrationOauthClients.isDefault, true)),
+      and(
+        tierAuthFilter(owner, packageId, authKey),
+        eq(integrationOauthClients.isDefault, true),
+        // A flag an auto-provisioned row still carries (registered before DCR rows stopped being
+        // defaults) is inert: no flow or picker reads it.
+        eq(integrationOauthClients.autoProvisioned, false),
+      ),
     )
     .limit(1);
   return row !== undefined;
@@ -1207,11 +1217,10 @@ export async function createIntegrationOAuthClient(
   const issuer = opts.issuer ?? null;
   assertClientAuth(await loadManifestOrThrow(owner, packageId), authKey, autoProvisioned);
 
-  // An auto-provisioned client of the manifest's server is the default; one per issuer is selected
-  // by its issuer (several coexist). A classic client wins the default only when none holds it.
-  const isDefault = autoProvisioned
-    ? issuer === null
-    : !(await hasTierDefault(owner, packageId, authKey));
+  // An auto-provisioned client is never a default: the auto-provisioned path finds it by its
+  // issuer (`getAutoProvisionedClient`), and no classic flow or default picker ever sees it. A
+  // classic client wins the default only when no manual client holds it.
+  const isDefault = !autoProvisioned && !(await hasTierDefault(owner, packageId, authKey));
 
   // Creation always supplies the field (blank means "register a public
   // client"), so the encoder never returns the preserve sentinel here.
@@ -1237,8 +1246,10 @@ export async function createIntegrationOAuthClient(
       })
       .returning();
   const [row] = await insert(isDefault).catch((err: unknown) => {
-    // A concurrent write took the tier's first default: land as non-default.
-    if (!isDefault || autoProvisioned || !isUniqueViolation(err)) throw err;
+    // A concurrent write took the tier's first default — or an auto-provisioned row registered
+    // before DCR rows stopped being defaults still holds the flag: land as non-default (the
+    // manual tier's `pickDefault` falls back to its first client anyway).
+    if (!isDefault || !isUniqueViolation(err)) throw err;
     return insert(false);
   });
 
@@ -1402,16 +1413,27 @@ function moveClientToOrg(
         `OAuth client '${clientId}' is auto-provisioned (DCR), and the organization already holds the auto-provisioned client of this auth${existing.issuer ? ` for ${existing.issuer}` : ""}. Reconnect this space's connections to move them onto it, then delete this client.`,
       );
     }
-    // An auto client of a server chosen per connection is picked by its issuer, never the default.
+    // An auto-provisioned client is found by its issuer, never the default.
     const isDefault =
       mayDefault &&
-      !(existing.autoProvisioned && existing.issuer !== null) &&
+      !existing.autoProvisioned &&
       !(await hasTierDefault({ orgId: scope.orgId }, packageId, existing.authKey, tx));
-    const [row] = await tx
-      .update(integrationOauthClients)
-      .set({ spaceId: null, isDefault, updatedAt: new Date() })
-      .where(eq(integrationOauthClients.id, existing.id))
-      .returning();
+    const move = (executor: Tx, asDefault: boolean) =>
+      executor
+        .update(integrationOauthClients)
+        .set({ spaceId: null, isDefault: asDefault, updatedAt: new Date() })
+        .where(eq(integrationOauthClients.id, existing.id))
+        .returning();
+    // A savepoint, so a refused flag (an auto-provisioned row registered before DCR rows stopped
+    // being defaults still holds the org slot) leaves the transaction usable for the plain move.
+    const [row] = isDefault
+      ? await tx
+          .transaction((sp) => move(sp, true))
+          .catch((err: unknown) => {
+            if (!isUniqueViolation(err)) throw err;
+            return move(tx, false);
+          })
+      : await move(tx, false);
     const widened = await widenConnectionsToOrgScope(
       tx,
       eq(integrationConnections.clientRef, existing.id),
@@ -1834,9 +1856,11 @@ function fingerprintSystemClientId(clientId: string): string {
 }
 
 /**
- * List the OAuth clients `owner` may make its default for `(packageId, authKey)`,
- * secrets omitted: its {@link inheritedDefault} (when not its own) then its own
- * clients, oldest-first. `is_default` marks the effective default.
+ * List the OAuth clients of `owner`'s tier for `(packageId, authKey)`, secrets omitted: its
+ * {@link inheritedDefault} (when not its own) then its own clients, oldest-first. `is_default`
+ * marks the effective default, chosen among the manual clients only. Its auto-provisioned (DCR)
+ * clients are listed too — `auto_provisioned: true`, never `is_default` — for display and
+ * deletion; none can be made the default ({@link setDefaultIntegrationClient} refuses them).
  */
 export async function listIntegrationClients(
   owner: ClientOwner,
@@ -1845,8 +1869,12 @@ export async function listIntegrationClients(
 ): Promise<IntegrationClientDescriptor[]> {
   await assertOwnerInScope(owner, packageId, authKey);
   const { space, org } = await loadClientTiers(owner, packageId, authKey);
+  const all = await loadClientTiers(owner, packageId, authKey, "all");
   const system = getDefaultSystemIntegrationClient(packageId, authKey);
-  const own = isSpaceOwner(owner) ? space : org;
+  // A space also sees the org's machine clients it uses (an auto-provisioned row lives at the org).
+  const own = isSpaceOwner(owner)
+    ? [...all.space, ...all.org.filter((c) => c.autoProvisioned)]
+    : all.org;
   const defaultRef = pickDefault(space, org, system)?.id;
   const inherited = inheritedDefault(owner, space, org, system);
   const listed: Array<IntegrationOAuthClientWithSecret | SystemIntegrationClientDefinition> =
@@ -4380,10 +4408,16 @@ export async function getIntegrationAuthStatuses(
     packageId,
   )!;
   const oauthClients = await db
-    .select({ authKey: integrationOauthClients.authKey })
+    .select({
+      authKey: integrationOauthClients.authKey,
+      autoProvisioned: integrationOauthClients.autoProvisioned,
+    })
     .from(integrationOauthClients)
     .where(and(spaceVisibleFilter(scope), eq(integrationOauthClients.integrationId, packageId)));
-  const oauthClientKeys = new Set(oauthClients.map((r) => r.authKey));
+  // The clients a connect of the auth can use: a classic auth chooses among the manual rows only
+  // (`loadClientTiers`), so a leftover auto-provisioned row does not make it connectable.
+  const hasUsableOAuthClient = (key: string, autoProvisioned: boolean) =>
+    oauthClients.some((r) => r.authKey === key && (autoProvisioned || !r.autoProvisioned));
 
   const auths: IntegrationAuthStatus[] = Object.entries(authsMap).map(([key, rawAuth]) => {
     // AFPS: default scopes are `default_scopes`, the OAuth resource is
@@ -4416,7 +4450,7 @@ export async function getIntegrationAuthStatuses(
       // `block_user_connections`, where a member cannot create a connection at
       // all and a shared one is the only path to a successful run.
       ready: keyConnections.some((c) => !c.needs_reconnection),
-      has_oauth_client: oauthClientKeys.has(key),
+      has_oauth_client: hasUsableOAuthClient(key, usesAutoProvisionedClient(manifest, auth)),
       // Shared platform client (SYSTEM_INTEGRATIONS): when one serves this
       // (integration, auth), connect falls back to it, so the UI is connectable
       // even without an org-registered client. Registry is in-memory — no DB cost.

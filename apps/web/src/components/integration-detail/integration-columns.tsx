@@ -135,8 +135,10 @@ export function useIntegrationClientColumns({
       const { client, level } = row;
       const { ownLevel, editable } = clientDeeds(row, canManageOrg);
       const promotable = level === "space" && !client.auto_provisioned && canManageOrg;
-      const useHere = canUseHere && row.inSpaceList && !row.usedHere;
-      const useForOrg = canChooseOrgDefault && row.inOrgList && !row.orgDefault;
+      // An auto-provisioned client is listed for display and deletion, never chosen as a default.
+      const choosable = !client.auto_provisioned;
+      const useHere = choosable && canUseHere && row.inSpaceList && !row.usedHere;
+      const useForOrg = choosable && canChooseOrgDefault && row.inOrgList && !row.orgDefault;
       return (
         <TableRowActions
           menuLabel={t("providers.moreActions", { name: client.client_id })}
