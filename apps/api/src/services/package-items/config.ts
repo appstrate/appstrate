@@ -12,6 +12,7 @@ import {
   findNonSnakeCaseIdentityClaimKeys,
   findUnboundedInjectedCredentials,
   findUnevaluableExpressions,
+  findConnectionlessVariables,
   findUnexposedDefaultTools,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
@@ -101,6 +102,7 @@ export const CONFIG_BY_TYPE: Record<PackageType, PackageTypeConfig> = {
       ...findUnboundedInjectedCredentials(manifest),
       ...findCleartextInjectedCredentials(manifest, isAllowedInternalIdpHost),
       ...findUnevaluableExpressions(manifest),
+      ...findConnectionlessVariables(manifest),
       ...findUnexposedDefaultTools(manifest),
     ],
     manifestIsStoredFile: true,

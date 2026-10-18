@@ -67,7 +67,10 @@ import {
   rankByLeastPrivilege,
   servingCandidates,
 } from "./integration-connection-resolver.ts";
-import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import {
+  isUnauthenticatedIntegration,
+  MAX_CONNECTIONS_PER_INTEGRATION,
+} from "@appstrate/core/integration";
 import type {
   ConnectionResolutionResult,
   ConnectionResolutionWarning,
@@ -910,6 +913,8 @@ interface AgentConnectionReadiness {
     run_blocking: boolean;
     /** Declared, with nothing a run would start: the run cascade skips it. */
     inert: boolean;
+    /** False for an integration declaring no auths (AFPS §7.2): it binds no connection. */
+    connection_required: boolean;
     resolution: IntegrationAgentResolution;
   }>;
 }
@@ -1044,6 +1049,14 @@ export async function resolveAgentConnectionReadiness(args: {
     ),
   );
 
+  // Read off the memo both cascades filled: an unloadable manifest is judged as needing one.
+  const connectionRequired = await Promise.all(
+    declared.map(async (e) => {
+      const res = await fetchIntegrationManifest(e.id, manifestCache);
+      return !(res.ok && isUnauthenticatedIntegration(res.manifest));
+    }),
+  );
+
   const errors: ValidationFieldError[] = runResolution.errors.map(translateResolutionError);
   if (!agentActive) {
     // First in the list: every other entry describes something to configure,
@@ -1065,6 +1078,7 @@ export async function resolveAgentConnectionReadiness(args: {
       required: e.required === true,
       run_blocking: blockingIds.has(e.id),
       inert: inert(e.id),
+      connection_required: connectionRequired[i]!,
       resolution: resolutions[i]!,
     })),
   };

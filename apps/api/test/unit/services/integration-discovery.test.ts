@@ -514,7 +514,7 @@ describe("discoverRemoteIntegration", () => {
     ]);
   });
 
-  it("refuses an open SSE server (endpoint event, no auth)", async () => {
+  it("proposes an open SSE server without auths (endpoint event, no challenge)", async () => {
     const { fetchImpl } = fakeFetch({
       "POST https://mcp.legacy.test/sse": () => new Response(null, { status: 405 }),
       "GET https://mcp.legacy.test/sse": () =>
@@ -522,16 +522,16 @@ describe("discoverRemoteIntegration", () => {
           headers: { "Content-Type": "text/event-stream" },
         }),
     });
-    const err = await refusal(
-      discoverRemoteIntegration(
-        { url: "https://mcp.legacy.test/sse", orgSlug: "acme" },
-        { fetchImpl },
-      ),
+    const proposal = await discoverRemoteIntegration(
+      { url: "https://mcp.legacy.test/sse", orgSlug: "acme" },
+      { fetchImpl },
     );
-    expect({ status: err.status, code: err.code }).toEqual({
-      status: 422,
-      code: "remote_mcp_auth_not_supported",
+    expect(proposal.manifest.auths).toBeUndefined();
+    expect(proposal.manifest.source).toEqual({
+      kind: "remote",
+      remote: { url: "https://mcp.legacy.test/sse", transport: "sse" },
     });
+    expect(Object.keys(proposal.provenance).some((key) => key.startsWith("/auths"))).toBe(false);
   });
 
   /** Serves `handler` at `url`, every JSON-RPC method outside `open` behind a Bearer challenge. */
@@ -569,26 +569,41 @@ describe("discoverRemoteIntegration", () => {
     websiteUrl: "https://acme.example/",
   };
 
-  it("refuses an open legacy Streamable HTTP server", async () => {
+  it("proposes an open legacy Streamable HTTP server as unauthenticated (AFPS §7.2)", async () => {
     const url = "https://mcp.openlegacy.test/mcp";
     const { fetchImpl } = mcpAt(url, legacyMcpHandler({ tools: [echo] }), [
       "server/discover",
       "initialize",
       "tools/list",
     ]);
-    const err = await refusal(discoverRemoteIntegration({ url, orgSlug: "acme" }, { fetchImpl }));
-    expect(err.code).toBe("remote_mcp_auth_not_supported");
+    const proposal = await discoverRemoteIntegration({ url, orgSlug: "acme" }, { fetchImpl });
+    expect(proposal.manifest.auths).toBeUndefined();
+    expect(proposal.warnings).toEqual([]);
   });
 
-  it("refuses an open modern-only server", async () => {
+  it("proposes an open modern-only server as unauthenticated", async () => {
     const url = "https://mcp.openmodern.test/mcp";
     const { fetchImpl, seen } = mcpAt(url, modernMcpHandler({ tools: [echo] }), [
       "server/discover",
       "tools/list",
     ]);
-    const err = await refusal(discoverRemoteIntegration({ url, orgSlug: "acme" }, { fetchImpl }));
-    expect(err.code).toBe("remote_mcp_auth_not_supported");
+    const proposal = await discoverRemoteIntegration({ url, orgSlug: "acme" }, { fetchImpl });
+    expect(proposal.manifest.auths).toBeUndefined();
     expect(seen).toEqual(["POST server/discover", "POST tools/list"]);
+  });
+
+  it("proposes an open server's URL exactly as pasted, a secret-looking segment included", async () => {
+    const url = "https://mcp.openmodern.test/3f9c2a7b1e6d4c8a9b0f5e2d7c1a8b4e/mcp";
+    const { fetchImpl } = mcpAt(url, modernMcpHandler({ tools: [echo] }), [
+      "server/discover",
+      "tools/list",
+    ]);
+    const proposal = await discoverRemoteIntegration({ url, orgSlug: "acme" }, { fetchImpl });
+    expect(proposal.manifest.source).toEqual({
+      kind: "remote",
+      remote: { url, transport: "streamable-http" },
+    });
+    expect(proposal.manifest.auths).toBeUndefined();
   });
 
   it("probes first with the 2026-07-28 version header", async () => {
@@ -737,8 +752,8 @@ describe("discoverRemoteIntegration", () => {
         },
       });
     });
-    const err = await refusal(discoverRemoteIntegration({ url, orgSlug: "acme" }, { fetchImpl }));
-    expect(err.code).toBe("remote_mcp_auth_not_supported");
+    const proposal = await discoverRemoteIntegration({ url, orgSlug: "acme" }, { fetchImpl });
+    expect(proposal.manifest.auths).toBeUndefined();
   });
 
   it("answers 502 when the probe and initialize both answer 5xx", async () => {

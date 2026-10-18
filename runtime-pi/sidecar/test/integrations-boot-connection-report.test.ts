@@ -162,11 +162,14 @@ describe("boot report — one entry per connection", () => {
     }
   });
 
-  it("fails an agent-run spec that binds no connection, before any credentials fetch", async () => {
+  it("fails an agent-run spec that delivers a credential but binds no connection, before any credentials fetch", async () => {
     const { result, seen } = await boot([spec(undefined), spec(CONN_B)], ["conn-b"]);
     try {
       expect(result.failed).toEqual([
-        { integrationId: INTEGRATION_ID, error: "agent-run spawn spec binds no connection" },
+        {
+          integrationId: INTEGRATION_ID,
+          error: "agent-run spawn spec delivers a credential but binds no connection",
+        },
       ]);
       expect(seen).toEqual([
         `/internal/integration-credentials/${INTEGRATION_ID}?connection_id=conn-b`,

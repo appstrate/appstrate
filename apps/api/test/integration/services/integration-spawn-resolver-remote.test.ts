@@ -261,3 +261,67 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
     });
   });
 });
+
+describe("resolveIntegrationSpawns — unauthenticated integration (AFPS §7.2)", () => {
+  const OPEN = "@orga/open-mcp";
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "orga" });
+  });
+
+  it("yields exactly one connectionless spec, nothing injected", async () => {
+    await seedPackage({
+      id: OPEN,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: {
+        type: "integration",
+        schema_version: "0.3",
+        name: OPEN,
+        version: "0.1.0",
+        display_name: "Open",
+        source: {
+          kind: "remote",
+          remote: { url: "https://mcp.example.com/open/mcp", transport: "streamable-http" },
+        },
+        tools_policy: { search: {} },
+      } as never,
+    });
+    await seedSpacePackage(ctx.defaultSpaceId, OPEN);
+
+    // The cascade binds nothing for it: the snapshot has no key.
+    const { specs, dropped } = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: {
+        schema_version: "0.2",
+        type: "agent",
+        name: "@orga/agent",
+        version: "0.1.0",
+        display_name: "Agent",
+        dependencies: { integrations: { [OPEN]: "^0.1.0" } },
+        integrations_configuration: { [OPEN]: { tools: ["search"], required: true } },
+      },
+      resolvedConnections: {},
+    });
+    expect(dropped).toEqual([]);
+    expect(specs).toEqual([
+      {
+        integrationId: OPEN,
+        namespace: OPEN,
+        sourceKind: "remote",
+        manifest: {
+          name: OPEN,
+          version: "0.1.0",
+          server: { url: "https://mcp.example.com/open/mcp", transport: "streamable-http" },
+        },
+        spawnEnv: {},
+        toolAllowlist: ["search"],
+      },
+    ]);
+  });
+});

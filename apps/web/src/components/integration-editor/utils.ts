@@ -295,6 +295,11 @@ export function setAuths(manifest: Rec, list: AuthState[]): Rec {
     if (!a.key.trim()) continue;
     auths[a.key] = patchAuth(asRec(existing[a.key]), a);
   }
+  // AFPS §7.2: no auth is spelled by leaving `auths` out, never as an empty map.
+  if (Object.keys(auths).length === 0) {
+    const { auths: _removed, ...rest } = manifest;
+    return setApiMeta(rest, list);
+  }
   return setApiMeta({ ...manifest, auths }, list);
 }
 

@@ -134,14 +134,27 @@ export function ReviewStep({
         )}
         <dt className="text-muted-foreground">{t("integrationWizard.review.connection")}</dt>
         <dd className="flex flex-col gap-1">
-          {Object.entries(manifest.auths).map(([key, auth]) => (
-            <span key={key} className="flex flex-wrap items-center gap-2">
-              {t(AUTH_KEYS[wizardAuthKind(auth)])}
-              <DiscoveryBadge provenance={provenance[`/auths/${key}`]} />
+          {manifest.auths ? (
+            Object.entries(manifest.auths).map(([key, auth]) => (
+              <span key={key} className="flex flex-wrap items-center gap-2">
+                {t(AUTH_KEYS[wizardAuthKind(auth)])}
+                <DiscoveryBadge provenance={provenance[`/auths/${key}`]} />
+              </span>
+            ))
+          ) : (
+            <span data-testid="integration-wizard-no-auth">
+              {t("integrationWizard.review.auth.none")}
             </span>
-          ))}
+          )}
         </dd>
       </dl>
+
+      {!manifest.auths && (
+        <Alert variant="warning" data-testid="integration-wizard-url-shared">
+          <AlertTitle>{t("integrationWizard.review.urlShared.title")}</AlertTitle>
+          <AlertDescription>{t("integrationWizard.review.urlShared.description")}</AlertDescription>
+        </Alert>
+      )}
 
       <DiscoveryWarnings warnings={result.warnings} />
 

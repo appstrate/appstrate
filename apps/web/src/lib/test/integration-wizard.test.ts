@@ -62,6 +62,13 @@ describe("integrationCreationManifest", () => {
     expect(manifest).not.toHaveProperty("icon");
   });
 
+  it("drops the default API key auth for a proposal declaring none (AFPS §7.2)", () => {
+    const { auths: _auths, ...open } = proposal;
+    const manifest = integrationCreationManifest(defaults, open, proposalEdits(open));
+    expect(manifest).not.toHaveProperty("auths");
+    expect(manifest.source).toEqual(proposal.source);
+  });
+
   it("carries the icon, the proposal's or the re-encoded one", () => {
     const withIcon = { ...proposal, icon: "data:image/png;base64,AAA" };
     expect(integrationCreationManifest(defaults, withIcon, proposalEdits(withIcon)).icon).toBe(
@@ -159,6 +166,13 @@ describe("integrationWizardStep — governed connection", () => {
     expect(integrationWizardStep({ ...facts, connection: "must_choose" })).toBe("ready");
     expect(
       integrationWizardStep({ ...facts, connection: "must_choose", toolsDeclared: false }),
+    ).toBe("tools");
+  });
+
+  it("skips the connect step of an integration declaring no auths (AFPS §7.2)", () => {
+    expect(integrationWizardStep({ ...facts, connection: "not_required" })).toBe("ready");
+    expect(
+      integrationWizardStep({ ...facts, connection: "not_required", toolsDeclared: false }),
     ).toBe("tools");
   });
 

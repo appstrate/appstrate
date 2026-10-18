@@ -1033,16 +1033,47 @@ describe("Packages API", () => {
             type: "integration",
             schema_version: "0.1",
             display_name: "Bad",
-            description: "No auths declared",
+            description: "An empty auths map: absence is the only spelling (AFPS §7.2)",
             source: {
               kind: "remote",
               remote: { url: "https://example.com/mcp/v1", transport: "streamable-http" },
+            },
+            auths: {},
+          },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("refuses variables on an integration without auths: no connection holds them", async () => {
+      const res = await app.request("/api/packages/integrations", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: {
+            name: "@pkgorg/open-integration",
+            version: "1.0.0",
+            type: "integration",
+            schema_version: "0.3",
+            display_name: "Open",
+            source: {
+              kind: "remote",
+              remote: { url: "{$variable.base_url}/mcp", transport: "streamable-http" },
+            },
+            variables: {
+              schema: {
+                type: "object",
+                properties: { base_url: { type: "string" } },
+                required: ["base_url"],
+              },
             },
           },
         }),
       });
 
       expect(res.status).toBe(400);
+      expect(JSON.stringify(await res.json())).toContain("cannot declare variables");
     });
 
     it("updates an integration manifest under If-Match", async () => {

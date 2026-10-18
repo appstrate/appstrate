@@ -253,7 +253,8 @@ export interface IntegrationSpawnSpec {
   namespace: string;
   /**
    * The bound connection this spec serves (N specs of one integration share the
-   * namespace); `label` is the `connection` selector value. Absent only on a connect run.
+   * namespace); `label` is the `connection` selector value. Absent on a connect run and for an
+   * unauthenticated integration (AFPS §7.2), which injects nothing.
    */
   connection?: { id: string; label: string; accountId: string | null };
   /**

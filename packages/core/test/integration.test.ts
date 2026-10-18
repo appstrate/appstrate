@@ -41,6 +41,8 @@ import {
   findInvalidScopeTokens,
   scopeTokenSchema,
   acquiresByConnectLogin,
+  isUnauthenticatedIntegration,
+  findConnectionlessVariables,
 } from "../src/integration.ts";
 import { validateManifest, metaSchema } from "../src/validation.ts";
 import { TOOL_NAME_MAX_LEN } from "../src/naming.ts";
@@ -3025,5 +3027,77 @@ describe("connection variables (§7.12) — rule (1g) and the write-path rules",
         v.path.join("."),
       ),
     ).toEqual(["auths.session.connect.login.request.url"]);
+  });
+});
+
+describe("unauthenticated integrations (AFPS §7.2)", () => {
+  const { auths: _auths, ...unauthenticated } = baseManifest({ schema_version: "0.3" });
+
+  it("parses a remote integration without auths, and names it unauthenticated", () => {
+    expect(isUnauthenticatedIntegration(parse(unauthenticated))).toBe(true);
+    expect(isUnauthenticatedIntegration(parse(baseManifest()))).toBe(false);
+  });
+
+  it("refuses an empty auths map and a none source without auths", () => {
+    expect(errorPaths({ ...unauthenticated, auths: {} })).not.toEqual([]);
+    expect(errorPaths({ ...unauthenticated, source: { kind: "none" } })).not.toEqual([]);
+  });
+
+  it("refuses variables on the write path: no connection could hold their values", () => {
+    const withVariables = {
+      ...unauthenticated,
+      source: {
+        kind: "remote",
+        remote: { url: "{$variable.base_url}/mcp", transport: "streamable-http" },
+      },
+      variables: {
+        schema: {
+          type: "object",
+          properties: { base_url: { type: "string" } },
+          required: ["base_url"],
+        },
+      },
+    };
+    expect(findConnectionlessVariables(withVariables)).toEqual([
+      { path: ["variables"], message: expect.stringContaining("cannot declare variables") },
+    ]);
+    expect(findConnectionlessVariables(unauthenticated)).toEqual([]);
+  });
+});
+
+describe("source.remote.url — no credential in the server URL (@afps-spec/schema 0.12)", () => {
+  const keyAuth = {
+    type: "api_key",
+    authorized_uris: ["https://mcp.example.com/**"],
+    credentials: {
+      schema: { type: "object", properties: { secret: { type: "string" } }, required: ["secret"] },
+    },
+    delivery: { http: { in: "header", name: "X-Api-Key", value: "{$credential.secret}" } },
+  };
+  const remote = (url: string, extra: Record<string, unknown> = {}) =>
+    baseManifest({
+      schema_version: "0.3",
+      source: { kind: "remote", remote: { url, transport: "streamable-http" } },
+      auths: { key: keyAuth },
+      ...extra,
+    });
+
+  it("refuses a {$credential.<field>} in the URL", () => {
+    expect(errorPaths(remote("https://mcp.example.com/{$credential.secret}/mcp"))).toContain(
+      "source.remote.url",
+    );
+  });
+
+  it("accepts a declared {$variable.<name>} URL template", () => {
+    const templated = remote("{$variable.base_url}/mcp", {
+      variables: {
+        schema: {
+          type: "object",
+          properties: { base_url: { type: "string" } },
+          required: ["base_url"],
+        },
+      },
+    });
+    expect(errorPaths(templated)).toEqual([]);
   });
 });

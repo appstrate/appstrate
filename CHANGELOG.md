@@ -275,6 +275,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **Integrations from a remote MCP server that needs no authentication**
+  (#2075, AFPS §7.2). The MCP-URL wizard no longer refuses a server that answers
+  without a Bearer challenge: it proposes an integration without `auths`, its
+  `source.remote.url` the address exactly as pasted. The review states that the
+  address is saved as package configuration, visible to anyone who can read the
+  integration, included in exports and shared by every member. Such an
+  integration needs no connection: runs start it without one, `required: true`
+  asks nothing of it, readiness reports `connection_required: false`, the
+  integration detail `proxy_connection.status: "not_required"`, and the server
+  sync reads its tools directly, egress-guarded. A server that asks for a
+  credential later leaves it unavailable. Declaring `variables` without `auths`
+  is refused (no connection would hold them). The `remote_mcp_auth_not_supported`
+  discovery error is gone. Requires `@afps-spec/schema` `^0.12.0`.
+
 - **An admin pin can let members add connections to the imposed ones**
   (#2043). `PUT` of an integration pin takes `allow_additional_connections`
   (default `false`, also when absent on the replacing `PUT`; `true` with

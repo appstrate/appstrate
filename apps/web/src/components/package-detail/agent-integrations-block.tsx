@@ -261,6 +261,14 @@ function ManagedIntegration({
   if (resolution?.warning?.code === "integration_not_active") {
     return <InactiveIntegration packageId={packageId} required={false} />;
   }
+  // AFPS §7.2: an integration declaring no auths binds no connection, there is nothing to pick.
+  if (entry?.connection_required === false) {
+    return (
+      <span className="text-muted-foreground text-sm" data-testid="integration-no-connection">
+        {t("detail.connectionsTable.noConnectionNeeded")}
+      </span>
+    );
+  }
 
   // Reuse hint, only when resolved: a blocking state is the picker's warning, not a reassuring line.
   const resolvedConnections =
@@ -404,7 +412,7 @@ function IntegrationStatusCell({
   // Settled without a verdict (a failed read, or none for this integration): no status to give,
   // and "checking" would never end.
   if (!entry) return <span className="text-muted-foreground text-xs">—</span>;
-  if (describeResolution(entry.resolution).resolved) {
+  if (!entry.connection_required || describeResolution(entry.resolution).resolved) {
     return <Badge variant="success">{t("detail.connectionsTable.ready")}</Badge>;
   }
   return entry.run_blocking ? (

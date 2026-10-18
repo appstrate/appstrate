@@ -864,6 +864,34 @@ export function getDeclaredToolNames(manifest: IntegrationManifest): string[] {
 }
 
 /**
+ * An unauthenticated integration (AFPS §7.2): it omits `auths`, so it injects no credential and
+ * binds no connection — `required: true` asks nothing of it.
+ */
+export function isUnauthenticatedIntegration(
+  manifest: Pick<IntegrationManifest, "auths">,
+): boolean {
+  return manifest.auths === undefined;
+}
+
+/**
+ * An unauthenticated integration's `variables` (AFPS §7.2, §7.12): their values live on a
+ * connection, which this platform creates only on an auth method. A WRITE-path refusal.
+ */
+export function findConnectionlessVariables(
+  manifest: unknown,
+): { path: IssuePath; message: string }[] {
+  const m = manifest as { auths?: unknown; variables?: unknown } | null;
+  if (m === null || m.auths !== undefined || m.variables === undefined) return [];
+  return [
+    {
+      path: ["variables"],
+      message:
+        "an integration without auths cannot declare variables: their values live on a connection, and this platform creates connections only on an auth method",
+    },
+  ];
+}
+
+/**
  * The set of auth keys a manifest currently declares — the single source for
  * the "orphaned-auth" guard. A connection whose `authKey` is not in this set
  * can never produce a delivery plan (the spawn resolver matches connection →

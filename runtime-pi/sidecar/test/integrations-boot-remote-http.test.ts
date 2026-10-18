@@ -533,6 +533,38 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     );
   });
 
+  // AFPS §7.2: an unauthenticated integration binds no connection, so the sidecar has no source.
+  it("connects without a credentials source: nothing injected, a 401 relayed", async () => {
+    const { deps, getFetch } = makeDeps(wire([], {}), async () => true);
+    const unauthenticated = { ...spec(), connection: undefined };
+    const { authKey } = await connectRemoteHttpIntegration(unauthenticated, null, deps);
+    expect(authKey).toBeNull();
+    const seen: Array<string | null> = [];
+    await withGlobalFetch(
+      (async (_input: unknown, init?: RequestInit) => {
+        seen.push(new Headers(init?.headers).get("authorization"));
+        return new Response("{}", { status: 401 });
+      }) as unknown as typeof fetch,
+      async () => {
+        expect((await getFetch()(SERVER_URL, { method: "POST" })).status).toBe(401);
+      },
+    );
+    expect(seen).toEqual([null]);
+  });
+
+  it("connects without a credentials source through the same egress guard", async () => {
+    const { deps, getFetch } = makeDeps(
+      wire([], {}),
+      async () => true,
+      async () => ["10.0.0.5"],
+    );
+    const unauthenticated = { ...spec(UNTRUSTED_SERVER_URL), connection: undefined };
+    await connectRemoteHttpIntegration(unauthenticated, null, deps);
+    await expect(getFetch()(UNTRUSTED_SERVER_URL, { method: "POST" })).rejects.toThrow(
+      /SSRF guard blocked outbound request/,
+    );
+  });
+
   it("throws when server.url is missing", async () => {
     const noUrl = {
       integrationId: "@vendor/remote",

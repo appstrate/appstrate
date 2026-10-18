@@ -145,6 +145,7 @@ import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
 import type { Actor, AuthorizationServerBinding, ResolvedOAuthClient } from "@appstrate/connect";
 import {
+  isUnauthenticatedIntegration,
   resolveIntegrationToolCatalog,
   readDefaultTools,
   type ConnectionCandidate,
@@ -599,7 +600,8 @@ export type ProxyConnectionStatus =
   | "none"
   | "not_permitted"
   | "default_unavailable"
-  | "unusable";
+  | "unusable"
+  | "not_required";
 
 export async function proxyConnectionVerdict(
   packageId: string,
@@ -609,6 +611,7 @@ export async function proxyConnectionVerdict(
   // Read once, for `imposed` and for the selection.
   const orgDefaults = await listOrgDefaultsForResolver(context.spaceId);
   const imposed = orgDefaults[packageId]?.enforce === true;
+  if (isUnauthenticatedIntegration(manifest)) return { status: "not_required", imposed };
   const { reach } = context;
   // The proxy route admits neither: nothing is selected for such a caller.
   if (reach === null) return { status: "not_permitted", imposed };

@@ -32,7 +32,11 @@ import {
   resolveAfpsHttpDelivery,
 } from "@appstrate/connect";
 import type { AfpsHttpDelivery as ConnectAfpsHttpDelivery } from "@appstrate/connect";
-import { resolveEffectiveToolSelection, selectedApiCallConfigs } from "@appstrate/core/integration";
+import {
+  isUnauthenticatedIntegration,
+  resolveEffectiveToolSelection,
+  selectedApiCallConfigs,
+} from "@appstrate/core/integration";
 import type {
   IntegrationManifest,
   ResolvedConnection,
@@ -537,6 +541,33 @@ async function resolveOne(
       ? resolveWorkspaceMount(integrationId, referencedMcpServer)
       : {};
 
+  // AFPS §7.2 — an unauthenticated integration binds no connection: one spec, nothing injected.
+  if (isUnauthenticatedIntegration(manifest)) {
+    if (!exposesTools) return { specs: [], drops: [] };
+    const hiddenTools = [...new Set(manifest.hidden_tools ?? [])];
+    return {
+      specs: [
+        {
+          integrationId,
+          namespace: integrationId,
+          sourceKind: specSourceKind,
+          manifest: {
+            name: manifest.name,
+            version: manifest.version,
+            ...(serverSpec ? { server: serverWire(serverSpec) } : {}),
+          },
+          ...(hiddenTools.length > 0 ? { hiddenTools } : {}),
+          spawnEnv: {},
+          ...(wildcardSelection
+            ? {}
+            : { toolAllowlist: (effectiveSelection ?? []) as readonly string[] }),
+          ...workspaceMount,
+        } satisfies IntegrationSpawnSpec,
+      ],
+      drops: [],
+    };
+  }
+
   if (!boundConnections) {
     // No verdict ⇔ the cascade judged it inert: no tool to expose, nothing to spawn.
     if (!exposesTools) return { specs: [], drops: [] };
@@ -599,18 +630,7 @@ async function resolveOne(
         manifest: {
           name: manifest.name,
           version: manifest.version,
-          ...(server
-            ? {
-                server: {
-                  ...(server.type ? { type: server.type } : {}),
-                  ...(server.entry_point ? { entry_point: server.entry_point } : {}),
-                  ...(server.packageId ? { packageId: server.packageId } : {}),
-                  ...(server.version ? { version: server.version } : {}),
-                  ...(server.url ? { url: server.url } : {}),
-                  ...(server.transport ? { transport: server.transport } : {}),
-                },
-              }
-            : {}),
+          ...(server ? { server: serverWire(server) } : {}),
         },
         ...(apiCalls.length > 0 ? { apiCalls } : {}),
         ...(hiddenToolsUnion.length > 0 ? { hiddenTools: hiddenToolsUnion } : {}),
@@ -646,6 +666,20 @@ async function resolveOne(
     }
   }
   return { specs, drops };
+}
+
+/** The spec's `manifest.server`: the fields the sidecar reads, those unset left out. */
+function serverWire(
+  server: NonNullable<IntegrationSpawnSpec["manifest"]["server"]>,
+): NonNullable<IntegrationSpawnSpec["manifest"]["server"]> {
+  return {
+    ...(server.type ? { type: server.type } : {}),
+    ...(server.entry_point ? { entry_point: server.entry_point } : {}),
+    ...(server.packageId ? { packageId: server.packageId } : {}),
+    ...(server.version ? { version: server.version } : {}),
+    ...(server.url ? { url: server.url } : {}),
+    ...(server.transport ? { transport: server.transport } : {}),
+  };
 }
 
 /**

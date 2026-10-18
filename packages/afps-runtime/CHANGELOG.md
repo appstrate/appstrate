@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `@afps-spec/schema` `^0.12.0`
+
+- An integration manifest may omit `auths` (AFPS §7.2, unauthenticated integrations). (#2075)
+
 ### Added — `API_CALL_BODY_FROM_FILE_RULE`
 
 - The request-body rule both `api_call` surfaces state: write the complete body
