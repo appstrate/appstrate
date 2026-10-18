@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { asRecord } from "@appstrate/core/safe-json";
 import { isEmbeddedDb, reservePgConnection } from "@appstrate/db/client";
 import {
@@ -48,6 +48,7 @@ import {
 } from "../../../src/services/integration-pins-service.ts";
 import {
   disableSchedulesLeftUnnamed,
+  disableUnnamedSince,
   pinLayer,
   removeNamingLayer,
   schedulesLayerMayName,
@@ -713,6 +714,34 @@ describe("removing the layer that names a schedule's connection set", () => {
       expect(spared.updatedAt).toEqual(schedule.updatedAt);
     });
 
+    /** An OAuth client of the space that minted `minted`. */
+    async function clientMinting(minted: string[]): Promise<string> {
+      const [client] = await db
+        .insert(integrationOauthClients)
+        .values({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          integrationId: INTEGRATION,
+          authKey: "primary",
+          clientId: "byo-app",
+          clientSecretEncrypted: "x",
+        })
+        .returning({ id: integrationOauthClients.id });
+      await db
+        .update(integrationConnections)
+        .set({ clientRef: client!.id })
+        .where(inArray(integrationConnections.id, minted));
+      return client!.id;
+    }
+
+    async function deleteClient(clientId: string): Promise<void> {
+      const res = await app.request(`/api/integrations/${INTEGRATION}/oauth-clients/${clientId}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(res.status, await res.clone().text()).toBe(204);
+    }
+
     for (const minting of [1, 2]) {
       // With two, the first forget shrinks the pin and the second drops it.
       it(`disables it when an OAuth client delete drops a pin of ${minting} minted connection(s)`, async () => {
@@ -720,33 +749,12 @@ describe("removing the layer that names a schedule's connection set", () => {
         while (minted.length < minting) {
           minted.push(await seedIntegrationConnection(ctx, INTEGRATION));
         }
-        const [client] = await db
-          .insert(integrationOauthClients)
-          .values({
-            orgId: ctx.orgId,
-            spaceId: ctx.defaultSpaceId,
-            integrationId: INTEGRATION,
-            authKey: "primary",
-            clientId: "byo-app",
-            clientSecretEncrypted: "x",
-          })
-          .returning({ id: integrationOauthClients.id });
-        await db
-          .update(integrationConnections)
-          .set({ clientRef: client!.id })
-          .where(inArray(integrationConnections.id, minted));
+        const clientId = await clientMinting(minted);
         await ownPin(minted);
         const schedule = await armedSchedule();
 
-        const res = await app.request(
-          `/api/integrations/${INTEGRATION}/oauth-clients/${client!.id}`,
-          {
-            method: "DELETE",
-            headers: authHeaders(ctx),
-          },
-        );
+        await deleteClient(clientId);
 
-        expect(res.status, await res.clone().text()).toBe(204);
         expect(await ownPins()).toEqual([]);
         expect(await rowOf(schedule.id)).toMatchObject({
           enabled: false,
@@ -755,6 +763,109 @@ describe("removing the layer that names a schedule's connection set", () => {
         expect(await auditedAs("integration.oauth_client.deleted")).toEqual([schedule.id]);
       });
     }
+
+    // A trigger stands in for a schedule write relying on the pin alone, stored after the read of
+    // the fires and committed with the delete: no candidate of its first pass, judged by the second
+    // once the delete committed (both fail with the first pass alone, verified).
+    const doors = [
+      {
+        door: "DELETE /api/me/connections/{id}",
+        audit: "integration.connection.deleted",
+        remove: (gone: string) => deleteConnection(gone),
+      },
+      {
+        door: "an OAuth client delete",
+        audit: "integration.oauth_client.deleted",
+        remove: async (gone: string) => deleteClient(await clientMinting([gone])),
+      },
+    ];
+    for (const { door, audit, remove: removeBy } of doors) {
+      it(`${door} disables a schedule armed on the pin it empties after the read of the fires`, async () => {
+        const gone = await seedIntegrationConnection(ctx, INTEGRATION);
+        await ownPin([gone]);
+        const id = `sched_${crypto.randomUUID()}`;
+        await db.execute(
+          sql.raw(`CREATE OR REPLACE FUNCTION late_schedule_fn() RETURNS trigger AS $$
+            BEGIN
+              INSERT INTO package_schedules (id, package_id, org_id, space_id, user_id, enabled, cron_expression)
+              VALUES ('${id}', OLD.package_id, '${ctx.orgId}', OLD.space_id, OLD.user_id, true, '0 * * * *');
+              RETURN NULL;
+            END $$ LANGUAGE plpgsql`),
+        );
+        await db.execute(sql`
+          CREATE TRIGGER late_schedule_trg AFTER DELETE ON integration_pins
+          FOR EACH ROW EXECUTE FUNCTION late_schedule_fn()`);
+        try {
+          await removeBy(gone);
+        } finally {
+          await db.execute(sql`DROP TRIGGER IF EXISTS late_schedule_trg ON integration_pins`);
+          await db.execute(sql`DROP FUNCTION IF EXISTS late_schedule_fn()`);
+        }
+
+        expect(await ownPins()).toEqual([]);
+        expect(await rowOf(id)).toMatchObject({
+          enabled: false,
+          disabledReason: "connection_deleted",
+          nextRunAt: null,
+        });
+        expect(await auditedAs(audit)).toEqual([id]);
+      });
+    }
+
+    // The member pin is in the governance a write was judged under, re-checked behind the lock the
+    // delete takes first. Sequential: that lock serializing the two in flight is not observable on
+    // PGlite, so this holds without it.
+    it("a create judged under the member pin a connection delete empties is refused, and stores nothing", async () => {
+      const gone = await seedIntegrationConnection(ctx, INTEGRATION);
+      await ownPin([gone]);
+      const judgedGovernance = await readScheduleGovernance(ctx.defaultSpaceId, AGENT, ctx.user.id);
+      await deleteConnection(gone);
+
+      await expect(
+        createSchedule(
+          { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+          AGENT,
+          { type: "user", id: ctx.user.id },
+          { cronExpression: "0 * * * *", judgedGovernance },
+        ),
+      ).rejects.toMatchObject({ status: 409, code: "schedule_governance_changed" });
+      expect(await db.select().from(schedules)).toEqual([]);
+    });
+  });
+
+  // What a removal runs once committed: the schedules stored on the layer since its read of the
+  // fires, judged behind the governance lock (fails when it judges nothing, verified).
+  describe("the second pass of a removal (disableUnnamedSince)", () => {
+    const layer = (): NamingLayer => ({
+      kind: "member_pin",
+      spaceId: ctx.defaultSpaceId,
+      integrationId: INTEGRATION,
+      agentPackageId: AGENT,
+      userId: ctx.user.id,
+    });
+
+    it("disables, with the reason given, a schedule the layer leaves unnamed that the removal did not judge", async () => {
+      const judged = await armedSchedule();
+      const late = await armedSchedule();
+
+      expect(await disableUnnamedSince(layer(), [judged.id], "connection_deleted")).toEqual([
+        late.id,
+      ]);
+      expect(await rowOf(late.id)).toMatchObject({
+        enabled: false,
+        disabledReason: "connection_deleted",
+        nextRunAt: null,
+      });
+      expect((await rowOf(judged.id)).enabled).toBe(true);
+    });
+
+    it("spares it when another layer names the set by then", async () => {
+      await orgDefault([await sharedConnection()]);
+      const late = await armedSchedule();
+
+      expect(await disableUnnamedSince(layer(), [], "connection_deleted")).toEqual([]);
+      expect((await rowOf(late.id)).enabled).toBe(true);
+    });
   });
 
   // The fires are read before the removal's transaction opens; every layer fact is read inside it.

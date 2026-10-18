@@ -297,11 +297,32 @@ export async function disableSchedulesSelectingWithin(
 }
 
 /**
+ * The second pass of `layer`'s removal, once committed: read the fires again
+ * ({@link schedulesLayerMayName}, outside any transaction), and disable with `reason`, in a
+ * transaction behind `lockIntegrationGovernance`, those the removal did not judge (`judged`) that
+ * it leaves unnamed — `leftUnnamed` re-asks every layer, so one re-created meanwhile keeps them
+ * armed. A write that committed before this read is found here; one committing after re-checks the
+ * governance behind the same lock and is refused. Returns them, whose jobs the caller removes.
+ */
+export async function disableUnnamedSince(
+  layer: NamingLayer,
+  judged: readonly string[],
+  reason: ScheduleDisabledReason,
+): Promise<string[]> {
+  const read = new Set(judged);
+  const since = (await schedulesLayerMayName(layer)).filter((id) => !read.has(id));
+  if (since.length === 0) return [];
+  return db.transaction(async (tx) => {
+    await lockIntegrationGovernance(tx, layer.spaceId, layer.integrationId);
+    return disableSchedulesLeftUnnamed(tx, layer, since, reason);
+  });
+}
+
+/**
  * Remove `layer` with `remove` (`previous: null` when there was no row); when there was one, disable
  * the schedules that leaves unnamed, and those selecting within the floor it imposed, if any. The
- * schedules written between the first read of the fires and the removal's commit are judged by a
- * second pass behind the governance lock, `leftUnnamed` re-asking every layer: one re-created
- * meanwhile keeps them armed.
+ * schedules written between the first read of the fires and the removal's commit are judged by
+ * {@link disableUnnamedSince}.
  */
 export async function removeNamingLayer<
   R extends { previous: unknown; removedFloor?: readonly string[] | null },
@@ -320,12 +341,6 @@ export async function removeNamingLayer<
     return { ...removed, disabledScheduleIds: [...unnamed, ...selectingWithin] };
   });
   if (removed.previous === null) return removed;
-  const judged = new Set(mayName);
-  const since = (await schedulesLayerMayName(layer)).filter((id) => !judged.has(id));
-  if (since.length === 0) return removed;
-  const late = await db.transaction(async (tx) => {
-    await lockIntegrationGovernance(tx, layer.spaceId, layer.integrationId);
-    return disableSchedulesLeftUnnamed(tx, layer, since, "connection_set_unnamed");
-  });
+  const late = await disableUnnamedSince(layer, mayName, "connection_set_unnamed");
   return { ...removed, disabledScheduleIds: [...removed.disabledScheduleIds, ...late] };
 }
