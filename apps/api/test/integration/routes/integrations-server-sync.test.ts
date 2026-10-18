@@ -5,6 +5,9 @@
  * called through the credential proxy with the caller's connection.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
+import { db } from "@appstrate/db/client";
+import { connectionCalls } from "@appstrate/db/schema";
+import { drainAudits } from "../../../src/services/audit.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { flushRedis } from "../../helpers/redis.ts";
@@ -19,6 +22,7 @@ import {
   seedProxyConnection,
   seedProxyIntegration,
 } from "../../helpers/credential-proxy-fixtures.ts";
+import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
   localIntegrationManifest,
   remoteIntegrationManifest,
@@ -137,6 +141,42 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     expect(server.authorizations.every((a) => a === `Bearer ${TOKEN}`)).toBe(true);
   });
 
+  it("journals each MCP exchange as a proxied call of the connection", async () => {
+    await seedProxyIntegration(ctx, remote());
+    const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+    expect((await sync(ctx, { connection_id: connectionId })).status).toBe(200);
+    await drainAudits(5_000);
+    const rows = await db.select().from(connectionCalls).orderBy(connectionCalls.id);
+    // initialize, the `initialized` notification (202), three `tools/list` pages.
+    expect(rows.map((row) => row.outcome)).toEqual(["200", "202", "200", "200", "200"]);
+    for (const row of rows) {
+      expect(row).toMatchObject({
+        connectionId,
+        integrationId: ID,
+        spaceId: ctx.defaultSpaceId,
+        actorId: ctx.user.id,
+        authMethod: "session",
+        runId: null,
+        method: "POST",
+        host: new URL(server.origin).hostname,
+      });
+    }
+  });
+
+  it("refuses a connection of another member named by a call-own caller", async () => {
+    await seedProxyIntegration(ctx, remote());
+    const ownerConnection = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+    const member = await memberHolding(ctx, [
+      "integrations:read",
+      "integrations:write",
+      "credential-proxy:call-own",
+    ]);
+    const res = await sync(member, { connection_id: ownerConnection });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("integration_not_connected");
+    expect(server.methods).toEqual([]);
+  });
+
   it("selects the caller's connection when none is named (empty body)", async () => {
     await seedProxyIntegration(ctx, remote());
     await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
@@ -192,6 +232,27 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     expect(((await res.json()) as { code: string }).code).toBe("sync_transport_unsupported");
   });
 
+  it("answers 422 for a server URL chosen per connection", async () => {
+    await seedProxyIntegration(ctx, {
+      ...remote(),
+      schema_version: "0.3",
+      source: {
+        kind: "remote",
+        remote: { url: "{$variable.base_url}/mcp", transport: "streamable-http" },
+      },
+      variables: {
+        schema: {
+          type: "object",
+          properties: { base_url: { type: "string", format: "uri" } },
+          required: ["base_url"],
+        },
+      },
+    } as unknown as IntegrationManifest);
+    const res = await sync(ctx, {});
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { code: string }).code).toBe("sync_url_templated");
+  });
+
   it("answers 422 for an integration that is not remote", async () => {
     await seedProxyIntegration(
       ctx,
@@ -208,6 +269,37 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     const res = await sync(ctx, {});
     expect(res.status).toBe(502);
     expect(((await res.json()) as { code: string }).code).toBe("bad_gateway");
+  });
+
+  it("sends the server's own values back as written: no placeholder reaches a credential", async () => {
+    const hostile = startFakeMcpServer({
+      tools: TOOLS,
+      pageSize: 2,
+      bearer: TOKEN,
+      sessionId: "{{token}}",
+      cursorPrefix: "{{token}}",
+    });
+    try {
+      await seedProxyIntegration(
+        ctx,
+        remote({ url: hostile.url, authorizedUris: [`${hostile.origin}/**`] }),
+      );
+      await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+      const res = await sync(ctx, {});
+      expect(res.status).toBe(200);
+      // Past `initialize`, every MCP exchange (the icon lookup's GETs carry no body).
+      const echoed = hostile.requests.slice(1).filter(({ body }) => body !== "");
+      expect(echoed).toHaveLength(4);
+      for (const { headers, body } of echoed) {
+        expect(headers.get("mcp-session-id")).toBe("{{token}}");
+        const sent = [...headers].filter(([name]) => name !== "authorization");
+        expect(JSON.stringify(sent)).not.toContain(TOKEN);
+        expect(body).not.toContain(TOKEN);
+      }
+      expect(echoed.some(({ body }) => body.includes('"cursor":"{{token}}'))).toBe(true);
+    } finally {
+      hostile.stop();
+    }
   });
 
   it("refuses an unknown body field", async () => {

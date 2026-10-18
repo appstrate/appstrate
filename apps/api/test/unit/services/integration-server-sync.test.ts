@@ -59,6 +59,24 @@ describe("proposalFromServer", () => {
     expect(proposal.warnings.map((w) => w.code)).toEqual(["tools_truncated"]);
   });
 
+  it("caps the instructions at a line boundary, with a warning", async () => {
+    const { fetchImpl } = fakeFetch({});
+    const line = `${"é".repeat(99)}\n`;
+    const proposal = await proposalFromServer(
+      {
+        url: "https://mcp.test/mcp",
+        info: { name: "x", version: "1" },
+        instructions: line.repeat(200),
+        tools: [],
+        truncated: false,
+      },
+      fetchImpl,
+    );
+    const kept = Math.floor((32 * 1024) / new TextEncoder().encode(line).length);
+    expect(proposal.instructions).toBe(line.repeat(kept).trimEnd());
+    expect(proposal.warnings.map((w) => w.code)).toEqual(["instructions_truncated"]);
+  });
+
   it("takes a fetched raster of serverInfo.icons before the site's icon", async () => {
     const { fetchImpl, seen } = fakeFetch({
       "https://cdn.test/logo.png": () => new Response(PNG),

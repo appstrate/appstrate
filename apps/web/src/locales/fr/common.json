@@ -241,7 +241,7 @@
   "apiError.integration_not_connected": "Connectez d'abord cette intégration : aucune connexion utilisable dans cet espace ne permet d'interroger son serveur.",
   "apiError.integration_not_remote": "Cette intégration n'est pas servie par un serveur MCP distant.",
   "apiError.sync_transport_unsupported": "Ce serveur MCP utilise le transport SSE : seuls les serveurs Streamable HTTP peuvent être synchronisés.",
-  "apiError.tools_truncated": "Le serveur liste plus de 500 outils : seuls les 500 premiers sont proposés.",
+  "apiError.sync_url_templated": "Le serveur MCP de cette intégration dépend de chaque connexion : il ne peut pas être synchronisé.",
   "apiError.missing_integration_connection": "Une connexion d'intégration manque ou doit être choisie avant de lancer.",
   "apiError.model_not_configured": "Aucun modèle n'est configuré pour cet agent. Choisissez-en un ou définissez le modèle par défaut de l'organisation.",
   "apiError.model_credential_missing": "La clé de ce modèle est introuvable. Choisissez à nouveau ses modèles dans Paramètres › Modèles.",

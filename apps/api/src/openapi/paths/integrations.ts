@@ -940,7 +940,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Propose an integration manifest from a remote MCP server URL",
       description:
-        "Probes a remote MCP server before any integration exists and returns a manifest proposal for the editor to merge: an MCP `initialize` request (Streamable HTTP; a 404/405 falls back to the SSE transport's GET), then its OAuth protected-resource metadata (RFC 9728) and authorization-server metadata (RFC 8414), plus the site's raster icon. An oauth2 auth is proposed as a public client (`token_endpoint_auth_method: none`) when the authorization server offers dynamic client registration (RFC 7591), else as `client_secret_post` with its `issuer` and a `manual_client_required` warning; without metadata, a server at the URL's origin offering DCR is guessed as oauth2, anything else as an API key sent as a Bearer token. Persists nothing. Every URL reached is egress-guarded (private and reserved addresses refused, `https` required for a host the operator has not allowlisted). Requires `integrations:write`. Rate limited to 10 requests per minute.",
+        "Probes a remote MCP server before any integration exists and returns a manifest proposal for the editor to merge: an MCP `initialize` request (Streamable HTTP; a 404/405 falls back to the SSE transport's GET), then its OAuth protected-resource metadata (RFC 9728) and authorization-server metadata (RFC 8414), plus the site's raster icon. An oauth2 auth is proposed as a public client (`token_endpoint_auth_method: none`) when the authorization server offers dynamic client registration (RFC 7591), else as `client_secret_post` with its `issuer` and a `manual_client_required` warning (`authorization_server_blocked` instead when the advertised authorization server is on a refused address, which is never read); without metadata, a server at the URL's origin offering DCR is guessed as oauth2, anything else as an API key sent as a Bearer token (auth `primary`, credential field `api_key`). A 401/403 counts as an MCP server only when its `WWW-Authenticate` offers the Bearer scheme. The whole discovery is bounded to 25 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Every URL reached is egress-guarded (private and reserved addresses refused, `https` required for a host the operator has not allowlisted). Requires `integrations:write`. Rate limited to 10 requests per minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1020,7 +1020,10 @@ export const integrationsPaths = {
                       type: "object",
                       required: ["code", "message"],
                       properties: {
-                        code: { type: "string", enum: ["manual_client_required"] },
+                        code: {
+                          type: "string",
+                          enum: ["manual_client_required", "authorization_server_blocked"],
+                        },
                         message: { type: "string" },
                       },
                     },
@@ -1036,14 +1039,14 @@ export const integrationsPaths = {
         "403": { $ref: "#/components/responses/Forbidden" },
         "422": {
           description:
-            "`not_an_mcp_server` — the URL answered, but not as a Streamable HTTP or SSE MCP server; `remote_mcp_auth_not_supported` — it serves MCP without authentication, which integrations do not support yet.",
+            "`not_an_mcp_server` — the URL answered, but not as a Streamable HTTP or SSE MCP server (a 401/403 without a Bearer challenge included); `remote_mcp_auth_not_supported` — it serves MCP without authentication, which integrations do not support yet.",
           headers: STD_RESPONSE_HEADERS,
           content: problemJson,
         },
         "429": { $ref: "#/components/responses/RateLimited" },
         "502": {
           description:
-            "`bad_gateway` — the server could not be reached (network failure, timeout, or a redirect to a refused address).",
+            "`bad_gateway` — the server could not be reached or read (network failure, timeout, a body cut short, the 25-second bound passed before the auth metadata was read, or a redirect to a refused address).",
           headers: STD_RESPONSE_HEADERS,
           content: problemJson,
         },
@@ -1056,7 +1059,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Propose manifest fields from the integration's connected MCP server",
       description:
-        "Connects to the remote MCP server of the integration's latest published version through the credential proxy — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy` — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500) as `default_tools` with an empty `tools_policy` entry each, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions`. Persists nothing. Only a Streamable HTTP server is supported. Requires `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too) and write authority on the package in its home space. Rate limited to 10 requests per minute.",
+        "Connects to the remote MCP server of the integration's latest published version through the credential proxy — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, each exchange journaled like one of its calls (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500) as `default_tools` with an empty `tools_policy` entry each, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning). Persists nothing. Only a Streamable HTTP server is supported. Requires `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too) and write authority on the package in its home space. Rate limited to 10 requests per minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1130,7 +1133,10 @@ export const integrationsPaths = {
                       type: "object",
                       required: ["code", "message"],
                       properties: {
-                        code: { type: "string", enum: ["tools_truncated"] },
+                        code: {
+                          type: "string",
+                          enum: ["tools_truncated", "instructions_truncated"],
+                        },
                         message: { type: "string" },
                       },
                     },
@@ -1156,7 +1162,7 @@ export const integrationsPaths = {
         },
         "422": {
           description:
-            "`integration_not_remote` — the integration is not backed by a remote MCP server; `sync_transport_unsupported` — its server uses the SSE transport.",
+            "`integration_not_remote` — the integration is not backed by a remote MCP server; `sync_transport_unsupported` — its server uses the SSE transport; `sync_url_templated` — its server URL is chosen per connection (`{$variable.…}`).",
           headers: STD_RESPONSE_HEADERS,
           content: problemJson,
         },

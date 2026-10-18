@@ -9,6 +9,8 @@
  */
 
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
+import { parse as parseHost } from "tldts";
+import { DEFAULT_CLIENT_INFO } from "@appstrate/mcp-transport";
 import {
   discoverProtectedResourceMetadata,
   parseResourceMetadataChallenge,
@@ -19,6 +21,7 @@ import { isIconImage } from "@appstrate/core/appearance";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { scopeTokenSchema } from "@appstrate/core/integration";
 import { toSlug } from "@appstrate/core/naming";
+import { parseSseFrames, parseSseJsonData } from "@appstrate/core/sse";
 import { ApiError, badGateway, invalidRequest } from "../lib/errors.ts";
 import { checkEgressUrl, egressFetchImpl, isBlockedEgressUrl } from "../lib/egress-host-guard.ts";
 import { readBodyPrefix } from "../lib/capped-body.ts";
@@ -36,8 +39,9 @@ export interface RemoteIntegrationProposal {
 }
 
 const PROBE_TIMEOUT_MS = 10_000;
+/** The whole discovery (probe, auth metadata, icon), each request keeping its own timeout. */
+const DISCOVERY_TIMEOUT_MS = 25_000;
 const PROBE_BODY_MAX_BYTES = 64 * 1024;
-const CLIENT_INFO = { name: "appstrate-mcp-client", version: "0.0.0" };
 
 /** An MCP server that answered the probe with a challenge: it wants a credential. */
 interface ProtectedServer {
@@ -47,10 +51,18 @@ interface ProtectedServer {
 
 export async function discoverRemoteIntegration(
   input: { url: string; orgSlug: string },
-  deps: { fetchImpl?: typeof fetch } = {},
+  deps: { fetchImpl?: typeof fetch; signal?: AbortSignal } = {},
 ): Promise<RemoteIntegrationProposal> {
   const { url } = input;
-  const fetchImpl = deps.fetchImpl ?? egressFetchImpl();
+  const timeout = AbortSignal.timeout(DISCOVERY_TIMEOUT_MS);
+  // The caller's own bound (its request going away) ends the discovery too.
+  const deadline = deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout;
+  const baseFetch = deps.fetchImpl ?? egressFetchImpl();
+  const fetchImpl = ((target: Parameters<typeof fetch>[0], init?: RequestInit) =>
+    baseFetch(target, {
+      ...init,
+      signal: init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline,
+    })) as typeof fetch;
   const egress = await checkEgressUrl(url, { requireHttpsForUntrustedHost: true });
   if (!egress.ok) {
     throw invalidRequest(
@@ -63,7 +75,12 @@ export async function discoverRemoteIntegration(
 
   const server = await probeServer(url, fetchImpl);
   const [auth, iconSource] = await Promise.all([
-    discoverAuth(url, server.challenge, fetchImpl),
+    // The metadata lookups swallow their faults: one cut by the deadline must not read as absent.
+    discoverAuth(url, server.challenge, fetchImpl).then((found) => {
+      if (deadline.aborted) throw unreachable(url, deadline.reason);
+      return found;
+    }),
+    // Best-effort: past the deadline it finds nothing.
     fetchSiteIcon(url, fetchImpl),
   ]);
 
@@ -109,18 +126,19 @@ async function probeServer(url: string, fetchImpl: typeof fetch): Promise<Protec
       params: {
         protocolVersion: LATEST_PROTOCOL_VERSION,
         capabilities: {},
-        clientInfo: CLIENT_INFO,
+        clientInfo: DEFAULT_CLIENT_INFO,
       },
     }),
   });
-  if (res.status === 401 || res.status === 403) {
+  const challenge = bearerChallenge(res);
+  if (challenge !== undefined) {
     await res.body?.cancel();
     // A server refusing before `initialize` says nothing of its transport.
     const transport = new URL(url).pathname.endsWith("/sse") ? "sse" : "streamable-http";
-    return { transport, challenge: res.headers.get("www-authenticate") };
+    return { transport, challenge };
   }
   if (res.ok) {
-    const answered = isJsonRpcResponse(await readFirstMessage(res));
+    const answered = await readOrFail(url, () => answersJsonRpc(res));
     const sessionId = res.headers.get("mcp-session-id");
     if (sessionId) {
       // Best-effort: end the session the probe opened.
@@ -134,53 +152,72 @@ async function probeServer(url: string, fetchImpl: typeof fetch): Promise<Protec
     }
     throw answered ? authNotSupported(url) : notAnMcpServer(url);
   }
-  await res.body?.cancel();
+  await res.body?.cancel().catch(() => {});
   if (res.status !== 404 && res.status !== 405) throw notAnMcpServer(url);
 
   const sse = await reach(url, fetchImpl, {
     method: "GET",
     headers: { Accept: "text/event-stream" },
   });
-  if (sse.status === 401 || sse.status === 403) {
+  const sseChallenge = bearerChallenge(sse);
+  if (sseChallenge !== undefined) {
     await sse.body?.cancel();
-    return { transport: "sse", challenge: sse.headers.get("www-authenticate") };
+    return { transport: "sse", challenge: sseChallenge };
   }
   if (sse.ok && sse.headers.get("content-type")?.includes("text/event-stream")) {
-    const head = await readBodyPrefix(sse, PROBE_BODY_MAX_BYTES, endsEvent);
-    if (/^event:\s*endpoint\s*$/m.test(head)) throw authNotSupported(url);
+    const isEndpoint = (text: string) =>
+      parseSseFrames(text, "").frames.some((frame) => frame.event === "endpoint");
+    const head = await readOrFail(url, () => readBodyPrefix(sse, PROBE_BODY_MAX_BYTES, isEndpoint));
+    if (isEndpoint(`${head}\n\n`)) throw authNotSupported(url);
   } else {
-    await sse.body?.cancel();
+    await sse.body?.cancel().catch(() => {});
   }
   throw notAnMcpServer(url);
+}
+
+/**
+ * The `WWW-Authenticate` of a 401/403 offering the Bearer scheme (MCP authorization), else
+ * undefined: any other refusal is not an MCP server asking for a credential.
+ */
+function bearerChallenge(res: Response): string | undefined {
+  if (res.status !== 401 && res.status !== 403) return undefined;
+  const challenge = res.headers.get("www-authenticate");
+  return challenge && /(?:^|,)\s*Bearer(?:\s|,|$)/i.test(challenge) ? challenge : undefined;
 }
 
 async function reach(url: string, fetchImpl: typeof fetch, init: RequestInit): Promise<Response> {
   try {
     return await fetchImpl(url, { ...init, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
   } catch (err) {
-    logger.warn("integration discovery: server unreachable", { url, error: getErrorMessage(err) });
-    throw badGateway(`The server at ${url} could not be reached.`);
+    throw unreachable(url, err);
   }
 }
 
-const endsEvent = (text: string) => /\r?\n\r?\n/.test(text);
-
-/** The first JSON-RPC message of a JSON or SSE answer, or null. */
-async function readFirstMessage(res: Response): Promise<unknown> {
-  const isSse = res.headers.get("content-type")?.includes("text/event-stream") ?? false;
-  const text = await readBodyPrefix(res, PROBE_BODY_MAX_BYTES, isSse ? endsEvent : undefined);
-  const json = isSse
-    ? text
-        .split(/\r?\n/)
-        .filter((line) => line.startsWith("data:"))
-        .map((line) => line.slice(5).trim())
-        .join("\n")
-    : text;
+/** A body read cut short (timeout, reset) is the server's fault, as a failed request is. */
+async function readOrFail<T>(url: string, read: () => Promise<T>): Promise<T> {
   try {
-    return JSON.parse(json);
-  } catch {
-    return null;
+    return await read();
+  } catch (err) {
+    throw unreachable(url, err);
   }
+}
+
+function unreachable(url: string, err: unknown): ApiError {
+  logger.warn("integration discovery: server unreachable", { url, error: getErrorMessage(err) });
+  return badGateway(`The server at ${url} could not be reached.`);
+}
+
+/** Whether a JSON or SSE answer carries a JSON-RPC response (notifications before it skipped). */
+async function answersJsonRpc(res: Response): Promise<boolean> {
+  if (!res.headers.get("content-type")?.includes("text/event-stream")) {
+    return isJsonRpcResponse(parseSseJsonData(await readBodyPrefix(res, PROBE_BODY_MAX_BYTES)));
+  }
+  const answered = (text: string) =>
+    parseSseFrames(text, "").frames.some((frame) =>
+      isJsonRpcResponse(parseSseJsonData(frame.data)),
+    );
+  // A last frame the stream ended without its blank line still counts.
+  return answered(`${await readBodyPrefix(res, PROBE_BODY_MAX_BYTES, answered)}\n\n`);
 }
 
 function isJsonRpcResponse(value: unknown): boolean {
@@ -221,7 +258,7 @@ interface DiscoveredAuth {
 /**
  * RFC 9728 metadata → an oauth2 auth on its authorization server. Without it, an
  * authorization server at the URL's origin offering DCR → oauth2 (guessed);
- * else an API key sent as a Bearer token (guessed).
+ * else an API key sent as a Bearer token (guessed), shaped as the editor's blank one.
  */
 async function discoverAuth(
   url: string,
@@ -243,6 +280,17 @@ async function discoverAuth(
     const endpoints = issuer ? await resolveOAuthEndpoints({ issuer, fetchImpl }) : {};
     const scopes = scopeTokens(challengeScopes ?? md.scopesSupported ?? []);
     const autoClient = endpoints.registrationEndpoint !== undefined;
+    const warning = !issuer
+      ? {
+          code: "authorization_server_blocked",
+          message: `The authorization server ${advertised} is on a private or reserved network address: it was not read, and the integration cannot connect to it.`,
+        }
+      : autoClient
+        ? null
+        : {
+            code: "manual_client_required",
+            message: `The authorization server ${advertised} offers no dynamic client registration: an administrator must register an OAuth client for this integration.`,
+          };
     return {
       key: "oauth",
       // A pre-registered client's connect resolves its endpoints from the issuer.
@@ -253,14 +301,7 @@ async function discoverAuth(
         catalog: scopeTokens([...scopes, ...(md.scopesSupported ?? [])]),
       }),
       provenance: "detected",
-      warnings: autoClient
-        ? []
-        : [
-            {
-              code: "manual_client_required",
-              message: `The authorization server ${advertised} offers no dynamic client registration: an administrator must register an OAuth client for this integration.`,
-            },
-          ],
+      warnings: warning ? [warning] : [],
       ...(md.resourceName ? { resourceName: md.resourceName } : {}),
       ...(md.resourceDocumentation ? { documentation: md.resourceDocumentation } : {}),
       ...(md.resourcePolicyUri ? { policyUri: md.resourcePolicyUri } : {}),
@@ -277,7 +318,7 @@ async function discoverAuth(
       warnings: [],
     };
   }
-  return { key: "api_key", auth: apiKeyAuth(origin), provenance: "guessed", warnings: [] };
+  return { key: "primary", auth: apiKeyAuth(origin), provenance: "guessed", warnings: [] };
 }
 
 /** Distinct RFC 6749 §3.3 scope tokens; anything else is dropped. */
@@ -322,20 +363,29 @@ function apiKeyAuth(origin: string): Record<string, unknown> {
     credentials: {
       schema: {
         type: "object",
-        properties: { token: { type: "string", writeOnly: true, title: "Jeton d'API" } },
-        required: ["token"],
+        properties: {
+          api_key: {
+            type: "string",
+            writeOnly: true,
+            description: "API key for this integration.",
+          },
+        },
+        required: ["api_key"],
       },
     },
-    delivery: bearerDelivery("{$credential.token}"),
+    delivery: bearerDelivery("{$credential.api_key}"),
     _meta: { "dev.appstrate/auth": { required: true } },
   };
 }
 
-/** `mcp.notion.com` → `Notion`: the registrable label, capitalised. An IP stays as is. */
+/**
+ * `mcp.notion.com` → `Notion`, `mcp.example.co.uk` → `Example`: the registrable domain's label
+ * (Public Suffix List), capitalised. An IP stays as is.
+ */
 export function hostDisplayName(url: string): string {
   const { hostname } = new URL(url);
-  if (/^[\d.]+$/.test(hostname) || hostname.includes(":")) return hostname;
-  const labels = hostname.split(".");
-  const label = labels.length >= 2 ? labels[labels.length - 2]! : labels[0]!;
+  const host = parseHost(hostname, { allowPrivateDomains: true, extractHostname: false });
+  if (host.isIp) return hostname;
+  const label = host.domainWithoutSuffix || hostname.split(".")[0]!;
   return label.charAt(0).toUpperCase() + label.slice(1);
 }

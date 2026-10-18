@@ -3,7 +3,8 @@
 /**
  * A remote MCP server on loopback (Streamable HTTP, stateless, JSON responses), for route tests
  * that reach one through the platform. Configurable tools (paginated by `pageSize`), `serverInfo`,
- * `instructions`, and a required bearer; records the `Authorization` header of every request.
+ * `instructions`, a required bearer, and values a hostile server would have its client echo (a
+ * session id, a cursor prefix); records every request.
  * Lifted from `mountStandalone` in `packages/mcp-transport/test/client.test.ts`.
  */
 
@@ -19,6 +20,10 @@ export interface FakeMcpServerOptions {
   instructions?: string;
   /** The bearer the server accepts; any other `Authorization` answers 401. */
   bearer?: string;
+  /** Answered as `Mcp-Session-Id` on every response: the client echoes it on each request. */
+  sessionId?: string;
+  /** Prefixes each `nextCursor`: the client sends it back in the next `tools/list` body. */
+  cursorPrefix?: string;
 }
 
 export interface FakeMcpServer {
@@ -29,6 +34,8 @@ export interface FakeMcpServer {
   authorizations: (string | null)[];
   /** The HTTP methods received, in order. */
   methods: string[];
+  /** Every request's headers and body text, in order. */
+  requests: { headers: Headers; body: string }[];
   stop(): void;
 }
 
@@ -41,6 +48,8 @@ export function startFakeMcpServer(opts: FakeMcpServerOptions = {}): FakeMcpServ
   const pageSize = opts.pageSize ?? Math.max(tools.length, 1);
   const authorizations: (string | null)[] = [];
   const methods: string[] = [];
+  const requests: { headers: Headers; body: string }[] = [];
+  const cursorPrefix = opts.cursorPrefix ?? "";
 
   const handle = async (request: Request): Promise<Response> => {
     const server = new Server(opts.serverInfo ?? { name: "fake-mcp", version: "1.0.0" }, {
@@ -48,11 +57,11 @@ export function startFakeMcpServer(opts: FakeMcpServerOptions = {}): FakeMcpServ
       ...(opts.instructions ? { instructions: opts.instructions } : {}),
     });
     server.setRequestHandler(ListToolsRequestSchema, async (req) => {
-      const start = Number(req.params?.cursor ?? 0);
+      const start = Number(req.params?.cursor?.slice(cursorPrefix.length) ?? 0);
       const end = start + pageSize;
       return {
         tools: tools.slice(start, end),
-        ...(end < tools.length ? { nextCursor: String(end) } : {}),
+        ...(end < tools.length ? { nextCursor: `${cursorPrefix}${end}` } : {}),
       };
     });
     const transport = new WebStandardStreamableHTTPServerTransport({
@@ -72,13 +81,23 @@ export function startFakeMcpServer(opts: FakeMcpServerOptions = {}): FakeMcpServ
     hostname: "127.0.0.1",
     port: 0,
     async fetch(req) {
+      const body = await req.text();
       authorizations.push(req.headers.get("authorization"));
       methods.push(req.method);
+      requests.push({ headers: req.headers, body });
       if (new URL(req.url).pathname !== "/mcp") return new Response("not found", { status: 404 });
       if (opts.bearer && req.headers.get("authorization") !== `Bearer ${opts.bearer}`) {
         return new Response("unauthorized", { status: 401 });
       }
-      return handle(req);
+      const res = await handle(
+        new Request(req.url, {
+          method: req.method,
+          headers: req.headers,
+          ...(body ? { body } : {}),
+        }),
+      );
+      if (opts.sessionId) res.headers.set("Mcp-Session-Id", opts.sessionId);
+      return res;
     },
   });
   const origin = `http://127.0.0.1:${http.port}`;
@@ -87,6 +106,7 @@ export function startFakeMcpServer(opts: FakeMcpServerOptions = {}): FakeMcpServ
     origin,
     authorizations,
     methods,
+    requests,
     stop: () => http.stop(true),
   };
 }

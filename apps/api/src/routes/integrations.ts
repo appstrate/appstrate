@@ -1023,7 +1023,10 @@ export function createIntegrationsRouter() {
   // URL, hence the egress guard inside and the rate limit here; persists nothing.
   router.post("/discover", rateLimit(10), requirePermission("integrations", "write"), async (c) => {
     const { url } = await readJsonBody(c, discoverIntegrationSchema);
-    const proposal = await discoverRemoteIntegration({ url, orgSlug: c.get("orgSlug") });
+    const proposal = await discoverRemoteIntegration(
+      { url, orgSlug: c.get("orgSlug") },
+      { signal: c.req.raw.signal },
+    );
     return c.json({
       manifest: proposal.manifest,
       icon_source: proposal.iconSource,
@@ -1051,6 +1054,11 @@ export function createIntegrationsRouter() {
         packageId,
         ...(body.connection_id ? { connectionId: body.connection_id } : {}),
         reach: reachOutsideRun(callerPermissions(c)),
+        caller: {
+          apiKeyId: c.get("apiKeyId") || null,
+          authMethod: c.get("authMethod"),
+          requestId: c.get("requestId"),
+        },
       });
       return c.json({
         manifest: proposal.manifest,

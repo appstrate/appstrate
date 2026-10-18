@@ -32,8 +32,8 @@ import { PackageToolCatalog, type PackageTool } from "../package-detail/package-
 import { TableRowActions } from "../table-row-actions";
 import { DiscoveryBadge } from "./discovery-badge";
 import { RequiredScopesField } from "./required-scopes-field";
-import { SyncFromServer } from "./sync-from-server";
-import type { DiscoveryBadges, ServerSyncProposal } from "../../lib/integration-discovery-merge";
+import { SyncFromServer, type ServerSyncResult } from "./sync-from-server";
+import type { DiscoveryBadges } from "../../lib/integration-discovery-merge";
 import {
   getAllowUndeclaredTools,
   getAuths,
@@ -57,9 +57,10 @@ export function IntegrationToolsSection({
   edit?: { manifest: Record<string, unknown>; onChange: (next: Record<string, unknown>) => void };
   /** Offered only when the integration can be asked for its tools (remote, connected). */
   sync?: {
-    packageId: string;
-    onProposal: (proposal: ServerSyncProposal) => void;
-    result: { count: number; warnings: ServerSyncProposal["warnings"] } | null;
+    run: () => void;
+    isPending: boolean;
+    error: unknown;
+    result: ServerSyncResult | null;
     badge: DiscoveryBadges[string] | undefined;
   };
 }) {

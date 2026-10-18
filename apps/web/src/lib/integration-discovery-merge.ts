@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  resolveIntegrationToolCatalog,
+  type IntegrationManifest,
+} from "@appstrate/core/integration";
+import { isToolsWildcard } from "@appstrate/core/dependencies";
 import type { paths } from "../api/schema";
 
 export type DiscoveryProposal =
@@ -22,52 +27,63 @@ const FILLABLE = ["display_name", "name", "documentation", "privacy_policies", "
 
 /**
  * Applies a discovery proposal over the author's draft. A field is overwritten only when it is
- * still empty or still the creation skeleton (`defaults`); `source.remote` always follows the
- * analysed URL. `badges` keeps the provenance of the fields actually applied.
+ * still empty, still the creation skeleton (`defaults`) or still what the previous analysis
+ * (`previous`) set, so analysing a second URL replaces the first one's proposal; `source.remote`
+ * always follows the analysed URL.
  */
 export function mergeDiscovery(
   current: Manifest,
   defaults: Manifest,
-  proposal: Pick<DiscoveryProposal, "manifest" | "provenance">,
-): { manifest: Manifest; badges: DiscoveryBadges } {
+  proposal: Pick<DiscoveryProposal, "manifest">,
+  previous?: Manifest,
+): Manifest {
   const proposed: Manifest = proposal.manifest;
   const manifest: Manifest = { ...current };
-  const badges: DiscoveryBadges = {};
-  const badge = (pointer: string) => {
-    const provenance = proposal.provenance[pointer];
-    if (provenance) badges[pointer] = provenance;
-  };
+  const untouched = (key: string) =>
+    isEmpty(current[key]) ||
+    isDeepEqual(current[key], defaults[key]) ||
+    (previous !== undefined && isDeepEqual(current[key], previous[key]));
 
   for (const key of FILLABLE) {
-    if (proposed[key] === undefined) continue;
-    if (isEmpty(current[key]) || isDeepEqual(current[key], defaults[key])) {
-      manifest[key] = proposed[key];
-      badge(`/${key}`);
-    }
+    if (proposed[key] !== undefined && untouched(key)) manifest[key] = proposed[key];
   }
-
-  if (isEmpty(current.auths) || isDeepEqual(current.auths, defaults.auths)) {
-    manifest.auths = proposed.auths;
-    for (const pointer of Object.keys(proposal.provenance)) {
-      if (pointer.startsWith("/auths/")) badge(pointer);
-    }
-  }
+  if (untouched("auths")) manifest.auths = proposed.auths;
 
   const remote = proposal.manifest.source.remote;
   const currentSource = asRecord(current.source);
-  const currentRemote = asRecord(currentSource.remote);
   manifest.source = {
     ...currentSource,
     kind: "remote",
-    remote: {
-      ...currentRemote,
-      url: currentRemote.url === remote.url ? currentRemote.url : remote.url,
-      transport: remote.transport,
-    },
+    remote: { ...asRecord(currentSource.remote), url: remote.url, transport: remote.transport },
   };
-  badge("/source/remote/transport");
+  return manifest;
+}
 
-  return { manifest, badges };
+/**
+ * The provenance of every proposed field the draft still holds as proposed: editing a field
+ * drops its badge, and a field the merge kept as the author's never gets one.
+ */
+export function proposalBadges(
+  manifest: Manifest,
+  proposal: { manifest: Manifest; provenance: DiscoveryBadges },
+): DiscoveryBadges {
+  return Object.fromEntries(
+    Object.entries(proposal.provenance).filter(([pointer]) =>
+      isDeepEqual(valueAt(manifest, pointer), valueAt(proposal.manifest, pointer)),
+    ),
+  );
+}
+
+/** The value at an RFC 6901 JSON pointer, `undefined` when a segment is missing. */
+function valueAt(root: unknown, pointer: string): unknown {
+  let node = root;
+  for (const raw of pointer.split("/").slice(1)) {
+    const key = raw.replace(/~1/g, "/").replace(/~0/g, "~");
+    const record = asRecord(node);
+    if (!hasOwn(record, key)) return undefined;
+    node = record[key];
+  }
+  return node;
 }
 
 /** Structural equality over JSON values, blind to key order. */
@@ -80,6 +96,11 @@ function isDeepEqual(a: unknown, b: unknown): boolean {
   return keys.every((k) =>
     isDeepEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]),
   );
+}
+
+/** Own keys only: a tool may be named `constructor`. (`Object.hasOwn` is past this lib target.) */
+function hasOwn(record: Manifest, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(record, key);
 }
 
 function asRecord(v: unknown): Manifest {
@@ -99,34 +120,45 @@ export function badgeUnder(
 const SYNC_IDENTITY = ["display_name", "description", "homepage", "icon"] as const;
 
 /**
- * Applies what a connected server reports over an existing integration. The author asked for the
- * sync, so the tool list replaces `default_tools`; `tools_policy` keeps the entry of every tool
- * still listed (its `required_scopes` are the author's) and drops the others. Identity is the
- * author's: a field is only filled when empty.
+ * Applies what a connected server reports over an existing integration. `tools_policy` keeps the
+ * entry of every tool still listed (its `required_scopes` are the author's), adds an empty one per
+ * new tool and drops the others, unless the list came back truncated. `default_tools` is the
+ * author's choice: an existing list only loses the tools the integration no longer exposes, and an absent or
+ * empty one becomes every listed tool the integration exposes (none a `hidden_tools` entry or a
+ * connect tool). Identity is the author's too: a field is only filled when empty.
  */
 export function mergeServerSync(
   current: Manifest,
-  proposal: Pick<ServerSyncProposal, "manifest">,
-): { manifest: Manifest; badges: DiscoveryBadges } {
+  proposal: Pick<ServerSyncProposal, "manifest" | "warnings">,
+): Manifest {
   const proposed: Manifest = proposal.manifest;
-  const manifest: Manifest = { ...current };
-  const badges: DiscoveryBadges = {};
-  const tools = proposal.manifest.default_tools;
+  const listed = proposal.manifest.default_tools;
   const policy = asRecord(current.tools_policy);
+  const truncated = proposal.warnings.some((w) => w.code === "tools_truncated");
+  const names = [...(truncated ? Object.keys(policy) : []), ...listed];
+  const manifest: Manifest = {
+    ...current,
+    tools_policy: Object.fromEntries(
+      names.map((name) => [name, hasOwn(policy, name) ? policy[name] : {}]),
+    ),
+  };
 
-  manifest.default_tools = tools;
-  manifest.tools_policy = Object.fromEntries(
-    tools.map((name) => [name, name in policy ? policy[name] : {}]),
+  const exposed = new Set(
+    resolveIntegrationToolCatalog({ integration: manifest as IntegrationManifest }).map(
+      (entry) => entry.name,
+    ),
   );
-  badges["/default_tools"] = "detected";
-  badges["/tools_policy"] = "detected";
+  const authored = current.default_tools;
+  if (Array.isArray(authored) && authored.length > 0) {
+    manifest.default_tools = authored.filter((name) => exposed.has(name));
+  } else if (!isToolsWildcard(authored)) {
+    manifest.default_tools = listed.filter((name) => exposed.has(name));
+  }
 
   for (const key of SYNC_IDENTITY) {
-    if (proposed[key] === undefined || !isEmpty(current[key])) continue;
-    manifest[key] = proposed[key];
-    badges[`/${key}`] = "detected";
+    if (proposed[key] !== undefined && isEmpty(current[key])) manifest[key] = proposed[key];
   }
-  return { manifest, badges };
+  return manifest;
 }
 
 /**

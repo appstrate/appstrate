@@ -38,9 +38,14 @@ describe("IntegrationToolsSection without a saved catalog", () => {
 describe("IntegrationToolsSection sync", () => {
   const button = 'data-testid="integration-editor-sync-button"';
   const sync = {
-    packageId: "@acme/notion",
-    onProposal: () => {},
-    result: { count: 3, warnings: [{ code: "tools_truncated" as const, message: "en" }] },
+    run: () => {},
+    isPending: false,
+    error: null,
+    result: {
+      count: 3,
+      warnings: [{ code: "tools_truncated" as const, message: "en" }],
+      docProposed: true,
+    },
     badge: "detected" as const,
   };
 
@@ -51,6 +56,7 @@ describe("IntegrationToolsSection sync", () => {
     expect(html).toContain(button);
     expect(html).toContain("Synchroniser depuis le serveur");
     expect(html).toContain("3 outils synchronisés");
+    expect(html).toContain("INTEGRATION.md");
     expect(html).toContain("détecté");
   });
 

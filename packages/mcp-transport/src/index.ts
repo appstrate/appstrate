@@ -336,7 +336,12 @@ export type {
 // MCP client factories. The agent connects to the sidecar's `/mcp`
 // over Streamable HTTP; the CLI uses the in-process pair already
 // exported above.
-export { createMcpHttpClient, wrapClient, type AppstrateMcpClient } from "./client.ts";
+export {
+  createMcpHttpClient,
+  DEFAULT_CLIENT_INFO,
+  wrapClient,
+  type AppstrateMcpClient,
+} from "./client.ts";
 
 export { parseMcpPost, serveStatelessPost, type McpPost } from "./streamable-post.ts";
 

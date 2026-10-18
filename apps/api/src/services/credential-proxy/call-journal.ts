@@ -19,7 +19,7 @@ import { logger } from "../../lib/logger.ts";
 const MAX_METHOD_LENGTH = 16;
 const MAX_HOST_LENGTH = 255;
 
-interface ConnectionCall {
+export interface ConnectionCall {
   orgId: string;
   spaceId: string;
   connectionId: string;

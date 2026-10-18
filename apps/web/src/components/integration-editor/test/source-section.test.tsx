@@ -8,7 +8,13 @@ import { SourceSection } from "../source-section.tsx";
 await i18nReady;
 
 const remote = { source: { kind: "remote", remote: { url: "https://x.test/mcp" } } };
-const discovery = { onProposal: () => {}, badges: {}, warnings: [] };
+const discovery = {
+  analyse: () => {},
+  isPending: false,
+  error: null,
+  badges: {},
+  warnings: [],
+};
 const analyse = 'data-testid="integration-editor-analyse"';
 
 describe("SourceSection analyse button", () => {
@@ -38,7 +44,7 @@ describe("SourceSection analyse button", () => {
         manifest={remote}
         onChange={() => {}}
         discovery={{
-          onProposal: () => {},
+          ...discovery,
           badges: { "/source/remote/transport": "guessed" },
           warnings: [{ code: "manual_client_required", message: "en" }],
         }}

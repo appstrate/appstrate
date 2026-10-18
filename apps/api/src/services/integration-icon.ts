@@ -6,6 +6,7 @@
  */
 
 import { fileTypeFromBuffer } from "file-type";
+import { parse } from "tldts";
 import { readBodyPrefix, readBodyUnder } from "../lib/capped-body.ts";
 
 const ICON_MAX_BYTES = 256 * 1024;
@@ -23,14 +24,14 @@ const RASTER_TYPES = new Set([
   "image/x-icon",
 ]);
 
-/** The URL's origin, then its parent domain's for a host of 3+ labels (`mcp.notion.com` → `notion.com`). */
+/**
+ * The URL's origin, then its registrable domain's (Public Suffix List) when the host is below it
+ * (`mcp.notion.com` → `notion.com`, `mcp.example.co.uk` → `example.co.uk`).
+ */
 export function iconOrigins(url: string): string[] {
   const u = new URL(url);
-  const labels = u.hostname.split(".");
-  const isIp = /^[\d.]+$/.test(u.hostname) || u.hostname.includes(":");
-  return !isIp && labels.length >= 3
-    ? [u.origin, `${u.protocol}//${labels.slice(1).join(".")}`]
-    : [u.origin];
+  const { domain } = parse(u.hostname, { allowPrivateDomains: true, extractHostname: false });
+  return domain && domain !== u.hostname ? [u.origin, `${u.protocol}//${domain}`] : [u.origin];
 }
 
 /** The first raster icon of the URL's site (linked icons, then `/favicon.ico`) as a data URI, or null. */

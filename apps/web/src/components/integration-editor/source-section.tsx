@@ -3,7 +3,6 @@
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "@appstrate/ui/components/spinner";
-import { $api } from "../../api/client";
 import { errorMessage } from "../../lib/mutation-error";
 import type { DiscoveryBadges, DiscoveryProposal } from "../../lib/integration-discovery-merge";
 import { FormField } from "../form-field";
@@ -15,9 +14,14 @@ import { getSource, setSource, type SourceKind } from "./utils";
 interface SourceSectionProps {
   manifest: Record<string, unknown>;
   onChange: (manifest: Record<string, unknown>) => void;
-  /** Creation only: analyses the remote URL into a proposal the editor merges. */
+  /**
+   * Creation only: analyses the remote URL into a proposal the editor merges. The request is
+   * the editor's, so its result still lands when this tab is left before it answers.
+   */
   discovery?: {
-    onProposal: (proposal: DiscoveryProposal) => void;
+    analyse: (url: string) => void;
+    isPending: boolean;
+    error: unknown;
     badges: DiscoveryBadges;
     warnings: DiscoveryProposal["warnings"];
   };
@@ -25,10 +29,6 @@ interface SourceSectionProps {
 
 export function SourceSection({ manifest, onChange, discovery }: SourceSectionProps) {
   const { t } = useTranslation(["agents", "common"]);
-  // Failure is shown inline under the field, not toasted.
-  const analyse = $api.useMutation("post", "/api/integrations/discover", {
-    meta: { errorHandledByCaller: true },
-  });
   const source = getSource(manifest);
   const update = (patch: Partial<typeof source>) =>
     onChange(setSource(manifest, { ...source, ...patch }));
@@ -65,23 +65,18 @@ export function SourceSection({ manifest, onChange, discovery }: SourceSectionPr
                 type="button"
                 variant="outline"
                 className="mt-7"
-                disabled={analyse.isPending || !URL.canParse(source.remoteUrl)}
-                onClick={() =>
-                  analyse.mutate(
-                    { body: { url: source.remoteUrl } },
-                    { onSuccess: discovery.onProposal },
-                  )
-                }
+                disabled={discovery.isPending || !URL.canParse(source.remoteUrl)}
+                onClick={() => discovery.analyse(source.remoteUrl)}
                 data-testid="integration-editor-analyse"
               >
-                {analyse.isPending && <Spinner />}
+                {discovery.isPending && <Spinner />}
                 {t("integrationEditor.discover.analyse")}
               </Button>
             )}
           </div>
-          {analyse.error && (
+          {discovery?.error != null && (
             <p role="alert" className="text-destructive text-sm">
-              {errorMessage(analyse.error)}
+              {errorMessage(discovery.error)}
             </p>
           )}
           {discovery && <DiscoveryWarnings warnings={discovery.warnings} />}

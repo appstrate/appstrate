@@ -4,54 +4,57 @@ import { useTranslation } from "react-i18next";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "@appstrate/ui/components/spinner";
-import { $api } from "../../api/client";
 import { errorMessage } from "../../lib/mutation-error";
 import type { ServerSyncProposal } from "../../lib/integration-discovery-merge";
 import { DiscoveryWarnings } from "./discovery-warnings";
 
+export interface ServerSyncResult {
+  count: number;
+  warnings: ServerSyncProposal["warnings"];
+  /** The server's instructions were staged as the package's `INTEGRATION.md`. */
+  docProposed: boolean;
+}
+
 /**
- * Asks the connected MCP server for its tools and identity and hands the proposal to the editor,
- * which merges it into the draft; nothing is saved here.
+ * Asks the connected MCP server for its tools and identity. The request is the editor's, which
+ * merges the proposal into the draft; nothing is saved here.
  */
 export function SyncFromServer({
-  packageId,
-  onProposal,
+  run,
+  isPending,
+  error,
   result,
 }: {
-  packageId: string;
-  onProposal: (proposal: ServerSyncProposal) => void;
+  run: () => void;
+  isPending: boolean;
+  error: unknown;
   /** The last applied sync, for the confirmation line and its warnings. */
-  result: { count: number; warnings: ServerSyncProposal["warnings"] } | null;
+  result: ServerSyncResult | null;
 }) {
   const { t } = useTranslation("agents");
-  // Failure is shown inline under the button, not toasted.
-  const sync = $api.useMutation("post", "/api/integrations/{packageId}/discover", {
-    meta: { errorHandledByCaller: true },
-  });
   return (
     <div className="flex flex-col gap-3" data-testid="integration-editor-sync">
       <div className="flex items-center gap-3">
         <Button
           type="button"
           variant="outline"
-          disabled={sync.isPending}
-          onClick={() =>
-            sync.mutate({ params: { path: { packageId } }, body: {} }, { onSuccess: onProposal })
-          }
+          disabled={isPending}
+          onClick={run}
           data-testid="integration-editor-sync-button"
         >
-          {sync.isPending ? <Spinner /> : <RefreshCw />}
+          {isPending ? <Spinner /> : <RefreshCw />}
           {t("integrationEditor.sync.button")}
         </Button>
-        {result && !sync.error && (
+        {result && error == null && (
           <p className="text-muted-foreground text-sm" role="status">
             {t("integrationEditor.sync.done", { count: result.count })}
+            {result.docProposed && ` ${t("integrationEditor.sync.docProposed")}`}
           </p>
         )}
       </div>
-      {sync.error && (
+      {error != null && (
         <p role="alert" className="text-destructive text-sm">
-          {errorMessage(sync.error)}
+          {errorMessage(error)}
         </p>
       )}
       {result && <DiscoveryWarnings warnings={result.warnings} />}

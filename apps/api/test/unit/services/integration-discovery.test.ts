@@ -31,6 +31,10 @@ const HOSTS = [
   "mcp.manual.test",
   "mcp.scopes.test",
   "mcp.down.test",
+  "mcp.reset.test",
+  "mcp.notbearer.test",
+  "mcp.blocked.test",
+  "mcp.slow.test",
 ];
 
 let previousAllowlist: string | undefined;
@@ -251,23 +255,29 @@ describe("discoverRemoteIntegration", () => {
     expect(provenance["/auths/oauth"]).toBe("guessed");
   });
 
-  it("guesses a Bearer API key when nothing describes the auth", async () => {
+  it("guesses a Bearer API key, shaped as the editor's, when nothing describes the auth", async () => {
     const { fetchImpl } = fakeFetch({
-      "POST https://mcp.apikey.test/mcp": () => new Response("no", { status: 401 }),
+      "POST https://mcp.apikey.test/mcp": () => unauthorized("Bearer"),
     });
     const { manifest, provenance } = await discoverRemoteIntegration(
       { url: "https://mcp.apikey.test/mcp", orgSlug: "acme" },
       { fetchImpl },
     );
     expect(manifest.auths).toEqual({
-      api_key: {
+      primary: {
         type: "api_key",
         authorized_uris: ["https://mcp.apikey.test/**"],
         credentials: {
           schema: {
             type: "object",
-            properties: { token: { type: "string", writeOnly: true, title: "Jeton d'API" } },
-            required: ["token"],
+            properties: {
+              api_key: {
+                type: "string",
+                writeOnly: true,
+                description: "API key for this integration.",
+              },
+            },
+            required: ["api_key"],
           },
         },
         delivery: {
@@ -275,13 +285,36 @@ describe("discoverRemoteIntegration", () => {
             in: "header",
             name: "Authorization",
             prefix: "Bearer ",
-            value: "{$credential.token}",
+            value: "{$credential.api_key}",
           },
         },
         _meta: { "dev.appstrate/auth": { required: true } },
       },
     });
-    expect(provenance["/auths/api_key"]).toBe("guessed");
+    expect(provenance["/auths/primary"]).toBe("guessed");
+  });
+
+  it("refuses a 401 that asks for no Bearer credential", async () => {
+    const { fetchImpl } = fakeFetch({
+      "POST https://mcp.notbearer.test/mcp": () => unauthorized('Basic realm="admin"'),
+    });
+    const err = await refusal(
+      discoverRemoteIntegration(
+        { url: "https://mcp.notbearer.test/mcp", orgSlug: "acme" },
+        { fetchImpl },
+      ),
+    );
+    expect(err.code).toBe("not_an_mcp_server");
+    const bare = fakeFetch({
+      "POST https://mcp.notbearer.test/mcp": () => new Response("no", { status: 403 }),
+    });
+    const bareErr = await refusal(
+      discoverRemoteIntegration(
+        { url: "https://mcp.notbearer.test/mcp", orgSlug: "acme" },
+        { fetchImpl: bare.fetchImpl },
+      ),
+    );
+    expect(bareErr.code).toBe("not_an_mcp_server");
   });
 
   it("guesses the SSE transport from an /sse path", async () => {
@@ -299,7 +332,7 @@ describe("discoverRemoteIntegration", () => {
   it("falls back to the SSE GET on a 405, and reads its challenge", async () => {
     const { fetchImpl, seen } = fakeFetch({
       "POST https://mcp.legacyauth.test/events": () => new Response(null, { status: 405 }),
-      "GET https://mcp.legacyauth.test/events": () => new Response("no", { status: 401 }),
+      "GET https://mcp.legacyauth.test/events": () => unauthorized("Bearer"),
     });
     const { manifest } = await discoverRemoteIntegration(
       { url: "https://mcp.legacyauth.test/events", orgSlug: "acme" },
@@ -333,10 +366,13 @@ describe("discoverRemoteIntegration", () => {
   });
 
   it("refuses an open Streamable HTTP server and ends the session it opened", async () => {
+    const notification = { jsonrpc: "2.0", method: "notifications/message", params: {} };
     const { fetchImpl, seen } = fakeFetch({
       "POST https://mcp.open.test/mcp": () =>
         new Response(
-          `event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-11-25" } })}\n\n`,
+          // A notification may come before the response: it is skipped.
+          `event: message\ndata: ${JSON.stringify(notification)}\n\n` +
+            `event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-11-25" } })}\n\n`,
           { headers: { "Content-Type": "text/event-stream", "Mcp-Session-Id": "s-1" } },
         ),
       "DELETE https://mcp.open.test/mcp": () => new Response(null, { status: 204 }),
@@ -379,6 +415,83 @@ describe("discoverRemoteIntegration", () => {
     expect({ status: err.status, code: err.code }).toEqual({ status: 502, code: "bad_gateway" });
   });
 
+  it("answers 502 when the answer's body fails mid-read", async () => {
+    const { fetchImpl } = fakeFetch({
+      "POST https://mcp.reset.test/mcp": () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode("event: message\n"));
+              controller.error(new Error("connection reset"));
+            },
+          }),
+          { headers: { "Content-Type": "text/event-stream" } },
+        ),
+    });
+    const err = await refusal(
+      discoverRemoteIntegration(
+        { url: "https://mcp.reset.test/mcp", orgSlug: "acme" },
+        { fetchImpl },
+      ),
+    );
+    expect({ status: err.status, code: err.code }).toEqual({ status: 502, code: "bad_gateway" });
+  });
+
+  it("warns that a blocked authorization server was not read", async () => {
+    const { fetchImpl, seen } = fakeFetch({
+      ...protectedServer("mcp.blocked.test"),
+      "GET https://mcp.blocked.test/.well-known/oauth-protected-resource/mcp": () =>
+        json({
+          resource: "https://mcp.blocked.test/mcp",
+          authorization_servers: ["https://10.0.0.1"],
+        }),
+    });
+    const { warnings } = await discoverRemoteIntegration(
+      { url: "https://mcp.blocked.test/mcp", orgSlug: "acme" },
+      { fetchImpl },
+    );
+    expect(warnings.map((w) => w.code)).toEqual(["authorization_server_blocked"]);
+    expect(seen.some((key) => key.includes("10.0.0.1"))).toBe(false);
+  });
+
+  /** Answers like `inner`, except the URLs `hangs` names, which wait for their signal. */
+  const hanging = (inner: typeof fetch, hangs: (url: string) => boolean) =>
+    (async (input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+      hangs(String(input))
+        ? new Promise<Response>((_, reject) => {
+            const signal = init!.signal!;
+            if (signal.aborted) reject(signal.reason);
+            signal.addEventListener("abort", () => reject(signal.reason));
+          })
+        : inner(input, init)) as typeof fetch;
+
+  it("answers 502 when the auth metadata outlasts the deadline", async () => {
+    const { fetchImpl } = fakeFetch(protectedServer("mcp.slow.test"));
+    const err = await refusal(
+      discoverRemoteIntegration(
+        { url: "https://mcp.slow.test/mcp", orgSlug: "acme" },
+        {
+          fetchImpl: hanging(fetchImpl, (url) => url.includes("oauth-protected-resource")),
+          signal: AbortSignal.timeout(50),
+        },
+      ),
+    );
+    expect({ status: err.status, code: err.code }).toEqual({ status: 502, code: "bad_gateway" });
+  });
+
+  it("proposes without an icon when only the icon outlasts the deadline", async () => {
+    const { fetchImpl } = fakeFetch(protectedServer("mcp.slow.test"));
+    const proposal = await discoverRemoteIntegration(
+      { url: "https://mcp.slow.test/mcp", orgSlug: "acme" },
+      {
+        fetchImpl: hanging(fetchImpl, (url) => new URL(url).pathname === "/"),
+        signal: AbortSignal.timeout(50),
+      },
+    );
+    expect(proposal.iconSource).toBeNull();
+    expect(Object.keys(proposal.manifest.auths as object)).toEqual(["oauth"]);
+  });
+
   it("refuses a private address and plain http before any request", async () => {
     const { fetchImpl, seen } = fakeFetch({});
     for (const url of ["https://10.0.0.1/mcp", "http://mcp.example.com/mcp"]) {
@@ -392,6 +505,7 @@ describe("discoverRemoteIntegration", () => {
 describe("hostDisplayName", () => {
   it("capitalises the registrable label", () => {
     expect(hostDisplayName("https://mcp.notion.com/mcp")).toBe("Notion");
+    expect(hostDisplayName("https://mcp.example.co.uk/mcp")).toBe("Example");
     expect(hostDisplayName("https://localhost:3000/mcp")).toBe("Localhost");
     expect(hostDisplayName("http://127.0.0.1:3000/mcp")).toBe("127.0.0.1");
   });

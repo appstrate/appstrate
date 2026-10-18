@@ -116,6 +116,12 @@ type ProxyCallInput = {
   /** A stream body's byte length from the request's own framing; omitted = sent chunked. */
   bodyLength?: number;
   substituteBody?: boolean;
+  /**
+   * `false`: headers and body go as written, no `{{field}}` substituted (the credential header is
+   * still injected). For a caller relaying another party's values, such as a protocol client
+   * echoing what the upstream sent it, which must never name a credential field.
+   */
+  substitute?: false;
 
   /**
    * Cookie jar store — read before the upstream call, written after.
@@ -236,11 +242,12 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   }
 
   const fields = resolved.credentials;
+  const literal = input.substitute === false;
   const prepareFor = (credentials: Record<string, string>) =>
     prepareApiCallRequest({
       target: input.target,
-      headers: input.headers ?? {},
-      body: typeof input.body === "string" && input.substituteBody ? input.body : null,
+      headers: literal ? {} : (input.headers ?? {}),
+      body: !literal && typeof input.body === "string" && input.substituteBody ? input.body : null,
       fields: credentials,
     });
   const prepared = prepareFor(fields);
@@ -274,7 +281,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // Every header carrying a decrypted credential: a redirect leaving the allowlist strips them.
   const sensitiveHeaderNames = new Set<string>();
   const outbound = (request: PreparedApiCallRequest, payload: typeof resolved) => {
-    const headers = new Headers(request.headers);
+    const headers = new Headers(literal ? input.headers : request.headers);
     const injection = applyInjectedCredentialHeaderToHeaders(headers, payload);
     const carrier = credentialCarryingHeader(injection);
     for (const name of request.credentialHeaders) sensitiveHeaderNames.add(name);

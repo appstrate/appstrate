@@ -1524,7 +1524,7 @@ export interface paths {
         };
         /**
          * The credential proxy's calls made in the current space
-         * @description Every call the credential proxy (`/api/credential-proxy/proxy`) made in the current space, whatever the connection and whoever owns it: who used which connection, against which host, with what outcome. One row per call that may have sent a credential, successful or not. Requires `integrations:configure`, the permission that governs which credential the space resolves to; it is session-only, so no API key reads this journal. Calls made in another space are never listed, including those made with a connection shared into both. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
+         * @description Every call the credential proxy (`/api/credential-proxy/proxy`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`) made in the current space, whatever the connection and whoever owns it: who used which connection, against which host, with what outcome. One row per call that may have sent a credential, successful or not. Requires `integrations:configure`, the permission that governs which credential the space resolves to; it is session-only, so no API key reads this journal. Calls made in another space are never listed, including those made with a connection shared into both. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
          */
         get: operations["listConnectionCalls"];
         put?: never;
@@ -1606,7 +1606,7 @@ export interface paths {
         put?: never;
         /**
          * Propose an integration manifest from a remote MCP server URL
-         * @description Probes a remote MCP server before any integration exists and returns a manifest proposal for the editor to merge: an MCP `initialize` request (Streamable HTTP; a 404/405 falls back to the SSE transport's GET), then its OAuth protected-resource metadata (RFC 9728) and authorization-server metadata (RFC 8414), plus the site's raster icon. An oauth2 auth is proposed as a public client (`token_endpoint_auth_method: none`) when the authorization server offers dynamic client registration (RFC 7591), else as `client_secret_post` with its `issuer` and a `manual_client_required` warning; without metadata, a server at the URL's origin offering DCR is guessed as oauth2, anything else as an API key sent as a Bearer token. Persists nothing. Every URL reached is egress-guarded (private and reserved addresses refused, `https` required for a host the operator has not allowlisted). Requires `integrations:write`. Rate limited to 10 requests per minute.
+         * @description Probes a remote MCP server before any integration exists and returns a manifest proposal for the editor to merge: an MCP `initialize` request (Streamable HTTP; a 404/405 falls back to the SSE transport's GET), then its OAuth protected-resource metadata (RFC 9728) and authorization-server metadata (RFC 8414), plus the site's raster icon. An oauth2 auth is proposed as a public client (`token_endpoint_auth_method: none`) when the authorization server offers dynamic client registration (RFC 7591), else as `client_secret_post` with its `issuer` and a `manual_client_required` warning (`authorization_server_blocked` instead when the advertised authorization server is on a refused address, which is never read); without metadata, a server at the URL's origin offering DCR is guessed as oauth2, anything else as an API key sent as a Bearer token (auth `primary`, credential field `api_key`). A 401/403 counts as an MCP server only when its `WWW-Authenticate` offers the Bearer scheme. The whole discovery is bounded to 25 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Every URL reached is egress-guarded (private and reserved addresses refused, `https` required for a host the operator has not allowlisted). Requires `integrations:write`. Rate limited to 10 requests per minute.
          */
         post: operations["discoverRemoteIntegration"];
         delete?: never;
@@ -1900,7 +1900,7 @@ export interface paths {
         put?: never;
         /**
          * Propose manifest fields from the integration's connected MCP server
-         * @description Connects to the remote MCP server of the integration's latest published version through the credential proxy — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy` — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500) as `default_tools` with an empty `tools_policy` entry each, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions`. Persists nothing. Only a Streamable HTTP server is supported. Requires `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too) and write authority on the package in its home space. Rate limited to 10 requests per minute.
+         * @description Connects to the remote MCP server of the integration's latest published version through the credential proxy — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, each exchange journaled like one of its calls (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500) as `default_tools` with an empty `tools_policy` entry each, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning). Persists nothing. Only a Streamable HTTP server is supported. Requires `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too) and write authority on the package in its home space. Rate limited to 10 requests per minute.
          */
         post: operations["syncIntegrationFromServer"];
         delete?: never;
@@ -2226,7 +2226,7 @@ export interface paths {
         };
         /**
          * The credential proxy's calls made with one of the caller's connections
-         * @description Every call the credential proxy (`/api/credential-proxy/proxy`) made with a connection the caller owns, whoever made it and from whichever space: a colleague using a connection shared into a space, a run, an API key. One row per call that may have sent the credential, successful or not. Authorized by ownership, capped by a delegated credential's `integrations:read` ceiling. A delegated or end-user credential reads inside its bound organization (and space, when it pins one) only. Ownership is read on the connection itself: once it is deleted this route answers 404, and its calls remain listed by `GET /api/integrations/calls` in the spaces they were made in. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
+         * @description Every call the credential proxy (`/api/credential-proxy/proxy`, and the MCP exchanges of `POST /api/integrations/{packageId}/discover`) made with a connection the caller owns, whoever made it and from whichever space: a colleague using a connection shared into a space, a run, an API key. One row per call that may have sent the credential, successful or not. Authorized by ownership, capped by a delegated credential's `integrations:read` ceiling. A delegated or end-user credential reads inside its bound organization (and space, when it pins one) only. Ownership is read on the connection itself: once it is deleted this route answers 404, and its calls remain listed by `GET /api/integrations/calls` in the spaces they were made in. Newest first, keyset-paginated on `id`: the `Link` header names the next page. An unknown query parameter is a 400, never an ignored filter. Rate-limited to 60/min.
          */
         get: operations["listMyConnectionCalls"];
         put?: never;
@@ -13645,7 +13645,7 @@ export interface operations {
                         };
                         warnings: {
                             /** @enum {string} */
-                            code: "manual_client_required";
+                            code: "manual_client_required" | "authorization_server_blocked";
                             message: string;
                         }[];
                     };
@@ -13653,7 +13653,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
-            /** @description `not_an_mcp_server` — the URL answered, but not as a Streamable HTTP or SSE MCP server; `remote_mcp_auth_not_supported` — it serves MCP without authentication, which integrations do not support yet. */
+            /** @description `not_an_mcp_server` — the URL answered, but not as a Streamable HTTP or SSE MCP server (a 401/403 without a Bearer challenge included); `remote_mcp_auth_not_supported` — it serves MCP without authentication, which integrations do not support yet. */
             422: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -13665,7 +13665,7 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description `bad_gateway` — the server could not be reached (network failure, timeout, or a redirect to a refused address). */
+            /** @description `bad_gateway` — the server could not be reached or read (network failure, timeout, a body cut short, the 25-second bound passed before the auth metadata was read, or a redirect to a refused address). */
             502: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -14863,7 +14863,7 @@ export interface operations {
                         };
                         warnings: {
                             /** @enum {string} */
-                            code: "tools_truncated";
+                            code: "tools_truncated" | "instructions_truncated";
                             message: string;
                         }[];
                     };
@@ -14893,7 +14893,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description `integration_not_remote` — the integration is not backed by a remote MCP server; `sync_transport_unsupported` — its server uses the SSE transport. */
+            /** @description `integration_not_remote` — the integration is not backed by a remote MCP server; `sync_transport_unsupported` — its server uses the SSE transport; `sync_url_templated` — its server URL is chosen per connection (`{$variable.…}`). */
             422: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];

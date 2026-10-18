@@ -8,6 +8,7 @@ import type {
   IntegrationToolCatalogEntry,
   OrgPackageItemDetail,
 } from "@appstrate/shared-types";
+import { $api } from "../api/client";
 import { useAuth } from "../hooks/use-auth";
 import { useOrg } from "../hooks/use-org";
 import type { AgentDefinitionSection } from "../lib/settings-section-href";
@@ -33,6 +34,7 @@ import { getSource, isRemoteSourceUrl } from "../components/integration-editor/u
 import { IntegrationIconField } from "../components/integration-editor/integration-icon-field";
 import { AuthsSection } from "../components/integration-editor/auths-section";
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
+import type { ServerSyncResult } from "../components/integration-editor/sync-from-server";
 
 import {
   defaultSkillManifest,
@@ -53,10 +55,9 @@ import {
   hasIntegrationDoc,
   mergeDiscovery,
   mergeServerSync,
-  badgeUnder,
+  proposalBadges,
   type DiscoveryBadges,
   type DiscoveryProposal,
-  type ServerSyncProposal,
 } from "../lib/integration-discovery-merge";
 import { encodeIconDataUri } from "../lib/icon-image";
 
@@ -415,60 +416,84 @@ function IntegrationEditorInner({
   const { state, activeTab, replaceManifest: onManifestChange } = editor;
   const { user } = useAuth();
   const { currentOrg } = useOrg();
-  const [badges, setBadges] = useState<DiscoveryBadges>({});
+  // The last applied proposal: its fields badge the draft while they still hold its values, and
+  // a second analysis may replace them.
+  const [applied, setApplied] = useState<{
+    manifest: Record<string, unknown>;
+    provenance: DiscoveryBadges;
+  } | null>(null);
+  // An icon re-encoded from the proposal's `icon_source`, which `applied` does not carry.
+  const [filledIcon, setFilledIcon] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<DiscoveryProposal["warnings"]>([]);
+  const [syncResult, setSyncResult] = useState<ServerSyncResult | null>(null);
+  const badges: DiscoveryBadges = {
+    ...(applied ? proposalBadges(state.manifest, applied) : {}),
+    ...(filledIcon && state.manifest.icon === filledIcon ? { "/icon": "detected" } : {}),
+  };
 
   // A raster the manifest does not accept as is (ICO, large PNG) is re-encoded here; one the
   // browser cannot decode is skipped.
-  const fillIcon = (
-    proposal: { icon_source: string | null; manifest: { icon?: string } },
-    merged: Record<string, unknown>,
-  ) => {
-    if (!proposal.icon_source || proposal.manifest.icon || merged.icon) return;
+  const fillIcon = (proposal: { icon_source: string | null; manifest: { icon?: string } }) => {
+    if (!proposal.icon_source || proposal.manifest.icon) return;
     void encodeIconDataUri(proposal.icon_source)
       .then((icon) => {
         editor.setState((s) => (s.manifest.icon ? s : { ...s, manifest: { ...s.manifest, icon } }));
-        setBadges((b) => ({ ...b, "/icon": "detected" }));
+        setFilledIcon(icon);
       })
       .catch(() => {});
   };
 
-  const applyProposal = (proposal: DiscoveryProposal) => {
-    const defaults = defaultIntegrationManifest(currentOrg?.slug, user?.email);
-    const merged = mergeDiscovery(state.manifest, defaults, proposal);
-    onManifestChange(merged.manifest);
-    setBadges(merged.badges);
-    setWarnings(proposal.warnings);
-    fillIcon(proposal, merged.manifest);
-  };
+  // Both requests live here, not in their tab: this editor outlives a tab switch, and React Query
+  // runs a `mutate()` call's own callbacks only while the component that made it is mounted. Each
+  // merge runs on the latest draft, so edits made while the request was out are kept.
+  const analyse = $api.useMutation("post", "/api/integrations/discover", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: (proposal) => {
+      const defaults = defaultIntegrationManifest(currentOrg?.slug, user?.email);
+      const previous = applied?.manifest;
+      editor.setState((s) => ({
+        ...s,
+        manifest: mergeDiscovery(s.manifest, defaults, proposal, previous),
+      }));
+      setApplied(proposal);
+      setFilledIcon(null);
+      setWarnings(proposal.warnings);
+      fillIcon(proposal);
+    },
+  });
 
-  const [syncResult, setSyncResult] = useState<{
-    count: number;
-    warnings: ServerSyncProposal["warnings"];
-  } | null>(null);
   const sourceNow = getSource(state.manifest);
+  // The server is called at the published URL; a templated one needs a connection's values.
   const canSync =
-    isEdit && syncable && sourceNow.kind === "remote" && sourceNow.remoteTransport !== "sse";
+    isEdit &&
+    syncable &&
+    sourceNow.kind === "remote" &&
+    sourceNow.remoteTransport !== "sse" &&
+    !sourceNow.remoteUrl.includes("{$");
 
-  const applySync = (proposal: ServerSyncProposal) => {
-    const merged = mergeServerSync(state.manifest, proposal);
-    onManifestChange(merged.manifest);
-    setBadges(merged.badges);
-    setSyncResult({ count: proposal.manifest.default_tools.length, warnings: proposal.warnings });
-    if (proposal.instructions && !hasDoc) {
-      const operation = {
-        op: "write",
-        path: "INTEGRATION.md",
-        text: proposal.instructions,
-      } as const;
-      editor.setState((s) =>
-        (s.operations ?? []).some((o) => o.op === "write" && o.path === operation.path)
-          ? s
-          : { ...s, operations: [...(s.operations ?? []), operation] },
-      );
-    }
-    fillIcon(proposal, merged.manifest);
-  };
+  const sync = $api.useMutation("post", "/api/integrations/{packageId}/discover", {
+    meta: { errorHandledByCaller: true },
+    onSuccess: (proposal) => {
+      editor.setState((s) => ({ ...s, manifest: mergeServerSync(s.manifest, proposal) }));
+      setApplied(proposal);
+      // A sync never replaces an authored `INTEGRATION.md`.
+      const instructions = hasDoc ? null : proposal.instructions;
+      setSyncResult({
+        count: proposal.manifest.default_tools.length,
+        warnings: proposal.warnings,
+        docProposed: Boolean(instructions),
+      });
+      if (instructions) {
+        const operation = { op: "write", path: "INTEGRATION.md", text: instructions } as const;
+        editor.setState((s) =>
+          (s.operations ?? []).some((o) => o.op === "write" && o.path === operation.path)
+            ? s
+            : { ...s, operations: [...(s.operations ?? []), operation] },
+        );
+      }
+      fillIcon(proposal);
+    },
+  });
 
   return (
     <PackageEditorFrame
@@ -509,7 +534,17 @@ function IntegrationEditorInner({
         <SourceSection
           manifest={state.manifest}
           onChange={onManifestChange}
-          discovery={isEdit ? undefined : { onProposal: applyProposal, badges, warnings }}
+          discovery={
+            isEdit
+              ? undefined
+              : {
+                  analyse: (url) => analyse.mutate({ body: { url } }),
+                  isPending: analyse.isPending,
+                  error: analyse.error,
+                  badges,
+                  warnings,
+                }
+          }
         />
       )}
 
@@ -522,12 +557,13 @@ function IntegrationEditorInner({
           tools={toolCatalog ?? []}
           edit={{ manifest: state.manifest, onChange: onManifestChange }}
           sync={
-            canSync
+            canSync && packageId
               ? {
-                  packageId,
-                  onProposal: applySync,
+                  run: () => sync.mutate({ params: { path: { packageId } }, body: {} }),
+                  isPending: sync.isPending,
+                  error: sync.error,
                   result: syncResult,
-                  badge: badgeUnder(badges, "/default_tools"),
+                  badge: syncResult ? "detected" : undefined,
                 }
               : undefined
           }

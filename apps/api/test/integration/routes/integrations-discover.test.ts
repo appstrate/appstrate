@@ -16,6 +16,7 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { allowLoopbackOAuthEgress } from "../../helpers/strict-authorization-server.ts";
+import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 
 /** A 1×1 PNG header: what `isIconImage` reads (signature + `IHDR` size). */
 const PNG = new Uint8Array([
@@ -140,6 +141,26 @@ describe("POST /api/integrations/discover", () => {
       },
       warnings: [],
     });
+  });
+
+  it("proposes a manifest every write-path validator accepts", async () => {
+    const res = await discover(ctx, { url: `${origin}/mcp` });
+    const { manifest } = (await res.json()) as { manifest: Record<string, unknown> };
+    // What the editor saves: its blank manifest with the proposal merged in.
+    const created = await getTestApp().request("/api/packages/integrations", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({
+        manifest: {
+          schema_version: AFPS_SCHEMA_VERSION,
+          type: "integration",
+          version: "1.0.0",
+          description: "",
+          ...manifest,
+        },
+      }),
+    });
+    expect(created.status).toBe(201);
   });
 
   it("is refused without integrations:write", async () => {

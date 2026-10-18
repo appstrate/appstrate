@@ -30,12 +30,18 @@ function fakeFetch(routes: Record<string, () => Response>) {
 }
 
 describe("iconOrigins", () => {
-  it("adds the parent domain of a host of three labels or more", () => {
+  it("adds the registrable domain of a host below it", () => {
     expect(iconOrigins("https://mcp.notion.com/mcp")).toEqual([
       "https://mcp.notion.com",
       "https://notion.com",
     ]);
     expect(iconOrigins("https://notion.com/mcp")).toEqual(["https://notion.com"]);
+    // The Public Suffix List, not the label count: `co.uk` is a suffix.
+    expect(iconOrigins("https://mcp.example.co.uk/mcp")).toEqual([
+      "https://mcp.example.co.uk",
+      "https://example.co.uk",
+    ]);
+    expect(iconOrigins("https://example.co.uk/mcp")).toEqual(["https://example.co.uk"]);
     expect(iconOrigins("http://127.0.0.1:4000/mcp")).toEqual(["http://127.0.0.1:4000"]);
   });
 });
