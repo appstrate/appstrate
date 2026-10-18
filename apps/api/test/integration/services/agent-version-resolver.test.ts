@@ -18,13 +18,18 @@
  * (read back from the stored version ZIP) — asserted via prompt content.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, spyOn } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent } from "../../helpers/seed.ts";
 import { packages } from "@appstrate/db/schema";
-import { resolveAgentRunVersion } from "../../../src/services/agent-version-resolver.ts";
+import * as storage from "@appstrate/db/storage";
+import {
+  resolveAgentRunManifest,
+  resolveAgentRunVersion,
+} from "../../../src/services/agent-version-resolver.ts";
+import { AGENT_PACKAGES_BUCKET } from "../../../src/services/package-storage-keys.ts";
 import { createVersionFromDraft } from "../../../src/services/package-versions.ts";
 import { getPackage } from "../../../src/services/package-catalog.ts";
 import { ApiError } from "../../../src/lib/errors.ts";
@@ -263,5 +268,89 @@ describe("resolveAgentRunVersion", () => {
 
     expect(resolved.overrideVersionLabel).toBeUndefined();
     expect(resolved.agent).toBe(systemAgent);
+  });
+  // Same selection as the run resolver, read off the catalog: the archive is never downloaded.
+  describe("resolveAgentRunManifest", () => {
+    const DIRTY_DESCRIPTION = "dirty draft manifest";
+
+    /** {@link seedPublishedDirtyAgent} with a draft manifest diverging from the published one. */
+    async function seedDivergedManifestAgent(): Promise<LoadedPackage> {
+      const agent = await seedPublishedDirtyAgent();
+      return { ...agent, manifest: { ...agent.manifest, description: DIRTY_DESCRIPTION } };
+    }
+
+    async function seedNeverPublished(): Promise<LoadedPackage> {
+      const id = "@verorg/never-published";
+      await seedAgent({ id, orgId: ctx.orgId, createdBy: ctx.user.id });
+      return (await getPackage(id, ctx.orgId))!;
+    }
+
+    /** `run` with every archive read counted; the calls it made to the packages bucket. */
+    async function archiveReadsOf(run: () => Promise<unknown>): Promise<unknown[]> {
+      const downloadSpy = spyOn(storage, "downloadFile");
+      try {
+        await run();
+        return downloadSpy.mock.calls.filter(([bucket]) => bucket === AGENT_PACKAGES_BUCKET);
+      } finally {
+        downloadSpy.mockRestore();
+      }
+    }
+
+    for (const selector of [undefined, "", "draft", "published", "1.0.0", "^1.0.0"]) {
+      it(`selects what resolveAgentRunVersion selects for ${JSON.stringify(selector)}, without the archive`, async () => {
+        const agent = await seedDivergedManifestAgent();
+        const run = await resolveAgentRunVersion(agent, selector);
+
+        let resolved: Awaited<ReturnType<typeof resolveAgentRunManifest>> | undefined;
+        const reads = await archiveReadsOf(async () => {
+          resolved = await resolveAgentRunManifest(agent, selector);
+        });
+
+        expect(reads).toEqual([]);
+        expect(resolved!.overrideVersionLabel).toBe(run.overrideVersionLabel);
+        expect(resolved!.agent.manifest).toEqual(run.agent.manifest);
+        expect(resolved!.agent.manifest.description).toBe(
+          selector === "draft" ? DIRTY_DESCRIPTION : "Versioned agent",
+        );
+      });
+    }
+
+    for (const [selector, code] of [
+      ["9.9.9", "not_found"],
+      ["published", "no_published_version"],
+    ] as const) {
+      it(`answers resolveAgentRunVersion's 404 for ${selector}`, async () => {
+        const agent =
+          code === "no_published_version"
+            ? await seedNeverPublished()
+            : await seedDivergedManifestAgent();
+
+        const refusals = await Promise.all(
+          [resolveAgentRunVersion, resolveAgentRunManifest].map((resolve) =>
+            resolve(agent, selector).then(
+              () => null,
+              (err: unknown) => err,
+            ),
+          ),
+        );
+        for (const err of refusals) {
+          expect(err).toBeInstanceOf(ApiError);
+          expect((err as ApiError).status).toBe(404);
+          expect((err as ApiError).code).toBe(code);
+        }
+      });
+    }
+
+    it("ignores the selector for system agents", async () => {
+      const systemAgent: LoadedPackage = {
+        ...(await seedDivergedManifestAgent()),
+        source: "system",
+      };
+
+      const resolved = await resolveAgentRunManifest(systemAgent, "published");
+
+      expect(resolved.overrideVersionLabel).toBeUndefined();
+      expect(resolved.agent).toBe(systemAgent);
+    });
   });
 });

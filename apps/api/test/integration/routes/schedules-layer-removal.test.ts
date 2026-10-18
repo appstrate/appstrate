@@ -9,10 +9,11 @@
  * removal, recorded as `connection_deleted`.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, spyOn } from "bun:test";
 import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
 import { asRecord } from "@appstrate/core/safe-json";
 import { isEmbeddedDb, reservePgConnection } from "@appstrate/db/client";
+import * as storage from "@appstrate/db/storage";
 import {
   auditEvents,
   integrationConnections,
@@ -55,6 +56,7 @@ import {
 } from "../../../src/services/schedules-named-by-layer.ts";
 import { readScheduleGovernance } from "../../../src/services/schedule-connections.ts";
 import { createSchedule, getSchedule, updateSchedule } from "../../../src/services/scheduler.ts";
+import { AGENT_PACKAGES_BUCKET } from "../../../src/services/package-storage-keys.ts";
 
 const app = getTestApp();
 
@@ -407,6 +409,30 @@ describe("removing the layer that names a schedule's connection set", () => {
       expect(await unnamed()).toEqual(disabled);
       expect(await db.select().from(integrationPins)).toEqual([]);
       expect(await auditedAs("integration.pin.deleted")).toEqual(disabled);
+    });
+
+    // Judged under the governance lock: a storage round-trip per fired version would lengthen it.
+    it("judges the published version by its catalog manifest, never reading its archive", async () => {
+      await pin([await sharedConnection()]);
+      const schedule = await armedSchedule();
+      // An unreachable archive store: a read would fail the removal, or be counted below.
+      const original = storage.downloadFile;
+      const downloadSpy = spyOn(storage, "downloadFile").mockImplementation(
+        async (bucket, path) => {
+          if (bucket === AGENT_PACKAGES_BUCKET) throw new Error("storage unreachable");
+          return original(bucket, path);
+        },
+      );
+      try {
+        expect(await remove(ADMIN_PIN_PATH)).toBe(1);
+        const archiveReads = downloadSpy.mock.calls.filter(
+          ([bucket]) => bucket === AGENT_PACKAGES_BUCKET,
+        );
+        expect(archiveReads).toEqual([]);
+      } finally {
+        downloadSpy.mockRestore();
+      }
+      expect(await unnamed()).toEqual([schedule.id]);
     });
 
     it("spares them all when an org default names the set", async () => {

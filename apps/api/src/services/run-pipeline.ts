@@ -272,7 +272,7 @@ export async function resolveRunPreflight(params: {
 
 /** The manifest memo seeded with the pinned integration manifests — see `resolveRunPreflight`. */
 export async function seedPinnedIntegrationManifests(params: {
-  agent: LoadedPackage;
+  agent: Pick<LoadedPackage, "manifest">;
   orgId: string;
   dependencyOverrides: Record<string, string> | null;
   manifestCache?: IntegrationManifestCache;
