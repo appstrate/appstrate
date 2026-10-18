@@ -13,10 +13,11 @@ import type { Implementation, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { isIconImage } from "@appstrate/core/appearance";
+import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { Actor } from "../lib/actor.ts";
 import { ApiError, badGateway } from "../lib/errors.ts";
-import { egressFetchImpl, fetchWithin } from "../lib/egress-host-guard.ts";
+import { fetchWithin } from "../lib/egress-host-guard.ts";
 import { logger } from "../lib/logger.ts";
 import { proxyProblem } from "../lib/proxy-status.ts";
 import type { SpaceScope } from "../lib/scope.ts";
@@ -25,8 +26,9 @@ import { recordConnectionCall, type ConnectionCall } from "./credential-proxy/ca
 import { proxyCall, ProxyCallError } from "./credential-proxy/core.ts";
 import type { ProxyReach } from "./integration-connections.ts";
 import { readIntegrationManifestForProxy } from "./integration-service.ts";
+import { downloadPackageFiles } from "./package-items/storage.ts";
 import { getCredentialProxyLimits } from "./proxy-limits.ts";
-import { fetchSiteIcon, rasterIcon } from "./integration-icon.ts";
+import { fetchSiteIcon, rasterIcon, siteIconFetch } from "./integration-icon.ts";
 
 export interface ServerSyncProposal {
   manifest: Record<string, unknown>;
@@ -151,26 +153,45 @@ export async function syncIntegrationFromServer(input: {
     return new Response(result.body, { status: result.status, headers: result.headers });
   }) as typeof fetch;
 
+  // Alongside the exchange; a storage fault surfaces as itself, not as an MCP failure.
+  const hasDoc = draftHasIntegrationDoc(scope.orgId, packageId);
+  hasDoc.catch(() => {});
+
   let client: AppstrateMcpClient | undefined;
+  let exchanged;
   try {
     client = await createMcpHttpClient(url, { fetch: proxied, signal: deadline });
     const { tools, truncated } = await listAllTools(client, deadline);
-    return await proposalFromServer(
-      {
-        url,
-        info: client.getServerVersion(),
-        instructions: client.client.getInstructions(),
-        tools,
-        truncated,
-      },
-      // Best-effort: past the deadline it finds nothing.
-      fetchWithin(egressFetchImpl(), deadline),
-    );
+    exchanged = {
+      tools,
+      truncated,
+      info: client.getServerVersion(),
+      instructions: client.client.getInstructions(),
+    };
   } catch (err) {
     throw syncFailure(err, packageId, url);
   } finally {
     await client?.close().catch(() => {});
   }
+  return proposalFromServer(
+    {
+      url,
+      info: exchanged.info,
+      // Never proposed over the package's own document.
+      instructions: exchanged.instructions && (await hasDoc) ? undefined : exchanged.instructions,
+      tools: exchanged.tools,
+      truncated: exchanged.truncated,
+    },
+    // Best-effort: past the deadline it finds nothing.
+    fetchWithin(siteIconFetch(), deadline),
+  );
+}
+
+/** Whether the draft's stored tree holds an `INTEGRATION.md`, whatever its content. */
+async function draftHasIntegrationDoc(orgId: string, packageId: string): Promise<boolean> {
+  const path = PACKAGE_CONTENT_ENTRY.integration?.path;
+  const files = await downloadPackageFiles("integrations", orgId, packageId, undefined, "org");
+  return path !== undefined && files !== null && Object.hasOwn(files, path);
 }
 
 async function listAllTools(
@@ -197,6 +218,7 @@ export async function proposalFromServer(
     tools: Tool[];
     truncated: boolean;
   },
+  /** Returns redirects unfollowed: the icon lookup judges each hop. */
   fetchImpl: typeof fetch,
 ): Promise<ServerSyncProposal> {
   const { info } = server;
@@ -253,7 +275,7 @@ async function serverIcon(
   fetchImpl: typeof fetch,
 ): Promise<string | null> {
   for (const icon of (info?.icons ?? []).slice(0, MAX_SERVER_ICONS)) {
-    const raster = await rasterIcon(icon.src, fetchImpl);
+    const raster = await rasterIcon(icon.src, url, fetchImpl);
     if (raster) return raster;
   }
   return fetchSiteIcon(url, fetchImpl);

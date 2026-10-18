@@ -3,7 +3,7 @@
  * `POST /api/integrations/discover` at the route boundary, against a real MCP-like
  * server on loopback reached through the operator's `EGRESS_ALLOW_INTERNAL_HOSTS`
  * opt-in: a 401 with an RFC 9728 challenge, its metadata, an RFC 8414 document
- * with a registration endpoint, and a favicon.
+ * with a registration endpoint, and a favicon — over plaintext, so never taken.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
@@ -99,12 +99,10 @@ describe("POST /api/integrations/discover", () => {
       provenance: Record<string, string>;
       warnings: unknown[];
     };
-    const iconSource = `data:image/png;base64,${PNG.toBase64()}`;
     expect(body).toEqual({
       manifest: {
         display_name: "Acme Tracker",
         name: "@acme/127-0-0-1",
-        icon: iconSource,
         source: { kind: "remote", remote: { url: `${origin}/mcp`, transport: "streamable-http" } },
         auths: {
           oauth: {
@@ -131,13 +129,13 @@ describe("POST /api/integrations/discover", () => {
           },
         },
       },
-      icon_source: iconSource,
+      // A site's icon is read over https only.
+      icon_source: null,
       provenance: {
         "/display_name": "detected",
         "/name": "guessed",
         "/source/remote/transport": "guessed",
         "/auths/oauth": "detected",
-        "/icon": "detected",
       },
       warnings: [],
     });

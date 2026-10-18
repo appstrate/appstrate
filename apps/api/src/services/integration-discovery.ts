@@ -8,7 +8,10 @@
  * or `guessed` (inferred), keyed by JSON pointer into the manifest.
  */
 
-import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
+import {
+  LATEST_PROTOCOL_VERSION,
+  SUPPORTED_PROTOCOL_VERSIONS,
+} from "@modelcontextprotocol/sdk/types.js";
 import { parse as parseHost } from "tldts";
 import { DEFAULT_CLIENT_INFO } from "@appstrate/mcp-transport";
 import {
@@ -31,7 +34,7 @@ import {
 } from "../lib/egress-host-guard.ts";
 import { readBodyPrefix } from "../lib/capped-body.ts";
 import { logger } from "../lib/logger.ts";
-import { fetchSiteIcon } from "./integration-icon.ts";
+import { fetchSiteIcon, siteIconFetch } from "./integration-icon.ts";
 
 type Provenance = "detected" | "guessed";
 type Transport = "streamable-http" | "sse";
@@ -47,6 +50,9 @@ const PROBE_TIMEOUT_MS = 10_000;
 /** The whole discovery (probe, auth metadata, icon), each request keeping its own timeout. */
 const DISCOVERY_TIMEOUT_MS = 25_000;
 const PROBE_BODY_MAX_BYTES = 64 * 1024;
+/** JSON-RPC codes of the 2026-07-28 revision's refusals (-32020 is defined there only). */
+const HEADER_MISMATCH = -32020;
+const METHOD_NOT_FOUND = -32601;
 
 /** An MCP server that answered the probe with a challenge: it wants a credential. */
 interface ProtectedServer {
@@ -63,6 +69,8 @@ export async function discoverRemoteIntegration(
   // The caller's own bound (its request going away) ends the discovery too.
   const deadline = deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout;
   const fetchImpl = fetchWithin(deps.fetchImpl ?? egressFetchImpl(), deadline);
+  // The icon lookup judges each redirect itself.
+  const iconFetch = fetchWithin(deps.fetchImpl ?? siteIconFetch(), deadline);
   const egress = await checkEgressUrl(url, { requireHttpsForUntrustedHost: true });
   if (!egress.ok) {
     // The guard fails closed on a DNS fault: a typo'd host is not a private address.
@@ -85,7 +93,7 @@ export async function discoverRemoteIntegration(
       return found;
     }),
     // Best-effort: past the deadline it finds nothing.
-    fetchSiteIcon(url, fetchImpl),
+    fetchSiteIcon(url, iconFetch),
   ]);
 
   const displayName = auth.resourceName ?? hostDisplayName(url);
@@ -118,11 +126,20 @@ export async function discoverRemoteIntegration(
   return { manifest, iconSource, provenance, warnings: auth.warnings };
 }
 
-/** POST `initialize` (Streamable HTTP); a 404/405 falls back to the SSE transport's GET. */
+/**
+ * POST `initialize` (Streamable HTTP); a 404/405 falls back to the SSE transport's GET. A
+ * 2026-07-28 server refuses it with a JSON-RPC error (400, or 404 for an unknown method): read
+ * before any fallback, as that revision's backward compatibility asks.
+ */
 async function probeServer(url: string, fetchImpl: typeof fetch): Promise<ProtectedServer> {
   const res = await reach(url, fetchImpl, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+      // A modern server reads it to answer a probe it refuses with a recognizable, versioned error.
+      "MCP-Protocol-Version": LATEST_PROTOCOL_VERSION,
+    },
     body: JSON.stringify({
       jsonrpc: "2.0",
       id: 1,
@@ -145,7 +162,17 @@ async function probeServer(url: string, fetchImpl: typeof fetch): Promise<Protec
     const answered = await readOrFail(url, () => answersJsonRpc(res));
     throw answered ? authNotSupported(url) : notAnMcpServer(url);
   }
-  await res.body?.cancel().catch(() => {});
+  if (res.status === 400 || res.status === 404 || res.status === 405) {
+    // It refused on protocol grounds, past any credential check: an open MCP server. On a
+    // 404/405 only a modern server's own error says so; a legacy server's generic JSON-RPC
+    // body there still owes the SSE fallback its turn.
+    const error = await readOrFail(url, () => jsonRpcError(res));
+    if (error && (res.status === 400 || isModernError(error))) {
+      throw modernOnly(url, error) ?? authNotSupported(url);
+    }
+  } else {
+    await res.body?.cancel().catch(() => {});
+  }
   if (res.status !== 404 && res.status !== 405) throw notAnMcpServer(url);
 
   const sse = await reach(url, fetchImpl, {
@@ -219,6 +246,50 @@ async function answersJsonRpc(res: Response): Promise<boolean> {
     );
   // A last frame the stream ended without its blank line still counts.
   return answered(`${await readBodyPrefix(res, PROBE_BODY_MAX_BYTES, answered)}\n\n`);
+}
+
+/** The `error` of a JSON-RPC error answer, else null. */
+async function jsonRpcError(res: Response): Promise<Record<string, unknown> | null> {
+  const parsed = parseSseJsonData(await readBodyPrefix(res, PROBE_BODY_MAX_BYTES));
+  if (!isJsonRpcResponse(parsed)) return null;
+  const { error } = parsed as { error?: unknown };
+  return typeof error === "object" && error !== null ? (error as Record<string, unknown>) : null;
+}
+
+/** An error only a 2026-07-28 server gives a legacy probe: version list, header mismatch, unknown method. */
+function isModernError(error: Record<string, unknown>): boolean {
+  const data = error.data as { supported?: unknown } | null | undefined;
+  return (
+    Array.isArray(data?.supported) ||
+    error.code === HEADER_MISMATCH ||
+    error.code === METHOD_NOT_FOUND
+  );
+}
+
+/** Whether the refusal means the server speaks only revisions this client does not. */
+function modernOnly(url: string, error: Record<string, unknown>): ApiError | null {
+  // HeaderMismatch exists only in 2026-07-28: the server took the probe as a modern request.
+  if (error.code === HEADER_MISMATCH) {
+    return new ApiError({
+      status: 422,
+      code: "remote_mcp_modern_only",
+      title: "MCP Version Not Supported",
+      detail: `The server at ${originOf(url)} serves only the stateless MCP revision (2026-07-28 or later); Appstrate speaks MCP up to ${LATEST_PROTOCOL_VERSION}.`,
+    });
+  }
+  const supported = (error.data as { supported?: unknown } | null | undefined)?.supported;
+  const versions = Array.isArray(supported)
+    ? supported.filter((v): v is string => typeof v === "string")
+    : [];
+  if (versions.length === 0 || versions.some((v) => SUPPORTED_PROTOCOL_VERSIONS.includes(v))) {
+    return null;
+  }
+  return new ApiError({
+    status: 422,
+    code: "remote_mcp_modern_only",
+    title: "MCP Version Not Supported",
+    detail: `The server at ${originOf(url)} serves only MCP ${versions.join(", ")}; Appstrate speaks MCP up to ${LATEST_PROTOCOL_VERSION}.`,
+  });
 }
 
 function isJsonRpcResponse(value: unknown): boolean {

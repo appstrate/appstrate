@@ -78,12 +78,12 @@ describe("proposalFromServer", () => {
 
   it("takes a fetched raster of serverInfo.icons before the site's icon", async () => {
     const { fetchImpl, seen } = fakeFetch({
-      "https://cdn.test/logo.png": () => new Response(PNG),
+      "https://mcp.test/logo.png": () => new Response(PNG),
     });
     const proposal = await proposalFromServer(
       {
         url: "https://mcp.test/mcp",
-        info: { name: "x", version: "1", icons: [{ src: "https://cdn.test/logo.png" }] },
+        info: { name: "x", version: "1", icons: [{ src: "https://mcp.test/logo.png" }] },
         instructions: undefined,
         tools: [],
         truncated: false,
@@ -93,7 +93,34 @@ describe("proposalFromServer", () => {
     const icon = `data:image/png;base64,${PNG.toBase64()}`;
     expect(proposal.iconSource).toBe(icon);
     expect(proposal.manifest.icon).toBe(icon);
-    expect(seen).toEqual(["https://cdn.test/logo.png"]);
+    expect(seen).toEqual(["https://mcp.test/logo.png"]);
+  });
+
+  it("never fetches a server icon of another origin, plaintext or not", async () => {
+    const { fetchImpl, seen } = fakeFetch({
+      "http://tracker.example/icon.png": () => new Response(PNG),
+      "https://cdn.example/icon.png": () => new Response(PNG),
+    });
+    const proposal = await proposalFromServer(
+      {
+        url: "https://mcp.example/mcp",
+        info: {
+          name: "MCP",
+          version: "1",
+          icons: [
+            { src: "http://tracker.example/icon.png" },
+            { src: "https://cdn.example/icon.png" },
+          ],
+        },
+        instructions: undefined,
+        tools: [],
+        truncated: false,
+      },
+      fetchImpl,
+    );
+    expect(proposal.iconSource).toBeNull();
+    expect(seen).not.toContain("http://tracker.example/icon.png");
+    expect(seen).not.toContain("https://cdn.example/icon.png");
   });
 
   it("falls back to the site's icon when no server icon is a raster", async () => {

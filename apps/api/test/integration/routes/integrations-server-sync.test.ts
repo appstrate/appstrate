@@ -30,6 +30,7 @@ import {
   remoteIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
 import { startFakeMcpServer, type FakeMcpServer } from "../../helpers/fake-mcp-server.ts";
+import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
 
 /** A 1×1 PNG header: what `isIconImage` reads (signature + `IHDR` size). */
 const PNG = new Uint8Array([
@@ -133,6 +134,32 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     // the standalone GET stream is never opened.
     expect(server.methods).toEqual(["POST", "POST", "POST", "POST", "POST"]);
     expect(server.authorizations.every((a) => a === `Bearer ${TOKEN}`)).toBe(true);
+  });
+
+  it("proposes no instructions when the draft already holds an INTEGRATION.md", async () => {
+    const manifest = remote();
+    await seedProxyIntegration(ctx, manifest);
+    await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+    // Whatever the file says: markdown, a JSON-shaped text, nothing at all.
+    for (const doc of ["# Docs\n", '{"instructions":"Do not mutate"}', ""]) {
+      await uploadPackageFiles("integrations", ctx.orgId, ID, {
+        "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),
+        "INTEGRATION.md": new TextEncoder().encode(doc),
+      });
+      const res = await sync(ctx, {});
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as { instructions: string | null; warnings: unknown[] };
+      expect(body.instructions).toBeNull();
+      expect(body.warnings).toEqual([]);
+    }
+    // The stored tree without the file: the server's instructions are proposed again.
+    await uploadPackageFiles("integrations", ctx.orgId, ID, {
+      "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),
+    });
+    const res = await sync(ctx, {});
+    expect(((await res.json()) as { instructions: string | null }).instructions).toBe(
+      "Call search before fetch.",
+    );
   });
 
   it("journals each MCP exchange as a proxied call of the connection", async () => {

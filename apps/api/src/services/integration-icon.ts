@@ -3,17 +3,22 @@
 /**
  * A site's raster icon, read once when an integration is discovered and handed
  * back as a data URI: the platform never stores a third-party icon URL.
+ *
+ * Every `fetchImpl` here must return redirects unfollowed: each hop is judged here
+ * (MCP icon rules: https, no change of scheme, a server icon on the server's origin).
  */
 
 import { fileTypeFromBuffer } from "file-type";
 import { parse } from "tldts";
 import { readBodyPrefix, readBodyUnder } from "../lib/capped-body.ts";
+import { egressFetchImpl } from "../lib/egress-host-guard.ts";
 
 const ICON_MAX_BYTES = 256 * 1024;
 /** The `<head>` is near the top; a homepage can weigh megabytes. */
 const HTML_HEAD_MAX_BYTES = 256 * 1024;
 const FETCH_TIMEOUT_MS = 5_000;
 const MAX_LINKED_ICONS = 4;
+const MAX_REDIRECTS = 5;
 /** Sniffed from the bytes, never the declared type. SVG is a document (scripts), never taken. */
 const RASTER_TYPES = new Set([
   "image/png",
@@ -22,6 +27,9 @@ const RASTER_TYPES = new Set([
   "image/gif",
   "image/x-icon",
 ]);
+
+/** The egress-guarded fetch every icon lookup must use: it hands redirects back unfollowed. */
+export const siteIconFetch = () => egressFetchImpl({ followRedirects: false });
 
 /** The origin, then its registrable domain's (`mcp.example.co.uk` → `example.co.uk`). */
 export function iconOrigins(url: string): string[] {
@@ -32,10 +40,11 @@ export function iconOrigins(url: string): string[] {
 
 /** The first raster icon of the URL's site (linked icons, then `/favicon.ico`) as a data URI, or null. */
 export async function fetchSiteIcon(url: string, fetchImpl: typeof fetch): Promise<string | null> {
+  if (new URL(url).protocol !== "https:") return null;
   for (const origin of iconOrigins(url)) {
     const candidates = [...(await linkedIcons(`${origin}/`, fetchImpl)), `${origin}/favicon.ico`];
     for (const candidate of candidates) {
-      const icon = await fetchRaster(candidate, fetchImpl);
+      const icon = await fetchRaster(candidate, fetchImpl, isPlainHttps);
       if (icon) return icon;
     }
   }
@@ -45,15 +54,16 @@ export async function fetchSiteIcon(url: string, fetchImpl: typeof fetch): Promi
 /** `<link rel="icon|shortcut icon|apple-touch-icon">` hrefs of a page, apple-touch-icon first. */
 async function linkedIcons(pageUrl: string, fetchImpl: typeof fetch): Promise<string[]> {
   let html: string;
+  let baseUrl: string;
   try {
-    const res = await fetchImpl(pageUrl, {
-      headers: { Accept: "text/html" },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
+    const page = await fetchHops(pageUrl, "text/html", fetchImpl, isPlainHttps);
+    if (!page) return [];
+    const { res } = page;
     if (!res.ok || !res.headers.get("content-type")?.includes("text/html")) {
       await res.body?.cancel();
       return [];
     }
+    baseUrl = page.url;
     html = await readBodyPrefix(res, HTML_HEAD_MAX_BYTES, (text) => /<\/head>/i.test(text));
   } catch {
     return [];
@@ -65,9 +75,9 @@ async function linkedIcons(pageUrl: string, fetchImpl: typeof fetch): Promise<st
         const rel = el.getAttribute("rel")!.toLowerCase().split(/\s+/);
         const touch = rel.includes("apple-touch-icon");
         if (!touch && !rel.includes("icon")) return;
-        // Against the page URL, not `res.url`: the guarded fetch reports the pinned address there.
-        const href = URL.parse(el.getAttribute("href")!, pageUrl);
-        if (href?.protocol === "https:" || href?.protocol === "http:") {
+        // Against the logical URL, not `res.url`: the guarded fetch reports the pinned address there.
+        const href = URL.parse(el.getAttribute("href")!, baseUrl);
+        if (href && isPlainHttps(href)) {
           found.push({ href: href.href, touch });
         }
       },
@@ -80,11 +90,21 @@ async function linkedIcons(pageUrl: string, fetchImpl: typeof fetch): Promise<st
     .map((f) => f.href);
 }
 
-/** An MCP `Implementation.icons[].src` (`http(s)` or `data:`) as a raster data URI, or null. */
-export async function rasterIcon(src: string, fetchImpl: typeof fetch): Promise<string | null> {
+/**
+ * An MCP `Implementation.icons[].src` as a raster data URI, or null. Per the MCP icon rules, a
+ * `data:` URI or an https URL of the MCP server's own origin, every redirect staying on it.
+ */
+export async function rasterIcon(
+  src: string,
+  serverUrl: string,
+  fetchImpl: typeof fetch,
+): Promise<string | null> {
   const url = URL.parse(src);
-  if (url?.protocol === "http:" || url?.protocol === "https:")
-    return fetchRaster(url.href, fetchImpl);
+  if (url?.protocol === "https:") {
+    const { origin } = new URL(serverUrl);
+    const sameOrigin = (hop: URL) => isHttps(hop) && !hasUserinfo(hop) && hop.origin === origin;
+    return sameOrigin(url) ? fetchRaster(url.href, fetchImpl, sameOrigin) : null;
+  }
   const data = /^data:[^,]*;base64,([A-Za-z0-9+/=\s]+)$/i.exec(src);
   if (!data) return null;
   try {
@@ -94,12 +114,45 @@ export async function rasterIcon(src: string, fetchImpl: typeof fetch): Promise<
   }
 }
 
-async function fetchRaster(url: string, fetchImpl: typeof fetch): Promise<string | null> {
-  try {
-    const res = await fetchImpl(url, {
-      headers: { Accept: "image/*" },
+const isHttps = (url: URL) => url.protocol === "https:";
+/** `https://user:pw@host/` credentials never ride an icon fetch. */
+const hasUserinfo = (url: URL) => url.username !== "" || url.password !== "";
+const isPlainHttps = (url: URL) => isHttps(url) && !hasUserinfo(url);
+
+/** GET `url`, following up to {@link MAX_REDIRECTS} redirects `allow` accepts; null on any other. */
+async function fetchHops(
+  url: string,
+  accept: string,
+  fetchImpl: typeof fetch,
+  allow: (hop: URL) => boolean,
+): Promise<{ res: Response; url: string } | null> {
+  let current = new URL(url);
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    // No credential: a plain GET, cookies and Authorization never set.
+    const res = await fetchImpl(current.href, {
+      headers: { Accept: accept },
+      redirect: "manual",
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
+    const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+    if (location === null) return { res, url: current.href };
+    await res.body?.cancel();
+    const next = URL.parse(location, current.href);
+    if (!next || !allow(next)) return null;
+    current = next;
+  }
+  return null;
+}
+
+async function fetchRaster(
+  url: string,
+  fetchImpl: typeof fetch,
+  allow: (hop: URL) => boolean,
+): Promise<string | null> {
+  try {
+    const fetched = await fetchHops(url, "image/*", fetchImpl, allow);
+    if (!fetched) return null;
+    const { res } = fetched;
     if (!res.ok) {
       await res.body?.cancel();
       return null;

@@ -35,6 +35,7 @@ const HOSTS = [
   "mcp.notbearer.test",
   "mcp.blocked.test",
   "mcp.slow.test",
+  "mcp.modern.test",
 ];
 
 let previousAllowlist: string | undefined;
@@ -397,6 +398,108 @@ describe("discoverRemoteIntegration", () => {
       ),
     );
     expect(err.code).toBe("remote_mcp_auth_not_supported");
+  });
+
+  it("probes with the MCP-Protocol-Version header both eras require", async () => {
+    let header = null as string | null;
+    const { fetchImpl } = fakeFetch({
+      "POST https://mcp.modern.test/mcp": (req) => {
+        header = req.headers.get("mcp-protocol-version");
+        return unauthorized("Bearer");
+      },
+    });
+    await discoverRemoteIntegration(
+      { url: "https://mcp.modern.test/mcp", orgSlug: "acme" },
+      { fetchImpl },
+    );
+    expect(header).toBe("2025-11-25");
+  });
+
+  /** A 2026-07-28 server refusing the legacy `initialize`, per its transport's server validation. */
+  const modernRefusal = (status: number, error: Record<string, unknown>) =>
+    fakeFetch({
+      "POST https://mcp.modern.test/mcp": () => json({ jsonrpc: "2.0", id: 1, error }, status),
+    });
+  const discoverModern = (fetchImpl: typeof fetch) =>
+    refusal(
+      discoverRemoteIntegration(
+        { url: "https://mcp.modern.test/mcp", orgSlug: "acme" },
+        { fetchImpl },
+      ),
+    );
+
+  it("refuses a modern-only server, naming the versions it serves", async () => {
+    const { fetchImpl, seen } = modernRefusal(400, {
+      code: -32022,
+      message: "Unsupported protocol version",
+      data: { supported: ["2026-07-28"], requested: "2025-11-25" },
+    });
+    const err = await discoverModern(fetchImpl);
+    expect({ status: err.status, code: err.code }).toEqual({
+      status: 422,
+      code: "remote_mcp_modern_only",
+    });
+    expect(err.message).toContain("2026-07-28");
+    expect(err.message).toContain("2025-11-25");
+    expect(seen).toEqual(["POST https://mcp.modern.test/mcp"]);
+  });
+
+  it("reads a JSON-RPC error on a 400 or 404 as an open MCP server", async () => {
+    const versions = modernRefusal(400, {
+      code: -32022,
+      message: "Unsupported protocol version",
+      data: { supported: ["2026-07-28", "2025-11-25"], requested: "1900-01-01" },
+    });
+    const unknownMethod = modernRefusal(404, { code: -32601, message: "Method not found" });
+    for (const { fetchImpl, seen } of [versions, unknownMethod]) {
+      const err = await discoverModern(fetchImpl);
+      expect({ status: err.status, code: err.code }).toEqual({
+        status: 422,
+        code: "remote_mcp_auth_not_supported",
+      });
+      // No fallback to the SSE transport: the server spoke JSON-RPC.
+      expect(seen).toEqual(["POST https://mcp.modern.test/mcp"]);
+    }
+  });
+
+  it("reads a header mismatch as a server serving only the stateless revision", async () => {
+    const { fetchImpl, seen } = modernRefusal(400, { code: -32020, message: "Header mismatch" });
+    const err = await discoverModern(fetchImpl);
+    expect({ status: err.status, code: err.code }).toEqual({
+      status: 422,
+      code: "remote_mcp_modern_only",
+    });
+    expect(err.message).toContain("2026-07-28 or later");
+    expect(seen).toEqual(["POST https://mcp.modern.test/mcp"]);
+  });
+
+  it("falls back to the SSE GET past a generic JSON-RPC error on a 405", async () => {
+    const { fetchImpl, seen } = fakeFetch({
+      "POST https://mcp.legacyauth.test/events": () =>
+        json(
+          { jsonrpc: "2.0", error: { code: -32000, message: "Method not allowed." }, id: null },
+          405,
+        ),
+      "GET https://mcp.legacyauth.test/events": () => unauthorized("Bearer"),
+    });
+    const { manifest } = await discoverRemoteIntegration(
+      { url: "https://mcp.legacyauth.test/events", orgSlug: "acme" },
+      { fetchImpl },
+    );
+    expect((manifest.source as { remote: { transport: string } }).remote.transport).toBe("sse");
+    expect(seen.slice(0, 2)).toEqual([
+      "POST https://mcp.legacyauth.test/events",
+      "GET https://mcp.legacyauth.test/events",
+    ]);
+  });
+
+  it("refuses a 400 that carries no JSON-RPC error", async () => {
+    for (const body of ["bad request", JSON.stringify({ error: "bad" }), ""]) {
+      const { fetchImpl } = fakeFetch({
+        "POST https://mcp.modern.test/mcp": () => new Response(body, { status: 400 }),
+      });
+      expect((await discoverModern(fetchImpl)).code).toBe("not_an_mcp_server");
+    }
   });
 
   it("names only the origin in a refusal: a path or query may carry a secret", async () => {

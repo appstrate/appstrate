@@ -13653,7 +13653,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             403: components["responses"]["Forbidden"];
-            /** @description `not_an_mcp_server` — the URL answered, but not as a Streamable HTTP or SSE MCP server (a 401/403 without a Bearer challenge included); `remote_mcp_auth_not_supported` — it serves MCP without authentication, which integrations do not support yet. */
+            /** @description `not_an_mcp_server` — the URL answered, but not as a Streamable HTTP or SSE MCP server (a 401/403 without a Bearer challenge included); `remote_mcp_auth_not_supported` — it serves MCP without authentication (it answered the probe, or refused it with a JSON-RPC error rather than a Bearer challenge), which integrations do not support yet; `remote_mcp_modern_only` — it refused the probe as an `UnsupportedProtocolVersionError` listing only MCP versions newer than the 2025-11-25 Appstrate speaks. */
             422: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -14853,9 +14853,9 @@ export interface operations {
                             homepage?: string;
                             icon?: string;
                         };
-                        /** @description The server's raster icon (PNG, JPEG, WebP, GIF or ICO, at most 256 KiB) as a base64 data URI, for the editor to re-encode; null when none was found. Never an SVG, never a URL. */
+                        /** @description The server's raster icon (PNG, JPEG, WebP, GIF or ICO, at most 256 KiB) as a base64 data URI, for the editor to re-encode; null when none was found. Never an SVG, never a URL. A `serverInfo.icons` entry is taken only as a `data:` URI or an https URL of the MCP server's own origin, fetched without credentials and with every redirect kept on that origin; else the site's own icon, over https only. */
                         icon_source: string | null;
-                        /** @description The server's `initialize` instructions, for the editor to propose as `INTEGRATION.md`; null when it sent none. */
+                        /** @description The server's `initialize` instructions, for the editor to propose as `INTEGRATION.md`; null when it sent none, or when the package's draft already holds an `INTEGRATION.md` (whatever its content, empty included). */
                         instructions: string | null;
                         warnings: {
                             /** @enum {string} */
