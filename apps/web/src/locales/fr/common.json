@@ -268,6 +268,7 @@
   "apiError.invalid_cron_expression": "L'expression cron est invalide.",
   "apiError.schedule_actor_invalid": "L'identité d'exécution choisie n'existe plus dans cet espace ou ne peut pas y lancer d'agents.",
   "apiError.schedule_modified_concurrently": "La planification a été modifiée entre-temps. Rechargez-la puis réessayez.",
+  "apiError.schedule_governance_changed": "Les connexions imposées à cette intégration ont changé pendant l’enregistrement. Rechargez et réessayez.",
   "apiError.connection_blocked_by_admin": "L'administrateur a désactivé les connexions personnelles pour cette intégration : utilisez la connexion partagée.",
   "apiError.auto_client_exists_at_org": "L'organisation a déjà son propre client OAuth automatique pour cette intégration : ce client d'espace ne peut pas le remplacer.",
   "apiError.connection_scope_narrowing": "Cette connexion sert toute l'organisation : la reconnecter via le client OAuth de cet espace la limiterait à cet espace. Créez plutôt une nouvelle connexion.",

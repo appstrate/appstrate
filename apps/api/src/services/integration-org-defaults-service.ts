@@ -41,7 +41,6 @@ import {
 import {
   disableSchedulesSelectingWithin,
   removeNamingLayer,
-  schedulesLayerMayName,
   type NamingLayer,
 } from "./schedules-named-by-layer.ts";
 
@@ -137,9 +136,9 @@ function orgDefaultKey(scope: SpaceScope, integrationId: string) {
  * every statement runs on `tx` (PGlite has one connection: a query on `db` would wait on this very
  * transaction). Purges the member pins it masks ({@link purgeMemberPins}); the default still names
  * every schedule, so none is left unnamed. Writing an enforced default back soft disables the
- * schedules strictly narrowing the floor it imposed, in the same transaction. Which schedules may
- * resolve the integration is read before it opens, as for a removal (`removeNamingLayer`), for every
- * soft write: whether the stored default is enforced is a fact only the transaction may read.
+ * schedules strictly narrowing the floor it imposed, read and disabled in the same transaction
+ * (`disableSchedulesSelectingWithin`): whether the stored default is enforced is a fact only the
+ * transaction may read.
  */
 export async function upsertOrgDefault(
   scope: SpaceScope,
@@ -152,10 +151,6 @@ export async function upsertOrgDefault(
   disabledScheduleIds: string[];
 }> {
   await validatePinTargets(scope, integrationId, input.connectionIds);
-  // Only a soft write can remove a floor.
-  const mayName = input.enforce
-    ? []
-    : await schedulesLayerMayName(orgDefaultLayer(scope, integrationId));
   const now = new Date();
   return db.transaction(async (tx) => {
     await lockIntegrationGovernance(tx, scope.spaceId, integrationId);
@@ -190,9 +185,14 @@ export async function upsertOrgDefault(
       previous?.enforce || input.enforce
         ? await purgeMemberPins(tx, scope, integrationId, null)
         : [];
+    // Only a soft write over an enforced default removes a floor.
     const disabledScheduleIds =
       previous?.enforce && !input.enforce
-        ? await disableSchedulesSelectingWithin(tx, integrationId, mayName, previous.connectionIds)
+        ? await disableSchedulesSelectingWithin(
+            tx,
+            orgDefaultLayer(scope, integrationId),
+            previous.connectionIds,
+          )
         : [];
     return {
       previous: previous ? toSummary(previous) : null,

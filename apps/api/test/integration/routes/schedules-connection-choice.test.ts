@@ -665,7 +665,11 @@ describe("schedule writes for another actor — only what both reach", () => {
       updateSchedule(
         scope,
         judged,
-        { connectionOverrides: { [INTEGRATION]: [own] }, enabled: true },
+        {
+          connectionOverrides: { [INTEGRATION]: [own] },
+          enabled: true,
+          judgedGovernance: new Map(),
+        },
         null,
         undefined,
       ),

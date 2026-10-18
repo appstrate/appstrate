@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { asRecord } from "@appstrate/core/safe-json";
 import { isEmbeddedDb, reservePgConnection } from "@appstrate/db/client";
 import {
@@ -42,11 +42,18 @@ import {
   deleteOrgDefault,
   upsertOrgDefault,
 } from "../../../src/services/integration-org-defaults-service.ts";
-import { deletePin } from "../../../src/services/integration-pins-service.ts";
+import {
+  deletePin,
+  lockIntegrationGovernance,
+} from "../../../src/services/integration-pins-service.ts";
 import {
   disableSchedulesLeftUnnamed,
+  removeNamingLayer,
   schedulesLayerMayName,
+  type NamingLayer,
 } from "../../../src/services/schedules-named-by-layer.ts";
+import { readScheduleGovernance } from "../../../src/services/schedule-connections.ts";
+import { createSchedule, getSchedule, updateSchedule } from "../../../src/services/scheduler.ts";
 
 const app = getTestApp();
 
@@ -900,6 +907,150 @@ describe("removing the layer that names a schedule's connection set", () => {
         holder.release();
         await Promise.allSettled(removals);
       }
+    });
+  });
+
+  // A schedule write is judged on `db` outside any transaction, then stored: a floor removed in
+  // between must still be judged against what it stored, or refuse to let it store it (#2043 A).
+  describe("a schedule write racing the removal of the floor it was judged under", () => {
+    const scope = () => ({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId });
+    const floors = [
+      {
+        name: "an admin pin",
+        layer: (): NamingLayer => ({
+          kind: "admin_pin",
+          spaceId: ctx.defaultSpaceId,
+          integrationId: INTEGRATION,
+          agentPackageId: AGENT,
+        }),
+        impose: (ids: string[]) => pin(ids),
+        remove: async (tx: Parameters<Parameters<typeof db.transaction>[0]>[0]) => {
+          const [row] = await tx
+            .delete(integrationPins)
+            .where(and(eq(integrationPins.packageId, AGENT), isNull(integrationPins.userId)))
+            .returning({ connectionIds: integrationPins.connectionIds });
+          return row;
+        },
+      },
+      {
+        name: "an enforced org default",
+        layer: (): NamingLayer => ({
+          kind: "org_default",
+          spaceId: ctx.defaultSpaceId,
+          integrationId: INTEGRATION,
+        }),
+        impose: (ids: string[]) => orgDefault(ids, true),
+        remove: async (tx: Parameters<Parameters<typeof db.transaction>[0]>[0]) => {
+          const [row] = await tx
+            .delete(integrationOrgDefaults)
+            .returning({ connectionIds: integrationOrgDefaults.connectionIds });
+          return row;
+        },
+      },
+    ];
+
+    for (const floor of floors) {
+      // The removal's candidates for the unnamed rule are read before its transaction; a schedule
+      // stored after that read, selecting `[]` ("no addition" under the floor), must not survive it
+      // meaning "no connection" (fails when the narrowing ones are judged from that read, verified).
+      it(`the removal of ${floor.name} disables a schedule narrowing it stored after its read`, async () => {
+        const imposed = await sharedConnection();
+        await floor.impose([imposed]);
+        const id = `sched_${crypto.randomUUID()}`;
+
+        const { disabledScheduleIds } = await removeNamingLayer(floor.layer(), async (tx) => {
+          // Lands here, on `tx` (PGlite has one connection): after the read, before the removal.
+          await tx.insert(schedules).values({
+            id,
+            packageId: AGENT,
+            orgId: ctx.orgId,
+            spaceId: ctx.defaultSpaceId,
+            userId: ctx.user.id,
+            enabled: true,
+            cronExpression: "0 * * * *",
+            connectionOverrides: { [INTEGRATION]: [] },
+          });
+          await lockIntegrationGovernance(tx, ctx.defaultSpaceId, INTEGRATION);
+          const row = await floor.remove(tx);
+          return { previous: row ?? null, removedFloor: row?.connectionIds ?? null };
+        });
+
+        expect(disabledScheduleIds).toEqual([id]);
+        expect(await rowOf(id)).toMatchObject({
+          enabled: false,
+          disabledReason: "connection_set_unnamed",
+        });
+      });
+    }
+
+    /** `[]` under the admin pin of one connection: "no addition", judged while the pin stands. */
+    async function judgedUnderPin() {
+      await pin([await sharedConnection()]);
+      return readScheduleGovernance(ctx.defaultSpaceId, AGENT);
+    }
+    const narrowing = { [INTEGRATION]: [] };
+    const refusedAsChanged = { status: 409, code: "schedule_governance_changed" };
+
+    it("a create judged under a floor removed before it stores is refused, and stores nothing", async () => {
+      const judgedGovernance = await judgedUnderPin();
+      await deletePin(scope(), AGENT, INTEGRATION, null);
+
+      await expect(
+        createSchedule(
+          scope(),
+          AGENT,
+          { type: "user", id: ctx.user.id },
+          {
+            cronExpression: "0 * * * *",
+            connectionOverrides: narrowing,
+            judgedGovernance,
+          },
+        ),
+      ).rejects.toMatchObject(refusedAsChanged);
+      expect(await db.select().from(schedules)).toEqual([]);
+    });
+
+    it("a patch judged under a floor removed before it stores is refused, and writes nothing", async () => {
+      // A soft default names its set once the pin is gone: the removal leaves the row as it was.
+      await orgDefault([await sharedConnection()]);
+      const seeded = await armedSchedule();
+      const judged = (await getSchedule(seeded.id, scope(), null, undefined))!;
+      const judgedGovernance = await judgedUnderPin();
+      await deletePin(scope(), AGENT, INTEGRATION, null);
+
+      await expect(
+        updateSchedule(
+          scope(),
+          judged,
+          { connectionOverrides: narrowing, judgedGovernance },
+          null,
+          undefined,
+        ),
+      ).rejects.toMatchObject(refusedAsChanged);
+      expect(await rowOf(seeded.id)).toMatchObject({
+        enabled: true,
+        connectionOverrides: null,
+        updatedAt: seeded.updatedAt,
+      });
+    });
+
+    it("a write judged under the governance still standing stores its set", async () => {
+      const judgedGovernance = await judgedUnderPin();
+
+      const created = await createSchedule(
+        scope(),
+        AGENT,
+        { type: "user", id: ctx.user.id },
+        {
+          cronExpression: "0 * * * *",
+          connectionOverrides: narrowing,
+          judgedGovernance,
+        },
+      );
+      expect((await rowOf(created.id)).connectionOverrides).toEqual(narrowing);
+      // The pin it was judged under goes after it stored: the removal sees it and disables it.
+      expect(await remove(ADMIN_PIN_PATH)).toBe(1);
+      expect(await unnamed()).toEqual([created.id]);
     });
   });
 });

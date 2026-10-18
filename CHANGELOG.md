@@ -217,7 +217,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the integration strictly narrows the removed set (fewer of its connections, `[]`
   included; ids compared case-insensitively): without the set it would bind fewer
   connections than written. The org default `PUT` removes their jobs and audits
-  them. The credential proxy outside a run is unchanged.
+  them. A schedule write storing `connection_overrides` while the admin pin or org
+  default of one of its integrations changes answers the new
+  `409 schedule_governance_changed` and writes nothing. The credential proxy
+  outside a run is unchanged.
 
 - **BREAKING: governance writes delete member pins, and a member pin write can
   be refused** (#2043). No member pin survives under a closed imposed set. Every

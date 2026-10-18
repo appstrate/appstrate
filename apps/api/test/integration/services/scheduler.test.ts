@@ -1234,6 +1234,7 @@ describeRequiresRedis("scheduler service", () => {
       const schedule = await createSchedule({ orgId, spaceId: defaultSpaceId }, packageId, actor, {
         cronExpression: "0 * * * *",
         connectionOverrides: { [integrationId]: [kept!, gone!] },
+        judgedGovernance: new Map(),
       });
 
       // What `DELETE /api/me/connections/:id` does: the service prunes, the route drops the jobs
@@ -1281,6 +1282,7 @@ describeRequiresRedis("scheduler service", () => {
       const schedule = await createSchedule({ orgId, spaceId: defaultSpaceId }, packageId, actor, {
         cronExpression: "0 * * * *",
         connectionOverrides: { [integrationId]: [row!.id] },
+        judgedGovernance: new Map(),
       });
 
       const { disabledScheduleIds } = (await deleteOwnConnection(
@@ -1334,6 +1336,7 @@ describeRequiresRedis("scheduler service", () => {
       const schedule = await createSchedule({ orgId, spaceId: closed.id }, packageId, actor, {
         cronExpression: "0 * * * *",
         connectionOverrides: { [integrationId]: [conn!.id] },
+        judgedGovernance: new Map(),
       });
       const queue = new Queue("schedules", {
         connection: getRedisQueueConnection() as unknown as ConnectionOptions,
@@ -1373,7 +1376,7 @@ describe("updateSchedule — a compare-and-set on the caller's read", () => {
   function read(as: Actor = actor, connectionOverrides?: Record<string, string[]>) {
     return createSchedule(scope, packageId, as, {
       cronExpression: "0 * * * *",
-      ...(connectionOverrides ? { connectionOverrides } : {}),
+      ...(connectionOverrides ? { connectionOverrides, judgedGovernance: new Map() } : {}),
     });
   }
 
@@ -1581,6 +1584,7 @@ describe("schedule disabled_reason", () => {
     const created = await createSchedule(scope, packageId, actor, {
       cronExpression: "0 * * * *",
       connectionOverrides: { [integrationId]: [gone!.id] },
+      judgedGovernance: new Map(),
     });
 
     await deleteOwnConnection({ kind: "delegated", actor, ...scope }, gone!.id);
@@ -1609,6 +1613,7 @@ describe("schedule disabled_reason", () => {
     const created = await createSchedule(scope, packageId, actor, {
       cronExpression: "0 * * * *",
       connectionOverrides: { [integrationId]: [gone!.id] },
+      judgedGovernance: new Map(),
     });
     await db
       .update(schedules)
