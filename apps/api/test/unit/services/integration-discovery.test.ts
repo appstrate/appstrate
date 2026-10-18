@@ -9,6 +9,13 @@
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
+import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
+import {
+  legacyMcpHandler,
+  modernMcpHandler,
+  MODERN_PROTOCOL_VERSION,
+  type McpHandler,
+} from "@appstrate/mcp-transport/testing";
 import { ApiError } from "../../../src/lib/errors.ts";
 import {
   discoverRemoteIntegration,
@@ -36,6 +43,17 @@ const HOSTS = [
   "mcp.blocked.test",
   "mcp.slow.test",
   "mcp.modern.test",
+  "mcp.openlegacy.test",
+  "mcp.openmodern.test",
+  "mcp.gated.test",
+  "mcp.gatedlegacy.test",
+  "mcp.dual.test",
+  "mcp.retry.test",
+  "mcp.big.test",
+  "mcp.toolsbasic.test",
+  "mcp.tools5xx.test",
+  "mcp.toolsbig.test",
+  "mcp.both5xx.test",
   "mcp.offline.test",
   "mcp.online.test",
   "mcp.noscope.test",
@@ -426,7 +444,9 @@ describe("discoverRemoteIntegration", () => {
       { fetchImpl },
     );
     expect((manifest.source as { remote: { transport: string } }).remote.transport).toBe("sse");
-    expect(seen.slice(0, 2)).toEqual([
+    // The era probe, the legacy `initialize`, then the SSE transport's GET.
+    expect(seen.slice(0, 3)).toEqual([
+      "POST https://mcp.legacyauth.test/events",
       "POST https://mcp.legacyauth.test/events",
       "GET https://mcp.legacyauth.test/events",
     ]);
@@ -452,41 +472,64 @@ describe("discoverRemoteIntegration", () => {
     });
   });
 
-  it("refuses an open Streamable HTTP server", async () => {
-    const notification = { jsonrpc: "2.0", method: "notifications/message", params: {} };
-    const { fetchImpl } = fakeFetch({
-      "POST https://mcp.open.test/mcp": () =>
-        new Response(
-          // A notification may come before the response: it is skipped.
-          `event: message\ndata: ${JSON.stringify(notification)}\n\n` +
-            `event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-11-25" } })}\n\n`,
-          { headers: { "Content-Type": "text/event-stream", "Mcp-Session-Id": "s-1" } },
-        ),
-    });
-    const err = await refusal(
-      discoverRemoteIntegration(
-        { url: "https://mcp.open.test/mcp", orgSlug: "acme" },
-        { fetchImpl },
-      ),
-    );
+  /** Serves `handler` at `url`, every JSON-RPC method outside `open` behind a Bearer challenge. */
+  const mcpAt = (url: string, handler: McpHandler, open: string[] = []) => {
+    const seen: string[] = [];
+    const fetchImpl = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const req = new Request(String(input), init);
+      if (req.url !== url) return new Response("not found", { status: 404 });
+      const text = req.method === "POST" ? await req.text() : "";
+      const method = text ? (JSON.parse(text) as { method?: string }).method : undefined;
+      // The MCP exchange only: the auth metadata and icon lookups are other requests.
+      if (req.method === "POST") seen.push(`POST ${method ?? ""}`.trim());
+      if (method !== undefined && !open.includes(method) && !method.startsWith("notifications/")) {
+        return unauthorized(`Bearer resource_metadata="${new URL(url).origin}/.well-known/none"`);
+      }
+      return handler(
+        new Request(req.url, {
+          method: req.method,
+          headers: req.headers,
+          ...(text ? { body: text } : {}),
+        }),
+      );
+    }) as typeof fetch;
+    return { fetchImpl, seen };
+  };
+  const echo: AppstrateToolDefinition = {
+    descriptor: { name: "echo", inputSchema: { type: "object" } },
+    handler: async () => ({ content: [] }),
+  };
+  const identity = {
+    name: "acme-mcp",
+    version: "3.1.0",
+    title: "Acme Tracker",
+    description: "Tracks acme.",
+    websiteUrl: "https://acme.example/",
+  };
+
+  it("refuses an open legacy Streamable HTTP server", async () => {
+    const url = "https://mcp.openlegacy.test/mcp";
+    const { fetchImpl } = mcpAt(url, legacyMcpHandler({ tools: [echo] }), [
+      "server/discover",
+      "initialize",
+      "tools/list",
+    ]);
+    const err = await refusal(discoverRemoteIntegration({ url, orgSlug: "acme" }, { fetchImpl }));
     expect(err.code).toBe("remote_mcp_auth_not_supported");
   });
 
-  it("reads a JSON answer larger than the probe's prefix as JSON-RPC", async () => {
-    const result = { protocolVersion: "2025-11-25", instructions: "x".repeat(128 * 1024) };
-    const { fetchImpl } = fakeFetch({
-      "POST https://mcp.open.test/mcp": () => json({ jsonrpc: "2.0", id: 1, result }),
-    });
-    const err = await refusal(
-      discoverRemoteIntegration(
-        { url: "https://mcp.open.test/mcp", orgSlug: "acme" },
-        { fetchImpl },
-      ),
-    );
+  it("refuses an open modern-only server", async () => {
+    const url = "https://mcp.openmodern.test/mcp";
+    const { fetchImpl, seen } = mcpAt(url, modernMcpHandler({ tools: [echo] }), [
+      "server/discover",
+      "tools/list",
+    ]);
+    const err = await refusal(discoverRemoteIntegration({ url, orgSlug: "acme" }, { fetchImpl }));
     expect(err.code).toBe("remote_mcp_auth_not_supported");
+    expect(seen).toEqual(["POST server/discover", "POST tools/list"]);
   });
 
-  it("probes with the MCP-Protocol-Version header both eras require", async () => {
+  it("probes first with the 2026-07-28 version header", async () => {
     let header = null as string | null;
     const { fetchImpl } = fakeFetch({
       "POST https://mcp.modern.test/mcp": (req) => {
@@ -498,65 +541,159 @@ describe("discoverRemoteIntegration", () => {
       { url: "https://mcp.modern.test/mcp", orgSlug: "acme" },
       { fetchImpl },
     );
-    expect(header).toBe("2025-11-25");
+    expect(header).toBe(MODERN_PROTOCOL_VERSION);
   });
 
-  /** A 2026-07-28 server refusing the legacy `initialize`, per its transport's server validation. */
-  const modernRefusal = (status: number, error: Record<string, unknown>) =>
-    fakeFetch({
-      "POST https://mcp.modern.test/mcp": () => json({ jsonrpc: "2.0", id: 1, error }, status),
+  it("reads a modern server's server/discover before its credential (no initialize)", async () => {
+    const url = "https://mcp.gated.test/mcp";
+    const { fetchImpl, seen } = mcpAt(
+      url,
+      modernMcpHandler({ tools: [echo], serverInfo: identity }),
+      ["server/discover"],
+    );
+    const { manifest, provenance } = await discoverRemoteIntegration(
+      { url, orgSlug: "acme" },
+      { fetchImpl },
+    );
+    expect(seen).toEqual(["POST server/discover", "POST tools/list"]);
+    expect(manifest).toMatchObject({
+      display_name: "Acme Tracker",
+      name: "@acme/gated",
+      description: "Tracks acme.",
+      homepage: "https://acme.example/",
+      source: { kind: "remote", remote: { url, transport: "streamable-http" } },
     });
-  const discoverModern = (fetchImpl: typeof fetch) =>
-    refusal(
+    expect(provenance).toMatchObject({
+      "/display_name": "detected",
+      "/description": "detected",
+      "/homepage": "detected",
+      "/source/remote/transport": "detected",
+    });
+    expect(Object.keys(manifest.auths as object)).toEqual(["primary"]);
+  });
+
+  it("reads a legacy server's initialize before its credential", async () => {
+    const url = "https://mcp.gatedlegacy.test/mcp";
+    const { fetchImpl } = mcpAt(url, legacyMcpHandler({ tools: [echo], serverInfo: identity }), [
+      "server/discover",
+      "initialize",
+    ]);
+    const { manifest } = await discoverRemoteIntegration({ url, orgSlug: "acme" }, { fetchImpl });
+    expect(manifest).toMatchObject({
+      display_name: "Acme Tracker",
+      homepage: "https://acme.example/",
+    });
+  });
+
+  it("stays modern with a dual-era server", async () => {
+    const url = "https://mcp.dual.test/mcp";
+    const { fetchImpl, seen } = mcpAt(
+      url,
+      modernMcpHandler({
+        tools: [echo],
+        serverInfo: identity,
+        legacy: legacyMcpHandler({ tools: [echo] }),
+      }),
+      ["server/discover", "initialize"],
+    );
+    const { manifest } = await discoverRemoteIntegration({ url, orgSlug: "acme" }, { fetchImpl });
+    expect(manifest.display_name).toBe("Acme Tracker");
+    expect(seen).not.toContain("POST initialize");
+  });
+
+  it("retries a probe refused as UnsupportedProtocolVersion with the version it lists", async () => {
+    const url = "https://mcp.retry.test/mcp";
+    const { fetchImpl, seen } = mcpAt(
+      url,
+      modernMcpHandler({ tools: [echo], serverInfo: identity, refuseFirst: 1 }),
+      ["server/discover"],
+    );
+    const { manifest } = await discoverRemoteIntegration({ url, orgSlug: "acme" }, { fetchImpl });
+    expect(manifest.display_name).toBe("Acme Tracker");
+    expect(seen).toEqual(["POST server/discover", "POST server/discover", "POST tools/list"]);
+  });
+
+  it("answers 502 for a handshake answer past the probe's bound", async () => {
+    const result = { protocolVersion: "2025-11-25", instructions: "x".repeat(2 * 1024 * 1024) };
+    const { fetchImpl } = fakeFetch({
+      "POST https://mcp.big.test/mcp": () => json({ jsonrpc: "2.0", id: 1, result }),
+    });
+    const err = await refusal(
       discoverRemoteIntegration(
-        { url: "https://mcp.modern.test/mcp", orgSlug: "acme" },
+        { url: "https://mcp.big.test/mcp", orgSlug: "acme" },
         { fetchImpl },
       ),
     );
-
-  it("refuses a modern-only server, naming the versions it serves", async () => {
-    const { fetchImpl, seen } = modernRefusal(400, {
-      code: -32022,
-      message: "Unsupported protocol version",
-      data: { supported: ["2026-07-28"], requested: "2025-11-25" },
-    });
-    const err = await discoverModern(fetchImpl);
-    expect({ status: err.status, code: err.code }).toEqual({
-      status: 422,
-      code: "remote_mcp_modern_only",
-    });
-    expect(err.message).toContain("2026-07-28");
-    expect(err.message).toContain("2025-11-25");
-    expect(seen).toEqual(["POST https://mcp.modern.test/mcp"]);
+    expect({ status: err.status, code: err.code }).toEqual({ status: 502, code: "bad_gateway" });
   });
 
-  it("reads a JSON-RPC error on a 400 or 404 as an open MCP server", async () => {
-    const versions = modernRefusal(400, {
-      code: -32022,
-      message: "Unsupported protocol version",
-      data: { supported: ["2026-07-28", "2025-11-25"], requested: "1900-01-01" },
-    });
-    const unknownMethod = modernRefusal(404, { code: -32601, message: "Method not found" });
-    for (const { fetchImpl, seen } of [versions, unknownMethod]) {
-      const err = await discoverModern(fetchImpl);
-      expect({ status: err.status, code: err.code }).toEqual({
-        status: 422,
-        code: "remote_mcp_auth_not_supported",
+  /** An open legacy server whose `tools/list` is answered by `tools` instead. */
+  const openThenTools = (url: string, tools: (req: Request) => Response | Promise<Response>) => {
+    const legacy = legacyMcpHandler({ tools: [echo] });
+    return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const req = new Request(String(input), init);
+      if (req.url !== url) return new Response("not found", { status: 404 });
+      const text = req.method === "POST" ? await req.text() : "";
+      const rebuilt = new Request(req.url, {
+        method: req.method,
+        headers: req.headers,
+        ...(text ? { body: text } : {}),
       });
-      // No fallback to the SSE transport: the server spoke JSON-RPC.
-      expect(seen).toEqual(["POST https://mcp.modern.test/mcp"]);
-    }
+      return text.includes('"tools/list"') ? tools(rebuilt) : legacy(rebuilt);
+    }) as typeof fetch;
+  };
+
+  it("reads the tools ask like the probe: a non-Bearer 401 is not an MCP server", async () => {
+    const url = "https://mcp.toolsbasic.test/mcp";
+    const fetchImpl = openThenTools(url, () => unauthorized('Basic realm="x"'));
+    const err = await refusal(discoverRemoteIntegration({ url, orgSlug: "acme" }, { fetchImpl }));
+    expect(err.code).toBe("not_an_mcp_server");
   });
 
-  it("reads a header mismatch as a server serving only the stateless revision", async () => {
-    const { fetchImpl, seen } = modernRefusal(400, { code: -32020, message: "Header mismatch" });
-    const err = await discoverModern(fetchImpl);
-    expect({ status: err.status, code: err.code }).toEqual({
-      status: 422,
-      code: "remote_mcp_modern_only",
+  it("reads the tools ask like the probe: a 5xx is a server that could not answer", async () => {
+    const url = "https://mcp.tools5xx.test/mcp";
+    const fetchImpl = openThenTools(url, () => new Response("down", { status: 503 }));
+    const err = await refusal(discoverRemoteIntegration({ url, orgSlug: "acme" }, { fetchImpl }));
+    expect({ status: err.status, code: err.code }).toEqual({ status: 502, code: "bad_gateway" });
+  });
+
+  it("takes a first tools page past the probe's bound as an open server's answer", async () => {
+    const url = "https://mcp.toolsbig.test/mcp";
+    const fetchImpl = openThenTools(url, async (req) => {
+      const { id } = (await req.json()) as { id: number };
+      return json({
+        jsonrpc: "2.0",
+        id,
+        result: {
+          tools: [
+            {
+              name: "x",
+              description: "y".repeat(2 * 1024 * 1024),
+              inputSchema: { type: "object" },
+            },
+          ],
+        },
+      });
     });
-    expect(err.message).toContain("2026-07-28 or later");
-    expect(seen).toEqual(["POST https://mcp.modern.test/mcp"]);
+    const err = await refusal(discoverRemoteIntegration({ url, orgSlug: "acme" }, { fetchImpl }));
+    expect(err.code).toBe("remote_mcp_auth_not_supported");
+  });
+
+  it("answers 502 when the probe and initialize both answer 5xx", async () => {
+    const { fetchImpl, seen } = fakeFetch({
+      "POST https://mcp.both5xx.test/mcp": () => new Response("down", { status: 503 }),
+    });
+    const err = await refusal(
+      discoverRemoteIntegration(
+        { url: "https://mcp.both5xx.test/mcp", orgSlug: "acme" },
+        { fetchImpl },
+      ),
+    );
+    expect({ status: err.status, code: err.code }).toEqual({ status: 502, code: "bad_gateway" });
+    expect(seen).toEqual([
+      "POST https://mcp.both5xx.test/mcp",
+      "POST https://mcp.both5xx.test/mcp",
+    ]);
   });
 
   it("falls back to the SSE GET past a generic JSON-RPC error on a 405", async () => {
@@ -573,7 +710,8 @@ describe("discoverRemoteIntegration", () => {
       { fetchImpl },
     );
     expect((manifest.source as { remote: { transport: string } }).remote.transport).toBe("sse");
-    expect(seen.slice(0, 2)).toEqual([
+    expect(seen.slice(0, 3)).toEqual([
+      "POST https://mcp.legacyauth.test/events",
       "POST https://mcp.legacyauth.test/events",
       "GET https://mcp.legacyauth.test/events",
     ]);
@@ -584,7 +722,13 @@ describe("discoverRemoteIntegration", () => {
       const { fetchImpl } = fakeFetch({
         "POST https://mcp.modern.test/mcp": () => new Response(body, { status: 400 }),
       });
-      expect((await discoverModern(fetchImpl)).code).toBe("not_an_mcp_server");
+      const err = await refusal(
+        discoverRemoteIntegration(
+          { url: "https://mcp.modern.test/mcp", orgSlug: "acme" },
+          { fetchImpl },
+        ),
+      );
+      expect(err.code).toBe("not_an_mcp_server");
     }
   });
 

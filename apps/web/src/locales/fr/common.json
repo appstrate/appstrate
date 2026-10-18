@@ -242,7 +242,6 @@
   "apiError.integration_invalid_manifest": "Le manifeste d'une intégration dont dépend l'agent est invalide : {{message}}",
   "apiError.not_an_mcp_server": "Cette adresse ne répond pas comme un serveur MCP (Streamable HTTP ou SSE).",
   "apiError.remote_mcp_auth_not_supported": "Ce serveur MCP ne demande aucune authentification : les intégrations sans authentification ne sont pas encore prises en charge.",
-  "apiError.remote_mcp_modern_only": "Ce serveur ne parle que des versions de MCP plus récentes que celle qu'Appstrate prend en charge (2025-11-25).",
   "apiError.integration_not_connected": "Connectez d'abord cette intégration : aucune connexion utilisable dans cet espace ne permet d'interroger son serveur.",
   "apiError.integration_not_remote": "Cette intégration n'est pas servie par un serveur MCP distant.",
   "apiError.sync_transport_unsupported": "Ce serveur MCP utilise le transport SSE : seuls les serveurs Streamable HTTP peuvent être synchronisés.",

@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Fully-paginated `tools/list` for a connected MCP client.
- *
- * `AppstrateMcpClient.listTools()` issues a single request and drops
- * `nextCursor`, so a server with a large catalog that paginates would return
- * a partial list — which would make the tool-parity diff report phantom
- * "declared but not exposed" failures. This drives the raw SDK client through
- * the cursor loop so the harness always sees the complete tool set.
+ * Fully-paginated `tools/list` for a connected MCP client, page by page so a
+ * server cursoring forever stops at `maxPages` with an error instead of a
+ * partial list — a partial list would make the tool-parity diff report phantom
+ * "declared but not exposed" failures.
  */
 
 import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
@@ -23,17 +20,16 @@ export async function listAllTools(
   appstrateClient: AppstrateMcpClient,
   options: { signal?: AbortSignal; maxPages?: number } = {},
 ): Promise<LiveTool[]> {
-  const sdk = appstrateClient.client;
   const maxPages = options.maxPages ?? 50;
   const out: LiveTool[] = [];
   let cursor: string | undefined;
   let pages = 0;
 
   do {
-    const page = await sdk.listTools(
-      cursor ? { cursor } : undefined,
-      options.signal ? { signal: options.signal } : undefined,
-    );
+    const page = await appstrateClient.listToolsPage({
+      ...(cursor ? { cursor } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
     for (const tool of page.tools) {
       out.push({
         name: tool.name,

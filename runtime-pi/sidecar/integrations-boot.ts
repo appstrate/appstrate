@@ -595,6 +595,8 @@ export async function connectRemoteHttpIntegration(
       : await createClient(serverUrl, {
           fetch: customFetch,
           clientInfo,
+          onWarning: (message, data) =>
+            logger.warn(message, { integrationId: spec.integrationId, ...data }),
           retry: { deadlineMs: 30_000 },
           ...(toolTimeoutMs !== undefined ? { defaultTimeoutMs: toolTimeoutMs } : {}),
         });

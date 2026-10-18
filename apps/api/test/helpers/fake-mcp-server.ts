@@ -4,7 +4,8 @@
  * A remote MCP server on loopback (Streamable HTTP, stateless, JSON responses), for route tests
  * that reach one through the platform. Configurable tools (paginated by `pageSize`), `serverInfo`,
  * `instructions`, a required bearer, and values a hostile server would have its client echo (a
- * session id, a cursor prefix); records every request.
+ * session id, a cursor prefix); records every request. Its protocol era is `legacy` (the
+ * `initialize` handshake, the default), `modern` (MCP 2026-07-28 only) or `dual`.
  * Lifted from `mountStandalone` in `packages/mcp-transport/test/client.test.ts`.
  */
 
@@ -15,6 +16,7 @@ import {
   type Implementation,
   type ToolAnnotations,
 } from "@modelcontextprotocol/sdk/types.js";
+import { modernMcpHandler } from "@appstrate/mcp-transport/testing";
 
 /** A name alone gets the description `Tool <name>` and no annotations. */
 export type FakeMcpTool =
@@ -30,6 +32,8 @@ export interface FakeMcpServerOptions {
   bearer?: string;
   /** Answered as `Mcp-Session-Id` on every response: the client echoes it on each request. */
   sessionId?: string;
+  /** The protocol era the server speaks; `legacy` when omitted. */
+  era?: "legacy" | "modern" | "dual";
 }
 
 export interface FakeMcpServer {
@@ -55,7 +59,7 @@ export function startFakeMcpServer(opts: FakeMcpServerOptions = {}): FakeMcpServ
   const methods: string[] = [];
   const requests: { headers: Headers; body: string }[] = [];
 
-  const handle = async (request: Request): Promise<Response> => {
+  const handleLegacy = async (request: Request): Promise<Response> => {
     const server = new Server(opts.serverInfo ?? { name: "fake-mcp", version: "1.0.0" }, {
       capabilities: { tools: {} },
       ...(opts.instructions ? { instructions: opts.instructions } : {}),
@@ -80,6 +84,21 @@ export function startFakeMcpServer(opts: FakeMcpServerOptions = {}): FakeMcpServ
       await server.close();
     }
   };
+
+  const era = opts.era ?? "legacy";
+  const handle =
+    era === "legacy"
+      ? handleLegacy
+      : modernMcpHandler({
+          tools: tools.map((descriptor) => ({
+            descriptor,
+            handler: async () => ({ content: [] }),
+          })),
+          pageSize,
+          ...(opts.serverInfo ? { serverInfo: opts.serverInfo } : {}),
+          ...(opts.instructions ? { instructions: opts.instructions } : {}),
+          ...(era === "dual" ? { legacy: handleLegacy } : {}),
+        });
 
   const http = Bun.serve({
     hostname: "127.0.0.1",
