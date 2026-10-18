@@ -61,6 +61,7 @@ import {
   OAUTH_STATE_TTL_SECONDS,
   isClientMetadataRedirectTag,
   sameUrlIdentifier,
+  withOfflineAccess,
 } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
 import {
@@ -150,7 +151,9 @@ import {
   type ConnectionOverrides,
   type ConnectionResolutionError,
   type IntegrationManifest,
+  acquiresByConnectLogin,
 } from "@appstrate/core/integration";
+import { isSystemPackage } from "./system-packages.ts";
 import type { ConnectionReach, IntegrationToolCatalogEntry } from "@appstrate/shared-types";
 import { isUserUrlReachable, type ConnectionVariables } from "./connect/connection-variables.ts";
 import {
@@ -223,7 +226,7 @@ interface IntegrationOAuthClientWithSecret extends IntegrationOAuthClient {
   isDefault: boolean;
   /** `true` for a DCR-minted machine client (remote MCP public client). */
   autoProvisioned: boolean;
-  /** Server chosen per connection the client is bound to (AFPS §7.3); null = the manifest's. */
+  /** The server an auto-provisioned client is registered at and bound to (AFPS §7.3). */
   issuer: string | null;
   /** The secret is under a key id the keyring lacks: connecting answers a 503. */
   secretKeyUnavailable: boolean;
@@ -1050,7 +1053,7 @@ function inheritedDefault<C extends { isDefault: boolean }, S>(
 
 /**
  * Load the auto-provisioned (DCR) client for `(packageId, authKey, issuer)`, if any (`null`
- * issuer = the manifest's server). `idx_ioc_one_auto` guarantees at most one — the find half of
+ * matches a row bound to no server, which no flow takes). `idx_ioc_one_auto` guarantees at most one — the find half of
  * the DCR find-or-create.
  */
 async function getAutoProvisionedClient(
@@ -1544,8 +1547,8 @@ function isReservedRedirectTag(tag: string, autoProvisioned: boolean): boolean {
 
 /**
  * Refuse a stored row's per-server redirect URI unless it is the one of THIS flow's server: a plain
- * tag only on an auto-provisioned row of an auth whose server is chosen per connection, and only
- * the tag of the issuer this flow resolved (`flowIssuer`); a `cimd/` tag on no row (a document
+ * tag only on an auto-provisioned row of an auto-provisioned auth, and only the tag of the issuer
+ * this flow resolved (`flowIssuer`); a `cimd/` tag on no row (a document
  * client carries its own, bound by its ref). Anything else would send another server's tag with
  * this flow's token endpoint — rows written before the write guard, or a DCR row left over from
  * a version whose server was chosen per connection.
@@ -1644,10 +1647,8 @@ export function resolveConnectClient(
     system,
   );
   if (picked) {
-    // The server a per-server redirect URI may name: this flow's, when chosen per connection.
-    const flowIssuer = hasPerConnectionAuthServer(manifest, auth)
-      ? resolved.authorizationServer?.issuer
-      : undefined;
+    // The server a per-server redirect URI may name: this flow's, when its client is provisioned.
+    const flowIssuer = autoProvisioned ? resolved.authorizationServer?.issuer : undefined;
     return "isDefault" in picked
       ? customConnectClient(picked, flowIssuer)
       : systemConnectClient(picked);
@@ -1664,6 +1665,9 @@ export function resolveConnectClient(
     // acquisition failed. `resolved.provisioningFailure` carries the complete
     // reason + remedy, authored by whichever step failed. Render it verbatim.
     const failure = resolved.provisioningFailure;
+    if (failure?.transient) {
+      throw authorizationServerUnreachable(integrationId, authKey, failure.message);
+    }
     const detail = failure?.message ?? "discovery or client registration failed";
     const statusPart = failure?.status ? ` (HTTP ${failure.status})` : "";
     throw forbidden(
@@ -2005,7 +2009,7 @@ export interface ResolvedOAuthConnect {
    * the authorization server's HTTP status when the failure came from a
    * response, surfaced alongside the message.
    */
-  provisioningFailure?: { message: string; status?: number };
+  provisioningFailure?: { message: string; status?: number; transient?: true };
 }
 
 /**
@@ -2052,6 +2056,63 @@ function sameOrigin(a: string, b: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** An authorization server that did not answer: retryable, unlike a refusal of its metadata. */
+function authorizationServerUnreachable(packageId: string, authKey: string, reason: string) {
+  return new ApiError({
+    status: 503,
+    code: "authorization_server_unreachable",
+    title: "Authorization Server Unreachable",
+    detail: `The authorization server of '${packageId}' auth '${authKey}' could not be reached: ${reason}`,
+  });
+}
+
+/**
+ * MCP 2026-07-28 Security Considerations: an MCP server's authorization server whose validated
+ * metadata lists no S256 is refused before any client is provisioned, whatever the manifest says.
+ */
+export function assertPkceS256Advertised(
+  packageId: string,
+  authKey: string,
+  metadata: { issuer: string; codeChallengeMethodsSupported?: string[] },
+): void {
+  if (metadata.codeChallengeMethodsSupported?.includes("S256")) return;
+  throw new ApiError({
+    status: 403,
+    code: "authorization_server_pkce_unsupported",
+    title: "Authorization Server Without PKCE",
+    detail: `The authorization server ${metadata.issuer} of '${packageId}' auth '${authKey}' does not advertise PKCE S256 in its metadata (code_challenge_methods_supported), which an MCP connection requires.`,
+  });
+}
+
+/**
+ * What the authorization server of an auto-provisioned (DCR or CIMD) client must advertise before
+ * any client is provisioned for it: PKCE S256 on an MCP server, and RFC 9207 `iss` unless the
+ * platform vouches for it — a system integration's own fixed server. RFC 9700 §4.4.2.2: an attacker
+ * defeats per-server redirect URIs by "registering a new client with the honest authorization
+ * server", on the redirect URI assigned to its own server.
+ */
+function assertProvisionableServer(
+  packageId: string,
+  authKey: string,
+  auth: AfpsManifestAuth,
+  metadata: {
+    issuer: string;
+    codeChallengeMethodsSupported?: string[];
+    authorizationResponseIssParameterSupported?: boolean;
+  },
+  policy: { mcp: boolean; vouched: boolean },
+): void {
+  if (acquiresByConnectLogin(auth)) return;
+  if (policy.mcp) assertPkceS256Advertised(packageId, authKey, metadata);
+  if (policy.vouched || metadata.authorizationResponseIssParameterSupported === true) return;
+  throw new ApiError({
+    status: 403,
+    code: "authorization_server_iss_unsupported",
+    title: "Authorization Server Without Issuer Identification",
+    detail: `The authorization server ${metadata.issuer} of '${packageId}' auth '${authKey}' does not advertise RFC 9207 issuer identification (authorization_response_iss_parameter_supported), which a client this platform provisions for an integration other than a system one requires.`,
+  });
 }
 
 /**
@@ -2111,7 +2172,6 @@ export async function ensureIntegrationOAuthClient(
   authKey: string,
   manifest: IntegrationManifest,
   auth: AfpsManifestAuth,
-  redirectUri: string,
   variables: ConnectionVariables = {},
 ): Promise<ResolvedOAuthConnect> {
   if (hasPerConnectionAuthServer(manifest, auth)) {
@@ -2165,6 +2225,18 @@ export async function ensureIntegrationOAuthClient(
   // AFPS §7.3: the issuer's validated metadata wins; a manifest endpoint stands in only without it.
   const discovered = issuer ? await resolveOAuthEndpoints({ issuer }) : {};
   assertEndpointsMatchMetadata(packageId, authKey, auth, discovered);
+  if (discovered.issuer !== undefined) {
+    assertProvisionableServer(
+      packageId,
+      authKey,
+      auth,
+      { ...discovered, issuer: discovered.issuer },
+      {
+        mcp: true,
+        vouched: isSystemPackage(packageId),
+      },
+    );
+  }
   const endpoints = {
     ...discovered,
     authorizationEndpoint: discovered.authorizationEndpoint ?? auth.authorization_endpoint,
@@ -2200,16 +2272,31 @@ export async function ensureIntegrationOAuthClient(
     return { ...resolved, metadataDocumentClient: metadataDocumentClient(discovered.issuer) };
   }
 
-  // Auto-provisioned by DCR: there is exactly one machine client, registered once.
-  const existing = await getAutoProvisionedClient(scope, packageId, authKey, null);
+  // RFC 9700 §4.4.2: a DCR client is bound to, and called back for, one validated server.
+  if (discovered.issuer === undefined) {
+    return {
+      ...resolved,
+      provisioningFailure: discovered.metadataUnreachable
+        ? {
+            message: "its metadata (RFC 8414) did not answer; retry shortly",
+            transient: true,
+          }
+        : {
+            message:
+              "the authorization server publishes no valid metadata (RFC 8414), so no client can be registered for it; register an OAuth client manually, or retry once it does",
+          },
+    };
+  }
+  const existing = await getAutoProvisionedClient(scope, packageId, authKey, discovered.issuer);
   if (existing) return { ...resolved, orgClients: [existing] };
 
   return registerAutoProvisionedClient({ orgId: scope.orgId }, packageId, authKey, auth, {
     registrationEndpoint: endpoints.registrationEndpoint,
     grantTypesSupported: endpoints.grantTypesSupported,
     clientIdMetadataDocumentSupported: endpoints.clientIdMetadataDocumentSupported,
-    redirectUri,
-    issuer: null,
+    scopesSupported: endpoints.scopesSupported,
+    issuer: discovered.issuer,
+    chosenPerConnection: false,
     resolved,
   });
 }
@@ -2297,12 +2384,29 @@ async function ensurePerConnectionOAuthClient(
     );
   }
   const endpoints = await resolveOAuthEndpoints({ issuer: candidate });
+  if (endpoints.metadataUnreachable) {
+    throw authorizationServerUnreachable(
+      packageId,
+      authKey,
+      `${candidate}'s metadata (RFC 8414) did not answer; retry shortly`,
+    );
+  }
   if (!endpoints.issuer || !endpoints.authorizationEndpoint || !endpoints.tokenEndpoint) {
     throw refuse(
       "authorization_server_unavailable",
       `the authorization server ${candidate} publishes no valid metadata (RFC 8414)`,
     );
   }
+  assertProvisionableServer(
+    packageId,
+    authKey,
+    auth,
+    { ...endpoints, issuer: endpoints.issuer },
+    {
+      mcp: remote !== null,
+      vouched: false,
+    },
+  );
   const byDocument = presentsClientMetadataDocument(endpoints);
   for (const url of [
     endpoints.authorizationEndpoint,
@@ -2346,8 +2450,9 @@ async function ensurePerConnectionOAuthClient(
     registrationEndpoint: endpoints.registrationEndpoint,
     grantTypesSupported: endpoints.grantTypesSupported,
     clientIdMetadataDocumentSupported: endpoints.clientIdMetadataDocumentSupported,
-    redirectUri: integrationCallbackUrlFor(issuer),
+    scopesSupported: endpoints.scopesSupported,
     issuer,
+    chosenPerConnection: true,
     resolved,
   });
 }
@@ -2378,8 +2483,8 @@ async function pruneUnusedPerConnectionClients(
 }
 
 /**
- * Register a public client (RFC 7591) as the auth's auto-provisioned client of `issuer` (`null` =
- * the manifest's server). Every failure comes back as `resolved.provisioningFailure`.
+ * Register a public client (RFC 7591) as the auth's auto-provisioned client of `issuer`, on that
+ * server's own redirect URI. Every failure comes back as `resolved.provisioningFailure`.
  */
 async function registerAutoProvisionedClient(
   org: OrgScope,
@@ -2391,17 +2496,19 @@ async function registerAutoProvisionedClient(
     grantTypesSupported: string[] | undefined;
     /** Advertised, but no document presented (`presentsClientMetadataDocument`): the failure says so. */
     clientIdMetadataDocumentSupported: boolean | undefined;
-    redirectUri: string;
-    issuer: string | null;
+    /** RFC 8414 `scopes_supported`: the registration asks for the scopes connect requests. */
+    scopesSupported: string[] | undefined;
+    issuer: string;
+    chosenPerConnection: boolean;
     resolved: ResolvedOAuthConnect;
   },
 ): Promise<ResolvedOAuthConnect> {
-  const { registrationEndpoint, redirectUri, issuer, resolved } = input;
+  const { registrationEndpoint, issuer, chosenPerConnection, resolved } = input;
+  const redirectUri = integrationCallbackUrlFor(issuer);
   // A server chosen per connection takes no manual client: the remedy is on its side.
-  const manualRemedy =
-    issuer === null
-      ? "register an OAuth client manually for this integration"
-      : "a server chosen per connection must support it";
+  const manualRemedy = chosenPerConnection
+    ? "a server chosen per connection must support it"
+    : "register an OAuth client manually for this integration";
 
   // No registration endpoint discovered — can't auto-register; let the caller
   // surface the existing "register a client" error.
@@ -2411,18 +2518,17 @@ async function registerAutoProvisionedClient(
       authKey,
       issuer: resolved.issuer,
     });
-    const server =
-      issuer === null ? "the authorization server" : `the authorization server ${issuer}`;
+    const server = `the authorization server ${issuer}`;
     const message =
       input.clientIdMetadataDocumentSupported === true
         ? `${server} accepts client metadata documents but not dynamic client registration, and this instance presents no document: it takes a server that also advertises RFC 9207 iss (authorization_response_iss_parameter_supported), a public https APP_URL the server can fetch, and INTEGRATION_OAUTH_CIMD not set to 'off'; ${
-            issuer === null
-              ? "register an OAuth client manually, or meet those conditions"
-              : "meet those conditions to connect to it"
+            chosenPerConnection
+              ? "meet those conditions to connect to it"
+              : "register an OAuth client manually, or meet those conditions"
           }`
-        : issuer === null
-          ? `${server} advertises neither client metadata documents nor dynamic client registration; register an OAuth client manually, or retry once the server advertises one of them`
-          : `${server} advertises neither client metadata documents nor dynamic client registration (RFC 7591), one of which a server chosen per connection requires`;
+        : chosenPerConnection
+          ? `${server} advertises neither client metadata documents nor dynamic client registration (RFC 7591), one of which a server chosen per connection requires`
+          : `${server} advertises neither client metadata documents nor dynamic client registration; register an OAuth client manually, or retry once the server advertises one of them`;
     return { ...resolved, provisioningFailure: { message } };
   }
 
@@ -2466,14 +2572,13 @@ async function registerAutoProvisionedClient(
     const grantTypes = input.grantTypesSupported?.includes("refresh_token")
       ? ["authorization_code", "refresh_token"]
       : ["authorization_code"];
+    const scopes = withOfflineAccess(auth.default_scopes ?? [], input.scopesSupported);
     const registration = await registerDynamicClient({
       registrationEndpoint,
       redirectUri,
       clientName: platformClientName(),
       grantTypes,
-      ...(auth.default_scopes && auth.default_scopes.length > 0
-        ? { scopes: auth.default_scopes }
-        : {}),
+      ...(scopes.length > 0 ? { scopes } : {}),
       ...(dcrAuthMethod ? { tokenEndpointAuthMethod: dcrAuthMethod } : {}),
       fetchImpl: dcrGuardedFetch,
     });

@@ -187,7 +187,6 @@ describe("org-level integration OAuth clients", () => {
       AUTH_KEY,
       manifest,
       OAUTH2_AUTH,
-      "https://app.example.com/callback",
     );
     return resolveConnectClient(INTEGRATION, AUTH_KEY, manifest, OAUTH2_AUTH, resolved).clientId;
   }

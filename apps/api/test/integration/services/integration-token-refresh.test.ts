@@ -191,6 +191,7 @@ function refreshOf(
   return refreshConnectionCredential({
     connection: { ...target, authKey: "primary" },
     integrationId: PACKAGE_ID,
+    manifest: gmailManifest(token.url),
     authDef: gmailManifest(token.url).auths!.primary as AfpsManifestAuth,
     scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
     actor: { type: "user", id: ctx.user.id },
@@ -308,6 +309,7 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
     const outcome = await refreshConnectionCredential({
       connection: { ...(await readTarget(connId)), authKey: "primary" },
       integrationId: PACKAGE_ID,
+      manifest: gmailManifest(token.url),
       authDef: gmailManifest(token.url).auths!.primary as AfpsManifestAuth,
       scope: { orgId: ctx.orgId, spaceId: other.id },
       actor: { type: "user", id: ctx.user.id },

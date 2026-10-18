@@ -3,7 +3,7 @@
 import { createCache } from "@appstrate/core/cache";
 import { stripTrailingSlashes } from "@appstrate/afps-shared/connection-variables";
 import { readJsonUnder } from "./bounded-body.ts";
-import { oauthEgressFetch } from "./oauth-egress.ts";
+import { oauthEgressFetch, SsrfBlockedError } from "./oauth-egress.ts";
 
 /**
  * Discovery-first OAuth endpoint resolution (RFC 8414 / OIDC Discovery 1.0).
@@ -88,6 +88,8 @@ export interface OAuthEndpointResolution {
   /** The validated document's `issuer`, verbatim: what a client is bound to, `iss` compared with. */
   issuer?: string;
   authorizationResponseIssParameterSupported?: boolean;
+  /** No document, and a probe went unanswered (network failure, timeout, 5xx): retry may succeed. */
+  metadataUnreachable?: true;
 }
 
 export interface ResolveOAuthEndpointsInput {
@@ -177,6 +179,7 @@ interface DiscoveredMetadata {
   scopesSupported?: string[];
   issuer?: string;
   authorizationResponseIssParameterSupported?: boolean;
+  metadataUnreachable?: true;
 }
 
 /**
@@ -212,8 +215,10 @@ export async function resolveOAuthEndpoints(
     };
   }
   const configuredIssuer = stripTrailingSlashes(issuer);
-  const discovered = await discoveryCache.get(configuredIssuer, () =>
-    discover(issuer, configuredIssuer, input.fetchImpl),
+  const discovered = await discoveryCache.get(
+    configuredIssuer,
+    () => discover(issuer, configuredIssuer, input.fetchImpl),
+    { store: (found) => !found.metadataUnreachable },
   );
   const { authorizationEndpoint, tokenEndpoint, ...enrichment } = discovered ?? {};
   // Manual endpoints always win — discovery fills only the gaps.
@@ -233,9 +238,11 @@ async function discover(
   fetchImpl: typeof fetch | undefined,
 ): Promise<DiscoveredMetadata | undefined> {
   const found: DiscoveredMetadata = {};
+  let unavailable = false;
   for (const url of buildDiscoveryProbes(issuer)) {
     const doc = await fetchDiscoveryDocument(url, fetchImpl);
-    if (!doc) continue;
+    if (doc === UNREACHABLE) unavailable = true;
+    if (!doc || doc === UNREACHABLE) continue;
     // AFPS §7.3: no field is trusted from a document of another issuer.
     if (!discoveryIssuerMatches(doc.issuer, configuredIssuer)) continue;
     found.issuer ??= doc.issuer as string;
@@ -266,7 +273,9 @@ async function discover(
       break;
     }
   }
-  return Object.values(found).some((v) => v !== undefined) ? found : undefined;
+  if (Object.values(found).some((v) => v !== undefined)) return found;
+  // One probe out (a 404 elsewhere says nothing of it): no verdict on the metadata yet.
+  return unavailable ? { metadataUnreachable: true } : undefined;
 }
 
 function stringArray(value: unknown): string[] | undefined {
@@ -292,11 +301,14 @@ interface DiscoveryDocument {
   authorization_response_iss_parameter_supported?: unknown;
 }
 
-/** Best-effort fetch + parse of a discovery document. Returns `null` on any failure. */
+/** No answer from the server: a network failure, a timeout or a 5xx. */
+const UNREACHABLE = Symbol("unreachable");
+
+/** Best-effort fetch + parse of a discovery document: `null` on an answer without one. */
 async function fetchDiscoveryDocument(
   url: string,
   fetchImpl?: typeof fetch,
-): Promise<DiscoveryDocument | null> {
+): Promise<DiscoveryDocument | null | typeof UNREACHABLE> {
   // SSRF-guarded, matching the now-guarded token exchange to the same host.
   // The probe host comes from the manifest-author-controlled `issuer`; a host
   // resolving to a private/link-local/metadata address makes `oauthEgressFetch`
@@ -311,12 +323,16 @@ async function fetchDiscoveryDocument(
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(10_000),
     });
+    if (res.status >= 500) return UNREACHABLE;
     if (!res.ok) return null;
     const json = await readJsonUnder(res);
     if (!json || typeof json !== "object") return null;
     return json as DiscoveryDocument;
-  } catch {
-    // Best-effort: discovery failures fall back to manual endpoints. Swallow.
-    return null;
+  } catch (err) {
+    // Best-effort: discovery failures fall back to manual endpoints. A refused host is no outage;
+    // an unresolved one may be.
+    return err instanceof SsrfBlockedError && err.reason !== "resolution-failed"
+      ? null
+      : UNREACHABLE;
   }
 }

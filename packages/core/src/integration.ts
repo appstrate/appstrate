@@ -1444,7 +1444,8 @@ export function expandScopesGranted(
 
 /**
  * The `required` scopes that `granted`, expanded through `scope_catalog[].implies`
- * (see {@link expandScopesGranted}), does not cover. Order of `required` is kept.
+ * (see {@link expandScopesGranted}), does not cover. Order of `required` is kept. `offline_access`
+ * is never uncovered: whether it yields a refresh token is the authorization server's decision.
  */
 export function scopesNotCovered(
   required: readonly string[],
@@ -1453,7 +1454,7 @@ export function scopesNotCovered(
   authKey: string,
 ): string[] {
   const expanded = new Set(expandScopesGranted(granted, manifest, authKey));
-  return required.filter((s) => !expanded.has(s));
+  return required.filter((s) => s !== "offline_access" && !expanded.has(s));
 }
 
 /**

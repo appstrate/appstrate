@@ -21,7 +21,13 @@ import type {
   RefreshContext as IntegrationRefreshContext,
   RefreshExchangeResult,
 } from "@appstrate/connect";
-import type { AfpsManifestAuth } from "./integration-manifest-helpers.ts";
+import {
+  fixedAuthorizationServer,
+  isFixedAuthorizationServer,
+  type AfpsManifestAuth,
+  type FixedAuthorizationServer,
+} from "./integration-manifest-helpers.ts";
+import type { IntegrationManifest } from "@appstrate/core/integration";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import type { Actor } from "../lib/actor.ts";
 import type { SpaceScope } from "../lib/scope.ts";
@@ -298,13 +304,14 @@ export async function refreshConnectionCredential(input: {
     credentialRevision: string;
   };
   integrationId: string;
-  /** The declaration of the connection's auth in the caller's manifest. */
+  /** The caller's manifest, and the declaration of the connection's auth in it. */
+  manifest: IntegrationManifest;
   authDef: AfpsManifestAuth;
   scope: SpaceScope;
   actor: Actor;
   trigger: RefreshTrigger;
 }): Promise<ConnectionRefreshOutcome> {
-  const { connection, integrationId, authDef, scope, actor, trigger } = input;
+  const { connection, integrationId, manifest, authDef, scope, actor, trigger } = input;
   const { authKey } = connection;
   const forced =
     trigger.kind === "rejected" &&
@@ -339,7 +346,7 @@ export async function refreshConnectionCredential(input: {
       authKey,
       authDef,
       scope.spaceId,
-      connection,
+      { ...connection, fixedServer: fixedAuthorizationServer(manifest, authDef) },
     );
   } catch (err) {
     if (!(err instanceof RefreshError && err.kind === "transient")) throw err;
@@ -394,8 +401,15 @@ export async function buildIntegrationOAuthRefreshContext(
   authKey: string,
   authDef: AfpsManifestAuth,
   spaceId: string,
-  /** The minting client (`client_ref`) and RFC 8707 `resource` pinned on the connection. */
-  connection: { clientRef: string | null; oauthResource: string | null },
+  /**
+   * The minting client (`client_ref`) and RFC 8707 `resource` pinned on the connection, and the
+   * server the current manifest fixes (`fixedAuthorizationServer`; `null`: chosen per connection).
+   */
+  connection: {
+    clientRef: string | null;
+    oauthResource: string | null;
+    fixedServer: FixedAuthorizationServer | null;
+  },
   /** Seam for tests. */
   discover: typeof resolveOAuthEndpoints = resolveOAuthEndpoints,
 ): Promise<IntegrationRefreshContext | null> {
@@ -449,10 +463,17 @@ export async function buildIntegrationOAuthRefreshContext(
     return null;
   }
 
-  // A server chosen per connection is the user's (AFPS §8.7): its token endpoint is re-checked
-  // (its metadata may have changed). An unresolvable host is a blip; any other refusal is terminal.
+  // The token endpoint of a client's bound server is re-checked (its metadata may have changed):
+  // https is waived only for the server the manifest fixes, as at connect. Any other bound server —
+  // the user's (AFPS §8.7), even under a manifest since republished as fixed — needs it. An
+  // unresolvable host is a blip; any other refusal is terminal.
   if (boundIssuer !== undefined) {
-    const egress = await checkEgressUrl(tokenEndpoint, { requireHttpsForUntrustedHost: true });
+    const egress = await checkEgressUrl(tokenEndpoint, {
+      requireHttpsForUntrustedHost: !isFixedAuthorizationServer(
+        boundIssuer,
+        connection.fixedServer,
+      ),
+    });
     if (!egress.ok) {
       if (egress.detail === "resolution-failed") {
         throw new RefreshError(

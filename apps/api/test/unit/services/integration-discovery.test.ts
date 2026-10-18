@@ -26,6 +26,7 @@ type Route = (req: Request) => Response | Promise<Response>;
 
 const HOSTS = [
   "mcp.notion.test",
+  "mcp.noiss.test",
   "mcp.linear.test",
   "mcp.sentry.test",
   "mcp.atlassian.test",
@@ -108,6 +109,8 @@ function protectedServer(
     path?: string;
     /** The authorization server's own `scopes_supported`. */
     asScopes?: string[];
+    /** RFC 9207 `authorization_response_iss_parameter_supported` (default true). */
+    iss?: boolean;
   } = {},
 ): Record<string, Route> {
   const origin = `https://${host}`;
@@ -125,12 +128,8 @@ function protectedServer(
         token_endpoint: `${origin}/token`,
         code_challenge_methods_supported: ["S256"],
         ...(opts.registration === false ? {} : { registration_endpoint: `${origin}/register` }),
-        ...(opts.cimd
-          ? {
-              client_id_metadata_document_supported: true,
-              authorization_response_iss_parameter_supported: true,
-            }
-          : {}),
+        ...(opts.cimd ? { client_id_metadata_document_supported: true } : {}),
+        ...(opts.iss === false ? {} : { authorization_response_iss_parameter_supported: true }),
         ...(opts.asScopes ? { scopes_supported: opts.asScopes } : {}),
       }),
   };
@@ -204,6 +203,15 @@ describe("discoverRemoteIntegration", () => {
     });
     expect(proposal.warnings).toEqual([]);
     expect(proposal.iconSource).toBeNull();
+  });
+
+  it("warns before saving that a server without RFC 9207 iss cannot be connected", async () => {
+    const { fetchImpl } = fakeFetch(protectedServer("mcp.noiss.test", { iss: false }));
+    const proposal = await discoverRemoteIntegration(
+      { url: "https://mcp.noiss.test/mcp", orgSlug: "acme" },
+      { fetchImpl },
+    );
+    expect(proposal.warnings.map((w) => w.code)).toEqual(["authorization_server_iss_unsupported"]);
   });
 
   it("takes the challenge's scopes as defaults, the catalog as their union (Linear)", async () => {

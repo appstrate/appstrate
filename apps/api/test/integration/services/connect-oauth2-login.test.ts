@@ -15,6 +15,7 @@ import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { eq } from "drizzle-orm";
 import { decryptCredentialsToStringMap } from "@appstrate/connect";
 import type { Actor } from "@appstrate/connect";
+import type { IntegrationManifest } from "@appstrate/core/integration";
 import { integrationManifestSchema } from "@appstrate/core/integration";
 import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import { truncateAll, db } from "../../helpers/db.ts";
@@ -519,6 +520,7 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
         credentialRevision: (await readCredentialRevision(row.id))!,
       },
       integrationId: INTEGRATION,
+      manifest: manifest(upstream.base) as unknown as IntegrationManifest,
       authDef: (manifest(upstream.base).auths as Record<string, AfpsManifestAuth>).primary!,
       scope: connectCtx.scope,
       actor,

@@ -18,9 +18,14 @@ import { createTestContext, authHeaders, type TestContext } from "../../helpers/
 import { seedPackage, seedSpacePackage, seedSpace } from "../../helpers/seed.ts";
 import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import type { SystemPackageEntry } from "@appstrate/core/system-packages";
+import { _setSystemPackagesForTesting } from "../../../src/services/system-packages.ts";
 import { buildIntegrationOAuthRefreshContext } from "../../../src/services/integration-token-refresh.ts";
 import { authorizationServerTag } from "../../../src/lib/integration-callback-url.ts";
-import type { AfpsManifestAuth } from "../../../src/services/integration-manifest-helpers.ts";
+import {
+  fixedAuthorizationServer,
+  type AfpsManifestAuth,
+} from "../../../src/services/integration-manifest-helpers.ts";
 
 const app = getTestApp();
 
@@ -34,6 +39,10 @@ interface Forge {
   cimd: boolean;
   /** Advertise RFC 9207 `authorization_response_iss_parameter_supported` and send `iss`. */
   iss: boolean;
+  /** Advertise `code_challenge_methods_supported: ["S256"]`. */
+  pkce: boolean;
+  /** The status the RFC 8414 / OIDC metadata probes answer instead of the document. */
+  metadataStatus?: number;
   stop: () => void;
 }
 
@@ -48,6 +57,7 @@ function startForge(): Forge {
     advertise,
     cimd: false,
     iss: true,
+    pkce: true,
     stop: () => {},
   };
   let n = 0;
@@ -82,6 +92,12 @@ function startForge(): Forge {
           authorization_servers: advertise.get(prefix) ?? [`${base}${prefix}`],
         });
       }
+      if (
+        handle.metadataStatus &&
+        /^\/\.well-known\/(oauth-authorization-server|openid)/.test(url.pathname)
+      ) {
+        return new Response("no", { status: handle.metadataStatus });
+      }
       if (req.method === "GET" && url.pathname === "/.well-known/oauth-authorization-server") {
         return json({
           issuer: base,
@@ -89,7 +105,7 @@ function startForge(): Forge {
           token_endpoint: `${base}/oauth/token`,
           registration_endpoint: `${base}/oauth/register`,
           grant_types_supported: ["authorization_code", "refresh_token"],
-          code_challenge_methods_supported: ["S256"],
+          ...(handle.pkce ? { code_challenge_methods_supported: ["S256"] } : {}),
           ...(handle.iss ? { authorization_response_iss_parameter_supported: true } : {}),
           ...(handle.cimd ? { client_id_metadata_document_supported: true } : {}),
         });
@@ -431,6 +447,8 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     forge.advertise.clear();
     forge.cimd = false;
     forge.iss = true;
+    forge.pkce = true;
+    forge.metadataStatus = undefined;
     ctx = await createTestContext({ orgSlug: "myorg" });
     await seedIntegration(ctx.orgId, forgeManifest("@myorg/forge"));
   });
@@ -481,7 +499,7 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
       "oauth",
       auth,
       ctx.defaultSpaceId,
-      conn!,
+      { ...conn!, fixedServer: null },
     );
     expect(refresh!.resource).toBe(`${base}/api/v4/mcp`);
   });
@@ -494,6 +512,15 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     expect(clients.map((c) => c.issuer).sort()).toEqual([base, otherBase].sort());
     expect(new Set(clients.map((c) => c.redirectUri)).size).toBe(2);
     expect(forge.registrations).toHaveLength(2);
+  });
+
+  it("refuses a server chosen per connection whose metadata lists no PKCE S256, registering nothing", async () => {
+    forge.pkce = false;
+    const { res } = await beginHosted(base);
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe("connection_not_ready");
+    expect(forge.registrations).toHaveLength(0);
+    expect(await db.select().from(integrationOauthClients)).toEqual([]);
   });
 
   it("registers a server's client once for the org: another space reuses it", async () => {
@@ -589,13 +616,31 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     expect(JSON.stringify(await res.json())).toContain("per connection");
   });
 
-  it("refuses the mix-up through a document: a DCR server without iss bouncing to a CIMD server", async () => {
-    // A (per connection, DCR, no iss) sends the user to B with our document of A as client_id and
-    // its redirect URI, plus A's state; B — which fetches any document — returns the code there
-    // without iss. The document's redirect URI is not A's DCR one, so A's state refuses it.
-    const previousAppUrl = process.env.APP_URL;
-    process.env.APP_URL = "https://appstrate.example.com";
-    resetEnvCache();
+  it("answers 503 when the chosen server's metadata does not answer, registering nothing", async () => {
+    forge.metadataStatus = 503;
+    const res = await app.request("/api/integrations/@myorg/forge/auths/oauth/connect/oauth2", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ variables: { base_url: base } }),
+    });
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { code: string }).code).toBe("authorization_server_unreachable");
+    expect(forge.registrations).toHaveLength(0);
+  });
+
+  it("vouches for no server a system integration chooses per connection: no iss, refused", async () => {
+    const restore = _setSystemPackagesForTesting(
+      new Map([
+        [
+          "@myorg/forge",
+          {
+            packageId: "@myorg/forge",
+            type: "integration",
+            manifest: forgeManifest("@myorg/forge"),
+          } as unknown as SystemPackageEntry,
+        ],
+      ]),
+    );
     try {
       forge.iss = false;
       const res = await app.request("/api/integrations/@myorg/forge/auths/oauth/connect/oauth2", {
@@ -603,32 +648,32 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
         body: JSON.stringify({ variables: { base_url: base } }),
       });
-      expect(res.status).toBe(200);
-      const toA = new URL(((await res.json()) as { auth_url: string }).auth_url);
-      expect(toA.searchParams.get("redirect_uri")).toBe(
-        `https://appstrate.example.com/api/integrations/callback/${authorizationServerTag(base)}`,
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { code: string }).code).toBe(
+        "authorization_server_iss_unsupported",
       );
-      const documentOfA = `/oauth/client-metadata/${Buffer.from(base).toString("base64url")}.json`;
-      const doc = (await (await app.request(documentOfA)).json()) as { redirect_uris: string[] };
-      expect(doc.redirect_uris).toEqual([
-        `https://appstrate.example.com/api/integrations/callback/cimd/${authorizationServerTag(base)}`,
-      ]);
-
-      const toB = new URL(`${otherBase}/oauth/authorize`);
-      for (const [k, v] of toA.searchParams) toB.searchParams.set(k, v);
-      toB.searchParams.set("client_id", `https://appstrate.example.com${documentOfA}`);
-      toB.searchParams.set("redirect_uri", doc.redirect_uris[0]!);
-      const fromB = await authorize(toB.toString());
-      expect(fromB.searchParams.get("iss")).toBeNull();
-      const done = await app.request(fromB.pathname + fromB.search);
-      expect(await done.text()).toContain("did not come from the authorization server");
-      expect(forge.tokenRequests).toHaveLength(0);
-      expect(await db.select().from(integrationConnections)).toHaveLength(0);
+      expect(forge.registrations).toHaveLength(0);
     } finally {
-      if (previousAppUrl === undefined) delete process.env.APP_URL;
-      else process.env.APP_URL = previousAppUrl;
-      resetEnvCache();
+      restore();
     }
+  });
+
+  it("refuses a server chosen per connection that does not advertise iss, registering nothing", async () => {
+    // Never vouched for: the user picks it. Without `iss`, a DCR server A could send the user to an
+    // honest B (a client registered there on A's redirect URI, or our document of A) and have B's
+    // code delivered on A's flow (RFC 9700 §4.4.2.2).
+    forge.iss = false;
+    const res = await app.request("/api/integrations/@myorg/forge/auths/oauth/connect/oauth2", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ variables: { base_url: base } }),
+    });
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe(
+      "authorization_server_iss_unsupported",
+    );
+    expect(forge.registrations).toHaveLength(0);
+    expect(await db.select().from(integrationOauthClients)).toEqual([]);
   });
 
   it("takes the server's own client metadata document when it accepts CIMD: no row, bound to it", async () => {
@@ -675,7 +720,7 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
         "oauth",
         auth,
         ctx.defaultSpaceId,
-        conn!,
+        { ...conn!, fixedServer: null },
       );
       expect(refresh).toMatchObject({
         tokenEndpoint: `${base}/oauth/token`,
@@ -708,7 +753,7 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
       "oauth",
       auth,
       ctx.defaultSpaceId,
-      { clientRef: client!.id, oauthResource: null },
+      { clientRef: client!.id, oauthResource: null, fixedServer: null },
     );
     expect(refresh!.tokenEndpoint).toBe(`${otherBase}/oauth/token`);
     expect(refresh!.clientId).toBe(client!.clientId);
@@ -723,7 +768,7 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
         "oauth",
         auth,
         ctx.defaultSpaceId,
-        { clientRef: client!.id, oauthResource: null },
+        { clientRef: client!.id, oauthResource: null, fixedServer: null },
         async () => ({ tokenEndpoint }),
       );
     expect(await refreshAt("http://forge.example.com/oauth/token")).toBeNull();
@@ -732,6 +777,52 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
       name: "RefreshError",
       kind: "transient",
     });
+
+    // A server the manifest fixes is judged as connect judged it: plain http is not refused there.
+    const fixedAt = (tokenEndpoint: string) =>
+      buildIntegrationOAuthRefreshContext(
+        "@myorg/forge",
+        "oauth",
+        auth,
+        ctx.defaultSpaceId,
+        { clientRef: client!.id, oauthResource: null, fixedServer: { issuer: otherBase } },
+        async () => ({ tokenEndpoint }),
+      );
+    expect((await fixedAt("http://93.184.215.14/oauth/token"))!.tokenEndpoint).toBe(
+      "http://93.184.215.14/oauth/token",
+    );
+    expect(await fixedAt("https://169.254.169.254/oauth/token")).toBeNull();
+
+    // The author republishes the auth with a fixed server: this row stays bound to the server its
+    // user chose, which keeps the https rule — no refresh token goes out over plain http.
+    const republished = {
+      ...forgeManifest("@myorg/forge"),
+      source: {
+        kind: "remote",
+        remote: { url: "https://forge.example.com/api/v4/mcp", transport: "streamable-http" },
+      },
+      auths: { oauth: { ...auth, issuer: "https://forge.example.com" } },
+    } as unknown as IntegrationManifest;
+    const fixedServer = fixedAuthorizationServer(
+      republished,
+      republished.auths!.oauth as AfpsManifestAuth,
+    );
+    expect(fixedServer).toEqual({
+      issuer: "https://forge.example.com",
+      remoteUrl: "https://forge.example.com/api/v4/mcp",
+    });
+    const before = forge.tokenRequests.length;
+    expect(
+      await buildIntegrationOAuthRefreshContext(
+        "@myorg/forge",
+        "oauth",
+        auth,
+        ctx.defaultSpaceId,
+        { clientRef: client!.id, oauthResource: null, fixedServer },
+        async () => ({ tokenEndpoint: "http://93.184.215.14/oauth/token" }),
+      ),
+    ).toBeNull();
+    expect(forge.tokenRequests).toHaveLength(before);
   });
 
   it("spends the page on a started flow: its cookie is cleared, a replay of it refused", async () => {

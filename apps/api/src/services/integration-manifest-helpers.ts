@@ -31,7 +31,11 @@ import type { IntegrationSpawnSpec, ManifestDeliveryHttp } from "@appstrate/core
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import type { TokenEndpointAuthMethod } from "@appstrate/connect";
 import { renderAuthorizedUris } from "@appstrate/afps-shared/authorized-uris";
-import { isVariableTemplate, renderUrlTemplate } from "@appstrate/afps-shared/connection-variables";
+import {
+  isVariableTemplate,
+  renderUrlTemplate,
+  stripTrailingSlashes,
+} from "@appstrate/afps-shared/connection-variables";
 import { renderCredentialTemplate as renderCredentialTemplateCore } from "@appstrate/afps-shared/credential-template";
 
 /**
@@ -434,6 +438,39 @@ export function getVariablesSchema(manifest: IntegrationManifest): JSONSchemaObj
   return typeof schema === "object" && schema !== null && !Array.isArray(schema)
     ? (schema as JSONSchemaObject)
     : null;
+}
+
+/**
+ * The authorization server an oauth2 auth's manifest fixes, as data a bound issuer is compared
+ * with: its declared `issuer`, else the origin of its remote URL; `null` when chosen per connection.
+ */
+export interface FixedAuthorizationServer {
+  issuer?: string;
+  remoteUrl?: string;
+}
+
+export function fixedAuthorizationServer(
+  manifest: IntegrationManifest,
+  auth: Pick<AfpsManifestAuth, "type" | "issuer">,
+): FixedAuthorizationServer | null {
+  if (hasPerConnectionAuthServer(manifest, auth)) return null;
+  const remoteUrl = getRemoteSource(manifest)?.url;
+  return { ...(auth.issuer ? { issuer: auth.issuer } : {}), ...(remoteUrl ? { remoteUrl } : {}) };
+}
+
+/** Whether `issuer` is the server `fixed` names (an issuer of the remote URL's origin, without one). */
+export function isFixedAuthorizationServer(
+  issuer: string,
+  fixed: FixedAuthorizationServer | null,
+): boolean {
+  if (!fixed) return false;
+  if (fixed.issuer) return stripTrailingSlashes(fixed.issuer) === stripTrailingSlashes(issuer);
+  return (
+    fixed.remoteUrl !== undefined &&
+    URL.canParse(issuer) &&
+    URL.canParse(fixed.remoteUrl) &&
+    new URL(issuer).origin === new URL(fixed.remoteUrl).origin
+  );
 }
 
 /** Whether an oauth2 auth's server is chosen per connection (AFPS §7.3): a templated issuer or URL. */

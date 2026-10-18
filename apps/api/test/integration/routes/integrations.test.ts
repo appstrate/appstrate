@@ -1471,7 +1471,7 @@ describe("OAuth2 connect initiate", () => {
     expect(res.status).toBe(403);
   });
 
-  it("remote MCP oauth2 with no pre-registered client takes the auto-DCR path (403 when discovery fails)", async () => {
+  it("remote MCP oauth2 with no pre-registered client takes the auto-DCR path (503 when discovery cannot reach the AS)", async () => {
     // A remote MCP integration self-registers its client at connect time, so
     // connect is attempted even with no pre-registered client (unlike a classic
     // oauth2 auth, which the UI gates earlier). Discovery against the
@@ -1487,14 +1487,9 @@ describe("OAuth2 connect initiate", () => {
         body: "{}",
       },
     );
-    expect(res.status).toBe(403);
-    // The error names the specific provisioning failure (no registration
-    // endpoint discovered against the unreachable AS) and carries its remedy.
-    const body = (await res.json()) as { detail: string };
-    expect(body.detail).toContain(
-      "advertises neither client metadata documents nor dynamic client registration",
-    );
-    expect(body.detail).toContain("register an OAuth client manually");
+    // An unresolvable host may be an outage: a retryable 503, not a "register manually" 403.
+    expect(res.status).toBe(503);
+    expect(((await res.json()) as { code: string }).code).toBe("authorization_server_unreachable");
   });
 
   it("returns a PKCE-protected authorize URL after registering OAuth client", async () => {

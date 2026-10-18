@@ -18,6 +18,7 @@ import {
   parseResourceMetadataChallenge,
   parseScopeChallenge,
   resolveOAuthEndpoints,
+  withOfflineAccess,
 } from "@appstrate/connect";
 import { isIconImage } from "@appstrate/core/appearance";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -417,7 +418,10 @@ async function discoverAuth(
         catalog: scopeTokens([...scopes, ...(md.scopesSupported ?? [])]),
       }),
       provenance: "detected",
-      warnings: warning ? [warning] : [],
+      warnings: [
+        ...(warning ? [warning] : []),
+        ...(autoClient ? issWarnings(advertised, endpoints) : []),
+      ],
       ...(md.resourceName ? { resourceName: md.resourceName } : {}),
       ...(md.resourceDocumentation ? { documentation: md.resourceDocumentation } : {}),
       ...(md.resourcePolicyUri ? { policyUri: md.resourcePolicyUri } : {}),
@@ -431,10 +435,25 @@ async function discoverAuth(
       key: "oauth",
       auth: oauth2Auth(origin, { issuer: origin, method: "none", scopes, catalog: scopes }),
       provenance: "guessed",
-      warnings: [],
+      warnings: issWarnings(origin, atOrigin),
     };
   }
   return { key: "primary", auth: apiKeyAuth(origin), provenance: "guessed", warnings: [] };
+}
+
+/** Connect refuses such a server for an integration it creates (`assertProvisionableServer`). */
+function issWarnings(
+  server: string,
+  endpoints: { authorizationResponseIssParameterSupported?: boolean },
+): { code: string; message: string }[] {
+  return endpoints.authorizationResponseIssParameterSupported === true
+    ? []
+    : [
+        {
+          code: "authorization_server_iss_unsupported",
+          message: `The authorization server ${server} does not support RFC 9207 issuer identification (authorization_response_iss_parameter_supported): an integration created from this server cannot connect.`,
+        },
+      ];
 }
 
 /**
@@ -450,20 +469,6 @@ function provisionsClientItself(endpoints: {
 }): boolean {
   return presentsClientMetadataDocument(endpoints) || endpoints.registrationEndpoint !== undefined;
 }
-
-/**
- * The OIDC `offline_access` scope added to a proposed list when the authorization server
- * advertises it: without it such a server issues no refresh token, and a connection that cannot
- * renew is refused. An empty list stays empty: the request then names no scope and the server
- * applies its defaults, which one added scope would replace.
- */
-function withOfflineAccess(scopes: string[], asScopes: string[] | undefined): string[] {
-  return scopes.length > 0 && asScopes?.includes(OFFLINE_ACCESS) && !scopes.includes(OFFLINE_ACCESS)
-    ? [...scopes, OFFLINE_ACCESS]
-    : scopes;
-}
-
-const OFFLINE_ACCESS = "offline_access";
 
 /** Distinct RFC 6749 §3.3 scope tokens; anything else is dropped. */
 function scopeTokens(scopes: string[]): string[] {

@@ -288,6 +288,18 @@ export function parseTokenResponse(
   };
 }
 
+/**
+ * MCP 2026-07-28 Refresh Tokens: `offline_access` added once when the server's `scopes_supported`
+ * lists it. An empty list stays empty, leaving the server's default scopes in force.
+ */
+export function withOfflineAccess(scopes: string[], asScopes: string[] | undefined): string[] {
+  return scopes.length > 0 && asScopes?.includes(OFFLINE_ACCESS) && !scopes.includes(OFFLINE_ACCESS)
+    ? [...scopes, OFFLINE_ACCESS]
+    : scopes;
+}
+
+const OFFLINE_ACCESS = "offline_access";
+
 /** `returned` plus the `expected` scopes the response proves unlisted: `offline_access` by a refresh token, `openid` by an `id_token`. */
 export function withProvenScopes(
   returned: readonly string[],

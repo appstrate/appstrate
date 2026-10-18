@@ -15,8 +15,9 @@
  * Notable AFPS inputs:
  *   - `resource` (RFC 8707) is sent on both the authorize URL and the token
  *     request — some IdPs only honour it on one of the two.
- *   - `code_challenge_methods_supported`: `["S256"]` ⇒ PKCE-S256; absent/empty
- *     ⇒ no PKCE.
+ *   - `code_challenge_methods_supported`: manifest > discovered > `["S256"]`, S256
+ *     preferred over `plain`, `[]` disables PKCE — except on an MCP server with
+ *     metadata, which must advertise S256 (`OAuth2Strategy.begin`).
  *   - `issuer` (optional) enables discovery-first endpoint resolution
  *     (RFC 8414 / OIDC). Discovery is best-effort; explicit endpoints always
  *     override the discovered ones.

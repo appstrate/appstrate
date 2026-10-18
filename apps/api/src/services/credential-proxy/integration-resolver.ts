@@ -183,6 +183,7 @@ export async function forceRefreshIntegrationProxyCredentials(
   const outcome = await refreshConnectionCredential({
     connection,
     integrationId: input.integrationId,
+    manifest,
     authDef,
     scope: { orgId: input.orgId, spaceId: input.spaceId },
     actor: input.actor,

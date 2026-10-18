@@ -1962,6 +1962,11 @@ describe("expandScopesGranted", () => {
 });
 
 describe("scopesNotCovered", () => {
+  it("never counts offline_access as uncovered: the server decides on refresh tokens", () => {
+    const manifest = { auths: { oauth: { type: "oauth2" } } } as unknown as IntegrationManifest;
+    expect(scopesNotCovered(["read", "offline_access"], ["read"], manifest, "oauth")).toEqual([]);
+  });
+
   const USERINFO_EMAIL = "https://www.googleapis.com/auth/userinfo.email";
   const GMAIL_READONLY = "https://www.googleapis.com/auth/gmail.readonly";
   const m = baseManifest();

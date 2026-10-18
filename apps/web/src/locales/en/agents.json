@@ -630,6 +630,7 @@
   "integrationEditor.discover.detected": "detected",
   "integrationEditor.discover.guessed": "suggested",
   "integrationEditor.discover.warning.manual_client_required": "This server offers no client registration this instance can use (neither a client metadata document, which needs a public https address, nor dynamic registration): create an OAuth app with the provider and enter its client ID and secret in the integration settings.",
+  "integrationEditor.discover.warning.authorization_server_iss_unsupported": "This authorization server does not support issuer identification (RFC 9207): an integration created from this server cannot connect.",
   "integrationEditor.discover.warning.authorization_server_blocked": "The authorization server this MCP server points to is at a refused address: it was not queried.",
   "integrationEditor.discover.warning.instructions_truncated": "The server's instructions exceed the limit: they are cut at the last line that fits.",
   "integrationEditor.discover.warning.tools_truncated": "The server returned more tools than the limit: the list is truncated.",

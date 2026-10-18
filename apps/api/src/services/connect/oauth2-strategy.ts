@@ -29,6 +29,7 @@ import {
   resolveOAuthEndpoints,
   oauthEgressFetch,
   SsrfBlockedError,
+  withOfflineAccess,
   type RefreshExchangeResult,
 } from "@appstrate/connect";
 import { LoginError, renderTokenGrant, type LoginConfig } from "@appstrate/connect/connect";
@@ -37,6 +38,7 @@ import { buildIntegrationOAuthRefreshContext } from "../integration-token-refres
 import { integrationCallbackUrl } from "../../lib/integration-callback-url.ts";
 import {
   getRemoteSource,
+  fixedAuthorizationServer,
   hasPerConnectionAuthServer,
   toSupportedTokenEndpointAuthMethod,
   type AfpsManifestAuth,
@@ -46,6 +48,7 @@ import { logger } from "../../lib/logger.ts";
 import { oauthStateStore } from "./oauth-state-store.ts";
 import {
   assertEndpointsMatchMetadata,
+  assertPkceS256Advertised,
   assertRequiredIdentityClaims,
   ensureIntegrationOAuthClient,
   extractIdentity,
@@ -362,12 +365,6 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
         "oauth2 auth must declare an issuer (for discovery) or explicit authorization_endpoint + token_endpoint for marketplace connect.",
       );
     }
-    // Same callback for every integration flow. Computed before client
-    // resolution so auto-DCR registers exactly this redirect URI. Shared
-    // helper, not an inline template: the admin UI displays the very same
-    // string (integration detail `platform_redirect_uri`) so what an admin
-    // registers at the provider cannot drift from what we send.
-    const redirectUri = integrationCallbackUrl();
     // Resolve the client (auto-registering via DCR for remote MCP integrations
     // when unregistered) and the connect endpoints/resource (discovered for
     // MCP, else manifest).
@@ -377,7 +374,6 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       ctx.authKey,
       manifest,
       auth,
-      redirectUri,
       variables ?? {},
     );
     // Client selection (multi-client) — full precedence lives in
@@ -398,7 +394,8 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       resolved,
       ctx.target?.spaceId === null,
     );
-    const effectiveRedirectUri = clientRedirectUri ?? redirectUri;
+    // The shared callback, the very string the admin UI displays (`platform_redirect_uri`).
+    const effectiveRedirectUri = clientRedirectUri ?? integrationCallbackUrl();
     // Threaded endpoints/resource: discovery result wins, manifest is the
     // fallback (classic integrations have no resolved.* fields).
     const issuer = resolved.issuer ?? auth.issuer;
@@ -406,14 +403,17 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     const tokenEndpoint = resolved.tokenEndpoint ?? auth.token_endpoint;
     // A server chosen per connection takes no declared resource.
     const resource = perConnection ? resolved.resource : (resolved.resource ?? auth.resource);
+    const metadata =
+      getRemoteSource(manifest) && issuer ? await resolveOAuthEndpoints({ issuer }) : undefined;
     // AFPS §7.3 client binding on a remote source, a manually registered client included.
-    if (getRemoteSource(manifest) && !perConnection && issuer) {
-      assertEndpointsMatchMetadata(
-        ctx.integrationId,
-        ctx.authKey,
-        auth,
-        await resolveOAuthEndpoints({ issuer }),
-      );
+    if (metadata && !perConnection) {
+      assertEndpointsMatchMetadata(ctx.integrationId, ctx.authKey, auth, metadata);
+    }
+    if (metadata?.issuer !== undefined) {
+      assertPkceS256Advertised(ctx.integrationId, ctx.authKey, {
+        ...metadata,
+        issuer: metadata.issuer,
+      });
     }
     const result = await initiateIntegrationOAuth(oauthStateStore, {
       packageId: ctx.integrationId,
@@ -423,12 +423,14 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       ...(tokenEndpoint ? { tokenEndpoint } : {}),
       clientId,
       clientRef,
-      scopes: opts.scopes,
+      scopes: withOfflineAccess(opts.scopes ?? [], metadata?.scopesSupported),
       ...(oauthMeta?.scope_separator ? { scopeSeparator: oauthMeta.scope_separator } : {}),
       ...(resource ? { resource } : {}),
-      ...(auth.code_challenge_methods_supported
-        ? { codeChallengeMethodsSupported: auth.code_challenge_methods_supported }
-        : {}),
+      ...(metadata?.issuer !== undefined
+        ? { codeChallengeMethodsSupported: ["S256"] }
+        : auth.code_challenge_methods_supported
+          ? { codeChallengeMethodsSupported: auth.code_challenge_methods_supported }
+          : {}),
       ...(auth.authorization_params ? { authorizationParams: auth.authorization_params } : {}),
       redirectUri: effectiveRedirectUri,
       orgId: ctx.scope.orgId,
@@ -602,7 +604,6 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       ctx.authKey,
       manifest,
       auth,
-      integrationCallbackUrl(),
       variables ?? {},
     );
     const { clientRef } = resolveConnectClient(
@@ -622,7 +623,11 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
         ctx.authKey,
         auth,
         ctx.scope.spaceId,
-        { clientRef, oauthResource },
+        {
+          clientRef,
+          oauthResource,
+          fixedServer: fixedAuthorizationServer(manifest, auth),
+        },
       );
     } catch (err) {
       if (err instanceof RefreshError && err.kind === "transient") {
