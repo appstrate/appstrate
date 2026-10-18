@@ -1,18 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { MessageSquareText, PencilLine } from "lucide-react";
+import { Link2, MessageSquareText, PencilLine } from "lucide-react";
 import { Badge } from "@appstrate/ui/components/badge";
 import { buildChatCreationDraft, type CreationResource } from "../lib/creation-handoff";
 import { useCanReach } from "../hooks/use-can-reach";
 import { ChoiceCard } from "./choice-card";
 import { Modal } from "./modal";
 
-interface CreationHandoffModalProps {
+interface CreationHandoffChoicesProps {
   resource: CreationResource;
-  onClose: () => void;
   onManual: () => void;
   onChat: (prompt: string) => void;
+  /** The guided way from an MCP server URL, offered first when set (integrations). */
+  onFromUrl?: () => void;
 }
 
 const TITLE_KEYS: Record<CreationResource, string> = {
@@ -22,28 +23,65 @@ const TITLE_KEYS: Record<CreationResource, string> = {
   "mcp-server": "creation.title.mcpServer",
 };
 
+const MANUAL_KEYS: Partial<Record<CreationResource, { title: string; description: string }>> = {
+  integration: {
+    title: "creation.manual.integrationTitle",
+    description: "creation.manual.integrationDescription",
+  },
+  "mcp-server": {
+    title: "creation.manual.importTitle",
+    description: "creation.manual.importDescription",
+  },
+};
+
 export function CreationHandoffModal({
-  resource,
   onClose,
+  ...choices
+}: CreationHandoffChoicesProps & { onClose: () => void }) {
+  const { t } = useTranslation("settings");
+  return (
+    <Modal onClose={onClose} title={t(TITLE_KEYS[choices.resource])} className="sm:max-w-xl">
+      <CreationHandoffChoices {...choices} />
+    </Modal>
+  );
+}
+
+/** The ways to create, as the modal lists them. */
+export function CreationHandoffChoices({
+  resource,
   onManual,
   onChat,
-}: CreationHandoffModalProps) {
+  onFromUrl,
+}: CreationHandoffChoicesProps) {
   const { t } = useTranslation("settings");
   const canReach = useCanReach();
   const translatePrompt = (key: string, values?: Record<string, string>) => t(key, values);
   const chatPrompt = buildChatCreationDraft(resource, translatePrompt);
-  const manualIsImport = resource === "mcp-server";
+  const manual = MANUAL_KEYS[resource] ?? {
+    title: "creation.manual.title",
+    description: "creation.manual.description",
+  };
   // The chat route gate covers both the feature flag and the `chat:read` permission.
   const chatAvailable = canReach("/chat");
 
   const methods = [
+    ...(onFromUrl
+      ? [
+          {
+            id: "url",
+            icon: Link2,
+            title: t("creation.fromUrl.title"),
+            description: t("creation.fromUrl.description"),
+            onClick: onFromUrl,
+            disabled: false,
+          },
+        ]
+      : []),
     {
       id: "manual",
       icon: PencilLine,
-      title: t(manualIsImport ? "creation.manual.importTitle" : "creation.manual.title"),
-      description: t(
-        manualIsImport ? "creation.manual.importDescription" : "creation.manual.description",
-      ),
+      title: t(manual.title),
+      description: t(manual.description),
       onClick: onManual,
       disabled: false,
     },
@@ -60,16 +98,14 @@ export function CreationHandoffModal({
   ];
 
   return (
-    <Modal onClose={onClose} title={t(TITLE_KEYS[resource])} className="sm:max-w-xl">
-      <div className="flex flex-col gap-2">
-        {methods.map(({ id, ...method }) => (
-          <ChoiceCard
-            key={id}
-            {...method}
-            adornment={id === "chat" ? <Badge variant="secondary">Appstrate</Badge> : undefined}
-          />
-        ))}
-      </div>
-    </Modal>
+    <div className="flex flex-col gap-2">
+      {methods.map(({ id, ...method }) => (
+        <ChoiceCard
+          key={id}
+          {...method}
+          adornment={id === "chat" ? <Badge variant="secondary">Appstrate</Badge> : undefined}
+        />
+      ))}
+    </div>
   );
 }

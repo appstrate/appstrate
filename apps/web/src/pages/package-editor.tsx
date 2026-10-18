@@ -2,6 +2,7 @@
 
 import { Fragment, useCallback, useContext, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { useLocation } from "react-router-dom";
 import type { Versioned } from "../hooks/use-packages";
 import type {
   AgentDetail,
@@ -57,6 +58,7 @@ import {
   type ServerSyncBody,
 } from "../lib/integration-server-sync";
 import { encodeIconDataUri } from "../lib/icon-image";
+import { readManualCreationManifest } from "../lib/integration-wizard";
 
 const asNumber = (value: unknown) => (typeof value === "number" ? value : undefined);
 
@@ -431,7 +433,7 @@ function IntegrationEditorInner({
       // `null` when the package already has an `INTEGRATION.md`, which a sync never replaces.
       const { instructions } = proposal;
       setSyncResult({
-        count: proposal.manifest.default_tools.length,
+        count: proposal.tools.length,
         warnings: proposal.warnings,
         docProposed: Boolean(instructions),
       });
@@ -578,11 +580,18 @@ export function PackageDefinitionEditor({
 export function PackageEditorPage({ type }: { type: "skill" | "integration" }) {
   const { user } = useAuth();
   const { currentOrg } = useOrg();
+  const location = useLocation();
+  // The manifest accepted in the MCP URL wizard, read once: nothing of it is stored.
+  const [accepted] = useState(() =>
+    type === "integration" ? readManualCreationManifest(location.state) : undefined,
+  );
 
   if (type === "integration") {
     return (
       <IntegrationEditorInner
-        initialState={{ manifest: defaultIntegrationManifest(currentOrg?.slug, user?.email) }}
+        initialState={{
+          manifest: accepted ?? defaultIntegrationManifest(currentOrg?.slug, user?.email),
+        }}
         packageId={undefined}
       />
     );

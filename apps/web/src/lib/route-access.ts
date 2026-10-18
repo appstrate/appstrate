@@ -70,6 +70,10 @@ export const ROUTE_ACCESS = {
     anyOf: ["integrations:write"],
     operations: ["createIntegrationPackage"],
   },
+  "/integrations/new/mcp": {
+    anyOf: ["integrations:write"],
+    operations: ["discoverRemoteIntegration", "createIntegrationPackage"],
+  },
   "/integrations/:scope/:name": { anyOf: ["integrations:read"], operations: ["getIntegration"] },
 
   "/mcp-servers": { anyOf: ["mcp-servers:read"], operations: ["listMcpServerPackages"] },

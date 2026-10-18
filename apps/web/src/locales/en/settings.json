@@ -1500,5 +1500,9 @@
   "models.choice.manualAdd": "Add a model id",
   "models.choice.manualConfirm": "Add to the list",
   "credentials.oauth.pairingFailed": "The connection did not complete: the account was not saved. Generate a new command to try again.",
-  "models.form.subscriptionRequired": "Choose an organization subscription or “Personal key”."
+  "models.form.subscriptionRequired": "Choose an organization subscription or “Personal key”.",
+  "creation.fromUrl.title": "From an MCP URL",
+  "creation.fromUrl.description": "Paste the address of an MCP server. Appstrate guides you through adding its tools.",
+  "creation.manual.integrationTitle": "Manual configuration",
+  "creation.manual.integrationDescription": "Define the source, the authentication and the tools yourself."
 }

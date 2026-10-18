@@ -15,6 +15,11 @@ describe("mergeServerSync", () => {
     manifest: Record<string, unknown>,
     warnings: { code: string; message: string }[] = [],
   ) => ({ manifest, warnings }) as unknown as Pick<ServerSyncProposal, "manifest" | "warnings">;
+  /** The server's answer: every listed tool in `tools_policy`, the read-only ones in `default_tools`. */
+  const listing = (names: string[], readOnly: string[] = names) => ({
+    default_tools: readOnly,
+    tools_policy: Object.fromEntries(names.map((name) => [name, {}])),
+  });
 
   it("keeps the policy of tools still listed, adds new ones and drops the others", () => {
     const current = {
@@ -24,7 +29,7 @@ describe("mergeServerSync", () => {
         gone: { required_scopes: { oauth: ["y"] } },
       },
     };
-    const manifest = mergeServerSync(current, sync({ default_tools: ["a", "b"] }));
+    const manifest = mergeServerSync(current, sync(listing(["a", "b"])));
     expect(manifest.tools_policy).toEqual({ a: { required_scopes: { oauth: ["x"] } }, b: {} });
   });
 
@@ -32,7 +37,7 @@ describe("mergeServerSync", () => {
     const current = { source: remote, tools_policy: { kept: { required_scopes: { o: ["s"] } } } };
     const manifest = mergeServerSync(
       current,
-      sync({ default_tools: ["a"] }, [{ code: "tools_truncated", message: "en" }]),
+      sync(listing(["a"]), [{ code: "tools_truncated", message: "en" }]),
     );
     expect(manifest.tools_policy).toEqual({ kept: { required_scopes: { o: ["s"] } }, a: {} });
   });
@@ -43,8 +48,17 @@ describe("mergeServerSync", () => {
       hidden_tools: ["secret"],
       auths: { primary: { type: "api_key", connect: { tool: { name: "login" } } } },
     };
-    const listed = sync({ default_tools: ["a", "secret", "login"] });
+    const listed = sync(listing(["a", "secret", "login"]));
     expect(mergeServerSync(current, listed).default_tools).toEqual(["a"]);
+  });
+
+  it("declares every listed tool but pre-selects only the read-only ones", () => {
+    const manifest = mergeServerSync(
+      { source: remote },
+      sync(listing(["read", "delete"], ["read"])),
+    );
+    expect(manifest.tools_policy).toEqual({ read: {}, delete: {} });
+    expect(manifest.default_tools).toEqual(["read"]);
   });
 
   it("keeps an explicitly empty default_tools", () => {
@@ -53,28 +67,25 @@ describe("mergeServerSync", () => {
       default_tools: [],
       tools_policy: { read: {}, delete: {} },
     };
-    const proposed = sync({
-      default_tools: ["read", "delete"],
-      tools_policy: { read: {}, delete: {} },
-    });
+    const proposed = sync(listing(["read", "delete"]));
     expect(mergeServerSync(current, proposed).default_tools).toEqual([]);
   });
 
   it("never adds to the author's default_tools, only removes tools no longer exposed", () => {
     const current = { source: remote, default_tools: ["a", "gone"], tools_policy: { a: {} } };
-    const manifest = mergeServerSync(current, sync({ default_tools: ["a", "b"] }));
+    const manifest = mergeServerSync(current, sync(listing(["a", "b"])));
     expect(manifest.default_tools).toEqual(["a"]);
   });
 
   it("keeps a wildcard default_tools", () => {
     const current = { source: remote, default_tools: "*" };
-    expect(mergeServerSync(current, sync({ default_tools: ["a"] })).default_tools).toBe("*");
+    expect(mergeServerSync(current, sync(listing(["a"]))).default_tools).toBe("*");
   });
 
   it("handles a tool named like an Object.prototype member", () => {
     const manifest = mergeServerSync(
       { source: remote, tools_policy: {} },
-      sync({ default_tools: ["constructor", "toString"] }),
+      sync(listing(["constructor", "toString"])),
     );
     expect(manifest.tools_policy).toEqual({ constructor: {}, toString: {} });
     expect(manifest.default_tools).toEqual(["constructor", "toString"]);
@@ -82,7 +93,7 @@ describe("mergeServerSync", () => {
 
   it("fills identity only when empty", () => {
     const proposed = {
-      default_tools: [],
+      ...listing([]),
       display_name: "Theirs",
       description: "Server",
       homepage: "https://x.test",
@@ -96,7 +107,7 @@ describe("mergeServerSync", () => {
   it("does not mutate the current manifest", () => {
     const current = { source: remote, default_tools: ["a"], tools_policy: { a: {} } };
     const copy = structuredClone(current);
-    mergeServerSync(current, sync({ default_tools: ["b"] }));
+    mergeServerSync(current, sync(listing(["b"])));
     expect(current).toEqual(copy);
   });
 });

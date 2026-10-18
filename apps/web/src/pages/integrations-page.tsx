@@ -224,6 +224,7 @@ export function IntegrationsPage() {
         <CreationHandoffModal
           resource="integration"
           onClose={creation.close}
+          onFromUrl={() => creation.leave("/integrations/new/mcp")}
           onManual={() => creation.leave("/integrations/new")}
           onChat={creation.openChat}
         />

@@ -37,15 +37,15 @@ const SYNC_IDENTITY = ["display_name", "description", "homepage", "icon"] as con
 /**
  * `tools_policy` keeps each still-listed tool's entry (its scopes are the author's) and drops the
  * rest unless the list was truncated. `default_tools` is the author's (`[]` and `*` included): it
- * only loses unexposed tools, and when absent becomes every exposed listed tool. Identity is
- * filled only when empty.
+ * only loses unexposed tools, and when absent becomes the proposal's pre-selection (the tools the
+ * server annotates read-only), exposed ones only. Identity is filled only when empty.
  */
 export function mergeServerSync(
   current: Manifest,
   proposal: Pick<ServerSyncProposal, "manifest" | "warnings">,
 ): Manifest {
   const proposed: Manifest = proposal.manifest;
-  const listed = proposal.manifest.default_tools;
+  const listed = Object.keys(proposal.manifest.tools_policy);
   const policy = asRecord(current.tools_policy);
   const truncated = proposal.warnings.some((w) => w.code === "tools_truncated");
   const names = [...(truncated ? Object.keys(policy) : []), ...listed];
@@ -65,7 +65,7 @@ export function mergeServerSync(
   if (Array.isArray(authored)) {
     manifest.default_tools = authored.filter((name) => exposed.has(name));
   } else if (authored === undefined) {
-    manifest.default_tools = listed.filter((name) => exposed.has(name));
+    manifest.default_tools = proposal.manifest.default_tools.filter((name) => exposed.has(name));
   }
 
   for (const key of SYNC_IDENTITY) {
