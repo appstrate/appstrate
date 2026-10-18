@@ -3,7 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { Plug } from "lucide-react";
 import { DataTable } from "../data-table";
-import { EmptyState } from "../page-states";
+import { EmptyState, NoMatchState } from "../page-states";
 import { ListToolbar } from "../list-toolbar";
 import { AddIntegrationConnection } from "../integration-connect/add-integration-connection";
 import { isOauthAuthConnectable } from "../integration-connect/connectable-auth-keys";
@@ -152,15 +152,11 @@ export function ConnectionsTable({
         rows={rows}
         rowKey={(connection) => connection.id}
         empty={
-          <EmptyState
-            message={t(
-              list.search || owners.length || methods.length
-                ? "integration.presentation.noMatch"
-                : "integration.auth.noConnection",
-            )}
-            icon={Plug}
-            compact
-          />
+          list.search || owners.length || methods.length ? (
+            <NoMatchState message={t("integration.presentation.noMatch")} onReset={list.reset} />
+          ) : (
+            <EmptyState message={t("integration.auth.noConnection")} icon={Plug} compact />
+          )
         }
       />
     </div>
