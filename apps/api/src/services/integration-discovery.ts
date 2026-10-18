@@ -166,6 +166,8 @@ async function probeServer(url: string, fetchImpl: typeof fetch): Promise<Protec
       };
     }
     if (seen.failure !== undefined) throw unreachable(url, seen.failure);
+    // A handshake answer past the probe's bound could not be read: no verdict on the server.
+    if (seen.oversized) throw unreachable(url, err);
     const status = httpStatusOf(err) ?? seen.status;
     if (status === 404 || status === 405) return probeSse(url, fetchImpl);
     // A server that could not answer (the probe, then `initialize`): not a verdict on it.

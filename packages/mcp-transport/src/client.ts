@@ -143,10 +143,10 @@ export interface McpHttpClientOptions extends AppstrateMcpClientOptions {
   retry?: McpConnectRetryOptions;
   /**
    * Cancellation signal for the entire connect. Honoured on BOTH paths: it
-   * short-circuits the retry loop *and* unwinds the in-flight era probe or
-   * `initialize` handshake of every individual attempt (see
-   * {@link connectWithSignal}) — including the single-shot path, which has no
-   * loop to short-circuit.
+   * short-circuits the retry loop *and* unwinds the in-flight `initialize`
+   * handshake (through its request) or era probe (by closing the transport) of
+   * every individual attempt (see {@link connectWithSignal}) — including the
+   * single-shot path, which has no loop to short-circuit.
    *
    * Independent from the retry deadline budget: `signal.abort()` is the
    * caller's own cancellation, the deadline triggers a separate AbortError.
@@ -328,16 +328,45 @@ async function connectOnce(
     } catch (err) {
       if (options.signal?.aborted || isAuthRefusal(err)) throw err;
       legacyOrigins.invalidate(origin);
-      return await connectAttempt(targetUrl, headers, options, "auto");
     }
   }
+  return probeThenFallback(targetUrl, headers, options);
+}
+
+/**
+ * The SDK's negotiation, then — when the probe said nothing of the era — the legacy handshake
+ * once. The handshake's own error is surfaced only when it says something the probe did not: an
+ * auth refusal, a fault of the injected fetch, a 5xx. A 4xx (a modern-only server refusing
+ * `initialize`) says the probe's failure was the real one, so that is what is thrown: a
+ * transient 5xx on a modern server stays transient, for a retry loop to ride through.
+ */
+async function probeThenFallback(
+  targetUrl: URL,
+  headers: Record<string, string>,
+  options: McpHttpClientOptions,
+): Promise<AppstrateMcpClient> {
   try {
     return await connectAttempt(targetUrl, headers, options, "auto");
   } catch (err) {
     if (!(err instanceof ProbeInconclusive) || options.signal?.aborted) throw err;
-    return await connectAttempt(targetUrl, headers, options, "legacy");
+    try {
+      return await connectAttempt(targetUrl, headers, options, "legacy");
+    } catch (fallback) {
+      if (options.signal?.aborted) throw fallback;
+      const status = httpStatusOf(fallback);
+      const telling =
+        isAuthRefusal(fallback) ||
+        isInjectedFetchFault(fallback) ||
+        (status !== undefined && status >= 500);
+      throw telling ? fallback : err.cause;
+    }
   }
 }
+
+/** Errors the injected `fetch` threw: handed back as themselves, never re-read as an era signal. */
+const injectedFetchFaults = new WeakSet<object>();
+const isInjectedFetchFault = (err: unknown) =>
+  typeof err === "object" && err !== null && injectedFetchFaults.has(err);
 
 /** A probe that said nothing of the era (5xx, timeout): carries the SDK's error as `cause`. */
 class ProbeInconclusive extends Error {
@@ -370,7 +399,6 @@ async function connectAttempt(
   // for, so it is handed back as itself. The methods sent tell a failed probe from a failed
   // handshake.
   const baseFetch = options.fetch ?? fetch;
-  const fetchFaults = new WeakSet<object>();
   let pastProbe = false;
   const observedFetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
     const method = postedMethod(init);
@@ -378,7 +406,7 @@ async function connectAttempt(
     try {
       return await baseFetch(input, init);
     } catch (err) {
-      if (typeof err === "object" && err !== null) fetchFaults.add(err);
+      if (typeof err === "object" && err !== null) injectedFetchFaults.add(err);
       throw err;
     }
   }) as typeof fetch;
@@ -398,15 +426,18 @@ async function connectAttempt(
     await connectWithSignal(client, transport, options.signal, era === "legacy");
   } catch (err) {
     await transport.close().catch(() => {});
+    if (options.signal?.aborted) throw abortReason(options.signal);
     const cause = err instanceof SdkError ? err.cause : undefined;
-    if (typeof cause === "object" && cause !== null && fetchFaults.has(cause)) throw cause;
+    if (isInjectedFetchFault(cause)) throw cause;
     if (era === "auto" && !pastProbe && isInconclusiveProbe(err)) throw new ProbeInconclusive(err);
     throw err;
   }
-  if (client.getProtocolEra() === "legacy") {
-    if (options.era !== "legacy") legacyOrigins.set(targetUrl.origin, true);
-  } else if (legacyOrigins.peek(targetUrl.origin)) {
-    legacyOrigins.invalidate(targetUrl.origin);
+  // A verdict only the SDK's own negotiation reached: never one assumed (the cached path, the
+  // fallback after an inconclusive probe, a caller's pin), or a busy origin would never be
+  // re-probed and a dual-era server answering a probe 5xx once would stay legacy.
+  if (era === "auto") {
+    if (client.getProtocolEra() === "legacy") legacyOrigins.set(targetUrl.origin, true);
+    else if (legacyOrigins.peek(targetUrl.origin)) legacyOrigins.invalidate(targetUrl.origin);
   }
   return buildClient(
     dualEraSession(client, options.onWarning),
@@ -442,10 +473,11 @@ export function httpStatusOf(err: unknown): number | undefined {
 /**
  * `client.connect`, with the caller's signal actually attached.
  *
- * This is the ONLY cancellation seam a connect has, and it bounds the phases that wedge: the
- * `server/discover` probe and the legacy `initialize` request both take the connect options'
- * signal. A retry loop is not an alternative bound — it wraps attempts, it cannot interrupt one
- * — which is why the signal goes here rather than only around the loop.
+ * This is the ONLY cancellation seam a connect has, and it bounds the phases that wedge. The
+ * legacy `initialize` request takes the connect options' signal; the `server/discover` probe
+ * does not — the SDK builds the probe without it — so an abort also closes the transport, which
+ * ends the probe's request. A retry loop is not an alternative bound — it wraps attempts, it
+ * cannot interrupt one — which is why the signal goes here rather than only around the loop.
  *
  * RESIDUAL, on purpose: on the legacy path `connect` awaits one more POST after `initialize`
  * settles — `notifications/initialized` — and the SDK passes that one no signal. An abort
@@ -454,9 +486,9 @@ export function httpStatusOf(err: unknown): number | undefined {
  * rather than papered over with a second timer. `client-connect-residual` in the tests pins it,
  * so this note cannot quietly become false.
  *
- * Without it a connect answers only to the SDK's 60 s default request timeout: a caller's own
- * deadline (a chat turn's stop button, a run's cancellation) does nothing for a full minute while
- * a wedged server sits on the handshake, and the caller cannot tell that it is waiting.
+ * Without it a connect answers only to the SDK's timeouts: a caller's own deadline (a chat
+ * turn's stop button, a run's cancellation) does nothing while a wedged server sits on the
+ * handshake, and the caller cannot tell that it is waiting.
  */
 async function connectWithSignal(
   client: DualEraClient,
@@ -464,10 +496,22 @@ async function connectWithSignal(
   signal: AbortSignal | undefined,
   knownLegacy: boolean,
 ): Promise<void> {
-  await client.connect(transport, {
-    ...(signal ? { signal } : {}),
-    ...(knownLegacy ? { prior: { kind: "legacy" } } : {}),
-  });
+  signal?.throwIfAborted();
+  const onAbort = () => void transport.close().catch(() => {});
+  signal?.addEventListener("abort", onAbort, { once: true });
+  try {
+    await client.connect(transport, {
+      ...(signal ? { signal } : {}),
+      ...(knownLegacy ? { prior: { kind: "legacy" } } : {}),
+    });
+  } finally {
+    signal?.removeEventListener("abort", onAbort);
+  }
+}
+
+/** What an aborted signal says, as an `Error`. */
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException("MCP connect aborted", "AbortError");
 }
 
 /**
@@ -497,6 +541,10 @@ async function connectWithRetry(
   // exhausted mid-sleep.
   const externalSignal = options.signal;
 
+  // The deadline bounds the attempt in flight too, not only the sleeps between attempts.
+  const budget = AbortSignal.timeout(deadlineMs);
+  const attemptSignal = externalSignal ? AbortSignal.any([externalSignal, budget]) : budget;
+
   let attempt = 0;
   let lastError: unknown;
   let lastErrorCode: string | undefined;
@@ -509,13 +557,12 @@ async function connectWithRetry(
     try {
       // The caller's signal reaches each ATTEMPT, not just the sleep below: without it an abort
       // raised while one handshake is in flight waits out that handshake.
-      // The deadline bounds the attempt in flight too, not only the sleeps between attempts.
-      const budget = AbortSignal.timeout(Math.max(1, deadlineAt - Date.now()));
-      const signal = externalSignal ? AbortSignal.any([externalSignal, budget]) : budget;
-      return await connectOnce(targetUrl, headers, { ...options, signal });
+      return await connectOnce(targetUrl, headers, { ...options, signal: attemptSignal });
     } catch (err) {
-      if (!externalSignal?.aborted && Date.now() >= deadlineAt) {
-        throw buildDeadlineExceededError(deadlineMs, err, extractErrorCode(err));
+      if (!externalSignal?.aborted && (budget.aborted || Date.now() >= deadlineAt)) {
+        // An attempt the budget cut says only that it was cut: the attempt before it says why.
+        const last = budget.aborted && lastError !== undefined ? lastError : err;
+        throw buildDeadlineExceededError(deadlineMs, last, extractErrorCode(last));
       }
       lastError = err;
       lastErrorCode = extractErrorCode(err);
@@ -757,6 +804,9 @@ interface SdkSession {
   close(): Promise<void>;
 }
 
+/** MCP 2026-07-28 `HeaderMismatch`: mirrored headers do not match the request body. */
+const HEADER_MISMATCH = -32020;
+
 /** Bounds a server answering `nextCursor` forever, as the SDK's own walk does. */
 const MAX_TOOL_PAGES = 64;
 
@@ -784,6 +834,17 @@ function dualEraSession(
     for (const tool of read.tools) listed.set(tool.name, tool);
     return read;
   };
+  const listAll = async (options: SessionRequestOptions) => {
+    const tools: Tool[] = [];
+    let cursor: string | undefined;
+    for (let n = 0; n < MAX_TOOL_PAGES; n++) {
+      const read = await page(cursor, options);
+      tools.push(...read.tools);
+      if (read.nextCursor === undefined || read.nextCursor === cursor) return { tools };
+      cursor = read.nextCursor;
+    }
+    throw new Error(`tools/list did not end within ${MAX_TOOL_PAGES} pages`);
+  };
   return {
     capabilities: () => client.getServerCapabilities() as ServerCapabilities | undefined,
     serverVersion: () => client.getServerVersion() as Implementation | undefined,
@@ -792,27 +853,29 @@ function dualEraSession(
       const era = client.getProtocolEra();
       return era ? { era, version: client.getNegotiatedProtocolVersion() } : undefined;
     },
-    async listTools(options) {
-      const tools: Tool[] = [];
-      let cursor: string | undefined;
-      for (let n = 0; n < MAX_TOOL_PAGES; n++) {
-        const read = await page(cursor, options);
-        tools.push(...read.tools);
-        if (read.nextCursor === undefined || read.nextCursor === cursor) return { tools };
-        cursor = read.nextCursor;
-      }
-      throw new Error(`tools/list did not end within ${MAX_TOOL_PAGES} pages`);
-    },
+    listTools: (options) => listAll(options),
     async listToolsPage(cursor, options) {
       const read = await page(cursor, options);
       return { tools: read.tools, ...(read.nextCursor ? { nextCursor: read.nextCursor } : {}) };
     },
     async callTool(args, options) {
-      const toolDefinition = listed.get(args.name);
-      return (await client.callTool(args, {
-        ...options,
-        ...(toolDefinition ? { toolDefinition: toolDefinition as never } : {}),
-      })) as CallToolResult;
+      const call = () => {
+        const toolDefinition = listed.get(args.name);
+        return client.callTool(args, {
+          ...options,
+          ...(toolDefinition ? { toolDefinition: toolDefinition as never } : {}),
+        }) as Promise<CallToolResult>;
+      };
+      try {
+        return await call();
+      } catch (err) {
+        // A `HeaderMismatch` says the definition the headers were mirrored from is stale: the
+        // SDK refetches and retries itself, but only from its own cache, which a passed
+        // `toolDefinition` bypasses — so this session does the same, once.
+        if ((err as { code?: unknown } | null)?.code !== HEADER_MISMATCH) throw err;
+        await listAll({ ...(options.signal ? { signal: options.signal } : {}) });
+        return await call();
+      }
     },
     async readResource(args, options) {
       return (await client.readResource(args, options)) as ReadResourceResult;

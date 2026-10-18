@@ -215,6 +215,18 @@ export function modernMcpHandler(opts: ModernServerOptions = {}): McpHandler {
         const tool = tools.find((t) => t.descriptor.name === name);
         if (!tool) return rpcError(200, message.id, -32602, `Unknown tool: ${String(name)}`);
         const args = (message.params?.arguments ?? {}) as Record<string, unknown>;
+        // SEP-2243: a top-level parameter declaring `x-mcp-header` rides in `Mcp-Param-<name>`.
+        const properties = (tool.descriptor.inputSchema.properties ?? {}) as Record<
+          string,
+          { "x-mcp-header"?: unknown }
+        >;
+        for (const [key, property] of Object.entries(properties)) {
+          const header = property["x-mcp-header"];
+          if (typeof header !== "string" || args[key] === undefined) continue;
+          if (request.headers.get(`mcp-param-${header}`) !== String(args[key])) {
+            return rpcError(400, message.id, HEADER_MISMATCH, `Mcp-Param-${header} does not match`);
+          }
+        }
         return result(
           await tool.handler(args, { signal: request.signal } as unknown as AppstrateRequestExtra),
         );

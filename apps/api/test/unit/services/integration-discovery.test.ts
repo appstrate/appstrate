@@ -613,7 +613,7 @@ describe("discoverRemoteIntegration", () => {
     expect(seen).toEqual(["POST server/discover", "POST server/discover", "POST tools/list"]);
   });
 
-  it("refuses an answer past the probe's bound as not an MCP server", async () => {
+  it("answers 502 for a handshake answer past the probe's bound", async () => {
     const result = { protocolVersion: "2025-11-25", instructions: "x".repeat(2 * 1024 * 1024) };
     const { fetchImpl } = fakeFetch({
       "POST https://mcp.big.test/mcp": () => json({ jsonrpc: "2.0", id: 1, result }),
@@ -624,10 +624,7 @@ describe("discoverRemoteIntegration", () => {
         { fetchImpl },
       ),
     );
-    expect({ status: err.status, code: err.code }).toEqual({
-      status: 422,
-      code: "not_an_mcp_server",
-    });
+    expect({ status: err.status, code: err.code }).toEqual({ status: 502, code: "bad_gateway" });
   });
 
   /** An open legacy server whose `tools/list` is answered by `tools` instead. */

@@ -9,6 +9,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { SdkError, SdkErrorCode } from "@modelcontextprotocol/client";
+import { setCacheClock } from "@appstrate/core/cache";
 import { createMcpHttpClient, httpStatusOf, type AppstrateToolDefinition } from "../src/index.ts";
 import {
   handlerFetch,
@@ -457,5 +458,136 @@ describe("createMcpHttpClient — tools/list", () => {
     await client.close();
     await expect(client.listTools()).rejects.toThrow(/closed/);
     await expect(client.callTool({ name: "echo" })).rejects.toThrow(/closed/);
+  });
+});
+
+describe("createMcpHttpClient — convergence of the era fallback", () => {
+  /** Answers `server/discover` 503 the first `n` times, then as `handler`. */
+  const flakyProbe = (n: number, handler: McpHandler): McpHandler => {
+    let left = n;
+    return probeAnswered(async (request) => {
+      if (left > 0) {
+        left -= 1;
+        return new Response("busy", { status: 503 });
+      }
+      return handler(request);
+    }, handler);
+  };
+
+  it("keeps a modern-only server's transient probe 5xx as the error, not initialize's 400", async () => {
+    const { fetch, seen } = recorded(flakyProbe(1, modernMcpHandler({ tools: [echo] })));
+    const caught = await createMcpHttpClient(freshUrl(), { fetch }).catch((err: unknown) => err);
+    expect(httpStatusOf(caught)).toBe(503);
+    expect(methods(seen)).toEqual(["server/discover", "initialize"]);
+  });
+
+  it("lets the retry loop ride a modern server's transient probe 5xx", async () => {
+    const { fetch } = recorded(flakyProbe(1, modernMcpHandler({ tools: [echo] })));
+    const client = await createMcpHttpClient(freshUrl(), {
+      fetch,
+      retry: { deadlineMs: 5_000, baseMs: 1, capMs: 2 },
+    });
+    try {
+      expect(client.getProtocol()?.era).toBe("modern");
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("re-probes from the cached path through the same fallback (no internal error leaks)", async () => {
+    const url = freshUrl();
+    let handler: McpHandler = legacyMcpHandler({ tools: [echo] });
+    const { fetch } = recorded((request) => handler(request));
+    await (await createMcpHttpClient(url, { fetch })).close();
+    handler = flakyProbe(1, modernMcpHandler({ tools: [echo] }));
+    const caught = await createMcpHttpClient(url, { fetch }).catch((err: unknown) => err);
+    expect((caught as Error).constructor.name).not.toBe("ProbeInconclusive");
+    expect(httpStatusOf(caught)).toBe(503);
+  });
+
+  it("does not remember legacy from a fallback after an inconclusive probe", async () => {
+    const url = freshUrl();
+    const { fetch, seen } = recorded(
+      flakyProbe(
+        1,
+        modernMcpHandler({ tools: [echo], legacy: legacyMcpHandler({ tools: [echo] }) }),
+      ),
+    );
+    const first = await createMcpHttpClient(url, { fetch });
+    expect(first.getProtocol()?.era).toBe("legacy");
+    await first.close();
+    seen.length = 0;
+    const second = await createMcpHttpClient(url, { fetch });
+    try {
+      expect(methods(seen)[0]).toBe("server/discover");
+      expect(second.getProtocol()?.era).toBe("modern");
+    } finally {
+      await second.close();
+    }
+  });
+
+  it("does not renew a legacy verdict on each cached connect: it expires from the probe", async () => {
+    let now = Date.now();
+    setCacheClock(() => now);
+    try {
+      const url = freshUrl();
+      const { fetch, seen } = recorded(legacyMcpHandler({ tools: [echo] }));
+      await (await createMcpHttpClient(url, { fetch })).close();
+      now += 10 * 60_000;
+      await (await createMcpHttpClient(url, { fetch })).close();
+      now += 10 * 60_000;
+      seen.length = 0;
+      await (await createMcpHttpClient(url, { fetch })).close();
+      expect(methods(seen)[0]).toBe("server/discover");
+    } finally {
+      setCacheClock(null);
+    }
+  });
+
+  it("an abort during a hanging probe returns promptly", async () => {
+    const { fetch } = recorded(probeAnswered(silent, legacyMcpHandler({ tools: [echo] })));
+    const ac = new AbortController();
+    setTimeout(() => ac.abort(new Error("caller gave up")), 50);
+    const started = Date.now();
+    const caught = await createMcpHttpClient(freshUrl(), { fetch, signal: ac.signal }).catch(
+      (err: unknown) => err,
+    );
+    expect((caught as Error).message).toBe("caller gave up");
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+
+  it("refreshes the tool list and retries once on a HeaderMismatch", async () => {
+    const plain: AppstrateToolDefinition = {
+      descriptor: {
+        name: "regional",
+        inputSchema: { type: "object", properties: { region: { type: "string" } } },
+      },
+      handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
+    };
+    const annotated: AppstrateToolDefinition = {
+      ...plain,
+      descriptor: {
+        name: "regional",
+        inputSchema: {
+          type: "object",
+          properties: { region: { type: "string", "x-mcp-header": "Region" } },
+        },
+      },
+    };
+    let handler = modernMcpHandler({ tools: [plain] });
+    const { fetch, seen } = recorded((request) => handler(request));
+    const client = await createMcpHttpClient(freshUrl(), { fetch });
+    try {
+      await client.listTools();
+      // The server now mirrors `region` into a header the client's stale definition omits.
+      handler = modernMcpHandler({ tools: [annotated] });
+      seen.length = 0;
+      const res = await client.callTool({ name: "regional", arguments: { region: "eu" } });
+      expect(res.content).toEqual([{ type: "text", text: "ok" }]);
+      expect(methods(seen)).toEqual(["tools/call", "tools/list", "tools/call"]);
+      expect(seen[0]!.status).toBe(400);
+    } finally {
+      await client.close();
+    }
   });
 });
