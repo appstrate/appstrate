@@ -38,6 +38,7 @@ import { buildIntegrationOAuthRefreshContext } from "../integration-token-refres
 import { integrationCallbackUrl } from "../../lib/integration-callback-url.ts";
 import {
   getRemoteSource,
+  fixedAuthorizationServer,
   hasPerConnectionAuthServer,
   toSupportedTokenEndpointAuthMethod,
   type AfpsManifestAuth,
@@ -622,7 +623,11 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
         ctx.authKey,
         auth,
         ctx.scope.spaceId,
-        { clientRef, oauthResource },
+        {
+          clientRef,
+          oauthResource,
+          fixedServer: fixedAuthorizationServer(manifest, auth),
+        },
       );
     } catch (err) {
       if (err instanceof RefreshError && err.kind === "transient") {

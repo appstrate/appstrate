@@ -382,13 +382,14 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
     // The manifest declares no issuer: refresh finds the token endpoint from the issuer the
     // document's name binds.
     const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
-    const { auth } = await readIntegrationAuth(scope, INTEGRATION, AUTH_KEY);
+    const { manifest, auth } = await readIntegrationAuth(scope, INTEGRATION, AUTH_KEY);
     const outcome = await refreshConnectionCredential({
       connection: {
         ...connection!,
         credentialRevision: (await readCredentialRevision(connection!.id))!,
       },
       integrationId: INTEGRATION,
+      manifest: manifest as IntegrationManifest,
       authDef: auth as AfpsManifestAuth,
       scope,
       actor: { type: "user", id: ctx.user.id },

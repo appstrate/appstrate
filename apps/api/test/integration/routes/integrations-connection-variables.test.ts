@@ -20,7 +20,10 @@ import { integrationConnections, integrationOauthClients } from "@appstrate/db/s
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { buildIntegrationOAuthRefreshContext } from "../../../src/services/integration-token-refresh.ts";
 import { authorizationServerTag } from "../../../src/lib/integration-callback-url.ts";
-import type { AfpsManifestAuth } from "../../../src/services/integration-manifest-helpers.ts";
+import {
+  fixedAuthorizationServer,
+  type AfpsManifestAuth,
+} from "../../../src/services/integration-manifest-helpers.ts";
 
 const app = getTestApp();
 
@@ -481,7 +484,7 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
       "oauth",
       auth,
       ctx.defaultSpaceId,
-      conn!,
+      { ...conn!, fixedServer: null },
     );
     expect(refresh!.resource).toBe(`${base}/api/v4/mcp`);
   });
@@ -675,7 +678,7 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
         "oauth",
         auth,
         ctx.defaultSpaceId,
-        conn!,
+        { ...conn!, fixedServer: null },
       );
       expect(refresh).toMatchObject({
         tokenEndpoint: `${base}/oauth/token`,
@@ -708,7 +711,7 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
       "oauth",
       auth,
       ctx.defaultSpaceId,
-      { clientRef: client!.id, oauthResource: null },
+      { clientRef: client!.id, oauthResource: null, fixedServer: null },
     );
     expect(refresh!.tokenEndpoint).toBe(`${otherBase}/oauth/token`);
     expect(refresh!.clientId).toBe(client!.clientId);
@@ -723,7 +726,7 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
         "oauth",
         auth,
         ctx.defaultSpaceId,
-        { clientRef: client!.id, oauthResource: null },
+        { clientRef: client!.id, oauthResource: null, fixedServer: null },
         async () => ({ tokenEndpoint }),
       );
     expect(await refreshAt("http://forge.example.com/oauth/token")).toBeNull();
@@ -732,6 +735,52 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
       name: "RefreshError",
       kind: "transient",
     });
+
+    // A server the manifest fixes is judged as connect judged it: plain http is not refused there.
+    const fixedAt = (tokenEndpoint: string) =>
+      buildIntegrationOAuthRefreshContext(
+        "@myorg/forge",
+        "oauth",
+        auth,
+        ctx.defaultSpaceId,
+        { clientRef: client!.id, oauthResource: null, fixedServer: { issuer: otherBase } },
+        async () => ({ tokenEndpoint }),
+      );
+    expect((await fixedAt("http://93.184.215.14/oauth/token"))!.tokenEndpoint).toBe(
+      "http://93.184.215.14/oauth/token",
+    );
+    expect(await fixedAt("https://169.254.169.254/oauth/token")).toBeNull();
+
+    // The author republishes the auth with a fixed server: this row stays bound to the server its
+    // user chose, which keeps the https rule — no refresh token goes out over plain http.
+    const republished = {
+      ...forgeManifest("@myorg/forge"),
+      source: {
+        kind: "remote",
+        remote: { url: "https://forge.example.com/api/v4/mcp", transport: "streamable-http" },
+      },
+      auths: { oauth: { ...auth, issuer: "https://forge.example.com" } },
+    } as unknown as IntegrationManifest;
+    const fixedServer = fixedAuthorizationServer(
+      republished,
+      republished.auths!.oauth as AfpsManifestAuth,
+    );
+    expect(fixedServer).toEqual({
+      issuer: "https://forge.example.com",
+      remoteUrl: "https://forge.example.com/api/v4/mcp",
+    });
+    const before = forge.tokenRequests.length;
+    expect(
+      await buildIntegrationOAuthRefreshContext(
+        "@myorg/forge",
+        "oauth",
+        auth,
+        ctx.defaultSpaceId,
+        { clientRef: client!.id, oauthResource: null, fixedServer },
+        async () => ({ tokenEndpoint: "http://93.184.215.14/oauth/token" }),
+      ),
+    ).toBeNull();
+    expect(forge.tokenRequests).toHaveLength(before);
   });
 
   it("spends the page on a started flow: its cookie is cleared, a replay of it refused", async () => {

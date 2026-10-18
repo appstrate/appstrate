@@ -362,7 +362,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
-        { clientRef: SYSTEM_ID, oauthResource: null },
+        { clientRef: SYSTEM_ID, oauthResource: null, fixedServer: {} },
       );
       expect(ctxOut).not.toBeNull();
       expect(ctxOut!.clientId).toBe("sys-client.apps.googleusercontent.com");
@@ -376,7 +376,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
-        { clientRef: customId, oauthResource: null },
+        { clientRef: customId, oauthResource: null, fixedServer: {} },
       );
       expect(ctxOut).not.toBeNull();
       expect(ctxOut!.clientId).toBe("custom-client-id");
@@ -389,7 +389,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
-        { clientRef: "removed-id", oauthResource: null },
+        { clientRef: "removed-id", oauthResource: null, fixedServer: {} },
       );
       expect(ctxOut).toBeNull();
     });
@@ -403,7 +403,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
-        { clientRef: null, oauthResource: null },
+        { clientRef: null, oauthResource: null, fixedServer: {} },
       );
       expect(ctxOut).toBeNull();
     });
@@ -415,7 +415,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         PUBLIC_AUTH,
         ctx.defaultSpaceId,
-        { clientRef: SYSTEM_ID, oauthResource: null },
+        { clientRef: SYSTEM_ID, oauthResource: null, fixedServer: {} },
       );
       expect(ctxOut).not.toBeNull();
       expect(ctxOut!.clientSecret).toBe("");
@@ -433,7 +433,7 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
-        { clientRef: pinned, oauthResource: null },
+        { clientRef: pinned, oauthResource: null, fixedServer: {} },
       );
       expect(ctxOut!.clientSecret).toBe("rt-secret");
     });

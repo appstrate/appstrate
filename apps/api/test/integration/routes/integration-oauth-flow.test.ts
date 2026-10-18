@@ -53,6 +53,7 @@ import {
 } from "../../../src/services/integration-connections.ts";
 import { getCache } from "../../../src/infra/index.ts";
 import type { AfpsManifestAuth } from "../../../src/services/integration-manifest-helpers.ts";
+import type { IntegrationManifest } from "@appstrate/core/integration";
 
 const app = getTestApp();
 const INTEGRATION = "@myorg/probe";
@@ -203,10 +204,11 @@ async function refresh(ctx: TestContext, connectionId: string): Promise<void> {
       .limit(1)
   )[0]!;
   const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
-  const { auth } = await readIntegrationAuth(scope, INTEGRATION, AUTH_KEY);
+  const { manifest, auth } = await readIntegrationAuth(scope, INTEGRATION, AUTH_KEY);
   const outcome = await refreshConnectionCredential({
     connection: { ...row, credentialRevision: (await readCredentialRevision(connectionId))! },
     integrationId: INTEGRATION,
+    manifest: manifest as IntegrationManifest,
     authDef: auth as AfpsManifestAuth,
     scope,
     actor: { type: "user", id: ctx.user.id },
