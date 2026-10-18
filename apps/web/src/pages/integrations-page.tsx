@@ -9,11 +9,7 @@ import { useMemo, useState } from "react";
 import { catalogueHref } from "../lib/catalogue-link";
 import { useTranslation } from "react-i18next";
 import { Boxes, LibraryBig, Plus, Upload } from "lucide-react";
-import {
-  PACKAGE_WRITE_PERMISSIONS,
-  packagePermission,
-  spacePackagePermission,
-} from "@appstrate/core/permissions";
+import { packagePermission, spacePackagePermission } from "@appstrate/core/permissions";
 import { PageHeader } from "../components/page-header";
 import { CollectionTabs } from "../components/detail-tabs";
 import { CardGrid } from "../components/card-grid";
@@ -60,9 +56,9 @@ export function IntegrationsPage() {
   const list = useListParams(["origin", "protocol"]);
   const searchPlaceholder = useSearchPlaceholder(t("integrations.title"));
   const [importing, setImporting] = useState(false);
-  // The same grants as every other package index (`PackageIndexPage`).
+  // The same grants as every other package index (`PackageIndexPage`): creating,
+  // by import too, is a write on the type.
   const canCreate = can(packagePermission("integration", "write"));
-  const canImport = PACKAGE_WRITE_PERMISSIONS.some(can);
   const canBrowse = can(spacePackagePermission("integration", "activate"));
   const creation = useCreationHandoff("integration", canCreate);
   const createAction: MenuAction = {
@@ -128,7 +124,7 @@ export function IntegrationsPage() {
         wrapActions
         actions={
           // A reader has no deed here: no menu, rather than an empty one.
-          (canBrowse || canCreate || canImport) && (
+          (canBrowse || canCreate) && (
             <PageActionsMenu
               actions={[
                 {
@@ -143,7 +139,7 @@ export function IntegrationsPage() {
                   label: t("nav.import", { ns: "common" }),
                   icon: Upload,
                   onSelect: () => setImporting(true),
-                  hidden: !canImport,
+                  hidden: !canCreate,
                 },
                 createAction,
               ]}
@@ -237,12 +233,18 @@ export function IntegrationsPage() {
         count={isLoading || error ? undefined : t("integrations.count", { count: shown.length })}
       />
 
-      {importing && canImport && <ImportModal onClose={() => setImporting(false)} />}
+      {importing && canCreate && (
+        <ImportModal type="integration" onClose={() => setImporting(false)} />
+      )}
       {creation.isOpen && (
         <CreationHandoffModal
           resource="integration"
           onClose={creation.close}
           onManual={() => creation.leave(packageNewPath("integration"))}
+          onImport={() => {
+            creation.close();
+            setImporting(true);
+          }}
           onChat={creation.openChat}
         />
       )}
