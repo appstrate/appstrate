@@ -3,6 +3,7 @@
 // `POST /api/integrations/connect/submit`. An oauth2 auth reaches the form for connection variables, or
 // for the grant its `connect.login` submits.
 
+import { acquiresByConnectLogin } from "@appstrate/core/integration";
 import type { paths } from "../api/client";
 import type { HandoffStep } from "../components/integration-connect/handoff-steps";
 import { refusalMessage, validationFieldErrors } from "./mutation-error";
@@ -17,6 +18,11 @@ interface HostedConnectInput {
   credentials: Record<string, string>;
   variableNames: string[] | null;
   variableValues: Record<string, string>;
+}
+
+/** oauth2 redirects to its authorization server, unless acquired by connect.login: that grant is a credential. */
+export function usesAuthorizationFlow(auth: { type?: unknown; connect?: unknown }): boolean {
+  return auth.type === "oauth2" && !acquiresByConnectLogin(auth);
 }
 
 /** Credentials unless an authorization flow (which refuses them); one trimmed value per declared variable. */

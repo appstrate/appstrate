@@ -13,6 +13,7 @@ import {
   connectSubmitBody,
   missingVariables,
   submitHostedConnect,
+  usesAuthorizationFlow,
   variableFieldErrors,
 } from "../hosted-connect-submit.ts";
 
@@ -20,6 +21,21 @@ await i18nReady;
 await i18n.changeLanguage("fr");
 
 const VARS = ["base_url"];
+
+describe("usesAuthorizationFlow", () => {
+  it("redirects an authorization-code oauth2 auth", () => {
+    expect(usesAuthorizationFlow({ type: "oauth2" })).toBe(true);
+  });
+
+  it("collects an oauth2 connect.login grant as a credential form", () => {
+    const login = { request: { url: "https://idp.example.test/token" } };
+    expect(usesAuthorizationFlow({ type: "oauth2", connect: { login } })).toBe(false);
+  });
+
+  it("collects credentials for a non-oauth auth", () => {
+    expect(usesAuthorizationFlow({ type: "api_key" })).toBe(false);
+  });
+});
 
 describe("connectSubmitBody", () => {
   it("sends the credentials and the trimmed declared variables for a non-oauth auth", () => {

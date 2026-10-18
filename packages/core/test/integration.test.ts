@@ -272,6 +272,16 @@ describe("integrationManifestSchema — oauth2 connect.login", () => {
       "auths.oauth.connect.login.outputs",
     ]);
   });
+
+  it("still asks a custom connect.login for outputs", () => {
+    const m = oauth2LoginManifest();
+    const auth = (m.auths as Record<string, Record<string, unknown>>).oauth!;
+    auth.type = "custom";
+    delete auth.token_endpoint;
+    delete auth.token_endpoint_auth_method;
+    auth.delivery = { env: { TOKEN: { value: "{$credential.token}" } } };
+    expect(errorPaths(m)).toContain("auths.oauth.connect.login.outputs");
+  });
 });
 
 describe("acquiresByConnectLogin", () => {

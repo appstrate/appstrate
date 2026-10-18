@@ -50,7 +50,8 @@ is the same track as points without altitude; use `directElevation` for altitude
 #### Files
 
 Route both to a file with `responseMode.toFile` (for example `garmin/<activityId>.gpx`); never read
-them inline.
+them inline. Send them with no `Accept` header at all: never `application/octet-stream`, which
+Garmin answers with `406`.
 
 - **GPX**: `GET /download-service/export/gpx/activity/<activityId>`. One `<trkpt>` per sample with
   `<ele>` and `<time>`, heart rate and cadence in `<extensions>`.

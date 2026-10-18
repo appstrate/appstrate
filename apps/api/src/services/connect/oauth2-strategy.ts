@@ -134,13 +134,7 @@ async function identitySourceFor(
         Accept: "application/json",
         "User-Agent": "Appstrate",
       },
-      // Bounded on purpose — `oauthEgressFetch` imposes no deadline of its
-      // own. This runs after the token exchange has already succeeded, so a
-      // provider that accepts the exchange and then stalls its userinfo
-      // endpoint would hold the connect open and leave the connection
-      // unsaved, losing a credential the user already granted. Identity is
-      // best-effort enrichment (a timeout degrades to accountId "default");
-      // it must never decide whether the connection persists.
+      // `oauthEgressFetch` has no deadline; a stalled userinfo must not lose the granted credential.
       signal: AbortSignal.timeout(USERINFO_TIMEOUT_MS),
     });
     if (res.ok) {
@@ -244,11 +238,16 @@ function oauthCredentials(
   };
 }
 
+/** What a `connect.login` failure says once the token request may have reached the grant. */
+const MAY_BE_REDEEMED =
+  "The service may have redeemed the submitted grant: if a retry is refused, obtain a new one.";
+
 /**
  * A failed `connect.login` token request as its API error. Unlike a refresh — where only
- * `invalid_grant` condemns a stored credential, since a stray 4xx may be the provider's blip — a
- * grant typed into a form that the token endpoint answers with any 4xx but 429 is unusable as
- * submitted. Retry-After is not captured by the token request, so none is relayed.
+ * `invalid_grant` condemns a stored credential — a grant typed into a form that the token endpoint
+ * answers with a 400 or 401 (RFC 6749 §5.2) is unusable as submitted. Any other 4xx (a 403 is
+ * often a WAF refusing the client, a 429 a throttle) or a request the egress guard never sent
+ * leaves the grant intact. Retry-After is not captured by the token request, so none is relayed.
  */
 function tokenRequestRefusal(err: RefreshError): ApiError {
   if (err.kind === "revoked") {
@@ -266,20 +265,19 @@ function tokenRequestRefusal(err: RefreshError): ApiError {
     });
   }
   const { status } = err;
-  if (status !== undefined && status >= 400 && status < 500 && status !== 429) {
+  if (status === 400 || status === 401) {
     return loginRejected(
       `The service refused the token request (HTTP ${status}): the submitted grant cannot be used as given.`,
     );
   }
-  // Throttled, or refused by the egress guard before anything was sent: the grant is intact.
-  // Anything else (a timeout, a 5xx, an unusable 2xx) may follow a redemption of a rotating grant.
-  if (status === 429 || err.cause instanceof SsrfBlockedError) {
+  if (
+    (status !== undefined && status >= 400 && status < 500) ||
+    err.cause instanceof SsrfBlockedError
+  ) {
     return loginUpstreamUnavailable(undefined);
   }
-  return loginUpstreamUnavailable(
-    undefined,
-    "The service may already have redeemed the submitted grant: if a retry is refused, obtain a new one.",
-  );
+  // A timeout, a 5xx or an unusable 2xx may follow a redemption of a rotating grant.
+  return loginUpstreamUnavailable(undefined, MAY_BE_REDEEMED);
 }
 
 /** A grant the submitted fields cannot render, as its 400; a manifest fault stays the caller's 500. */
@@ -544,12 +542,9 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       ctx.authKey,
     );
     const auth = rawAuth as unknown as AfpsManifestAuth;
-    const login = acquiresByConnectLogin(auth) ? auth.connect?.login : undefined;
-    if (!login) {
-      throw invalidRequest(
-        `Auth '${ctx.authKey}' is type 'oauth2' — use the OAuth flow, not the fields flow`,
-      );
-    }
+    const login = auth.connect?.login;
+    // Invariant: both fields routes send an oauth2 auth here only when it acquires by connect.login.
+    if (!login) throw new Error(`Auth '${ctx.authKey}' declares no connect.login`);
     requireNonEmptyCredentials(submitted);
     const credentials = assertCredentialsMatchSchema(auth.credentials?.schema, submitted);
     let grant: Record<string, string>;
@@ -626,8 +621,8 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       throw tokenRequestRefusal(err);
     }
 
-    // The request redeemed the submitted grant (a rotating server invalidates a refresh token), so
-    // a failure from here on must say so: retrying with the same values cannot work.
+    // The request may have redeemed the submitted grant (a rotating server invalidates a refresh
+    // token), so a failure from here on must say so.
     const { parsed, raw } = exchanged;
     try {
       const identitySource = await identitySourceFor(
@@ -664,14 +659,12 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
         ...log,
         err: String(err),
       });
-      const redeemed =
-        "The submitted grant was already redeemed: obtain a new one before trying again.";
       if (!(err instanceof ApiError)) {
         throw new ApiError({
           status: 500,
           code: "internal_error",
           title: "Internal Error",
-          detail: `The connection could not be stored. ${redeemed}`,
+          detail: `The connection could not be stored. ${MAY_BE_REDEEMED}`,
           cause: err,
         });
       }
@@ -679,8 +672,12 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
         status: err.status,
         code: err.code,
         title: err.title,
-        detail: `${err.message} ${redeemed}`,
-        ...(err.param !== undefined ? { param: err.param } : {}),
+        detail: `${err.message} ${MAY_BE_REDEEMED}`,
+        param: err.param,
+        retryAfter: err.retryAfter,
+        errors: err.fieldErrors,
+        headers: err.headers,
+        extensions: err.extensions,
         cause: err,
       });
     }

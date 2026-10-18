@@ -39,6 +39,10 @@ const CONFIDENTIAL = "@orga/oauth2-login-basic";
 const MISDIRECTED = "@orga/oauth2-login-elsewhere";
 /** The auth served by an organization client, with no system client. */
 const ORG_CLIENT = "@orga/oauth2-login-org";
+/** A token endpoint the egress guard refuses: a loopback address outside the test allowlist. */
+const BLOCKED = "@orga/oauth2-login-blocked";
+/** The auth requiring an identity claim the userinfo answer lacks. */
+const REQUIRES_EMAIL = "@orga/oauth2-login-email";
 const SYSTEM_CLIENT = "oauth2-login-sys";
 const PUBLIC_CLIENT_ID = "PUBLIC_MOBILE_CLIENT";
 
@@ -183,6 +187,8 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
     initSystemIntegrations([
       { id: INTEGRATION, clients: [publicClient] },
       { id: MISDIRECTED, clients: [{ ...publicClient, id: "oauth2-login-elsewhere-sys" }] },
+      { id: BLOCKED, clients: [{ ...publicClient, id: "oauth2-login-blocked-sys" }] },
+      { id: REQUIRES_EMAIL, clients: [{ ...publicClient, id: "oauth2-login-email-sys" }] },
       {
         id: CONFIDENTIAL,
         clients: [
@@ -238,7 +244,9 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
       },
       authorization: null,
     });
+    // Identity from the userinfo body: the token response carries none.
     expect(conn.account_id).toBe("pierre-trek");
+    expect(conn.identity_claims).toEqual({ account_id: "pierre-trek", profile_id: 4242 });
 
     const row = await storedRow(conn.id);
     const creds = decryptCredentialsToStringMap(row.credentialsEncrypted);
@@ -303,7 +311,7 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
     expect(await db.select().from(integrationConnections)).toHaveLength(0);
   });
 
-  it("says the grant was redeemed when storing fails after a successful token request", async () => {
+  it("says the grant may be redeemed when storing fails after a successful token request", async () => {
     upstream.setToken({ access_token: "at-fresh", refresh_token: "rt-rotated", expires_in: 3600 });
     // A reconnect target that is gone by the time the connection is written.
     const err = await submit(
@@ -319,8 +327,33 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
     );
 
     expect(err).toBeInstanceOf(ApiError);
-    expect((err as ApiError).message).toContain("already redeemed");
+    expect((err as ApiError).status).toBe(404);
+    expect((err as ApiError).code).toBe("not_found");
+    expect((err as ApiError).message).toContain("may have redeemed the submitted grant");
     expect(upstream.tokenRequests()).toBe(1);
+  });
+
+  it("refuses a missing required identity claim after the token request, saying the grant may be redeemed", async () => {
+    await seed(
+      manifest(upstream.base, {
+        name: REQUIRES_EMAIL,
+        auth: { required_identity_claims: ["email"] },
+      }),
+    );
+    upstream.setToken({ access_token: "at-fresh", refresh_token: "rt-rotated", expires_in: 3600 });
+
+    const err = await submit(
+      { refresh_token: "rt-submitted" },
+      { ...connectCtx, integrationId: REQUIRES_EMAIL },
+    );
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(400);
+    expect((err as ApiError).code).toBe("invalid_request");
+    expect((err as ApiError).message).toContain("'email'");
+    expect((err as ApiError).message).toContain("may have redeemed the submitted grant");
+    expect(upstream.tokenRequests()).toBe(1);
+    expect(await db.select().from(integrationConnections)).toHaveLength(0);
   });
 
   it("reconnects in place: same row, credentials replaced, client re-pinned", async () => {
@@ -390,7 +423,7 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
 
   for (const [label, body, status] of [
     ["an OAuth error other than invalid_grant", { error: "invalid_request" }, 400],
-    ["a bare 403", "forbidden", 403],
+    ["a bare 401", "unauthorized", 401],
   ] as const) {
     it(`refuses the submitted grant on ${label}, before anything is stored`, async () => {
       upstream.setToken(body, status);
@@ -405,15 +438,46 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
     });
   }
 
-  it("reports a throttled token endpoint as a 502 with the grant intact", async () => {
-    upstream.setToken({ error: "slow_down" }, 429);
+  for (const [label, body, status] of [
+    ["a throttled token endpoint", { error: "slow_down" }, 429],
+    ["a bare 403 (a firewall refusing the client)", "forbidden", 403],
+  ] as const) {
+    it(`reports ${label} as a 502 with the grant intact`, async () => {
+      upstream.setToken(body, status);
+
+      const err = await submit({ refresh_token: "rt-submitted" });
+
+      expect((err as ApiError).status).toBe(502);
+      expect((err as ApiError).code).toBe("login_upstream_unavailable");
+      expect((err as ApiError).retryAfter).toBeUndefined();
+      expect((err as ApiError).message).not.toContain("redeemed");
+      expect(await db.select().from(integrationConnections)).toHaveLength(0);
+    });
+  }
+
+  it("reports a token request the egress guard refuses as a 502 with the grant intact", async () => {
+    // Nothing listens there: only the guard's refusal, never a connection error, omits the note.
+    await seed(manifest("http://127.0.0.2:9", { name: BLOCKED }));
+
+    const err = await submit(
+      { refresh_token: "rt-submitted" },
+      { ...connectCtx, integrationId: BLOCKED },
+    );
+
+    expect((err as ApiError).status).toBe(502);
+    expect((err as ApiError).code).toBe("login_upstream_unavailable");
+    expect((err as ApiError).message).not.toContain("redeemed");
+    expect(await db.select().from(integrationConnections)).toHaveLength(0);
+  });
+
+  it("reports a 2xx without access_token as a 502 that may have redeemed the grant", async () => {
+    upstream.setToken({ token_type: "Bearer" });
 
     const err = await submit({ refresh_token: "rt-submitted" });
 
     expect((err as ApiError).status).toBe(502);
     expect((err as ApiError).code).toBe("login_upstream_unavailable");
-    expect((err as ApiError).retryAfter).toBeUndefined();
-    expect((err as ApiError).message).not.toContain("redeemed");
+    expect((err as ApiError).message).toContain("may have redeemed the submitted grant");
     expect(await db.select().from(integrationConnections)).toHaveLength(0);
   });
 
@@ -424,7 +488,7 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
 
     expect((err as ApiError).status).toBe(502);
     expect((err as ApiError).code).toBe("login_upstream_unavailable");
-    expect((err as ApiError).message).toContain("may already have redeemed the submitted grant");
+    expect((err as ApiError).message).toContain("may have redeemed the submitted grant");
     expect(await db.select().from(integrationConnections)).toHaveLength(0);
   });
 
@@ -483,7 +547,7 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
       expect(err).toBeInstanceOf(ApiError);
       expect((err as ApiError).status).toBe(500);
       expect((err as ApiError).code).toBe("internal_error");
-      expect((err as ApiError).message).toContain("already redeemed");
+      expect((err as ApiError).message).toContain("may have redeemed the submitted grant");
       expect((err as ApiError).cause).toBe(fault);
     } finally {
       save.mockRestore();
@@ -527,20 +591,5 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
       `Integration '${MISDIRECTED}' not found in this organization`,
     );
     expect(upstream.tokenRequests()).toBe(0);
-  });
-
-  it("still asks a custom connect.login for outputs", () => {
-    const custom = manifest(upstream.base, {
-      auth: {
-        type: "custom",
-        token_endpoint: undefined,
-        token_endpoint_auth_method: undefined,
-        userinfo_endpoint: undefined,
-        delivery: { env: { TOKEN: { value: "{$credential.token}" } } },
-      },
-    });
-    expect(
-      integrationManifestSchema.safeParse(custom).error?.issues.map((i) => i.path.join(".")),
-    ).toContain("auths.primary.connect.login.outputs");
   });
 });

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, KeyRound, Plus } from "lucide-react";
+import { acquiresByConnectLogin } from "@appstrate/core/integration";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
@@ -52,7 +53,7 @@ type ModalState =
   | { mode: "edit"; tier: IntegrationClientTier; client: IntegrationClient }
   | null;
 
-function OAuthClientModal({
+export function OAuthClientModal({
   tier,
   packageId,
   authKey,
@@ -82,6 +83,8 @@ function OAuthClientModal({
   // publisher hint below must agree, and they diverge the moment the same
   // expression is spelled out twice.
   const effectiveRedirectUri = redirectUri.trim() || platformRedirectUri;
+  // A `connect.login` auth has no redirect: its first token comes from a token request.
+  const hasRedirect = !(authDecl && acquiresByConnectLogin(authDecl));
   // The admin's own declaration, read back from the row — NOT re-derived from
   // the absence of a secret. The old `!has_client_secret` guess could not tell
   // "declared public" from "secret not entered yet", so reopening a client
@@ -186,37 +189,45 @@ function OAuthClientModal({
             data-testid={`oauth-clientsecret-${authKey}`}
           />
         </FormItem>
-        <FormItem
-          id={`redir-${authKey}`}
-          label={t("integration.oauthClient.redirectUri")}
-          className="sm:col-span-2"
-        >
-          <Input type="url" value={redirectUri} onChange={(e) => setRedirectUri(e.target.value)} />
-        </FormItem>
-        {/* The redirect_uri connect will send for THIS client: the override typed above when it
-            is set, else the platform callback. Providers compare it byte-for-byte and reject a
-            mismatch with an opaque error, so the admin is shown the exact string to register
-            rather than left to reconstruct it from the browser's origin (which is NOT
-            authoritative — `APP_URL` is). */}
-        <div className="flex flex-col gap-1 sm:col-span-2">
-          <p className="text-muted-foreground text-[0.7rem]">
-            {t("integration.oauthClient.platformRedirectUri")}
-          </p>
-          <CopyBlock
-            value={effectiveRedirectUri}
-            dense
-            testId={`platform-redirect-uri-modal-${authKey}`}
-          />
-          {/* AFPS §7.10: `auths.<key>.callback_url_hint`, its `{{callback_url}}` placeholder
-              resolved against the SAME value shown above. */}
-          {authDecl?.callback_url_hint && (
-            <CallbackUrlHint
-              hint={authDecl.callback_url_hint}
-              callbackUrl={effectiveRedirectUri}
-              authKey={authKey}
-            />
-          )}
-        </div>
+        {hasRedirect && (
+          <>
+            <FormItem
+              id={`redir-${authKey}`}
+              label={t("integration.oauthClient.redirectUri")}
+              className="sm:col-span-2"
+            >
+              <Input
+                type="url"
+                value={redirectUri}
+                onChange={(e) => setRedirectUri(e.target.value)}
+              />
+            </FormItem>
+            {/* The redirect_uri connect will send for THIS client: the override typed above when it
+              is set, else the platform callback. Providers compare it byte-for-byte and reject a
+              mismatch with an opaque error, so the admin is shown the exact string to register
+              rather than left to reconstruct it from the browser's origin (which is NOT
+              authoritative — `APP_URL` is). */}
+            <div className="flex flex-col gap-1 sm:col-span-2">
+              <p className="text-muted-foreground text-[0.7rem]">
+                {t("integration.oauthClient.platformRedirectUri")}
+              </p>
+              <CopyBlock
+                value={effectiveRedirectUri}
+                dense
+                testId={`platform-redirect-uri-modal-${authKey}`}
+              />
+              {/* AFPS §7.10: `auths.<key>.callback_url_hint`, its `{{callback_url}}` placeholder
+                resolved against the SAME value shown above. */}
+              {authDecl?.callback_url_hint && (
+                <CallbackUrlHint
+                  hint={authDecl.callback_url_hint}
+                  callbackUrl={effectiveRedirectUri}
+                  authKey={authKey}
+                />
+              )}
+            </div>
+          </>
+        )}
         <label className="flex items-center gap-2 text-sm sm:col-span-2">
           <Checkbox checked={publicClient} onCheckedChange={(c) => setPublicClient(Boolean(c))} />
           {t("integration.oauthClient.publicClient")}

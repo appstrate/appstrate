@@ -1261,22 +1261,6 @@ describe("renderTokenGrant — the grant of an oauth2 connect.login (AFPS)", () 
     expect(reason(grantLogin(), {})).toBe("unresolved_placeholder");
   });
 
-  it("refuses a method other than POST", () => {
-    expect(reason(grantLogin({ method: "PUT" }), { refresh_token: "rt" })).toBe("invalid_config");
-  });
-
-  it("refuses a content type other than form encoding", () => {
-    expect(reason(grantLogin({ content_type: "application/json", body: '{"a":"b"}' }), {})).toBe(
-      "invalid_config",
-    );
-  });
-
-  it("refuses declared headers", () => {
-    expect(reason(grantLogin({ headers: { "X-A": "b" } }), { refresh_token: "rt" })).toBe(
-      "invalid_config",
-    );
-  });
-
   it("refuses a parameter written twice, including through an input", () => {
     expect(reason(grantLogin({ body: "grant_type=a&grant_type=b" }), {})).toBe("invalid_config");
     expect(reason(grantLogin({ body: "grant_type=x&a=1&a={{v}}" }), { v: "2" })).toBe(

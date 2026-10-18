@@ -543,24 +543,16 @@ function renderLoginRequest(
   return renderRequest(login.request, inputs);
 }
 
-const FORM_CONTENT_TYPE = "application/x-www-form-urlencoded";
-
 /**
- * The grant parameters of a `connect.login` on an oauth2 auth (AFPS): a form-encoded `POST`
- * without `headers`, whose rendered body is returned as parameters. Sends nothing and leaves
- * the URL to the caller, which adds client authentication and posts it to `token_endpoint`.
+ * The grant parameters of a `connect.login` on an oauth2 auth (AFPS): its rendered form body,
+ * returned as parameters (the manifest schema fixes the request to a form-encoded `POST` without
+ * `headers`). Sends nothing and leaves the URL to the caller, which adds client authentication
+ * and posts it to `token_endpoint`.
  */
 export function renderTokenGrant(
   login: LoginConfig["login"],
   inputs: Record<string, unknown>,
 ): Record<string, string> {
-  const { method, content_type, headers } = login.request;
-  if (method !== "POST" || content_type !== FORM_CONTENT_TYPE || headers !== undefined) {
-    throw new LoginError(
-      `connect.login.request of an oauth2 auth is a POST of ${FORM_CONTENT_TYPE} without headers`,
-      "invalid_config",
-    );
-  }
   const { body } = renderLoginRequest(login, inputs);
   const params = [...new URLSearchParams(body ?? "")];
   const names = new Set<string>();

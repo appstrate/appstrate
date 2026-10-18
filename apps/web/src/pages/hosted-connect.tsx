@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { acquiresByConnectLogin } from "@appstrate/core/integration";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "@appstrate/ui/components/spinner";
@@ -21,6 +20,7 @@ import { errorMessage } from "../lib/mutation-error";
 import {
   missingVariables,
   submitHostedConnect,
+  usesAuthorizationFlow,
   variableFieldErrors,
 } from "../lib/hosted-connect-submit";
 
@@ -101,9 +101,7 @@ export function HostedConnectPage() {
 
   const fields = context?.variables ? variableFields(context.variables.schema) : [];
   const variableLabels = Object.fromEntries(fields.map((f) => [f.name, f.title ?? f.name]));
-  // An oauth2 auth acquired by connect.login collects its grant on this form, like any credential.
-  const isOAuth =
-    context !== null && context.auth.type === "oauth2" && !acquiresByConnectLogin(context.auth);
+  const isOAuth = context !== null && usesAuthorizationFlow(context.auth);
   const variablesLocked = Object.keys(context?.variables?.values ?? {}).length > 0;
 
   const changeVariable = (name: string, value: string) => {

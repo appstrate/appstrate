@@ -1347,9 +1347,7 @@ export function createIntegrationsRouter() {
 
     // Non-oauth, oauth2 acquired by connect.login, or oauth2 with connection
     // variables → hand off to the hosted SPA form. Pin the page cookie so the
-    // form can read context via GET /connect/context (no token in the URL). The
-    // oauth2 branch above never reaches here, so the cookie is set only when the
-    // hosted form needs it.
+    // form can read context via GET /connect/context (no token in the URL).
     setConnectPageCookie(c, claims);
     return c.redirect("/connect");
   });

@@ -4,7 +4,7 @@
   "type": "integration",
   "schema_version": "0.3",
   "display_name": "Garmin Connect (API)",
-  "description": "Fitness — reads the owner's Garmin Connect activities (list by date, summary, dense GPS track and time series, splits, heart-rate zones, weather, GPX and original FIT files) and profile. Relies on the undocumented API of the Garmin Connect mobile app: it may break, and automated reading may fall outside Garmin's terms of use. Connected with a refresh token obtained once outside Appstrate (Garmin's mobile sign-in, MFA included, has no redirect flow); Appstrate renews it at each use.",
+  "description": "Fitness — reads the owner's Garmin Connect activities (list by date, summary, dense GPS track and time series, splits, heart-rate zones, weather, GPX and original FIT files) and profile. Relies on the undocumented API of the Garmin Connect mobile app: it may break, and automated reading may fall outside Garmin's terms of use. Connected with a refresh token obtained once outside Appstrate (Garmin's mobile sign-in, MFA included, has no redirect flow); Garmin rotates it at each refresh.",
   "keywords": ["garmin", "fitness", "activities", "gps", "gpx", "fit", "running", "hiking"],
   "license": "Apache-2.0",
   "icon": "cib:garmin",
@@ -51,7 +51,7 @@
             "refresh_token": {
               "type": "string",
               "title": "Refresh token Garmin",
-              "description": "Obtenu une fois sur votre ordinateur avec python-garminconnect : `uv run --with garminconnect python -c \"from garminconnect import Garmin; import getpass, json; g = Garmin(email=input('Email: '), password=getpass.getpass('Mot de passe: '), prompt_mfa=lambda: input('Code MFA: ')); g.login(); print(json.loads(g.client.dumps())['di_refresh_token'])\"`. Il reste valable 30 jours sans usage et Appstrate le renouvelle à chaque utilisation : collez-le tel quel, ne le partagez pas.",
+              "description": "Obtenu une fois sur votre ordinateur avec python-garminconnect : `uv run --with garminconnect python -c \"from garminconnect import Garmin; import getpass, json; g = Garmin(email=input('Email: '), password=getpass.getpass('Mot de passe: '), prompt_mfa=lambda: input('Code MFA: ')); g.login(); print(json.loads(g.client.dumps())['di_refresh_token'])\"`. Il reste valable 30 jours sans usage et Appstrate le renouvelle à chaque rafraîchissement : collez-le tel quel, ne le partagez pas.",
               "minLength": 20
             }
           },
