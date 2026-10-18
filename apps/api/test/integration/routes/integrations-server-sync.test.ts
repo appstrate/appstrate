@@ -5,6 +5,7 @@
  * called through the credential proxy with the caller's connection.
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
+import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { connectionCalls, spacePackages } from "@appstrate/db/schema";
 import { drainAudits } from "../../../src/services/audit.ts";
@@ -139,9 +140,14 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
     expect((await sync(ctx, { connection_id: connectionId })).status).toBe(200);
     await drainAudits(5_000);
-    const rows = await db.select().from(connectionCalls).orderBy(connectionCalls.id);
+    // This connection's rows only: a previous test's journal writes are asynchronous and can land
+    // after the truncate. Inserts are fire-and-forget, so their order is not the exchange order.
+    const rows = await db
+      .select()
+      .from(connectionCalls)
+      .where(eq(connectionCalls.connectionId, connectionId));
     // initialize, the `initialized` notification (202), three `tools/list` pages.
-    expect(rows.map((row) => row.outcome)).toEqual(["200", "202", "200", "200", "200"]);
+    expect(rows.map((row) => row.outcome).sort()).toEqual(["200", "200", "200", "200", "202"]);
     for (const row of rows) {
       expect(row).toMatchObject({
         connectionId,
