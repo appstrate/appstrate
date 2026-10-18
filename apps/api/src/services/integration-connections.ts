@@ -150,6 +150,7 @@ import {
   type ConnectionOverrides,
   type ConnectionResolutionError,
   type IntegrationManifest,
+  acquiresByConnectLogin,
 } from "@appstrate/core/integration";
 import type { ConnectionReach, IntegrationToolCatalogEntry } from "@appstrate/shared-types";
 import { isUserUrlReachable, type ConnectionVariables } from "./connect/connection-variables.ts";
@@ -2053,6 +2054,24 @@ function sameOrigin(a: string, b: string): boolean {
 }
 
 /**
+ * MCP 2026-07-28 Security Considerations: an MCP server's authorization server whose validated
+ * metadata lists no S256 is refused before any client is provisioned, whatever the manifest says.
+ */
+export function assertPkceS256Advertised(
+  packageId: string,
+  authKey: string,
+  metadata: { issuer: string; codeChallengeMethodsSupported?: string[] },
+): void {
+  if (metadata.codeChallengeMethodsSupported?.includes("S256")) return;
+  throw new ApiError({
+    status: 403,
+    code: "authorization_server_pkce_unsupported",
+    title: "Authorization Server Without PKCE",
+    detail: `The authorization server ${metadata.issuer} of '${packageId}' auth '${authKey}' does not advertise PKCE S256 in its metadata (code_challenge_methods_supported), which an MCP connection requires.`,
+  });
+}
+
+/**
  * AFPS §7.3 *Client binding*: refuse a manifest-declared endpoint that the validated metadata of
  * the auth's authorization server contradicts — its client is presented to that server only.
  */
@@ -2162,6 +2181,9 @@ export async function ensureIntegrationOAuthClient(
   // AFPS §7.3: the issuer's validated metadata wins; a manifest endpoint stands in only without it.
   const discovered = issuer ? await resolveOAuthEndpoints({ issuer }) : {};
   assertEndpointsMatchMetadata(packageId, authKey, auth, discovered);
+  if (discovered.issuer !== undefined && !acquiresByConnectLogin(auth)) {
+    assertPkceS256Advertised(packageId, authKey, { ...discovered, issuer: discovered.issuer });
+  }
   const endpoints = {
     ...discovered,
     authorizationEndpoint: discovered.authorizationEndpoint ?? auth.authorization_endpoint,
@@ -2308,6 +2330,9 @@ async function ensurePerConnectionOAuthClient(
       "authorization_server_unavailable",
       `the authorization server ${candidate} publishes no valid metadata (RFC 8414)`,
     );
+  }
+  if (remote && !acquiresByConnectLogin(auth)) {
+    assertPkceS256Advertised(packageId, authKey, { ...endpoints, issuer: endpoints.issuer });
   }
   const byDocument = presentsClientMetadataDocument(endpoints);
   for (const url of [

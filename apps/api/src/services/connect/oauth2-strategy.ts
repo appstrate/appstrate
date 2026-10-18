@@ -46,6 +46,7 @@ import { logger } from "../../lib/logger.ts";
 import { oauthStateStore } from "./oauth-state-store.ts";
 import {
   assertEndpointsMatchMetadata,
+  assertPkceS256Advertised,
   assertRequiredIdentityClaims,
   ensureIntegrationOAuthClient,
   extractIdentity,
@@ -400,14 +401,17 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     const tokenEndpoint = resolved.tokenEndpoint ?? auth.token_endpoint;
     // A server chosen per connection takes no declared resource.
     const resource = perConnection ? resolved.resource : (resolved.resource ?? auth.resource);
+    const metadata =
+      getRemoteSource(manifest) && issuer ? await resolveOAuthEndpoints({ issuer }) : undefined;
     // AFPS §7.3 client binding on a remote source, a manually registered client included.
-    if (getRemoteSource(manifest) && !perConnection && issuer) {
-      assertEndpointsMatchMetadata(
-        ctx.integrationId,
-        ctx.authKey,
-        auth,
-        await resolveOAuthEndpoints({ issuer }),
-      );
+    if (metadata && !perConnection) {
+      assertEndpointsMatchMetadata(ctx.integrationId, ctx.authKey, auth, metadata);
+    }
+    if (metadata?.issuer !== undefined) {
+      assertPkceS256Advertised(ctx.integrationId, ctx.authKey, {
+        ...metadata,
+        issuer: metadata.issuer,
+      });
     }
     const result = await initiateIntegrationOAuth(oauthStateStore, {
       packageId: ctx.integrationId,
@@ -420,9 +424,11 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       scopes: opts.scopes,
       ...(oauthMeta?.scope_separator ? { scopeSeparator: oauthMeta.scope_separator } : {}),
       ...(resource ? { resource } : {}),
-      ...(auth.code_challenge_methods_supported
-        ? { codeChallengeMethodsSupported: auth.code_challenge_methods_supported }
-        : {}),
+      ...(metadata?.issuer !== undefined
+        ? { codeChallengeMethodsSupported: ["S256"] }
+        : auth.code_challenge_methods_supported
+          ? { codeChallengeMethodsSupported: auth.code_challenge_methods_supported }
+          : {}),
       ...(auth.authorization_params ? { authorizationParams: auth.authorization_params } : {}),
       redirectUri: effectiveRedirectUri,
       orgId: ctx.scope.orgId,

@@ -67,6 +67,10 @@ interface Advertise {
   registration: boolean;
   /** RFC 9207: advertise `authorization_response_iss_parameter_supported` and send `iss`. */
   iss?: boolean;
+  /** RFC 8414 `code_challenge_methods_supported` (default `["S256"]`; `null` omits it). */
+  pkce?: string[] | null;
+  /** RFC 8414 `scopes_supported` (omitted by default). */
+  scopes?: string[];
 }
 
 /** The remote MCP server and its authorization server's metadata, fronting `provider`. */
@@ -105,7 +109,10 @@ function startMetadataServer(advertise: Advertise): MetadataServer {
           authorization_endpoint: `${base}/authorize`,
           token_endpoint: handle.provider!.tokenEndpoint,
           grant_types_supported: ["authorization_code", "refresh_token"],
-          code_challenge_methods_supported: ["S256"],
+          ...(advertise.pkce === null
+            ? {}
+            : { code_challenge_methods_supported: advertise.pkce ?? ["S256"] }),
+          ...(advertise.scopes ? { scopes_supported: advertise.scopes } : {}),
           ...(iss ? { authorization_response_iss_parameter_supported: true } : {}),
           ...(advertise.registration ? { registration_endpoint: `${base}/register` } : {}),
           ...(advertise.cimd ? { client_id_metadata_document_supported: true } : {}),
@@ -293,6 +300,14 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
     return new URL(((await res.json()) as { auth_url: string }).auth_url);
   }
 
+  /** POST …/connect/oauth2, the raw response. */
+  const postConnect = () =>
+    app.request(`/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/connect/oauth2`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
   /** The browser's consent hop: the URL the authorization server sends it back to. */
   async function consent(authUrl: URL): Promise<URL> {
     const res = await fetch(authUrl, { redirect: "manual" });
@@ -428,6 +443,49 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
     expect(await callbackText(genuine)).not.toContain("error");
     expect(meta.provider!.tokenRequests).toHaveLength(1);
     expect(meta.registrations).toBe(1);
+  });
+
+  it.each([
+    ["omits code_challenge_methods_supported", null],
+    ["advertises plain only", ["plain"]],
+  ] as const)(
+    "refuses to connect to an MCP authorization server that %s (#2078)",
+    async (_case, pkce) => {
+      // MCP 2026-07-28: absent from the metadata, PKCE is unsupported, whatever the manifest says.
+      await install({ cimd: false, registration: true, iss: false, pkce: pkce && [...pkce] });
+      const res = await app.request(
+        `/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/connect/oauth2`,
+        {
+          method: "POST",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        },
+      );
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { code: string }).code).toBe(
+        "authorization_server_pkce_unsupported",
+      );
+      expect(meta.provider!.authorizeRequests).toHaveLength(0);
+      // Refused before any client is provisioned upstream or stored.
+      expect(meta.registrations).toBe(0);
+      expect(await db.select().from(integrationOauthClients)).toEqual([]);
+    },
+  );
+
+  it("refuses PKCE-less metadata on a CIMD flow too, before any authorize request", async () => {
+    await install({ cimd: true, registration: true, pkce: null });
+    const res = await postConnect();
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe(
+      "authorization_server_pkce_unsupported",
+    );
+    expect(meta.provider!.authorizeRequests).toHaveLength(0);
+  });
+
+  it("sends S256 to an MCP authorization server that advertises it beside plain", async () => {
+    await install({ cimd: false, registration: true, iss: false, pkce: ["plain", "S256"] });
+    const authUrl = await begin();
+    expect(authUrl.searchParams.get("code_challenge_method")).toBe("S256");
   });
 
   it("refuses a document client bound to another server than the state's (issuer_mismatch)", async () => {
