@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { lazy, Suspense, useEffect } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { LibraryBig, Menu, PanelLeft, Plus, Settings, type LucideIcon } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { NavOrg } from "@/components/nav-org";
@@ -115,6 +115,11 @@ function OverlayEntry({
  */
 export function AppSidebar({ product }: { product: "studio" | "chat" }) {
   const { t } = useTranslation();
+  // On a phone the navigation is a sheet over the page: once a link has taken the user somewhere,
+  // the sheet would only hide where they went. Desktop keeps its own, remembered, open state.
+  const { setOpenMobile } = useSidebar();
+  const { pathname, search } = useLocation();
+  useEffect(() => setOpenMobile(false), [pathname, search, setOpenMobile]);
   // The catalogue is drawn only when its route admits the caller (`ROUTE_ACCESS`).
   const canReach = useCanReach();
   const ready = useReachReady();
