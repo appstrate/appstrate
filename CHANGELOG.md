@@ -343,10 +343,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Garmin rotates it at each refresh and it lapses after 30 days unused. Garmin
   has no public API for individuals: the integration reads the undocumented API
   of the Garmin Connect mobile app, which may break, and automated reading may
-  fall outside Garmin's terms of use. `authorized_uris` covers only the read
-  services (activity list, activities, downloads, profile) and `INTEGRATION.md`
-  tells the agent to use `GET` only, but nothing enforces a method: the token can
-  also edit and delete activities on those same paths.
+  fall outside Garmin's terms of use. It also reads daily health data
+  (sleep, body battery, stress, heart rate, HRV, respiration, SpO2, training
+  readiness). `authorized_uris` covers all of `connectapi.garmin.com` and
+  `INTEGRATION.md` tells the agent to use `GET` only, but nothing enforces a
+  method: the token can also edit and delete the owner's data (activities,
+  settings, workouts, gear).
 
   **Operators:** the auth needs a public client. Declare it in
   `SYSTEM_INTEGRATIONS` —

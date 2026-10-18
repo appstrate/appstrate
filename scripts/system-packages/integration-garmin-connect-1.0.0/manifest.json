@@ -4,8 +4,19 @@
   "type": "integration",
   "schema_version": "0.3",
   "display_name": "Garmin Connect (API)",
-  "description": "Fitness — reads the owner's Garmin Connect activities (list by date, summary, dense GPS track and time series, splits, heart-rate zones, weather, GPX and original FIT files) and profile. Relies on the undocumented API of the Garmin Connect mobile app: it may break, and automated reading may fall outside Garmin's terms of use. Connected with a refresh token obtained once outside Appstrate (Garmin's mobile sign-in, MFA included, has no redirect flow); Garmin rotates it at each refresh.",
-  "keywords": ["garmin", "fitness", "activities", "gps", "gpx", "fit", "running", "hiking"],
+  "description": "Fitness — reads the owner's Garmin Connect activities (list by date, summary, dense GPS track and time series, splits, heart-rate zones, weather, GPX and original FIT files), daily health data (sleep, body battery, stress, heart rate, HRV, respiration, SpO2, training readiness) and profile. Relies on the undocumented API of the Garmin Connect mobile app: it may break, and automated reading may fall outside Garmin's terms of use. Connected with a refresh token obtained once outside Appstrate (Garmin's mobile sign-in, MFA included, has no redirect flow); Garmin rotates it at each refresh.",
+  "keywords": [
+    "garmin",
+    "fitness",
+    "activities",
+    "gps",
+    "gpx",
+    "fit",
+    "running",
+    "hiking",
+    "sleep",
+    "health"
+  ],
   "license": "Apache-2.0",
   "icon": "cib:garmin",
   "source": {
@@ -38,12 +49,7 @@
         "name": "$.fullName",
         "garmin_guid": "$.garminGUID"
       },
-      "authorized_uris": [
-        "https://connectapi.garmin.com/activitylist-service/**",
-        "https://connectapi.garmin.com/activity-service/activity/**",
-        "https://connectapi.garmin.com/download-service/**",
-        "https://connectapi.garmin.com/userprofile-service/socialProfile"
-      ],
+      "authorized_uris": ["https://connectapi.garmin.com/**"],
       "credentials": {
         "schema": {
           "type": "object",
