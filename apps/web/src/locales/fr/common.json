@@ -69,6 +69,7 @@
   "apiError.scope_reserved": "Ce scope de package est réservé par la plateforme. Utilisez celui de votre organisation.",
   "apiError.redirect_uri_reserved": "Cette URI de redirection est réservée aux retours par serveur de la plateforme (/api/integrations/callback/<tag> et /api/integrations/callback/cimd/<tag>) : indiquez le retour partagé /api/integrations/callback, une autre URI, ou laissez-la vide.",
   "apiError.authorization_server_unreachable": "Le serveur d'autorisation de cette intégration ne répond pas pour le moment : réessayez dans quelques instants.",
+  "apiError.authorization_server_iss_unsupported": "Le serveur d'autorisation de cette intégration ne prend pas en charge l'identification de l'émetteur (RFC 9207) : la connexion est refusée pour une intégration autre qu'une intégration système.",
   "apiError.authorization_server_pkce_unsupported": "Le serveur d'autorisation de cette intégration n'annonce pas PKCE (S256) dans ses métadonnées : la connexion est refusée pour protéger le code d'autorisation.",
   "apiError.oauth_client_redirect_mismatch": "Le client OAuth de cette intégration déclare une URI de redirection propre à un autre serveur d'autorisation : un administrateur doit la modifier ou supprimer ce client avant de connecter.",
   "apiError.validation_failed": "Les données envoyées sont invalides.",

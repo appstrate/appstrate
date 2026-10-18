@@ -605,46 +605,22 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     expect(JSON.stringify(await res.json())).toContain("per connection");
   });
 
-  it("refuses the mix-up through a document: a DCR server without iss bouncing to a CIMD server", async () => {
-    // A (per connection, DCR, no iss) sends the user to B with our document of A as client_id and
-    // its redirect URI, plus A's state; B — which fetches any document — returns the code there
-    // without iss. The document's redirect URI is not A's DCR one, so A's state refuses it.
-    const previousAppUrl = process.env.APP_URL;
-    process.env.APP_URL = "https://appstrate.example.com";
-    resetEnvCache();
-    try {
-      forge.iss = false;
-      const res = await app.request("/api/integrations/@myorg/forge/auths/oauth/connect/oauth2", {
-        method: "POST",
-        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({ variables: { base_url: base } }),
-      });
-      expect(res.status).toBe(200);
-      const toA = new URL(((await res.json()) as { auth_url: string }).auth_url);
-      expect(toA.searchParams.get("redirect_uri")).toBe(
-        `https://appstrate.example.com/api/integrations/callback/${authorizationServerTag(base)}`,
-      );
-      const documentOfA = `/oauth/client-metadata/${Buffer.from(base).toString("base64url")}.json`;
-      const doc = (await (await app.request(documentOfA)).json()) as { redirect_uris: string[] };
-      expect(doc.redirect_uris).toEqual([
-        `https://appstrate.example.com/api/integrations/callback/cimd/${authorizationServerTag(base)}`,
-      ]);
-
-      const toB = new URL(`${otherBase}/oauth/authorize`);
-      for (const [k, v] of toA.searchParams) toB.searchParams.set(k, v);
-      toB.searchParams.set("client_id", `https://appstrate.example.com${documentOfA}`);
-      toB.searchParams.set("redirect_uri", doc.redirect_uris[0]!);
-      const fromB = await authorize(toB.toString());
-      expect(fromB.searchParams.get("iss")).toBeNull();
-      const done = await app.request(fromB.pathname + fromB.search);
-      expect(await done.text()).toContain("did not come from the authorization server");
-      expect(forge.tokenRequests).toHaveLength(0);
-      expect(await db.select().from(integrationConnections)).toHaveLength(0);
-    } finally {
-      if (previousAppUrl === undefined) delete process.env.APP_URL;
-      else process.env.APP_URL = previousAppUrl;
-      resetEnvCache();
-    }
+  it("refuses a server chosen per connection that does not advertise iss, registering nothing", async () => {
+    // Never vouched for: the user picks it. Without `iss`, a DCR server A could send the user to an
+    // honest B (a client registered there on A's redirect URI, or our document of A) and have B's
+    // code delivered on A's flow (RFC 9700 §4.4.2.2).
+    forge.iss = false;
+    const res = await app.request("/api/integrations/@myorg/forge/auths/oauth/connect/oauth2", {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ variables: { base_url: base } }),
+    });
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe(
+      "authorization_server_iss_unsupported",
+    );
+    expect(forge.registrations).toHaveLength(0);
+    expect(await db.select().from(integrationOauthClients)).toEqual([]);
   });
 
   it("takes the server's own client metadata document when it accepts CIMD: no row, bound to it", async () => {

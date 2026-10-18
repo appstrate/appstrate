@@ -79,6 +79,7 @@ function startAuthServer(): AuthServer {
           registration_endpoint: `${base}/oauth/register`,
           grant_types_supported: ["authorization_code", "refresh_token"],
           code_challenge_methods_supported: ["S256"],
+          authorization_response_iss_parameter_supported: true,
         });
       }
       if (req.method === "POST" && url.pathname === "/oauth/register") {

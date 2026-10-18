@@ -50,6 +50,8 @@ import {
 import { oauthStateStore } from "../../../src/services/connect/oauth-state-store.ts";
 import { initiateIntegrationOAuth } from "@appstrate/connect";
 import { authorizationServerTag } from "../../../src/lib/integration-callback-url.ts";
+import { _setSystemPackagesForTesting } from "../../../src/services/system-packages.ts";
+import type { SystemPackageEntry } from "@appstrate/core/system-packages";
 import type { AfpsManifestAuth } from "../../../src/services/integration-manifest-helpers.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 
@@ -237,11 +239,18 @@ describe("GET /oauth/client-metadata/{document} (public)", () => {
 describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
   let ctx: TestContext;
   let meta: MetadataServer;
+  let restoreSystem: (() => void) | undefined;
 
   /** Install the remote integration on a fresh metadata server, its provider bound to `clientId`. */
   async function install(
     advertise: Advertise,
-    opts: { method?: "none" | "client_secret_post"; clientSecret?: string; clientId?: string } = {},
+    opts: {
+      method?: "none" | "client_secret_post";
+      clientSecret?: string;
+      clientId?: string;
+      /** A system package id the platform vouches for (the installed integration's by default). */
+      system?: string | true;
+    } = {},
   ): Promise<void> {
     meta = startMetadataServer(advertise);
     meta.provider = createStrictAuthorizationServer({
@@ -250,23 +259,34 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
       ...(opts.clientSecret ? {} : { acceptedAuthMethods: ["none"] as const }),
       expiresIn: 60,
     });
+    const manifest = remoteIntegrationManifest({
+      name: INTEGRATION,
+      url: `${meta.base}/mcp`,
+      auths: {
+        [AUTH_KEY]: {
+          type: "oauth2",
+          tokenEndpointAuthMethod: opts.method ?? "none",
+          defaultScopes: ["read"],
+          codeChallengeMethodsSupported: ["S256"],
+        },
+      },
+    });
+    const system = opts.system === true;
+    if (opts.system) {
+      // The boot registry, which answers a system package's manifest by id.
+      const id = system ? INTEGRATION : (opts.system as string);
+      restoreSystem = _setSystemPackagesForTesting(
+        new Map([
+          [id, { packageId: id, type: "integration", manifest } as unknown as SystemPackageEntry],
+        ]),
+      );
+    }
     await seedPackage({
       id: INTEGRATION,
-      orgId: ctx.orgId,
+      orgId: system ? null : ctx.orgId,
       type: "integration",
-      source: "local",
-      draftManifest: remoteIntegrationManifest({
-        name: INTEGRATION,
-        url: `${meta.base}/mcp`,
-        auths: {
-          [AUTH_KEY]: {
-            type: "oauth2",
-            tokenEndpointAuthMethod: opts.method ?? "none",
-            defaultScopes: ["read"],
-            codeChallengeMethodsSupported: ["S256"],
-          },
-        },
-      }),
+      source: system ? "system" : "local",
+      draftManifest: manifest,
     });
     await db
       .insert(spacePackages)
@@ -338,6 +358,8 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
   afterEach(() => {
     meta?.provider?.stop();
     meta?.stop();
+    restoreSystem?.();
+    restoreSystem = undefined;
   });
 
   it("connects and refreshes with the server's document as client_id, storing no client", async () => {
@@ -421,9 +443,12 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
   });
 
   it("never completes a DCR flow with a response on a document's redirect URI", async () => {
-    // A DCR client of a server without `iss`. A response arriving on the document namespace —
-    // where a server handed our document would send it — is refused.
-    await install({ cimd: false, registration: true, iss: false }, { clientId: "dcr-1" });
+    // A DCR client of a server without `iss` (a system integration's). A response arriving on the
+    // document namespace — where a server handed our document would send it — is refused.
+    await install(
+      { cimd: false, registration: true, iss: false },
+      { clientId: "dcr-1", system: true },
+    );
     const back = await consent(await begin());
     expect(back.pathname).toBe(`/api/integrations/callback/${authorizationServerTag(meta.base)}`);
     const onDocumentPath = `/api/integrations/callback/cimd/${authorizationServerTag(meta.base)}${back.search}`;
@@ -435,9 +460,12 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
   });
 
   it("binds a DCR client of a server without iss to that server's own redirect URI (#2102)", async () => {
-    // Without `iss`, the redirect URI tells servers apart (RFC 9700 §4.4.2): the shared callback
-    // would take a code from any honest server whose client returns there.
-    await install({ cimd: false, registration: true, iss: false }, { clientId: "dcr-1" });
+    // Without `iss` (a system integration's server), the redirect URI tells servers apart (RFC
+    // 9700 §4.4.2): the shared callback would take a code from any server whose client returns there.
+    await install(
+      { cimd: false, registration: true, iss: false },
+      { clientId: "dcr-1", system: true },
+    );
     const tagged = `${CALLBACK}/${authorizationServerTag(meta.base)}`;
 
     const authUrl = await begin();
@@ -511,7 +539,6 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
     await install({
       cimd: false,
       registration: true,
-      iss: false,
       scopes: ["read", "offline_access"],
     });
     const authUrl = await begin();
@@ -532,13 +559,13 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
   });
 
   it("adds no offline_access the MCP authorization server does not advertise", async () => {
-    await install({ cimd: false, registration: true, iss: false, scopes: ["read"] });
+    await install({ cimd: false, registration: true, scopes: ["read"] });
     expect((await begin()).searchParams.get("scope")).toBe("read");
     expect(meta.registeredScope).toBe("read");
   });
 
   it("sends S256 to an MCP authorization server that advertises it beside plain", async () => {
-    await install({ cimd: false, registration: true, iss: false, pkce: ["plain", "S256"] });
+    await install({ cimd: false, registration: true, pkce: ["plain", "S256"] });
     const authUrl = await begin();
     expect(authUrl.searchParams.get("code_challenge_method")).toBe("S256");
   });
@@ -596,12 +623,63 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
     expect(await db.select().from(integrationConnections)).toEqual([]);
   });
 
-  it("registers by DCR when the server does not advertise RFC 9207 iss", async () => {
-    await install({ cimd: true, registration: true, iss: false });
+  it("registers by DCR for a system integration whose fixed server does not advertise iss", async () => {
+    await install({ cimd: true, registration: true, iss: false }, { system: true });
     const { resolved, picked } = await connectClient();
     expect(resolved.metadataDocumentClient).toBeUndefined();
     expect(picked!.clientId).toBe("dcr-1");
     expect(meta.registrations).toBe(1);
+  });
+
+  // The trust policy (RFC 9700 §4.4.2.2): per-server redirect URIs are circumvented by a client
+  // registered at an honest server on the redirect URI assigned to the attacker's one.
+  it("refuses a server without iss for an integration that is not a system one, registering nothing", async () => {
+    await install({ cimd: false, registration: true, iss: false }, { clientId: "dcr-1" });
+    const res = await postConnect();
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe(
+      "authorization_server_iss_unsupported",
+    );
+    expect(meta.registrations).toBe(0);
+    expect(await db.select().from(integrationOauthClients)).toEqual([]);
+  });
+
+  it("refuses a fork of a system integration: the platform vouches for the system id alone", async () => {
+    await install(
+      { cimd: false, registration: true, iss: false },
+      { clientId: "dcr-1", system: "@appstrate/remote-mcp" },
+    );
+    const res = await postConnect();
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe(
+      "authorization_server_iss_unsupported",
+    );
+    expect(meta.registrations).toBe(0);
+  });
+
+  it("connects a system integration whose fixed server sends no iss (Canva-like)", async () => {
+    await install(
+      { cimd: false, registration: true, iss: false },
+      { clientId: "dcr-1", system: true },
+    );
+    const back = await consent(await begin());
+    expect(back.searchParams.get("iss")).toBeNull();
+    expect(await callbackText(back)).not.toContain("error");
+    expect(await db.select().from(integrationConnections)).toHaveLength(1);
+  });
+
+  it("replays RFC 9700 §4.4.2.2: honest B answers on hostile A's tag without iss — refused", async () => {
+    // A (not vouched) advertises iss, so its flow requires it; B's answer, on A's redirect URI via
+    // a client the attacker registered there, carries none. Nothing reaches A's token endpoint.
+    await install({ cimd: false, registration: true }, { clientId: "dcr-1" });
+    const authUrl = await begin();
+    const state = await oauthStateStore.get(authUrl.searchParams.get("state")!);
+    expect(state!.integration).toMatchObject({ issuer: meta.base, issParameterSupported: true });
+    const fromB = await consent(authUrl);
+    expect(fromB.pathname).toBe(`/api/integrations/callback/${authorizationServerTag(meta.base)}`);
+    fromB.searchParams.delete("iss");
+    expect(await callbackText(fromB)).toContain("did not come from the authorization server");
+    expect(meta.provider!.tokenRequests).toHaveLength(0);
   });
 
   it("takes the document over a machine client DCR registered before", async () => {

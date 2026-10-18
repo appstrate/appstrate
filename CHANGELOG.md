@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
+- **A non-system integration whose authorization server does not support RFC 9207
+  issuer identification no longer connects** (#2102). A client the platform
+  provisions (DCR or client metadata document) now requires the server to
+  advertise `authorization_response_iss_parameter_supported`, unless the
+  integration is a system one connecting to the server its manifest fixes. Such
+  a connect answers `403 authorization_server_iss_unsupported` before any client
+  is registered, and the MCP-URL wizard warns about it before saving. Measured
+  on 2026-10-18: Notion, Linear, Sentry, ClickUp and Appstrate advertise it;
+  Canva, Atlassian, Asana, Vercel, PayPal and Square do not.
+
 - **Auto-provisioned OAuth clients are bound to their authorization server**
   (#2102). On the first connect after the deploy, each remote MCP integration
   registers one new DCR client per authorization server, at that server's own
@@ -66,6 +76,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `403 authorization_server_pkce_unsupported` (MCP 2026-07-28). A server whose metadata does
   not answer (network failure, timeout, 5xx) gives a retryable
   `503 authorization_server_unreachable` instead of a "register a client manually" 403.
+  A client the platform provisions for an integration other than a system one needs a server
+  advertising RFC 9207 `iss`, else `403 authorization_server_iss_unsupported`; discovery warns
+  with the same code.
   `offline_access` is requested when the server's `scopes_supported` lists it, and is never
   reported as a denied scope, since issuing a refresh token is the server's decision.
 - **Agent persistence: one visibility rule for pinned slots and memories** (#2070). A caller holding

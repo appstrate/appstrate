@@ -153,6 +153,7 @@ import {
   type IntegrationManifest,
   acquiresByConnectLogin,
 } from "@appstrate/core/integration";
+import { isSystemPackage } from "./system-packages.ts";
 import type { ConnectionReach, IntegrationToolCatalogEntry } from "@appstrate/shared-types";
 import { isUserUrlReachable, type ConnectionVariables } from "./connect/connection-variables.ts";
 import {
@@ -2081,6 +2082,35 @@ export function assertPkceS256Advertised(
 }
 
 /**
+ * What the authorization server of an auto-provisioned (DCR or CIMD) client must advertise before
+ * any client is provisioned for it: PKCE S256 on an MCP server, and RFC 9207 `iss` unless the
+ * platform vouches for it — a system integration's own fixed server. RFC 9700 §4.4.2.2: an attacker
+ * defeats per-server redirect URIs by "registering a new client with the honest authorization
+ * server", on the redirect URI assigned to its own server.
+ */
+function assertProvisionableServer(
+  packageId: string,
+  authKey: string,
+  auth: AfpsManifestAuth,
+  metadata: {
+    issuer: string;
+    codeChallengeMethodsSupported?: string[];
+    authorizationResponseIssParameterSupported?: boolean;
+  },
+  policy: { mcp: boolean; vouched: boolean },
+): void {
+  if (acquiresByConnectLogin(auth)) return;
+  if (policy.mcp) assertPkceS256Advertised(packageId, authKey, metadata);
+  if (policy.vouched || metadata.authorizationResponseIssParameterSupported === true) return;
+  throw new ApiError({
+    status: 403,
+    code: "authorization_server_iss_unsupported",
+    title: "Authorization Server Without Issuer Identification",
+    detail: `The authorization server ${metadata.issuer} of '${packageId}' auth '${authKey}' does not advertise RFC 9207 issuer identification (authorization_response_iss_parameter_supported), which a client this platform provisions for an integration other than a system one requires.`,
+  });
+}
+
+/**
  * AFPS §7.3 *Client binding*: refuse a manifest-declared endpoint that the validated metadata of
  * the auth's authorization server contradicts — its client is presented to that server only.
  */
@@ -2190,8 +2220,17 @@ export async function ensureIntegrationOAuthClient(
   // AFPS §7.3: the issuer's validated metadata wins; a manifest endpoint stands in only without it.
   const discovered = issuer ? await resolveOAuthEndpoints({ issuer }) : {};
   assertEndpointsMatchMetadata(packageId, authKey, auth, discovered);
-  if (discovered.issuer !== undefined && !acquiresByConnectLogin(auth)) {
-    assertPkceS256Advertised(packageId, authKey, { ...discovered, issuer: discovered.issuer });
+  if (discovered.issuer !== undefined) {
+    assertProvisionableServer(
+      packageId,
+      authKey,
+      auth,
+      { ...discovered, issuer: discovered.issuer },
+      {
+        mcp: true,
+        vouched: isSystemPackage(packageId),
+      },
+    );
   }
   const endpoints = {
     ...discovered,
@@ -2346,9 +2385,16 @@ async function ensurePerConnectionOAuthClient(
       `the authorization server ${candidate} publishes no valid metadata (RFC 8414)`,
     );
   }
-  if (remote && !acquiresByConnectLogin(auth)) {
-    assertPkceS256Advertised(packageId, authKey, { ...endpoints, issuer: endpoints.issuer });
-  }
+  assertProvisionableServer(
+    packageId,
+    authKey,
+    auth,
+    { ...endpoints, issuer: endpoints.issuer },
+    {
+      mcp: remote !== null,
+      vouched: false,
+    },
+  );
   const byDocument = presentsClientMetadataDocument(endpoints);
   for (const url of [
     endpoints.authorizationEndpoint,

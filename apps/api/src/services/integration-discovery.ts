@@ -418,7 +418,10 @@ async function discoverAuth(
         catalog: scopeTokens([...scopes, ...(md.scopesSupported ?? [])]),
       }),
       provenance: "detected",
-      warnings: warning ? [warning] : [],
+      warnings: [
+        ...(warning ? [warning] : []),
+        ...(autoClient ? issWarnings(advertised, endpoints) : []),
+      ],
       ...(md.resourceName ? { resourceName: md.resourceName } : {}),
       ...(md.resourceDocumentation ? { documentation: md.resourceDocumentation } : {}),
       ...(md.resourcePolicyUri ? { policyUri: md.resourcePolicyUri } : {}),
@@ -432,10 +435,25 @@ async function discoverAuth(
       key: "oauth",
       auth: oauth2Auth(origin, { issuer: origin, method: "none", scopes, catalog: scopes }),
       provenance: "guessed",
-      warnings: [],
+      warnings: issWarnings(origin, atOrigin),
     };
   }
   return { key: "primary", auth: apiKeyAuth(origin), provenance: "guessed", warnings: [] };
+}
+
+/** Connect refuses such a server for an integration it creates (`assertProvisionableServer`). */
+function issWarnings(
+  server: string,
+  endpoints: { authorizationResponseIssParameterSupported?: boolean },
+): { code: string; message: string }[] {
+  return endpoints.authorizationResponseIssParameterSupported === true
+    ? []
+    : [
+        {
+          code: "authorization_server_iss_unsupported",
+          message: `The authorization server ${server} does not support RFC 9207 issuer identification (authorization_response_iss_parameter_supported): an integration created from this server cannot connect.`,
+        },
+      ];
 }
 
 /**
