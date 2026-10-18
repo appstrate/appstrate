@@ -13,8 +13,8 @@ The existing `content` request field remains supported for API clients.
 
 An agent, a skill or an integration is created from a short dialog (name, identifier,
 description, plus an agent's prompt or an integration's server URL), in one POST to the
-existing per-type route; its files are authored on the saved package, in this editor. There
-is no file tree before creation. MCP servers are created by archive import.
+existing per-type route; its files are authored on the saved package, in this editor. MCP
+servers are created by archive import.
 
 The draft owns its manifest and pending file operations. The file tree is a
 projection of its initial index plus those operations; it cannot acquire a

@@ -74,12 +74,20 @@ describe("integrationCreationManifest", () => {
 
   it("is created by the wizard as a draft only, the manifest as its content", () => {
     const manifest = integrationCreationManifest(defaults, proposal, proposalEdits(proposal));
-    expect(wizardCreateBody(manifest)).toEqual({
+    expect(wizardCreateBody(manifest, "guided")).toEqual({
       manifest,
       content: JSON.stringify(manifest, null, 2),
       publish: false,
     });
-    expect(wizardCreateBody(manifest).manifest.version).toBe("1.0.0");
+    expect(wizardCreateBody(manifest, "guided").manifest.version).toBe("1.0.0");
+  });
+
+  it("is created the manual way as the creation dialog creates it, published by the gate", () => {
+    const manifest = integrationCreationManifest(defaults, proposal, proposalEdits(proposal));
+    expect(wizardCreateBody(manifest, "manual")).toEqual({
+      manifest,
+      content: JSON.stringify(manifest, null, 2),
+    });
   });
 });
 

@@ -214,6 +214,7 @@ describe("routeOf", () => {
       "/agents/:scope/:name/runs/:runId",
     );
     expect(routeOf("/integrations/@acme/gmail#configuration")).toBe("/integrations/:scope/:name");
+    expect(routeOf("/integrations/new/mcp?package=@acme/gmail")).toBe("/integrations/new/mcp");
   });
 
   it("covers no URL outside the declarations", () => {

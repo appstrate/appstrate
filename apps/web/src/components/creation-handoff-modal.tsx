@@ -21,14 +21,6 @@ interface CreationHandoffChoicesProps {
   onFromUrl?: () => void;
 }
 
-/** An integration's manual way says what it configures, beside the guided one from a URL. */
-const MANUAL_KEYS: Partial<Record<CreationResource, { title: string; description: string }>> = {
-  integration: {
-    title: "creation.manual.integrationTitle",
-    description: "creation.manual.integrationDescription",
-  },
-};
-
 export function CreationHandoffModal({
   onClose,
   ...choices
@@ -62,10 +54,6 @@ export function CreationHandoffChoices({
   const canReach = useCanReach();
   const translatePrompt = (key: string, values?: Record<string, string>) => t(key, values);
   const chatPrompt = buildChatCreationDraft(resource, translatePrompt, integration);
-  const manual = MANUAL_KEYS[resource] ?? {
-    title: "creation.manual.title",
-    description: "creation.manual.description",
-  };
   // The chat route gate covers both the feature flag and the `chat:read` permission.
   const chatAvailable = canReach("/chat");
 
@@ -85,8 +73,10 @@ export function CreationHandoffChoices({
     {
       id: "manual",
       icon: PencilLine,
-      title: t(manual.title),
-      description: t(onManual ? manual.description : "creation.manual.unavailableDescription"),
+      title: t("creation.manual.title"),
+      description: t(
+        onManual ? "creation.manual.description" : "creation.manual.unavailableDescription",
+      ),
       onClick: () => onManual?.(),
       disabled: !onManual,
     },

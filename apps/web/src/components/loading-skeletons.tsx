@@ -314,6 +314,16 @@ export function EditorSkeleton({ height }: { height?: string | number }) {
   );
 }
 
+/** A form page with its title in the shell header and no tabs (the MCP URL wizard). */
+export function FormPageSkeleton() {
+  return (
+    <Waiting>
+      <DetailBarSkeleton tabCount={0} />
+      <SettingsSkeleton rows={4} />
+    </Waiting>
+  );
+}
+
 /** The dashboard below its greeting: the figures, recent agents, the two lists. */
 export function DashboardBodySkeleton() {
   return (
@@ -468,15 +478,5 @@ export function ChatConversationSkeleton() {
       label={t("loading")}
       placeholder={canWrite ? <Skeleton className="h-3.5 w-48" /> : null}
     />
-  );
-}
-
-/** A form page with its header in the shell header (the MCP URL wizard). */
-export function FormPageSkeleton() {
-  return (
-    <Waiting>
-      <DetailBarSkeleton tabCount={3} />
-      <SettingsSkeleton rows={4} />
-    </Waiting>
   );
 }

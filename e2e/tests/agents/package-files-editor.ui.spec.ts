@@ -353,7 +353,7 @@ for (const nonInline of [false, true]) {
 }
 
 // A skill or an integration is created from a short dialog (name, id, description, plus the
-// integration's server URL), not from a page: its files are authored on the saved package.
+// integration's server URL); its files are authored on the saved package.
 const creations = {
   skills: { menuItem: "Nouveau skill", dialog: "Nouveau skill", submit: "Créer le skill" },
   integrations: {
@@ -432,8 +432,8 @@ for (const type of ["skills", "integrations"] as const) {
   });
 }
 
-// An agent is created from a short dialog (name, id, description, prompt), not from the editor's
-// pages: its files are authored on the saved agent, the first one being `prompt.md`.
+// An agent is created from a short dialog (name, id, description, prompt); its files are
+// authored on the saved agent, the first one being `prompt.md`.
 test("agents: the creation dialog keeps what was typed after a failed create", async ({
   authedPage: page,
   apiClient,

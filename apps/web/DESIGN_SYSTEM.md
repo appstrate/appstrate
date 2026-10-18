@@ -693,8 +693,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   (`components/creation-handoff-modal.tsx`, `hooks/use-creation-handoff.ts`:
   manual / chat / coding agent), then, for the manual way, `components/create-package-modal.tsx`
   (name, identifier, description, plus an agent's prompt or an integration's server URL), after
-  which the new package's page takes the rest. There is no manual creation page: files are authored
-  on the saved package. An MCP server has no dialog: it is imported. An integration is also added
+  which the new package's page takes the rest, its files included. An MCP server is imported. An integration is also added
   from an MCP server URL, the hand-off's first card (`onFromUrl`): one page,
   `pages/integration-from-mcp-url.tsx`, whose steps (`components/integration-wizard/`) appear
   in turn, each heading taking the focus; nothing of it is stored but `?package=<id>` once the

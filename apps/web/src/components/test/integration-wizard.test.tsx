@@ -27,7 +27,7 @@ await i18nModule.default.changeLanguage("fr");
 const noop = () => {};
 
 describe("the creation hand-off", () => {
-  it("offers the MCP URL first for an integration, then the manual configuration", () => {
+  it("offers the MCP URL first for an integration, then the same manual way as every type", () => {
     const html = render(
       <CreationHandoffChoices
         resource="integration"
@@ -38,10 +38,10 @@ describe("the creation hand-off", () => {
       />,
     );
     const url = html.indexOf(settingsFr["creation.fromUrl.title"]);
-    const manual = html.indexOf(settingsFr["creation.manual.integrationTitle"]);
+    const manual = html.indexOf(settingsFr["creation.manual.title"]);
     expect(url).toBeGreaterThanOrEqual(0);
     expect(manual).toBeGreaterThan(url);
-    expect(html).toContain(settingsFr["creation.manual.integrationDescription"]);
+    expect(html).toContain(settingsFr["creation.manual.description"]);
     expect(html).toContain(settingsFr["creation.chat.title"]);
     expect(html).toContain(settingsFr["creation.import.title"]);
   });
@@ -80,7 +80,7 @@ describe("the review", () => {
         onEditsChange={noop}
         icon={undefined}
         onCreate={noop}
-        creating={false}
+        creating={null}
         createError={null}
         onManual={noop}
       />,
@@ -118,7 +118,7 @@ describe("the review", () => {
         onEditsChange={noop}
         icon={undefined}
         onCreate={noop}
-        creating={false}
+        creating={null}
         createError={null}
         onManual={noop}
       />,

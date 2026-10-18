@@ -4,6 +4,10 @@ import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { SLUG_REGEX } from "@appstrate/core/naming";
+import {
+  SKILL_DESCRIPTION_MAX_LENGTH,
+  isValidSkillName,
+} from "@appstrate/afps-shared/companion-files";
 import { FormModal } from "./form-modal";
 import { FormField } from "./form-field";
 import { isRemoteSourceUrl } from "./integration-editor/utils";
@@ -68,8 +72,12 @@ export function CreatePackageModal({
   const valid =
     displayName.trim() !== "" &&
     SLUG_REGEX.test(id) &&
-    // A skill's description is required by its SKILL.md; an agent's prompt and an integration's URL by the type.
-    (type !== "skill" || description.trim() !== "") &&
+    // A skill's identifier and description are its SKILL.md frontmatter, under that file's rules;
+    // an agent's prompt and an integration's URL are required by the type.
+    (type !== "skill" ||
+      (isValidSkillName(id) &&
+        description.trim() !== "" &&
+        [...description.trim()].length <= SKILL_DESCRIPTION_MAX_LENGTH)) &&
     (type !== "agent" || prompt.trim() !== "") &&
     (type !== "integration" || isRemoteSourceUrl(url.trim()));
 

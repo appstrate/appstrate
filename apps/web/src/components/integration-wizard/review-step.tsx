@@ -3,7 +3,6 @@
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
-import { Button } from "@appstrate/ui/components/button";
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { ApiError } from "../../api/errors";
 import { FormField } from "../form-field";
@@ -49,7 +48,8 @@ export function ReviewStep({
   /** The proposal's icon, or the site's raster once re-encoded. */
   icon: string | undefined;
   onCreate: () => void;
-  creating: boolean;
+  /** The way being created, while its request is out. */
+  creating: "guided" | "manual" | null;
   createError: unknown;
   onManual: () => void;
 }) {
@@ -97,7 +97,7 @@ export function ReviewStep({
             required
             value={edits.display_name}
             onChange={(display_name) => onEditsChange({ ...edits, display_name })}
-            disabled={creating}
+            disabled={creating !== null}
             badge={
               <DiscoveryBadge
                 provenance={edited("display_name") ? undefined : provenance["/display_name"]}
@@ -110,7 +110,7 @@ export function ReviewStep({
             required
             value={edits.name}
             onChange={(name) => onEditsChange({ ...edits, name })}
-            disabled={creating}
+            disabled={creating !== null}
             description={t("integrationWizard.review.identifierHint")}
             badge={<DiscoveryBadge provenance={edited("name") ? undefined : provenance["/name"]} />}
             error={nameTaken ? errorMessage(createError) : undefined}
@@ -156,15 +156,21 @@ export function ReviewStep({
           <PendingButton
             type="button"
             onClick={onCreate}
-            pending={creating}
-            disabled={!complete}
+            pending={creating === "guided"}
+            disabled={!complete || creating !== null}
             data-testid="integration-wizard-create"
           >
             {t("integrationWizard.review.create")}
           </PendingButton>
-          <Button type="button" variant="outline" onClick={onManual} disabled={creating}>
+          <PendingButton
+            type="button"
+            variant="outline"
+            onClick={onManual}
+            pending={creating === "manual"}
+            disabled={!complete || creating !== null}
+          >
             {t("integrationWizard.review.manual")}
-          </Button>
+          </PendingButton>
         </div>
       </div>
     </WizardSection>

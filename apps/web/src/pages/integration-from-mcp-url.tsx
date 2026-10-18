@@ -38,7 +38,6 @@ import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-i
 import { encodeIconDataUri } from "../lib/icon-image";
 import { agentCreationWithIntegrationPath } from "../lib/creation-handoff";
 import { packageDetailPath } from "../lib/package-paths";
-import { integrationSettingsHref } from "../lib/settings-section-href";
 import {
   declaredToolNames,
   defaultToolCount,
@@ -101,7 +100,7 @@ function NewIntegrationWizard() {
     meta: { errorHandledByCaller: true },
   });
   const create = useCreatePackage("integration");
-  // « Continuer en configuration manuelle » creates the same draft, then opens its editor.
+  // « Continuer en configuration manuelle » creates the package as the creation dialog does, then opens it.
   const [manual, setManual] = useState(false);
 
   // While a creation is in flight nothing it was built from may change: its controls are disabled.
@@ -148,9 +147,7 @@ function NewIntegrationWizard() {
   // Rendered, not a mutate callback: a re-render during the request cannot lose the package.
   if (create.data) {
     const created = create.data.id;
-    const to = manual
-      ? integrationSettingsHref(packageDetailPath("integration", created), "identity")
-      : wizardResumePath(created);
+    const to = manual ? packageDetailPath("integration", created) : wizardResumePath(created);
     return <Navigate to={to} replace />;
   }
 
@@ -175,17 +172,17 @@ function NewIntegrationWizard() {
             create.reset();
           }}
           icon={review.icon}
-          creating={create.isPending}
+          creating={create.isPending ? (manual ? "manual" : "guided") : null}
           createError={create.error}
           onCreate={() => {
             if (create.isPending) return;
             setManual(false);
-            create.mutate(wizardCreateBody(accepted(review)));
+            create.mutate(wizardCreateBody(accepted(review), "guided"));
           }}
           onManual={() => {
             if (create.isPending) return;
             setManual(true);
-            create.mutate(wizardCreateBody(accepted(review)));
+            create.mutate(wizardCreateBody(accepted(review), "manual"));
           }}
         />
       )}

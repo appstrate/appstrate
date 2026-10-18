@@ -126,13 +126,15 @@ export function DetailBarSkeleton({
       <ShellHeaderActions>
         <Skeleton className="h-8 w-20" />
       </ShellHeaderActions>
-      <ShellHeaderTabs>
-        <div className="flex h-11 items-center gap-4">
-          {Array.from({ length: tabCount }, (_, i) => (
-            <Skeleton key={i} className="h-4 w-20" />
-          ))}
-        </div>
-      </ShellHeaderTabs>
+      {tabCount > 0 && (
+        <ShellHeaderTabs>
+          <div className="flex h-11 items-center gap-4">
+            {Array.from({ length: tabCount }, (_, i) => (
+              <Skeleton key={i} className="h-4 w-20" />
+            ))}
+          </div>
+        </ShellHeaderTabs>
+      )}
     </>
   );
 }

@@ -312,9 +312,14 @@ export function syncConnectionRemedy(
   return !facts.published || facts.authsMatch ? "connect" : "unpublishedAuths";
 }
 
-/** The create body of the wizard: the draft alone, activated here, published with its tools. */
-export function wizardCreateBody(manifest: Record<string, unknown>) {
-  return { manifest, content: JSON.stringify(manifest, null, 2), publish: false as const };
+/**
+ * The create body of an accepted proposal. The wizard creates the draft alone (`publish: false`),
+ * activated here and published with its tools; the manual way creates it as every creation dialog
+ * does, published when the publish gate accepts it.
+ */
+export function wizardCreateBody(manifest: Record<string, unknown>, way: "guided" | "manual") {
+  const body = { manifest, content: JSON.stringify(manifest, null, 2) };
+  return way === "guided" ? { ...body, publish: false as const } : body;
 }
 
 /**
