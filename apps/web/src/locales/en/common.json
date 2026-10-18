@@ -68,6 +68,7 @@
   "apiError.not_a_platform_account": "This account belongs to a space's application and cannot join an organization. Sign in with a platform account.",
   "apiError.scope_reserved": "This package scope is reserved by the platform. Use your organization's scope.",
   "apiError.redirect_uri_reserved": "This redirect URI is reserved for the platform's per-server callbacks (/api/integrations/callback/<tag> and /api/integrations/callback/cimd/<tag>): use the shared /api/integrations/callback, another URI, or leave it empty.",
+  "apiError.oauth_client_redirect_mismatch": "This integration's OAuth client declares a redirect URI that belongs to another authorization server: an administrator must change it or delete the client before connecting.",
   "apiError.validation_failed": "The submitted data is invalid.",
   "apiError.unauthorized": "Authentication refused: {{message}}",
   "apiError.forbidden": "You do not have permission to do this.",

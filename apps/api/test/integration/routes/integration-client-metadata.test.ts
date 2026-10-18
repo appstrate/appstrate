@@ -600,6 +600,109 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
     },
   );
 
+  it("never takes a leftover per-server DCR row as a classic flow's client", async () => {
+    // A version that chose its server per connection left the org a DCR row for server X (its
+    // redirect URI X's tag); the current version is classic (fixed server). That row must be
+    // neither connected through, nor listed, nor made default: its tag would ride with this
+    // flow's token endpoint.
+    await install(
+      { cimd: true, registration: true },
+      { method: "client_secret_post", clientId: "admin-app", clientSecret: "shh" },
+    );
+    const [leftover] = await db
+      .insert(integrationOauthClients)
+      .values({
+        orgId: ctx.orgId,
+        spaceId: null,
+        integrationId: INTEGRATION,
+        authKey: AUTH_KEY,
+        clientId: "dcr-x",
+        clientSecretEncrypted: "",
+        tokenEndpointAuthMethod: "none",
+        isDefault: true,
+        autoProvisioned: true,
+        issuer: "https://honest-x.example.com",
+        redirectUri: `${CALLBACK}/${authorizationServerTag("https://honest-x.example.com")}`,
+      })
+      .returning({ id: integrationOauthClients.id });
+
+    const begin = await app.request(
+      `/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/connect/oauth2`,
+      {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      },
+    );
+    expect(begin.status).toBe(403);
+    expect(meta.provider!.authorizeRequests).toHaveLength(0);
+
+    const listed = await app.request(`/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/clients`, {
+      headers: authHeaders(ctx),
+    });
+    expect(JSON.stringify(await listed.json())).not.toContain(leftover!.id);
+    const setDefault = await app.request(
+      `/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/default-client`,
+      {
+        method: "PUT",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ client_ref: leftover!.id }),
+      },
+    );
+    expect(setDefault.status).toBe(400);
+  });
+
+  it("binds a per-server DCR row's redirect URI to the flow's own server", async () => {
+    // Reached directly (the tiers no longer hand such a row to a classic flow): a tagged row on a
+    // classic auth, or on a per-connection auth whose flow resolved another server, is refused.
+    const tagX = authorizationServerTag("https://honest-x.example.com");
+    const row = {
+      id: "00000000-0000-4000-8000-000000000001",
+      spaceId: null,
+      integration_package_id: INTEGRATION,
+      auth_key: AUTH_KEY,
+      client_id: "dcr-x",
+      clientSecret: "",
+      has_client_secret: false,
+      token_endpoint_auth_method: "none",
+      redirect_uri: `${CALLBACK}/${tagX}`,
+      isDefault: true,
+      autoProvisioned: true,
+      issuer: "https://honest-x.example.com",
+      secretKeyUnavailable: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    const auths = (issuer: string) =>
+      ({ type: "oauth2", issuer, token_endpoint_auth_method: "none" }) as AfpsManifestAuth;
+    const manifestOf = (auth: AfpsManifestAuth) =>
+      ({
+        type: "integration",
+        name: INTEGRATION,
+        source: { kind: "none" },
+        auths: { [AUTH_KEY]: auth },
+      }) as unknown as IntegrationManifest;
+    const pick = (auth: AfpsManifestAuth, flowIssuer: string) =>
+      resolveConnectClient(INTEGRATION, AUTH_KEY, manifestOf(auth), auth, {
+        spaceClients: [],
+        orgClients: [row],
+        authorizationServer: { issuer: flowIssuer, issParameterSupported: false },
+      } as Parameters<typeof resolveConnectClient>[4]);
+
+    const fixed = auths("https://fixed-h.example.com");
+    expect(() => pick(fixed, "https://fixed-h.example.com")).toThrow(
+      expect.objectContaining({ code: "oauth_client_redirect_mismatch", status: 403 }),
+    );
+    const perConnection = auths("{$variable.base_url}");
+    expect(() => pick(perConnection, "https://other-y.example.com")).toThrow(
+      expect.objectContaining({ code: "oauth_client_redirect_mismatch" }),
+    );
+    expect(pick(perConnection, "https://honest-x.example.com")).toMatchObject({
+      clientId: "dcr-x",
+      redirectTag: tagX,
+    });
+  });
+
   it("keeps an administrator's client on an auth that is not auto-provisioned", async () => {
     await install(
       { cimd: true, registration: true },

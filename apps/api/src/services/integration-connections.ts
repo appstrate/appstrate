@@ -135,6 +135,7 @@ import {
 import {
   integrationCallbackUrl,
   clientMetadataCallbackUrlFor,
+  authorizationServerTag,
   integrationCallbackUrlFor,
   redirectTagOf,
 } from "../lib/integration-callback-url.ts";
@@ -974,7 +975,12 @@ function assertClientAuth(
   }
 }
 
-/** `owner`'s custom clients for the auth, decrypted, oldest-first; a space also sees its org's. */
+/**
+ * `owner`'s custom clients for the auth, decrypted, oldest-first; a space also sees its org's.
+ * Manual rows only: an auto-provisioned (DCR) row is the machine client of one server, found by
+ * {@link getAutoProvisionedClient} on the auto-provisioned path alone — never a classic flow's
+ * client nor a default an admin picks, even once a new version made its auth classic.
+ */
 async function loadClientTiers(
   owner: ClientOwner,
   packageId: string,
@@ -988,6 +994,7 @@ async function loadClientTiers(
         isSpaceOwner(owner) ? spaceVisibleFilter(owner) : tierFilter(owner),
         eq(integrationOauthClients.integrationId, packageId),
         eq(integrationOauthClients.authKey, authKey),
+        eq(integrationOauthClients.autoProvisioned, false),
       ),
     )
     .orderBy(integrationOauthClients.createdAt);
@@ -1509,15 +1516,35 @@ function assertConnectClientUsable(client: IntegrationOAuthClientWithSecret): vo
  * platform with `integrationCallbackUrlFor(issuer)`, may carry a plain tag; a `cimd/` tag, none.
  */
 function isReservedRedirectTag(tag: string, autoProvisioned: boolean): boolean {
+  // Write side; the connect side is the stricter {@link assertRedirectBoundToFlow}.
   return isClientMetadataRedirectTag(tag) || !autoProvisioned;
 }
 
-/** Refuse a stored row's reserved redirect URI at connect — rows written before the write guard. */
-function assertNotReservedRedirect(client: IntegrationOAuthClientWithSecret, tag: string): void {
-  if (isReservedRedirectTag(tag, client.autoProvisioned)) {
-    throw forbidden(
-      `OAuth client '${client.id}' for '${client.integration_package_id}' auth '${client.auth_key}' declares a redirect URI reserved for the platform's per-server callbacks (${client.redirect_uri}); change or clear the client's redirect_uri.`,
-    );
+/**
+ * Refuse a stored row's per-server redirect URI unless it is the one of THIS flow's server: a plain
+ * tag only on an auto-provisioned row of an auth whose server is chosen per connection, and only
+ * the tag of the issuer this flow resolved (`flowIssuer`); a `cimd/` tag on no row (a document
+ * client carries its own, bound by its ref). Anything else would send another server's tag with
+ * this flow's token endpoint — rows written before the write guard, or a DCR row left over from
+ * a version whose server was chosen per connection.
+ */
+function assertRedirectBoundToFlow(
+  client: IntegrationOAuthClientWithSecret,
+  tag: string,
+  flowIssuer: string | undefined,
+): void {
+  const bound =
+    !isClientMetadataRedirectTag(tag) &&
+    client.autoProvisioned &&
+    flowIssuer !== undefined &&
+    tag === authorizationServerTag(flowIssuer);
+  if (!bound) {
+    throw new ApiError({
+      status: 403,
+      code: "oauth_client_redirect_mismatch",
+      title: "OAuth Client Redirect Mismatch",
+      detail: `OAuth client '${client.id}' for '${client.integration_package_id}' auth '${client.auth_key}' declares a redirect URI reserved for the platform's per-server callbacks (${client.redirect_uri}) that is not the one of this connection's authorization server; change or clear the client's redirect_uri, or delete the client.`,
+    });
   }
 }
 
@@ -1550,11 +1577,14 @@ function assertRedirectUriNotReserved(
 }
 
 /** Project a custom (space or org) client into the resolved shape. */
-function customConnectClient(client: IntegrationOAuthClientWithSecret): ResolvedConnectClient {
+function customConnectClient(
+  client: IntegrationOAuthClientWithSecret,
+  flowIssuer: string | undefined,
+): ResolvedConnectClient {
   // Before the authorize redirect, never after the user has consented.
   assertConnectClientUsable(client);
   const redirectTag = client.redirect_uri ? redirectTagOf(client.redirect_uri) : undefined;
-  if (redirectTag !== undefined) assertNotReservedRedirect(client, redirectTag);
+  if (redirectTag !== undefined) assertRedirectBoundToFlow(client, redirectTag, flowIssuer);
   return {
     clientId: client.client_id,
     redirectUri: client.redirect_uri ?? null,
@@ -1592,7 +1622,13 @@ export function resolveConnectClient(
     system,
   );
   if (picked) {
-    return "isDefault" in picked ? customConnectClient(picked) : systemConnectClient(picked);
+    // The server a per-server redirect URI may name: this flow's, when chosen per connection.
+    const flowIssuer = hasPerConnectionAuthServer(manifest, auth)
+      ? resolved.authorizationServer?.issuer
+      : undefined;
+    return "isDefault" in picked
+      ? customConnectClient(picked, flowIssuer)
+      : systemConnectClient(picked);
   }
   if (resolved.metadataDocumentClient) return resolved.metadataDocumentClient;
   if (reconnectsOrgRow && resolved.spaceClients.length > 0) {
