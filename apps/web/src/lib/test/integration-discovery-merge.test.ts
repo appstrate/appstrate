@@ -45,6 +45,7 @@ describe("mergeDiscovery", () => {
   const LINEAR = "https://mcp.linear.app/mcp";
   // The skeleton once the author typed the URL being analysed.
   const withNotion = setSource(defaults, { ...getSource(defaults), remoteUrl: NOTION });
+  const analysedNotion = getSource(withNotion);
 
   it("fills an untouched skeleton", () => {
     const current = {
@@ -54,7 +55,7 @@ describe("mergeDiscovery", () => {
         remote: { url: "https://mcp.notion.com/mcp", transport: "streamable-http" },
       },
     };
-    const manifest = mergeDiscovery(current, defaults, proposal, NOTION);
+    const manifest = mergeDiscovery(current, defaults, proposal, analysedNotion);
     expect(manifest.display_name).toBe("Notion");
     expect(manifest.name).toBe("@acme/notion");
     expect(manifest.auths).toEqual({ oauth });
@@ -73,7 +74,7 @@ describe("mergeDiscovery", () => {
     expect(
       (current.auths as Record<string, { authorized_uris: string[] }>).primary!.authorized_uris,
     ).toEqual(["https://mcp.notion.com/**"]);
-    expect(mergeDiscovery(current, defaults, proposal, NOTION).auths).toEqual({ oauth });
+    expect(mergeDiscovery(current, defaults, proposal, analysedNotion).auths).toEqual({ oauth });
   });
 
   it("keeps what the author touched and does not badge it", () => {
@@ -82,7 +83,7 @@ describe("mergeDiscovery", () => {
       display_name: "Mon Notion",
       auths: { custom: { type: "api_key", authorized_uris: ["https://x.test/**"] } },
     };
-    const manifest = mergeDiscovery(current, defaults, proposal, NOTION);
+    const manifest = mergeDiscovery(current, defaults, proposal, analysedNotion);
     expect(manifest.display_name).toBe("Mon Notion");
     expect(manifest.auths).toEqual(current.auths);
     expect(manifest.name).toBe("@acme/notion");
@@ -102,10 +103,16 @@ describe("mergeDiscovery", () => {
         auths: { oauth: linearAuth },
       },
     } as unknown as DiscoveryProposal;
-    const first = mergeDiscovery(withNotion, defaults, proposal, NOTION);
+    const first = mergeDiscovery(withNotion, defaults, proposal, analysedNotion);
     // The author typed the second URL before analysing it.
     const retyped = setSource(first, { ...getSource(first), remoteUrl: LINEAR });
-    const manifest = mergeDiscovery(retyped, defaults, second, LINEAR, proposal.manifest);
+    const manifest = mergeDiscovery(
+      retyped,
+      defaults,
+      second,
+      getSource(retyped),
+      proposal.manifest,
+    );
     expect(manifest.display_name).toBe("Linear");
     expect(manifest.name).toBe("@acme/linear");
     expect(manifest.auths).toEqual({ oauth: linearAuth });
@@ -114,14 +121,14 @@ describe("mergeDiscovery", () => {
       { ...retyped, display_name: "Mine" },
       defaults,
       second,
-      LINEAR,
+      getSource(retyped),
       proposal.manifest,
     );
     expect(edited.display_name).toBe("Mine");
   });
 
   it("drops a badge once the author edits the field", () => {
-    const manifest = mergeDiscovery(withNotion, defaults, proposal, NOTION);
+    const manifest = mergeDiscovery(withNotion, defaults, proposal, analysedNotion);
     const badges = proposalBadges(
       { ...manifest, auths: { oauth: { ...oauth, client_id: "x" } } },
       proposal,
@@ -135,7 +142,7 @@ describe("mergeDiscovery", () => {
       ...defaults,
       source: { kind: "remote", server: { name: "x" }, remote: { url: NOTION, extra: 1 } },
     };
-    expect(mergeDiscovery(current, defaults, proposal, NOTION).source).toEqual({
+    expect(mergeDiscovery(current, defaults, proposal, analysedNotion).source).toEqual({
       kind: "remote",
       server: { name: "x" },
       remote: { url: NOTION, extra: 1, transport: "sse" },
@@ -157,17 +164,40 @@ describe("mergeDiscovery", () => {
         source: { kind: "remote", remote: { url: "https://old.example/sse", transport: "sse" } },
       },
     } as unknown as DiscoveryProposal;
-    expect(mergeDiscovery(current, {}, stale, "https://old.example/mcp")).toBe(current);
+    expect(
+      mergeDiscovery(current, {}, stale, {
+        remoteUrl: "https://old.example/mcp",
+        remoteTransport: "streamable-http",
+      }),
+    ).toBe(current);
   });
 
   it("drops an answer once the source was switched to local", () => {
     const current = { ...withNotion, source: { kind: "local", server: { name: "x" } } };
-    expect(mergeDiscovery(current, defaults, proposal, NOTION)).toBe(current);
+    expect(mergeDiscovery(current, defaults, proposal, analysedNotion)).toBe(current);
+  });
+
+  it("keeps a transport corrected while the same URL was being analysed", () => {
+    const current = setSource(withNotion, { ...getSource(withNotion), remoteTransport: "sse" });
+    const detected = {
+      ...proposal,
+      manifest: {
+        ...proposal.manifest,
+        source: {
+          kind: "remote" as const,
+          remote: { url: NOTION, transport: "streamable-http" as const },
+        },
+      },
+    };
+    const manifest = mergeDiscovery(current, defaults, detected, analysedNotion);
+    expect(getSource(manifest).remoteTransport).toBe("sse");
+    expect(manifest.display_name).toBe("Notion");
+    expect(proposalBadges(manifest, detected)["/source/remote/transport"]).toBeUndefined();
   });
 
   it("does not mutate its inputs", () => {
     const current = structuredClone(withNotion);
-    mergeDiscovery(current, defaults, proposal, NOTION);
+    mergeDiscovery(current, defaults, proposal, analysedNotion);
     expect(current).toEqual(withNotion);
   });
 });
@@ -272,54 +302,12 @@ describe("mergeServerSync", () => {
 });
 
 describe("serverSyncBody", () => {
-  const connection = (
-    id: string,
-    over: Partial<{ owner_id: string; needs_reconnection: boolean }> = {},
-  ) => ({
-    id,
-    owner_type: "user" as const,
-    owner_id: "u1",
-    needs_reconnection: false,
-    ...over,
+  it("lets the proxy apply governance and choose on the initial request", () => {
+    expect(serverSyncBody()).toEqual({});
   });
 
-  it("names the caller's one own connection, other members' aside", () => {
-    const auths = [
-      { connections: [connection("theirs", { owner_id: "u2" })] },
-      { connections: [connection("mine")] },
-    ];
-    expect(serverSyncBody(auths, "u1")).toEqual({ connection_id: "mine" });
-  });
-
-  it("names none between two own accounts: the proxy asks for a choice", () => {
-    const auths = [{ connections: [connection("account-A"), connection("account-B")] }];
-    expect(serverSyncBody(auths, "u1")).toEqual({});
-  });
-
-  it("names none when one own account is dead and another lives: no silent switch", () => {
-    const auths = [
-      { connections: [connection("A", { needs_reconnection: true }), connection("B")] },
-    ];
-    expect(serverSyncBody(auths, "u1")).toEqual({});
-  });
-
-  it("names one own live account", () => {
-    expect(serverSyncBody([{ connections: [connection("only")] }], "u1")).toEqual({
-      connection_id: "only",
-    });
-  });
-
-  it("names none without an own usable connection: the proxy selects", () => {
-    const auths = [
-      {
-        connections: [
-          connection("theirs", { owner_id: "u2" }),
-          connection("dead", { needs_reconnection: true }),
-        ],
-      },
-    ];
-    expect(serverSyncBody(auths, "u1")).toEqual({});
-    expect(serverSyncBody(auths, undefined)).toEqual({});
+  it("names only a connection the caller explicitly selected", () => {
+    expect(serverSyncBody("chosen")).toEqual({ connection_id: "chosen" });
   });
 });
 

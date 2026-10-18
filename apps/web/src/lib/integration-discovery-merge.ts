@@ -7,7 +7,6 @@ import {
 import { ApiError } from "../api/errors";
 import type { components, paths } from "../api/schema";
 import { getSource, setSource } from "../components/integration-editor/utils";
-import { isConnectionOwnedBy } from "../components/integration-connect/connection-ownership";
 
 export type DiscoveryProposal =
   paths["/api/integrations/discover"]["post"]["responses"][200]["content"]["application/json"];
@@ -36,16 +35,17 @@ export function isDiscoveryCurrent(manifest: Manifest, analysedUrl: string): boo
 /**
  * A field is overwritten only while empty, the skeleton (`defaults`) or the previous analysis's
  * value, so a second analysis replaces the first; `source.remote` follows the URL. A stale
- * answer (see `isDiscoveryCurrent`) touches nothing.
+ * answer (see `isDiscoveryCurrent`) touches nothing. The transport changes only while it still
+ * matches the value captured before the request.
  */
 export function mergeDiscovery(
   current: Manifest,
   defaults: Manifest,
   proposal: Pick<DiscoveryProposal, "manifest">,
-  analysedUrl: string,
+  analysedSource: Pick<ReturnType<typeof getSource>, "remoteUrl" | "remoteTransport">,
   previous?: Manifest,
 ): Manifest {
-  if (!isDiscoveryCurrent(current, analysedUrl)) return current;
+  if (!isDiscoveryCurrent(current, analysedSource.remoteUrl)) return current;
   const proposed: Manifest = proposal.manifest;
   const manifest: Manifest = { ...current };
   // The skeleton as typing the URL left it: its auth's allowlist follows the URL (`setSource`).
@@ -63,10 +63,15 @@ export function mergeDiscovery(
 
   const remote = proposal.manifest.source.remote;
   const currentSource = asRecord(current.source);
+  const transport = getSource(current).remoteTransport;
   manifest.source = {
     ...currentSource,
     kind: "remote",
-    remote: { ...asRecord(currentSource.remote), url: remote.url, transport: remote.transport },
+    remote: {
+      ...asRecord(currentSource.remote),
+      url: remote.url,
+      transport: transport === analysedSource.remoteTransport ? remote.transport : transport,
+    },
   };
   return manifest;
 }
@@ -184,23 +189,11 @@ export type ServerSyncBody = NonNullable<
 >["content"]["application/json"];
 
 /**
- * The caller's one own connection, when it is the only one and live. Otherwise the proxy decides
- * (pin, org default) or asks for a choice (`syncConnectionCandidates`): never a silent switch
- * from a dead account to another.
+ * The proxy applies governance and selects a connection on the first request. An id is sent
+ * only after the caller explicitly chooses a candidate from its refusal.
  */
-export function serverSyncBody(
-  auths: { connections: (Parameters<typeof isConnectionOwnedBy>[0] & ConnectionHealth)[] }[],
-  userId: string | undefined,
-): ServerSyncBody {
-  const own = auths
-    .flatMap((auth) => auth.connections)
-    .filter((c) => isConnectionOwnedBy(c, userId));
-  return own.length === 1 && !own[0]!.needs_reconnection ? { connection_id: own[0]!.id } : {};
-}
-
-interface ConnectionHealth {
-  id: string;
-  needs_reconnection: boolean;
+export function serverSyncBody(connectionId?: string): ServerSyncBody {
+  return connectionId ? { connection_id: connectionId } : {};
 }
 
 export type SyncCandidate = NonNullable<

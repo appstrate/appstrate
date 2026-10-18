@@ -7,7 +7,12 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { connectionCalls, spacePackages } from "@appstrate/db/schema";
+import {
+  connectionCalls,
+  integrationConnectionShares,
+  integrationOrgDefaults,
+  spacePackages,
+} from "@appstrate/db/schema";
 import { drainAudits } from "../../../src/services/audit.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
@@ -31,6 +36,8 @@ import {
 } from "../../helpers/integration-manifests.ts";
 import { startFakeMcpServer, type FakeMcpServer } from "../../helpers/fake-mcp-server.ts";
 import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
+import { serverSyncBody } from "../../../../web/src/lib/integration-discovery-merge.ts";
+import type { IntegrationAuthStatus } from "@appstrate/shared-types";
 
 /** A 1×1 PNG header: what `isIconImage` reads (signature + `IHDR` size). */
 const PNG = new Uint8Array([
@@ -211,6 +218,41 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     expect(
       ((await res.json()) as { manifest: { default_tools: string[] } }).manifest.default_tools,
     ).toEqual(TOOLS);
+  });
+
+  it("syncs with the imposed org connection instead of the caller's only own account", async () => {
+    await seedProxyIntegration(ctx, remote());
+    const imposed = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN }, "org");
+    const caller = await memberHolding(ctx, [
+      "integrations:read",
+      "integrations:write",
+      "credential-proxy:call",
+    ]);
+    const own = await seedProxyConnection(caller, ID, "api_key", { token: "own-token" }, "own");
+    await db.insert(integrationConnectionShares).values({
+      connectionId: imposed,
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+    });
+    await db.insert(integrationOrgDefaults).values({
+      spaceId: ctx.defaultSpaceId,
+      integrationId: ID,
+      connectionIds: [imposed],
+      enforce: true,
+    });
+    const listed = await getTestApp().request(`/api/integrations/${ID}`, {
+      headers: authHeaders(caller),
+    });
+    expect(listed.status).toBe(200);
+    const detail = (await listed.json()) as { auths: IntegrationAuthStatus[] };
+    expect(detail.auths.flatMap((auth) => auth.connections.map((c) => c.id))).toContain(own);
+
+    const res = await sync(caller, serverSyncBody());
+    expect(res.status).toBe(200);
+    expect(
+      ((await res.json()) as { manifest: { default_tools: string[] } }).manifest.default_tools,
+    ).toEqual(TOOLS);
+    expect(server.authorizations.every((value) => value === `Bearer ${TOKEN}`)).toBe(true);
   });
 
   it("asks for connection_id when the caller holds several usable connections", async () => {

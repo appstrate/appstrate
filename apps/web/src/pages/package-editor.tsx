@@ -57,6 +57,7 @@ import {
   mergeServerSync,
   proposalBadges,
   serverSyncProvenance,
+  serverSyncBody,
   type DiscoveryBadges,
   type DiscoveryProposal,
   type ServerSyncBody,
@@ -455,14 +456,15 @@ function IntegrationEditorInner({
   // merge runs on the latest draft, so edits made while the request was out are kept.
   const analyse = $api.useMutation("post", "/api/integrations/discover", {
     meta: { errorHandledByCaller: true },
-    onSuccess: (proposal, { body }) => {
+    onMutate: () => getSource(state.manifest),
+    onSuccess: (proposal, { body }, analysedSource) => {
       // The author changed the source while the analysis was out: its answer is dropped.
-      if (!isDiscoveryCurrent(state.manifest, body.url)) return;
+      if (!analysedSource || !isDiscoveryCurrent(state.manifest, body.url)) return;
       const defaults = defaultIntegrationManifest(currentOrg?.slug, user?.email);
       const previous = applied?.manifest;
       editor.setState((s) => ({
         ...s,
-        manifest: mergeDiscovery(s.manifest, defaults, proposal, body.url, previous),
+        manifest: mergeDiscovery(s.manifest, defaults, proposal, analysedSource, previous),
       }));
       setApplied(proposal);
       setFilledIcon(null);
@@ -565,7 +567,7 @@ function IntegrationEditorInner({
                   run: (connectionId) =>
                     sync.mutate({
                       params: { path: { packageId } },
-                      body: connectionId ? { connection_id: connectionId } : syncBody,
+                      body: serverSyncBody(connectionId),
                     }),
                   isPending: sync.isPending,
                   error: sync.error,

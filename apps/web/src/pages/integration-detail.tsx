@@ -60,7 +60,6 @@ import { ConnectionsTable } from "../components/integration-detail/connections-t
 import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
 import { readIntegrationSource } from "../lib/package-manifest";
 import { serverSyncBody } from "../lib/integration-discovery-merge";
-import { useAuth } from "../hooks/use-auth";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { usePackageDetail, usePackageDownload, type Versioned } from "../hooks/use-packages";
 import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-integrations";
@@ -118,7 +117,6 @@ function IntegrationSettings({
   const { t } = useTranslation(["settings", "agents"]);
   const navigate = useNavigate();
   const { can } = usePermissions();
-  const { user } = useAuth();
   // `detail.manifest` is the published version, the one the sync's server call goes to.
   const published = readIntegrationSource(detail.manifest.source);
   const syncable =
@@ -210,7 +208,7 @@ function IntegrationSettings({
                 if (railId) void navigate(href(railId));
               }}
               toolCatalog={detail.tool_catalog ?? []}
-              syncBody={syncable ? serverSyncBody(detail.auths, user?.id) : undefined}
+              syncBody={syncable ? serverSyncBody() : undefined}
             />
           </Suspense>
         ) : isPackageCommonSection(active) ? (
