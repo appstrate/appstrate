@@ -123,6 +123,22 @@ const CASES: Record<string, Case> = {
     accountId: "80351110224678912",
     source_doc: "docs.discord.com/developers/resources/user",
   },
+  // No public documentation: the shape is the live `socialProfile` response, trimmed. Garmin's
+  // `displayName` is a generated UUID; `userName` is the account's sign-in email.
+  "@appstrate/garmin-connect": {
+    authKey: "primary",
+    source: {
+      access_token: "at",
+      token_type: "Bearer",
+      profileId: 123456789,
+      garminGUID: "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+      displayName: "5f8e7d6c-5b4a-4392-8170-6f5e4d3c2b1a",
+      fullName: "Jane Doe",
+      userName: "jane@example.com",
+    },
+    accountId: "jane@example.com",
+    source_doc: "the live connectapi.garmin.com/userprofile-service/socialProfile response",
+  },
   // Like SSH, no third-party payload: the account key is read off the credential
   // bag — the owner's public personal LiveTrack link, the one field it holds.
   "@appstrate/garmin-livetrack": {

@@ -313,6 +313,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `@afps-spec/schema` enforces the manifest rules (URL equal to `token_endpoint`,
   form body, no `outputs`, no client parameters); Appstrate's own rule that a
   `connect.login` declares `outputs` now applies to `custom` auths only.
+- **Garmin Connect — an agent reads the owner's activities.**
+  `@appstrate/garmin-connect@1.0.0` lists activities by date and reads their
+  summary, dense track and time series (`details`), laps, heart-rate zones,
+  weather, GPX and original FIT files through `api_call`, on
+  `connectapi.garmin.com`. It is the first oauth2 auth acquired through
+  `connect.login`: the user obtains a refresh token once with
+  python-garminconnect (Garmin's mobile sign-in, MFA included) and pastes it;
+  Garmin rotates it at each refresh and it lapses after 30 days unused. Garmin
+  has no public API for individuals: the integration reads the undocumented API
+  of the Garmin Connect mobile app, which may break, and automated reading may
+  fall outside Garmin's terms of use. `authorized_uris` covers only the read
+  services (activity list, activities, downloads, profile) and `INTEGRATION.md`
+  tells the agent to use `GET` only, but nothing enforces a method: the token can
+  also edit and delete activities on those same paths.
+
+  **Operators:** the auth needs a public client. Declare it in
+  `SYSTEM_INTEGRATIONS` —
+  `{"id":"@appstrate/garmin-connect","clients":[{"id":"garmin-connect-mobile","auth_key":"primary","client_id":"GARMIN_CONNECT_MOBILE_ANDROID_DI_2025Q2","token_endpoint_auth_method":"none"}]}`
+  — or register it as an organization OAuth client. The `client_id` must be the
+  one the refresh token was issued to (python-garminconnect stores it as
+  `di_client_id`).
 
 ### Fixed
 

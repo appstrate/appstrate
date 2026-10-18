@@ -1,0 +1,99 @@
+{
+  "name": "@appstrate/garmin-connect",
+  "version": "1.0.0",
+  "type": "integration",
+  "schema_version": "0.3",
+  "display_name": "Garmin Connect (API)",
+  "description": "Fitness — reads the owner's Garmin Connect activities (list by date, summary, dense GPS track and time series, splits, heart-rate zones, weather, GPX and original FIT files) and profile. Relies on the undocumented API of the Garmin Connect mobile app: it may break, and automated reading may fall outside Garmin's terms of use. Connected with a refresh token obtained once outside Appstrate (Garmin's mobile sign-in, MFA included, has no redirect flow); Appstrate renews it at each use.",
+  "keywords": ["garmin", "fitness", "activities", "gps", "gpx", "fit", "running", "hiking"],
+  "license": "Apache-2.0",
+  "icon": "cib:garmin",
+  "source": {
+    "kind": "none"
+  },
+  "default_tools": ["api_call"],
+  "setup_guide": {
+    "steps": [
+      {
+        "label": "Aucune application à créer chez Garmin : l'intégration utilise le client public de l'application mobile Garmin Connect"
+      },
+      {
+        "label": "Enregistrer un client OAuth public (sans secret) d'identifiant GARMIN_CONNECT_MOBILE_ANDROID_DI_2025Q2, ou le déclarer dans SYSTEM_INTEGRATIONS"
+      },
+      {
+        "label": "Chaque membre obtient ensuite son refresh token avec python-garminconnect (commande dans l'aide du formulaire de connexion)",
+        "url": "https://github.com/cyberjunky/python-garminconnect"
+      }
+    ]
+  },
+  "auths": {
+    "primary": {
+      "type": "oauth2",
+      "token_endpoint": "https://diauth.garmin.com/di-oauth2-service/oauth/token",
+      "token_endpoint_auth_method": "none",
+      "userinfo_endpoint": "https://connectapi.garmin.com/userprofile-service/socialProfile",
+      "identity_claims": {
+        "account_id": "$.userName",
+        "email": "$.userName",
+        "name": "$.fullName",
+        "garmin_guid": "$.garminGUID"
+      },
+      "authorized_uris": [
+        "https://connectapi.garmin.com/activitylist-service/**",
+        "https://connectapi.garmin.com/activity-service/activity/**",
+        "https://connectapi.garmin.com/download-service/**",
+        "https://connectapi.garmin.com/userprofile-service/socialProfile"
+      ],
+      "credentials": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "refresh_token": {
+              "type": "string",
+              "title": "Refresh token Garmin",
+              "description": "Obtenu une fois sur votre ordinateur avec python-garminconnect : `uv run --with garminconnect python -c \"from garminconnect import Garmin; import getpass, json; g = Garmin(email=input('Email: '), password=getpass.getpass('Mot de passe: '), prompt_mfa=lambda: input('Code MFA: ')); g.login(); print(json.loads(g.client.dumps())['di_refresh_token'])\"`. Il reste valable 30 jours sans usage et Appstrate le renouvelle à chaque utilisation : collez-le tel quel, ne le partagez pas.",
+              "minLength": 20
+            }
+          },
+          "required": ["refresh_token"]
+        }
+      },
+      "delivery": {
+        "http": {
+          "in": "header",
+          "name": "Authorization",
+          "prefix": "Bearer ",
+          "value": "{$credential.access_token}"
+        }
+      },
+      "_meta": {
+        "dev.appstrate/auth": {
+          "required": true
+        },
+        "dev.appstrate/oauth": {
+          "refresh_token_issuance": "default"
+        }
+      },
+      "connect": {
+        "login": {
+          "request": {
+            "method": "POST",
+            "url": "https://diauth.garmin.com/di-oauth2-service/oauth/token",
+            "content_type": "application/x-www-form-urlencoded",
+            "body": "grant_type=refresh_token&refresh_token={{refresh_token}}"
+          }
+        }
+      }
+    }
+  },
+  "_meta": {
+    "dev.appstrate/package": {
+      "author": "Appstrate"
+    },
+    "dev.appstrate/api": {
+      "auths": {
+        "primary": {}
+      }
+    }
+  }
+}
