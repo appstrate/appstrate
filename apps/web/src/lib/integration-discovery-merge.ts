@@ -7,6 +7,7 @@ import {
 import { isToolsWildcard } from "@appstrate/core/dependencies";
 import type { paths } from "../api/schema";
 import { getSource, setSource } from "../components/integration-editor/utils";
+import { isConnectionOwnedBy } from "../components/integration-connect/connection-ownership";
 
 export type DiscoveryProposal =
   paths["/api/integrations/discover"]["post"]["responses"][200]["content"]["application/json"];
@@ -166,6 +167,32 @@ export function serverSyncProvenance(proposal: Pick<ServerSyncProposal, "manifes
       Object.keys(proposal.manifest).map((key) => [`/${key}`, "detected" as const]),
     ),
   };
+}
+
+export type ServerSyncBody = NonNullable<
+  paths["/api/integrations/{packageId}/discover"]["post"]["requestBody"]
+>["content"]["application/json"];
+
+/**
+ * The sync names the caller's own usable connection, since the proxy asks for a choice when there
+ * are several. No picker (KISS): the one a pin or org default locks, else the first. Without one,
+ * the proxy's own selection decides.
+ */
+export function serverSyncBody(
+  auths: { connections: (Parameters<typeof isConnectionOwnedBy>[0] & ConnectionHealth)[] }[],
+  userId: string | undefined,
+): ServerSyncBody {
+  const usable = auths
+    .flatMap((auth) => auth.connections)
+    .filter((c) => isConnectionOwnedBy(c, userId) && !c.needs_reconnection);
+  const chosen = usable.find((c) => c.locked_by) ?? usable[0];
+  return chosen ? { connection_id: chosen.id } : {};
+}
+
+interface ConnectionHealth {
+  id: string;
+  needs_reconnection: boolean;
+  locked_by?: string | null;
 }
 
 /**

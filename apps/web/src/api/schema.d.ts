@@ -14878,7 +14878,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
-            /** @description `integration_not_published` — the integration has no usable published version; `integration_not_connected` — no connection of the integration usable by the caller in this space; the proxy's own connection-selection conflicts (`needs_reconnection`, `must_choose_connection`) are relayed. */
+            /** @description `integration_not_published` — the integration has no usable published version; `integration_not_connected` — no connection of the integration usable by the caller in this space; the proxy's own connection-selection conflicts are relayed (`needs_reconnection`; `must_choose_connection` when the caller holds several usable connections and the body names none: retry with one of its `candidate_connections` as `connection_id`). */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];

@@ -180,6 +180,28 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     ).toEqual(TOOLS);
   });
 
+  it("asks for connection_id when the caller holds several usable connections", async () => {
+    await seedProxyIntegration(ctx, remote());
+    await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN }, "acct-1");
+    const second = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN }, "acct-2");
+
+    const res = await sync(ctx, {});
+    expect(res.status).toBe(409);
+    const body = (await res.json()) as {
+      code: string;
+      detail: string;
+      errors: { message: string; candidate_connections: { id: string }[] }[];
+    };
+    expect(body.code).toBe("must_choose_connection");
+    expect(body.detail).toContain("connection_id");
+    expect(body.detail).not.toContain("X-Connection-Id");
+    expect(body.errors[0]!.message).toBe(body.detail);
+    expect(body.errors[0]!.candidate_connections.map((c) => c.id)).toContain(second);
+    expect(server.methods).toEqual([]);
+
+    expect((await sync(ctx, { connection_id: second })).status).toBe(200);
+  });
+
   it("answers 409 integration_not_connected without a connection", async () => {
     await seedProxyIntegration(ctx, remote());
     const res = await sync(ctx, {});

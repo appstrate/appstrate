@@ -59,6 +59,7 @@ import {
   serverSyncProvenance,
   type DiscoveryBadges,
   type DiscoveryProposal,
+  type ServerSyncBody,
 } from "../lib/integration-discovery-merge";
 import { encodeIconDataUri } from "../lib/icon-image";
 
@@ -383,7 +384,7 @@ function IntegrationEditorInner({
   tab,
   onTabRequest,
   toolCatalog,
-  syncable,
+  syncBody,
   hasIntegrationDoc: hasDoc,
 }: {
   initialState: EditorState;
@@ -393,8 +394,8 @@ function IntegrationEditorInner({
   onTabRequest?: (tab: PackageEditorTab) => void;
   /** Editing: the saved package's tool catalog, shown with the draft's policy. */
   toolCatalog?: IntegrationToolCatalogEntry[];
-  /** Editing: the published version's server can be asked (see `IntegrationDefinitionEditor`). */
-  syncable?: boolean;
+  /** Editing: the sync request, when the published version's server can be asked. */
+  syncBody?: ServerSyncBody;
   /** Editing: the package already has an `INTEGRATION.md`, which a sync never replaces. */
   hasIntegrationDoc?: boolean;
 }) {
@@ -463,7 +464,7 @@ function IntegrationEditorInner({
     },
   });
 
-  const canSync = isEdit && syncable === true;
+  const canSync = isEdit && syncBody !== undefined;
 
   const sync = $api.useMutation("post", "/api/integrations/{packageId}/discover", {
     meta: { errorHandledByCaller: true },
@@ -553,7 +554,7 @@ function IntegrationEditorInner({
           sync={
             canSync && packageId
               ? {
-                  run: () => sync.mutate({ params: { path: { packageId } }, body: {} }),
+                  run: () => sync.mutate({ params: { path: { packageId } }, body: syncBody }),
                   isPending: sync.isPending,
                   error: sync.error,
                   result: syncResult,
@@ -574,17 +575,18 @@ export function IntegrationDefinitionEditor({
   section,
   onSection,
   toolCatalog,
-  syncable,
+  syncBody,
 }: {
   detail: Versioned<OrgPackageItemDetail>;
   section: IntegrationDefinitionSection;
   onSection: (section: IntegrationDefinitionSection) => void;
   toolCatalog: IntegrationToolCatalogEntry[];
   /**
-   * The published version is served by a Streamable HTTP server at a fixed URL, and the caller
-   * may call it through one of its connections: what the sync reads, not the draft.
+   * The sync request, set when the published version is served by a Streamable HTTP server at a
+   * fixed URL and the caller may call it through one of its connections (the sync reads it, not
+   * the draft).
    */
-  syncable: boolean;
+  syncBody: ServerSyncBody | undefined;
 }) {
   return (
     <DraftEditorMount id={detail.id} etag={detail.etag}>
@@ -594,7 +596,7 @@ export function IntegrationDefinitionEditor({
         tab={section}
         onTabRequest={(next) => onSection(next as IntegrationDefinitionSection)}
         toolCatalog={toolCatalog}
-        syncable={syncable}
+        syncBody={syncBody}
         hasIntegrationDoc={hasIntegrationDoc(detail.content)}
       />
     </DraftEditorMount>

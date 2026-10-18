@@ -10,6 +10,7 @@ import {
   badgeUnder,
   proposalBadges,
   serverSyncProvenance,
+  serverSyncBody,
   type DiscoveryProposal,
   type ServerSyncProposal,
 } from "../integration-discovery-merge.ts";
@@ -227,6 +228,51 @@ describe("mergeServerSync", () => {
     const copy = structuredClone(current);
     mergeServerSync(current, sync({ default_tools: ["b"] }));
     expect(current).toEqual(copy);
+  });
+});
+
+describe("serverSyncBody", () => {
+  const connection = (
+    id: string,
+    over: Partial<{ owner_id: string; needs_reconnection: boolean; locked_by: string | null }> = {},
+  ) => ({
+    id,
+    owner_type: "user" as const,
+    owner_id: "u1",
+    needs_reconnection: false,
+    locked_by: null,
+    ...over,
+  });
+
+  it("names the caller's own usable connection, a locked one first", () => {
+    const auths = [
+      {
+        connections: [
+          connection("theirs", { owner_id: "u2" }),
+          connection("dead", { needs_reconnection: true }),
+        ],
+      },
+      { connections: [connection("first"), connection("pinned", { locked_by: "org_default" })] },
+    ];
+    expect(serverSyncBody(auths, "u1")).toEqual({ connection_id: "pinned" });
+    expect(
+      serverSyncBody([{ connections: [connection("first"), connection("second")] }], "u1"),
+    ).toEqual({
+      connection_id: "first",
+    });
+  });
+
+  it("names none without an own usable connection: the proxy selects", () => {
+    const auths = [
+      {
+        connections: [
+          connection("theirs", { owner_id: "u2" }),
+          connection("dead", { needs_reconnection: true }),
+        ],
+      },
+    ];
+    expect(serverSyncBody(auths, "u1")).toEqual({});
+    expect(serverSyncBody(auths, undefined)).toEqual({});
   });
 });
 

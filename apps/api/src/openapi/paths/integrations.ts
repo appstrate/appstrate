@@ -1151,7 +1151,7 @@ export const integrationsPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "`integration_not_published` — the integration has no usable published version; `integration_not_connected` — no connection of the integration usable by the caller in this space; the proxy's own connection-selection conflicts (`needs_reconnection`, `must_choose_connection`) are relayed.",
+            "`integration_not_published` — the integration has no usable published version; `integration_not_connected` — no connection of the integration usable by the caller in this space; the proxy's own connection-selection conflicts are relayed (`needs_reconnection`; `must_choose_connection` when the caller holds several usable connections and the body names none: retry with one of its `candidate_connections` as `connection_id`).",
           headers: STD_RESPONSE_HEADERS,
           content: problemJson,
         },

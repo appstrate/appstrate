@@ -264,6 +264,19 @@ const notConnected = (detail: string) =>
   });
 
 function syncFailure(err: unknown, packageId: string, url: string): Error {
+  // The proxy names its own `X-Connection-Id` header; this route takes the body's `connection_id`.
+  if (err instanceof ApiError && err.code === "must_choose_connection") {
+    const detail = `No single connection of '${packageId}' applies: name one in the request body's \`connection_id\`.`;
+    return new ApiError({
+      status: err.status,
+      code: err.code,
+      title: err.title,
+      detail,
+      ...(err.fieldErrors
+        ? { errors: err.fieldErrors.map((item) => ({ ...item, message: detail })) }
+        : {}),
+    });
+  }
   if (err instanceof ApiError) return err;
   if (err instanceof ProxyCallError) {
     return err.code === "credential_not_found"
