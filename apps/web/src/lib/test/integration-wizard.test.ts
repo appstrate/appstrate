@@ -9,11 +9,13 @@ import {
   integrationCreationManifest,
   integrationWizardStep,
   manualCreationState,
+  needsWizardFinish,
   nextMinorVersion,
   proposalEdits,
   readManualCreationManifest,
   toolsUpdateBody,
   wizardAuthKind,
+  wizardResumePath,
   type DiscoveryResult,
 } from "../integration-wizard.ts";
 
@@ -159,5 +161,32 @@ describe("defaultToolCount", () => {
     expect(defaultToolCount({ tools_policy, default_tools: ["a"] })).toBe(1);
     expect(defaultToolCount({ tools_policy, default_tools: "*" })).toBe(2);
     expect(defaultToolCount({ tools_policy })).toBe(0);
+  });
+});
+
+describe("needsWizardFinish", () => {
+  const remote = { source: { kind: "remote", remote: { url: "https://mcp.acme.test/mcp" } } };
+  const facts = { manifest: remote, published: true, writable: true };
+
+  it("offers to finish a published, writable remote integration with no tool", () => {
+    expect(needsWizardFinish(facts)).toBe(true);
+  });
+
+  it("stays quiet once tools are declared", () => {
+    const manifest = { ...remote, tools_policy: { search: { description: "Search" } } };
+    expect(needsWizardFinish({ ...facts, manifest })).toBe(false);
+  });
+
+  it("stays quiet for a local source, an unpublished package or a read-only caller", () => {
+    const local = { source: { kind: "local", server: { name: "x", version: "1.0.0" } } };
+    expect(needsWizardFinish({ ...facts, manifest: local })).toBe(false);
+    expect(needsWizardFinish({ ...facts, published: false })).toBe(false);
+    expect(needsWizardFinish({ ...facts, writable: false })).toBe(false);
+  });
+});
+
+describe("wizardResumePath", () => {
+  it("encodes the package id", () => {
+    expect(wizardResumePath("@org/acme")).toBe("/integrations/new/mcp?package=%40org%2Facme");
   });
 });

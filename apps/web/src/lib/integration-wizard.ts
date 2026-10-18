@@ -10,6 +10,7 @@ import {
   type IntegrationManifest,
 } from "@appstrate/core/integration";
 import { bumpVersion } from "@appstrate/core/semver";
+import { getSource } from "../components/integration-editor/utils";
 import type { paths } from "../api/schema";
 import { mergeServerSync, type ServerSyncProposal } from "./integration-server-sync";
 import { fileTextOperation, packageUpdateBody } from "./package-file-drafts";
@@ -100,6 +101,25 @@ export function integrationWizardStep(facts: IntegrationWizardFacts): Integratio
   if (!facts.published) return "unpublished";
   if (facts.toolsDeclared) return "ready";
   return facts.connected ? "tools" : "connect";
+}
+
+/** Whether the integration page offers to resume the wizard: a published remote server with no tool declared, which the caller may write. */
+export function needsWizardFinish(facts: {
+  manifest: Record<string, unknown>;
+  published: boolean;
+  writable: boolean;
+}): boolean {
+  return (
+    facts.published &&
+    facts.writable &&
+    getSource(facts.manifest).kind === "remote" &&
+    declaredToolNames(facts.manifest).length === 0
+  );
+}
+
+/** The wizard's resume address for a package. */
+export function wizardResumePath(packageId: string): string {
+  return `/integrations/new/mcp?${new URLSearchParams({ package: packageId })}`;
 }
 
 /** The version the tools are published as: the next minor of the published one. */

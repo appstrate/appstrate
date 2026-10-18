@@ -31,10 +31,13 @@ import {
   LayoutGrid,
   Server,
   Settings2,
+  Info,
 } from "lucide-react";
 import { InlineMarkdown } from "../components/markdown";
 import { authMethodLabel } from "../lib/integration-presentation";
 import { Button } from "@appstrate/ui/components/button";
+import { Alert, AlertDescription, AlertTitle } from "@appstrate/ui/components/alert";
+import { needsWizardFinish, wizardResumePath } from "../lib/integration-wizard";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { ErrorState, ResourceErrorState } from "../components/page-states";
@@ -467,6 +470,25 @@ export function IntegrationDetailPage() {
         forkedFrom={pkg?.forked_from ?? null}
         draftReadOnly={pkg?.definition === "draft" && !homeWritable}
       />
+
+      {needsWizardFinish({
+        manifest: m,
+        published: (pkg?.version_count ?? 0) > 0,
+        writable: !!homeWritable,
+      }) && (
+        <Alert variant="info" className="mb-4" data-testid="integration-wizard-finish">
+          <Info />
+          <AlertTitle>{t("integrationWizard.finish.title", { ns: "agents" })}</AlertTitle>
+          <AlertDescription>
+            <p>{t("integrationWizard.finish.description", { ns: "agents" })}</p>
+            <Button variant="outline" size="sm" className="mt-2" asChild>
+              <Link to={wizardResumePath(packageId)}>
+                {t("integrationWizard.finish.action", { ns: "agents" })}
+              </Link>
+            </Button>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* One connected-accounts table, with each row retaining its auth context. */}
       <DetailTabPanel value="connections">

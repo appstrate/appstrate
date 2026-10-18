@@ -45,6 +45,7 @@ import {
   proposalEdits,
   type DiscoveryResult,
   type IntegrationWizardStep,
+  wizardResumePath,
   type WizardEdits,
 } from "../lib/integration-wizard";
 
@@ -157,11 +158,7 @@ function NewIntegrationWizard() {
           createError={create.error}
           onCreate={() =>
             create.mutate(packageCreateBody({ manifest: accepted(review) }, "integration"), {
-              onSuccess: (data) =>
-                navigate(
-                  { search: `?${new URLSearchParams({ package: data.id }).toString()}` },
-                  { replace: true },
-                ),
+              onSuccess: (data) => navigate(wizardResumePath(data.id), { replace: true }),
             })
           }
           onManual={() =>
