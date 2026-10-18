@@ -3,6 +3,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   runLogin,
+  renderTokenGrant,
   LoginError,
   evaluateSuccessCriteriaForTest,
   type LoginConfig,
@@ -1222,5 +1223,64 @@ describe("runLogin — what a failed answer means", () => {
     expect(await login(429, [{ condition: "$statusCode == 302" }])).toMatchObject({
       reason: "upstream_failed",
     });
+  });
+});
+
+describe("renderTokenGrant — the grant of an oauth2 connect.login (AFPS)", () => {
+  const grantLogin = (
+    request: Partial<LoginConfig["login"]["request"]> = {},
+  ): LoginConfig["login"] => ({
+    request: {
+      method: "POST",
+      url: "https://idp.example.com/token",
+      content_type: "application/x-www-form-urlencoded",
+      body: "grant_type=refresh_token&refresh_token={{refresh_token}}",
+      ...request,
+    },
+  });
+
+  const reason = (login: LoginConfig["login"], inputs: Record<string, unknown>) => {
+    try {
+      renderTokenGrant(login, inputs);
+    } catch (err) {
+      expect(err).toBeInstanceOf(LoginError);
+      return (err as LoginError).reason;
+    }
+    throw new Error("renderTokenGrant did not refuse");
+  };
+
+  it("returns the rendered form parameters, each value encoded by the engine", () => {
+    const value = "p&ss=w+rd %x/é";
+    expect(renderTokenGrant(grantLogin(), { refresh_token: value })).toEqual({
+      grant_type: "refresh_token",
+      refresh_token: value,
+    });
+  });
+
+  it("fails closed on an unresolved placeholder", () => {
+    expect(reason(grantLogin(), {})).toBe("unresolved_placeholder");
+  });
+
+  it("refuses a method other than POST", () => {
+    expect(reason(grantLogin({ method: "PUT" }), { refresh_token: "rt" })).toBe("invalid_config");
+  });
+
+  it("refuses a content type other than form encoding", () => {
+    expect(reason(grantLogin({ content_type: "application/json", body: '{"a":"b"}' }), {})).toBe(
+      "invalid_config",
+    );
+  });
+
+  it("refuses declared headers", () => {
+    expect(reason(grantLogin({ headers: { "X-A": "b" } }), { refresh_token: "rt" })).toBe(
+      "invalid_config",
+    );
+  });
+
+  it("refuses a parameter written twice, including through an input", () => {
+    expect(reason(grantLogin({ body: "grant_type=a&grant_type=b" }), {})).toBe("invalid_config");
+    expect(reason(grantLogin({ body: "grant_type=x&a=1&a={{v}}" }), { v: "2" })).toBe(
+      "invalid_config",
+    );
   });
 });

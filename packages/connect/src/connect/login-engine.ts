@@ -513,6 +513,70 @@ function renderRequest(
   return rendered;
 }
 
+/**
+ * The login request rendered once it is known sound: a `loginBlockIssues` refusal is
+ * `invalid_config`, and a `{{name}}` no input supplies fails closed (a typo'd placeholder
+ * must never be sent literally upstream).
+ */
+function renderLoginRequest(
+  login: LoginRequestSpec,
+  inputs: Record<string, unknown>,
+): ReturnType<typeof renderRequest> {
+  const [issue] = loginBlockIssues(login);
+  if (issue) {
+    throw new LoginError(
+      `connect.login.${issue.path.join(".")}: ${issue.message}`,
+      "invalid_config",
+    );
+  }
+  const unresolved = [
+    login.request.url,
+    login.request.body ?? "",
+    ...Object.values(login.request.headers ?? {}),
+  ].flatMap((template) => unresolvedPlaceholders(template, inputs));
+  if (unresolved.length > 0) {
+    throw new LoginError(
+      `unresolved placeholders: ${[...new Set(unresolved)].join(", ")}`,
+      "unresolved_placeholder",
+    );
+  }
+  return renderRequest(login.request, inputs);
+}
+
+const FORM_CONTENT_TYPE = "application/x-www-form-urlencoded";
+
+/**
+ * The grant parameters of a `connect.login` on an oauth2 auth (AFPS): a form-encoded `POST`
+ * without `headers`, whose rendered body is returned as parameters. Sends nothing and leaves
+ * the URL to the caller, which adds client authentication and posts it to `token_endpoint`.
+ */
+export function renderTokenGrant(
+  login: LoginConfig["login"],
+  inputs: Record<string, unknown>,
+): Record<string, string> {
+  const { method, content_type, headers } = login.request;
+  if (method !== "POST" || content_type !== FORM_CONTENT_TYPE || headers !== undefined) {
+    throw new LoginError(
+      `connect.login.request of an oauth2 auth is a POST of ${FORM_CONTENT_TYPE} without headers`,
+      "invalid_config",
+    );
+  }
+  const { body } = renderLoginRequest(login, inputs);
+  const params = [...new URLSearchParams(body ?? "")];
+  const names = new Set<string>();
+  for (const [name] of params) {
+    if (names.has(name)) {
+      throw new LoginError(
+        `connect.login.request.body: '${name}' is written twice`,
+        "invalid_config",
+      );
+    }
+    names.add(name);
+  }
+  // `fromEntries` defines own properties: a `__proto__` parameter stays a parameter.
+  return Object.fromEntries(params);
+}
+
 const REFUSAL_STATUSES: ReadonlySet<number> = new Set([400, 401, 403, 422]);
 const NOT_A_LOGIN_STATUSES: ReadonlySet<number> = new Set([404, 405, 410]);
 
@@ -557,28 +621,7 @@ export async function runLogin(config: LoginConfig, ctx: LoginContext): Promise<
   if (!login) {
     throw new LoginError("connect.login declared no login request", "invalid_config");
   }
-  const [issue] = loginBlockIssues(login);
-  if (issue) {
-    throw new LoginError(
-      `connect.login.${issue.path.join(".")}: ${issue.message}`,
-      "invalid_config",
-    );
-  }
-
-  // Fail closed on a `{{name}}` no input supplies (a typo'd placeholder must never be sent
-  // literally upstream).
-  const unresolved = [
-    login.request.url,
-    login.request.body ?? "",
-    ...Object.values(login.request.headers ?? {}),
-  ].flatMap((template) => unresolvedPlaceholders(template, ctx.inputs));
-  if (unresolved.length > 0) {
-    throw new LoginError(
-      `unresolved placeholders: ${[...new Set(unresolved)].join(", ")}`,
-      "unresolved_placeholder",
-    );
-  }
-  const { url, headers, body } = renderRequest(login.request, ctx.inputs);
+  const { url, headers, body } = renderLoginRequest(login, ctx.inputs);
   const urlFields = placeholderKeys(urlTemplateAuthority(login.request.url));
   const urlRefused = (message: string, options?: ErrorOptions) =>
     new LoginError(message, "url_not_allowed", {
