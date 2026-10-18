@@ -6,14 +6,11 @@
  * write still waits on the fired version's declared integrations.
  */
 
-import { afterAll, describe, expect, it, spyOn } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 import type { ReactElement } from "react";
 import { QueryClient } from "@tanstack/react-query";
 import type { ScheduleWireDto } from "@appstrate/shared-types";
 import { installFakeStorage } from "../../test/fake-storage.ts";
-
-// Registered before the fake storage's own teardown, so it runs first.
-afterAll(() => getSession.mockRestore());
 
 installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
@@ -23,18 +20,10 @@ installFakeStorage({
 const { ScheduleActionsMenu, ScheduleSettings } = await import("../schedule-settings.tsx");
 const { render } = await import("../../test/render.tsx");
 const i18nModule = await import("../../i18n.ts");
-const { authClient } = await import("../../lib/auth-client.ts");
 const { authStore } = await import("../../stores/auth-store.ts");
-const { startAuthBootstrap } = await import("../../hooks/use-auth.ts");
 
-// `useAuth()` would start the session resync mid-suite: start it here, answered at once (no
-// session), and let it settle before any test, while the fake storage it clears exists.
-const getSession = spyOn(authClient, "getSession").mockResolvedValue({
-  data: null,
-  error: null,
-});
-startAuthBootstrap();
-for (let i = 0; i < 5000 && authStore.getState().loading; i++) await Bun.sleep(1);
+// Signed out, the session read settled: the state the boot resync leaves without a session.
+authStore.setState({ user: null, profile: null, loading: false });
 
 await i18nModule.i18nReady;
 await i18nModule.default.changeLanguage("fr");
