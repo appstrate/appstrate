@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
+- **Auto-provisioned OAuth clients are bound to their authorization server**
+  (#2102). On the first connect after the deploy, each remote MCP integration
+  registers one new DCR client per authorization server, at that server's own
+  redirect URI (`/api/integrations/callback/<tag>`). Clients registered before
+  (issuer NULL, shared `/api/integrations/callback`) keep refreshing the
+  connections they minted and are left orphaned once those are reconnected. No
+  migration is needed, and none is wanted: back-filling their issuer would serve
+  them again on the untagged callback. The DCR connections of a manifest that
+  declares neither `issuer` nor `token_endpoint` cannot refresh through an
+  unbound client and must be reconnected.
+
 - **Run the read-only pre-flight `scripts/migration/0050-report-narrowing-overrides.ts`
   before deploying the release that carries migration `0102`** (#2043):
   `DATABASE_URL=<platform> bun scripts/migration/0050-report-narrowing-overrides.ts`
@@ -49,6 +60,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **OAuth connect to remote MCP servers is hardened** (#2102, #2078, #2084). Each DCR client
+  is registered at, bound to and called back on its own authorization server. A server whose
+  metadata does not list PKCE S256 is refused before any client is provisioned, with
+  `403 authorization_server_pkce_unsupported` (MCP 2026-07-28). A server whose metadata does
+  not answer (network failure, timeout, 5xx) gives a retryable
+  `503 authorization_server_unreachable` instead of a "register a client manually" 403.
+  `offline_access` is requested when the server's `scopes_supported` lists it, and is never
+  reported as a denied scope, since issuing a refresh token is the server's decision.
 - **Agent persistence: one visibility rule for pinned slots and memories** (#2070). A caller holding
   `persistence:delete` (admin, builder) who names no actor in `GET /api/agents/{scope}/{name}/persistence`
   now sees every actor's memories, as it already did for pinned slots, with or without `runId`. A

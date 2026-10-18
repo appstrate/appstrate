@@ -1484,7 +1484,7 @@ export interface paths {
         };
         /**
          * Integration OAuth2 callback (popup)
-         * @description Browser-side OAuth callback for an authorization server fixed by the manifest. Exchanges code + state for tokens, persists the connection, and returns an HTML page that closes the popup window. A response for a flow started with a per-server redirect URI is refused here: one with an authorization server chosen per connection must arrive at that server's own `/callback/{tag}`, one with a client metadata document at `/callback/cimd/{tag}`. When the response carries `iss` (RFC 9207) it must name the authorization server the request was sent to, and a response without it is refused from a server that advertises `authorization_response_iss_parameter_supported`.
+         * @description Browser-side OAuth callback of a client a system integration or an administrator registered on it (`platform_redirect_uri`). Exchanges code + state for tokens, persists the connection, and returns an HTML page that closes the popup window. A response for a flow started with a per-server redirect URI is refused here: one with an auto-provisioned (DCR) client must arrive at its authorization server's own `/callback/{tag}`, one with a client metadata document at `/callback/cimd/{tag}`. When the response carries `iss` (RFC 9207) it must name the authorization server the request was sent to, and a response without it is refused from a server that advertises `authorization_response_iss_parameter_supported`.
          */
         get: operations["integrationsOAuthCallback"];
         put?: never;
@@ -1523,8 +1523,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Integration OAuth2 callback of an authorization server chosen per connection (popup)
-         * @description The redirect URI registered with, and sent to, an authorization server chosen per connection (AFPS §7.3: an oauth2 auth whose `issuer` or `source.remote.url` is a URL template over connection variables). One per server — the RFC 9700 §4.4 mix-up defence — so the response must arrive at the tag of the server the request was sent to: a mismatch is refused, as is a response for a fixed server or for a client metadata document (`/callback/cimd/{tag}`). Otherwise identical to `integrationsOAuthCallback`, including the RFC 9207 `iss` check.
+         * Integration OAuth2 callback of an auto-provisioned (DCR) client's authorization server (popup)
+         * @description The redirect URI a dynamically registered (RFC 7591) client is registered with and sends, one per authorization server (`{tag}` derives from its validated issuer): the server a remote MCP manifest fixes, or one chosen per connection (AFPS §7.3: an `issuer` or `source.remote.url` templated over connection variables). One per server is the RFC 9700 §4.4 mix-up defence, so the response must arrive at the tag of the server the request was sent to: a mismatch is refused, as is a response for a flow on the shared `/callback` or for a client metadata document (`/callback/cimd/{tag}`). Otherwise identical to `integrationsOAuthCallback`, including the RFC 9207 `iss` check.
          */
         get: operations["integrationsOAuthCallbackForServer"];
         put?: never;
@@ -1708,7 +1708,7 @@ export interface paths {
         put?: never;
         /**
          * Headless OAuth2 PKCE start — returns an authorize URL (programmatic)
-         * @description Porte B (programmatic/headless): returns an `auth_url` the caller redirects the user to itself, then handles completion via the shared `/callback`. An oauth2 auth declaring `connect.login` has no authorization flow and is refused with a 400: submit its credentials through `importIntegrationConnection`. For an interactive, platform-hosted flow that also covers non-OAuth auths and keeps the secret off the caller, mint a hosted Connect portal session (`initiateIntegrationConnect`) instead.
+         * @description Porte B (programmatic/headless): returns an `auth_url` the caller redirects the user to itself, then handles completion via the platform callback: the shared `/callback` for a system or administrator client, the authorization server's `/callback/{tag}` for an auto-provisioned (DCR) client, `/callback/cimd/{tag}` for a client metadata document. An oauth2 auth declaring `connect.login` has no authorization flow and is refused with a 400: submit its credentials through `importIntegrationConnection`. For an interactive, platform-hosted flow that also covers non-OAuth auths and keeps the secret off the caller, mint a hosted Connect portal session (`initiateIntegrationConnect`) instead.
          */
         post: operations["initiateIntegrationOAuth"];
         delete?: never;
