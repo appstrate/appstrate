@@ -36,8 +36,8 @@ export function proposalEdits(manifest: DiscoveredManifest): WizardEdits {
 
 /**
  * The manifest the wizard creates (or hands to the manual editor): the editor's defaults, the
- * proposal over them — its `auths` replace the default API key auth, they are not merged — then
- * the user's edits and the icon.
+ * proposal over them — its `auths` replace the default API key auth, they are not merged, and a
+ * proposal without any (an open server, AFPS §7.2) drops it — then the user's edits and the icon.
  */
 export function integrationCreationManifest(
   defaults: Record<string, unknown>,
@@ -45,8 +45,9 @@ export function integrationCreationManifest(
   edits: WizardEdits,
   icon?: string,
 ): Record<string, unknown> {
+  const { auths: _defaultAuths, ...base } = defaults;
   return {
-    ...defaults,
+    ...(proposal.auths === undefined ? base : defaults),
     ...proposal,
     display_name: edits.display_name.trim(),
     name: edits.name.trim(),
@@ -83,9 +84,12 @@ export type IntegrationWizardStep = "notRemote" | "inactive" | "connect" | "tool
 export type ProxyConnectionStatus =
   paths["/api/integrations/{packageId}"]["get"]["responses"][200]["content"]["application/json"]["proxy_connection"]["status"];
 
-/** The governed verdicts the tools step proceeds on: `must_choose` gets its choice there. */
+/**
+ * The governed verdicts the tools step proceeds on: `must_choose` gets its choice there, and an
+ * unauthenticated integration (`not_required`, AFPS §7.2) has nothing to connect.
+ */
 function connectionProceeds(status: ProxyConnectionStatus): boolean {
-  return status === "ready" || status === "must_choose";
+  return status === "ready" || status === "must_choose" || status === "not_required";
 }
 
 /** Why the connect step cannot move on, and whether connecting an account of one's own helps. */

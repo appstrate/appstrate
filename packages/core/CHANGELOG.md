@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Unauthenticated integrations** (`@appstrate/core/integration`, AFPS §7.2):
+  **`isUnauthenticatedIntegration(manifest)`** — the manifest omits `auths`, so it binds no
+  connection; **`findConnectionlessVariables`**, a write-path refusal of `variables` on such an
+  integration, which no connection could hold. `IntegrationSpawnSpec.connection` is absent for
+  one. (#2075)
+
 - **`acquiresByConnectLogin(auth)`** (`@appstrate/core/integration`): true for an `oauth2` auth
   declaring `connect.login` (AFPS §7.7, afps-spec/afps-spec#44) — its first token is acquired by
   a token request to `token_endpoint` carrying the grant the user submits, instead of the
@@ -83,6 +89,8 @@ providerMessage? }` — the `<status> <JSON body>` envelope of a provider refusa
 
 ### Changed
 
+- **Requires `@afps-spec/schema` `^0.12.0`** (was `^0.10.0`): `auths` is optional (AFPS §7.2,
+  an empty map stays invalid); a `{$credential.<field>}` in `source.remote.url` stays invalid.
 - **`acceptsCompletionMessage`** (`@appstrate/core/connect-handshake`) is now a
   type guard: a `true` narrows `event.data` to `IntegrationConnectCompletion`.
 - **BREAKING: `ConnectionResolutionErrorCode` gains `connection_set_too_large`**

@@ -850,3 +850,84 @@ describe("connection-readiness — scopes of an inherited tool selection", () =>
     });
   });
 });
+
+describe("connection-readiness — unauthenticated integration (AFPS §7.2)", () => {
+  const OPEN = "@rdyorg/open";
+  const openManifest = {
+    type: "integration",
+    schema_version: "0.3",
+    name: OPEN,
+    version: "1.0.0",
+    display_name: "Open",
+    source: {
+      kind: "remote",
+      remote: { url: "https://mcp.example.com/open/mcp", transport: "streamable-http" },
+    },
+    tools_policy: { search: {} },
+  };
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "rdyorg" });
+    await seedPackage({
+      id: OPEN,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: openManifest,
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OPEN);
+    await seedPublishedVersion(OPEN, "1.0.0", { manifest: openManifest });
+    await seedPackage({
+      id: INTEGRATION,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: buildIntegrationManifest(INTEGRATION, false),
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEGRATION);
+    await seedAgent({
+      id: AGENT,
+      homeSpaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: {
+        name: AGENT,
+        version: "1.0.0",
+        type: "agent",
+        schema_version: "0.2",
+        display_name: "Readiness Agent",
+        dependencies: { integrations: { [OPEN]: "^1.0.0", [INTEGRATION]: "^1.0.0" } },
+        integrations_configuration: {
+          [OPEN]: { tools: ["search"], required: true },
+          [INTEGRATION]: { tools: ["search"], required: true },
+        },
+      },
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, AGENT);
+  });
+
+  it("asks no connection of it, required or not, while its authenticated sibling blocks", async () => {
+    const res = await app.request(`/api/agents/${AGENT}/connection-readiness`, {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      errors: Array<{ field: string }>;
+      integrations: Array<{
+        integration_package_id: string;
+        run_blocking: boolean;
+        inert: boolean;
+        connection_required: boolean;
+      }>;
+    };
+    expect(body.errors.map((e) => e.field)).toEqual([`integrations.${INTEGRATION}`]);
+    const open = body.integrations.find((i) => i.integration_package_id === OPEN)!;
+    expect(open).toMatchObject({ run_blocking: false, inert: false, connection_required: false });
+    const sibling = body.integrations.find((i) => i.integration_package_id === INTEGRATION)!;
+    expect(sibling.connection_required).toBe(true);
+  });
+});

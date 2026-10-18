@@ -30,7 +30,9 @@ import {
 import {
   httpHeaderDelivery,
   localIntegrationManifest,
+  remoteIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
+import type { IntegrationManifest } from "@appstrate/core/integration";
 
 const ID = "@verdict/docs";
 
@@ -100,6 +102,17 @@ describe("GET /api/integrations/{packageId} — proxy_connection", () => {
   it("is ready on the caller's own healthy connection", async () => {
     await seedProxyConnection(ctx, ID, "api", { api_key: "sk" });
     expect(await verdict(ctx)).toEqual({ status: "ready", imposed: false });
+  });
+
+  it("is not_required for an integration declaring no auths (AFPS §7.2)", async () => {
+    const OPEN = "@verdict/open";
+    const { auths: _auths, ...open } = remoteIntegrationManifest({ name: OPEN, auths: {} });
+    await seedProxyIntegration(ctx, open as IntegrationManifest);
+    const res = await getTestApp().request(`/api/integrations/${OPEN}`, {
+      headers: authHeaders(ctx),
+    });
+    const body = (await res.json()) as { proxy_connection: { status: string; imposed: boolean } };
+    expect(body.proxy_connection).toEqual({ status: "not_required", imposed: false });
   });
 
   it("is none without a connection, as the proxy answers", async () => {

@@ -91,7 +91,13 @@ function unbound(over: Partial<Resolution> = {}): Resolution {
 
 function renderCard(
   resolution: Resolution,
-  entry: { required?: boolean; blocking?: boolean; active?: boolean; absent?: boolean } = {},
+  entry: {
+    required?: boolean;
+    blocking?: boolean;
+    active?: boolean;
+    absent?: boolean;
+    connectionRequired?: boolean;
+  } = {},
 ): string {
   const qc = new QueryClient();
   qc.setQueryData(
@@ -119,6 +125,7 @@ function renderCard(
               required: entry.required ?? false,
               run_blocking: entry.blocking ?? false,
               inert: false,
+              connection_required: entry.connectionRequired ?? true,
               resolution,
             },
           ],
@@ -321,6 +328,19 @@ describe("AgentIntegrationsBlock — the integration's own detail does not land"
     expect(html).not.toContain(`integration-activate-${GMAIL}`);
     expect(html).toContain(errorMessage(failure));
     expect(html).toContain(`${AMBER_TEXT} text-xs`);
+  });
+});
+
+describe("AgentIntegrationsBlock — an integration declaring no auths (AFPS §7.2)", () => {
+  it("offers no picker and reads ready: there is no connection to give it", () => {
+    const html = renderCard(unbound({ warning: null }), {
+      required: true,
+      connectionRequired: false,
+    });
+    expect(html).toContain('data-testid="integration-no-connection"');
+    expect(html).toContain(label("connectionsTable.noConnectionNeeded"));
+    expect(html).toContain(label("connectionsTable.ready"));
+    expect(html).not.toContain(`member-picker-${GMAIL}`);
   });
 });
 

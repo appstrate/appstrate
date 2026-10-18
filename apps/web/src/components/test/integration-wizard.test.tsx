@@ -127,6 +127,29 @@ describe("the review", () => {
     // The auth line keeps its own badge.
     expect(html).toContain(agentsFr["integrationEditor.discover.detected"]);
   });
+
+  it("says a server answering without authentication needs no connection, and how its address is kept", () => {
+    const { auths: _auths, ...manifest } = discovery.manifest;
+    const html = render(
+      <ReviewStep
+        result={{ ...discovery, manifest }}
+        edits={{ display_name: "Acme", name: "@org/acme" }}
+        onEditsChange={noop}
+        icon={undefined}
+        onCreate={noop}
+        creating={null}
+        createError={null}
+        onManual={noop}
+      />,
+    );
+    expect(html).toContain(agentsFr["integrationWizard.review.auth.none"]);
+    expect(html).toContain('data-testid="integration-wizard-url-shared"');
+    expect(html).toContain("https://mcp.acme.test/mcp");
+  });
+
+  it("shows no address notice for a server asking for authentication", () => {
+    expect(review()).not.toContain('data-testid="integration-wizard-url-shared"');
+  });
 });
 
 const catalog = {

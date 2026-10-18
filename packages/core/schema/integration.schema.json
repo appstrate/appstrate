@@ -913,8 +913,7 @@
     "name",
     "version",
     "type",
-    "source",
-    "auths"
+    "source"
   ],
   "additionalProperties": {}
 }

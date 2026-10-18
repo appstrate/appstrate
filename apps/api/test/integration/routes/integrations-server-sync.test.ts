@@ -560,3 +560,70 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     expect((await sync(ctx, { url: server.url })).status).toBe(400);
   });
 });
+
+describe("POST /api/integrations/{packageId}/discover — unauthenticated integration (AFPS §7.2)", () => {
+  const OPEN_ID = "@acme/open";
+  let ctx: TestContext;
+  let open: FakeMcpServer;
+  let restore: () => void;
+
+  beforeAll(() => {
+    restore = allowLoopbackOAuthEgress();
+    open = startFakeMcpServer({ tools: TOOLS, pageSize: 2 });
+  });
+
+  afterAll(() => {
+    open.stop();
+    restore();
+  });
+
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    ctx = await createTestContext({ orgSlug: "acme" });
+    open.authorizations.length = 0;
+    forgetProtocolEras();
+  });
+
+  const unauthenticated = (url: string) =>
+    ({
+      type: "integration",
+      schema_version: "0.3",
+      name: OPEN_ID,
+      version: "1.0.0",
+      display_name: "Open",
+      source: { kind: "remote", remote: { url, transport: "streamable-http" } },
+    }) as unknown as IntegrationManifest;
+
+  const syncOpen = () =>
+    getTestApp().request(`/api/integrations/${OPEN_ID}/discover`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+  it("lists the server's tools with no connection and no credential", async () => {
+    await seedProxyIntegration(ctx, unauthenticated(open.url));
+    const res = await syncOpen();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { tools: { name: string }[] };
+    expect(body.tools.map((t) => t.name)).toEqual(TOOL_NAMES);
+    expect(open.authorizations.length).toBeGreaterThan(0);
+    expect(open.authorizations.every((a) => a === null)).toBe(true);
+  });
+
+  it("answers 502 when the server asks for a credential: never authorized ad hoc", async () => {
+    const guarded = startFakeMcpServer({ tools: TOOLS, bearer: "nope" });
+    try {
+      await seedProxyIntegration(ctx, unauthenticated(guarded.url));
+      const res = await syncOpen();
+      expect(res.status).toBe(502);
+      expect(((await res.json()) as { detail: string }).detail).toContain(
+        "declares no authentication",
+      );
+      expect(guarded.authorizations.every((a) => a === null)).toBe(true);
+    } finally {
+      guarded.stop();
+    }
+  });
+});

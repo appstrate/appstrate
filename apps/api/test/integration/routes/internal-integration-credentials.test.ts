@@ -306,14 +306,11 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     expect(body.delivery_plans.primary).toBeDefined();
   });
 
-  // NOTE — a RUN token never gets an empty payload from this endpoint. The
-  // zero-auth branch that used to produce one is gone: `@afps-spec/schema`
-  // requires every integration to declare at least one auth ("integration MUST
-  // declare at least one auth method"), so a zero-auth manifest fails
-  // validation on read and this endpoint answers 500 `invalid_manifest` long
-  // before any resolver code. The one empty payload that remains belongs to the
-  // CONNECT-run branch, which never reaches the resolver — it is covered in
-  // `internal-connect-run-grant.test.ts`.
+  // NOTE — a RUN token never gets an empty payload from this endpoint. An
+  // integration declaring no auths (AFPS §7.2) binds no connection, so its spawn
+  // spec carries none and the sidecar never asks this endpoint for it. The one
+  // empty payload that remains belongs to the CONNECT-run branch, which never
+  // reaches the resolver — it is covered in `internal-connect-run-grant.test.ts`.
 
   // ─── Fail-loud: the three states that used to answer 200-with-empty ───
   //

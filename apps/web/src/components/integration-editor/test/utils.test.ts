@@ -175,9 +175,9 @@ describe("integration-editor auths", () => {
     expect(back.scopeCatalog[0]!.value).toBe("read");
   });
 
-  it("drops auths with an empty key", () => {
-    const m = setAuths({}, [{ ...emptyAuth(""), key: "" }]);
-    expect(Object.keys(m.auths as any)).toHaveLength(0);
+  it("drops auths with an empty key, and with none left leaves auths out (AFPS §7.2)", () => {
+    const m = setAuths({ auths: { old: { type: "api_key" } } }, [{ ...emptyAuth(""), key: "" }]);
+    expect("auths" in m).toBe(false);
   });
 
   it("preserves unread auth fields on edit (no data loss)", () => {

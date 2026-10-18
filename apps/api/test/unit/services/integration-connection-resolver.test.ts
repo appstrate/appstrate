@@ -3332,3 +3332,40 @@ describe("resolveConnections — a warning carries the code its state raises on 
     );
   });
 });
+
+describe("resolveConnections — unauthenticated integration (AFPS §7.2)", () => {
+  /** An integration that OMITS `auths`. */
+  const unauthenticated = {
+    type: "integration",
+    schema_version: "0.3",
+    name: INTEG,
+    version: "1.0.0",
+    display_name: "Open server",
+    source: { kind: "remote", remote: { url: "https://mcp.example.com/mcp" } },
+  } as unknown as IntegrationManifest;
+
+  for (const required of [false, true]) {
+    it(`required: ${required} → no entry, no warning, no error`, () => {
+      const result = resolveConnections({
+        requirements: [{ ...req(unauthenticated, ["search"]), required }],
+        accessibleConnections: [],
+        pins: [],
+      });
+      expect(result).toEqual({ resolved: {}, warnings: [], errors: [] });
+    });
+  }
+
+  it("does not disturb the verdict of an authenticated sibling in the same call", () => {
+    const sibling = "@vendor/other";
+    const result = resolveConnections({
+      requirements: [
+        { ...req(unauthenticated), required: true },
+        { ...req(oauth2Manifest()), integrationId: sibling, required: true },
+      ],
+      accessibleConnections: [conn({ integrationId: sibling })],
+      pins: [],
+    });
+    expect(result.errors).toEqual([]);
+    expect(Object.keys(result.resolved)).toEqual([sibling]);
+  });
+});

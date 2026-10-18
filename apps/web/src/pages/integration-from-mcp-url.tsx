@@ -322,10 +322,12 @@ function ReadyStep({
   return (
     <WizardSection
       title={t("integrationWizard.ready.title")}
-      description={t("integrationWizard.ready.description", {
-        name: detail.manifest.display_name,
-        version: detail.manifest.version,
-      })}
+      description={t(
+        detail.proxy_connection.status === "not_required"
+          ? "integrationWizard.ready.descriptionNoConnection"
+          : "integrationWizard.ready.description",
+        { name: detail.manifest.display_name, version: detail.manifest.version },
+      )}
     >
       <p className="text-sm">
         {t("integrationWizard.tools.declared", { count: declaredToolNames(manifest).length })}{" "}

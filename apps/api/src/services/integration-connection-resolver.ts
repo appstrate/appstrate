@@ -53,6 +53,7 @@ import {
   requiredScopesForAgent,
   manifestAuthKeySet,
   manifestHasRequiredAuth,
+  isUnauthenticatedIntegration,
   CONNECT_FLOW_CODES,
   CONNECTION_SCOPE_FITS,
   MAX_CONNECTIONS_PER_INTEGRATION,
@@ -201,6 +202,8 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       );
       continue;
     }
+    // AFPS §7.2 — binds no connection: no verdict, no warning, `required` asks nothing.
+    if (isUnauthenticatedIntegration(req.manifest)) continue;
 
     const auth = authFilterOf(req);
 

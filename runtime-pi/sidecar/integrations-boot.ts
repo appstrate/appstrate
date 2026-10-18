@@ -338,9 +338,8 @@ export async function extractBundle(bytes: Uint8Array, namespace: string): Promi
  * `auths.length === 1` test). So this is a trivial pick, not a second policy
  * site: the oauth2-first / first-with-a-plan ordering is just a defensive
  * tie-breaker should the payload ever surface more than one. Throws when no
- * auth produces an injectable header — a remote MCP client cannot run
- * without authentication (every public hosted MCP today gates `tools/call`
- * behind some credential).
+ * auth produces an injectable header. Without a source — an unauthenticated
+ * integration (AFPS §7.2), which binds no connection — it injects nothing.
  */
 /**
  * Dependency seam for {@link connectRemoteHttpIntegration} — production
@@ -418,9 +417,9 @@ async function defaultCreateSseClient(
 
 export async function connectRemoteHttpIntegration(
   spec: IntegrationSpawnSpec,
-  source: IntegrationCredentialsSource,
+  source: IntegrationCredentialsSource | null,
   deps: ConnectRemoteHttpDeps = {},
-): Promise<{ client: AppstrateMcpClient; authKey: string }> {
+): Promise<{ client: AppstrateMcpClient; authKey: string | null }> {
   const createClient = deps.createClient ?? createMcpHttpClient;
   const createSseClient = deps.createSseClient ?? defaultCreateSseClient;
 
@@ -441,40 +440,38 @@ export async function connectRemoteHttpIntegration(
     );
   }
 
-  // Read the hoisted source's current payload for auth-selection. The source
-  // was created (and its initial credentials fetched) once by the caller.
-  const initial = source.snapshot();
-
-  // Pick the auth whose header we'll inject. The payload normally carries a
+  // Pick the auth whose header we'll inject, from the hoisted source's current payload (created,
+  // its initial credentials fetched, once by the caller). The payload normally carries a
   // SINGLE auth (this spec's one connection), so this resolves to that
   // one auth — NOT a policy decision. OAuth2-first / first-with-a-plan is only
   // a defensive tie-breaker if the payload ever surfaces more than one. The
   // credentials resolver populates `deliveryPlans[authKey]` for every auth
   // declaring `delivery.http` — including `{}` (empty), which defaults per
   // `AUTH_TYPE_HTTP_DEFAULTS` (oauth2 → Bearer, api_key → X-Api-Key, …).
-  const oauthAuth = initial.auths.find(
-    (a) => a.authType === "oauth2" && initial.deliveryPlans[a.authKey],
-  );
-  const fallbackAuth = oauthAuth
-    ? null
-    : initial.auths.find((a) => initial.deliveryPlans[a.authKey]);
-  const pickedAuth = oauthAuth ?? fallbackAuth;
-  if (!pickedAuth) {
-    throw new Error(
-      `integration ${spec.integrationId} (sourceKind="remote") has no auth with a resolvable delivery.http plan`,
+  let credential: { source: IntegrationCredentialsSource; authKey: string } | null = null;
+  if (source) {
+    const initial = source.snapshot();
+    const oauthAuth = initial.auths.find(
+      (a) => a.authType === "oauth2" && initial.deliveryPlans[a.authKey],
     );
+    const pickedAuth = oauthAuth ?? initial.auths.find((a) => initial.deliveryPlans[a.authKey]);
+    if (!pickedAuth) {
+      throw new Error(
+        `integration ${spec.integrationId} (sourceKind="remote") has no auth with a resolvable delivery.http plan`,
+      );
+    }
+    credential = { source, authKey: pickedAuth.authKey };
   }
-  const authKey = pickedAuth.authKey;
 
   // Per-request injection planner. Reading from the snapshot on every call
   // means an OAuth refresh (which swaps `payload` in place) is picked up
   // automatically — no MCP transport restart needed. Static creds
   // (api_key) just return the same value forever.
   const planInjection = (
-    snapshot: ReturnType<typeof source.snapshot>,
+    snapshot: ReturnType<IntegrationCredentialsSource["snapshot"]> | undefined,
     callerHeaderNames: readonly string[],
   ) => {
-    const plan = snapshot.deliveryPlans[authKey];
+    const plan = credential && snapshot?.deliveryPlans[credential.authKey];
     return plan ? planHttpDeliveryInjection(plan, callerHeaderNames) : { kind: "none" as const };
   };
 
@@ -503,8 +500,8 @@ export async function connectRemoteHttpIntegration(
         credentialAnswered: boolean;
         credentialRevision: string | undefined;
       }> => {
-        const snapshot = source.snapshot();
-        const credentialRevision = snapshot.credentialRevision;
+        const snapshot = credential?.source.snapshot();
+        const credentialRevision = snapshot?.credentialRevision;
         const headers = new Headers(init?.headers);
         const injection = planInjection(snapshot, [...headers.keys()]);
         // `guardedFetch` accepts `string | URL`; the MCP transports always
@@ -517,7 +514,7 @@ export async function connectRemoteHttpIntegration(
         let validateHop: ((url: URL) => void) | undefined;
         if (injection.kind === "inject") {
           const authorizedUris =
-            snapshot.auths.find((a) => a.authKey === authKey)?.authorizedUris ?? [];
+            snapshot?.auths.find((a) => a.authKey === credential?.authKey)?.authorizedUris ?? [];
           const origin = new URL(String(target)).origin;
           validateHop = (url) => {
             if (url.origin !== origin) return;
@@ -566,14 +563,14 @@ export async function connectRemoteHttpIntegration(
         };
       };
       let attempt = await send();
-      if (attempt.response.status === 401 && attempt.credentialAnswered) {
-        const refreshed = await source
-          .refreshOnUnauthorized(authKey, attempt.credentialRevision)
+      if (credential && attempt.response.status === 401 && attempt.credentialAnswered) {
+        const refreshed = await credential.source
+          .refreshOnUnauthorized(credential.authKey, attempt.credentialRevision)
           .catch(() => false);
         if (refreshed) attempt = await send();
       }
-      if (attempt.response.ok && attempt.credentialAnswered) {
-        source.reportUpstreamSuccess(attempt.credentialRevision);
+      if (credential && attempt.response.ok && attempt.credentialAnswered) {
+        credential.source.reportUpstreamSuccess(attempt.credentialRevision);
       }
       return attempt.response;
     },
@@ -600,7 +597,7 @@ export async function connectRemoteHttpIntegration(
           retry: { deadlineMs: 30_000 },
           ...(toolTimeoutMs !== undefined ? { defaultTimeoutMs: toolTimeoutMs } : {}),
         });
-  return { client, authKey };
+  return { client, authKey: credential?.authKey ?? null };
 }
 
 /**
@@ -1316,12 +1313,13 @@ type PreparedConnection = {
   | { ok: false; error: unknown }
   | {
       ok: true;
-      connection: BoundConnection;
+      /** Absent for an unauthenticated integration (AFPS §7.2). */
+      connection: BoundConnection | undefined;
       /** The connection's ONE credentials source, shared by every consumer. */
       source: IntegrationCredentialsSource | null;
       upstream:
         | { kind: "serverless" }
-        | { kind: "remote"; client: AppstrateMcpClient; authKey: string }
+        | { kind: "remote"; client: AppstrateMcpClient; authKey: string | null }
         | { kind: "local"; started: StartedLocalIntegration };
     }
 );
@@ -1492,8 +1490,8 @@ export async function bootIntegrations(
       prepareMs: performance.now() - prepareStart,
     });
     try {
+      // Absent for an unauthenticated integration (AFPS §7.2): no source, nothing injected.
       const connection = spec.connection;
-      if (!connection) throw new Error("agent-run spawn spec binds no connection");
       // ─── ONE shared credentials source per bound connection ───
       // The Source/Sink model (see integration-credentials-source.ts header):
       // a single source feeds every consumer of this connection's credentials
@@ -1506,19 +1504,23 @@ export async function bootIntegrations(
       const hasHttpDelivery =
         spec.httpDeliveryAuths !== undefined && Object.keys(spec.httpDeliveryAuths).length > 0;
       const needsSource = hasHttpDelivery || hasApiCall || spec.sourceKind === "remote";
-      const source = needsSource
-        ? createIntegrationCredentialsSource({
-            integrationId: spec.integrationId,
-            connectionId: connection.id,
-            platformApiUrl: bundleFetchOpts.platformApiUrl,
-            runToken: bundleFetchOpts.runToken,
-            initialPayload: await fetchInitialIntegrationCredentials(
-              spec.integrationId,
-              connection.id,
-              bundleFetchOpts,
-            ),
-          })
-        : null;
+      if (!connection && (hasHttpDelivery || hasApiCall)) {
+        throw new Error("agent-run spawn spec delivers a credential but binds no connection");
+      }
+      const source =
+        needsSource && connection
+          ? createIntegrationCredentialsSource({
+              integrationId: spec.integrationId,
+              connectionId: connection.id,
+              platformApiUrl: bundleFetchOpts.platformApiUrl,
+              runToken: bundleFetchOpts.runToken,
+              initialPayload: await fetchInitialIntegrationCredentials(
+                spec.integrationId,
+                connection.id,
+                bundleFetchOpts,
+              ),
+            })
+          : null;
 
       // Serverless integration (api_call-only, no MCP server): nothing to
       // start, the in-process api_call server registered below is its surface.
@@ -1535,13 +1537,6 @@ export async function bootIntegrations(
       // no per-tool upstream URL can be enforced through a hosted MCP —
       // the upstream decides.
       if (spec.sourceKind === "remote") {
-        if (!source) {
-          // Unreachable: `sourceKind === "remote"` forces `needsSource`. Guard
-          // narrows the type + fails loud if that invariant ever breaks.
-          throw new Error(
-            `remote integration ${spec.integrationId} has no hoisted credentials source`,
-          );
-        }
         const { client, authKey } = await connectRemoteHttpIntegration(spec, source);
         // On the caller-owned teardown collector as soon as it is open, so a
         // failed registration still closes the Streamable HTTP client.
@@ -1608,7 +1603,7 @@ export async function bootIntegrations(
   // Returns the number of tools added so callers can sum the tool count.
   const attachApiCall = async (
     spec: IntegrationSpawnSpec,
-    connection: BoundConnection,
+    connection: BoundConnection | undefined,
     source: IntegrationCredentialsSource | null,
     intoNamespace?: string,
   ): Promise<number> => {
@@ -1620,10 +1615,10 @@ export async function bootIntegrations(
       });
       return 0;
     }
-    if (!source) {
-      // Unreachable: `hasApiCall` forces `needsSource`, so the source always
-      // exists when there are api_calls. Guard narrows the type + fails loud
-      // if that invariant ever breaks.
+    if (!source || !connection) {
+      // Unreachable: `hasApiCall` forces `needsSource` and a bound connection, so both always
+      // exist when there are api_calls. Guard narrows the type + fails loud if that invariant
+      // ever breaks.
       logger.warn("integration declares api_call but no credentials source was hoisted", {
         integrationId: spec.integrationId,
       });

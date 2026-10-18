@@ -55,12 +55,15 @@ const PROBE_BODY_MAX_BYTES = 64 * 1024;
 /** One MCP answer of the probe (`server/discover`, `initialize`, a first `tools/list` page). */
 const PROBE_EXCHANGE_MAX_BYTES = 1024 * 1024;
 
-/** An MCP server that answered the probe with a challenge: it wants a credential. */
-interface ProtectedServer {
+/**
+ * What the probe found: a server answering with a challenge wants a credential, one answering
+ * without (`challenge` undefined) serves MCP openly.
+ */
+interface ProbedServer {
   transport: Transport;
   /** Whether the transport was seen answering, rather than guessed from the URL. */
   transportDetected: boolean;
-  challenge: string;
+  challenge: string | undefined;
   /** What the server says it is, when it answered `server/discover` or `initialize` openly. */
   identity: Implementation | undefined;
 }
@@ -90,31 +93,34 @@ export async function discoverRemoteIntegration(
     );
   }
 
-  const server = await probeServer(url, fetchImpl);
+  const { challenge, ...server } = await probeServer(url, fetchImpl);
   const [auth, iconSource] = await Promise.all([
-    // The metadata lookups swallow their faults: one cut by the deadline must not read as absent.
-    discoverAuth(url, server.challenge, fetchImpl).then((found) => {
-      if (deadline.aborted) throw unreachable(url, deadline.reason);
-      return found;
-    }),
+    // AFPS §7.2: an open server's integration declares no auths.
+    challenge === undefined
+      ? null
+      : // The metadata lookups swallow their faults: one cut by the deadline must not read as absent.
+        discoverAuth(url, challenge, fetchImpl).then((found) => {
+          if (deadline.aborted) throw unreachable(url, deadline.reason);
+          return found;
+        }),
     // Best-effort: past the deadline it finds nothing.
     fetchServerIcon(url, server.identity, iconFetch),
   ]);
 
   const identity = serverIdentityFields(server.identity);
-  const detectedName = server.identity?.title?.trim() || auth.resourceName;
+  const detectedName = server.identity?.title?.trim() || auth?.resourceName;
   const provenance: Record<string, Provenance> = {
     "/display_name": detectedName || identity.display_name ? "detected" : "guessed",
     // From the host, not `resource_name`: a server's label ("Notion MCP (Beta)") makes a poor id.
     "/name": "guessed",
     "/source/remote/transport": server.transportDetected ? "detected" : "guessed",
-    [`/auths/${auth.key}`]: auth.provenance,
+    ...(auth ? { [`/auths/${auth.key}`]: auth.provenance } : {}),
   };
   const manifest: Record<string, unknown> = {
     display_name: detectedName || identity.display_name || hostDisplayName(url),
     name: `@${input.orgSlug}/${toSlug(hostDisplayName(url))}`,
     source: { kind: "remote", remote: { url, transport: server.transport } },
-    auths: { [auth.key]: auth.auth },
+    ...(auth ? { auths: { [auth.key]: auth.auth } } : {}),
   };
   if (identity.description) {
     manifest.description = identity.description;
@@ -124,11 +130,11 @@ export async function discoverRemoteIntegration(
     manifest.homepage = identity.homepage;
     provenance["/homepage"] = "detected";
   }
-  if (auth.documentation) {
+  if (auth?.documentation) {
     manifest.documentation = auth.documentation;
     provenance["/documentation"] = "detected";
   }
-  if (auth.policyUri) {
+  if (auth?.policyUri) {
     manifest.privacy_policies = [auth.policyUri];
     provenance["/privacy_policies"] = "detected";
   }
@@ -137,7 +143,7 @@ export async function discoverRemoteIntegration(
     manifest.icon = iconSource;
     provenance["/icon"] = "detected";
   }
-  return { manifest, iconSource, provenance, warnings: auth.warnings };
+  return { manifest, iconSource, provenance, warnings: auth?.warnings ?? [] };
 }
 
 /**
@@ -148,7 +154,7 @@ export async function discoverRemoteIntegration(
  * protected server, an answer an open one. A 404/405 to every POST falls back to the SSE
  * transport's GET, as the spec's backward compatibility asks.
  */
-async function probeServer(url: string, fetchImpl: typeof fetch): Promise<ProtectedServer> {
+async function probeServer(url: string, fetchImpl: typeof fetch): Promise<ProbedServer> {
   const seen: ProbeObservation = {};
   const probeFetch = observingFetch(url, fetchImpl, seen);
   // A server refusing before it answers says nothing of its transport.
@@ -202,7 +208,12 @@ async function probeServer(url: string, fetchImpl: typeof fetch): Promise<Protec
     }
     // It listed its tools — or answered the ask, if past the probe's bound or with a JSON-RPC
     // error — without a credential: an open server.
-    throw authNotSupported(url);
+    return {
+      transport: "streamable-http",
+      transportDetected: true,
+      challenge: undefined,
+      identity,
+    };
   } finally {
     await client.close().catch(() => {});
   }
@@ -261,7 +272,7 @@ function observingFetch(
 }
 
 /** The deprecated HTTP+SSE transport: a GET opening a stream whose first event names the endpoint. */
-async function probeSse(url: string, fetchImpl: typeof fetch): Promise<ProtectedServer> {
+async function probeSse(url: string, fetchImpl: typeof fetch): Promise<ProbedServer> {
   const sse = await reach(url, fetchImpl, {
     method: "GET",
     headers: { Accept: "text/event-stream" },
@@ -280,7 +291,14 @@ async function probeSse(url: string, fetchImpl: typeof fetch): Promise<Protected
     const isEndpoint = (text: string) =>
       parseSseFrames(text, "").frames.some((frame) => frame.event === "endpoint");
     const head = await readOrFail(url, () => readBodyPrefix(sse, PROBE_BODY_MAX_BYTES, isEndpoint));
-    if (isEndpoint(`${head}\n\n`)) throw authNotSupported(url);
+    if (isEndpoint(`${head}\n\n`)) {
+      return {
+        transport: "sse",
+        transportDetected: true,
+        challenge: undefined,
+        identity: undefined,
+      };
+    }
   } else {
     await sse.body?.cancel().catch(() => {});
   }
@@ -349,14 +367,6 @@ const notAnMcpServer = (url: string) =>
     code: "not_an_mcp_server",
     title: "Not an MCP Server",
     detail: `The server at ${originOf(url)} did not answer as a Streamable HTTP or SSE MCP server.`,
-  });
-
-const authNotSupported = (url: string) =>
-  new ApiError({
-    status: 422,
-    code: "remote_mcp_auth_not_supported",
-    title: "Unauthenticated MCP Server",
-    detail: `The server at ${originOf(url)} serves MCP without authentication, which integrations do not support yet.`,
   });
 
 interface DiscoveredAuth {

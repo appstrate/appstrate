@@ -2515,7 +2515,14 @@ export const schemas = {
         type: "array",
         items: {
           type: "object",
-          required: ["integration_package_id", "required", "run_blocking", "inert", "resolution"],
+          required: [
+            "integration_package_id",
+            "required",
+            "run_blocking",
+            "inert",
+            "connection_required",
+            "resolution",
+          ],
           properties: {
             integration_package_id: { type: "string" },
             required: {
@@ -2532,6 +2539,11 @@ export const schemas = {
               type: "boolean",
               description:
                 "True iff the agent declares this integration with nothing a run would start (inert): a run resolves no connection for it, whatever `resolution` reports for the picker.",
+            },
+            connection_required: {
+              type: "boolean",
+              description:
+                "False for an integration declaring no auths (AFPS §7.2): it binds no connection, a run reaches its server without one, and `required` asks nothing of it.",
             },
             resolution: { $ref: "#/components/schemas/IntegrationAgentResolution" },
           },

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What a connected remote MCP server says about its integration once a connection exists: its
- * tools (`tools/list`), its `serverInfo` and its `instructions`, as a manifest proposal the editor
- * merges. The MCP exchange goes through the credential proxy (`proxyCall`), so connection
- * selection, `authorized_uris`, the egress guard and the 401 refresh are the proxy's; this module
- * only speaks MCP over it. Persists nothing.
+ * What a remote MCP server says about its integration: its tools (`tools/list`), its `serverInfo`
+ * and its `instructions`, as a manifest proposal the editor merges. The MCP exchange goes through
+ * the credential proxy (`proxyCall`) once a connection exists, so connection selection,
+ * `authorized_uris`, the egress guard and the 401 refresh are the proxy's; this module only speaks
+ * MCP over it. An unauthenticated integration (AFPS §7.2) has nothing to inject: its server is
+ * reached directly, egress-guarded on every hop. Persists nothing.
  */
 
 import type { Implementation, Tool } from "@modelcontextprotocol/sdk/types.js";
@@ -15,12 +16,14 @@ import {
   type AppstrateMcpClient,
 } from "@appstrate/mcp-transport";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
+import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
 import { isIconImage } from "@appstrate/core/appearance";
 import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { Actor } from "../lib/actor.ts";
 import { ApiError, badGateway } from "../lib/errors.ts";
-import { fetchWithin } from "../lib/egress-host-guard.ts";
+import { checkEgressUrl, egressFetchImpl, fetchWithin } from "../lib/egress-host-guard.ts";
+import { readBodyUnder } from "../lib/capped-body.ts";
 import { logger } from "../lib/logger.ts";
 import { proxyProblem } from "../lib/proxy-status.ts";
 import type { SpaceScope } from "../lib/scope.ts";
@@ -119,9 +122,22 @@ export async function syncIntegrationFromServer(input: {
     });
   }
 
+  const unauthenticated = isUnauthenticatedIntegration(loaded.manifest);
+  if (unauthenticated && !(await checkEgressUrl(url, { requireHttpsForUntrustedHost: true })).ok) {
+    throw badGateway(`The MCP server at ${URL.parse(url)?.origin} is refused by the egress guard.`);
+  }
+
   // One bound for the whole sync, the icon lookup included.
   const timeout = AbortSignal.timeout(SYNC_TIMEOUT_MS);
   const deadline = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout;
+  const egressFetch = fetchWithin(egressFetchImpl(), deadline);
+  const direct = (async (target: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    if (init?.method === "GET") return new Response(null, { status: 405 });
+    const res = await egressFetch(target, init);
+    const body = await readBodyUnder(res, MAX_EXCHANGE_BYTES);
+    if (body === null) throw new Error("an MCP answer exceeds the synchronization's bound");
+    return new Response(body, { status: res.status, headers: res.headers });
+  }) as typeof fetch;
   const proxied = (async (target: Parameters<typeof fetch>[0], init?: RequestInit) => {
     // The standalone GET stream carries server-initiated messages, which a list-and-close never reads.
     if (init?.method === "GET") return new Response(null, { status: 405 });
@@ -183,7 +199,7 @@ export async function syncIntegrationFromServer(input: {
   let exchanged;
   try {
     client = await createMcpHttpClient(url, {
-      fetch: proxied,
+      fetch: unauthenticated ? direct : proxied,
       signal: deadline,
       onWarning: (message, data) => logger.warn(message, { packageId, ...data }),
     });
@@ -195,7 +211,7 @@ export async function syncIntegrationFromServer(input: {
       instructions: client.getInstructions(),
     };
   } catch (err) {
-    throw syncFailure(err, packageId, url);
+    throw syncFailure(err, packageId, url, unauthenticated);
   } finally {
     await client?.close().catch(() => {});
   }
@@ -330,7 +346,12 @@ const notConnected = (detail: string) =>
     detail,
   });
 
-function syncFailure(err: unknown, packageId: string, url: string): Error {
+function syncFailure(
+  err: unknown,
+  packageId: string,
+  url: string,
+  unauthenticated: boolean,
+): Error {
   // The proxy names its own `X-Connection-Id` header; this route takes the body's `connection_id`.
   if (err instanceof ApiError && err.code === "must_choose_connection") {
     const detail = `No single connection of '${packageId}' applies: name one in the request body's \`connection_id\`.`;
@@ -357,6 +378,12 @@ function syncFailure(err: unknown, packageId: string, url: string): Error {
     error: getErrorMessage(err),
   });
   const status = httpStatusOf(err);
+  if ((status === 401 || status === 403) && unauthenticated) {
+    // AFPS §7.2: a challenge makes the integration unavailable, never an ad hoc authorization.
+    return badGateway(
+      `The MCP server at ${origin} asks for a credential (HTTP ${status}), but the integration declares no authentication.`,
+    );
+  }
   if (status === 401 || status === 403) {
     return badGateway(
       `The MCP server at ${origin} refused the connection's credential (HTTP ${status}); reconnect the integration.`,
