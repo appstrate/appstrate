@@ -10,7 +10,13 @@ export const ICON_SOURCE_MAX_BYTES = 5 * 1024 * 1024;
  * browser. SVG stays out — a vector file has no pixel size to crop, and not
  * every browser rasterises one through `createImageBitmap`.
  */
-const ICON_SOURCE_TYPE_LIST = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
+const ICON_SOURCE_TYPE_LIST = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+  "image/x-icon",
+] as const;
 
 /** The file input's `accept`. */
 export const ICON_SOURCE_TYPES = ICON_SOURCE_TYPE_LIST.join(",");
@@ -111,6 +117,14 @@ export async function encodeIconImage(file: File): Promise<string> {
   } finally {
     bitmap.close();
   }
+}
+
+/** A base64 raster data URI (a site's favicon) as an uploaded icon, through `encodeIconImage`. */
+export function encodeIconDataUri(uri: string): Promise<string> {
+  const match = /^data:([^;,]+);base64,(.*)$/s.exec(uri);
+  if (!match) return Promise.reject(new IconImageFailure("icon_file_type"));
+  const bytes = Uint8Array.from(atob(match[2]!), (char) => char.charCodeAt(0));
+  return encodeIconImage(new File([bytes], "icon", { type: match[1] }));
 }
 
 /** The `IconImageError` an `encodeIconImage` rejection carries; `icon_processing` for anything else. */

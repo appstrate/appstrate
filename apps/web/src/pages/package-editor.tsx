@@ -30,6 +30,7 @@ import { ResourceSection } from "../components/agent-editor/resource-section";
 import { RuntimeToolsGroup } from "../components/agent-editor/runtime-tools-group";
 import { SourceSection } from "../components/integration-editor/source-section";
 import { getSource, isRemoteSourceUrl } from "../components/integration-editor/utils";
+import { IntegrationIconField } from "../components/integration-editor/integration-icon-field";
 import { AuthsSection } from "../components/integration-editor/auths-section";
 import { IntegrationToolsSection } from "../components/integration-editor/integration-tools-section";
 
@@ -48,6 +49,12 @@ import {
   fieldsToSchema,
 } from "../components/agent-editor/utils";
 import type { ResourceEntry, SchemaField } from "../components/agent-editor/types";
+import {
+  mergeDiscovery,
+  type DiscoveryBadges,
+  type DiscoveryProposal,
+} from "../lib/integration-discovery-merge";
+import { encodeIconDataUri } from "../lib/icon-image";
 
 const asNumber = (value: unknown) => (typeof value === "number" ? value : undefined);
 
@@ -396,6 +403,30 @@ function IntegrationEditorInner({
     },
   });
   const { state, activeTab, replaceManifest: onManifestChange } = editor;
+  const { user } = useAuth();
+  const { currentOrg } = useOrg();
+  const [badges, setBadges] = useState<DiscoveryBadges>({});
+  const [warnings, setWarnings] = useState<DiscoveryProposal["warnings"]>([]);
+
+  const applyProposal = (proposal: DiscoveryProposal) => {
+    const defaults = defaultIntegrationManifest(currentOrg?.slug, user?.email);
+    const merged = mergeDiscovery(state.manifest, defaults, proposal);
+    onManifestChange(merged.manifest);
+    setBadges(merged.badges);
+    setWarnings(proposal.warnings);
+    // A raster the manifest does not accept as is (ICO, large PNG) is re-encoded here; one the
+    // browser cannot decode is skipped.
+    if (proposal.icon_source && !proposal.manifest.icon && !merged.manifest.icon) {
+      void encodeIconDataUri(proposal.icon_source)
+        .then((icon) => {
+          editor.setState((s) =>
+            s.manifest.icon ? s : { ...s, manifest: { ...s.manifest, icon } },
+          );
+          setBadges((b) => ({ ...b, "/icon": "detected" }));
+        })
+        .catch(() => {});
+    }
+  };
 
   return (
     <PackageEditorFrame
@@ -421,15 +452,27 @@ function IntegrationEditorInner({
           value={editor.metadata}
           onChange={editor.onMetadataChange}
           isEdit={isEdit}
+          badges={badges}
+          identityChildren={
+            <IntegrationIconField
+              icon={typeof state.manifest.icon === "string" ? state.manifest.icon : undefined}
+              badge={badges["/icon"]}
+              onChange={(icon) => editor.updateManifest({ icon })}
+            />
+          }
         />
       )}
 
       {activeTab === "source" && (
-        <SourceSection manifest={state.manifest} onChange={onManifestChange} />
+        <SourceSection
+          manifest={state.manifest}
+          onChange={onManifestChange}
+          discovery={isEdit ? undefined : { onProposal: applyProposal, badges, warnings }}
+        />
       )}
 
       {activeTab === "auths" && (
-        <AuthsSection manifest={state.manifest} onChange={onManifestChange} />
+        <AuthsSection manifest={state.manifest} onChange={onManifestChange} badges={badges} />
       )}
 
       {activeTab === "tools" && (

@@ -7,6 +7,7 @@ import {
   ICON_SOURCE_TYPES,
   IconImageFailure,
   centerSquare,
+  encodeIconDataUri,
   iconDataUri,
   iconImageErrorCode,
   iconSourceError,
@@ -140,5 +141,17 @@ describe("iconImageErrorCode", () => {
   it("reads anything else as a processing failure", () => {
     expect(iconImageErrorCode(new Error("icon_file_type"))).toBe("icon_processing");
     expect(iconImageErrorCode("boom")).toBe("icon_processing");
+  });
+});
+
+describe("encodeIconDataUri", () => {
+  it("refuses anything but a base64 data URI", async () => {
+    await expect(encodeIconDataUri("https://x.test/favicon.ico")).rejects.toMatchObject({
+      code: "icon_file_type",
+    });
+  });
+
+  it("reads an ICO as a source type", () => {
+    expect(iconSourceError({ type: "image/x-icon", size: 10 })).toBeNull();
   });
 });
