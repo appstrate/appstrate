@@ -959,7 +959,7 @@ function dualEraSession(
         } catch (err) {
           options.signal?.throwIfAborted();
           onWarning?.(
-            `MCP tools/list before calling '${args.name}' failed; the call is sent without its definition`,
+            `MCP tools/list before calling '${args.name}' failed; the call goes without its definition, or not at all if that used its whole time`,
             {
               tool: args.name,
               error: err instanceof Error ? err.message : String(err),
