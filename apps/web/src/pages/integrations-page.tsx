@@ -5,10 +5,15 @@
  * placed here but switched off, or never switched on, is in the space library.
  */
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { catalogueHref } from "../lib/catalogue-link";
 import { useTranslation } from "react-i18next";
-import { Boxes, LibraryBig, Plus } from "lucide-react";
+import { Boxes, LibraryBig, Plus, Upload } from "lucide-react";
+import {
+  PACKAGE_WRITE_PERMISSIONS,
+  packagePermission,
+  spacePackagePermission,
+} from "@appstrate/core/permissions";
 import { PageHeader } from "../components/page-header";
 import { CollectionTabs } from "../components/detail-tabs";
 import { CardGrid } from "../components/card-grid";
@@ -22,6 +27,7 @@ import { EmptyState, EmptyStateAction, NoMatchState } from "../components/page-s
 import { PageActionsMenu } from "../components/page-actions-menu";
 import type { MenuAction } from "../lib/menu-action";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
+import { ImportModal } from "../components/import-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
 import {
@@ -33,6 +39,7 @@ import {
   filterIntegrations,
 } from "../lib/integration-collection";
 import { readList, useListParams } from "../lib/list-params";
+import { packageNewPath } from "../lib/package-paths";
 import { useSearchPlaceholder } from "../lib/search-placeholder";
 import { useConnectionCounts } from "../hooks/use-me-connections";
 import { usePackageList } from "../hooks/use-packages";
@@ -52,8 +59,11 @@ export function IntegrationsPage() {
   const [view, setView] = useListView("integrations");
   const list = useListParams(["origin", "protocol"]);
   const searchPlaceholder = useSearchPlaceholder(t("integrations.title"));
-  const canCreate = can("integrations:write");
-  const canBrowse = can("integrations:install");
+  const [importing, setImporting] = useState(false);
+  // The same grants as every other package index (`PackageIndexPage`).
+  const canCreate = can(packagePermission("integration", "write"));
+  const canImport = PACKAGE_WRITE_PERMISSIONS.some(can);
+  const canBrowse = can(spacePackagePermission("integration", "activate"));
   const creation = useCreationHandoff("integration", canCreate);
   const createAction: MenuAction = {
     id: "create",
@@ -118,7 +128,7 @@ export function IntegrationsPage() {
         wrapActions
         actions={
           // A reader has no deed here: no menu, rather than an empty one.
-          (canBrowse || canCreate) && (
+          (canBrowse || canCreate || canImport) && (
             <PageActionsMenu
               actions={[
                 {
@@ -127,6 +137,13 @@ export function IntegrationsPage() {
                   icon: LibraryBig,
                   to: catalogueHref("integration"),
                   hidden: !canBrowse,
+                },
+                {
+                  id: "import",
+                  label: t("nav.import", { ns: "common" }),
+                  icon: Upload,
+                  onSelect: () => setImporting(true),
+                  hidden: !canImport,
                 },
                 createAction,
               ]}
@@ -220,11 +237,12 @@ export function IntegrationsPage() {
         count={isLoading || error ? undefined : t("integrations.count", { count: shown.length })}
       />
 
+      {importing && canImport && <ImportModal onClose={() => setImporting(false)} />}
       {creation.isOpen && (
         <CreationHandoffModal
           resource="integration"
           onClose={creation.close}
-          onManual={() => creation.leave("/integrations/new")}
+          onManual={() => creation.leave(packageNewPath("integration"))}
           onChat={creation.openChat}
         />
       )}

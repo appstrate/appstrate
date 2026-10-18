@@ -15,13 +15,6 @@ interface CreationHandoffModalProps {
   onChat: (prompt: string) => void;
 }
 
-const TITLE_KEYS: Record<CreationResource, string> = {
-  agent: "creation.title.agent",
-  skill: "creation.title.skill",
-  integration: "creation.title.integration",
-  "mcp-server": "creation.title.mcpServer",
-};
-
 export function CreationHandoffModal({
   resource,
   onClose,
@@ -60,7 +53,7 @@ export function CreationHandoffModal({
   ];
 
   return (
-    <Modal onClose={onClose} title={t(TITLE_KEYS[resource])} className="sm:max-w-xl">
+    <Modal onClose={onClose} title={t(`creation.title.${resource}`)} className="sm:max-w-xl">
       <div className="flex flex-col gap-2">
         {methods.map(({ id, ...method }) => (
           <ChoiceCard
