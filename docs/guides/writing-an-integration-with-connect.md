@@ -272,21 +272,37 @@ an `oauth2` auth method_):
 - The request is a `POST` of `application/x-www-form-urlencoded` to exactly
   `token_endpoint`, without `headers`; its `body` holds only the grant parameters
   (`grant_type` and its own). `authorization_endpoint` and `issuer` are not required.
+  When an `issuer` is declared, its metadata is read before anything is sent: a
+  `token_endpoint` it contradicts is a `400 invalid_request` (the client is presented
+  only to its issuer's own token endpoint), and metadata that cannot be read a
+  `502 login_upstream_unavailable`.
 - The platform adds the client authentication itself, with the auth's default client —
   the one later refreshes use: a Basic header for `client_secret_basic`, `client_id` and
   `client_secret` in the body for `client_secret_post`, `client_id` alone for a public
-  client (`none`). The body never carries `client_id`, `client_secret`,
-  `client_assertion*` or `resource`.
+  client (`none`). Another method (`private_key_jwt`, `client_secret_jwt`,
+  `tls_client_auth`, …) is refused with a `409 connection_not_ready` before anything is
+  sent. The body never carries `client_id`, `client_secret`, `client_assertion*` or
+  `resource`.
 - No `outputs`, `success_criteria`, `expires_in_output` or `identity_outputs`: the answer
-  is read as a token response, and identity comes from `identity_claims` over it, an
-  `id_token` and `userinfo_endpoint`, as for the authorization-code flow. A response
-  without `refresh_token` keeps the submitted `refresh_token`.
+  is read as a token response, which must carry `token_type` `Bearer` (any case; absent
+  or another type is a `502 login_upstream_unavailable`). Identity comes from
+  `identity_claims` over the token response and `userinfo_endpoint` — never an
+  `id_token`, which the platform does not validate on this path (OIDC Core §3.1.3.7).
+  A response without `scope` is granted the grant's `scope` parameter, if any. A
+  `refresh_token` grant answered without `refresh_token` keeps the one it presented,
+  whatever the field it was typed in.
 - No `scope_catalog`, no templated `issuer`, no `remote` source.
 
 The user submits the fields through the hosted form or `connect/fields`;
 `connect/oauth2` refuses the auth. Nothing is stored unless the token request succeeds:
 a grant the server refuses is a `400 login_rejected`, a refused OAuth client a
-`502 oauth_client_rejected`. Once connected, it is an ordinary `oauth2` connection.
+`502 oauth_client_rejected`. Once the token request may have redeemed the grant (a
+timeout, a 5xx, an unusable 2xx, or a failure after a successful request), the problem
+carries `grant_may_be_redeemed: true` and the hosted form says the grant may need
+replacing. A hosted form submits its grant once: a second submission is a `404`, unless
+the first was refused before the grant left the platform (an invalid field, no usable
+client, an issuer or egress refusal), in which case it can be fixed and submitted again.
+Once connected, it is an ordinary `oauth2` connection.
 Reference package: `@appstrate/garmin-connect`.
 
 ### `identity_claims` — naming the connected account

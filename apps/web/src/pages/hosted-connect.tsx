@@ -19,6 +19,7 @@ import type { IntegrationManifestAuth } from "../hooks/use-integrations";
 import { errorMessage } from "../lib/mutation-error";
 import {
   missingVariables,
+  hostedConnectErrorMessage,
   submitHostedConnect,
   usesAuthorizationFlow,
   variableFieldErrors,
@@ -167,7 +168,7 @@ export function HostedConnectPage() {
     } catch (err) {
       const { byName, complete } = variableFieldErrors(err, variableLabels);
       setVariableErrors(byName);
-      setError(complete ? null : errorMessage(err));
+      setError(complete ? null : hostedConnectErrorMessage(err));
       setPhase("form");
     }
   };

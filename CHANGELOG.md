@@ -308,12 +308,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   or failing server a 502 `login_upstream_unavailable` that says the grant may
   have been redeemed when the request may have reached it (never on a 4xx), an
   auth with no usable OAuth client (none registered, a secret that cannot be
-  decrypted) a 403, a chosen client removed before the token request a 409
+  decrypted) a 403, a chosen client removed before the token request or one
+  authenticating with a method the platform does not implement (anything but
+  `client_secret_basic`, `client_secret_post` and `none`) a 409
   `connection_not_ready`, and a failure after a successful token request says
-  the grant may have been redeemed. Identity
-  comes from the token response, an `id_token` and `userinfo_endpoint`
-  (discovered from the `issuer` when not declared); a response without
-  `refresh_token` keeps the submitted one. The connection is then an
+  the grant may have been redeemed. Every refusal saying so carries the RFC 9457
+  extension member `grant_may_be_redeemed: true`, which the hosted form turns
+  into a sentence of its own. When the auth declares an `issuer`, its metadata
+  must answer and name the token endpoint the client is presented to before
+  anything is sent (400 `invalid_request` on a contradiction, 502
+  `login_upstream_unavailable` when unreadable). The answer must carry
+  `token_type` `Bearer` (any case), else a 502 that may have redeemed the grant.
+  Identity comes from the token response and `userinfo_endpoint` (discovered
+  from the `issuer` when not declared), never from an `id_token`, which is not
+  validated on this path; a response without `scope` is granted the grant's
+  `scope` parameter, if any; a `refresh_token` grant answered without
+  `refresh_token` keeps the one it presented. A hosted form submits its grant
+  once: the page session is spent before the token request, so a repeated or
+  concurrent submission is a 404, and it is handed back only when the refusal
+  preceded any request (an invalid field, no usable client, an issuer or egress
+  refusal), so the form can be fixed and submitted again. The connection is then an
   ordinary oauth2 one: proactive and on-401 refresh, rotated tokens written back.
   `connect/oauth2` refuses such an auth and connect offers skip it.
   `@afps-spec/schema` enforces the manifest rules (URL equal to `token_endpoint`,

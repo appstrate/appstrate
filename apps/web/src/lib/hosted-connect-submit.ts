@@ -4,9 +4,11 @@
 // for the grant its `connect.login` submits.
 
 import { acquiresByConnectLogin } from "@appstrate/core/integration";
+import i18n from "../i18n";
 import type { paths } from "../api/client";
+import { ApiError } from "../api/errors";
 import type { HandoffStep } from "../components/integration-connect/handoff-steps";
-import { refusalMessage, validationFieldErrors } from "./mutation-error";
+import { errorMessage, refusalMessage, validationFieldErrors } from "./mutation-error";
 
 type SubmitPath = paths["/api/integrations/connect/submit"]["post"];
 type ConnectSubmitBody = SubmitPath["requestBody"]["content"]["application/json"];
@@ -89,4 +91,15 @@ export function variableFieldErrors(
     byName[name] = sentence ?? item.message!;
   }
   return { byName, complete };
+}
+
+/**
+ * What the form says on a failure: the translated refusal, and — when the server flags
+ * `grant_may_be_redeemed` (an oauth2 `connect.login` whose token request may have spent the
+ * grant) — that the submitted token may need replacing, which no translation of the code says.
+ */
+export function hostedConnectErrorMessage(err: unknown): string {
+  const message = errorMessage(err);
+  if (!(err instanceof ApiError) || err.details?.grant_may_be_redeemed !== true) return message;
+  return `${message} ${i18n.t("integration.connect.hosted.grantMayBeRedeemed", { ns: "settings" })}`;
 }

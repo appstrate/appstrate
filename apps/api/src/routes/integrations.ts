@@ -1394,6 +1394,9 @@ export function createIntegrationsRouter() {
     const scope = scopeFromClaims(claims);
     const actor = actorFromClaims(claims);
     const body = await readJsonBody(c, connectSubmitSchema, { allowEmpty: true });
+    // An oauth2 `connect.login` submission spends the page cookie's jti like an authorization
+    // flow: a rotating grant presented twice is redeemed once and refused once.
+    const loginJti = { consumed: false, grantPresented: false };
     try {
       const { manifest, auth } = await readIntegrationAuth(
         scope,
@@ -1447,6 +1450,12 @@ export function createIntegrationsRouter() {
           detail: "Could not start the connection. Please request a new connection link.",
         });
       }
+      if (auth.type === "oauth2") {
+        if (!(await consumeJti(claims.jti, claims.exp))) {
+          throw notFound("No active connect session");
+        }
+        loginJti.consumed = true;
+      }
       if (!body.credentials) {
         throw invalidRequest("credentials payload cannot be empty", "credentials");
       }
@@ -1484,6 +1493,13 @@ export function createIntegrationsRouter() {
         ...(target ? { target } : {}),
         ...(claims.delegated ? { delegated: true } : {}),
         ...(body.variables ? { variables: body.variables } : {}),
+        ...(loginJti.consumed
+          ? {
+              onGrantPresented: () => {
+                loginJti.grantPresented = true;
+              },
+            }
+          : {}),
       };
       const strategy = resolveStrategy(auth, { connectToolExecutor: createConnectRunExecutor() });
       const { conn, audits } = await completeConnect(strategy, ctx, {
@@ -1504,6 +1520,11 @@ export function createIntegrationsRouter() {
           : {}),
       });
     } catch (err) {
+      if (loginJti.consumed) {
+        // Refused before the grant left the platform: the form can be fixed and submitted again.
+        if (loginJti.grantPresented) clearConnectPageCookie(c);
+        else await releaseJti(claims.jti);
+      }
       if (err instanceof ApiError) throw err;
       logger.error("Hosted connect submit failed", { err: String(err) });
       throw internalError();

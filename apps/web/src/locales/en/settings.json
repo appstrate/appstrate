@@ -898,6 +898,7 @@
   "integration.connect.hosted.errorBody": "This connect link is invalid, expired, or already used. Start the connection again from the app.",
   "integration.connect.hosted.doneTitle": "Connected",
   "integration.connect.hosted.doneBody": "You can close this window.",
+  "integration.connect.hosted.grantMayBeRedeemed": "The service may already have redeemed this token: if a new attempt is refused, obtain a new one.",
   "integration.connect.variables.oauthSubtitle": "Enter the server to connect to. You will then be redirected to its authorization page.",
   "integration.connect.variables.required": "This field is required.",
   "integration.connect.variables.locked": "This connection stays bound to this instance. To connect to another instance, add a new connection.",

@@ -43,6 +43,12 @@ const ORG_CLIENT = "@orga/oauth2-login-org";
 const BLOCKED = "@orga/oauth2-login-blocked";
 /** The auth requiring an identity claim the userinfo answer lacks. */
 const REQUIRES_EMAIL = "@orga/oauth2-login-email";
+/** The auth declaring an `issuer`, whose metadata binds its client to a token endpoint. */
+const ISSUER_BOUND = "@orga/oauth2-login-issuer";
+/** The auth whose client authenticates with a method the token request does not implement. */
+const JWT_CLIENT = "@orga/oauth2-login-jwt";
+/** The auth whose grant names its refresh token from a field called `token`, and asks a scope. */
+const RENAMED_FIELD = "@orga/oauth2-login-renamed";
 const SYSTEM_CLIENT = "oauth2-login-sys";
 const PUBLIC_CLIENT_ID = "PUBLIC_MOBILE_CLIENT";
 
@@ -53,6 +59,8 @@ interface Upstream {
   /** The last token request: its form body and Authorization header. */
   lastTokenRequest: () => { form: Record<string, string>; authorization: string | null } | null;
   tokenRequests: () => number;
+  /** The authorization server metadata (RFC 8414) served for the issuer `base`; `null` serves none. */
+  setMetadata: (doc: Record<string, unknown> | null) => void;
   stop: () => void;
 }
 
@@ -61,6 +69,7 @@ function startUpstream(): Upstream {
   let tokenStatus = 200;
   let last: { form: Record<string, string>; authorization: string | null } | null = null;
   let served = 0;
+  let metadata: Record<string, unknown> | null = null;
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
@@ -82,6 +91,9 @@ function startUpstream(): Upstream {
         }
         return Response.json({ profileId: 4242, displayName: "pierre-trek" });
       }
+      if (url.pathname === "/.well-known/oauth-authorization-server" && metadata) {
+        return Response.json(metadata);
+      }
       return new Response("not found", { status: 404 });
     },
   });
@@ -93,6 +105,9 @@ function startUpstream(): Upstream {
     },
     lastTokenRequest: () => last,
     tokenRequests: () => served,
+    setMetadata: (doc) => {
+      metadata = doc;
+    },
     stop: () => server.stop(true),
   };
 }
@@ -189,6 +204,20 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
       { id: MISDIRECTED, clients: [{ ...publicClient, id: "oauth2-login-elsewhere-sys" }] },
       { id: BLOCKED, clients: [{ ...publicClient, id: "oauth2-login-blocked-sys" }] },
       { id: REQUIRES_EMAIL, clients: [{ ...publicClient, id: "oauth2-login-email-sys" }] },
+      { id: ISSUER_BOUND, clients: [{ ...publicClient, id: "oauth2-login-issuer-sys" }] },
+      { id: RENAMED_FIELD, clients: [{ ...publicClient, id: "oauth2-login-renamed-sys" }] },
+      {
+        id: JWT_CLIENT,
+        // No method of its own: the manifest's stands in.
+        clients: [
+          {
+            id: "oauth2-login-jwt-sys",
+            auth_key: "primary",
+            client_id: "jwt-id",
+            client_secret: "jwt-secret",
+          },
+        ],
+      },
       {
         id: CONFIDENTIAL,
         clients: [
@@ -265,7 +294,12 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
         auth: { token_endpoint_auth_method: "client_secret_basic" },
       }),
     );
-    upstream.setToken({ access_token: "at-fresh", refresh_token: "rt-rotated", expires_in: 3600 });
+    upstream.setToken({
+      access_token: "at-fresh",
+      token_type: "Bearer",
+      refresh_token: "rt-rotated",
+      expires_in: 3600,
+    });
 
     await strategy.complete(
       { ...connectCtx, integrationId: CONFIDENTIAL },
@@ -279,7 +313,7 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
   });
 
   it("keeps the submitted token when the server does not rotate it", async () => {
-    upstream.setToken({ access_token: "at-fresh", expires_in: 3600 });
+    upstream.setToken({ access_token: "at-fresh", token_type: "Bearer", expires_in: 3600 });
 
     const conn = await strategy.complete(connectCtx, {
       kind: "fields",
@@ -312,7 +346,12 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
   });
 
   it("says the grant may be redeemed when storing fails after a successful token request", async () => {
-    upstream.setToken({ access_token: "at-fresh", refresh_token: "rt-rotated", expires_in: 3600 });
+    upstream.setToken({
+      access_token: "at-fresh",
+      token_type: "Bearer",
+      refresh_token: "rt-rotated",
+      expires_in: 3600,
+    });
     // A reconnect target that is gone by the time the connection is written.
     const err = await submit(
       { refresh_token: "rt-submitted" },
@@ -330,6 +369,7 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
     expect((err as ApiError).status).toBe(404);
     expect((err as ApiError).code).toBe("not_found");
     expect((err as ApiError).message).toContain("may have redeemed the submitted grant");
+    expect((err as ApiError).extensions?.grant_may_be_redeemed).toBe(true);
     expect(upstream.tokenRequests()).toBe(1);
   });
 
@@ -340,7 +380,12 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
         auth: { required_identity_claims: ["email"] },
       }),
     );
-    upstream.setToken({ access_token: "at-fresh", refresh_token: "rt-rotated", expires_in: 3600 });
+    upstream.setToken({
+      access_token: "at-fresh",
+      token_type: "Bearer",
+      refresh_token: "rt-rotated",
+      expires_in: 3600,
+    });
 
     const err = await submit(
       { refresh_token: "rt-submitted" },
@@ -352,12 +397,18 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
     expect((err as ApiError).code).toBe("invalid_request");
     expect((err as ApiError).message).toContain("'email'");
     expect((err as ApiError).message).toContain("may have redeemed the submitted grant");
+    expect((err as ApiError).extensions?.grant_may_be_redeemed).toBe(true);
     expect(upstream.tokenRequests()).toBe(1);
     expect(await db.select().from(integrationConnections)).toHaveLength(0);
   });
 
   it("reconnects in place: same row, credentials replaced, client re-pinned", async () => {
-    upstream.setToken({ access_token: "at-fresh", refresh_token: "rt-1", expires_in: 3600 });
+    upstream.setToken({
+      access_token: "at-fresh",
+      token_type: "Bearer",
+      refresh_token: "rt-1",
+      expires_in: 3600,
+    });
     const first = await strategy.complete(connectCtx, {
       kind: "fields",
       credentials: { refresh_token: "rt-submitted" },
@@ -367,7 +418,12 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
       .update(integrationConnections)
       .set({ clientRef: "stale-client" })
       .where(eq(integrationConnections.id, first.id));
-    upstream.setToken({ access_token: "at-fresh", refresh_token: "rt-2", expires_in: 3600 });
+    upstream.setToken({
+      access_token: "at-fresh",
+      token_type: "Bearer",
+      refresh_token: "rt-2",
+      expires_in: 3600,
+    });
 
     const again = await strategy.complete(
       {
@@ -386,7 +442,12 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
   });
 
   it("is refreshed later with the same client, and the rotation is written back", async () => {
-    upstream.setToken({ access_token: "at-fresh", refresh_token: "rt-1", expires_in: 3600 });
+    upstream.setToken({
+      access_token: "at-fresh",
+      token_type: "Bearer",
+      refresh_token: "rt-1",
+      expires_in: 3600,
+    });
     const conn = await strategy.complete(connectCtx, {
       kind: "fields",
       credentials: { refresh_token: "rt-submitted" },
@@ -451,6 +512,7 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
       expect((err as ApiError).code).toBe("login_upstream_unavailable");
       expect((err as ApiError).retryAfter).toBeUndefined();
       expect((err as ApiError).message).not.toContain("redeemed");
+      expect((err as ApiError).extensions?.grant_may_be_redeemed).toBeUndefined();
       expect(await db.select().from(integrationConnections)).toHaveLength(0);
     });
   }
@@ -459,15 +521,25 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
     // Nothing listens there: only the guard's refusal, never a connection error, omits the note.
     await seed(manifest("http://127.0.0.2:9", { name: BLOCKED }));
 
+    let presented = false;
     const err = await submit(
       { refresh_token: "rt-submitted" },
-      { ...connectCtx, integrationId: BLOCKED },
+      {
+        ...connectCtx,
+        integrationId: BLOCKED,
+        onGrantPresented: () => {
+          presented = true;
+        },
+      },
     );
 
     expect((err as ApiError).status).toBe(502);
     expect((err as ApiError).code).toBe("login_upstream_unavailable");
     expect((err as ApiError).message).not.toContain("redeemed");
+    expect((err as ApiError).extensions?.grant_may_be_redeemed).toBeUndefined();
     expect(await db.select().from(integrationConnections)).toHaveLength(0);
+    // The guard refused a request it never sent: the grant was not presented.
+    expect(presented).toBe(false);
   });
 
   it("reports a 2xx without access_token as a 502 that may have redeemed the grant", async () => {
@@ -478,6 +550,7 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
     expect((err as ApiError).status).toBe(502);
     expect((err as ApiError).code).toBe("login_upstream_unavailable");
     expect((err as ApiError).message).toContain("may have redeemed the submitted grant");
+    expect((err as ApiError).extensions?.grant_may_be_redeemed).toBe(true);
     expect(await db.select().from(integrationConnections)).toHaveLength(0);
   });
 
@@ -489,6 +562,7 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
     expect((err as ApiError).status).toBe(502);
     expect((err as ApiError).code).toBe("login_upstream_unavailable");
     expect((err as ApiError).message).toContain("may have redeemed the submitted grant");
+    expect((err as ApiError).extensions?.grant_may_be_redeemed).toBe(true);
     expect(await db.select().from(integrationConnections)).toHaveLength(0);
   });
 
@@ -538,7 +612,12 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
   });
 
   it("wraps a storage fault after a successful token request as a 500 that says so", async () => {
-    upstream.setToken({ access_token: "at-fresh", refresh_token: "rt-rotated", expires_in: 3600 });
+    upstream.setToken({
+      access_token: "at-fresh",
+      token_type: "Bearer",
+      refresh_token: "rt-rotated",
+      expires_in: 3600,
+    });
     const fault = new Error("database unavailable");
     const save = spyOn(connections, "saveIntegrationConnection").mockRejectedValueOnce(fault);
     try {
@@ -548,6 +627,7 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
       expect((err as ApiError).status).toBe(500);
       expect((err as ApiError).code).toBe("internal_error");
       expect((err as ApiError).message).toContain("may have redeemed the submitted grant");
+      expect((err as ApiError).extensions?.grant_may_be_redeemed).toBe(true);
       expect((err as ApiError).cause).toBe(fault);
     } finally {
       save.mockRestore();
@@ -591,5 +671,194 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
       `Integration '${MISDIRECTED}' not found in this organization`,
     );
     expect(upstream.tokenRequests()).toBe(0);
+  });
+
+  /** An unsigned JWT: the platform never verifies one on this path, so the signature is junk. */
+  const unsignedJwt = (claims: Record<string, unknown>) =>
+    [{ alg: "none", typ: "JWT" }, claims]
+      .map((part) => Buffer.from(JSON.stringify(part)).toString("base64url"))
+      .concat("sig")
+      .join(".");
+
+  it("never reads identity from an id_token on this path", async () => {
+    await seed(
+      manifest(upstream.base, {
+        name: REQUIRES_EMAIL,
+        auth: { required_identity_claims: ["email"] },
+      }),
+    );
+    upstream.setToken({
+      access_token: "at-fresh",
+      token_type: "Bearer",
+      refresh_token: "rt-rotated",
+      expires_in: 3600,
+      id_token: unsignedJwt({ sub: "forged", email: "forged@example.com" }),
+    });
+
+    const err = await submit(
+      { refresh_token: "rt-submitted" },
+      { ...connectCtx, integrationId: REQUIRES_EMAIL },
+    );
+
+    // The claim is in the id_token only: unread, it is missing.
+    expect((err as ApiError).status).toBe(400);
+    expect((err as ApiError).message).toContain("'email'");
+    expect(await db.select().from(integrationConnections)).toHaveLength(0);
+  });
+
+  for (const [label, tokenType] of [
+    ["without token_type", undefined],
+    ["of type N_A", "N_A"],
+  ] as const) {
+    it(`refuses a token ${label} after the request, saying the grant may be redeemed`, async () => {
+      upstream.setToken({
+        access_token: "at-fresh",
+        refresh_token: "rt-rotated",
+        expires_in: 3600,
+        ...(tokenType ? { token_type: tokenType } : {}),
+      });
+
+      const err = await submit({ refresh_token: "rt-submitted" });
+
+      expect((err as ApiError).status).toBe(502);
+      expect((err as ApiError).code).toBe("login_upstream_unavailable");
+      expect((err as ApiError).message).toContain("bearer");
+      expect((err as ApiError).message).toContain("may have redeemed the submitted grant");
+      expect((err as ApiError).extensions?.grant_may_be_redeemed).toBe(true);
+      expect(upstream.tokenRequests()).toBe(1);
+      expect(await db.select().from(integrationConnections)).toHaveLength(0);
+    });
+  }
+
+  it("accepts a bearer token_type in any case", async () => {
+    upstream.setToken({ access_token: "at-fresh", token_type: "bearer", expires_in: 3600 });
+
+    const conn = await submit({ refresh_token: "rt-submitted" });
+
+    expect(conn).not.toBeInstanceOf(Error);
+  });
+
+  it("keeps the presented refresh token whatever the field it was typed in, and grants the requested scope", async () => {
+    await seed(
+      manifest(upstream.base, {
+        name: RENAMED_FIELD,
+        auth: {
+          credentials: {
+            schema: {
+              type: "object",
+              properties: { token: { type: "string" } },
+              required: ["token"],
+            },
+          },
+          connect: {
+            login: {
+              request: {
+                method: "POST",
+                url: `${upstream.base}/token`,
+                content_type: "application/x-www-form-urlencoded",
+                body: "grant_type=refresh_token&refresh_token={{token}}&scope=activity+profile",
+              },
+            },
+          },
+        },
+      }),
+    );
+    // Neither rotated nor scoped: RFC 6749 §6 keeps the token, §5.1 grants the requested scope.
+    upstream.setToken({ access_token: "at-fresh", token_type: "Bearer", expires_in: 3600 });
+
+    const conn = await strategy.complete(
+      { ...connectCtx, integrationId: RENAMED_FIELD },
+      { kind: "fields", credentials: { token: "rt-submitted" } },
+    );
+
+    expect(upstream.lastTokenRequest()!.form).toEqual({
+      grant_type: "refresh_token",
+      refresh_token: "rt-submitted",
+      scope: "activity profile",
+      client_id: PUBLIC_CLIENT_ID,
+    });
+    expect(conn.scopes_granted).toEqual(["activity", "profile"]);
+    const creds = decryptCredentialsToStringMap((await storedRow(conn.id)).credentialsEncrypted);
+    expect(creds.refresh_token).toBe("rt-submitted");
+    expect(creds.scope).toBe("activity profile");
+  });
+
+  it("stores no scope when neither the request nor the response names one", async () => {
+    upstream.setToken({ access_token: "at-fresh", token_type: "Bearer", expires_in: 3600 });
+
+    const conn = await strategy.complete(connectCtx, {
+      kind: "fields",
+      credentials: { refresh_token: "rt-submitted" },
+    });
+
+    expect(conn.scopes_granted).toEqual([]);
+  });
+
+  it("refuses a client authentication the token request does not implement, without calling the server", async () => {
+    await seed(
+      manifest(upstream.base, {
+        name: JWT_CLIENT,
+        auth: { token_endpoint_auth_method: "private_key_jwt" },
+      }),
+    );
+
+    const err = await submit(
+      { refresh_token: "rt-submitted" },
+      { ...connectCtx, integrationId: JWT_CLIENT },
+    );
+
+    expect((err as ApiError).status).toBe(409);
+    expect((err as ApiError).code).toBe("connection_not_ready");
+    expect((err as ApiError).message).toContain("private_key_jwt");
+    expect(upstream.tokenRequests()).toBe(0);
+  });
+
+  describe("an auth declaring an issuer", () => {
+    const presented: boolean[] = [];
+    const issuerCtx = () => ({
+      ...connectCtx,
+      integrationId: ISSUER_BOUND,
+      onGrantPresented: () => presented.push(true),
+    });
+
+    beforeEach(async () => {
+      presented.length = 0;
+      await seed(manifest(upstream.base, { name: ISSUER_BOUND, auth: { issuer: upstream.base } }));
+    });
+
+    it("posts to the token endpoint its issuer's metadata names", async () => {
+      upstream.setMetadata({ issuer: upstream.base, token_endpoint: `${upstream.base}/token` });
+      upstream.setToken({ access_token: "at-fresh", token_type: "Bearer", expires_in: 3600 });
+
+      const conn = await submit({ refresh_token: "rt-submitted" }, issuerCtx());
+
+      expect(conn).not.toBeInstanceOf(Error);
+      expect(upstream.tokenRequests()).toBe(1);
+      expect(presented).toEqual([true]);
+    });
+
+    it("sends nothing to a token endpoint its issuer's metadata contradicts", async () => {
+      upstream.setMetadata({ issuer: upstream.base, token_endpoint: `${upstream.base}/other` });
+
+      const err = await submit({ refresh_token: "rt-submitted" }, issuerCtx());
+
+      expect((err as ApiError).status).toBe(400);
+      expect((err as ApiError).code).toBe("invalid_request");
+      expect((err as ApiError).message).toContain("token_endpoint");
+      expect(upstream.tokenRequests()).toBe(0);
+      expect(presented).toEqual([]);
+    });
+
+    it("sends nothing while its issuer's metadata cannot be read", async () => {
+      upstream.setMetadata(null);
+
+      const err = await submit({ refresh_token: "rt-submitted" }, issuerCtx());
+
+      expect((err as ApiError).status).toBe(502);
+      expect((err as ApiError).code).toBe("login_upstream_unavailable");
+      expect((err as ApiError).extensions?.grant_may_be_redeemed).toBeUndefined();
+      expect(upstream.tokenRequests()).toBe(0);
+      expect(presented).toEqual([]);
+    });
   });
 });

@@ -51,6 +51,7 @@
             "refresh_token": {
               "type": "string",
               "title": "Refresh token Garmin",
+              "writeOnly": true,
               "description": "Obtenu une fois sur votre ordinateur avec python-garminconnect : `uv run --with garminconnect python -c \"from garminconnect import Garmin; import getpass, json; g = Garmin(email=input('Email: '), password=getpass.getpass('Mot de passe: '), prompt_mfa=lambda: input('Code MFA: ')); g.login(); print(json.loads(g.client.dumps())['di_refresh_token'])\"`. Il reste valable 30 jours sans usage et Appstrate le renouvelle à chaque rafraîchissement : collez-le tel quel, ne le partagez pas.",
               "minLength": 20
             }

@@ -131,8 +131,8 @@ export async function performTokenRequest(
   //     credentials travel in the Authorization: Basic header.
   //   - client_secret_post:  client_id + client_secret in body, no Basic header.
   //   - none (public client): client_id in body, NO client_secret, NO Basic
-  //     header. RFC 6749 §6 + §3.2.1: a public client MUST authenticate
-  //     itself by including its client_id in the request.
+  //     header. RFC 6749 §3.2.1: a public client identifies itself by its
+  //     client_id in the request — identification, not authentication.
   const tokenAuthMethod = ctx.tokenEndpointAuthMethod ?? "client_secret_basic";
   // Same invariant as the initial exchange: the caller hands us a method and a
   // secret that belong together, or nothing is sent at all.

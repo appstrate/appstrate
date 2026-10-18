@@ -11,6 +11,7 @@ import i18n, { i18nReady } from "../../i18n.ts";
 import { toApiError } from "../../api/client.ts";
 import {
   connectSubmitBody,
+  hostedConnectErrorMessage,
   missingVariables,
   submitHostedConnect,
   usesAuthorizationFlow,
@@ -195,5 +196,33 @@ describe("variableFieldErrors", () => {
       byName: {},
       complete: false,
     });
+  });
+});
+
+describe("hostedConnectErrorMessage", () => {
+  const upstream = (extensions: Record<string, unknown>) =>
+    toApiError(
+      new Response(
+        JSON.stringify({
+          status: 502,
+          code: "login_upstream_unavailable",
+          detail: "The service could not complete the login. Try again later.",
+          ...extensions,
+        }),
+        { status: 502, headers: { "content-type": "application/problem+json" } },
+      ),
+    );
+
+  it("adds that the grant may be spent when the server flags it", async () => {
+    expect(hostedConnectErrorMessage(await upstream({ grant_may_be_redeemed: true }))).toBe(
+      "Le service n'a pas pu terminer la connexion. Réessayez plus tard. " +
+        "Le service a peut-être déjà consommé ce jeton : si une nouvelle tentative est refusée, obtenez-en un nouveau.",
+    );
+  });
+
+  it("says only the refusal otherwise", async () => {
+    expect(hostedConnectErrorMessage(await upstream({}))).toBe(
+      "Le service n'a pas pu terminer la connexion. Réessayez plus tard.",
+    );
   });
 });

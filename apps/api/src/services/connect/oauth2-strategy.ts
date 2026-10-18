@@ -14,7 +14,7 @@
  * An auth declaring `connect.login` (`acquiresByConnectLogin`, AFPS §7.7) has no
  * `begin`: `complete` takes the submitted `fields`, renders the login's grant from
  * them and posts it to the token endpoint with the auth's client — the token request
- * a later refresh sends — then extracts identity and persists the same way.
+ * a later refresh sends — then extracts identity (no `id_token`) and persists the same way.
  *
  * Re-acquisition (refresh) is not a strategy method — the live resolvers call
  * `refreshConnectionCredential`, since only `oauth2` refreshes.
@@ -41,6 +41,7 @@ import {
 import {
   getRemoteSource,
   hasPerConnectionAuthServer,
+  toSupportedTokenEndpointAuthMethod,
   type AfpsManifestAuth,
 } from "../integration-manifest-helpers.ts";
 import { resolveConnectionVariables } from "./connection-variables.ts";
@@ -98,8 +99,11 @@ function refreshTokenIssuance(auth: Record<string, unknown>): string | undefined
  * Build the identity source for `extractIdentity`. Three layers, applied in
  * order so later layers don't overwrite earlier ones:
  *   1. Token response top-level (some IdPs put identity there).
- *   2. `id_token` JWT claims — OIDC providers. No sig check: the channel that
- *      delivered the token was already vetted; claims are identity hints only.
+ *   2. `id_token` JWT claims — OIDC providers, on the authorization-code flow only
+ *      (`readIdToken`). No sig check: the channel that delivered the token was already
+ *      vetted; claims are identity hints only. A `connect.login` token request answers a
+ *      grant the user brought, with no nonce or authorization request to tie an `id_token`
+ *      to (OIDC Core §3.1.3.7 validation is not performed), so its claims are not read.
  *   3. `userinfoUrl` GET — non-OIDC OAuth2 (GitHub, Slack, Notion, …).
  *      Without it, accountId falls back to "default" and every new
  *      connection collapses onto the same row.
@@ -109,9 +113,10 @@ async function identitySourceFor(
   accessToken: string,
   userinfoUrl: string | undefined,
   log: { packageId: string; authKey: string },
+  readIdToken: boolean,
 ): Promise<Record<string, unknown>> {
   const identitySource: Record<string, unknown> = { ...tokenResponse };
-  const idToken = tokenResponse.id_token;
+  const idToken = readIdToken ? tokenResponse.id_token : undefined;
   if (typeof idToken === "string") {
     const claims = decodeJwtPayload(idToken);
     if (claims) {
@@ -243,6 +248,35 @@ const MAY_BE_REDEEMED =
   "The service may have redeemed the submitted grant: if a retry is refused, obtain a new one.";
 
 /**
+ * `err` once the token request may have redeemed the submitted grant: its detail says so, and the
+ * RFC 9457 extension member `grant_may_be_redeemed: true` lets a client say it in its own words.
+ */
+function mayHaveRedeemed(err: ApiError): ApiError {
+  return new ApiError({
+    status: err.status,
+    code: err.code,
+    title: err.title,
+    detail: `${err.message} ${MAY_BE_REDEEMED}`,
+    param: err.param,
+    retryAfter: err.retryAfter,
+    errors: err.fieldErrors,
+    headers: err.headers,
+    extensions: { ...err.extensions, grant_may_be_redeemed: true },
+    cause: err.cause ?? err,
+  });
+}
+
+/** An auth this platform cannot connect yet: an administrator has something to set up. */
+function connectionNotReady(detail: string): ApiError {
+  return new ApiError({
+    status: 409,
+    code: "connection_not_ready",
+    title: "Connection Not Ready",
+    detail,
+  });
+}
+
+/**
  * A failed `connect.login` token request as its API error. Unlike a refresh — where only
  * `invalid_grant` condemns a stored credential — a grant typed into a form that the token endpoint
  * answers with a 400 or 401 (RFC 6749 §5.2) is unusable as submitted. Any other 4xx (a 403 is
@@ -277,7 +311,7 @@ function tokenRequestRefusal(err: RefreshError): ApiError {
     return loginUpstreamUnavailable(undefined);
   }
   // A timeout, a 5xx or an unusable 2xx may follow a redemption of a rotating grant.
-  return loginUpstreamUnavailable(undefined, MAY_BE_REDEEMED);
+  return mayHaveRedeemed(loginUpstreamUnavailable(undefined));
 }
 
 /** A grant the submitted fields cannot render, as its 400; a manifest fault stays the caller's 500. */
@@ -424,6 +458,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       result.accessToken,
       await resolveUserinfoUrl(server, log),
       log,
+      true,
     );
 
     const { accountId, identityClaims } = extractIdentity(manifest, result.authKey, identitySource);
@@ -593,25 +628,55 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     // auth with no usable client (403); what is left is the chosen client gone by now.
     if (!tokenContext) {
       logger.warn("Integration connect.login: no token request context", log);
-      throw new ApiError({
-        status: 409,
-        code: "connection_not_ready",
-        title: "Connection Not Ready",
-        detail:
-          "This integration is not ready to be connected. Ask an administrator to finish setting it up, then try again.",
-      });
+      throw connectionNotReady(
+        "This integration is not ready to be connected. Ask an administrator to finish setting it up, then try again.",
+      );
+    }
+    // A client authentication `performTokenRequest` does not implement (`private_key_jwt`,
+    // `client_secret_jwt`, `tls_client_auth`, …) narrows to "unspecified", which would send Basic.
+    const declaredMethod = auth.token_endpoint_auth_method;
+    if (
+      tokenContext.tokenEndpointAuthMethod === undefined &&
+      declaredMethod !== undefined &&
+      toSupportedTokenEndpointAuthMethod(declaredMethod) === undefined
+    ) {
+      throw connectionNotReady(
+        `This integration's OAuth client authenticates with '${declaredMethod}', which this platform does not support. Ask an administrator to register a client using client_secret_basic, client_secret_post or none.`,
+      );
+    }
+    const server = authorizationServer(manifest, auth, resolved.issuer);
+    // AFPS §7.3 client binding: the client is presented only to its issuer's own token endpoint.
+    if (server.issuer && !hasPerConnectionAuthServer(manifest, auth)) {
+      const metadata = await resolveOAuthEndpoints({ issuer: server.issuer });
+      // Unverifiable is not verified: nothing is sent until the issuer's metadata answers.
+      if (metadata.issuer === undefined) {
+        logger.warn("Integration connect.login: issuer metadata unavailable", log);
+        throw loginUpstreamUnavailable(undefined);
+      }
+      assertEndpointsMatchMetadata(
+        ctx.integrationId,
+        ctx.authKey,
+        { token_endpoint: tokenContext.tokenEndpoint },
+        metadata,
+      );
     }
 
     let exchanged: RefreshExchangeResult;
     try {
       exchanged = await performTokenRequest(tokenContext, grant, {
         label: `Integration connect.login for '${ctx.integrationId}' auth '${ctx.authKey}'`,
-        // RFC 6749 §6 / AFPS §7.7: a response without `refresh_token` keeps the submitted one.
-        ...(typeof credentials.refresh_token === "string"
-          ? { keepRefreshToken: credentials.refresh_token }
+        // RFC 6749 §6 / AFPS §7.7: a refresh-token grant answered without `refresh_token` keeps
+        // the one it presented.
+        ...(grant.grant_type === "refresh_token" && grant.refresh_token
+          ? { keepRefreshToken: grant.refresh_token }
           : {}),
       });
     } catch (err) {
+      // Every other throw is the request refused before sending (a malformed grant, an
+      // incoherent client); only the egress guard's refusal of a built request is also unsent.
+      if (err instanceof RefreshError && !(err.cause instanceof SsrfBlockedError)) {
+        ctx.onGrantPresented?.();
+      }
       if (!(err instanceof RefreshError)) throw err;
       logger.warn("Integration connect.login token request refused", {
         ...log,
@@ -620,21 +685,39 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       });
       throw tokenRequestRefusal(err);
     }
+    ctx.onGrantPresented?.();
 
     // The request may have redeemed the submitted grant (a rotating server invalidates a refresh
     // token), so a failure from here on must say so.
     const { parsed, raw } = exchanged;
     try {
+      // RFC 6749 §5.1 / §7.1: the delivery sends the token as a bearer token (RFC 6750); a token of
+      // another type would fail every call, and its absence violates §5.1.
+      const tokenType = raw.token_type;
+      if (typeof tokenType !== "string" || tokenType.toLowerCase() !== "bearer") {
+        throw new ApiError({
+          status: 502,
+          code: "login_upstream_unavailable",
+          title: "Login Upstream Unavailable",
+          detail:
+            typeof tokenType === "string"
+              ? `The service issued a token of type '${tokenType}', not a bearer token: this integration cannot use it.`
+              : "The service issued a token without a token_type: this integration uses bearer tokens only.",
+        });
+      }
       const identitySource = await identitySourceFor(
         raw,
         parsed.accessToken,
-        await resolveUserinfoUrl(authorizationServer(manifest, auth, resolved.issuer), log),
+        await resolveUserinfoUrl(server, log),
         log,
+        false,
       );
       const { accountId, identityClaims } = extractIdentity(manifest, ctx.authKey, identitySource);
       assertRequiredIdentityClaims(manifest, ctx.authKey, identityClaims);
 
-      const scopesGranted = parsed.scopesReturned ?? [];
+      // RFC 6749 §5.1: a response without `scope` granted the scope requested.
+      const scopesGranted =
+        parsed.scopesReturned ?? grant.scope?.split(" ").filter((s) => s !== "") ?? [];
       return await saveIntegrationConnection(ctx.scope, {
         packageId: ctx.integrationId,
         authKey: ctx.authKey,
@@ -659,27 +742,17 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
         ...log,
         err: String(err),
       });
-      if (!(err instanceof ApiError)) {
-        throw new ApiError({
-          status: 500,
-          code: "internal_error",
-          title: "Internal Error",
-          detail: `The connection could not be stored. ${MAY_BE_REDEEMED}`,
-          cause: err,
-        });
-      }
-      throw new ApiError({
-        status: err.status,
-        code: err.code,
-        title: err.title,
-        detail: `${err.message} ${MAY_BE_REDEEMED}`,
-        param: err.param,
-        retryAfter: err.retryAfter,
-        errors: err.fieldErrors,
-        headers: err.headers,
-        extensions: err.extensions,
-        cause: err,
-      });
+      throw mayHaveRedeemed(
+        err instanceof ApiError
+          ? err
+          : new ApiError({
+              status: 500,
+              code: "internal_error",
+              title: "Internal Error",
+              detail: "The connection could not be stored.",
+              cause: err,
+            }),
+      );
     }
   }
 }

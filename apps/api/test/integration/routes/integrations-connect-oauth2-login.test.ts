@@ -25,6 +25,8 @@ let restoreEgress: () => void;
 let origin: string;
 /** The `refresh_token` each token request carried. */
 let exchanged: string[] = [];
+/** The token endpoint's next answer status: a 503 is a failure after the grant arrived. */
+let tokenStatus = 200;
 
 beforeAll(() => {
   restoreEgress = allowLoopbackOAuthEgress();
@@ -35,9 +37,13 @@ beforeAll(() => {
       if (new URL(req.url).pathname !== "/token") return new Response("no page", { status: 404 });
       const form = new URLSearchParams(await req.text());
       exchanged.push(form.get("refresh_token") ?? "");
+      if (tokenStatus !== 200) {
+        return Response.json({ error: "server_error" }, { status: tokenStatus });
+      }
       return Response.json({
         access_token: "at",
         refresh_token: "rt-next",
+        token_type: "Bearer",
         expires_in: 3600,
         user_id: "acct-42",
       });
@@ -65,12 +71,45 @@ afterAll(() => {
   initSystemIntegrations([]);
 });
 
+/** Open the hosted form once (mint → dispatch → context) and submit it as often as asked. */
+async function openHostedForm(ctx: TestContext) {
+  const app = getTestApp();
+  const mint = await app.request(
+    `/api/integrations/${INTEGRATION_ID}/auths/account/connect/session`,
+    {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+  const token = new URL(
+    ((await mint.json()) as { connect_url: string }).connect_url,
+  ).searchParams.get("token")!;
+  const start = await app.request(
+    `/api/integrations/connect/start?token=${encodeURIComponent(token)}`,
+    { redirect: "manual" },
+  );
+  const cookie = `appstrate_connect=${start.headers.get("set-cookie")!.match(/appstrate_connect=([^;]+)/)![1]}`;
+  const { csrf } = (await (
+    await app.request("/api/integrations/connect/context", { headers: { Cookie: cookie } })
+  ).json()) as { csrf: string };
+  return (credentials: Record<string, unknown>) =>
+    Promise.resolve(
+      app.request("/api/integrations/connect/submit", {
+        method: "POST",
+        headers: { Cookie: cookie, "Content-Type": "application/json", "x-connect-csrf": csrf },
+        body: JSON.stringify({ credentials }),
+      }),
+    );
+}
+
 describe("oauth2 acquired by connect.login — connect routes", () => {
   let ctx: TestContext;
 
   beforeEach(async () => {
     await truncateAll();
     exchanged = [];
+    tokenStatus = 200;
     ctx = await createTestContext({ orgSlug: "myorg" });
     await seedPackage({
       id: INTEGRATION_ID,
@@ -137,6 +176,49 @@ describe("oauth2 acquired by connect.login — connect routes", () => {
       .from(integrationConnections)
       .where(eq(integrationConnections.integrationId, INTEGRATION_ID));
     expect(rows).toEqual([{ accountId: "acct-42", clientRef: "mobile-sso-sys" }]);
+  });
+
+  it("the hosted form presents its grant once: a concurrent second submission is refused", async () => {
+    const submit = await openHostedForm(ctx);
+
+    const statuses = (
+      await Promise.all([
+        submit({ refresh_token: "rt-submitted" }),
+        submit({ refresh_token: "rt-submitted" }),
+      ])
+    )
+      .map((r) => r.status)
+      .sort();
+
+    expect(statuses).toEqual([200, 404]);
+    expect(exchanged).toEqual(["rt-submitted"]);
+  });
+
+  it("the hosted form is spent once the token request may have redeemed the grant", async () => {
+    const submit = await openHostedForm(ctx);
+    tokenStatus = 503;
+
+    const first = await submit({ refresh_token: "rt-submitted" });
+    expect(first.status).toBe(502);
+    expect(((await first.json()) as Record<string, unknown>).grant_may_be_redeemed).toBe(true);
+    expect(first.headers.get("set-cookie")).toContain("appstrate_connect=;");
+    tokenStatus = 200;
+    const again = await submit({ refresh_token: "rt-submitted" });
+
+    expect(again.status).toBe(404);
+    expect(exchanged).toEqual(["rt-submitted"]);
+  });
+
+  it("the hosted form can be submitted again after a refusal before any token request", async () => {
+    const submit = await openHostedForm(ctx);
+
+    const invalid = await submit({ token: "rt-submitted" });
+    expect(invalid.status).toBe(400);
+    expect(exchanged).toEqual([]);
+    const fixed = await submit({ refresh_token: "rt-submitted" });
+
+    expect(fixed.status).toBe(200);
+    expect(exchanged).toEqual(["rt-submitted"]);
   });
 
   it("the hosted dispatch hands the auth to the form, never to an authorization server", async () => {

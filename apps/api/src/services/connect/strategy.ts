@@ -51,6 +51,11 @@ export interface ConnectContext {
    * minting client can, so only the strategy passing a `clientRef` forwards it.
    */
   onScopeWidened?: (widened: WidenedConnection) => void;
+  /**
+   * Told once an oauth2 `connect.login` grant may have reached the token endpoint: from then on
+   * a refusal may follow a redemption, so the hosted form's single-use page session stays spent.
+   */
+  onGrantPresented?: () => void;
 }
 
 /** Options for the interactive `begin` step (OAuth2 authorize URL). */
@@ -173,16 +178,13 @@ export function loginUrlRefused(fields: readonly string[]): ApiError {
   });
 }
 
-/**
- * A login target that is unreachable, throttling or failing; `retryAfter` is its own, in seconds.
- * `note` is a sentence on what the failed attempt may have consumed.
- */
-export function loginUpstreamUnavailable(retryAfter: number | undefined, note?: string): ApiError {
+/** A login target that is unreachable, throttling or failing; `retryAfter` is its own, in seconds. */
+export function loginUpstreamUnavailable(retryAfter: number | undefined): ApiError {
   return new ApiError({
     status: 502,
     code: "login_upstream_unavailable",
     title: "Login Upstream Unavailable",
-    detail: `The service could not complete the login.${note ? ` ${note}` : ""} Try again later.`,
+    detail: "The service could not complete the login. Try again later.",
     ...(retryAfter !== undefined ? { retryAfter } : {}),
   });
 }
