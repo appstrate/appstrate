@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { acquiresByRefreshToken } from "@appstrate/core/integration";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { Spinner } from "@appstrate/ui/components/spinner";
@@ -100,7 +101,9 @@ export function HostedConnectPage() {
 
   const fields = context?.variables ? variableFields(context.variables.schema) : [];
   const variableLabels = Object.fromEntries(fields.map((f) => [f.name, f.title ?? f.name]));
-  const isOAuth = context?.auth.type === "oauth2";
+  // An auth acquired by refresh token collects it on this form, like any credential.
+  const isOAuth =
+    context !== null && context.auth.type === "oauth2" && !acquiresByRefreshToken(context.auth);
   const variablesLocked = Object.keys(context?.variables?.values ?? {}).length > 0;
 
   const changeVariable = (name: string, value: string) => {
@@ -136,7 +139,7 @@ export function HostedConnectPage() {
     try {
       const outcome = await submitHostedConnect(
         {
-          authType: context.auth.type,
+          authorizationFlow: isOAuth,
           credentials: values,
           variableNames,
           variableValues,

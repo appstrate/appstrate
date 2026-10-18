@@ -78,6 +78,40 @@ export const API_META_KEY = "dev.appstrate/api";
 
 const APPSTRATE_META_NAMESPACE = API_META_KEY.slice(0, API_META_KEY.indexOf("/") + 1);
 
+// ─────────────────────────────────────────────
+// Appstrate vendor extension: OAuth2 (`auths.{key}._meta["dev.appstrate/oauth"]`)
+// ─────────────────────────────────────────────
+
+/** `_meta` key of an auth carrying Appstrate's OAuth2 extensions (`scope_separator`, `refresh_token_issuance`, `acquisition`). */
+const OAUTH_META_KEY = "dev.appstrate/oauth";
+
+/**
+ * How an `oauth2` auth's connections are acquired, from `_meta["dev.appstrate/oauth"].acquisition`:
+ *
+ * - `"authorization_code"` (the default): the browser authorization-code flow.
+ * - `"refresh_token"`: the user submits a refresh token obtained outside Appstrate, for a provider
+ *   whose login no redirect flow can drive (a mobile-app SSO). The platform exchanges it at
+ *   `token_endpoint` (RFC 6749 §6) before storing the connection, then refreshes it like any
+ *   oauth2 connection. The token is collected through `credentials.schema` (a required
+ *   `refresh_token` string), so every fields form serves it. `authorization_endpoint`, which
+ *   AFPS §7.3 still requires, names where the user signs in; nothing is redirected there.
+ */
+const OAUTH_ACQUISITIONS = ["authorization_code", "refresh_token"] as const;
+
+/** The declared `_meta["dev.appstrate/oauth"].acquisition`, unvalidated. */
+function declaredOAuthAcquisition(auth: object): unknown {
+  const meta = (auth as { _meta?: unknown })._meta;
+  if (!meta || typeof meta !== "object") return undefined;
+  const oauthMeta = (meta as Record<string, unknown>)[OAUTH_META_KEY];
+  if (!oauthMeta || typeof oauthMeta !== "object") return undefined;
+  return (oauthMeta as Record<string, unknown>).acquisition;
+}
+
+/** True for an `oauth2` auth whose connections are acquired by submitting a refresh token. */
+export function acquiresByRefreshToken(auth: { type?: unknown; _meta?: unknown }): boolean {
+  return auth.type === "oauth2" && declaredOAuthAcquisition(auth) === "refresh_token";
+}
+
 /**
  * Resumable-upload protocols an api_call auth MAY advertise under
  * `_meta["dev.appstrate/api"].auths.{key}.upload_protocols`. This is an open
@@ -434,6 +468,79 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
     const identityClaims = (auth as { identity_claims?: Record<string, string> }).identity_claims;
     for (const [claim, path] of Object.entries(identityClaims ?? {})) {
       checkJsonPath(path, ["identity_claims", claim]);
+    }
+
+    // (1h) `_meta["dev.appstrate/oauth"].acquisition`: a known value, on oauth2 only. A
+    // refresh-token acquisition exchanges at a literal `token_endpoint` and collects the token
+    // through `credentials.schema`, so both must be there.
+    const acquisition = declaredOAuthAcquisition(auth);
+    const acquisitionPath = ["auths", authKey, "_meta", OAUTH_META_KEY, "acquisition"];
+    if (acquisition !== undefined) {
+      if (!(OAUTH_ACQUISITIONS as readonly unknown[]).includes(acquisition)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `acquisition must be one of ${OAUTH_ACQUISITIONS.map((a) => `"${a}"`).join(", ")}`,
+          path: acquisitionPath,
+        });
+      } else if (auth.type !== "oauth2") {
+        ctx.addIssue({
+          code: "custom",
+          message: `acquisition is an oauth2 setting; auth '${authKey}' is type '${auth.type}'`,
+          path: acquisitionPath,
+        });
+      }
+    }
+    if (acquiresByRefreshToken(auth)) {
+      const tokenEndpoint = (auth as { token_endpoint?: unknown }).token_endpoint;
+      if (typeof tokenEndpoint !== "string" || tokenEndpoint.includes("{$")) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            'acquisition "refresh_token" needs a literal token_endpoint: the submitted token is exchanged there before the connection is stored',
+          path: ["auths", authKey, "token_endpoint"],
+        });
+      }
+      // The connection's server is the literal one: no server chosen per connection or discovered
+      // from a remote source (those register a client with an authorization flow), and no scope
+      // catalog (a submitted token carries no consent the platform could judge).
+      const issuer = (auth as { issuer?: unknown }).issuer;
+      if (typeof issuer === "string" && issuer.includes("{$")) {
+        ctx.addIssue({
+          code: "custom",
+          message: 'acquisition "refresh_token" cannot use a templated issuer',
+          path: ["auths", authKey, "issuer"],
+        });
+      }
+      if ((manifest.source as { kind?: unknown } | undefined)?.kind === "remote") {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            'acquisition "refresh_token" is not available on a remote source, whose authorization server is discovered at connect time',
+          path: ["auths", authKey, "_meta", OAUTH_META_KEY, "acquisition"],
+        });
+      }
+      if ((auth as { scope_catalog?: unknown }).scope_catalog !== undefined) {
+        ctx.addIssue({
+          code: "custom",
+          message: 'acquisition "refresh_token" cannot declare a scope_catalog',
+          path: ["auths", authKey, "scope_catalog"],
+        });
+      }
+      const fields = credentialsSchema as
+        { properties?: Record<string, { type?: unknown }>; required?: unknown } | undefined;
+      const field = fields?.properties?.refresh_token;
+      if (
+        field?.type !== "string" ||
+        !Array.isArray(fields?.required) ||
+        !fields.required.includes("refresh_token")
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          message:
+            'acquisition "refresh_token" needs credentials.schema to declare a required string property refresh_token: it is the field the user fills',
+          path: ["auths", authKey, "credentials", "schema"],
+        });
+      }
     }
 
     // (1g) Entries templated with `{$credential.<field>}` reference declared, required

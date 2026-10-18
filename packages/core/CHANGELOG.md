@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`acquiresByRefreshToken(auth)`** (`@appstrate/core/integration`): true for an `oauth2` auth
+  declaring `_meta["dev.appstrate/oauth"].acquisition: "refresh_token"` — connected by submitting a
+  refresh token the platform exchanges at `token_endpoint`, instead of the authorization-code flow.
+  `integrationManifestSchema` now refuses an unknown `acquisition`, one on a non-oauth2 auth, and a
+  refresh-token acquisition without a literal `token_endpoint` or a required string
+  `refresh_token` in `credentials.schema`.
 - **`isReservedScope(scope)`** and **`INLINE_SHADOW_SCOPE`** (`@appstrate/core/naming`):
   the package scopes the platform owns — `appstrate` (system packages) and `inline`
   (inline runs' shadow packages, `@inline/r-<uuid>`). The API refuses a reserved scope both as

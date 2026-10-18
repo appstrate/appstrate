@@ -40,6 +40,7 @@ import {
   findUnexposedDefaultTools,
   findInvalidScopeTokens,
   scopeTokenSchema,
+  acquiresByRefreshToken,
 } from "../src/integration.ts";
 import { validateManifest, metaSchema } from "../src/validation.ts";
 import { TOOL_NAME_MAX_LEN } from "../src/naming.ts";
@@ -199,6 +200,111 @@ describe("integrationManifestSchema — oauth2 discovery + manual", () => {
     auths.oauth!.identity_claims = { account_id: "$.sub", email: "$.email" };
     auths.oauth!.required_identity_claims = ["sub"];
     expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────
+// OAuth2 — refresh-token acquisition (`_meta["dev.appstrate/oauth"].acquisition`)
+// ─────────────────────────────────────────────
+
+/**
+ * A none-source oauth2 auth acquired by refresh token. AFPS §7.3 still asks for the authorization
+ * endpoint (where the user signs in); the acquisition never sends anyone there.
+ */
+function refreshTokenManifest(auth: Record<string, unknown> = {}): Record<string, unknown> {
+  return baseManifest({
+    source: { kind: "none" },
+    auths: {
+      oauth: {
+        type: "oauth2",
+        authorization_endpoint: "https://idp.example.com/sign-in",
+        token_endpoint: "https://idp.example.com/token",
+        token_endpoint_auth_method: "none",
+        authorized_uris: ["https://api.example.com/**"],
+        credentials: {
+          schema: {
+            type: "object",
+            properties: { refresh_token: { type: "string" } },
+            required: ["refresh_token"],
+          },
+        },
+        delivery: {
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer ",
+            value: "{$credential.access_token}",
+          },
+        },
+        _meta: { "dev.appstrate/oauth": { acquisition: "refresh_token" } },
+        ...auth,
+      },
+    },
+  });
+}
+
+describe("integrationManifestSchema — oauth2 refresh-token acquisition", () => {
+  it("accepts a token endpoint and a required refresh_token field", () => {
+    expect(errorPaths(refreshTokenManifest())).toEqual([]);
+  });
+
+  it("rejects an unknown acquisition value", () => {
+    const m = refreshTokenManifest({
+      _meta: { "dev.appstrate/oauth": { acquisition: "password" } },
+    });
+    expect(errorPaths(m)).toContain("auths.oauth._meta.dev.appstrate/oauth.acquisition");
+  });
+
+  it("rejects acquisition on a non-oauth2 auth", () => {
+    const m = refreshTokenManifest({ type: "custom" });
+    expect(errorPaths(m)).toContain("auths.oauth._meta.dev.appstrate/oauth.acquisition");
+  });
+
+  it("rejects a refresh-token acquisition without a literal token endpoint", () => {
+    const m = refreshTokenManifest({
+      token_endpoint: undefined,
+      issuer: "https://idp.example.com",
+    });
+    expect(errorPaths(m)).toContain("auths.oauth.token_endpoint");
+  });
+
+  it("rejects a refresh-token acquisition whose credentials.schema lacks a required refresh_token string", () => {
+    const optional = refreshTokenManifest({
+      credentials: {
+        schema: { type: "object", properties: { refresh_token: { type: "string" } } },
+      },
+    });
+    expect(errorPaths(optional)).toContain("auths.oauth.credentials.schema");
+    const missing = refreshTokenManifest({ credentials: undefined });
+    expect(errorPaths(missing)).toContain("auths.oauth.credentials.schema");
+  });
+
+  it("rejects a refresh-token acquisition with a templated issuer, a remote source or a scope catalog", () => {
+    expect(
+      errorPaths(refreshTokenManifest({ issuer: "https://{$variable.host}/oauth" })),
+    ).toContain("auths.oauth.issuer");
+    const remote = refreshTokenManifest();
+    remote.source = {
+      kind: "remote",
+      remote: { url: "https://mcp/x", transport: "streamable-http" },
+    };
+    expect(errorPaths(remote)).toContain("auths.oauth._meta.dev.appstrate/oauth.acquisition");
+    expect(
+      errorPaths(refreshTokenManifest({ scope_catalog: [{ value: "read", label: "Read" }] })),
+    ).toContain("auths.oauth.scope_catalog");
+  });
+
+  it("acquiresByRefreshToken reads the declaration on oauth2 only", () => {
+    const meta = { "dev.appstrate/oauth": { acquisition: "refresh_token" } };
+    expect(acquiresByRefreshToken({ type: "oauth2", _meta: meta })).toBe(true);
+    expect(acquiresByRefreshToken({ type: "custom", _meta: meta })).toBe(false);
+    expect(acquiresByRefreshToken({ type: "oauth2" })).toBe(false);
+    expect(
+      acquiresByRefreshToken({
+        type: "oauth2",
+        _meta: { "dev.appstrate/oauth": { acquisition: "authorization_code" } },
+      }),
+    ).toBe(false);
   });
 });
 

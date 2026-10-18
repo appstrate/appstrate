@@ -1564,7 +1564,7 @@ export interface paths {
         };
         /**
          * Hosted connect dispatch (token)
-         * @description Public entry the connect URL points at. Verifies the single-use session token, pins a page cookie, then 302-redirects to the provider OAuth screen (oauth2) or the hosted form (non-oauth, and oauth2 of an integration declaring connection variables, which the form collects before `submitIntegrationConnect` starts the OAuth flow). On failure returns an HTML error page. Authenticated by the signed token, not a session.
+         * @description Public entry the connect URL points at. Verifies the single-use session token, pins a page cookie, then 302-redirects to the provider OAuth screen (oauth2) or the hosted form (non-oauth, oauth2 acquired by refresh token, and oauth2 of an integration declaring connection variables, which the form collects before `submitIntegrationConnect` starts the OAuth flow). On failure returns an HTML error page. Authenticated by the signed token, not a session.
          */
         get: operations["startIntegrationConnect"];
         put?: never;
@@ -1586,7 +1586,7 @@ export interface paths {
         put?: never;
         /**
          * Hosted form credential submit (page cookie + CSRF)
-         * @description Persists credentials entered on the hosted form — or, for an oauth2 auth (reached only when the integration declares connection variables), starts its OAuth flow with the submitted `variables` and returns the provider URL to navigate to; the connection is then created by the callback. Context + actor come from the page cookie; the request carries only the credentials and/or the variables and echoes the CSRF nonce in the `x-connect-csrf` header. An oauth2 refusal mirrors `startIntegrationConnect`: a variable to fix is a 400 `validation_failed` and the form can be resubmitted; another refusal keeps its status with a generic detail, and keeps the page session only when it preceded any request to the authorization server; anything else is a 502 that ends the session.
+         * @description Persists credentials entered on the hosted form (for an oauth2 auth acquired by refresh token, the token is exchanged first) — or, for another oauth2 auth (reached only when the integration declares connection variables), starts its OAuth flow with the submitted `variables` and returns the provider URL to navigate to; the connection is then created by the callback. Context + actor come from the page cookie; the request carries only the credentials and/or the variables and echoes the CSRF nonce in the `x-connect-csrf` header. An oauth2 refusal mirrors `startIntegrationConnect`: a variable to fix is a 400 `validation_failed` and the form can be resubmitted; another refusal keeps its status with a generic detail, and keeps the page session only when it preceded any request to the authorization server; anything else is a 502 that ends the session.
          */
         post: operations["submitIntegrationConnect"];
         delete?: never;
@@ -1646,7 +1646,7 @@ export interface paths {
         put?: never;
         /**
          * Import a connection by submitting credentials directly (programmatic)
-         * @description Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths. For OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).
+         * @description Porte B (programmatic/headless): the backend already holds the credential and submits it directly to create the connection — the server-to-server analogue of the hosted Connect portal. Use for api_key / basic / custom auths, and for an oauth2 auth acquired by refresh token (`_meta["dev.appstrate/oauth"].acquisition: "refresh_token"`): its `refresh_token` credential is exchanged at the token endpoint before the connection is stored, and a token the server refuses is a 400 `login_rejected`, an OAuth client it refuses a 502 `oauth_client_rejected`. For other OAuth2 auths use the headless OAuth start (`initiateIntegrationOAuth`); for interactive/human flows where the secret should never transit the caller, use the hosted Connect portal (`initiateIntegrationConnect`).
          *
          *     A credential the platform mints (the `private_key` of `@appstrate/ssh`) is refused with a 400 naming the field; such an auth connects through the Connect portal (`initiateIntegrationConnect`).
          */
@@ -1668,7 +1668,7 @@ export interface paths {
         put?: never;
         /**
          * Headless OAuth2 PKCE start — returns an authorize URL (programmatic)
-         * @description Porte B (programmatic/headless): returns an `auth_url` the caller redirects the user to itself, then handles completion via the shared `/callback`. For an interactive, platform-hosted flow that also covers non-OAuth auths and keeps the secret off the caller, mint a hosted Connect portal session (`initiateIntegrationConnect`) instead.
+         * @description Porte B (programmatic/headless): returns an `auth_url` the caller redirects the user to itself, then handles completion via the shared `/callback`. An oauth2 auth acquired by refresh token has no authorization flow and is refused with a 400: submit its token through `importIntegrationConnection`. For an interactive, platform-hosted flow that also covers non-OAuth auths and keeps the secret off the caller, mint a hosted Connect portal session (`initiateIntegrationConnect`) instead.
          */
         post: operations["initiateIntegrationOAuth"];
         delete?: never;
@@ -13317,7 +13317,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Redirect to the provider OAuth screen, or to the hosted form (non-oauth, or oauth2 with connection variables). */
+            /** @description Redirect to the provider OAuth screen, or to the hosted form (non-oauth, oauth2 acquired by refresh token, or oauth2 with connection variables). */
             302: {
                 headers: {
                     [name: string]: unknown;
@@ -13385,7 +13385,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    /** @description The credential fields. Required for a non-oauth auth, refused for oauth2. */
+                    /** @description The credential fields. Required for a non-oauth auth and for an oauth2 auth acquired by refresh token, refused for other oauth2 auths. */
                     credentials?: {
                         [key: string]: unknown;
                     };

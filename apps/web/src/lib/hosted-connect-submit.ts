@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// `POST /api/integrations/connect/submit`. An oauth2 auth reaches the form only for connection variables.
+// `POST /api/integrations/connect/submit`. An oauth2 auth reaches the form for connection variables, or
+// for the refresh token it is acquired with.
 
 import type { paths } from "../api/client";
 import type { HandoffStep } from "../components/integration-connect/handoff-steps";
@@ -11,16 +12,17 @@ type ConnectSubmitBody = SubmitPath["requestBody"]["content"]["application/json"
 type ConnectSubmitResponse = SubmitPath["responses"][200]["content"]["application/json"];
 
 interface HostedConnectInput {
-  authType: string;
+  /** The auth connects through an authorization server (oauth2, not acquired by refresh token). */
+  authorizationFlow: boolean;
   credentials: Record<string, string>;
   variableNames: string[] | null;
   variableValues: Record<string, string>;
 }
 
-/** Credentials unless oauth2 (which refuses them); one trimmed value per declared variable. */
+/** Credentials unless an authorization flow (which refuses them); one trimmed value per declared variable. */
 export function connectSubmitBody(input: HostedConnectInput): ConnectSubmitBody {
   const body: ConnectSubmitBody = {};
-  if (input.authType !== "oauth2") body.credentials = input.credentials;
+  if (!input.authorizationFlow) body.credentials = input.credentials;
   if (input.variableNames) {
     body.variables = Object.fromEntries(
       input.variableNames.map((name) => [name, (input.variableValues[name] ?? "").trim()]),
@@ -46,7 +48,7 @@ export async function submitHostedConnect(
   },
 ): Promise<HostedConnectOutcome> {
   const data = await deps.post(connectSubmitBody(input));
-  if (input.authType === "oauth2") {
+  if (input.authorizationFlow) {
     // An empty message renders the generic sentence, not an English one.
     if (!data?.redirect_url) throw new Error("");
     deps.navigate(data.redirect_url);

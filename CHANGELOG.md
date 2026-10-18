@@ -173,6 +173,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   body is retried once from the page; a `403` with a JSON `errors` body is
   reported as is. Only sessions visible to everyone are read; passcode-protected
   links are refused with a clear message.
+- **An oauth2 connection can be acquired by submitting a refresh token.** For a
+  provider whose login no redirect flow can drive (a mobile-app SSO), an oauth2
+  auth declares `_meta["dev.appstrate/oauth"].acquisition: "refresh_token"` and a
+  required `refresh_token` string in its `credentials.schema`. The fields doors
+  (`connect/fields`, the hosted form, which the portal now opens instead of an
+  authorization server) take the token; the platform exchanges it at
+  `token_endpoint` with the auth's default client — the very exchange later
+  refreshes run — before anything is stored, so a dead or spent token is a 400
+  `login_rejected` on the form. The connection is then an ordinary oauth2 one:
+  identity from `userinfo_endpoint`, proactive and on-401 refresh, rotated
+  tokens written back. `connect/oauth2` refuses such an auth. The manifest gate
+  requires the value to be known, on oauth2 only, with a literal
+  `token_endpoint` and the field.
+- **Garmin Connect — an agent reads the owner's activities.**
+  `@appstrate/garmin-connect@1.0.0` lists activities by date and reads their
+  summary, dense track and time series (`details`), laps, heart-rate zones,
+  weather, GPX and original FIT files through `api_call`, on
+  `connectapi.garmin.com`. It is the first auth acquired by refresh token: the
+  user obtains one once with python-garminconnect (Garmin's mobile sign-in, MFA
+  included) and pastes it; Garmin rotates it at each refresh and it lapses after
+  30 days unused. Garmin has no public API for individuals: the integration reads
+  the undocumented API of the Garmin Connect mobile app, which may break, and
+  automated reading may fall outside Garmin's terms of use. `authorized_uris`
+  covers only the read services (activity list, activities, downloads, profile)
+  and `INTEGRATION.md` tells the agent to use `GET` only, but nothing enforces a
+  method: the token can also edit and delete activities on those same paths.
+
+  **Operators:** the auth needs a public client. Declare it in
+  `SYSTEM_INTEGRATIONS` —
+  `{"id":"@appstrate/garmin-connect","clients":[{"id":"garmin-connect-mobile","auth_key":"primary","client_id":"GARMIN_CONNECT_MOBILE_ANDROID_DI_2025Q2","token_endpoint_auth_method":"none"}]}`
+  — or register it as an organization OAuth client. The `client_id` must be the
+  one the refresh token was issued to (python-garminconnect stores it as
+  `di_client_id`).
 
 ### Fixed
 
