@@ -9,7 +9,8 @@
  * the bound set in `connection_ids` — `[]` pins to no connection, no row is no pin.
  * Scope = admin (`user_id IS NULL`, the imposed floor, optionally open to the run's
  * selection via `allow_additional_connections`) OR member (`user_id = caller.id`, the
- * member's selection, never open). Semantics: `packages/db/src/schema/integration-pins.ts`.
+ * member's selection, never open). The resolver binds them (`integration-connection-resolver.ts`);
+ * when a member pin is refused or purged is {@link purgeMemberPins}'s rule.
  *
  * All governance operations — the route layer enforces
  * `requirePermission("integrations", "configure")`; this layer assumes the
@@ -34,13 +35,12 @@ import type {
   IntegrationPin,
 } from "@appstrate/shared-types";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
-import { activatePackageWithin, isPackageActiveHere } from "./space-packages.ts";
-import { activeHereSql } from "./package-activation.ts";
 import {
-  getPackageDisplayName,
-  notEphemeralFilter,
-  orgOrSystemFilter,
-} from "../lib/package-helpers.ts";
+  activatePackageWithin,
+  activePackagesFilter,
+  isPackageActiveHere,
+} from "./space-packages.ts";
+import { getPackageDisplayName } from "../lib/package-helpers.ts";
 import { conflict, notFound } from "../lib/errors.ts";
 import type { Tx } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
@@ -143,10 +143,11 @@ export function pinAudit(connectionIds: string[] | null): AuditPayload | null {
   return connectionIds ? { connectionIds } : null;
 }
 
-/** An admin pin's audited state: its floor and whether the run's selection may add to it. */
-export function adminPinAudit(
-  pin: Pick<PinSummary, "connection_ids" | "allow_additional_connections">,
-): AuditPayload {
+/** A pin row's set and whether the run's selection may add to it — an admin pin's audited state. */
+type PinState = { connectionIds: string[]; allowAdditionalConnections: boolean };
+
+/** {@link PinState} of a pin's wire summary. */
+export function adminPinAudit(pin: PinSummary): PinState {
   return {
     connectionIds: pin.connection_ids,
     allowAdditionalConnections: pin.allow_additional_connections,
@@ -167,7 +168,7 @@ function toPinSummary(pin: PinRow, agentActive: boolean): PinSummary {
 
 /**
  * List every admin pin governing a (space, integration), each with whether its agent is ACTIVE
- * here — the {@link isPackageActiveHere} rule, conjoined on the placement row join: a pin of an agent
+ * here ({@link activePackagesFilter}, as {@link listOpenAdminPinAgents} asks it): a pin of an agent
  * that runs nowhere still stands, and still names its connections. Used by the admin UI to render
  * the per-agent pin section + by the runtime resolver via the dedicated `loadPins` helper (private
  * to the resolver, see integration-connection-resolver.ts).
@@ -176,12 +177,12 @@ export async function listIntegrationPins(
   scope: SpaceScope,
   integrationId: string,
 ): Promise<PinSummary[]> {
-  const active = and(orgOrSystemFilter(scope.orgId), notEphemeralFilter(), activeHereSql());
+  const agentActive = activePackagesFilter(scope, "agent");
   const rows = await db
     .select({
       pin: integrationPins,
       // No package row (left join): every conjunct is NULL, so not active.
-      agentActive: sql<boolean>`coalesce((${active}), false)`.mapWith(Boolean),
+      agentActive: sql<boolean>`coalesce((${agentActive}), false)`.mapWith(Boolean),
     })
     .from(integrationPins)
     .leftJoin(packages, eq(packages.id, integrationPins.packageId))
@@ -203,11 +204,9 @@ export async function listIntegrationPins(
  * integration detail page (so the admin can pick which agent to pin without
  * leaving the integration view).
  *
- * ACTIVE, not "holds a row" ({@link activeHereSql}): a pin names the agent a
+ * ACTIVE, not "holds a row" ({@link activePackagesFilter}): a pin names the agent a
  * run will use this connection for, and a deactivated agent runs nowhere, so
- * offering it as a pin target would offer a pin that can never fire. Written
- * in the query builder rather than as raw SQL so the rule is CONJOINED here
- * rather than copied.
+ * offering it as a pin target would offer a pin that can never fire.
  */
 export async function listAgentsConsumingIntegration(
   scope: SpaceScope,
@@ -219,10 +218,7 @@ export async function listAgentsConsumingIntegration(
     .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
     .where(
       and(
-        eq(packages.type, "agent"),
-        orgOrSystemFilter(scope.orgId),
-        notEphemeralFilter(),
-        activeHereSql(),
+        activePackagesFilter(scope, "agent"),
         sql`(${packages.draftManifest} -> 'dependencies' -> 'integrations') ? ${integrationId}`,
       ),
     )
@@ -252,11 +248,7 @@ interface SetPinInput {
  *
  * Opening is refused with 409 `connection_additions_conflict` while the space enforces a default
  * for the integration (an enforced default is always closed, and the two would otherwise disagree
- * on what may add). A member pin never survives under a closed admin pin: a write that stores the
- * pin closed, or replaces a closed one, deletes the member pins of its (space, agent, integration)
- * in the same transaction ({@link purgeMemberPins}) — masked by the closed floor, they would
- * otherwise come back as additions or as an ungoverned selection nobody chose again. Only a write
- * where they were live before and stay live after keeps them: none → open, open → open.
+ * on what may add). Purges the member pins it masks ({@link purgeMemberPins}).
  */
 export async function upsertIntegrationPin(
   scope: SpaceScope,
@@ -275,23 +267,13 @@ export async function upsertIntegrationPin(
 }
 
 /** A member pin a governance write or delete purged: its owner, its agent and the set it held. */
-export interface PurgedMemberPin {
-  userId: string;
-  agentPackageId: string;
-  connectionIds: string[];
-}
+export type PurgedMemberPin = { userId: string; agentPackageId: string; connectionIds: string[] };
 
-/** A member pin an admin pin write or delete purged, as its audit records it: the pin's own agent. */
-type ClearedMemberPin = Omit<PurgedMemberPin, "agentPackageId">;
-
-/**
- * A pin write: the pin it replaced (`null` when there was none), the stored pin, and the member
- * pins it purged (`[]` for a member pin write and for none → open, open → open).
- */
+/** A pin write: the state it replaced (`null` when there was none), the stored pin, the purge. */
 interface PinWrite {
-  previous: PinSummary | null;
+  previous: PinState | null;
   pin: PinSummary;
-  memberPinsCleared: ClearedMemberPin[];
+  memberPinsCleared: PurgedMemberPin[];
 }
 
 /** The one pin row of (space, agent, integration, owner) — `userId: null` is the admin pin. */
@@ -310,13 +292,21 @@ function pinKey(
 }
 
 /**
- * Delete, on `tx`, the member pins of (space, integration) a governance admitting no addition masks
- * — one agent's (the triple an admin pin governs), or, for `agentPackageId: null`, every agent's
- * (around an enforced org default: a closed admin pin left none, an open one is closed by it).
- * Every one, by the rule "a member pin never survives under a closed floor" — or, given the `floor`
- * of an open admin pin being deleted, only those whose set strictly narrows it ({@link withinFloor}):
- * under the floor they added nothing, ungoverned they would bind as written. Returns them by agent
- * then owner, for the audit.
+ * Delete, on `tx`, the member pins of (space, integration) — one agent's, or every agent's for
+ * `agentPackageId: null` — and return them by agent then owner, for the audit.
+ *
+ * The rule: no member pin survives under a governance admitting no addition (a closed admin pin,
+ * an enforced org default). Masked there, it would otherwise come back unasked — as an addition, or
+ * as an ungoverned selection nobody chose again. So, in the writer's transaction:
+ *   - an admin pin write purges its (space, agent, integration) when the pin is stored closed or
+ *     replaces a closed one; none → open and open → open keep them;
+ *   - an admin pin delete purges them when the pin was closed, or open under an enforced default
+ *     (which masks them from then on); deleting an open pin otherwise passes its `floor`, and only
+ *     those strictly narrowing it go ({@link withinFloor}): they added nothing, and ungoverned would
+ *     bind fewer connections as written;
+ *   - an org default write or delete purges every agent's when the default is, or was, enforced (a
+ *     closed admin pin left none, and the enforced default closes an open one).
+ * A member pin write under such a governance is refused instead ({@link assertMemberPinBinds}).
  */
 export async function purgeMemberPins(
   tx: Tx,
@@ -359,18 +349,6 @@ export async function purgeMemberPins(
     );
 }
 
-/** {@link purgeMemberPins} of one admin pin's triple, as its audit records them. */
-async function purgeAdminPinMemberPins(
-  tx: Tx,
-  scope: SpaceScope,
-  agentPackageId: string,
-  integrationId: string,
-  floor?: readonly string[],
-): Promise<ClearedMemberPin[]> {
-  const purged = await purgeMemberPins(tx, scope, integrationId, agentPackageId, floor);
-  return purged.map(({ userId, connectionIds }) => ({ userId, connectionIds }));
-}
-
 /**
  * The agents, active in the space, whose admin pin of `integrationId` is open to additions — the
  * pins an enforced default would contradict. An inactive agent runs nowhere (the resolver closes
@@ -393,7 +371,7 @@ export async function listOpenAdminPinAgents(
         eq(integrationPins.integrationId, integrationId),
         isNull(integrationPins.userId),
         eq(integrationPins.allowAdditionalConnections, true),
-        activeHereSql(),
+        activePackagesFilter(scope, "agent"),
       ),
     )
     .orderBy(integrationPins.packageId);
@@ -448,8 +426,11 @@ async function upsertPin(args: {
     if (userIdValue !== null) {
       await assertMemberPinBinds(tx, scope, agentPackageId, integrationId, connectionIds);
     }
-    const [previousRow] = await tx
-      .select()
+    const [previous] = await tx
+      .select({
+        connectionIds: integrationPins.connectionIds,
+        allowAdditionalConnections: integrationPins.allowAdditionalConnections,
+      })
       .from(integrationPins)
       .where(pinKey(scope, agentPackageId, integrationId, userIdValue))
       .limit(1);
@@ -471,16 +452,14 @@ async function upsertPin(args: {
       RETURNING connection_ids, allow_additional_connections, created_at, updated_at
     `),
     );
-    // Written closed, or replacing a closed pin: the member pins were, or would be, masked.
     const closedBeforeOrAfter =
-      !allow || (previousRow !== undefined && !previousRow.allowAdditionalConnections);
+      !allow || (previous !== undefined && !previous.allowAdditionalConnections);
     const memberPinsCleared =
       userIdValue === null && closedBeforeOrAfter
-        ? await purgeAdminPinMemberPins(tx, scope, agentPackageId, integrationId)
+        ? await purgeMemberPins(tx, scope, integrationId, agentPackageId)
         : [];
-    // A write requires the agent active here (`assertAgentActiveHere`), before and after.
     return {
-      previous: previousRow ? toPinSummary(previousRow, true) : null,
+      previous: previous ?? null,
       memberPinsCleared,
       pin: {
         agent_package_id: agentPackageId,
@@ -491,6 +470,7 @@ async function upsertPin(args: {
         allow_additional_connections: integrationPins.allowAdditionalConnections.mapFromDriverValue(
           row!.allow_additional_connections,
         ) as boolean,
+        // A write requires the agent active here (`assertAgentActiveHere`).
         agent_active: true,
         createdAt: (
           integrationPins.createdAt.mapFromDriverValue(row!.created_at) as Date
@@ -568,22 +548,11 @@ async function assertMemberPinBinds(
 
 /**
  * Delete one pin row — the admin pin for `userId: null`, else that member's — and disable the
- * schedules that leaves unnamed ({@link removeNamingLayer}); `previous` is the set it held, `null`
- * when there was none, and `previousAllowedAdditions` whether that row was open to additions
- * (always `false` for a member pin and when there was none).
- *
- * Deleting a CLOSED admin pin purges the member pins of its (space, agent, integration)
- * ({@link purgeMemberPins}) inside the removal, before the schedules are judged: masked until now,
- * they never revive as the member's ungoverned selection, and a schedule that relied on one is
- * disabled as unnamed with the rest. So does deleting an OPEN one while the space enforces a default
- * for the integration: that default governs the agent from now on, and masks them all. Deleting an
- * OPEN admin pin otherwise keeps those that added a connection — live additions until now, they
- * stay the member's selection — and purges those strictly narrowing the floor ({@link withinFloor}),
- * which added nothing and would otherwise bind fewer connections as written. `memberPinsCleared` is
- * `[]` on every other delete. Either way the admin
- * pin's floor is removed, so the schedules of the agent narrowing it are disabled too
- * (`removedFloor`, {@link removeNamingLayer}). An admin pin delete takes
- * {@link lockIntegrationGovernance} first, as every governance writer does.
+ * schedules that leaves unnamed ({@link removeNamingLayer}); `previous` is the state it held, `null`
+ * when there was none. An admin pin delete takes {@link lockIntegrationGovernance} first, purges the
+ * member pins it masked ({@link purgeMemberPins}) before the schedules are judged — a schedule that
+ * relied on one is disabled as unnamed with the rest — and removes its floor, so the schedules of
+ * the agent narrowing it are disabled too (`removedFloor`).
  */
 export async function deletePin(
   scope: SpaceScope,
@@ -591,44 +560,40 @@ export async function deletePin(
   integrationId: string,
   userId: string | null,
 ): Promise<{
-  previous: string[] | null;
-  previousAllowedAdditions: boolean;
-  memberPinsCleared: ClearedMemberPin[];
+  previous: PinState | null;
+  memberPinsCleared: PurgedMemberPin[];
   disabledScheduleIds: string[];
 }> {
   const pin = { spaceId: scope.spaceId, agentPackageId, integrationId };
-  const removed = await removeNamingLayer(pinLayer(pin, userId), async (tx) => {
-    if (userId === null) await lockIntegrationGovernance(tx, scope.spaceId, integrationId);
-    const [row] = await tx
-      .delete(integrationPins)
-      .where(pinKey(scope, agentPackageId, integrationId, userId))
-      .returning({
-        connectionIds: integrationPins.connectionIds,
-        allowAdditionalConnections: integrationPins.allowAdditionalConnections,
-      });
-    if (!row) return { previous: null };
-    if (userId !== null) {
-      return { previous: { ...row, memberPinsCleared: [] as ClearedMemberPin[] } };
-    }
-    // Closed, or open under an enforced default that masks them from now on: every member pin
-    // goes. Open and ungoverned after: those strictly narrowing the floor it imposed.
-    const keepsAdditions =
-      row.allowAdditionalConnections && !(await isDefaultEnforced(tx, scope, integrationId));
-    const memberPinsCleared = await purgeAdminPinMemberPins(
-      tx,
-      scope,
-      agentPackageId,
-      integrationId,
-      keepsAdditions ? row.connectionIds : undefined,
-    );
-    return { previous: { ...row, memberPinsCleared }, removedFloor: row.connectionIds };
-  });
-  return {
-    previous: removed.previous?.connectionIds ?? null,
-    previousAllowedAdditions: removed.previous?.allowAdditionalConnections ?? false,
-    memberPinsCleared: removed.previous?.memberPinsCleared ?? [],
-    disabledScheduleIds: removed.disabledScheduleIds,
-  };
+  const { previous, memberPinsCleared, disabledScheduleIds } = await removeNamingLayer(
+    pinLayer(pin, userId),
+    async (tx) => {
+      if (userId === null) await lockIntegrationGovernance(tx, scope.spaceId, integrationId);
+      const [row] = await tx
+        .delete(integrationPins)
+        .where(pinKey(scope, agentPackageId, integrationId, userId))
+        .returning({
+          connectionIds: integrationPins.connectionIds,
+          allowAdditionalConnections: integrationPins.allowAdditionalConnections,
+        });
+      if (!row || userId !== null) return { previous: row ?? null, memberPinsCleared: [] };
+      // Open and ungoverned after: only those strictly narrowing the floor go.
+      const keepsAdditions =
+        row.allowAdditionalConnections && !(await isDefaultEnforced(tx, scope, integrationId));
+      return {
+        previous: row,
+        memberPinsCleared: await purgeMemberPins(
+          tx,
+          scope,
+          integrationId,
+          agentPackageId,
+          keepsAdditions ? row.connectionIds : undefined,
+        ),
+        removedFloor: row.connectionIds,
+      };
+    },
+  );
+  return { previous, memberPinsCleared, disabledScheduleIds };
 }
 
 /**
@@ -713,7 +678,7 @@ export async function upsertMemberPin(
     allowAdditionalConnections: false,
     validateOpts: { allowOwnedBy: input.userId },
   });
-  return { previous: previous?.connection_ids ?? null, pin };
+  return { previous: previous?.connectionIds ?? null, pin };
 }
 
 /**

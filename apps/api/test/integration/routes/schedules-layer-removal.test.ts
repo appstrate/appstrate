@@ -38,7 +38,10 @@ import {
 } from "../../helpers/run-connection-fixtures.ts";
 import { seedShares } from "../../helpers/connection-shares.ts";
 import { deactivatePackage } from "../../../src/services/space-packages.ts";
-import { deleteOrgDefault } from "../../../src/services/integration-org-defaults-service.ts";
+import {
+  deleteOrgDefault,
+  upsertOrgDefault,
+} from "../../../src/services/integration-org-defaults-service.ts";
 import { deletePin } from "../../../src/services/integration-pins-service.ts";
 import {
   disableSchedulesLeftUnnamed,
@@ -606,6 +609,35 @@ describe("removing the layer that names a schedule's connection set", () => {
       }
       expect((await rowOf(armed.id)).enabled).toBe(true);
     });
+
+    it("a soft write racing the enforcing one disables them whenever it lands last", async () => {
+      const { floor, within } = await selections();
+      await orgDefault(floor);
+      const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
+      const write = (enforce: boolean) =>
+        upsertOrgDefault(scope, INTEGRATION, { connectionIds: floor, enforce });
+      for (let round = 0; round < 4; round++) {
+        // Fired together, in both orders. Soft last removes the floor the enforcing write imposed;
+        // its candidates are read before its transaction, so they must not hang on what it reads
+        // there (fails on PGlite too when they do, verified).
+        const writes = round % 2 === 0 ? [write(false), write(true)] : [write(true), write(false)];
+        await Promise.all(writes);
+
+        const [stored] = await db.select().from(integrationOrgDefaults);
+        expect(await stillArmed(within)).toEqual(stored!.enforce ? within.map((s) => s.id) : []);
+
+        await db
+          .update(schedules)
+          .set({ enabled: true, disabledReason: null })
+          .where(
+            inArray(
+              schedules.id,
+              within.map((s) => s.id),
+            ),
+          );
+        await db.update(integrationOrgDefaults).set({ enforce: false });
+      }
+    });
   });
 
   describe("a member pin dropped by a connection delete", () => {
@@ -850,7 +882,10 @@ describe("removing the layer that names a schedule's connection set", () => {
         await holder.sql`COMMIT`;
 
         const [byPin, byDefault] = await Promise.all([pinRemoval, defaultRemoval]);
-        expect(byPin.previous).toEqual([shared]);
+        expect(byPin.previous).toEqual({
+          connectionIds: [shared],
+          allowAdditionalConnections: false,
+        });
         expect(byDefault.previous).not.toBeNull();
         // The first through the lock spares it; the second reads its verdict after that commit.
         expect([...byPin.disabledScheduleIds, ...byDefault.disabledScheduleIds]).toEqual([

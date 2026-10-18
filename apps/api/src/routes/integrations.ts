@@ -1587,7 +1587,7 @@ export function createIntegrationsRouter() {
         action: "integration.pin.upserted",
         resourceType: "integration_pin",
         resourceId: pinAuditResourceId(agentPackageId, packageId),
-        before: previous ? adminPinAudit(previous) : null,
+        before: previous,
         after: { ...adminPinAudit(pin), memberPinsCleared },
       });
       return c.json(pin);
@@ -1601,18 +1601,19 @@ export function createIntegrationsRouter() {
       const packageId = c.req.param("packageId")!;
       const agentPackageId = c.req.param("agentPackageId")!;
       const scope = getSpaceScope(c);
-      const { previous, previousAllowedAdditions, memberPinsCleared, disabledScheduleIds } =
-        await deletePin(scope, agentPackageId, packageId, null);
+      const { previous, memberPinsCleared, disabledScheduleIds } = await deletePin(
+        scope,
+        agentPackageId,
+        packageId,
+        null,
+      );
       await removeScheduleJobs(disabledScheduleIds);
       if (previous) {
         await recordAuditFromContext(c, {
           action: "integration.pin.deleted",
           resourceType: "integration_pin",
           resourceId: pinAuditResourceId(agentPackageId, packageId),
-          before: adminPinAudit({
-            connection_ids: previous,
-            allow_additional_connections: previousAllowedAdditions,
-          }),
+          before: previous,
           after: {
             memberPinsCleared,
             ...(disabledScheduleIds.length > 0 ? { disabledScheduleIds } : {}),

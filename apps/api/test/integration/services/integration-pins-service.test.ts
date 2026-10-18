@@ -468,7 +468,7 @@ describe("integration-pins-service — DB access/ownership", () => {
         connectionIds: [ids[2]!],
         allowAdditionalConnections: false,
       });
-      expect(second.previous?.connection_ids).toEqual(ids);
+      expect(second.previous).toEqual({ connectionIds: ids, allowAdditionalConnections: false });
       const listed = await listIntegrationPins(scope, INTEGRATION);
       expect(listed).toHaveLength(1);
       expect(listed[0]!.connection_ids).toEqual([ids[2]!]);
@@ -1053,7 +1053,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       expect(member.pin.allow_additional_connections).toBe(false);
 
       const closed = await adminPin([id], false);
-      expect(closed.previous?.allow_additional_connections).toBe(true);
+      expect(closed.previous?.allowAdditionalConnections).toBe(true);
       expect(closed.pin.allow_additional_connections).toBe(false);
       expect((await listIntegrationPins(scope, INTEGRATION))[0]!.allow_additional_connections).toBe(
         false,
@@ -1142,8 +1142,8 @@ describe("integration-pins-service — DB access/ownership", () => {
 
         expect(await memberPins()).toEqual((purges ? controls : [...controls, ...triple]).sort());
         const cleared = [
-          { userId: memberId, connectionIds: mine },
-          { userId: colleague, connectionIds: theirs },
+          { userId: memberId, agentPackageId: AGENT, connectionIds: mine },
+          { userId: colleague, agentPackageId: AGENT, connectionIds: theirs },
         ].sort((a, b) => a.userId.localeCompare(b.userId));
         expect(memberPinsCleared).toEqual(purges ? cleared : []);
       });
@@ -1373,6 +1373,59 @@ describe("integration-pins-service — DB access/ownership", () => {
 
         await db.delete(integrationPins);
         await deleteOrgDefault(scope, INTEGRATION);
+      }
+    });
+
+    it("a member pin write racing a write that closes the set never survives it", async () => {
+      // As above: PGlite serialises transactions, so this discriminates only on PostgreSQL.
+      const [floor, addition] = [await shared(), await shared()];
+      const memberPin = () =>
+        upsertMemberPin(scope, {
+          agentPackageId: AGENT,
+          integrationId: INTEGRATION,
+          connectionIds: [addition],
+          userId: memberId,
+        });
+      const closers: Array<{
+        name: string;
+        before: () => Promise<unknown>;
+        close: () => Promise<unknown>;
+      }> = [
+        {
+          name: "closing the open admin pin",
+          before: () => adminPin([floor], true),
+          close: () => adminPin([floor], false),
+        },
+        {
+          name: "enforcing the default",
+          before: async () => {
+            await db.delete(integrationPins);
+            await upsertOrgDefault(scope, INTEGRATION, { connectionIds: [floor], enforce: false });
+          },
+          close: () =>
+            upsertOrgDefault(scope, INTEGRATION, { connectionIds: [floor], enforce: true }),
+        },
+      ];
+      for (const { name, before, close } of closers) {
+        for (let round = 0; round < 4; round++) {
+          await before();
+          // Fired together, in both orders: written first it is purged, second it is refused.
+          const settled = await Promise.allSettled(
+            round % 2 === 0 ? [memberPin(), close()] : [close(), memberPin()],
+          );
+          const [memberWrite, closing] = round % 2 === 0 ? settled : [settled[1]!, settled[0]!];
+
+          expect(closing.status, name).toBe("fulfilled");
+          if (memberWrite.status === "rejected") {
+            expect(memberWrite.reason, name).toMatchObject({
+              status: 409,
+              code: "connection_additions_blocked",
+            });
+          }
+          expect(await memberPins(), name).toEqual([]);
+          await db.delete(integrationPins);
+          await deleteOrgDefault(scope, INTEGRATION);
+        }
       }
     });
   });

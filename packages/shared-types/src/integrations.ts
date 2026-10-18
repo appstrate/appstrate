@@ -231,15 +231,9 @@ export interface IntegrationPin {
   integration_package_id: string;
   /** An admin pin's floor, bound by every run of the agent; a member pin's selection. */
   connection_ids: string[];
-  /**
-   * Admin pin: whether the run's selection (launch override, else the member pin) may add to the
-   * floor. Never true on an empty floor, nor on a member pin.
-   */
+  /** Admin pin: whether the run's selection may add to the floor. Never on `[]` nor a member pin. */
   allow_additional_connections: boolean;
-  /**
-   * Whether the pin's agent is active in the space (placed and switched on): a pin of an agent
-   * that runs nowhere still stands. Always true on a write's response, which requires it.
-   */
+  /** Whether the pin's agent is active in the space; a pin of an inactive agent still stands. */
   agent_active: boolean;
   createdAt: string;
   updatedAt: string;
@@ -301,12 +295,9 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  * All three `null` with nothing resolved: an inert integration nothing binds,
  * or one whose manifest could not be loaded.
  *
- * Per-connection provenance: under governance the floor is
- * `admin_pinned_connection_ids` when an admin pin exists, else the enforced
- * `org_default_connection_ids`; every other id of `resolved_connection_ids` is
- * an addition — here the member pin's; a run's launch override, when it
- * carries one, supplies them instead. Ungoverned, the whole set comes from
- * `source`.
+ * Under governance the floor is `admin_pinned_connection_ids`, else the enforced
+ * `org_default_connection_ids`; any other id of `resolved_connection_ids` is the
+ * member pin's addition.
  */
 export interface IntegrationAgentResolution {
   source: ConnectionResolutionSource | null;
@@ -328,10 +319,7 @@ export interface IntegrationAgentResolution {
    */
   org_default_connection_ids: string[] | null;
   org_default_enforced: boolean;
-  /**
-   * Whether the run's selection adds to the imposed set: an admin pin open to additions, with no
-   * enforced org default for the integration. `false` with nothing imposed too (no floor to add to).
-   */
+  /** An admin pin open to additions, with no enforced org default: `false` with nothing imposed. */
   additional_connections_allowed: boolean;
   /** Whether the actor may add a connection (admin OR not blocked). */
   can_add_connection: boolean;

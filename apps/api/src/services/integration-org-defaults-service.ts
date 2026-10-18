@@ -20,13 +20,8 @@
  *
  * Deleting an enforced default, or writing it back soft, removes the floor it imposed: the
  * schedules strictly narrowing it are disabled in the same transaction
- * (`disableSchedulesSelectingWithin`, `schedules-named-by-layer.ts`).
- *
- * An enforced default admits no addition, so it follows the closed admin pin's rule: a member pin
- * never survives under it. Every write or delete where the default IS enforced (after) or WAS
- * enforced (before) deletes, in its transaction, every member pin of the (space, integration)
- * (`purgeMemberPins`; a closed admin pin left none, and the enforced default closes an open one) —
- * masked, none comes back unasked as the member's selection once the default is soft or gone.
+ * (`disableSchedulesSelectingWithin`, `schedules-named-by-layer.ts`). An enforced default masks
+ * every member pin of its integration, so its writes purge them (`purgeMemberPins` states the rule).
  */
 
 import { and, eq } from "drizzle-orm";
@@ -140,11 +135,11 @@ function orgDefaultKey(scope: SpaceScope, integrationId: string) {
  * the write are one transaction behind the lock the admin pin upsert takes too
  * ({@link lockIntegrationGovernance}), so a concurrent pin write cannot slip an open pin in between;
  * every statement runs on `tx` (PGlite has one connection: a query on `db` would wait on this very
- * transaction). A write where the default is, or was, enforced purges the member pins it masks
- * (`memberPinsCleared`); the default still names every schedule, so none is left unnamed. Writing an
- * enforced default back soft disables the schedules strictly narrowing the floor it imposed, in the
- * same transaction; which schedules may resolve the integration is read before it opens, as for a
- * removal (`removeNamingLayer`), and only when the default read before it was enforced.
+ * transaction). Purges the member pins it masks ({@link purgeMemberPins}); the default still names
+ * every schedule, so none is left unnamed. Writing an enforced default back soft disables the
+ * schedules strictly narrowing the floor it imposed, in the same transaction. Which schedules may
+ * resolve the integration is read before it opens, as for a removal (`removeNamingLayer`), for every
+ * soft write: whether the stored default is enforced is a fact only the transaction may read.
  */
 export async function upsertOrgDefault(
   scope: SpaceScope,
@@ -157,11 +152,10 @@ export async function upsertOrgDefault(
   disabledScheduleIds: string[];
 }> {
   await validatePinTargets(scope, integrationId, input.connectionIds);
-  // Only un-enforcing removes a floor, so only then are the candidates worth reading.
-  const unenforcing = !input.enforce && (await getOrgDefault(scope, integrationId))?.enforce;
-  const mayName = unenforcing
-    ? await schedulesLayerMayName(orgDefaultLayer(scope, integrationId))
-    : [];
+  // Only a soft write can remove a floor.
+  const mayName = input.enforce
+    ? []
+    : await schedulesLayerMayName(orgDefaultLayer(scope, integrationId));
   const now = new Date();
   return db.transaction(async (tx) => {
     await lockIntegrationGovernance(tx, scope.spaceId, integrationId);
@@ -196,7 +190,6 @@ export async function upsertOrgDefault(
       previous?.enforce || input.enforce
         ? await purgeMemberPins(tx, scope, integrationId, null)
         : [];
-    // Enforced here, soft when the candidates were read: none to judge — an accepted race.
     const disabledScheduleIds =
       previous?.enforce && !input.enforce
         ? await disableSchedulesSelectingWithin(tx, integrationId, mayName, previous.connectionIds)
@@ -233,9 +226,9 @@ async function assertNoOpenAdminPin(
 /**
  * Delete the org default and disable the schedules that leaves unnamed, and, for an enforced one,
  * those strictly narrowing the floor it imposed ({@link removeNamingLayer}); `previous` is the one
- * removed, `null` when none was set. Deleting an enforced default purges the member pins it masked
- * ({@link purgeMemberPins}) inside the removal, before the schedules are judged: a schedule that
- * relied on one is disabled as unnamed with the rest. `memberPinsCleared` is `[]` for a soft one.
+ * removed, `null` when none was set. An enforced one purges the member pins it masked
+ * ({@link purgeMemberPins}) before the schedules are judged: a schedule that relied on one is
+ * disabled as unnamed with the rest.
  */
 export async function deleteOrgDefault(
   scope: SpaceScope,
@@ -245,24 +238,21 @@ export async function deleteOrgDefault(
   memberPinsCleared: PurgedMemberPin[];
   disabledScheduleIds: string[];
 }> {
-  const removed = await removeNamingLayer(orgDefaultLayer(scope, integrationId), async (tx) => {
-    await lockIntegrationGovernance(tx, scope.spaceId, integrationId);
-    const [row] = await tx
-      .delete(integrationOrgDefaults)
-      .where(orgDefaultKey(scope, integrationId))
-      .returning();
-    if (!row) return { previous: null };
-    const memberPinsCleared = row.enforce
-      ? await purgeMemberPins(tx, scope, integrationId, null)
-      : [];
-    return {
-      previous: { orgDefault: toSummary(row), memberPinsCleared },
-      removedFloor: row.enforce ? row.connectionIds : null,
-    };
-  });
-  return {
-    previous: removed.previous?.orgDefault ?? null,
-    memberPinsCleared: removed.previous?.memberPinsCleared ?? [],
-    disabledScheduleIds: removed.disabledScheduleIds,
-  };
+  const { previous, memberPinsCleared, disabledScheduleIds } = await removeNamingLayer(
+    orgDefaultLayer(scope, integrationId),
+    async (tx) => {
+      await lockIntegrationGovernance(tx, scope.spaceId, integrationId);
+      const [row] = await tx
+        .delete(integrationOrgDefaults)
+        .where(orgDefaultKey(scope, integrationId))
+        .returning();
+      if (!row?.enforce) return { previous: row ? toSummary(row) : null, memberPinsCleared: [] };
+      return {
+        previous: toSummary(row),
+        memberPinsCleared: await purgeMemberPins(tx, scope, integrationId, null),
+        removedFloor: row.connectionIds,
+      };
+    },
+  );
+  return { previous, memberPinsCleared, disabledScheduleIds };
 }

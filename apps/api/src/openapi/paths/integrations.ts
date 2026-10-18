@@ -170,9 +170,13 @@ export const namingLayerRemovalEffect =
 const floorRemovalEffect =
   "Removing a floor (an admin pin, an enforced default, or that enforcement) also disables (`disabled_reason: connection_set_unnamed`), in the same transaction, every enabled schedule it governed — for a pin, on its agent; for an enforced default, on every agent of the space no admin pin governs for this integration — that nothing governs afterwards and whose `connection_overrides` set for this integration strictly narrows the removed floor — names only connections of it, and fewer than it holds (`[]` included; ids compared case-insensitively, repeats counted once): under the floor it added nothing, ungoverned it would bind fewer connections, or none. A set naming the whole floor (in any order) binds the same either way; it, a set naming another connection, and a schedule with no key for this integration keep their meaning and are left alone.";
 
-/** The member pins writing or removing an enforced default deletes. */
-const enforcedDefaultMemberPinPurge =
-  "An enforced default admits no addition, so a member pin never survives under it: every write or removal where the default is enforced, or was, deletes in its transaction every member pin of this integration in the space (a closed admin pin left none, and the enforced default closes an open one), so none comes back later as a selection nobody chose again. The audit records each one (`memberPinsCleared`: `userId`, `agentPackageId`, `connectionIds`).";
+/** The member pins a governance write or removal deletes — stated in full on `upsertIntegrationPin` only. */
+const memberPinPurgeRule =
+  "A member pin never survives under a governance that admits no addition — a closed admin pin or an enforced default — where it would otherwise come back later as an addition or as a selection nobody chose again. So, in the same transaction: writing an admin pin closed, or over a closed one, deletes every member pin of its agent and integration in the space (writing an open pin where there was none, or rewriting an open one, keeps them); removing a closed pin, or an open one while the space enforces a default for the integration, deletes them too; removing an open pin otherwise deletes only those strictly narrowing its floor (only connections of it, fewer than it holds, `[]` included), which added nothing and would bind fewer connections as written; writing or removing a default that is, or was, enforced deletes every member pin of the integration in the space (a closed admin pin left none, and the enforced default closes an open one). The audit records each one (`memberPinsCleared`: `userId`, `agentPackageId`, `connectionIds`).";
+
+/** The pointer the other governance operations carry to {@link memberPinPurgeRule}. */
+const memberPinPurgeRef =
+  "It deletes the member pins it masks, by the rule stated on `upsertIntegrationPin`; the audit records each one (`memberPinsCleared`).";
 
 /** What a connection delete does to the schedules of a member pin it empties. */
 export const droppedPinEffect =
@@ -1885,7 +1889,8 @@ export const integrationsPaths = {
         `${MAX_CONNECTIONS_PER_INTEGRATION} in all, else \`connection_set_too_large\`), from the connections the actor can reach. ` +
         "Growing an open floor does not judge the member pins already stored: where the floor plus one of them exceeds " +
         `${MAX_CONNECTIONS_PER_INTEGRATION} connections, that member's runs fail with \`connection_set_too_large\`. ` +
-        "A member pin never survives under a closed admin pin: a write that stores the pin closed, or replaces a closed one, deletes in its transaction every member pin of this agent and integration in the space, which the closed floor masks, so none comes back later as an addition or a selection nobody chose again. Only writing an open pin where there was none, or rewriting an open one, keeps them. The audit records each cleared member pin. Pin connections whose `scopes_granted` cover what the agent needs; when none does, create and share a new connection with those scopes rather than upgrading one other agents use. Only shared connections can be pinned.",
+        memberPinPurgeRule +
+        " Pin connections whose `scopes_granted` cover what the agent needs; when none does, create and share a new connection with those scopes rather than upgrading one other agents use. Only shared connections can be pinned.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1951,7 +1956,7 @@ export const integrationsPaths = {
       operationId: "deleteIntegrationPin",
       tags: ["Integrations"],
       summary: "Remove an admin pin (admin)",
-      description: `Removes the agent's admin pin for this integration. Removing a closed pin also deletes, in the same transaction, every member pin of this agent and integration in the space: masked by the pin, none revives as the member's ungoverned selection. So does removing an open pin while the space enforces a default for this integration: the default governs the agent from then on and masks them all. Otherwise, removing an open pin keeps those that add a connection to its floor — their additions become each member's selection — or name all of it, and deletes those strictly narrowing it (only connections of the floor, fewer than it holds, \`[]\` included), which added nothing and would otherwise bind fewer connections as written. ${namingLayerRemovalEffect} A schedule that relied on a deleted member pin is disabled with them. ${floorRemovalEffect}`,
+      description: `Removes the agent's admin pin for this integration. ${memberPinPurgeRef} ${namingLayerRemovalEffect} A schedule that relied on a deleted member pin is disabled with them. ${floorRemovalEffect}`,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -2014,7 +2019,7 @@ export const integrationsPaths = {
         "default's scopes: bind an agent that needs more to its own connection rather than " +
         "upgrading a default one — a member pin overrides a soft default, and only an admin pin " +
         "overrides an enforced one. " +
-        enforcedDefaultMemberPinPurge +
+        memberPinPurgeRef +
         " Writing an enforced default back with `enforce: false` removes the floor it imposed. " +
         floorRemovalEffect +
         " Their jobs are removed once it commits; the response counts them (`schedules_disabled_count`) and the audit record lists them (`disabledScheduleIds`).",
@@ -2076,7 +2081,7 @@ export const integrationsPaths = {
       operationId: "deleteIntegrationOrgDefault",
       tags: ["Integrations"],
       summary: "Remove the space-wide default connection (admin)",
-      description: `Removes the space's default set for this integration, soft or enforced. ${enforcedDefaultMemberPinPurge} ${namingLayerRemovalEffect} A schedule that relied on a deleted member pin is disabled with them. ${floorRemovalEffect}`,
+      description: `Removes the space's default set for this integration, soft or enforced. ${memberPinPurgeRef} ${namingLayerRemovalEffect} A schedule that relied on a deleted member pin is disabled with them. ${floorRemovalEffect}`,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

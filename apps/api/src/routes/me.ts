@@ -346,7 +346,7 @@ router.delete(
         action: "integration.member_pin.deleted",
         resourceType: "integration_pin",
         resourceId: pinAuditResourceId(agentPackageId, integrationPackageId),
-        before: pinAudit(previous),
+        before: pinAudit(previous.connectionIds),
         ...(disabledScheduleIds.length > 0 ? { after: { disabledScheduleIds } } : {}),
       });
     }

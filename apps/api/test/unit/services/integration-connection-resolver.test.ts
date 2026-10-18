@@ -3153,6 +3153,33 @@ describe("resolveConnections — an imposed set and its additions (floor ∪ sel
       expect(atCap.resolved[INTEG]).toHaveLength(MAX_CONNECTIONS_PER_INTEGRATION);
     });
 
+    it("a floor grown past what a stored member pin fits is connection_set_too_large on the member pin", () => {
+      const mine = conn({});
+      // The member pin was written under a floor of 19; the admin then grew the floor to 20.
+      const floor = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION }, () => shared());
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [...floor, mine],
+        pins: [openPin(floor.map((c) => c.id)), memberPin([floor[1]!.id, mine.id])],
+      });
+      expect(result.resolved[INTEG]).toBeUndefined();
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toMatchObject({
+        code: "connection_set_too_large",
+        source: "member_pin",
+        boundConnectionIds: [...floor, mine].map((c) => c.id),
+      });
+
+      // Control: the floor it was written under binds it.
+      const fits = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [...floor, mine],
+        pins: [openPin(floor.slice(1).map((c) => c.id)), memberPin([floor[1]!.id, mine.id])],
+      });
+      expect(fits.errors).toEqual([]);
+      expect(fits.resolved[INTEG]).toHaveLength(MAX_CONNECTIONS_PER_INTEGRATION);
+    });
+
     it("an under-scoped addition names its own layer's remedy", () => {
       const scoped = {
         ...oauth2Manifest(),

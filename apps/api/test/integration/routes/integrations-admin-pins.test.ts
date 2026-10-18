@@ -711,7 +711,9 @@ describe("/api/integrations/:packageId admin surface", () => {
           after: {
             connectionIds: [connId],
             allowAdditionalConnections: true,
-            memberPinsCleared: [{ userId: ctx.user.id, connectionIds: [connId] }],
+            memberPinsCleared: [
+              { userId: ctx.user.id, agentPackageId: AGENT, connectionIds: [connId] },
+            ],
           },
         });
         expect(await memberPinsLeft()).toEqual([]);
@@ -727,7 +729,11 @@ describe("/api/integrations/:packageId admin surface", () => {
         expect((await del()).status).toBe(200);
         expect(await lastAudit("integration.pin.deleted")).toEqual({
           before: { connectionIds: [connId], allowAdditionalConnections: false },
-          after: { memberPinsCleared: [{ userId: ctx.user.id, connectionIds: [connId] }] },
+          after: {
+            memberPinsCleared: [
+              { userId: ctx.user.id, agentPackageId: AGENT, connectionIds: [connId] },
+            ],
+          },
         });
         expect(await memberPinsLeft()).toEqual([]);
 

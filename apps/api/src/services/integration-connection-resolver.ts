@@ -2,25 +2,18 @@
 
 /**
  * Integration connection resolver — the single source of truth for which SET of connections a
- * run binds to each integration. One formula per (space, agent, integration):
+ * run binds to each integration.
  *
- *   effective = floor ∪ selection, selection ⊆ ceiling, floor first (its order), then the
- *   selection's additions (their order), deduped.
- *
- * GOVERNANCE is the admin pin (`integration_pins`, user_id IS NULL, per agent), else an enforced
- * org default (`integration_org_defaults`, every agent of the space). Under it the floor is that
- * set, always bound whole, and `selection = launch override ?? (additions open ? member pin : ∅)`
- * — the launch override being the run body's or the schedule row's `connection_overrides`.
- * Additions are open only for an admin pin that allows them in a space whose org default for the
- * integration is not enforced ({@link additionsOpen}); the ceiling is then the actor's accessible
- * rows, else the floor itself. A selection never removes: one naming only floor ids, or `[]`,
- * adds nothing; one naming an id outside a closed floor is `override_outranked`. No soft default
- * and no fallback contribute. Each bound row carries its own source (`admin_pin` /
- * `org_default_enforced` for the floor; `run_override` / `schedule_override` / `member_pin` for
- * an addition), and a union over {@link MAX_CONNECTIONS_PER_INTEGRATION} is
- * `connection_set_too_large`, never truncated. One door picks rather than binds: the credential
- * proxy outside a run (`selectAccessibleConnection`, `integration-connections.ts`), where a named
- * member of an enforced default binds alone, the other members' health irrelevant.
+ * GOVERNED — by the admin pin (`integration_pins`, user_id IS NULL, per agent), else an enforced
+ * org default (`integration_org_defaults`, every agent of the space) — the run binds
+ * `floor ∪ selection`: that set whole, in its order, then the selection's other ids, deduped. The
+ * selection is the launch override (the run body's or the schedule row's `connection_overrides`),
+ * else the member pin when additions are open ({@link additionsOpen}); additions come from the
+ * actor's accessible rows. A selection never removes: one naming only floor ids, or `[]`, adds
+ * nothing; one naming an id outside a closed floor is `override_outranked`. A union past
+ * {@link MAX_CONNECTIONS_PER_INTEGRATION} is `connection_set_too_large`, never truncated. Each bound
+ * row carries the source of the layer that named it. The credential proxy outside a run picks
+ * rather than binds (`selectAccessibleConnection`, `integration-connections.ts`).
  *
  * UNGOVERNED, the cascade, highest precedence first: launch override, member pin
  * (`integration_pins`, user_id = actor), soft org default, then the fallback — the actor's ONE
@@ -28,13 +21,12 @@
  * → `must_choose_connection`; none → as below.
  *
  * Every named set binds whole or fails loudly on the layer that named the failing row, never
- * falling through or dropping a member. A shared connection is never bound implicitly. A
- * `must_choose_connection` item lists every serving connection, least privilege first. A layer
- * with no row or key is absent; ungoverned, `[]` wins and binds none, as an empty floor does
- * with no addition. With nothing to bind (or switched off in the space), a `required`
- * integration is an error, any other binds none with a warning carrying the same code —
- * `integration_unbound` (an empty set) aside. Equal labels in a bound set (two owners') get
- * ` (n)` in set order: the snapshot and the sidecar read the same names.
+ * falling through. A shared connection is never bound implicitly. A `must_choose_connection` item
+ * lists every serving connection, least privilege first. A layer with no row or key is absent;
+ * `[]` wins and binds none, as an empty floor does with no addition. With nothing to bind (or
+ * switched off in the space), a `required` integration is an error, any other binds none with a
+ * warning carrying the same code — `integration_unbound` (an empty set) aside. Equal labels in a
+ * bound set (two owners') get ` (n)` in set order: the snapshot and the sidecar read the same names.
  * `resolveConnections()` is pure; `resolveConnectionsForRun()` loads its inputs.
  */
 
@@ -301,7 +293,6 @@ interface ResolveOneArgs {
   manifest: IntegrationManifest;
   agentTools: readonly string[] | "*";
   agentScopes: readonly string[];
-  /** `allowsAdditions`: the row's `allow_additional_connections`, read by {@link additionsOpen}. */
   adminPin: { ids: readonly string[]; allowsAdditions: boolean } | null;
   orgDefault: OrgDefaultPick | null;
   launchOverride: { ids: readonly string[]; source: LaunchOverrides["source"] } | null;

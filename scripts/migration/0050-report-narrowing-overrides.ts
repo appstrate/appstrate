@@ -47,9 +47,9 @@ export interface ReportSnapshot {
  * instead of aborting the report. Layer precedence is the resolver's: the admin pin, else the
  * enforced org default; an empty imposed set (a pin to no connection) narrows nothing.
  */
-const narrowed = () => `
+const NARROWED = `
   WITH entries AS (
-    SELECT o.id::text AS owner_id, o.space_id, o.package_id, e.key AS integration,
+    SELECT o.id AS owner_id, o.space_id, o.package_id, e.key AS integration,
            ARRAY(SELECT DISTINCT lower(x) AS v
                    FROM jsonb_array_elements_text(CASE WHEN jsonb_typeof(e.value) = 'array'
                                                        THEN e.value ELSE '[]'::jsonb END) x
@@ -80,7 +80,7 @@ const narrowed = () => `
        AND cardinality(override_ids) < cardinality(imposed_ids)
   )`;
 
-const SCHEDULES_QUERY = `${narrowed()}
+const SCHEDULES_QUERY = `${NARROWED}
   SELECT o.slug AS org, s.name AS space, sc.id, sc.name, sc.enabled, sc.package_id,
          n.integration,
          '[' || array_to_string(n.override_ids, ', ') || ']' AS override_set,
