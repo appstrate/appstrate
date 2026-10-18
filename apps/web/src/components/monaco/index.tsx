@@ -3,7 +3,7 @@
 import { lazy, Suspense } from "react";
 import type { EditorProps, DiffEditorProps } from "@monaco-editor/react";
 import { useTheme } from "../../stores/theme-store";
-import { TextSkeleton } from "../loading-skeletons";
+import { EditorSkeleton } from "../loading-skeletons";
 
 /**
  * Lazy facade over the self-hosted Monaco setup (`./setup.ts`).
@@ -25,18 +25,6 @@ const BASE_OPTIONS = {
 
 function useMonacoTheme() {
   return useTheme().resolvedTheme === "dark" ? "vs-dark" : "vs";
-}
-
-/**
- * The editor's own box, drawn as text lines: the same block waits for the data
- * and for the lazy chunk, so the editor replaces it in place.
- */
-export function EditorSkeleton({ height }: { height?: string | number }) {
-  return (
-    <div className="overflow-hidden" style={{ height: height ?? "300px" }}>
-      <TextSkeleton lines={8} className="p-4" />
-    </div>
-  );
 }
 
 export function CodeEditor({ options, ...props }: Omit<EditorProps, "theme">) {

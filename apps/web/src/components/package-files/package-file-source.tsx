@@ -20,7 +20,8 @@ import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { formatBytes } from "../../lib/format-bytes";
 import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
-import { CodeEditor, EditorSkeleton } from "../monaco";
+import { CodeEditor } from "../monaco";
+import { EditorSkeleton } from "../loading-skeletons";
 import { ErrorState } from "../page-states";
 import {
   baseName,

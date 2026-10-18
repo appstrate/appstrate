@@ -6,9 +6,12 @@
  * the member list is in, the member's name replaces it.
  */
 
-import { describe, expect, it, spyOn } from "bun:test";
+import { afterAll, describe, expect, it, spyOn } from "bun:test";
 import { QueryClient } from "@tanstack/react-query";
 import { installFakeStorage } from "../../test/fake-storage.ts";
+
+// Registered before the fake storage's own teardown, so it runs first.
+afterAll(() => getSession.mockRestore());
 
 installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
@@ -20,6 +23,18 @@ const { orgStore } = await import("../../stores/org-store.ts");
 const { render } = await import("../../test/render.tsx");
 const { $api } = await import("../../api/client.ts");
 const i18nModule = await import("../../i18n.ts");
+const { authClient } = await import("../../lib/auth-client.ts");
+const { authStore } = await import("../../stores/auth-store.ts");
+const { startAuthBootstrap } = await import("../../hooks/use-auth.ts");
+
+// `useAuth()` would start the session resync mid-suite and settle it after the fake storage is
+// gone: start it here, answered at once (no session), and let it settle while the storage exists.
+const getSession = spyOn(authClient, "getSession").mockResolvedValue({
+  data: null,
+  error: null,
+});
+startAuthBootstrap();
+for (let i = 0; i < 5000 && authStore.getState().loading; i++) await Bun.sleep(1);
 
 await i18nModule.i18nReady;
 await i18nModule.default.changeLanguage("fr");

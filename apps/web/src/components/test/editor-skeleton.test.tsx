@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { i18nReady } from "../../i18n.ts";
-import { EditorSkeleton } from "../monaco";
+import { EditorSkeleton } from "../loading-skeletons.tsx";
 import { render } from "../../test/render.tsx";
 
 await i18nReady;

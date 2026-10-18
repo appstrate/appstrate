@@ -29,9 +29,10 @@ const host: ChatHost = {
 const getHeaders = () => ({ "X-Org-Id": "org_1", "X-Space-Id": "spc_a" });
 
 /** Seeds the shared read, so the render is the answer and not a fetch. */
-function render(enforced: SkillHint[], headers: GetHeaders = getHeaders): string {
+function render(enforced: SkillHint[] | null, headers: GetHeaders = getHeaders): string {
   const qc = new QueryClient();
-  qc.setQueryData(["chat", "enforced-skills", "spc_a"], enforced);
+  // `null`: nothing seeded, the read is on its way.
+  if (enforced) qc.setQueryData(["chat", "enforced-skills", "spc_a"], enforced);
   return renderToString(
     <QueryClientProvider client={qc}>
       <ChatHostProvider value={host}>
@@ -46,6 +47,10 @@ function render(enforced: SkillHint[], headers: GetHeaders = getHeaders): string
 describe("EnforcedSkillsIndicator", () => {
   it("renders nothing when the space imposes nothing", () => {
     expect(render([])).toBe("");
+  });
+
+  it("holds its place while the space's read is on its way", () => {
+    expect(render(null)).toContain("animate-pulse");
   });
 
   it("never waits on a read that does not run: no space, no placeholder", () => {

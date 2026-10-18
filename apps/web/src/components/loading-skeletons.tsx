@@ -301,6 +301,18 @@ export function SettingsTableSkeleton({ toolbar = false }: { toolbar?: boolean }
   );
 }
 
+/**
+ * The editor's own box, drawn as text lines: the same block waits for the data
+ * and for the lazy chunk, so the editor replaces it in place.
+ */
+export function EditorSkeleton({ height }: { height?: string | number }) {
+  return (
+    <div className="overflow-hidden" style={{ height: height ?? "300px" }}>
+      <TextSkeleton lines={8} className="p-4" />
+    </div>
+  );
+}
+
 /** A form page with its header and tabs in the shell header (the package editor). */
 export function FormPageSkeleton() {
   return (
