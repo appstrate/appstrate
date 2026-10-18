@@ -30,7 +30,7 @@ export function useCreationHandoff(resource: CreationResource, canCreate: boolea
     isOpen: canCreate && param.value === resource,
     open,
     close: param.close,
-    /** Leaves the chooser for a creation page: the manual editor or the MCP URL wizard. */
+    /** Leaves the chooser for the MCP URL wizard. */
     leave: (to: string) => navigate(to, { replace: true }),
     openChat,
   };

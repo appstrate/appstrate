@@ -10,7 +10,7 @@
 
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { $api } from "../api/client";
 import { DetailBar } from "../components/detail-bar";
@@ -38,6 +38,7 @@ import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-i
 import { encodeIconDataUri } from "../lib/icon-image";
 import { agentCreationWithIntegrationPath } from "../lib/creation-handoff";
 import { packageDetailPath } from "../lib/package-paths";
+import { integrationSettingsHref } from "../lib/settings-section-href";
 import {
   declaredToolNames,
   defaultToolCount,
@@ -45,7 +46,6 @@ import {
   integrationWizardStep,
   isCurrentAnalysis,
   isRemoteSource,
-  manualCreationState,
   proposalEdits,
   toolsPublishVersion,
   type DiscoveryResult,
@@ -91,7 +91,6 @@ interface Review {
 /** Before the package exists: the address and the review. Nothing is stored. */
 function NewIntegrationWizard() {
   const { t } = useTranslation("agents");
-  const navigate = useNavigate();
   const { user } = useAuth();
   const { currentOrg } = useOrg();
   const [url, setUrl] = useState("");
@@ -102,6 +101,8 @@ function NewIntegrationWizard() {
     meta: { errorHandledByCaller: true },
   });
   const create = useCreatePackage("integration");
+  // « Continuer en configuration manuelle » creates the same draft, then opens its editor.
+  const [manual, setManual] = useState(false);
 
   // While a creation is in flight nothing it was built from may change: its controls are disabled.
   const changeUrl = (next: string) => {
@@ -145,7 +146,13 @@ function NewIntegrationWizard() {
     );
 
   // Rendered, not a mutate callback: a re-render during the request cannot lose the package.
-  if (create.data) return <Navigate to={wizardResumePath(create.data.id)} replace />;
+  if (create.data) {
+    const created = create.data.id;
+    const to = manual
+      ? integrationSettingsHref(packageDetailPath("integration", created), "identity")
+      : wizardResumePath(created);
+    return <Navigate to={to} replace />;
+  }
 
   return (
     <>
@@ -171,11 +178,15 @@ function NewIntegrationWizard() {
           creating={create.isPending}
           createError={create.error}
           onCreate={() => {
-            if (!create.isPending) create.mutate(wizardCreateBody(accepted(review)));
+            if (create.isPending) return;
+            setManual(false);
+            create.mutate(wizardCreateBody(accepted(review)));
           }}
-          onManual={() =>
-            navigate("/integrations/new", { state: manualCreationState(accepted(review)) })
-          }
+          onManual={() => {
+            if (create.isPending) return;
+            setManual(true);
+            create.mutate(wizardCreateBody(accepted(review)));
+          }}
         />
       )}
       <div>

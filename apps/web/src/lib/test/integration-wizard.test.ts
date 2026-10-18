@@ -2,7 +2,6 @@
 
 import { describe, expect, it } from "bun:test";
 import { defaultIntegrationManifest } from "../../components/agent-editor/utils.ts";
-import { packageCreateBody } from "../package-file-drafts.ts";
 import type { ServerSyncProposal } from "../integration-server-sync.ts";
 import { ApiError } from "../../api/errors.ts";
 import {
@@ -20,10 +19,8 @@ import {
   integrationWizardStep,
   isCurrentAnalysis,
   isRemoteSource,
-  manualCreationState,
   needsWizardFinish,
   proposalEdits,
-  readManualCreationManifest,
   toolsPublishVersion,
   toolsUpdateBody,
   wizardAuthKind,
@@ -75,28 +72,14 @@ describe("integrationCreationManifest", () => {
     ).toBe("data:x");
   });
 
-  it("is sent as the create route's body", () => {
-    const manifest = integrationCreationManifest(defaults, proposal, proposalEdits(proposal));
-    expect(packageCreateBody({ manifest }, "integration")).toEqual({
-      manifest,
-      content: JSON.stringify(manifest, null, 2),
-    });
-  });
-
-  it("is created by the wizard as a draft only, through the same payload builder", () => {
+  it("is created by the wizard as a draft only, the manifest as its content", () => {
     const manifest = integrationCreationManifest(defaults, proposal, proposalEdits(proposal));
     expect(wizardCreateBody(manifest)).toEqual({
-      ...packageCreateBody({ manifest }, "integration"),
+      manifest,
+      content: JSON.stringify(manifest, null, 2),
       publish: false,
     });
     expect(wizardCreateBody(manifest).manifest.version).toBe("1.0.0");
-  });
-
-  it("reaches the manual editor through router state only as an object", () => {
-    const manifest = integrationCreationManifest(defaults, proposal, proposalEdits(proposal));
-    expect(readManualCreationManifest(manualCreationState(manifest))).toBe(manifest);
-    expect(readManualCreationManifest({ integrationManifest: [] })).toBeUndefined();
-    expect(readManualCreationManifest(null)).toBeUndefined();
   });
 });
 

@@ -18,7 +18,7 @@ import {
   mergeServerSync,
   type ServerSyncProposal,
 } from "./integration-server-sync";
-import { fileTextOperation, packageCreateBody, packageUpdateBody } from "./package-file-drafts";
+import { fileTextOperation, packageUpdateBody } from "./package-file-drafts";
 
 export type DiscoveryResult =
   paths["/api/integrations/discover"]["post"]["responses"][200]["content"]["application/json"];
@@ -63,19 +63,6 @@ export function wizardAuthKind(auth: unknown): WizardAuthKind {
   if (type !== "oauth2") return "other";
   // A public client is registered at connect time (RFC 7591); any other needs a registered one.
   return token_endpoint_auth_method === "none" ? "oauthAuto" : "oauthAdmin";
-}
-
-/** Router state carrying the accepted manifest to the manual creation page. */
-export function manualCreationState(manifest: Record<string, unknown>) {
-  return { integrationManifest: manifest };
-}
-
-export function readManualCreationManifest(state: unknown): Record<string, unknown> | undefined {
-  if (!state || typeof state !== "object" || !("integrationManifest" in state)) return undefined;
-  const manifest = (state as { integrationManifest?: unknown }).integrationManifest;
-  return manifest && typeof manifest === "object" && !Array.isArray(manifest)
-    ? (manifest as Record<string, unknown>)
-    : undefined;
 }
 
 /** For a remote source the declared catalog is `tools_policy`'s keys (`getDeclaredToolNames`). */
@@ -327,7 +314,7 @@ export function syncConnectionRemedy(
 
 /** The create body of the wizard: the draft alone, activated here, published with its tools. */
 export function wizardCreateBody(manifest: Record<string, unknown>) {
-  return { ...packageCreateBody({ manifest }, "integration"), publish: false as const };
+  return { manifest, content: JSON.stringify(manifest, null, 2), publish: false as const };
 }
 
 /**

@@ -118,7 +118,6 @@ function IntegrationSettings({
   versionGrants: { canRestore: boolean; canDelete: boolean };
 }) {
   const { t } = useTranslation(["settings", "agents"]);
-  const navigate = useNavigate();
   const { can } = usePermissions();
   // The sync calls the server of the DRAFT, published or not: the copy this editor writes.
   const draftSource = definition
@@ -208,10 +207,6 @@ function IntegrationSettings({
             <IntegrationDefinitionEditor
               detail={definition}
               section={definitionSection}
-              onSection={(next) => {
-                const railId = DEFINITION_RAIL.find(([, section]) => section === next)?.[0];
-                if (railId) void navigate(href(railId));
-              }}
               toolCatalog={detail.tool_catalog ?? []}
               syncBody={syncable ? serverSyncBody() : undefined}
             />

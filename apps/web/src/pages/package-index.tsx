@@ -17,7 +17,6 @@ import { useAgents, usePackageList } from "../hooks/use-packages";
 import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { useListParams } from "../lib/list-params";
 import { catalogueHref } from "../lib/catalogue-link";
-import { packageNewPath } from "../lib/package-paths";
 import { PACKAGE_TYPE_ICON } from "../lib/package-type-icon";
 import { agentCardItem, packageCardItem, type CardItem } from "../lib/package-card-item";
 import { PageHeader } from "../components/page-header";
@@ -31,7 +30,7 @@ import { useColumnVisibility } from "../stores/column-visibility-store";
 import { ImportModal } from "../components/import-modal";
 import { SpaceLibraryHint } from "../components/space-library-hint";
 import { usePermissions } from "../hooks/use-permissions";
-import { CreateAgentModal } from "../components/create-agent-modal";
+import { CreatePackageModal } from "../components/create-package-modal";
 import { CreationHandoffModal } from "../components/creation-handoff-modal";
 import { useIntegrationDetail } from "../hooks/use-integrations";
 import { useCreationHandoff } from "../hooks/use-creation-handoff";
@@ -88,7 +87,7 @@ function PackageIndexBody({
   const { t } = useTranslation(["agents", "settings", "common"]);
   const { can } = usePermissions();
   const [importing, setImporting] = useState(false);
-  const [creatingAgent, setCreatingAgent] = useState<{ integrationId: string | null } | null>(null);
+  const [creating, setCreating] = useState<{ integrationId: string | null } | null>(null);
   const list = useListParams(["origin", "activity"]);
   const [view, setView] = useListView(type);
   const { columns, menu } = useColumnVisibility(`packages-${type}`, usePackageColumns(type));
@@ -166,10 +165,11 @@ function PackageIndexBody({
         onViewChange={setView}
       />
       {importing && canCreate && <ImportModal type={type} onClose={() => setImporting(false)} />}
-      {creatingAgent !== null && canCreate && type === "agent" && (
-        <CreateAgentModal
-          integrationId={creatingAgent.integrationId ?? undefined}
-          onClose={() => setCreatingAgent(null)}
+      {creating !== null && canCreate && type !== "mcp-server" && (
+        <CreatePackageModal
+          type={type}
+          integrationId={creating.integrationId ?? undefined}
+          onClose={() => setCreating(null)}
         />
       )}
       {creation.isOpen && (
@@ -180,11 +180,8 @@ function PackageIndexBody({
             type === "mcp-server"
               ? undefined
               : () => {
-                  // The chooser hands over to the agent dialog; other types have a page of their own.
-                  if (type === "agent") {
-                    creation.close();
-                    setCreatingAgent({ integrationId: creation.integrationId });
-                  } else creation.leave(packageNewPath(type));
+                  creation.close();
+                  setCreating({ integrationId: creation.integrationId });
                 }
           }
           onImport={() => {

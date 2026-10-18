@@ -804,7 +804,7 @@
   "creation.title.integration": "Créer une nouvelle intégration",
   "creation.title.mcp-server": "Créer un nouveau serveur MCP local",
   "creation.manual.title": "Créer manuellement",
-  "creation.manual.description": "Ouvrir l’éditeur existant et configurer vous-même la ressource.",
+  "creation.manual.description": "Renseigner l’essentiel dans un court formulaire, puis régler le reste dans ses paramètres.",
   "creation.manual.unavailableDescription": "Un serveur MCP local embarque son code : il se crée par import.",
   "creation.import.title": "Importer un package",
   "creation.import.description": "Téléverser une archive .afps ou .zip, ou l’importer depuis GitHub.",

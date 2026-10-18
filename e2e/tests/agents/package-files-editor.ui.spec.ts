@@ -352,58 +352,38 @@ for (const nonInline of [false, true]) {
   });
 }
 
-for (const type of ["skills", "integrations"]) {
-  test(`${type}: authors files before creation and keeps them after a failed create`, async ({
+// A skill or an integration is created from a short dialog (name, id, description, plus the
+// integration's server URL), not from a page: its files are authored on the saved package.
+const creations = {
+  skills: { menuItem: "Nouveau skill", dialog: "Nouveau skill", submit: "Créer le skill" },
+  integrations: {
+    menuItem: "Nouvelle intégration",
+    dialog: "Nouvelle intégration",
+    submit: "Créer l'intégration",
+  },
+} as const;
+
+for (const type of ["skills", "integrations"] as const) {
+  test(`${type}: the creation dialog keeps what was typed after a failed create, then files are authored on the saved package`, async ({
     authedPage: page,
     apiClient,
     browserCtx,
   }) => {
+    const { menuItem, dialog: dialogName, submit } = creations[type];
     const scope = `@${browserCtx.org.orgSlug}`;
     const name = `new-files-${Date.now()}`;
     const id = `${scope}/${name}`;
-    const editor = new PackageEditorPage(page, scope, name, type);
-    const requests: string[] = [];
-    page.on("request", (request) => {
-      if (
-        request.url().includes("/api/packages/") &&
-        (request.method() === "POST" || request.url().includes("/files"))
-      )
-        requests.push(request.url());
-    });
-    await page.goto(`/${type}/new`);
-    await page.locator("#meta-displayName").fill(name);
-    await page.locator("#meta-description").fill("Created with its complete file tree");
-    if (type === "integrations") {
-      await page.getByRole("tab", { name: "Source", exact: true }).click();
-      await page.locator("#int-source-url").fill("https://example.com/mcp");
-    }
-    await editor.openFilesTab();
-    const primary = type === "skills" ? "SKILL.md" : "prompt.md";
-    const content =
-      type === "skills"
-        ? `---\nname: ${name}\ndescription: Created with files.\n---\n\nInstructions.`
-        : "Agent instructions.";
-    if (type !== "integrations") {
-      const pane = page.getByRole("region", { name: primary });
-      await pane.locator(".monaco-editor .view-lines").click();
-      await page.keyboard.press("ControlOrMeta+A");
-      await page.keyboard.insertText(content);
-    }
-    await editor.createFile("notes.md");
-    await editor.typeIntoEditor("notes.md", "Local notes");
-    await editor.renameFile("notes.md", "README.md");
-    await editor.createFile("discard.txt");
-    await editor.deleteFile("discard.txt");
-    await page.locator('input[type="file"]').setInputFiles({
-      name: "asset.bin",
-      mimeType: "application/octet-stream",
-      buffer: Buffer.from([0, 255, 128]),
-    });
-    await expect(editor.fileRow("asset.bin")).toBeVisible();
-    await page.getByRole("tab", { name: "Général", exact: true }).click();
-    await editor.openFilesTab();
-    await expect(editor.fileRow("README.md")).toBeVisible();
-    expect(requests).toEqual([]);
+    const description = "Created from its dialog";
+    await page.goto(`/${type}`);
+    await page.getByRole("button", { name: "Actions", exact: true }).click();
+    await page.getByRole("menuitem", { name: menuItem }).click();
+    await page.getByRole("button", { name: /Créer manuellement/ }).click();
+    const dialog = page.getByRole("dialog", { name: dialogName });
+    await dialog.getByLabel("Nom d'affichage").fill(name);
+    await expect(dialog.getByLabel("Identifiant (slug)")).toHaveValue(name);
+    await dialog.getByLabel("Description").fill(description);
+    if (type === "integrations")
+      await dialog.getByLabel("URL du serveur distant").fill("https://example.com/mcp");
 
     const writes: Record<string, unknown>[] = [];
     await page.route(`**/api/packages/${type}`, async (route) => {
@@ -423,26 +403,32 @@ for (const type of ["skills", "integrations"]) {
         });
       await route.continue();
     });
-    const create = page.getByRole("button", { name: "Créer", exact: true });
+    const create = dialog.getByRole("button", { name: submit, exact: true });
     await create.click();
-    await expect(page.getByText("Retry creation").first()).toBeVisible();
-    await expect(page).toHaveURL(`/${type}/new`);
+    await expect(dialog.getByText("Retry creation")).toBeVisible();
     expect((await apiClient.get(`/packages/${id}/files`)).status()).toBe(404);
-    await expect(editor.fileRow("README.md")).toBeVisible();
-    await expect(editor.fileRow("asset.bin")).toBeVisible();
+    await expect(dialog.getByLabel("Description")).toHaveValue(description);
     await create.click();
     await expect(page).toHaveURL(`/${type}/${id}`);
     expect(writes).toHaveLength(2);
     expect(writes[1]).toEqual(writes[0]);
-    if (type !== "integrations") expect(writes[1]?.content).toBe(content);
+    expect(writes[1]).toMatchObject({ manifest: { name: id, description } });
+    if (type === "skills")
+      expect(writes[1]?.content).toBe(
+        `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\n---\n`,
+      );
+
+    // The saved package's files are authored where every package's are: Paramètres › Fichiers.
+    const editor = new PackageEditorPage(page, scope, name, type);
+    await editor.goto();
+    await editor.createFile("notes.md");
+    await editor.editFile("notes.md", "Local notes");
+    await editor.renameFile("notes.md", "README.md");
+    await editor.saveButton.click();
+    await expect(editor.saveButton).toHaveCount(0);
     const files = await listFiles(apiClient, id);
     expect(files.find((file) => file.path === "README.md")?.inline).toBe("Local notes");
-    expect(files.map((file) => file.path)).not.toContain("discard.txt");
-    const binary = await apiClient.get(`/packages/${id}/files/content?path=asset.bin`);
-    expect(await binary.body()).toEqual(Buffer.from([0, 255, 128]));
-    const version = await apiClient.get(`/packages/${id}/files?version=1.0.0`);
-    expect(version.status()).toBe(200);
-    expect((await version.json()).data.map((file: FileEntry) => file.path)).toContain("README.md");
+    expect(files.map((file) => file.path)).not.toContain("notes.md");
   });
 }
 
@@ -497,25 +483,6 @@ test("agents: the creation dialog keeps what was typed after a failed create", a
   expect(writes[1]?.content).toBe(instructions);
   const files = await listFiles(apiClient, id);
   expect(files.find((file) => file.path === "prompt.md")?.inline).toBe(instructions);
-});
-
-test("discarding a new package's files creates nothing on the server", async ({
-  authedPage: page,
-}) => {
-  const writes: string[] = [];
-  page.on("request", (request) => {
-    if (request.method() === "POST" && request.url().includes("/api/packages/"))
-      writes.push(request.url());
-  });
-  await page.goto("/skills/new");
-  const editor = new PackageEditorPage(page, "", "");
-  await editor.openFilesTab();
-  await editor.createFile("unsaved.txt");
-  await page.getByRole("link", { name: "Agents", exact: true }).click();
-  await expect(editor.confirmDialog).toContainText("Modifications non enregistrées");
-  await editor.confirmDialog.getByRole("button", { name: "Quitter sans enregistrer" }).click();
-  await expect(page).toHaveURL("/agents");
-  expect(writes).toEqual([]);
 });
 
 test("a MCP home author edits files while browsing a read-only placement", async ({

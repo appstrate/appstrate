@@ -7,7 +7,7 @@ const ROUTES = Object.keys(ROUTE_ACCESS).map((path) => ({ path }));
 
 /**
  * The declared route a link target lands on: a pattern as is, a concrete URL
- * ranked the way the router ranks it (`/skills/new` before `/skills/:scope`).
+ * ranked the way the router ranks it (`…/runs/:runId` before `…/:version`).
  * `undefined` for a URL no declaration covers — outside the main layout.
  */
 export function routeOf(target: string): RoutePath | undefined {

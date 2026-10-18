@@ -309,11 +309,10 @@ export function useCreatePackage(type: PackageType) {
   const qc = useQueryClient();
   return useMutation({
     meta: { errorHandledByCaller: true },
-    // Exactly the keys the editor sends: the branches forward `body` whole and the create schemas are `.strict()`, so an unmodelled key is a 400.
+    // Exactly the keys the creation dialog sends: the branches forward `body` whole and the create schemas are `.strict()`, so an unmodelled key is a 400.
     mutationFn: async (body: {
       manifest: Record<string, unknown>;
       content: string;
-      operations?: components["schemas"]["PackageFileWriteOperation"][];
       /** Integration only: create the draft without its initial version (`wizardCreateBody`). */
       publish?: false;
     }): Promise<{ id: string; version_count?: number }> => {

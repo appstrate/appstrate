@@ -1,24 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-  type FormEvent,
-} from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { formatBytes } from "../lib/format-bytes";
 import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import { packageFilesErrorKey } from "../lib/package-files";
-import { useNavigate } from "react-router-dom";
 import type { PackageType } from "@appstrate/core/validation";
-import { useCreatePackage, useUpdatePackage } from "./use-mutations";
+import { useUpdatePackage } from "./use-mutations";
 import { useUnsavedChanges } from "./use-unsaved-changes";
-import { packageDetailPath } from "../lib/package-paths";
-import { packageCreateBody, packageUpdateBody } from "../lib/package-file-drafts";
+import { packageUpdateBody } from "../lib/package-file-drafts";
 import type { PackageFileWriteOperation } from "../lib/package-file-tree";
 import { errorMessage } from "../lib/mutation-error";
 
@@ -26,6 +16,7 @@ export interface EditorState {
   manifest: Record<string, unknown>;
   /** The draft version this editor is based on: its detail's `ETag`. */
   etag?: string | null;
+  /** File writes saved with the manifest, such as the `INTEGRATION.md` a server sync proposes. */
   operations?: PackageFileWriteOperation[];
 }
 
@@ -60,9 +51,8 @@ export function settleSavedState(
 interface UseEditorStateOptions {
   initialState: EditorState;
   packageType: PackageType;
-  packageId: string | undefined;
-  isEdit: boolean;
-  validate?: (state: EditorState) => { error: string; tab?: string } | null;
+  packageId: string;
+  validate?: (state: EditorState) => { error: string } | null;
 }
 
 interface UseEditorStateReturn {
@@ -72,59 +62,36 @@ interface UseEditorStateReturn {
   updateManifest: (patch: Record<string, unknown>) => void;
   isDirty: boolean;
   blocker: ReturnType<typeof useUnsavedChanges>["blocker"];
-  allowNavigation: (allowed?: boolean) => void;
   error: string | null;
   setError: (err: string | null) => void;
-  jsonEditorKey: number;
-  bumpJsonKey: () => void;
   saveDraft: () => Promise<void>;
-  handleSubmit: (
-    e?: FormEvent,
-    /** Called when `validate` reports an error so the caller can focus the right tab. */
-    onValidationError?: (tab: string | undefined) => void,
-  ) => void;
   isPending: boolean;
-  setPreparingFiles: (busy: boolean) => void;
 }
 
 export function useEditorState({
   initialState,
   packageType,
   packageId,
-  isEdit,
   validate,
 }: UseEditorStateOptions): UseEditorStateReturn {
-  const navigate = useNavigate();
   const { t } = useTranslation("agents");
   const [state, setState] = useState(initialState);
   const [initialSnapshot, setInitialSnapshot] = useState(initialState);
   const [error, setError] = useState<string | null>(null);
-  const [jsonEditorKey, setJsonEditorKey] = useState(0);
-  const [preparingFiles, setPreparingFiles] = useState(false);
   const saving = useRef(false);
-  const createPkg = useCreatePackage(packageType);
-  const updatePkg = useUpdatePackage(packageType, packageId ?? "");
-  const isDirty = preparingFiles || JSON.stringify(state) !== JSON.stringify(initialSnapshot);
-  const { blocker, allowNavigation } = useUnsavedChanges(isDirty, () => setState(initialSnapshot));
+  const updatePkg = useUpdatePackage(packageType, packageId);
+  const isDirty = JSON.stringify(state) !== JSON.stringify(initialSnapshot);
+  const { blocker } = useUnsavedChanges(isDirty, () => setState(initialSnapshot));
   useReportEditorDirty(isDirty);
   const updateManifest = useCallback(
     (patch: Record<string, unknown>) =>
       setState((current) => ({ ...current, manifest: { ...current.manifest, ...patch } })),
     [],
   );
-  const bumpJsonKey = useCallback(() => setJsonEditorKey((key) => key + 1), []);
 
-  const reportFailure = (failure: Error) => {
-    const key = packageFilesErrorKey(failure);
-    setError(
-      key ? t(key, { limit: formatBytes(PACKAGE_FILE_INLINE_MAX_BYTES) }) : errorMessage(failure),
-    );
-  };
-
+  /** Saves the manifest; edits made while the request was in flight stay, and stay unsaved. */
   const saveDraft = async () => {
-    if (!isEdit || !packageId) return;
-    if (saving.current || preparingFiles)
-      throw new Error("An editor operation is still in progress");
+    if (saving.current) throw new Error("An editor operation is still in progress");
     const invalid = validate?.(state);
     if (invalid) {
       setError(invalid.error);
@@ -141,62 +108,26 @@ export function useEditorState({
       setState((current) => settleSavedState(current, sent, updated.etag));
       setInitialSnapshot(settleSavedState(sent, sent, updated.etag));
     } catch (cause) {
-      reportFailure(cause as Error);
+      const failure = cause as Error;
+      const key = packageFilesErrorKey(failure);
+      setError(
+        key ? t(key, { limit: formatBytes(PACKAGE_FILE_INLINE_MAX_BYTES) }) : errorMessage(failure),
+      );
       throw cause;
     } finally {
       saving.current = false;
     }
   };
 
-  const handleSubmit = (
-    event?: FormEvent,
-    onValidationError?: (tab: string | undefined) => void,
-  ) => {
-    event?.preventDefault();
-    if (saving.current || preparingFiles || createPkg.isPending) return;
-    const invalid = validate?.(state);
-    if (invalid) {
-      setError(invalid.error);
-      onValidationError?.(invalid.tab);
-      return;
-    }
-    if (isEdit) {
-      void saveDraft().then(
-        () => {
-          allowNavigation();
-          navigate(packageDetailPath(packageType, packageId!));
-        },
-        () => {},
-      );
-    } else {
-      saving.current = true;
-      setError(null);
-      createPkg.mutate(packageCreateBody(state, packageType), {
-        onSettled: () => {
-          saving.current = false;
-        },
-        onSuccess: (data) => {
-          allowNavigation();
-          navigate(packageDetailPath(packageType, data.id));
-        },
-        onError: reportFailure,
-      });
-    }
-  };
   return {
     state,
     setState,
     updateManifest,
     isDirty,
     blocker,
-    allowNavigation,
     error,
     setError,
-    jsonEditorKey,
-    bumpJsonKey,
     saveDraft,
-    handleSubmit,
-    setPreparingFiles,
-    isPending: preparingFiles || createPkg.isPending || updatePkg.isPending,
+    isPending: updatePkg.isPending,
   };
 }
