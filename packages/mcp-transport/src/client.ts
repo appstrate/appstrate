@@ -832,6 +832,26 @@ interface SdkSession {
   close(): Promise<void>;
 }
 
+/** `promise`, or the signal's reason as soon as it aborts. */
+function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortReason(signal));
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (err: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(err);
+      },
+    );
+  });
+}
+
 /** The bounds of a call, for the listing it needs: its signal and its per-call timeout. */
 const refreshOptions = (options: SessionRequestOptions): SessionRequestOptions => ({
   ...(options.signal ? { signal: options.signal } : {}),
@@ -851,10 +871,20 @@ function dualEraSession(
 ): SdkSession {
   // The definitions listed, for `callTool`'s `x-mcp-header` mirroring and output validation: the
   // SDK reads them from its own `listTools()` cache otherwise, which this session never fills.
-  const listed = new Map<string, Tool>();
+  // Replaced whole once a listing completes, so a concurrent call never reads a partial one and a
+  // failed listing leaves the previous one in place.
+  let listed = new Map<string, Tool>();
+  // Whether a complete listing ever landed: an empty or fully-excluded list is still one.
+  let listedOnce = false;
+  // The listing in flight, shared: concurrent callers never walk `tools/list` twice.
+  let inflight: Promise<{ tools: Tool[] }> | undefined;
   // Every page is a raw request: the SDK's `listTools()` answers `[]` without asking a server
   // that advertises no `tools` capability, as v1 never did.
-  const page = async (cursor: string | undefined, options: SessionRequestOptions) => {
+  const page = async (
+    cursor: string | undefined,
+    options: SessionRequestOptions,
+    into: Map<string, Tool>,
+  ) => {
     // The SDK validates a spec method's result itself (an explicit schema does not bypass it):
     // a page without `tools` is its typed `INVALID_RESULT`, never a TypeError here.
     const raw = await client.request(
@@ -865,21 +895,32 @@ function dualEraSession(
     for (const { name, reason } of read.excluded) {
       onWarning?.(`MCP tool '${name}' excluded from tools/list: ${reason}`, { tool: name, reason });
     }
-    for (const tool of read.tools) listed.set(tool.name, tool);
+    for (const tool of read.tools) into.set(tool.name, tool);
     return read;
   };
-  const listAll = async (options: SessionRequestOptions) => {
-    // A listing replaces the definitions: one the server no longer lists must not be mirrored.
-    listed.clear();
+  const walk = async (options: SessionRequestOptions) => {
+    const next = new Map<string, Tool>();
     const tools: Tool[] = [];
     let cursor: string | undefined;
     for (let n = 0; n < MAX_TOOL_PAGES; n++) {
-      const read = await page(cursor, options);
+      const read = await page(cursor, options, next);
       tools.push(...read.tools);
-      if (read.nextCursor === undefined || read.nextCursor === cursor) return { tools };
+      if (read.nextCursor === undefined || read.nextCursor === cursor) {
+        // A listing replaces the definitions: one the server no longer lists is not mirrored.
+        listed = next;
+        listedOnce = true;
+        return { tools };
+      }
       cursor = read.nextCursor;
     }
     throw new Error(`tools/list did not end within ${MAX_TOOL_PAGES} pages`);
+  };
+  const listAll = (options: SessionRequestOptions): Promise<{ tools: Tool[] }> => {
+    inflight ??= walk(options).finally(() => {
+      inflight = undefined;
+    });
+    // A caller joining a listing it did not start still answers to its own signal.
+    return untilAborted(inflight, options.signal);
   };
   return {
     capabilities: () => client.getServerCapabilities() as ServerCapabilities | undefined,
@@ -891,33 +932,64 @@ function dualEraSession(
     },
     listTools: (options) => listAll(options),
     async listToolsPage(cursor, options) {
-      const read = await page(cursor, options);
+      // One page adds to the definitions known; only a complete listing replaces them.
+      const read = await page(cursor, options, listed);
       return { tools: read.tools, ...(read.nextCursor ? { nextCursor: read.nextCursor } : {}) };
     },
     async callTool(args, options) {
       const modern = client.getProtocolEra() === "modern";
+      let callOptions = options;
       // On a modern connection every call carries the definition its headers mirror: the
-      // session's own listing, taken first when it has none, so the SDK never falls back to its
-      // own cache — whose recovery refetches, retries and writes to the console.
-      if (modern && listed.size === 0) await listAll(refreshOptions(options));
-      const call = () => {
-        const toolDefinition = listed.get(args.name);
-        return client.callTool(args, {
-          ...options,
+      // session's own listing, taken first when it never had one, so the SDK never falls back to
+      // its own cache — whose recovery refetches, retries and writes to the console. The listing
+      // only helps the call: bounded by the call's own time, and when it fails the call is sent
+      // anyway, the failure reported.
+      if (modern && !listedOnce) {
+        const started = Date.now();
+        const budget = options.timeout ? AbortSignal.timeout(options.timeout) : undefined;
+        const signals = [options.signal, budget].filter((x): x is AbortSignal => x !== undefined);
+        try {
+          await listAll(signals.length > 0 ? { signal: AbortSignal.any(signals) } : {});
+        } catch (err) {
+          options.signal?.throwIfAborted();
+          onWarning?.(
+            `MCP tools/list before calling '${args.name}' failed; the call is sent without its definition`,
+            {
+              tool: args.name,
+              error: err instanceof Error ? err.message : String(err),
+            },
+          );
+        }
+        if (options.timeout && !options.onprogress) {
+          callOptions = {
+            ...options,
+            timeout: Math.max(1, options.timeout - (Date.now() - started)),
+          };
+        }
+      }
+      const send = (toolDefinition: Tool | undefined) =>
+        client.callTool(args, {
+          ...callOptions,
           ...(toolDefinition ? { toolDefinition: toolDefinition as never } : {}),
         }) as Promise<CallToolResult>;
-      };
-      const mirrored = modern && listed.has(args.name);
+      const definition = modern ? listed.get(args.name) : undefined;
       try {
-        return await call();
+        return await send(definition);
       } catch (err) {
         // `HeaderMismatch` is the transport's rejection BEFORE the tool runs, and only on a
         // modern connection mirroring headers (SEP-2243): there the definition is stale, so it
-        // is refreshed and the call sent once more. Elsewhere -32020 is the server's own code
-        // for a call that may have run: never resent.
-        if (!mirrored || (err as { code?: unknown } | null)?.code !== HEADER_MISMATCH) throw err;
-        await listAll(refreshOptions(options));
-        return await call();
+        // is refreshed and the call sent once more, with the refreshed definition — never
+        // without one, which would set the SDK's own resend going. Elsewhere -32020 is the
+        // server's own code for a call that may have run: never resent.
+        if (!definition || (err as { code?: unknown } | null)?.code !== HEADER_MISMATCH) throw err;
+        try {
+          await listAll(refreshOptions(options));
+        } catch {
+          throw err;
+        }
+        const refreshed = listed.get(args.name);
+        if (!refreshed) throw err;
+        return await send(refreshed);
       }
     },
     async readResource(args, options) {

@@ -711,3 +711,184 @@ describe("createMcpHttpClient — tools/call retries", () => {
     }
   });
 });
+
+describe("createMcpHttpClient — the session's tool listing under concurrency", () => {
+  const regional: AppstrateToolDefinition = {
+    descriptor: {
+      name: "regional",
+      inputSchema: {
+        type: "object",
+        properties: { region: { type: "string", "x-mcp-header": "Region" } },
+      },
+    },
+    handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
+  };
+
+  /** Counts `tools/list` and `tools/call`, records each call's mirrored header. */
+  function observed(handler: () => McpHandler) {
+    const counts = { list: 0, call: 0 };
+    const headers: (string | null)[] = [];
+    const fetch = handlerFetch(async (request) => {
+      const text = request.method === "POST" ? await request.clone().text() : "";
+      if (text.includes('"tools/list"')) counts.list += 1;
+      if (text.includes('"tools/call"')) {
+        counts.call += 1;
+        headers.push(request.headers.get("mcp-param-region"));
+      }
+      return handler()(request);
+    });
+    return { fetch, counts, headers };
+  }
+
+  it("shares one listing between concurrent first calls, each carrying its definition", async () => {
+    const modern = modernMcpHandler({ tools: [regional] });
+    const slowList: McpHandler = async (request) => {
+      if ((await request.clone().text()).includes('"tools/list"')) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return modern(request);
+    };
+    const { fetch, counts, headers } = observed(() => slowList);
+    const client = await createMcpHttpClient(freshUrl(), { fetch });
+    try {
+      await Promise.all([
+        client.callTool({ name: "regional", arguments: { region: "a" } }),
+        client.callTool({ name: "regional", arguments: { region: "b" } }),
+      ]);
+      expect(counts.list).toBe(1);
+      expect(headers.sort()).toEqual(["a", "b"]);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("keeps the previous definitions when a refresh fails", async () => {
+    let failList = false;
+    let mismatchOnce = false;
+    const modern = modernMcpHandler({ tools: [regional] });
+    const handler: McpHandler = async (request) => {
+      const text = request.method === "POST" ? await request.clone().text() : "";
+      if (text.includes('"tools/list"') && failList) return new Response("down", { status: 500 });
+      if (text.includes('"tools/call"') && mismatchOnce) {
+        mismatchOnce = false;
+        const { id } = JSON.parse(text) as { id: number };
+        return Response.json(
+          { jsonrpc: "2.0", id, error: { code: -32020, message: "Header mismatch" } },
+          { status: 400 },
+        );
+      }
+      return modern(request);
+    };
+    const { fetch, headers } = observed(() => handler);
+    const client = await createMcpHttpClient(freshUrl(), { fetch });
+    try {
+      await client.listTools();
+      failList = true;
+      mismatchOnce = true;
+      await expect(
+        client.callTool({ name: "regional", arguments: { region: "x" } }),
+      ).rejects.toThrow();
+      // The failed refresh left the listing in place: the next call still mirrors its header.
+      await client.callTool({ name: "regional", arguments: { region: "y" } });
+      expect(headers.at(-1)).toBe("y");
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("lists an empty server once, not before every call", async () => {
+    const { fetch, counts } = observed(() => modernMcpHandler({ tools: [] }));
+    const client = await createMcpHttpClient(freshUrl(), { fetch });
+    try {
+      for (let i = 0; i < 3; i++) {
+        await expect(client.callTool({ name: "ghost" })).rejects.toThrow(/Unknown tool/);
+      }
+      expect(counts).toEqual({ list: 1, call: 3 });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("does not resend when the refreshed listing no longer has the tool", async () => {
+    let gone = false;
+    const withTool = modernMcpHandler({ tools: [regional] });
+    const without = modernMcpHandler({ tools: [] });
+    const handler: McpHandler = async (request) => {
+      const text = request.method === "POST" ? await request.clone().text() : "";
+      if (text.includes('"tools/call"')) {
+        gone = true;
+        const { id } = JSON.parse(text) as { id: number };
+        return Response.json(
+          { jsonrpc: "2.0", id, error: { code: -32020, message: "Header mismatch" } },
+          { status: 400 },
+        );
+      }
+      return (gone ? without : withTool)(request);
+    };
+    const { fetch, counts } = observed(() => handler);
+    const client = await createMcpHttpClient(freshUrl(), { fetch });
+    try {
+      await client.listTools();
+      const caught = await client
+        .callTool({ name: "regional", arguments: { region: "x" } })
+        .catch((err: unknown) => err);
+      expect((caught as { code?: unknown }).code).toBe(-32020);
+      expect(counts.call).toBe(1);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("sends the call anyway when the listing before it fails, and says so", async () => {
+    const modern = modernMcpHandler({ tools: [echo] });
+    const handler: McpHandler = async (request) => {
+      const text = request.method === "POST" ? await request.clone().text() : "";
+      if (text.includes('"tools/list"')) {
+        const { id } = JSON.parse(text) as { id: number };
+        return Response.json(
+          { jsonrpc: "2.0", id, error: { code: -32601, message: "Method not found" } },
+          { status: 404 },
+        );
+      }
+      return modern(request);
+    };
+    const warnings: string[] = [];
+    const { fetch, counts } = observed(() => handler);
+    const client = await createMcpHttpClient(freshUrl(), {
+      fetch,
+      onWarning: (message) => warnings.push(message),
+    });
+    try {
+      const res = await client.callTool({ name: "echo", arguments: { msg: "hi" } });
+      expect(res.content).toEqual([{ type: "text", text: "hi" }]);
+      expect(counts.call).toBe(1);
+      expect(warnings.some((w) => w.includes("tools/list before calling 'echo'"))).toBe(true);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("bounds the listing before a call by the call's own timeout", async () => {
+    const modern = modernMcpHandler({ tools: [echo] });
+    const handler: McpHandler = async (request) => {
+      const text = request.method === "POST" ? await request.clone().text() : "";
+      return text.includes('"tools/list"') ? silent(request) : modern(request);
+    };
+    const warnings: string[] = [];
+    const { fetch } = observed(() => handler);
+    const client = await createMcpHttpClient(freshUrl(), {
+      fetch,
+      onWarning: (message) => warnings.push(message),
+    });
+    try {
+      const started = Date.now();
+      await client
+        .callTool({ name: "echo", arguments: { msg: "x" } }, { timeoutMs: 300 })
+        .catch(() => {});
+      expect(Date.now() - started).toBeLessThan(1_500);
+      expect(warnings).toHaveLength(1);
+    } finally {
+      await client.close();
+    }
+  });
+});
