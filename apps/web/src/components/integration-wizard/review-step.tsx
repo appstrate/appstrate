@@ -57,6 +57,8 @@ export function ReviewStep({
   const { manifest, provenance } = result;
   const nameTaken = createError instanceof ApiError && createError.code === "name_collision";
   const complete = edits.display_name.trim() !== "" && edits.name.trim() !== "";
+  // A value the user changed is theirs: it no longer reads as detected or suggested.
+  const edited = (key: keyof WizardEdits) => edits[key] !== manifest[key];
   return (
     <WizardSection
       title={t("integrationWizard.review.title")}
@@ -96,7 +98,11 @@ export function ReviewStep({
             value={edits.display_name}
             onChange={(display_name) => onEditsChange({ ...edits, display_name })}
             disabled={creating}
-            badge={<DiscoveryBadge provenance={provenance["/display_name"]} />}
+            badge={
+              <DiscoveryBadge
+                provenance={edited("display_name") ? undefined : provenance["/display_name"]}
+              />
+            }
           />
           <FormField
             id="integration-wizard-id"
@@ -106,7 +112,7 @@ export function ReviewStep({
             onChange={(name) => onEditsChange({ ...edits, name })}
             disabled={creating}
             description={t("integrationWizard.review.identifierHint")}
-            badge={<DiscoveryBadge provenance={provenance["/name"]} />}
+            badge={<DiscoveryBadge provenance={edited("name") ? undefined : provenance["/name"]} />}
             error={nameTaken ? errorMessage(createError) : undefined}
           />
         </div>

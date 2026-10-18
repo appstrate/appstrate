@@ -98,6 +98,24 @@ describe("the review", () => {
     expect(html).toContain(agentsFr["integrationEditor.discover.guessed"]);
     expect(html).not.toContain("streamable-http");
   });
+
+  it("stops marking a name or identifier the user changed as detected or suggested", () => {
+    const html = render(
+      <ReviewStep
+        result={discovery}
+        edits={{ display_name: "Mon Acme", name: "@org/mon-acme" }}
+        onEditsChange={noop}
+        icon={undefined}
+        onCreate={noop}
+        creating={false}
+        createError={null}
+        onManual={noop}
+      />,
+    );
+    expect(html).not.toContain(agentsFr["integrationEditor.discover.guessed"]);
+    // The auth line keeps its own badge.
+    expect(html).toContain(agentsFr["integrationEditor.discover.detected"]);
+  });
 });
 
 const catalog = {
