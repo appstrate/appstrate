@@ -275,7 +275,6 @@ describe("discoverRemoteIntegration", () => {
               api_key: {
                 type: "string",
                 writeOnly: true,
-                description: "API key for this integration.",
               },
             },
             required: ["api_key"],

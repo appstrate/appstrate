@@ -910,6 +910,7 @@
   "integration.connect.handoff.ssh_host_fingerprint.note": "The command above prints the server's fingerprint as its last line. If it differs from this one, the host key you pinned is not this server's: delete the connection and reconnect with the right one.",
   "integration.connect.handoff.ssh_revoke.label": "Remove this key from the server",
   "integration.connect.handoff.ssh_revoke.note": "Keep this block, and run it before or after deleting the connection: once it is deleted, Appstrate can no longer show it. Deleting the connection destroys the private half and nothing else — Appstrate cannot reach your server to take its key out of authorized_keys.",
+  "integration.connect.fields.api_key.label": "API key",
   "integration.connect.fields.client_cert.label": "Client certificate (PEM)",
   "integration.connect.fields.client_key.label": "Private key (PEM)",
   "integration.oauthClient.clientSecret": "Client Secret",
