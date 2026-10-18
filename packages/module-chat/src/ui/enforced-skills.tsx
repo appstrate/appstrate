@@ -9,8 +9,9 @@ import { useEnforcedSkills } from "./use-enforced-skills.ts";
 /** For a member who chats without `skills:read`: the space's policy applies to them too. */
 export function EnforcedSkillsIndicator({ getHeaders }: { getHeaders: GetHeaders | undefined }) {
   const { t } = useChatHost();
-  const { data: enforced, isPending } = useEnforcedSkills(getHeaders);
-  if (isPending) return <Skeleton className="size-8 rounded-lg" aria-hidden />;
+  // `isLoading`: the read is off without a space, and would wait forever.
+  const { data: enforced, isLoading } = useEnforcedSkills(getHeaders);
+  if (isLoading) return <Skeleton className="size-8 rounded-lg" aria-hidden />;
   if (!enforced || enforced.length === 0) return null;
   const names = enforced.map((skill) => skill.display_name ?? skill.packageId).join(", ");
 

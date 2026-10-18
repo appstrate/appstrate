@@ -27,6 +27,7 @@ import { fieldWriteState } from "../../lib/field-write-state";
 import { OrgSettingToggle } from "../../components/settings/org-setting-toggle";
 import { PersonalCredentialsSetting } from "../../components/settings/personal-credentials-setting";
 import { EmptyState } from "../../components/page-states";
+import { errorMessage } from "../../lib/mutation-error";
 import { orgKeys } from "../../lib/query-keys";
 import { useViewAsHeader } from "../../stores/view-as-store";
 import { AppearancePicker } from "../../components/appearance-picker";
@@ -63,7 +64,7 @@ export function OrgSettingsGeneralPage() {
   const leaveHintId = useId();
 
   // Owners always get the member list.
-  const { data: orgDetail } = useOrgDetail();
+  const { data: orgDetail, isLoading: orgDetailLoading, error: orgDetailError } = useOrgDetail();
   const orgDetailPending = !orgDetail;
   const ownerCount = orgDetail?.members?.filter((m) => m.role === "owner").length ?? 0;
   // Under a preview `orgRole` is the persona's, not the real membership.
@@ -233,8 +234,15 @@ export function OrgSettingsGeneralPage() {
           variant="action"
           label={t("orgSettings.leaveOrg")}
           description={
-            orgDetailPending && !previewing ? (
+            previewing ? (
+              <span id={leaveHintId}>{leaveHint}</span>
+            ) : orgDetailLoading ? (
               <Skeleton className="h-3.5 w-64" />
+            ) : orgDetailError ? (
+              // The guard cannot be evaluated: leaving stays off, and the reason is said.
+              <span id={leaveHintId} className="text-destructive">
+                {errorMessage(orgDetailError)}
+              </span>
             ) : (
               <span id={leaveHintId}>{leaveHint}</span>
             )
@@ -242,7 +250,7 @@ export function OrgSettingsGeneralPage() {
         >
           <Button
             data-testid="leave-org-button"
-            aria-describedby={orgDetailPending && !previewing ? undefined : leaveHintId}
+            aria-describedby={orgDetailLoading && !previewing ? undefined : leaveHintId}
             variant="destructive"
             disabled={!canLeave || leaveOrgMutation.isPending}
             onClick={() => setConfirmLeave(true)}

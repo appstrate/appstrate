@@ -393,13 +393,16 @@ function IntegrationStatusCell({
   agentPackageId: string;
 }) {
   const { t } = useTranslation("agents");
-  const { data: entry, isPending } = useIntegrationReadinessEntry(packageId, agentPackageId);
+  const { data: entry, isLoading } = useIntegrationReadinessEntry(packageId, agentPackageId);
   if (!spaceActive) {
     return <Badge variant="pending">{t("detail.connectionsTable.inactive")}</Badge>;
   }
-  if (isPending || !entry) {
+  if (isLoading) {
     return <Badge variant="pending">{t("detail.connectionsTable.checking")}</Badge>;
   }
+  // Settled without a verdict (a failed read, or none for this integration): no status to give,
+  // and "checking" would never end.
+  if (!entry) return <span className="text-muted-foreground text-xs">—</span>;
   if (describeResolution(entry.resolution).resolved) {
     return <Badge variant="success">{t("detail.connectionsTable.ready")}</Badge>;
   }

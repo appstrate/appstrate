@@ -203,7 +203,9 @@ export function NotificationContent({
 export function NotificationBell() {
   const { t } = useTranslation(["common", "agents"]);
   const { data: count } = useUnreadCount();
-  const { data: agents, isPending: agentsPending } = useAgents();
+  // `isLoading`, not `isPending`: the read is off for a role that sees no agent,
+  // and a disabled query stays pending forever.
+  const { data: agents, isLoading: agentsPending } = useAgents();
   const {
     data: notifications,
     isPending: notificationsPending,

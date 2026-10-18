@@ -307,6 +307,18 @@ function box(html: string, id: string): { checked: boolean; disabled: boolean } 
   };
 }
 
+describe("IntegrationConnectionPicker — no verdict", () => {
+  it("says the check failed when the readiness answered without the integration", () => {
+    const qc = withDetail(new QueryClient());
+    qc.setQueryData(READINESS_KEY, { blocks_run: false, errors: [], integrations: [] });
+    const html = render(
+      <IntegrationConnectionPicker integration={{ id: INTEGRATION }} agentPackageId={AGENT} />,
+      { queryClient: qc },
+    );
+    expect(html).toContain(`data-testid="member-pick-failed-${INTEGRATION}"`);
+  });
+});
+
 describe("IntegrationConnectionPicker — a stored member is gone", () => {
   it("names the survivors and how many are unavailable, and says why runs are blocked", () => {
     const html = renderPicker(

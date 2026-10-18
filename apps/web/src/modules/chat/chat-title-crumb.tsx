@@ -24,11 +24,12 @@ export function ChatTitleCrumb({
   t: ChatTranslate;
   can: ChatCan;
 }) {
-  const { data: sessions, isPending } = useSessions();
+  const { data: sessions, isLoading } = useSessions();
   const session = conversationId ? sessions?.find((s) => s.id === conversationId) : undefined;
   const title = session ? (session.title ?? t("threads.new")) : null;
 
-  const loading = conversationId !== null && isPending;
+  // `isLoading`: the read is off without a space, and would wait forever.
+  const loading = conversationId !== null && isLoading;
 
   usePageBreadcrumb(
     title !== null ? [{ label: title, slot: true }] : loading ? [{ label: "", slot: true }] : [],
