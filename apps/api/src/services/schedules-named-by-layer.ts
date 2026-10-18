@@ -31,7 +31,7 @@ import {
 import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
 import { ApiError } from "../lib/errors.ts";
 import type { LoadedPackage } from "../types/index.ts";
-import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
+import { resolveAgentRunManifest } from "./agent-version-resolver.ts";
 import { integrationsResolvedForRun } from "./integration-connection-resolver.ts";
 import { getPackage } from "./package-catalog.ts";
 import { seedPinnedIntegrationManifests } from "./run-pipeline.ts";
@@ -156,15 +156,21 @@ async function unnamedAmong(
   return rows.map((row) => row.id);
 }
 
-/** The definition `schedule` fires, or `null` when none resolves: that fire fails on its own. */
+/**
+ * The definition `schedule` fires, as its catalog manifest, or `null` when no version is selected
+ * (none published, none matching): that fire fails on its own. The archive is never read — this
+ * runs inside a removal holding the governance lock, and what it asks is declared by the manifest.
+ * So a selected version whose archive is unreadable is judged by its manifest, and may be disabled
+ * as unnamed: harmless, its fire fails anyway.
+ */
 async function firedDefinition(
   schedule: ScheduleRow,
   executor: DbOrTx,
-): Promise<LoadedPackage | null> {
+): Promise<Omit<LoadedPackage, "prompt"> | null> {
   const draft = await getPackage(schedule.packageId, schedule.orgId, { executor });
   if (!draft) return null;
   try {
-    return (await resolveAgentRunVersion(draft, schedule.versionOverride ?? undefined, executor))
+    return (await resolveAgentRunManifest(draft, schedule.versionOverride ?? undefined, executor))
       .agent;
   } catch (err) {
     if (err instanceof ApiError) return null;
