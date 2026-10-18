@@ -179,6 +179,21 @@ function ServerCatalog({
           <Link className="underline underline-offset-4" to={detailPath}>
             {t("integrationWizard.open")}
           </Link>
+          <div className="mt-2">
+            {/* Re-reads the draft and the detail: a publish or a revert there changes the step.
+                Not the server read: through these auths it cannot answer otherwise. */}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void qc.invalidateQueries({ queryKey: packageKeys.all });
+                void invalidateIntegrationQueries(qc);
+              }}
+            >
+              {t("integrationWizard.tools.checkAgain")}
+            </Button>
+          </div>
         </AlertDescription>
       </Alert>
     );
@@ -228,8 +243,8 @@ function ServerCatalog({
     draftChangesBeyondWizard({
       draft: draft.manifest ?? {},
       published: detail.manifest,
+      proposal,
       unarchivedAtMount,
-      listedTools: proposal.tools.map((tool) => tool.name),
     });
   const selected = selection ?? initialToolSelection(draft.manifest ?? {}, proposal);
   const submit = async () => {

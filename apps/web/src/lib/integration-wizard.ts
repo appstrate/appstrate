@@ -239,10 +239,6 @@ function canonicalJson(value: unknown): string {
   );
 }
 
-/** Own keys only: a tool may be named `constructor`. */
-const hasOwnKey = (record: Record<string, unknown>, key: string) =>
-  Object.prototype.hasOwnProperty.call(record, key);
-
 const isEmptyValue = (v: unknown) =>
   v === undefined ||
   v === null ||
@@ -253,68 +249,42 @@ const isEmptyValue = (v: unknown) =>
 /** Identity fields the server sync fills only when the draft's are empty (`mergeServerSync`). */
 const SYNC_FILLED_IDENTITY = ["display_name", "description", "homepage", "icon"] as const;
 
-/**
- * The draft as the wizard's own writes leave it comparable to the published version: its
- * `default_tools`, its `version`, an identity field the published version leaves empty, and the
- * `tools_policy` keys it adds (`{}`) or drops are taken from the published side. An entry kept
- * under the same name, or added with content, is somebody's edit and stays.
- */
-function withoutWizardWrites(
-  draft: Record<string, unknown>,
+/** What the comparison sets aside: the wizard's own writes, the identity only where it fills it. */
+function setAsideWizardWrites(
+  manifest: Record<string, unknown>,
   published: Record<string, unknown>,
 ): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...draft };
-  for (const key of ["default_tools", "version"] as const) {
-    if (key in published) out[key] = published[key];
-    else delete out[key];
-  }
-  for (const key of SYNC_FILLED_IDENTITY) {
-    if (!isEmptyValue(published[key])) continue;
-    if (key in published) out[key] = published[key];
-    else delete out[key];
-  }
-  const asRecord = (v: unknown): Record<string, unknown> =>
-    v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
-  const draftPolicy = asRecord(draft.tools_policy);
-  const publishedPolicy = asRecord(published.tools_policy);
-  const policy: Record<string, unknown> = {};
-  for (const [name, entry] of Object.entries(publishedPolicy)) {
-    // Dropped by the sync, or kept as it is: the published entry either way.
-    policy[name] = hasOwnKey(draftPolicy, name) ? draftPolicy[name] : entry;
-  }
-  for (const [name, entry] of Object.entries(draftPolicy)) {
-    // Added by the sync as `{}`; added with content, it is an edit and stays visible.
-    if (!hasOwnKey(publishedPolicy, name) && !isEmptyValue(entry)) policy[name] = entry;
-  }
-  if ("tools_policy" in draft || "tools_policy" in published) {
-    if ("tools_policy" in published || Object.keys(policy).length > 0) out.tools_policy = policy;
-    else delete out.tools_policy;
-  }
+  const out: Record<string, unknown> = { ...manifest };
+  delete out.default_tools;
+  delete out.version;
+  for (const key of SYNC_FILLED_IDENTITY) if (isEmptyValue(published[key])) delete out[key];
   return out;
 }
 
 /**
- * Whether the tools step's publish would ship draft changes the wizard does not write: the whole
- * manifest compared, key order aside, once the wizard's own writes are set aside
- * ({@link withoutWizardWrites}). Files are not visible here, hence a heuristic for them: the
- * draft had unarchived changes when the step opened (`has_unarchived_changes`) while it does not
- * yet declare the tools the server lists — no save of this step, in this session or an earlier
- * one, explains them.
+ * Whether the tools step's publish would ship draft changes the wizard does not write: what the
+ * save ships, `mergeServerSync(draft, proposal)`, against the same sync merged into the published
+ * version — so the tools the server lists, added or dropped, count on both sides alike — with
+ * `default_tools`, `version` and the identity fields the sync fills where the published version
+ * leaves them empty set aside; key order ignored. Files are not visible here, hence a heuristic for
+ * them: the draft had unarchived changes when the step opened (`has_unarchived_changes`) while it
+ * does not yet declare the tools the server lists — no save of this step, in this session or an
+ * earlier one, explains them.
  */
 export function draftChangesBeyondWizard(facts: {
   draft: Record<string, unknown>;
   published: Record<string, unknown>;
+  proposal: Pick<ServerSyncProposal, "manifest" | "warnings">;
   /** `has_unarchived_changes` when the step opened. */
   unarchivedAtMount: boolean;
-  /** The tools the server lists. */
-  listedTools: readonly string[];
 }): boolean {
-  const { draft, published } = facts;
-  if (canonicalJson(withoutWizardWrites(draft, published)) !== canonicalJson(published))
-    return true;
+  const { draft, published, proposal } = facts;
+  const shipped = setAsideWizardWrites(mergeServerSync(draft, proposal), published);
+  const baseline = setAsideWizardWrites(mergeServerSync(published, proposal), published);
+  if (canonicalJson(shipped) !== canonicalJson(baseline)) return true;
   const declared = new Set(declaredToolNames(draft));
-  const wizardSaved =
-    facts.listedTools.length > 0 && facts.listedTools.every((n) => declared.has(n));
+  const listed = Object.keys(proposal.manifest.tools_policy);
+  const wizardSaved = listed.length > 0 && listed.every((name) => declared.has(name));
   return facts.unarchivedAtMount && !wizardSaved;
 }
 

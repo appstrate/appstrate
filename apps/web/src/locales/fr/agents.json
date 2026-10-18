@@ -1017,6 +1017,7 @@
   "integrationWizard.tools.docsPreview": "Aperçu des instructions",
   "integrationWizard.tools.publishFailed": "Les outils sont enregistrés, mais la version {{version}} n’a pas été publiée.",
   "integrationWizard.tools.unpublishedAuths": "Le brouillon modifie l’authentification de cette intégration, et ces modifications ne sont pas publiées : un compte se connecte sur l’authentification publiée, il ne peut donc pas servir à lire les outils du brouillon. Publiez ou annulez ces modifications depuis la page de l’intégration.",
+  "integrationWizard.tools.checkAgain": "Vérifier à nouveau",
   "integrationWizard.tools.draftMoved": "Le brouillon a été modifié entre-temps : la version {{version}} n’a pas été publiée. Le prochain envoi enregistre à nouveau vos outils sur le brouillon actuel, puis publie.",
   "integrationWizard.tools.retryPublish": "Publier la version {{version}}",
   "integrationWizard.tools.submit": "Enregistrer et publier la version {{version}}",

@@ -1017,6 +1017,7 @@
   "integrationWizard.tools.docsPreview": "Preview the instructions",
   "integrationWizard.tools.publishFailed": "The tools are saved, but version {{version}} was not published.",
   "integrationWizard.tools.unpublishedAuths": "The draft changes this integration's authentication, and those changes are not published: an account connects on the published authentication, so it cannot be used to read the draft's tools. Publish or revert those changes from the integration page.",
+  "integrationWizard.tools.checkAgain": "Check again",
   "integrationWizard.tools.draftMoved": "The draft changed in the meantime: version {{version}} was not published. The next submit saves your tools again on the current draft, then publishes.",
   "integrationWizard.tools.retryPublish": "Publish version {{version}}",
   "integrationWizard.tools.submit": "Save and publish version {{version}}",

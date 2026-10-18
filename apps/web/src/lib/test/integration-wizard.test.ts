@@ -391,14 +391,24 @@ describe("draftChangesBeyondWizard", () => {
     tools_policy: { search: { required_scopes: { oauth: ["read"] } } },
     default_tools: ["search"],
   };
-  const listedTools = ["search", "fetch"];
-  const check = (draft: Record<string, unknown>, unarchivedAtMount = false) =>
-    draftChangesBeyondWizard({ draft, published, unarchivedAtMount, listedTools });
+  /** The server lists `search` and `fetch`, complete or cut. */
+  const sync = (truncated = false) =>
+    ({
+      manifest: {
+        default_tools: ["search"],
+        tools_policy: { search: {}, fetch: {} },
+        description: "From the server",
+        homepage: "https://acme.example/",
+      },
+      warnings: truncated ? [{ code: "tools_truncated", message: "…" }] : [],
+    }) as unknown as Pick<ServerSyncProposal, "manifest" | "warnings">;
+  const check = (draft: Record<string, unknown>, unarchivedAtMount = false, truncated = false) =>
+    draftChangesBeyondWizard({ draft, published, proposal: sync(truncated), unarchivedAtMount });
   /** What the wizard's save leaves: tools merged, selection and version set, empty identity filled. */
   const savedByWizard = {
     ...published,
     version: "1.1.0",
-    description: "Filled by the sync",
+    description: "From the server",
     homepage: "https://acme.example/",
     tools_policy: { search: { required_scopes: { oauth: ["read"] } }, fetch: {} },
     default_tools: ["search", "fetch"],
@@ -410,8 +420,18 @@ describe("draftChangesBeyondWizard", () => {
     expect(check(savedByWizard)).toBe(false);
     // The draft holding changes at mount is the wizard's own save: it declares the listed tools.
     expect(check(savedByWizard, true)).toBe(false);
-    // A tool the sync drops is the wizard's doing too.
-    expect(check({ ...savedByWizard, tools_policy: { fetch: {} } })).toBe(false);
+    // Before any save, an untouched draft ships nothing else either.
+    expect(check(published)).toBe(false);
+  });
+
+  it("says nothing about an edit to a tool the server no longer lists: the save drops it", () => {
+    const gone = {
+      ...savedByWizard,
+      tools_policy: { ...savedByWizard.tools_policy, old: { required_scopes: { oauth: ["x"] } } },
+    };
+    expect(check(gone)).toBe(false);
+    // Cut list: the save keeps that entry, so it ships.
+    expect(check(gone, false, true)).toBe(true);
   });
 
   it("warns on every other manifest change", () => {
@@ -420,8 +440,7 @@ describe("draftChangesBeyondWizard", () => {
       { allow_undeclared_tools: true },
       { variables: { schema: { type: "object", properties: {} } } },
       { tools_policy: { search: { required_scopes: { oauth: ["write"] } }, fetch: {} } },
-      // An entry added with content is an edit, not the sync's `{}`.
-      { tools_policy: { ...savedByWizard.tools_policy, extra: { description: "x" } } },
+      { tools_policy: { ...savedByWizard.tools_policy, fetch: { description: "edited" } } },
       // An identity field already set is not the sync's to fill.
       { display_name: "Acme renamed" },
       { source: { kind: "remote", remote: { url: "https://b.test/mcp" } } },
