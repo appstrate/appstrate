@@ -25,6 +25,7 @@ import { recordConnectionCall, type ConnectionCall } from "./credential-proxy/ca
 import { proxyCall, ProxyCallError } from "./credential-proxy/core.ts";
 import type { ProxyReach } from "./integration-connections.ts";
 import { readIntegrationManifestForProxy } from "./integration-service.ts";
+import { getCredentialProxyLimits } from "./proxy-limits.ts";
 import { fetchSiteIcon, rasterIcon } from "./integration-icon.ts";
 
 export interface ServerSyncProposal {
@@ -39,7 +40,7 @@ const SYNC_TIMEOUT_MS = 20_000;
 const MAX_TOOLS = 500;
 /** Bounds a server answering `nextCursor` forever with empty pages. */
 const MAX_PAGES = 20;
-/** Per MCP exchange: a `tools/list` page is kilobytes, not the proxy's general ceiling. */
+/** Per MCP exchange: a `tools/list` page is kilobytes, not the proxy's general ceiling (an operator cap below it wins). */
 const MAX_EXCHANGE_BYTES = 2 * 1024 * 1024;
 /** `serverInfo.icons` entries tried before the site's own icon. */
 const MAX_SERVER_ICONS = 4;
@@ -136,7 +137,10 @@ export async function syncIntegrationFromServer(input: {
         body: typeof init?.body === "string" ? init.body : null,
         // The SDK echoes the server's values (`Mcp-Session-Id`, `nextCursor`): never a placeholder.
         literalHeaders: true,
-        maxResponseBytes: MAX_EXCHANGE_BYTES,
+        maxResponseBytes: Math.min(
+          MAX_EXCHANGE_BYTES,
+          getCredentialProxyLimits().max_response_bytes,
+        ),
         signal: init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline,
       });
     } catch (err) {

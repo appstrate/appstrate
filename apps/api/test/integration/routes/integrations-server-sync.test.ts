@@ -301,7 +301,9 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     await seedProxyConnection(ctx, ID, "api_key", { token: "wrong" });
     const res = await sync(ctx, {});
     expect(res.status).toBe(502);
-    expect(((await res.json()) as { code: string }).code).toBe("bad_gateway");
+    const body = (await res.json()) as { code: string; detail: string };
+    expect(body.code).toBe("bad_gateway");
+    expect(body.detail).toContain("refused the connection's credential");
   });
 
   it("sends the server's own header values back as written: no placeholder reaches a credential", async () => {

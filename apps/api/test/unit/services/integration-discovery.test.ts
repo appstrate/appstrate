@@ -527,6 +527,22 @@ describe("discoverRemoteIntegration", () => {
     }
     expect(seen).toEqual([]);
   });
+
+  it("tells an unresolvable host from a private address", async () => {
+    const { fetchImpl, seen } = fakeFetch({});
+    const err = await refusal(
+      discoverRemoteIntegration(
+        { url: "https://mcp.nowhere.invalid/mcp", orgSlug: "acme" },
+        { fetchImpl },
+      ),
+    );
+    expect({ status: err.status, param: err.param, detail: err.message }).toEqual({
+      status: 400,
+      param: "url",
+      detail: "The host of the URL could not be resolved.",
+    });
+    expect(seen).toEqual([]);
+  });
 });
 
 describe("hostDisplayName", () => {

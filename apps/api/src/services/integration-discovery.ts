@@ -51,7 +51,7 @@ const PROBE_BODY_MAX_BYTES = 64 * 1024;
 /** An MCP server that answered the probe with a challenge: it wants a credential. */
 interface ProtectedServer {
   transport: Transport;
-  challenge: string | null;
+  challenge: string;
 }
 
 export async function discoverRemoteIntegration(
@@ -65,6 +65,10 @@ export async function discoverRemoteIntegration(
   const fetchImpl = fetchWithin(deps.fetchImpl ?? egressFetchImpl(), deadline);
   const egress = await checkEgressUrl(url, { requireHttpsForUntrustedHost: true });
   if (!egress.ok) {
+    // The guard fails closed on a DNS fault: a typo'd host is not a private address.
+    if (egress.detail === "resolution-failed") {
+      throw invalidRequest("The host of the URL could not be resolved.", "url");
+    }
     throw invalidRequest(
       egress.reason === "blocked-host"
         ? "The URL targets a private or reserved network address."
@@ -259,12 +263,12 @@ interface DiscoveredAuth {
  */
 async function discoverAuth(
   url: string,
-  challenge: string | null,
+  challenge: string,
   fetchImpl: typeof fetch,
 ): Promise<DiscoveredAuth> {
   const origin = new URL(url).origin;
-  const resourceMetadataUrl = challenge ? parseResourceMetadataChallenge(challenge) : undefined;
-  const challengeScopes = challenge ? parseScopeChallenge(challenge) : undefined;
+  const resourceMetadataUrl = parseResourceMetadataChallenge(challenge);
+  const challengeScopes = parseScopeChallenge(challenge);
   const md = await discoverProtectedResourceMetadata({
     resourceServerUrl: url,
     ...(resourceMetadataUrl ? { resourceMetadataUrl } : {}),
