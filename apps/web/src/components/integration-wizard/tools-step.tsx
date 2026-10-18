@@ -40,7 +40,8 @@ import {
   docsChoice,
   draftChangesBeyondWizard,
   isStalePublish,
-  syncNeedsConnection,
+  sameAuths,
+  syncConnectionRemedy,
   initialToolSelection,
   toolsUpdateBody,
 } from "../../lib/integration-wizard";
@@ -117,6 +118,7 @@ function ServerCatalog({
   const qc = useQueryClient();
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
+  const authsMatch = sameAuths(draft.manifest ?? {}, detail.manifest);
   // Unset until the proxy asks for a choice: the first read lets it apply the space's governance.
   const [connectionId, setConnectionId] = useState<string>();
   // A read of the server, kept off the `/api/integrations` keys a save invalidates: it is not
@@ -129,8 +131,10 @@ function ServerCatalog({
       spaceId,
       packageId,
       catalogSourceKey(draft.manifest ?? {}),
-      // A connection added or reconnected since (the connect step below) is read again.
-      catalogConnectionsKey(detail),
+      // A connection added or reconnected since (the connect step below) is read again — unless
+      // the draft's auths are not the ones a connection is made on (`unpublishedAuths`): then
+      // nothing a connect does changes the answer, and nothing reads again by itself.
+      authsMatch || !published ? catalogConnectionsKey(detail) : null,
       connectionId ?? null,
     ],
     queryFn: async () => {
@@ -150,9 +154,8 @@ function ServerCatalog({
   const [saved, setSaved] = useState<{ etag: string | null }>();
   // Whether a save of THIS session wrote `INTEGRATION.md`: only that file is ever deleted.
   const [docsWritten, setDocsWritten] = useState(false);
-  // Before the first publish the whole draft IS what is published: there is nothing to warn about.
-  const otherDraftChanges =
-    published && draftChangesBeyondWizard(draft.manifest ?? {}, detail.manifest);
+  // Read when the step opens: our own save sets it afterwards.
+  const [unarchivedAtMount] = useState(draft.has_unarchived_changes === true);
   // A publish refused because the draft moved after our save: the next submit saves it again.
   const [draftMoved, setDraftMoved] = useState(false);
   const update = useUpdatePackage("integration", packageId);
@@ -166,9 +169,23 @@ function ServerCatalog({
   };
 
   if (catalog.isLoading) return <TextSkeleton lines={4} />;
-  // No account the draft's auths reach (a published integration whose draft changed them, a
-  // connection gone): connect one here; the read runs again once the detail lists it.
-  if (syncNeedsConnection(catalog.error)) {
+  const remedy = syncConnectionRemedy(catalog.error, { published, authsMatch });
+  // The draft changes the authentication a connection is made on: no connect clears this.
+  if (remedy === "unpublishedAuths") {
+    return (
+      <Alert variant="warning" data-testid="integration-wizard-unpublished-auths">
+        <AlertDescription>
+          {t("integrationWizard.tools.unpublishedAuths")}{" "}
+          <Link className="underline underline-offset-4" to={detailPath}>
+            {t("integrationWizard.open")}
+          </Link>
+        </AlertDescription>
+      </Alert>
+    );
+  }
+  // No account the draft's auths reach (a connection gone, or never made): connect one here; the
+  // read runs again once the detail lists it.
+  if (remedy === "connect") {
     return (
       <div className="flex flex-col items-start gap-3">
         {connect}
@@ -205,6 +222,15 @@ function ServerCatalog({
   }
 
   const proposal = catalog.data;
+  // Before the first publish the whole draft IS what is published: there is nothing to warn about.
+  const otherDraftChanges =
+    published &&
+    draftChangesBeyondWizard({
+      draft: draft.manifest ?? {},
+      published: detail.manifest,
+      unarchivedAtMount,
+      listedTools: proposal.tools.map((tool) => tool.name),
+    });
   const selected = selection ?? initialToolSelection(draft.manifest ?? {}, proposal);
   const submit = async () => {
     try {

@@ -12,7 +12,8 @@ import {
   connectBlocker,
   draftChangesBeyondWizard,
   isStalePublish,
-  syncNeedsConnection,
+  sameAuths,
+  syncConnectionRemedy,
   docsChoice,
   initialToolSelection,
   integrationCreationManifest,
@@ -198,6 +199,11 @@ describe("connectBlocker", () => {
       offerConnect: false,
     });
     expect(connectBlocker({ status: "not_permitted", imposed: true })).toEqual({
+      blocker: "notPermittedImposed",
+      offerConnect: false,
+    });
+    // Not imposed: the caller holds no proxy permission at all.
+    expect(connectBlocker({ status: "not_permitted", imposed: false })).toEqual({
       blocker: "notPermitted",
       offerConnect: false,
     });
@@ -335,13 +341,42 @@ describe("isStalePublish", () => {
   });
 });
 
-describe("syncNeedsConnection", () => {
-  it("sends a sync that lacks an account to the connect step", () => {
-    expect(syncNeedsConnection(new ApiError("integration_not_connected", "none", 409))).toBe(true);
-    expect(syncNeedsConnection(new ApiError("needs_reconnection", "dead", 409))).toBe(true);
-    expect(syncNeedsConnection(new ApiError("must_choose_connection", "pick", 409))).toBe(false);
-    expect(syncNeedsConnection(new ApiError("bad_gateway", "down", 502))).toBe(false);
-    expect(syncNeedsConnection(null)).toBe(false);
+describe("syncConnectionRemedy", () => {
+  const missing = new ApiError("integration_not_connected", "none", 409);
+  const dead = new ApiError("needs_reconnection", "dead", 409);
+
+  it("connects when nothing is published or the draft keeps the published auths", () => {
+    for (const error of [missing, dead]) {
+      expect(syncConnectionRemedy(error, { published: false, authsMatch: false })).toBe("connect");
+      expect(syncConnectionRemedy(error, { published: true, authsMatch: true })).toBe("connect");
+    }
+  });
+
+  it("says the draft's authentication is unpublished when a connect cannot clear it", () => {
+    for (const error of [missing, dead]) {
+      expect(syncConnectionRemedy(error, { published: true, authsMatch: false })).toBe(
+        "unpublishedAuths",
+      );
+    }
+  });
+
+  it("leaves every other error to the ordinary error state", () => {
+    const facts = { published: true, authsMatch: true };
+    expect(syncConnectionRemedy(new ApiError("must_choose_connection", "pick", 409), facts)).toBe(
+      null,
+    );
+    expect(syncConnectionRemedy(new ApiError("bad_gateway", "down", 502), facts)).toBeNull();
+    expect(syncConnectionRemedy(null, facts)).toBeNull();
+  });
+});
+
+describe("sameAuths", () => {
+  it("compares the auths whatever their key order", () => {
+    const reordered = { auths: { oauth: Object.fromEntries(Object.entries(oauth).reverse()) } };
+    expect(sameAuths(reordered, { auths: { oauth } })).toBe(true);
+    expect(
+      sameAuths({ auths: { oauth: { ...oauth, type: "api_key" } } }, { auths: { oauth } }),
+    ).toBe(false);
   });
 });
 
@@ -350,31 +385,55 @@ describe("draftChangesBeyondWizard", () => {
     name: "@org/acme",
     version: "1.0.0",
     display_name: "Acme",
+    description: "",
     source: proposal.source,
     auths: { oauth },
+    tools_policy: { search: { required_scopes: { oauth: ["read"] } } },
+    default_tools: ["search"],
+  };
+  const listedTools = ["search", "fetch"];
+  const check = (draft: Record<string, unknown>, unarchivedAtMount = false) =>
+    draftChangesBeyondWizard({ draft, published, unarchivedAtMount, listedTools });
+  /** What the wizard's save leaves: tools merged, selection and version set, empty identity filled. */
+  const savedByWizard = {
+    ...published,
+    version: "1.1.0",
+    description: "Filled by the sync",
+    homepage: "https://acme.example/",
+    tools_policy: { search: { required_scopes: { oauth: ["read"] } }, fetch: {} },
+    default_tools: ["search", "fetch"],
+    // Same values, another key order.
+    auths: { oauth: Object.fromEntries(Object.entries(oauth).reverse()) },
   };
 
   it("says nothing about what the wizard itself writes (a reload after its failed publish)", () => {
-    const saved = {
-      ...published,
-      version: "1.1.0",
-      display_name: "Acme MCP",
-      tools_policy: { read: {} },
-      default_tools: ["read"],
-      // Same values, another key order.
-      auths: { oauth: Object.fromEntries(Object.entries(oauth).reverse()) },
-    };
-    expect(draftChangesBeyondWizard(saved, published)).toBe(false);
+    expect(check(savedByWizard)).toBe(false);
+    // The draft holding changes at mount is the wizard's own save: it declares the listed tools.
+    expect(check(savedByWizard, true)).toBe(false);
+    // A tool the sync drops is the wizard's doing too.
+    expect(check({ ...savedByWizard, tools_policy: { fetch: {} } })).toBe(false);
   });
 
-  it("warns when the draft's source or auths differ", () => {
-    const moved = {
-      ...published,
-      source: { kind: "remote", remote: { url: "https://b.test/mcp" } },
-    };
-    expect(draftChangesBeyondWizard(moved, published)).toBe(true);
-    const reauthed = { ...published, auths: { oauth: { ...oauth, default_scopes: ["x"] } } };
-    expect(draftChangesBeyondWizard(reauthed, published)).toBe(true);
+  it("warns on every other manifest change", () => {
+    const changes: Record<string, unknown>[] = [
+      { hidden_tools: ["fetch"] },
+      { allow_undeclared_tools: true },
+      { variables: { schema: { type: "object", properties: {} } } },
+      { tools_policy: { search: { required_scopes: { oauth: ["write"] } }, fetch: {} } },
+      // An entry added with content is an edit, not the sync's `{}`.
+      { tools_policy: { ...savedByWizard.tools_policy, extra: { description: "x" } } },
+      // An identity field already set is not the sync's to fill.
+      { display_name: "Acme renamed" },
+      { source: { kind: "remote", remote: { url: "https://b.test/mcp" } } },
+      { auths: { oauth: { ...oauth, default_scopes: ["x"] } } },
+    ];
+    for (const change of changes) expect(check({ ...savedByWizard, ...change })).toBe(true);
+  });
+
+  it("warns on unarchived changes at mount the wizard did not save (files it cannot see)", () => {
+    // The tools are not declared yet: no save of this step explains the changes.
+    expect(check(published, true)).toBe(true);
+    expect(check(published, false)).toBe(false);
   });
 });
 

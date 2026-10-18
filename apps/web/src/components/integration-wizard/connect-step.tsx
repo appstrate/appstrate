@@ -18,6 +18,7 @@ const BLOCKER_KEY: Record<Exclude<ConnectBlocker, "none">, string> = {
   reconnect: "integrationWizard.connect.blocker.reconnect",
   reconnectImposed: "integrationWizard.connect.blocker.reconnectImposed",
   notPermitted: "integrationWizard.connect.blocker.notPermitted",
+  notPermittedImposed: "integrationWizard.connect.blocker.notPermittedImposed",
   defaultUnavailable: "integrationWizard.connect.blocker.defaultUnavailable",
   unusable: "integrationWizard.connect.blocker.unusable",
   unusableImposed: "integrationWizard.connect.blocker.unusableImposed",

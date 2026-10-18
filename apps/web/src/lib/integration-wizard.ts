@@ -107,6 +107,7 @@ export type ConnectBlocker =
   | "reconnect"
   | "reconnectImposed"
   | "notPermitted"
+  | "notPermittedImposed"
   | "defaultUnavailable"
   | "unusable"
   | "unusableImposed";
@@ -130,7 +131,12 @@ export function connectBlocker(verdict: { status: ProxyConnectionStatus; imposed
         ? { blocker: "unusableImposed", offerConnect: false }
         : { blocker: "unusable", offerConnect: true };
     case "not_permitted":
-      return { blocker: "notPermitted", offerConnect: false };
+      // Imposed: `call-own` is refused by the enforced default. Not imposed: the caller holds no
+      // proxy permission at all, and `call-own` is the one reading the server's tools needs.
+      return {
+        blocker: verdict.imposed ? "notPermittedImposed" : "notPermitted",
+        offerConnect: false,
+      };
     case "default_unavailable":
       return { blocker: "defaultUnavailable", offerConnect: false };
     default:
@@ -233,19 +239,88 @@ function canonicalJson(value: unknown): string {
   );
 }
 
+/** Own keys only: a tool may be named `constructor`. */
+const hasOwnKey = (record: Record<string, unknown>, key: string) =>
+  Object.prototype.hasOwnProperty.call(record, key);
+
+const isEmptyValue = (v: unknown) =>
+  v === undefined ||
+  v === null ||
+  v === "" ||
+  (Array.isArray(v) && v.length === 0) ||
+  (typeof v === "object" && v !== null && Object.keys(v).length === 0);
+
+/** Identity fields the server sync fills only when the draft's are empty (`mergeServerSync`). */
+const SYNC_FILLED_IDENTITY = ["display_name", "description", "homepage", "icon"] as const;
+
 /**
- * Whether the draft holds changes the tools step's publish would ship that the wizard does not
- * write and that change what is called: its `source` or its `auths`. The identity, the tools,
- * the version and `INTEGRATION.md` are the wizard's own (a reload after its failed publish
- * leaves them), and warn about nothing.
+ * The draft as the wizard's own writes leave it comparable to the published version: its
+ * `default_tools`, its `version`, an identity field the published version leaves empty, and the
+ * `tools_policy` keys it adds (`{}`) or drops are taken from the published side. An entry kept
+ * under the same name, or added with content, is somebody's edit and stays.
  */
-export function draftChangesBeyondWizard(
+function withoutWizardWrites(
   draft: Record<string, unknown>,
   published: Record<string, unknown>,
-): boolean {
-  return (["source", "auths"] as const).some(
-    (key) => canonicalJson(draft[key] ?? null) !== canonicalJson(published[key] ?? null),
-  );
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...draft };
+  for (const key of ["default_tools", "version"] as const) {
+    if (key in published) out[key] = published[key];
+    else delete out[key];
+  }
+  for (const key of SYNC_FILLED_IDENTITY) {
+    if (!isEmptyValue(published[key])) continue;
+    if (key in published) out[key] = published[key];
+    else delete out[key];
+  }
+  const asRecord = (v: unknown): Record<string, unknown> =>
+    v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  const draftPolicy = asRecord(draft.tools_policy);
+  const publishedPolicy = asRecord(published.tools_policy);
+  const policy: Record<string, unknown> = {};
+  for (const [name, entry] of Object.entries(publishedPolicy)) {
+    // Dropped by the sync, or kept as it is: the published entry either way.
+    policy[name] = hasOwnKey(draftPolicy, name) ? draftPolicy[name] : entry;
+  }
+  for (const [name, entry] of Object.entries(draftPolicy)) {
+    // Added by the sync as `{}`; added with content, it is an edit and stays visible.
+    if (!hasOwnKey(publishedPolicy, name) && !isEmptyValue(entry)) policy[name] = entry;
+  }
+  if ("tools_policy" in draft || "tools_policy" in published) {
+    if ("tools_policy" in published || Object.keys(policy).length > 0) out.tools_policy = policy;
+    else delete out.tools_policy;
+  }
+  return out;
+}
+
+/**
+ * Whether the tools step's publish would ship draft changes the wizard does not write: the whole
+ * manifest compared, key order aside, once the wizard's own writes are set aside
+ * ({@link withoutWizardWrites}). Files are not visible here, hence a heuristic for them: the
+ * draft had unarchived changes when the step opened (`has_unarchived_changes`) while it does not
+ * yet declare the tools the server lists — no save of this step, in this session or an earlier
+ * one, explains them.
+ */
+export function draftChangesBeyondWizard(facts: {
+  draft: Record<string, unknown>;
+  published: Record<string, unknown>;
+  /** `has_unarchived_changes` when the step opened. */
+  unarchivedAtMount: boolean;
+  /** The tools the server lists. */
+  listedTools: readonly string[];
+}): boolean {
+  const { draft, published } = facts;
+  if (canonicalJson(withoutWizardWrites(draft, published)) !== canonicalJson(published))
+    return true;
+  const declared = new Set(declaredToolNames(draft));
+  const wizardSaved =
+    facts.listedTools.length > 0 && facts.listedTools.every((n) => declared.has(n));
+  return facts.unarchivedAtMount && !wizardSaved;
+}
+
+/** Whether the draft's `auths` are the published version's, key order aside. */
+export function sameAuths(draft: Record<string, unknown>, published: Record<string, unknown>) {
+  return canonicalJson(draft.auths ?? null) === canonicalJson(published.auths ?? null);
 }
 
 /** A publish refused because the draft moved since its save (`412`): the next submit saves again. */
@@ -256,15 +331,28 @@ export function isStalePublish(error: unknown): boolean {
 }
 
 /**
- * A server sync that needs an account first — none in reach of the draft's auths
- * (`integration_not_connected`), or one to reconnect (`needs_reconnection`): the connect step,
- * not a dead error. A published integration whose draft changed auths lands here.
+ * What a server sync refused for want of an account (`integration_not_connected`) or for one to
+ * reconnect (`needs_reconnection`) calls for. The sync reads the DRAFT's auths, while the connect
+ * flow and the detail's verdict read the PUBLISHED manifest once a version exists:
+ *
+ *   - `connect` — nothing is published (the detail serves the draft, so connecting reaches the
+ *     sync's auths), or the published auths are the draft's (a connection really gone).
+ *   - `unpublishedAuths` — a version is published and the draft changes its authentication:
+ *     connecting reaches the published auths and cannot clear the refusal. The draft's changes
+ *     are published or reverted from the integration page.
+ *   - `null` — any other error.
  */
-export function syncNeedsConnection(error: unknown): boolean {
-  return (
-    error instanceof ApiError &&
-    (error.code === "integration_not_connected" || error.code === "needs_reconnection")
-  );
+export function syncConnectionRemedy(
+  error: unknown,
+  facts: { published: boolean; authsMatch: boolean },
+): "connect" | "unpublishedAuths" | null {
+  if (
+    !(error instanceof ApiError) ||
+    (error.code !== "integration_not_connected" && error.code !== "needs_reconnection")
+  ) {
+    return null;
+  }
+  return !facts.published || facts.authsMatch ? "connect" : "unpublishedAuths";
 }
 
 /** The create body of the wizard: the draft alone, activated here, published with its tools. */
