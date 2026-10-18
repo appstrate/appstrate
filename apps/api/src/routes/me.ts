@@ -245,7 +245,7 @@ router.get(
  * `/api/me/integration-pins` — member-self pin CRUD.
  *
  * When an agent has >1 candidate connection on a declared integration, the member's pick is
- * stored here and read by the resolver on every run (cascade layer 4).
+ * stored here and read by the resolver on every run (the member pin, below the launch override).
  *
  * Member-only (no end-user surface — end-users are addressed via API key
  * impersonation and the calling member controls the choice via run
@@ -346,7 +346,7 @@ router.delete(
         action: "integration.member_pin.deleted",
         resourceType: "integration_pin",
         resourceId: pinAuditResourceId(agentPackageId, integrationPackageId),
-        before: pinAudit(previous),
+        before: pinAudit(previous.connectionIds),
         ...(disabledScheduleIds.length > 0 ? { after: { disabledScheduleIds } } : {}),
       });
     }

@@ -1662,6 +1662,7 @@ export const CONNECTION_RESOLUTION_ERROR_CODES = [
   "pinned_connection_unavailable",
   "override_connection_unavailable",
   "override_outranked",
+  "connection_set_too_large",
   "must_choose_connection",
   "insufficient_scopes",
   "auth_key_mismatch",
@@ -1704,7 +1705,6 @@ export type ReadinessErrorCode = (typeof READINESS_ERROR_CODES)[number];
  */
 export const OVERRIDE_REFUSAL_CODES = [
   "undeclared_connection_override",
-  "required_integration_unbound",
   "undeclared_dependency_override",
 ] as const;
 
@@ -1775,12 +1775,13 @@ export interface ConnectionResolutionError {
    */
   authKey?: string;
   /**
-   * The cascade layer whose set failed, on every layer-bound code, and the layer that chose `[]`
+   * The layer that named the failing row (or set), on every layer-bound code — the adding layer on
+   * `override_outranked` and `connection_set_too_large` — and the layer that chose `[]`
    * on an `integration_unbound` warning; absent when no layer bound anything (`not_connected`,
    * `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`).
    */
   source?: ConnectionResolutionSource;
-  /** The failing layer's whole set, in its order. */
+  /** The whole set that failed to bind, in its order: under governance, the floor then its additions. */
   boundConnectionIds?: string[];
   /**
    * True when the resolved connection belongs to the current actor. Carried on

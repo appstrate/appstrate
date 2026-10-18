@@ -7,6 +7,15 @@
  * write rule (`schedule-connections.ts`). Which fired versions resolve a set for the integration
  * is the resolver's answer, read before the removal's transaction opens (the resolver reads outside
  * any); every layer fact is read from rows, inside it.
+ *
+ * Removing an imposed FLOOR (an admin pin, an enforced org default, or the enforcement itself) also
+ * disables the schedules whose selection strictly narrows it ({@link withinFloor}): under the floor
+ * it meant "no addition", ungoverned it would bind fewer connections, or none. Those are read
+ * inside the removal's transaction, behind `lockIntegrationGovernance`: a key in
+ * `connection_overrides` is a selection, no resolver needed. A schedule write carrying overrides
+ * takes the same lock and re-checks the governance it was judged under
+ * (`assertScheduleGovernanceUnchanged`), so either it commits first and the removal sees it, or it
+ * sees the removal and is refused.
  */
 
 import { and, asc, eq, inArray, isNull, notExists, or, sql, type SQL } from "drizzle-orm";
@@ -67,9 +76,22 @@ function orgDefaultOf(layer: NamingLayer): SQL | undefined {
   );
 }
 
-/** `connection_overrides` holds no key for `integrationId`: a key names its set, `[]` included. */
+/** `connection_overrides` holds a key for `integrationId`: a key names its set, `[]` included. */
+function hasOverrideKey(integrationId: string): SQL {
+  return sql`coalesce(${schedules.connectionOverrides} ? ${integrationId}, false)`;
+}
+
 function noOverrideKey(integrationId: string): SQL {
-  return sql`NOT coalesce(${schedules.connectionOverrides} ? ${integrationId}, false)`;
+  return sql`NOT ${hasOverrideKey(integrationId)}`;
+}
+
+/** The schedules of `layer`'s scope: its space, and its agent (and member) for a pin. */
+function inLayerScope(layer: NamingLayer): SQL | undefined {
+  return and(
+    eq(schedules.spaceId, layer.spaceId),
+    layer.kind === "org_default" ? undefined : eq(schedules.packageId, layer.agentPackageId),
+    layer.kind === "member_pin" ? eq(schedules.userId, layer.userId) : undefined,
+  );
 }
 
 /**
@@ -151,16 +173,7 @@ async function integrationsFired(schedule: ScheduleRow): Promise<string[]> {
  * ({@link integrationsFired}). It asks no layer fact: the layer may hold no row.
  */
 export async function schedulesLayerMayName(layer: NamingLayer): Promise<string[]> {
-  const candidates = await db
-    .select()
-    .from(schedules)
-    .where(
-      and(
-        eq(schedules.spaceId, layer.spaceId),
-        layer.kind === "org_default" ? undefined : eq(schedules.packageId, layer.agentPackageId),
-        layer.kind === "member_pin" ? eq(schedules.userId, layer.userId) : undefined,
-      ),
-    );
+  const candidates = await db.select().from(schedules).where(inLayerScope(layer));
   const fired = new Map<string, string[]>();
   const using: string[] = [];
   for (const schedule of candidates) {
@@ -201,18 +214,102 @@ export async function disableSchedulesLeftUnnamed(
   return ids;
 }
 
-/** Remove `layer` with `remove`; when it held a row, disable the schedules that leaves unnamed. */
-export async function removeNamingLayer<P>(
+/**
+ * `selection` strictly narrows `floor`: only floor ids, fewer than the floor holds (`[]` under a
+ * non-empty floor included). An equal set, in any order, binds the same governed or not, so it is
+ * not within; nothing is within an empty floor. Uuids are lowercased and deduplicated, as Postgres
+ * compares them.
+ */
+export function withinFloor(selection: readonly string[], floor: readonly string[]): boolean {
+  const imposed = new Set(floor.map((id) => id.toLowerCase()));
+  const chosen = new Set(selection.map((id) => id.toLowerCase()));
+  return chosen.size < imposed.size && [...chosen].every((id) => imposed.has(id));
+}
+
+/** No admin pin on the schedule's agent and no enforced org default governs `integrationId`. */
+function leftUngoverned(integrationId: string): SQL {
+  return and(
+    notExists(
+      db
+        .select({ one: sql`1` })
+        .from(integrationPins)
+        .where(
+          and(
+            eq(integrationPins.spaceId, schedules.spaceId),
+            eq(integrationPins.packageId, schedules.packageId),
+            eq(integrationPins.integrationId, integrationId),
+            isNull(integrationPins.userId),
+          ),
+        ),
+    ),
+    notExists(
+      db
+        .select({ one: sql`1` })
+        .from(integrationOrgDefaults)
+        .where(
+          and(
+            eq(integrationOrgDefaults.spaceId, schedules.spaceId),
+            eq(integrationOrgDefaults.integrationId, integrationId),
+            eq(integrationOrgDefaults.enforce, true),
+          ),
+        ),
+    ),
+  )!;
+}
+
+/**
+ * Disable, with `connection_set_unnamed`, the enabled schedules of `layer`'s scope left ungoverned
+ * in `tx` whose `connection_overrides` set for its integration strictly narrows the removed
+ * `floor`. Read here, on `tx`, behind the caller's `lockIntegrationGovernance`, never from a read
+ * made before the transaction: a schedule written in between would keep a selection whose meaning
+ * the removal changed. Returns them, whose jobs the caller removes once committed.
+ */
+export async function disableSchedulesSelectingWithin(
+  tx: Tx,
   layer: NamingLayer,
-  remove: (tx: Tx) => Promise<{ previous: P | null }>,
-): Promise<{ previous: P | null; disabledScheduleIds: string[] }> {
+  floor: readonly string[],
+): Promise<string[]> {
+  if (floor.length === 0) return [];
+  const selecting = and(inLayerScope(layer), hasOverrideKey(layer.integrationId));
+  // Locked, then read by a second statement: see disableSchedulesLeftUnnamed.
+  await tx
+    .select({ id: schedules.id })
+    .from(schedules)
+    .where(selecting)
+    .orderBy(asc(schedules.id))
+    .for("update");
+  const rows = await tx
+    .select({ id: schedules.id, connectionOverrides: schedules.connectionOverrides })
+    .from(schedules)
+    .where(and(selecting, eq(schedules.enabled, true), leftUngoverned(layer.integrationId)));
+  const ids = rows
+    .filter((row) => {
+      const selection = row.connectionOverrides?.[layer.integrationId];
+      return selection !== undefined && withinFloor(selection, floor);
+    })
+    .map((row) => row.id);
+  await disableSchedules(tx, ids, "connection_set_unnamed");
+  return ids;
+}
+
+/**
+ * Remove `layer` with `remove` (`previous: null` when there was no row); when there was one, disable
+ * the schedules that leaves unnamed, and those selecting within the floor it imposed, if any.
+ */
+export async function removeNamingLayer<
+  R extends { previous: unknown; removedFloor?: readonly string[] | null },
+>(
+  layer: NamingLayer,
+  remove: (tx: Tx) => Promise<R>,
+): Promise<R & { disabledScheduleIds: string[] }> {
   const mayName = await schedulesLayerMayName(layer);
   return db.transaction(async (tx) => {
-    const { previous } = await remove(tx);
-    const disabledScheduleIds =
-      previous === null
-        ? []
-        : await disableSchedulesLeftUnnamed(tx, layer, mayName, "connection_set_unnamed");
-    return { previous, disabledScheduleIds };
+    const removed = await remove(tx);
+    if (removed.previous === null) return { ...removed, disabledScheduleIds: [] };
+    const unnamed = await disableSchedulesLeftUnnamed(tx, layer, mayName, "connection_set_unnamed");
+    const selectingWithin = removed.removedFloor
+      ? await disableSchedulesSelectingWithin(tx, layer, removed.removedFloor)
+      : [];
+    return { ...removed, disabledScheduleIds: [...unnamed, ...selectingWithin] };
   });
 }

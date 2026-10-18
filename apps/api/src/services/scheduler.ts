@@ -33,13 +33,17 @@ import { withoutLockedFields } from "@appstrate/core/input-resolution";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { toLaunchOverrides } from "./integration-connection-resolver.ts";
-import { isScheduleOwned } from "./schedule-connections.ts";
+import {
+  assertScheduleGovernanceUnchanged,
+  isScheduleOwned,
+  type ScheduleGovernance,
+} from "./schedule-connections.ts";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { getPackage, packageExists } from "./package-catalog.ts";
 import { resolveAgentRunVersion, versionRefOf } from "./agent-version-resolver.ts";
 import type { LoadedPackage } from "../types/index.ts";
 import { ApiError, conflict, internalError } from "../lib/errors.ts";
-import { scopedWhere, type Tx } from "../lib/db-helpers.ts";
+import { scopedWhere, type DbOrTx, type Tx } from "../lib/db-helpers.ts";
 import { computeNextRun } from "../lib/cron.ts";
 import { actorFromIds, actorMatch, type Actor } from "../lib/actor.ts";
 import type { SpaceScope } from "../lib/scope.ts";
@@ -956,6 +960,8 @@ export async function createSchedule(
     versionOverride?: string | null;
     connectionOverrides?: ConnectionOverrides | null;
     dependencyOverrides?: Record<string, string> | null;
+    /** The governance `connectionOverrides` was judged under: required when it is set. */
+    judgedGovernance?: ScheduleGovernance;
   },
 ): Promise<EnrichedSchedule> {
   const id = `sched_${crypto.randomUUID()}`;
@@ -964,29 +970,44 @@ export async function createSchedule(
   // Compute next run (cron parsing only)
   const nextRun = computeNextRun(data.cronExpression, tz);
 
-  const [row] = await db
-    .insert(schedules)
-    .values({
-      id,
-      packageId,
-      userId: actor.type === "user" ? actor.id : null,
-      endUserId: actor.type === "end_user" ? actor.id : null,
-      orgId: scope.orgId,
-      spaceId: scope.spaceId,
-      name: data.name ?? null,
-      enabled: true,
-      cronExpression: data.cronExpression,
-      timezone: tz,
-      input: data.input ?? null,
-      modelIdOverride: data.modelIdOverride ?? null,
-      generationConfigOverride: data.generationConfigOverride ?? null,
-      proxyIdOverride: data.proxyIdOverride ?? null,
-      versionOverride: data.versionOverride ?? null,
-      connectionOverrides: data.connectionOverrides ?? null,
-      dependencyOverrides: data.dependencyOverrides ?? null,
-      nextRunAt: nextRun ?? null,
-    })
-    .returning();
+  const insert = (executor: DbOrTx) =>
+    executor
+      .insert(schedules)
+      .values({
+        id,
+        packageId,
+        userId: actor.type === "user" ? actor.id : null,
+        endUserId: actor.type === "end_user" ? actor.id : null,
+        orgId: scope.orgId,
+        spaceId: scope.spaceId,
+        name: data.name ?? null,
+        enabled: true,
+        cronExpression: data.cronExpression,
+        timezone: tz,
+        input: data.input ?? null,
+        modelIdOverride: data.modelIdOverride ?? null,
+        generationConfigOverride: data.generationConfigOverride ?? null,
+        proxyIdOverride: data.proxyIdOverride ?? null,
+        versionOverride: data.versionOverride ?? null,
+        connectionOverrides: data.connectionOverrides ?? null,
+        dependencyOverrides: data.dependencyOverrides ?? null,
+        nextRunAt: nextRun ?? null,
+      })
+      .returning();
+  const overrides = data.connectionOverrides ?? null;
+  const [row] =
+    overrides === null
+      ? await insert(db)
+      : await db.transaction(async (tx) => {
+          await assertScheduleGovernanceUnchanged(
+            tx,
+            scope.spaceId,
+            packageId,
+            data.judgedGovernance,
+            overrides,
+          );
+          return insert(tx);
+        });
 
   if (!row) {
     throw internalError();
@@ -1006,12 +1027,14 @@ export async function createSchedule(
 /** The caller's read of the row a write is judged against: the `updatedAt` token + fallbacks. */
 export type ScheduleWriteSnapshot = Pick<
   ScheduleWireDto,
-  "id" | "updatedAt" | "enabled" | "cron_expression" | "timezone"
+  "id" | "packageId" | "updatedAt" | "enabled" | "cron_expression" | "timezone"
 >;
 
 /**
  * Merge-update a schedule as a compare-and-set on `expected.updatedAt` (409 otherwise) — not a
- * held lock, which PGlite's single connection would deadlock the caller's `db` checks on.
+ * held lock, which PGlite's single connection would deadlock the caller's `db` checks on. A patch
+ * storing a `connectionOverrides` set also re-checks, in the same transaction, the governance it
+ * was judged under (409 `schedule_governance_changed`, `assertScheduleGovernanceUnchanged`).
  */
 export async function updateSchedule(
   scope: SpaceScope,
@@ -1028,6 +1051,8 @@ export async function updateSchedule(
     versionOverride?: string | null;
     connectionOverrides?: ConnectionOverrides | null;
     dependencyOverrides?: Record<string, string> | null;
+    /** The governance `connectionOverrides` was judged under: required when it is set. */
+    judgedGovernance?: ScheduleGovernance;
     // Re-point the schedule's execution identity. When set, overwrites
     // both `userId` and `endUserId` (one non-null, mirroring create). Never
     // clears the actor — the non-null type preserves the invariant that a
@@ -1071,17 +1096,32 @@ export async function updateSchedule(
     payload.endUserId = data.actor.type === "end_user" ? data.actor.id : null;
   }
 
-  const [row] = await db
-    .update(schedules)
-    .set(payload)
-    .where(
-      scopedWhere(schedules, {
-        orgId: scope.orgId,
-        spaceId: scope.spaceId,
-        extra: [eq(schedules.id, expected.id), unchangedSince(expected.updatedAt)],
-      }),
-    )
-    .returning();
+  const update = (executor: DbOrTx) =>
+    executor
+      .update(schedules)
+      .set(payload)
+      .where(
+        scopedWhere(schedules, {
+          orgId: scope.orgId,
+          spaceId: scope.spaceId,
+          extra: [eq(schedules.id, expected.id), unchangedSince(expected.updatedAt)],
+        }),
+      )
+      .returning();
+  const overrides = data.connectionOverrides ?? null;
+  const [row] =
+    overrides === null
+      ? await update(db)
+      : await db.transaction(async (tx) => {
+          await assertScheduleGovernanceUnchanged(
+            tx,
+            scope.spaceId,
+            expected.packageId,
+            data.judgedGovernance,
+            overrides,
+          );
+          return update(tx);
+        });
 
   // Changed or deleted since the caller read it: every check it ran judged another row.
   if (!row) {

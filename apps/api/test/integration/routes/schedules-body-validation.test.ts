@@ -165,7 +165,9 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
     expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [] });
   });
 
-  it("rejects an EMPTY connection_overrides set on a required integration with 400", async () => {
+  // Not a static 400: under an imposed set `[]` adds nothing, so the resolver judges it — here,
+  // with nothing imposed, the schedule's own empty set on a required integration.
+  it("refuses an EMPTY connection_overrides set on a required integration nothing imposes (409)", async () => {
     const required = "@schedbodyorg/required-agent";
     await seedSchedulableAgent({
       id: required,
@@ -192,14 +194,14 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
         connection_overrides: { [INTEGRATION]: [] },
       }),
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(409);
     const problem = (await res.json()) as {
       code?: string;
-      errors?: { field: string; code: string }[];
+      errors?: { field: string; code: string; source?: string }[];
     };
-    expect(problem.code).toBe("validation_failed");
-    expect(problem.errors?.map((e) => [e.field, e.code])).toEqual([
-      [`connection_overrides.${INTEGRATION}`, "required_integration_unbound"],
+    expect(problem.code).toBe("missing_integration_connection");
+    expect(problem.errors?.map((e) => [e.field, e.code, e.source])).toEqual([
+      [`integrations.${INTEGRATION}`, "required_integration_unbound", "schedule_override"],
     ]);
     expect(await db.select().from(schedules)).toHaveLength(0);
   });

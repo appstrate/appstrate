@@ -23,6 +23,7 @@ import {
   schedules,
 } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { Queue, type ConnectionOptions } from "bullmq";
 import { truncateAll } from "../../helpers/db.ts";
 import {
@@ -1233,6 +1234,7 @@ describeRequiresRedis("scheduler service", () => {
       const schedule = await createSchedule({ orgId, spaceId: defaultSpaceId }, packageId, actor, {
         cronExpression: "0 * * * *",
         connectionOverrides: { [integrationId]: [kept!, gone!] },
+        judgedGovernance: new Map(),
       });
 
       // What `DELETE /api/me/connections/:id` does: the service prunes, the route drops the jobs
@@ -1280,6 +1282,7 @@ describeRequiresRedis("scheduler service", () => {
       const schedule = await createSchedule({ orgId, spaceId: defaultSpaceId }, packageId, actor, {
         cronExpression: "0 * * * *",
         connectionOverrides: { [integrationId]: [row!.id] },
+        judgedGovernance: new Map(),
       });
 
       const { disabledScheduleIds } = (await deleteOwnConnection(
@@ -1333,6 +1336,7 @@ describeRequiresRedis("scheduler service", () => {
       const schedule = await createSchedule({ orgId, spaceId: closed.id }, packageId, actor, {
         cronExpression: "0 * * * *",
         connectionOverrides: { [integrationId]: [conn!.id] },
+        judgedGovernance: new Map(),
       });
       const queue = new Queue("schedules", {
         connection: getRedisQueueConnection() as unknown as ConnectionOptions,
@@ -1372,7 +1376,7 @@ describe("updateSchedule — a compare-and-set on the caller's read", () => {
   function read(as: Actor = actor, connectionOverrides?: Record<string, string[]>) {
     return createSchedule(scope, packageId, as, {
       cronExpression: "0 * * * *",
-      ...(connectionOverrides ? { connectionOverrides } : {}),
+      ...(connectionOverrides ? { connectionOverrides, judgedGovernance: new Map() } : {}),
     });
   }
 
@@ -1580,6 +1584,7 @@ describe("schedule disabled_reason", () => {
     const created = await createSchedule(scope, packageId, actor, {
       cronExpression: "0 * * * *",
       connectionOverrides: { [integrationId]: [gone!.id] },
+      judgedGovernance: new Map(),
     });
 
     await deleteOwnConnection({ kind: "delegated", actor, ...scope }, gone!.id);
@@ -1608,6 +1613,7 @@ describe("schedule disabled_reason", () => {
     const created = await createSchedule(scope, packageId, actor, {
       cronExpression: "0 * * * *",
       connectionOverrides: { [integrationId]: [gone!.id] },
+      judgedGovernance: new Map(),
     });
     await db
       .update(schedules)
@@ -1703,14 +1709,14 @@ describe("triggerScheduledRun — the schedule's own connection choice", () => {
   }
 
   const outranked = (by: "admin pin" | "enforced org default"): FireCase => ({
-    verdict: `overrides outside an ${by} placed above them (override_outranked)`,
+    verdict: `overrides adding to the set an ${by} imposes, closed to additions (override_outranked)`,
     arrange: async () => {
       const [governed, picked] = [await connect(SVC), await connect(SVC)];
       await nameSet(by, [governed]);
       return { [SVC]: [picked] };
     },
     disables: true,
-    error: new RegExp(`fall outside an ${by}`),
+    error: new RegExp(`add connections outside the set an ${by} imposes, which allows no addition`),
   });
 
   // The pin is what to fix, whoever set it: the schedule names nothing here.
@@ -1748,6 +1754,25 @@ describe("triggerScheduledRun — the schedule's own connection choice", () => {
     },
     outranked("admin pin"),
     outranked("enforced org default"),
+    {
+      verdict: "its own additions taking an open admin pin past the cap (connection_set_too_large)",
+      arrange: async () => {
+        const imposed = await connect(SVC);
+        await db.insert(integrationPins).values({
+          spaceId: ctx.defaultSpaceId,
+          packageId: AGENT,
+          integrationId: SVC,
+          userId: null,
+          connectionIds: [imposed],
+          allowAdditionalConnections: true,
+        });
+        const added: string[] = [];
+        for (let i = 0; i < MAX_CONNECTIONS_PER_INTEGRATION; i++) added.push(await connect(SVC));
+        return { [SVC]: added };
+      },
+      disables: true,
+      error: /past the cap of \d+: drop some additions/,
+    },
     {
       verdict: "its own empty set on a required integration (required_integration_unbound)",
       arrange: async () => ({ [SVC]: [] }),

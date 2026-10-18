@@ -58,6 +58,7 @@ import {
   assertScheduleConnectionsChosen,
   withScheduleFallback,
   assertScheduleOverridesReachable,
+  readScheduleGovernance,
   sameRecord,
   sameSet,
 } from "../services/schedule-connections.ts";
@@ -546,8 +547,10 @@ export function createSchedulesRouter() {
         );
       }
 
-      // Armed: its actor must be able to fire it, and its connection choice is made now.
+      // Armed: its actor must be able to fire it, and its connection choice is made now — under
+      // the governance read here, which the insert re-checks when it stores a set.
       await assertScheduleActorValid(actor, scope.orgId, scope.spaceId);
+      const judgedGovernance = await readScheduleGovernance(scope.spaceId, agent.id);
       await assertScheduleOverridesReachable({
         spaceId: scope.spaceId,
         actor,
@@ -585,6 +588,7 @@ export function createSchedulesRouter() {
         versionOverride: data.version_override ?? null,
         connectionOverrides,
         dependencyOverrides: data.dependency_overrides ?? null,
+        judgedGovernance,
       });
       await recordAuditFromContext(c, {
         action: "schedule.created",
@@ -825,6 +829,8 @@ export function createSchedulesRouter() {
         nextOverrides,
       );
     }
+    // Read before any judgment of the set: the update re-checks it when it stores one.
+    const judgedGovernance = await readScheduleGovernance(scope.spaceId, existing.packageId);
     // On EVERY write: a disabled row must not store a pick that arming it later would trust.
     await assertScheduleOverridesReachable({
       spaceId: scope.spaceId,
@@ -892,6 +898,7 @@ export function createSchedulesRouter() {
         versionOverride: data.version_override,
         connectionOverrides,
         dependencyOverrides: data.dependency_overrides,
+        judgedGovernance,
         actor,
       },
       // `actor` above is the schedule's (possibly re-pointed) execution
