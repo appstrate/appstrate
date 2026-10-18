@@ -30,6 +30,9 @@ import { useAuth } from "../hooks/use-auth";
 import { useOrg } from "../hooks/use-org";
 import { usePermissions } from "../hooks/use-permissions";
 import { useCreatePackage } from "../hooks/use-mutations";
+import { usePackageActivation } from "../hooks/use-library";
+import { PendingButton } from "@/components/app-ui/pending-button";
+import { RoleLimitNotice } from "../components/role-limit-notice";
 import { usePackageDetail } from "../hooks/use-packages";
 import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-integrations";
 import { encodeIconDataUri } from "../lib/icon-image";
@@ -54,6 +57,7 @@ import {
 
 const PROGRESS: Record<IntegrationWizardStep, WizardStepId | null> = {
   notRemote: null,
+  inactive: null,
   connect: "connect",
   tools: "tools",
   ready: null,
@@ -199,6 +203,7 @@ function ExistingPackageWizard({ packageId }: { packageId: string }) {
   const published = (draft.data.version_count ?? 0) > 0;
   const step = integrationWizardStep({
     remote: isRemoteSource(manifest),
+    active: detail.active,
     published,
     connected: detail.auths.some((auth) => auth.ready),
     // The detail reads the published version, else the draft.
@@ -234,6 +239,7 @@ function ExistingPackageWizard({ packageId }: { packageId: string }) {
           </div>
         </WizardSection>
       )}
+      {step === "inactive" && <InactiveStep packageId={packageId} name={name} />}
       {step === "connect" && <ConnectStep packageId={packageId} detail={detail} />}
       {step === "tools" &&
         (version ? (
@@ -263,6 +269,34 @@ function ExistingPackageWizard({ packageId }: { packageId: string }) {
   );
 }
 
+/** Switched off in this space: no call reaches it, so nothing past this step can be done here. */
+function InactiveStep({ packageId, name }: { packageId: string; name: string }) {
+  const { t } = useTranslation("agents");
+  // The integration page's own activation: offered only where the route would accept it.
+  const { mayActivate, activate, pending } = usePackageActivation(packageId);
+  return (
+    <WizardSection
+      title={t("integrationWizard.inactive.title")}
+      description={t("integrationWizard.inactive.description", { name })}
+    >
+      {mayActivate ? (
+        <div>
+          <PendingButton
+            type="button"
+            onClick={() => activate()}
+            pending={pending}
+            data-testid="integration-wizard-activate"
+          >
+            {t("integrationWizard.inactive.activate")}
+          </PendingButton>
+        </div>
+      ) : (
+        <RoleLimitNotice>{t("integrationWizard.inactive.noPermission")}</RoleLimitNotice>
+      )}
+    </WizardSection>
+  );
+}
+
 function ReadyStep({
   packageId,
   detail,
@@ -286,6 +320,10 @@ function ReadyStep({
       <p className="text-sm">
         {t("integrationWizard.tools.declared", { count: declaredToolNames(manifest).length })}{" "}
         {t("integrationWizard.tools.selectedCount", { count: defaultToolCount(manifest) })}
+      </p>
+      {/* `auth.ready` is not the connection a run binds: the space's rules decide that. */}
+      <p className="text-muted-foreground text-sm">
+        {t("integrationWizard.ready.connectionCheck")}
       </p>
       <div className="flex flex-wrap gap-2">
         {/* The agent creation hand-off; it opens only for a caller who may create one. */}

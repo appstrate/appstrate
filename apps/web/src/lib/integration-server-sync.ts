@@ -40,6 +40,11 @@ const SYNC_IDENTITY = ["display_name", "description", "homepage", "icon"] as con
  * only loses unexposed tools, and when absent becomes the proposal's pre-selection (the tools the
  * server annotates read-only), exposed ones only. Identity is filled only when empty.
  */
+/** Whether the server listed more tools than were read: what is not listed may still exist. */
+export function isToolsTruncated(proposal: Pick<ServerSyncProposal, "warnings">): boolean {
+  return proposal.warnings.some((w) => w.code === "tools_truncated");
+}
+
 export function mergeServerSync(
   current: Manifest,
   proposal: Pick<ServerSyncProposal, "manifest" | "warnings">,
@@ -47,7 +52,7 @@ export function mergeServerSync(
   const proposed: Manifest = proposal.manifest;
   const listed = Object.keys(proposal.manifest.tools_policy);
   const policy = asRecord(current.tools_policy);
-  const truncated = proposal.warnings.some((w) => w.code === "tools_truncated");
+  const truncated = isToolsTruncated(proposal);
   const names = [...(truncated ? Object.keys(policy) : []), ...listed];
   const manifest: Manifest = {
     ...current,

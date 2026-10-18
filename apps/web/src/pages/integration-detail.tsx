@@ -382,7 +382,8 @@ export function IntegrationDetailPage() {
     else params.delete("connectionMethod");
     void navigate({ search: params.toString(), hash: "connections" });
   };
-  const canBrowseIntegrations = useCanReach()("/integrations");
+  const canReach = useCanReach();
+  const canBrowseIntegrations = canReach("/integrations");
 
   // Only the integration detail gates the page; the package detail brings `source` and
   // follows in place (badges, read-only alert, actions menu).
@@ -474,7 +475,11 @@ export function IntegrationDetailPage() {
         pending={pkgLoading}
       />
 
-      {needsWizardFinish({ manifest: m, writable: !!homeWritable }) && (
+      {needsWizardFinish({
+        manifest: m,
+        homeWritable: !!homeWritable,
+        canOpenWizard: canReach("/integrations/new/mcp"),
+      }) && (
         <Alert variant="info" className="mb-4" data-testid="integration-wizard-finish">
           <Info />
           <AlertTitle>{t("integrationWizard.finish.title", { ns: "agents" })}</AlertTitle>

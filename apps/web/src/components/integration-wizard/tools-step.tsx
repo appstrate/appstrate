@@ -34,7 +34,12 @@ import {
   type ServerSyncProposal,
 } from "../../lib/integration-server-sync";
 import { packageDetailPath } from "../../lib/package-paths";
-import { docsChoice, initialToolSelection, toolsUpdateBody } from "../../lib/integration-wizard";
+import {
+  catalogSourceKey,
+  docsChoice,
+  initialToolSelection,
+  toolsUpdateBody,
+} from "../../lib/integration-wizard";
 import { WizardSection } from "./wizard-section";
 
 /**
@@ -97,9 +102,17 @@ function ServerCatalog({
   // Unset until the proxy asks for a choice: the first read lets it apply the space's governance.
   const [connectionId, setConnectionId] = useState<string>();
   // A read of the server, kept off the `/api/integrations` keys a save invalidates: it is not
-  // asked again behind the user's back.
+  // asked again behind the user's back — but it is keyed on the source and auths it was read
+  // from, so a draft pointing elsewhere since is read again, never answered from the cache.
   const catalog = useQuery({
-    queryKey: ["integration-server-catalog", orgId, spaceId, packageId, connectionId ?? null],
+    queryKey: [
+      "integration-server-catalog",
+      orgId,
+      spaceId,
+      packageId,
+      catalogSourceKey(draft.manifest ?? {}),
+      connectionId ?? null,
+    ],
     queryFn: async () => {
       const { data } = await client.POST("/api/integrations/{packageId}/discover", {
         params: { path: { packageId } },

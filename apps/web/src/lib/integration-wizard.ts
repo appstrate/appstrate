@@ -12,7 +12,11 @@ import {
 import { bumpVersion } from "@appstrate/core/semver";
 import { getSource } from "../components/integration-editor/utils";
 import type { paths } from "../api/schema";
-import { mergeServerSync, type ServerSyncProposal } from "./integration-server-sync";
+import {
+  isToolsTruncated,
+  mergeServerSync,
+  type ServerSyncProposal,
+} from "./integration-server-sync";
 import { fileTextOperation, packageCreateBody, packageUpdateBody } from "./package-file-drafts";
 
 export type DiscoveryResult =
@@ -85,16 +89,19 @@ export function defaultToolCount(manifest: Record<string, unknown>): number {
   return defaults?.length ?? 0;
 }
 
-export type IntegrationWizardStep = "notRemote" | "connect" | "tools" | "ready";
+export type IntegrationWizardStep = "notRemote" | "inactive" | "connect" | "tools" | "ready";
 
 interface IntegrationWizardFacts {
   /** The integration is served by a remote MCP server, the only source this wizard handles. */
   remote: boolean;
+  /** The integration is switched on in this space (the detail's `active`): no call reaches it else. */
+  active: boolean;
   /** The package has a published version. */
   published: boolean;
   /**
    * A connection the caller can use here, its own or one shared into the space, is not flagged for
-   * reconnection (`auth.ready`).
+   * reconnection (`auth.ready`). Not the connection a run would bind: the space's org default is
+   * not part of it.
    */
   connected: boolean;
   /** The manifest the detail reads declares tools: the published version, else the draft. */
@@ -108,6 +115,7 @@ interface IntegrationWizardFacts {
  */
 export function integrationWizardStep(facts: IntegrationWizardFacts): IntegrationWizardStep {
   if (!facts.remote) return "notRemote";
+  if (!facts.active) return "inactive";
   if (!facts.connected) return "connect";
   return facts.published && facts.toolsDeclared ? "ready" : "tools";
 }
@@ -122,16 +130,20 @@ export function isCurrentAnalysis(latestInput: string, requested: string): boole
 }
 
 /**
- * Whether the integration page offers to resume the wizard: a remote server the caller may write
- * whose manifest declares no tool — the published version's, or the draft's while nothing is
- * published.
+ * Whether the integration page offers to resume the wizard: a remote server whose manifest
+ * declares no tool — the published version's, or the draft's while nothing is published — for a
+ * caller who may both write the package's home and open the wizard's route in this space.
  */
 export function needsWizardFinish(facts: {
   manifest: Record<string, unknown>;
-  writable: boolean;
+  /** `home_writable`: the save and the publish are writes in the package's home. */
+  homeWritable: boolean;
+  /** The wizard's route is reachable in the CURRENT space (`integrations:write` here). */
+  canOpenWizard: boolean;
 }): boolean {
   return (
-    facts.writable &&
+    facts.homeWritable &&
+    facts.canOpenWizard &&
     isRemoteSource(facts.manifest) &&
     declaredToolNames(facts.manifest).length === 0
   );
@@ -160,6 +172,23 @@ export function toolsPublishVersion(facts: {
 /** The create body of the wizard: the draft alone, activated here, published with its tools. */
 export function wizardCreateBody(manifest: Record<string, unknown>) {
   return { ...packageCreateBody({ manifest }, "integration"), publish: false as const };
+}
+
+/**
+ * What a read of the server's catalogue was read FROM: the draft's source and the auths the
+ * proxy authorizes the call with. A change to either is another read, never a cached answer.
+ */
+export function catalogSourceKey(draft: Record<string, unknown>): string {
+  const source = getSource(draft);
+  const auths = Object.entries(
+    (draft.auths && typeof draft.auths === "object" ? draft.auths : {}) as Record<string, unknown>,
+  )
+    .map(([key, auth]) => {
+      const { type, authorized_uris } = (auth ?? {}) as Record<string, unknown>;
+      return [key, type ?? null, authorized_uris ?? null] as const;
+    })
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return JSON.stringify([source.kind, source.remoteUrl, source.remoteTransport, auths]);
 }
 
 /**
@@ -201,6 +230,32 @@ export function docsChoice(state: {
 }
 
 /**
+ * The saved `default_tools`: the user's choice among the listed tools. A truncated list leaves the
+ * draft's other declared tools in `tools_policy` ({@link mergeServerSync}), so the selection keeps
+ * those of them it already held; a name the merged policy does not declare is never added.
+ */
+function toolsSelection(
+  merged: Record<string, unknown>,
+  proposal: Pick<ServerSyncProposal, "manifest" | "warnings">,
+  selected: readonly string[],
+): string[] {
+  if (!isToolsTruncated(proposal)) return [...selected];
+  const listed = new Set(Object.keys(proposal.manifest.tools_policy));
+  const declared = new Set(declaredToolNames(merged));
+  // `*` selected every declared tool, the unlisted ones included.
+  const held: unknown[] =
+    merged.default_tools === "*"
+      ? [...declared]
+      : Array.isArray(merged.default_tools)
+        ? merged.default_tools
+        : [];
+  const kept = held.filter(
+    (name): name is string => typeof name === "string" && !listed.has(name) && declared.has(name),
+  );
+  return [...kept, ...selected.filter((name) => declared.has(name))];
+}
+
+/**
  * The draft save that declares the server's tools: the sync merged into the draft, the selection
  * as `default_tools`, the version to publish, and `INTEGRATION.md` as {@link docsChoice} decides.
  */
@@ -214,10 +269,11 @@ export function toolsUpdateBody(
     removeDocs?: boolean;
   },
 ) {
+  const merged = mergeServerSync(draft, proposal);
   return packageUpdateBody({
     manifest: {
-      ...mergeServerSync(draft, proposal),
-      default_tools: [...choice.selected],
+      ...merged,
+      default_tools: toolsSelection(merged, proposal, choice.selected),
       version: choice.version,
     },
     operations: choice.instructions

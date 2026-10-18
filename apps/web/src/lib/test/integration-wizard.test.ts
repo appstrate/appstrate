@@ -6,6 +6,7 @@ import { packageCreateBody } from "../package-file-drafts.ts";
 import type { ServerSyncProposal } from "../integration-server-sync.ts";
 import {
   defaultToolCount,
+  catalogSourceKey,
   docsChoice,
   initialToolSelection,
   integrationCreationManifest,
@@ -105,7 +106,13 @@ describe("wizardAuthKind", () => {
 
 describe("integrationWizardStep", () => {
   it("reads the step from the package alone", () => {
-    const facts = { remote: true, published: true, connected: true, toolsDeclared: false };
+    const facts = {
+      remote: true,
+      active: true,
+      published: true,
+      connected: true,
+      toolsDeclared: false,
+    };
     expect(integrationWizardStep({ ...facts, remote: false })).toBe("notRemote");
     expect(integrationWizardStep({ ...facts, connected: false })).toBe("connect");
     expect(integrationWizardStep(facts)).toBe("tools");
@@ -113,7 +120,13 @@ describe("integrationWizardStep", () => {
   });
 
   it("goes from connecting to the tools on a draft never published", () => {
-    const draft = { remote: true, published: false, connected: false, toolsDeclared: false };
+    const draft = {
+      remote: true,
+      active: true,
+      published: false,
+      connected: false,
+      toolsDeclared: false,
+    };
     expect(integrationWizardStep(draft)).toBe("connect");
     expect(integrationWizardStep({ ...draft, connected: true })).toBe("tools");
     // A draft that declares tools (saved, its publish failed) is not ready: nothing is published.
@@ -121,8 +134,81 @@ describe("integrationWizardStep", () => {
   });
 
   it("is not ready while no usable connection exists, tools declared or not", () => {
-    const facts = { remote: true, published: true, connected: false, toolsDeclared: true };
+    const facts = {
+      remote: true,
+      active: true,
+      published: true,
+      connected: false,
+      toolsDeclared: true,
+    };
     expect(integrationWizardStep(facts)).toBe("connect");
+  });
+});
+
+describe("integrationWizardStep — activation", () => {
+  it("is never ready, nor at a later step, while switched off in this space", () => {
+    const ready = {
+      remote: true,
+      active: false,
+      published: true,
+      connected: true,
+      toolsDeclared: true,
+    };
+    expect(integrationWizardStep(ready)).toBe("inactive");
+    expect(integrationWizardStep({ ...ready, connected: false })).toBe("inactive");
+    expect(integrationWizardStep({ ...ready, remote: false })).toBe("notRemote");
+    expect(integrationWizardStep({ ...ready, active: true })).toBe("ready");
+  });
+});
+
+describe("catalogSourceKey", () => {
+  const draft = {
+    name: "@org/acme",
+    display_name: "Acme",
+    source: proposal.source,
+    auths: { oauth },
+  };
+
+  it("changes with the server the catalogue is read from", () => {
+    const key = catalogSourceKey(draft);
+    const elsewhere = {
+      ...draft,
+      source: {
+        kind: "remote",
+        remote: { url: "https://b.test/mcp", transport: "streamable-http" },
+      },
+    };
+    expect(catalogSourceKey(elsewhere)).not.toBe(key);
+    const sse = {
+      ...draft,
+      source: { kind: "remote", remote: { url: "https://mcp.acme.test/mcp", transport: "sse" } },
+    };
+    expect(catalogSourceKey(sse)).not.toBe(key);
+  });
+
+  it("changes with the auths the proxy authorizes the read with", () => {
+    const key = catalogSourceKey(draft);
+    expect(catalogSourceKey({ ...draft, auths: { primary: oauth } })).not.toBe(key);
+    expect(
+      catalogSourceKey({ ...draft, auths: { oauth: { ...oauth, type: "api_key" } } }),
+    ).not.toBe(key);
+    expect(
+      catalogSourceKey({
+        ...draft,
+        auths: { oauth: { ...oauth, authorized_uris: ["https://b.test/**"] } },
+      }),
+    ).not.toBe(key);
+  });
+
+  it("stays the same across edits the read does not depend on, auth order included", () => {
+    const key = catalogSourceKey({ ...draft, auths: { a: oauth, b: { type: "api_key" } } });
+    expect(
+      catalogSourceKey({
+        ...draft,
+        display_name: "Renamed",
+        auths: { b: { type: "api_key" }, a: oauth },
+      }),
+    ).toBe(key);
   });
 });
 
@@ -201,6 +287,49 @@ describe("toolsUpdateBody", () => {
     });
     expect(body.manifest.default_tools).toEqual([]);
     expect(body.operations).toEqual([{ op: "write", path: "INTEGRATION.md", text: "# Acme" }]);
+  });
+});
+
+describe("toolsUpdateBody — truncated catalogue", () => {
+  const draft = {
+    name: "@org/acme",
+    version: "1.0.0",
+    source: proposal.source,
+    tools_policy: { a: {}, b: {} },
+    default_tools: ["a", "b"],
+  };
+  const partial = (truncated: boolean) =>
+    ({
+      manifest: { default_tools: [], tools_policy: { a: {} } },
+      warnings: truncated ? [{ code: "tools_truncated", message: "…" }] : [],
+    }) as unknown as Pick<ServerSyncProposal, "manifest" | "warnings">;
+  const choice = { selected: ["a"], version: "1.1.0", instructions: null };
+
+  it("keeps the selected tools the server did not list when the list was cut", () => {
+    const body = toolsUpdateBody(draft, partial(true), choice);
+    expect(body.manifest.tools_policy).toEqual({ a: {}, b: {} });
+    expect(body.manifest.default_tools).toEqual(["b", "a"]);
+    // Unchecking a listed tool still unselects it.
+    expect(
+      toolsUpdateBody(draft, partial(true), { ...choice, selected: [] }).manifest.default_tools,
+    ).toEqual(["b"]);
+  });
+
+  it("keeps every unlisted tool a `*` selection held, and never adds an undeclared name", () => {
+    const all = toolsUpdateBody({ ...draft, default_tools: "*" }, partial(true), choice);
+    expect(all.manifest.default_tools).toEqual(["b", "a"]);
+    const stray = toolsUpdateBody(
+      { ...draft, default_tools: ["a", "b", "ghost"] },
+      partial(true),
+      choice,
+    );
+    expect(stray.manifest.default_tools).toEqual(["b", "a"]);
+  });
+
+  it("replaces the selection with the user's choice when the list is complete", () => {
+    const body = toolsUpdateBody(draft, partial(false), choice);
+    expect(body.manifest.tools_policy).toEqual({ a: {} });
+    expect(body.manifest.default_tools).toEqual(["a"]);
   });
 });
 
@@ -293,7 +422,7 @@ describe("defaultToolCount", () => {
 
 describe("needsWizardFinish", () => {
   const remote = { source: { kind: "remote", remote: { url: "https://mcp.acme.test/mcp" } } };
-  const facts = { manifest: remote, writable: true };
+  const facts = { manifest: remote, homeWritable: true, canOpenWizard: true };
 
   it("offers to finish a writable remote integration with no tool, published or still a draft", () => {
     // The detail's manifest: the published version, else the draft.
@@ -308,7 +437,12 @@ describe("needsWizardFinish", () => {
   it("stays quiet for a local source or a read-only caller", () => {
     const local = { source: { kind: "local", server: { name: "x", version: "1.0.0" } } };
     expect(needsWizardFinish({ ...facts, manifest: local })).toBe(false);
-    expect(needsWizardFinish({ ...facts, writable: false })).toBe(false);
+    expect(needsWizardFinish({ ...facts, homeWritable: false })).toBe(false);
+  });
+
+  it("offers nothing to a writer of the home who cannot open the wizard in this space", () => {
+    // Home A writable, viewed from space B where the caller only reads integrations.
+    expect(needsWizardFinish({ ...facts, homeWritable: true, canOpenWizard: false })).toBe(false);
   });
 });
 
