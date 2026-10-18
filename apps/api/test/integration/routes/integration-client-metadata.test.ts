@@ -71,6 +71,8 @@ interface Advertise {
   pkce?: string[] | null;
   /** RFC 8414 `scopes_supported` (omitted by default). */
   scopes?: string[];
+  /** The status every metadata probe answers instead of the document. */
+  metadataStatus?: number;
 }
 
 /** The remote MCP server and its authorization server's metadata, fronting `provider`. */
@@ -103,6 +105,11 @@ function startMetadataServer(advertise: Advertise): MetadataServer {
       }
       if (url.pathname === "/.well-known/oauth-protected-resource/mcp") {
         return json({ resource: `${base}/mcp`, authorization_servers: [base] });
+      }
+      if (advertise.metadataStatus && url.pathname.startsWith("/.well-known/o")) {
+        if (!url.pathname.includes("protected-resource")) {
+          return new Response("no", { status: advertise.metadataStatus });
+        }
       }
       if (url.pathname === "/.well-known/oauth-authorization-server") {
         return json({
@@ -483,6 +490,20 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
     );
     expect(meta.provider!.authorizeRequests).toHaveLength(0);
   });
+
+  it.each([
+    [503, 503, "authorization_server_unreachable"],
+    [404, 403, "forbidden"],
+  ] as const)(
+    "metadata answering %i: connect answers %i %s (retryable outage vs invalid metadata)",
+    async (metadataStatus, status, code) => {
+      await install({ cimd: false, registration: true, iss: false, metadataStatus });
+      const res = await postConnect();
+      expect(res.status).toBe(status);
+      expect(((await res.json()) as { code: string }).code).toBe(code);
+      expect(meta.registrations).toBe(0);
+    },
+  );
 
   it("requests offline_access once when the MCP authorization server advertises it (#2084)", async () => {
     await install({

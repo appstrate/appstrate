@@ -1664,6 +1664,14 @@ export function resolveConnectClient(
     // acquisition failed. `resolved.provisioningFailure` carries the complete
     // reason + remedy, authored by whichever step failed. Render it verbatim.
     const failure = resolved.provisioningFailure;
+    if (failure?.transient) {
+      throw new ApiError({
+        status: 503,
+        code: "authorization_server_unreachable",
+        title: "Authorization Server Unreachable",
+        detail: `The authorization server of '${integrationId}' auth '${authKey}' could not be reached: ${failure.message}`,
+      });
+    }
     const detail = failure?.message ?? "discovery or client registration failed";
     const statusPart = failure?.status ? ` (HTTP ${failure.status})` : "";
     throw forbidden(
@@ -2005,7 +2013,7 @@ export interface ResolvedOAuthConnect {
    * the authorization server's HTTP status when the failure came from a
    * response, surfaced alongside the message.
    */
-  provisioningFailure?: { message: string; status?: number };
+  provisioningFailure?: { message: string; status?: number; transient?: true };
 }
 
 /**
@@ -2224,10 +2232,15 @@ export async function ensureIntegrationOAuthClient(
   if (discovered.issuer === undefined) {
     return {
       ...resolved,
-      provisioningFailure: {
-        message:
-          "the authorization server publishes no valid metadata (RFC 8414), so no client can be registered for it; register an OAuth client manually, or retry once it does",
-      },
+      provisioningFailure: discovered.metadataUnreachable
+        ? {
+            message: "its metadata (RFC 8414) did not answer; retry shortly",
+            transient: true,
+          }
+        : {
+            message:
+              "the authorization server publishes no valid metadata (RFC 8414), so no client can be registered for it; register an OAuth client manually, or retry once it does",
+          },
     };
   }
   const existing = await getAutoProvisionedClient(scope, packageId, authKey, discovered.issuer);
