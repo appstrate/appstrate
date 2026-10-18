@@ -7,7 +7,7 @@ import { newAgentCreateBody } from "../agent-creation.ts";
 const input = {
   orgSlug: "acme",
   slug: "digest",
-  displayName: " Digest ",
+  title: " Digest ",
   description: " Daily ",
   prompt: "Do it",
 };

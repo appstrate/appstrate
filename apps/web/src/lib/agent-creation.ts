@@ -13,7 +13,7 @@ export function newAgentCreateBody(input: {
   base: EditorState;
   orgSlug: string | undefined;
   slug: string;
-  displayName: string;
+  title: string;
   description: string;
   prompt: string;
   integrationId?: string;
@@ -21,7 +21,7 @@ export function newAgentCreateBody(input: {
   const manifest = {
     ...structuredClone(input.base.manifest),
     name: `@${input.orgSlug}/${input.slug}`,
-    display_name: input.displayName.trim(),
+    display_name: input.title.trim(),
     description: input.description.trim(),
   };
   if (input.integrationId) {

@@ -55,7 +55,7 @@ export function CreateAgentModal({
         base: defaultEditorState(currentOrg?.slug, user?.email),
         orgSlug: currentOrg?.slug,
         slug: id,
-        displayName,
+        title: displayName,
         description,
         prompt,
         integrationId: integration ? integrationId : undefined,

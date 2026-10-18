@@ -20,7 +20,7 @@ const frenchChatDrafts: Record<CreationResource, string> = {
   integration:
     "Aide-moi à créer une nouvelle intégration Appstrate. Commence par me poser les questions nécessaires.",
   "mcp-server":
-    "Aide-moi à créer un nouveau serveur MCP Appstrate. Commence par me poser les questions nécessaires.",
+    "Aide-moi à créer un nouveau serveur MCP local Appstrate. Commence par me poser les questions nécessaires.",
 };
 const dictionaries = { en: settingsEn, fr: settingsFr } as const;
 

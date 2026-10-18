@@ -15,13 +15,6 @@ export function agentCreationWithIntegrationPath(integrationId: string): string 
 export type CreationResource = "agent" | "skill" | "integration" | "mcp-server";
 export type CreationPromptTranslate = (key: string, values?: Record<string, string>) => string;
 
-const CHAT_DRAFT_KEYS: Record<CreationResource, string> = {
-  agent: "creation.chat.draft.agent",
-  skill: "creation.chat.draft.skill",
-  integration: "creation.chat.draft.integration",
-  "mcp-server": "creation.chat.draft.mcpServer",
-};
-
 export function chatDraftNavigationState(prompt: string): { composerDraft: string } {
   return { composerDraft: prompt };
 }
@@ -37,7 +30,7 @@ export function buildChatCreationDraft(
   t: CreationPromptTranslate,
   integrationName?: string,
 ): string {
-  const draft = t(CHAT_DRAFT_KEYS[resource]);
+  const draft = t(`creation.chat.draft.${resource}`);
   if (resource !== "agent" || !integrationName) return draft;
   return `${draft} ${t("creation.chat.draft.withIntegration", { name: integrationName })}`;
 }

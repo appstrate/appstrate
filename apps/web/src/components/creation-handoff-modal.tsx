@@ -18,13 +18,6 @@ interface CreationHandoffChoicesProps {
   onFromUrl?: () => void;
 }
 
-const TITLE_KEYS: Record<CreationResource, string> = {
-  agent: "creation.title.agent",
-  skill: "creation.title.skill",
-  integration: "creation.title.integration",
-  "mcp-server": "creation.title.mcpServer",
-};
-
 const MANUAL_KEYS: Partial<Record<CreationResource, { title: string; description: string }>> = {
   integration: {
     title: "creation.manual.integrationTitle",
@@ -42,7 +35,11 @@ export function CreationHandoffModal({
 }: CreationHandoffChoicesProps & { onClose: () => void }) {
   const { t } = useTranslation("settings");
   return (
-    <Modal onClose={onClose} title={t(TITLE_KEYS[choices.resource])} className="sm:max-w-xl">
+    <Modal
+      onClose={onClose}
+      title={t(`creation.title.${choices.resource}`)}
+      className="sm:max-w-xl"
+    >
       <CreationHandoffChoices {...choices} />
     </Modal>
   );
