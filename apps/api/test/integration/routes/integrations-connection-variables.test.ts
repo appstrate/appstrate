@@ -10,6 +10,7 @@
  */
 import { describe, it, expect, beforeEach, beforeAll, afterAll } from "bun:test";
 import { and, eq } from "drizzle-orm";
+import { _resetCacheForTesting as resetEnvCache } from "@appstrate/env";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { flushRedis } from "../../helpers/redis.ts";
@@ -29,6 +30,8 @@ interface Forge {
   tokenRequests: Array<Record<string, string>>;
   /** Overrides the advertised authorization servers, by resource path prefix. */
   advertise: Map<string, string[]>;
+  /** Advertise `client_id_metadata_document_supported` (CIMD) in the RFC 8414 metadata. */
+  cimd: boolean;
   stop: () => void;
 }
 
@@ -36,6 +39,14 @@ function startForge(): Forge {
   const registrations: Forge["registrations"] = [];
   const tokenRequests: Forge["tokenRequests"] = [];
   const advertise = new Map<string, string[]>();
+  const handle: Forge = {
+    port: 0,
+    registrations,
+    tokenRequests,
+    advertise,
+    cimd: false,
+    stop: () => {},
+  };
   let n = 0;
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), {
@@ -77,6 +88,7 @@ function startForge(): Forge {
           grant_types_supported: ["authorization_code", "refresh_token"],
           code_challenge_methods_supported: ["S256"],
           authorization_response_iss_parameter_supported: true,
+          ...(handle.cimd ? { client_id_metadata_document_supported: true } : {}),
         });
       }
       if (req.method === "POST" && url.pathname === "/oauth/register") {
@@ -112,13 +124,9 @@ function startForge(): Forge {
       return new Response("not found", { status: 404 });
     },
   });
-  return {
-    port: server.port!,
-    registrations,
-    tokenRequests,
-    advertise,
-    stop: () => server.stop(true),
-  };
+  handle.port = server.port!;
+  handle.stop = () => server.stop(true);
+  return handle;
 }
 
 const variablesSchema = {
@@ -418,6 +426,7 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     forge.registrations.length = 0;
     forge.tokenRequests.length = 0;
     forge.advertise.clear();
+    forge.cimd = false;
     ctx = await createTestContext({ orgSlug: "myorg" });
     await seedIntegration(ctx.orgId, forgeManifest("@myorg/forge"));
   });
@@ -574,6 +583,65 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     });
     expect(res.status).toBe(400);
     expect(JSON.stringify(await res.json())).toContain("per connection");
+  });
+
+  it("takes the server's own client metadata document when it accepts CIMD: no row, bound to it", async () => {
+    const previousAppUrl = process.env.APP_URL;
+    process.env.APP_URL = "https://appstrate.example.com";
+    resetEnvCache();
+    try {
+      forge.cimd = true;
+      const res = await app.request("/api/integrations/@myorg/forge/auths/oauth/connect/oauth2", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ variables: { base_url: base } }),
+      });
+      expect(res.status).toBe(200);
+      const authUrl = ((await res.json()) as { auth_url: string }).auth_url;
+      const documentUrl = `https://appstrate.example.com/oauth/client-metadata/${Buffer.from(base).toString("base64url")}.json`;
+      const tag = authorizationServerTag(base);
+      const authorizeUrl = new URL(authUrl);
+      expect(authorizeUrl.searchParams.get("client_id")).toBe(documentUrl);
+      expect(authorizeUrl.searchParams.get("redirect_uri")).toBe(
+        `https://appstrate.example.com/api/integrations/callback/${tag}`,
+      );
+      // The document the server would fetch lists exactly that redirect URI.
+      const doc = await app.request(new URL(documentUrl).pathname);
+      expect(await doc.json()).toMatchObject({
+        client_id: documentUrl,
+        redirect_uris: [authorizeUrl.searchParams.get("redirect_uri")],
+      });
+
+      const callback = await authorize(authUrl);
+      const done = await app.request(callback.pathname + callback.search);
+      expect(done.status).toBe(200);
+      expect(await done.text()).not.toContain("error");
+      expect(forge.registrations).toHaveLength(0);
+      expect(await db.select().from(integrationOauthClients)).toEqual([]);
+      const [conn] = await db.select().from(integrationConnections);
+      expect(conn!.clientRef).toBe(documentUrl);
+      expect(forge.tokenRequests[0]!.client_id).toBe(documentUrl);
+
+      const auth = (forgeManifest("@myorg/forge").auths as Record<string, unknown>)
+        .oauth as AfpsManifestAuth;
+      const refresh = await buildIntegrationOAuthRefreshContext(
+        "@myorg/forge",
+        "oauth",
+        auth,
+        ctx.defaultSpaceId,
+        conn!,
+      );
+      expect(refresh).toMatchObject({
+        tokenEndpoint: `${base}/oauth/token`,
+        clientId: documentUrl,
+        clientSecret: "",
+        tokenEndpointAuthMethod: "none",
+      });
+    } finally {
+      if (previousAppUrl === undefined) delete process.env.APP_URL;
+      else process.env.APP_URL = previousAppUrl;
+      resetEnvCache();
+    }
   });
 
   it("refreshes against the token endpoint of the client's own issuer", async () => {

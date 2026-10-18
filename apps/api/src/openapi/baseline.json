@@ -5870,7 +5870,7 @@
         "operationId": "discoverRemoteIntegration",
         "tags": ["Integrations"],
         "summary": "Propose an integration manifest from a remote MCP server URL",
-        "description": "Probes a remote MCP server before any integration exists and returns a manifest proposal for the editor to merge: an MCP `initialize` request (Streamable HTTP; a 404/405 falls back to the SSE transport's GET), then its OAuth protected-resource metadata (RFC 9728) and authorization-server metadata (RFC 8414), plus the site's raster icon. An oauth2 auth is proposed as a public client (`token_endpoint_auth_method: none`) when the authorization server offers dynamic client registration (RFC 7591), else as `client_secret_post` with its `issuer` and a `manual_client_required` warning (`authorization_server_blocked` instead when the advertised authorization server is on a refused address, which is never read); without metadata, a server at the URL's origin offering DCR is guessed as oauth2, anything else as an API key sent as a Bearer token (auth `primary`, credential field `api_key`). A 401/403 counts as an MCP server only when its `WWW-Authenticate` offers the Bearer scheme. The whole discovery is bounded to 25 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Every URL reached is egress-guarded (private and reserved addresses refused, `https` required for a host the operator has not allowlisted). Requires `integrations:write`. Rate limited to 10 requests per minute.",
+        "description": "Probes a remote MCP server before any integration exists and returns a manifest proposal for the editor to merge: an MCP `initialize` request (Streamable HTTP; a 404/405 falls back to the SSE transport's GET), then its OAuth protected-resource metadata (RFC 9728) and authorization-server metadata (RFC 8414), plus the site's raster icon. An oauth2 auth is proposed as a public client (`token_endpoint_auth_method: none`) when the authorization server accepts a client this instance provisions itself — a Client ID Metadata Document (`client_id_metadata_document_supported`, only when `APP_URL` is public https) or dynamic client registration (RFC 7591) — else as `client_secret_post` with its `issuer` and a `manual_client_required` warning (`authorization_server_blocked` instead when the advertised authorization server is on a refused address, which is never read); without metadata, a server at the URL's origin offering either is guessed as oauth2, anything else as an API key sent as a Bearer token (auth `primary`, credential field `api_key`). A 401/403 counts as an MCP server only when its `WWW-Authenticate` offers the Bearer scheme. The whole discovery is bounded to 25 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Every URL reached is egress-guarded (private and reserved addresses refused, `https` required for a host the operator has not allowlisted). Requires `integrations:write`. Rate limited to 10 requests per minute.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -6478,7 +6478,7 @@
                                 },
                                 "client_ref": {
                                   "type": ["string", "null"],
-                                  "description": "The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting."
+                                  "description": "The OAuth client that minted this connection: a system env id, a custom `integration_oauth_clients.id`, or the URL of this instance's client metadata document (its `client_id`, under `/oauth/client-metadata`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting."
                                 },
                                 "variables": {
                                   "type": ["object", "null"],
@@ -6512,7 +6512,7 @@
                           },
                           "client_auto_provisioned": {
                             "type": "boolean",
-                            "description": "True for an oauth2 auth declaring `token_endpoint_auth_method: \"none\"` on a remote MCP integration (`source.kind: \"remote\"`) or with an authorization server chosen per connection. Its OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414), then RFC 7591 dynamic registration of a public client — so no pre-registered client is required."
+                            "description": "True for an oauth2 auth declaring `token_endpoint_auth_method: \"none\"` on a remote MCP integration (`source.kind: \"remote\"`) or with an authorization server chosen per connection. Its OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414), then this instance's Client ID Metadata Document as a public client (`GET /oauth/client-metadata.json`) when the server advertises `client_id_metadata_document_supported` and `APP_URL` is public https, else RFC 7591 dynamic registration of a public client — so no pre-registered client is required."
                           }
                         }
                       }
@@ -6602,7 +6602,7 @@
         "operationId": "createIntegrationOAuthClient",
         "tags": ["Integrations"],
         "summary": "Register a custom OAuth client for an integration auth",
-        "description": "Registers a NEW custom (BYO-app) client for this auth, in this space — it overrides the org-level clients here. Repeatable — a space may hold N clients per auth (model-provider pattern). The first registered client becomes the default; later ones are non-default until promoted via PUT .../default-client. Rejected for auto-provisioned (DCR) auths. Requires `integrations:configure`, which is never granted to an API key.",
+        "description": "Registers a NEW custom (BYO-app) client for this auth, in this space — it overrides the org-level clients here. Repeatable — a space may hold N clients per auth (model-provider pattern). The first registered client becomes the default; later ones are non-default until promoted via PUT .../default-client. Rejected for auto-provisioned (client metadata document or DCR) auths. Requires `integrations:configure`, which is never granted to an API key.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -7564,7 +7564,7 @@
                     },
                     "client_ref": {
                       "type": ["string", "null"],
-                      "description": "The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting."
+                      "description": "The OAuth client that minted this connection: a system env id, a custom `integration_oauth_clients.id`, or the URL of this instance's client metadata document (its `client_id`, under `/oauth/client-metadata`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting."
                     },
                     "variables": {
                       "type": ["object", "null"],
@@ -8256,7 +8256,7 @@
                         },
                         "client_ref": {
                           "type": ["string", "null"],
-                          "description": "The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting."
+                          "description": "The OAuth client that minted this connection: a system env id, a custom `integration_oauth_clients.id`, or the URL of this instance's client metadata document (its `client_id`, under `/oauth/client-metadata`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting."
                         },
                         "variables": {
                           "type": ["object", "null"],
@@ -8596,7 +8596,7 @@
                           },
                           "client_ref": {
                             "type": ["string", "null"],
-                            "description": "The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting."
+                            "description": "The OAuth client that minted this connection: a system env id, a custom `integration_oauth_clients.id`, or the URL of this instance's client metadata document (its `client_id`, under `/oauth/client-metadata`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting."
                           },
                           "variables": {
                             "type": ["object", "null"],
@@ -8824,7 +8824,7 @@
                     },
                     "client_ref": {
                       "type": ["string", "null"],
-                      "description": "The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting."
+                      "description": "The OAuth client that minted this connection: a system env id, a custom `integration_oauth_clients.id`, or the URL of this instance's client metadata document (its `client_id`, under `/oauth/client-metadata`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting."
                     },
                     "variables": {
                       "type": ["object", "null"],
@@ -9367,7 +9367,7 @@
                                 },
                                 "client_ref": {
                                   "type": ["string", "null"],
-                                  "description": "The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting."
+                                  "description": "The OAuth client that minted this connection: a system env id, a custom `integration_oauth_clients.id`, or the URL of this instance's client metadata document (its `client_id`, under `/oauth/client-metadata`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting."
                                 },
                                 "variables": {
                                   "type": ["object", "null"],
@@ -9401,7 +9401,7 @@
                           },
                           "client_auto_provisioned": {
                             "type": "boolean",
-                            "description": "True for an oauth2 auth declaring `token_endpoint_auth_method: \"none\"` on a remote MCP integration (`source.kind: \"remote\"`) or with an authorization server chosen per connection. Its OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414), then RFC 7591 dynamic registration of a public client — so no pre-registered client is required."
+                            "description": "True for an oauth2 auth declaring `token_endpoint_auth_method: \"none\"` on a remote MCP integration (`source.kind: \"remote\"`) or with an authorization server chosen per connection. Its OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414), then this instance's Client ID Metadata Document as a public client (`GET /oauth/client-metadata.json`) when the server advertises `client_id_metadata_document_supported` and `APP_URL` is public https, else RFC 7591 dynamic registration of a public client — so no pre-registered client is required."
                           }
                         }
                       }
@@ -10093,7 +10093,7 @@
         "operationId": "listOrgIntegrationClients",
         "tags": ["Integrations"],
         "summary": "List the org-level OAuth clients of an integration auth",
-        "description": "Returns the org's own clients (`org`, oldest first) plus the default it inherits, the platform-provided system client (`system`), if any. `is_default` marks the org-tier default. Secrets are never returned. Only oauth2 auths whose client is not auto-provisioned (DCR) are listed here — the org's machine client of an auto-provisioned auth is not chosen by an admin; any other auth is a 400. Requires `org-integrations:configure`, which is never granted to an API key.",
+        "description": "Returns the org's own clients (`org`, oldest first) plus the default it inherits, the platform-provided system client (`system`), if any. `is_default` marks the org-tier default. Secrets are never returned. Only oauth2 auths whose client is not auto-provisioned (client metadata document or DCR) are listed here — the org's machine client of an auto-provisioned auth is not chosen by an admin; any other auth is a 400. Requires `org-integrations:configure`, which is never granted to an API key.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -10343,7 +10343,7 @@
         "operationId": "createOrgIntegrationOAuthClient",
         "tags": ["Integrations"],
         "summary": "Register an org-level OAuth client for an integration auth",
-        "description": "Registers a custom (BYO-app) client at the org level (`spaceId: null`), inherited by every space of the org. The first one becomes the org default. Rejected (400) for auto-provisioned (DCR) auths, whose org-level client the platform registers itself at the first connect from any space. Requires `org-integrations:configure`, which is never granted to an API key.",
+        "description": "Registers a custom (BYO-app) client at the org level (`spaceId: null`), inherited by every space of the org. The first one becomes the org default. Rejected (400) for auto-provisioned auths, whose client the platform provisions itself at connect time (its client metadata document, else an org-level client registered by DCR at the first connect from any space). Requires `org-integrations:configure`, which is never granted to an API key.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -16097,7 +16097,7 @@
                     },
                     "client_ref": {
                       "type": ["string", "null"],
-                      "description": "The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting."
+                      "description": "The OAuth client that minted this connection: a system env id, a custom `integration_oauth_clients.id`, or the URL of this instance's client metadata document (its `client_id`, under `/oauth/client-metadata`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting."
                     },
                     "variables": {
                       "type": ["object", "null"],
@@ -16857,6 +16857,220 @@
           },
           "500": {
             "$ref": "#/components/responses/InternalServerError"
+          }
+        }
+      }
+    },
+    "/oauth/client-metadata.json": {
+      "get": {
+        "operationId": "getOAuthClientMetadataDocument",
+        "tags": ["Integrations"],
+        "summary": "OAuth client metadata document",
+        "description": "Public. This instance's OAuth Client ID Metadata Document (draft-ietf-oauth-client-id-metadata-document): its URL is the `client_id` an auto-provisioned integration auth (remote MCP, `token_endpoint_auth_method: none`) presents to an authorization server advertising `client_id_metadata_document_supported`, which fetches it — the client registration MCP 2026-07-28 prefers to dynamic registration (RFC 7591), the fallback otherwise. Used only when `APP_URL` is `https` on a public host; a tier-0/localhost instance registers by DCR. Computed from `APP_URL`, nothing stored.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The client metadata document",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Cache-Control": {
+                "description": "`public, max-age=300` — an authorization server may cache the document.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "client_id",
+                    "client_name",
+                    "client_uri",
+                    "redirect_uris",
+                    "grant_types",
+                    "response_types",
+                    "token_endpoint_auth_method"
+                  ],
+                  "properties": {
+                    "client_id": {
+                      "type": "string",
+                      "format": "uri",
+                      "description": "The URL this document is served at, exactly (the draft requires equality)."
+                    },
+                    "client_name": {
+                      "type": "string",
+                      "description": "`Appstrate (<APP_URL host>)`."
+                    },
+                    "client_uri": {
+                      "type": "string",
+                      "format": "uri",
+                      "description": "This instance's `APP_URL`."
+                    },
+                    "redirect_uris": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 1,
+                      "items": {
+                        "type": "string",
+                        "format": "uri"
+                      },
+                      "description": "The one redirect URI the connect flow sends with this `client_id`: `<APP_URL>/api/integrations/callback`, or its per-server twin `<APP_URL>/api/integrations/callback/<tag>` for a document of a server chosen per connection."
+                    },
+                    "grant_types": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["authorization_code", "refresh_token"]
+                      }
+                    },
+                    "response_types": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["code"]
+                      }
+                    },
+                    "token_endpoint_auth_method": {
+                      "type": "string",
+                      "enum": ["none"],
+                      "description": "A public client (PKCE): no secret, no key."
+                    }
+                  }
+                },
+                "example": {
+                  "client_id": "https://app.example.com/oauth/client-metadata.json",
+                  "client_name": "Appstrate (app.example.com)",
+                  "client_uri": "https://app.example.com",
+                  "redirect_uris": ["https://app.example.com/api/integrations/callback"],
+                  "grant_types": ["authorization_code", "refresh_token"],
+                  "response_types": ["code"],
+                  "token_endpoint_auth_method": "none"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/oauth/client-metadata/{document}": {
+      "get": {
+        "operationId": "getOAuthServerClientMetadataDocument",
+        "tags": ["Integrations"],
+        "summary": "OAuth client metadata document of a server chosen per connection",
+        "description": "Public. The Client ID Metadata Document presented to an authorization server chosen per connection (AFPS §7.3): `document` is `<base64url(issuer)>.json`, and the document names that server's own redirect URI (`/api/integrations/callback/<tag>`), so each server is given a redirect URI of its own (RFC 9700 §4.4). Computed from `APP_URL` and the issuer, nothing stored.",
+        "security": [],
+        "parameters": [
+          {
+            "name": "document",
+            "in": "path",
+            "required": true,
+            "description": "`<base64url(issuer)>.json`, the issuer in its canonical encoding.",
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]+\\.json$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The client metadata document",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Cache-Control": {
+                "description": "`public, max-age=300` — an authorization server may cache the document.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "client_id",
+                    "client_name",
+                    "client_uri",
+                    "redirect_uris",
+                    "grant_types",
+                    "response_types",
+                    "token_endpoint_auth_method"
+                  ],
+                  "properties": {
+                    "client_id": {
+                      "type": "string",
+                      "format": "uri",
+                      "description": "The URL this document is served at, exactly (the draft requires equality)."
+                    },
+                    "client_name": {
+                      "type": "string",
+                      "description": "`Appstrate (<APP_URL host>)`."
+                    },
+                    "client_uri": {
+                      "type": "string",
+                      "format": "uri",
+                      "description": "This instance's `APP_URL`."
+                    },
+                    "redirect_uris": {
+                      "type": "array",
+                      "minItems": 1,
+                      "maxItems": 1,
+                      "items": {
+                        "type": "string",
+                        "format": "uri"
+                      },
+                      "description": "The one redirect URI the connect flow sends with this `client_id`: `<APP_URL>/api/integrations/callback`, or its per-server twin `<APP_URL>/api/integrations/callback/<tag>` for a document of a server chosen per connection."
+                    },
+                    "grant_types": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["authorization_code", "refresh_token"]
+                      }
+                    },
+                    "response_types": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": ["code"]
+                      }
+                    },
+                    "token_endpoint_auth_method": {
+                      "type": "string",
+                      "enum": ["none"],
+                      "description": "A public client (PKCE): no secret, no key."
+                    }
+                  }
+                },
+                "example": {
+                  "client_id": "https://app.example.com/oauth/client-metadata.json",
+                  "client_name": "Appstrate (app.example.com)",
+                  "client_uri": "https://app.example.com",
+                  "redirect_uris": ["https://app.example.com/api/integrations/callback"],
+                  "grant_types": ["authorization_code", "refresh_token"],
+                  "response_types": ["code"],
+                  "token_endpoint_auth_method": "none"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`document` encodes no issuer URL (or not in its canonical encoding)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -18380,6 +18594,16 @@
           },
           {
             "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "description": "The package type the import is made for. When set, an archive whose package (for a bundle, its root) is another type is refused with 400 `unexpected_package_type` before anything is written.",
+            "schema": {
+              "type": "string",
+              "enum": ["agent", "skill", "mcp-server", "integration"]
+            }
           }
         ],
         "requestBody": {
@@ -18420,6 +18644,7 @@
                     "root_active",
                     "root_package_id",
                     "root_version",
+                    "root_type",
                     "warnings"
                   ],
                   "properties": {
@@ -18459,6 +18684,11 @@
                     "root_version": {
                       "type": "string"
                     },
+                    "root_type": {
+                      "type": "string",
+                      "enum": ["agent", "skill", "mcp-server", "integration"],
+                      "description": "The root package's type."
+                    },
                     "warnings": {
                       "type": "array",
                       "items": {
@@ -18472,7 +18702,7 @@
             }
           },
           "400": {
-            "description": "Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, or `post_install_failed`. A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization.",
+            "description": "Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `unexpected_package_type` (the root is not the `type` asked for), or `post_install_failed`. A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -18515,6 +18745,16 @@
           },
           {
             "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "description": "The package type the import is made for. When set, an archive whose package (for a bundle, its root) is another type is refused with 400 `unexpected_package_type` before anything is written.",
+            "schema": {
+              "type": "string",
+              "enum": ["agent", "skill", "mcp-server", "integration"]
+            }
           },
           {
             "name": "force",
@@ -18591,7 +18831,7 @@
             }
           },
           "400": {
-            "description": "Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `type_mismatch` (existing package has a different type), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization.",
+            "description": "Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `type_mismatch` (existing package has a different type), `unexpected_package_type` (the archive is not the `type` asked for), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -18655,6 +18895,16 @@
           },
           {
             "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "description": "The package type the import is made for. When set, an archive whose package (for a bundle, its root) is another type is refused with 400 `unexpected_package_type` before anything is written.",
+            "schema": {
+              "type": "string",
+              "enum": ["agent", "skill", "mcp-server", "integration"]
+            }
           }
         ],
         "requestBody": {
@@ -18717,7 +18967,7 @@
             }
           },
           "400": {
-            "description": "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`type_mismatch`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization.",
+            "description": "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`type_mismatch`, `unexpected_package_type`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization.",
             "content": {
               "application/problem+json": {
                 "schema": {

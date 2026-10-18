@@ -86,6 +86,7 @@ import { ORG_PATH_MIDDLEWARE } from "../../src/middleware/org-path-context.ts";
 import meRouter from "../../src/routes/me.ts";
 import profileRouter from "../../src/routes/profile.ts";
 import invitationsRouter from "../../src/routes/invitations.ts";
+import { createOAuthClientMetadataRouter } from "../../src/routes/oauth-client-metadata.ts";
 import welcomeRouter from "../../src/routes/welcome.ts";
 
 import type { AppstrateModule } from "@appstrate/core/module";
@@ -320,6 +321,7 @@ export function getTestApp(options?: GetTestAppOptions): Hono<AppEnv> {
   app.route("/api/credential-proxy", createCredentialProxyRouter());
   app.route(LLM_PROXY_MOUNT, createLlmProxyRouter());
   app.route("/invite", invitationsRouter);
+  app.route("/oauth", createOAuthClientMetadataRouter());
   app.route("/api", welcomeRouter);
   app.route("/internal", createInternalRouter());
   app.route(RUN_LLM_PROXY_MOUNT, createRunLlmProxyRouter());

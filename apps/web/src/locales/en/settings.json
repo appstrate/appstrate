@@ -838,7 +838,7 @@
   "integration.clients.title": "Available clients",
   "integration.clients.empty": "No OAuth client registered",
   "integration.clients.register": "Register a client",
-  "integration.oauthClient.autoProvisionedHint": "This MCP integration registers its OAuth client automatically at connect time (DCR). You don't need to enter anything — just connect.",
+  "integration.oauthClient.autoProvisionedHint": "This MCP integration provisions its OAuth client automatically at connect time (client metadata document, or dynamic registration). You don't need to enter anything — just connect.",
   "integration.oauthClient.registerManually": "Register a client manually instead",
   "integration.auth.required": "Required",
   "integration.auth.optional": "Optional",

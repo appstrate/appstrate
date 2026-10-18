@@ -383,7 +383,7 @@ export const integrationConnectionSchema = {
     client_ref: {
       type: ["string", "null"],
       description:
-        "The registered OAuth client that minted this connection (system env id or custom `integration_oauth_clients.id`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting.",
+        "The OAuth client that minted this connection: a system env id, a custom `integration_oauth_clients.id`, or the URL of this instance's client metadata document (its `client_id`, under `/oauth/client-metadata`). Null for non-oauth2 auths. The connection is bound to it — changing it requires reconnecting.",
     },
     variables: {
       type: ["object", "null"],
@@ -605,7 +605,7 @@ const authStatusSchema = {
     client_auto_provisioned: {
       type: "boolean",
       description:
-        'True for an oauth2 auth declaring `token_endpoint_auth_method: "none"` on a remote MCP integration (`source.kind: "remote"`) or with an authorization server chosen per connection. Its OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414), then RFC 7591 dynamic registration of a public client — so no pre-registered client is required.',
+        'True for an oauth2 auth declaring `token_endpoint_auth_method: "none"` on a remote MCP integration (`source.kind: "remote"`) or with an authorization server chosen per connection. Its OAuth client is provisioned automatically at connect time — discovery of the authorization server (RFC 9728 → RFC 8414), then this instance\'s Client ID Metadata Document as a public client (`GET /oauth/client-metadata.json`) when the server advertises `client_id_metadata_document_supported` and `APP_URL` is public https, else RFC 7591 dynamic registration of a public client — so no pre-registered client is required.',
     },
   },
 } as const;
@@ -1018,7 +1018,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Propose an integration manifest from a remote MCP server URL",
       description:
-        "Probes a remote MCP server before any integration exists and returns a manifest proposal for the editor to merge: an MCP `initialize` request (Streamable HTTP; a 404/405 falls back to the SSE transport's GET), then its OAuth protected-resource metadata (RFC 9728) and authorization-server metadata (RFC 8414), plus the site's raster icon. An oauth2 auth is proposed as a public client (`token_endpoint_auth_method: none`) when the authorization server offers dynamic client registration (RFC 7591), else as `client_secret_post` with its `issuer` and a `manual_client_required` warning (`authorization_server_blocked` instead when the advertised authorization server is on a refused address, which is never read); without metadata, a server at the URL's origin offering DCR is guessed as oauth2, anything else as an API key sent as a Bearer token (auth `primary`, credential field `api_key`). A 401/403 counts as an MCP server only when its `WWW-Authenticate` offers the Bearer scheme. The whole discovery is bounded to 25 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Every URL reached is egress-guarded (private and reserved addresses refused, `https` required for a host the operator has not allowlisted). Requires `integrations:write`. Rate limited to 10 requests per minute.",
+        "Probes a remote MCP server before any integration exists and returns a manifest proposal for the editor to merge: an MCP `initialize` request (Streamable HTTP; a 404/405 falls back to the SSE transport's GET), then its OAuth protected-resource metadata (RFC 9728) and authorization-server metadata (RFC 8414), plus the site's raster icon. An oauth2 auth is proposed as a public client (`token_endpoint_auth_method: none`) when the authorization server accepts a client this instance provisions itself — a Client ID Metadata Document (`client_id_metadata_document_supported`, only when `APP_URL` is public https) or dynamic client registration (RFC 7591) — else as `client_secret_post` with its `issuer` and a `manual_client_required` warning (`authorization_server_blocked` instead when the advertised authorization server is on a refused address, which is never read); without metadata, a server at the URL's origin offering either is guessed as oauth2, anything else as an API key sent as a Bearer token (auth `primary`, credential field `api_key`). A 401/403 counts as an MCP server only when its `WWW-Authenticate` offers the Bearer scheme. The whole discovery is bounded to 25 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Every URL reached is egress-guarded (private and reserved addresses refused, `https` required for a host the operator has not allowlisted). Requires `integrations:write`. Rate limited to 10 requests per minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1291,7 +1291,7 @@ export const integrationsPaths = {
         "space may hold N clients per auth (model-provider pattern). The first " +
         "registered client becomes the default; later ones are non-default until " +
         "promoted via PUT .../default-client. Rejected for auto-provisioned " +
-        "(DCR) auths. Requires `integrations:configure`, which is never granted to an API key.",
+        "(client metadata document or DCR) auths. Requires `integrations:configure`, which is never granted to an API key.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

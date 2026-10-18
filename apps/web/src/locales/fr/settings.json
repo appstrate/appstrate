@@ -839,7 +839,7 @@
   "integration.clients.title": "Clients OAuth",
   "integration.clients.empty": "Aucun client OAuth enregistré",
   "integration.clients.register": "Enregistrer un client",
-  "integration.oauthClient.autoProvisionedHint": "Cette intégration MCP enregistre automatiquement son client OAuth à la connexion (DCR). Vous n'avez rien à saisir : connectez-vous simplement.",
+  "integration.oauthClient.autoProvisionedHint": "Cette intégration MCP obtient automatiquement son client OAuth à la connexion (document de métadonnées client, ou enregistrement dynamique). Vous n'avez rien à saisir : connectez-vous simplement.",
   "integration.oauthClient.registerManually": "Enregistrer un client manuellement",
   "integration.auth.required": "Requise",
   "integration.auth.optional": "Optionnelle",

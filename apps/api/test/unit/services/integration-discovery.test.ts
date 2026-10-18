@@ -36,6 +36,8 @@ const HOSTS = [
   "mcp.blocked.test",
   "mcp.slow.test",
   "mcp.modern.test",
+  "mcp.cimd.test",
+  "mcp.cimdlocal.test",
 ];
 
 let previousAllowlist: string | undefined;
@@ -79,6 +81,7 @@ function protectedServer(
     challengeScope?: string;
     prm?: Record<string, unknown>;
     registration?: boolean;
+    cimd?: boolean;
     path?: string;
   } = {},
 ): Record<string, Route> {
@@ -97,6 +100,7 @@ function protectedServer(
         token_endpoint: `${origin}/token`,
         code_challenge_methods_supported: ["S256"],
         ...(opts.registration === false ? {} : { registration_endpoint: `${origin}/register` }),
+        ...(opts.cimd ? { client_id_metadata_document_supported: true } : {}),
       }),
   };
 }
@@ -232,6 +236,51 @@ describe("discoverRemoteIntegration", () => {
     expect(auth.token_endpoint_auth_method).toBe("client_secret_post");
     expect(auth.issuer).toBe("https://mcp.manual.test");
     expect(warnings.map((w) => w.code)).toEqual(["manual_client_required"]);
+  });
+
+  describe("a server accepting only client metadata documents (CIMD, no DCR)", () => {
+    const withAppUrl = async <T>(appUrl: string, fn: () => Promise<T>): Promise<T> => {
+      const previous = process.env.APP_URL;
+      process.env.APP_URL = appUrl;
+      resetEnvCache();
+      try {
+        return await fn();
+      } finally {
+        if (previous === undefined) delete process.env.APP_URL;
+        else process.env.APP_URL = previous;
+        resetEnvCache();
+      }
+    };
+
+    it("proposes a public client when the instance can serve its document", async () => {
+      const { fetchImpl } = fakeFetch(
+        protectedServer("mcp.cimd.test", { registration: false, cimd: true }),
+      );
+      const { manifest, warnings } = await withAppUrl("https://appstrate.example.com", () =>
+        discoverRemoteIntegration(
+          { url: "https://mcp.cimd.test/mcp", orgSlug: "acme" },
+          { fetchImpl },
+        ),
+      );
+      const auth = (manifest.auths as Record<string, Record<string, unknown>>).oauth!;
+      expect(auth.token_endpoint_auth_method).toBe("none");
+      expect(warnings).toEqual([]);
+    });
+
+    it("asks for a manual client on an instance no server can fetch from (localhost)", async () => {
+      const { fetchImpl } = fakeFetch(
+        protectedServer("mcp.cimdlocal.test", { registration: false, cimd: true }),
+      );
+      const { manifest, warnings } = await withAppUrl("http://localhost:3000", () =>
+        discoverRemoteIntegration(
+          { url: "https://mcp.cimdlocal.test/mcp", orgSlug: "acme" },
+          { fetchImpl },
+        ),
+      );
+      const auth = (manifest.auths as Record<string, Record<string, unknown>>).oauth!;
+      expect(auth.token_endpoint_auth_method).toBe("client_secret_post");
+      expect(warnings.map((w) => w.code)).toEqual(["manual_client_required"]);
+    });
   });
 
   it("guesses oauth2 on the origin's server without protected-resource metadata (Atlassian)", async () => {

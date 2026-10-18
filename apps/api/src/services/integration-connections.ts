@@ -69,6 +69,13 @@ import {
 } from "@appstrate/afps-shared/connection-variables";
 import { egressFetchImpl, isBlockedEgressUrl } from "../lib/egress-host-guard.ts";
 import {
+  clientMetadataDocumentUrl,
+  clientMetadataDocumentsServable,
+  clientMetadataRedirectUri,
+  parseClientMetadataDocumentRef,
+  platformClientName,
+} from "../lib/integration-client-metadata.ts";
+import {
   resolveSystemClientForAuth,
   getDefaultSystemIntegrationClient,
   listSystemIntegrationClientsFor,
@@ -866,12 +873,12 @@ function assertClientAuth(
   }
   if (!autoProvisioned && hasPerConnectionAuthServer(manifest, auth)) {
     throw invalidRequest(
-      `Integration '${manifest.name}' auth '${authKey}' chooses its authorization server per connection, so its OAuth client is registered automatically with each server (DCR); a manual client, bound to one server, must not be registered.`,
+      `Integration '${manifest.name}' auth '${authKey}' chooses its authorization server per connection, so its OAuth client is provisioned automatically for each server (client metadata document or DCR); a manual client, bound to one server, must not be registered.`,
     );
   }
   if (!autoProvisioned && usesAutoProvisionedClient(manifest, auth)) {
     throw invalidRequest(
-      `Integration '${manifest.name}' auth '${authKey}' provisions its OAuth client automatically at connect time (DCR); a manual client must not be registered. Connect without supplying credentials, or delete the existing client to restore auto-registration.`,
+      `Integration '${manifest.name}' auth '${authKey}' provisions its OAuth client automatically at connect time (client metadata document or DCR); a manual client must not be registered. Connect without supplying credentials, or delete the existing client to restore auto-registration.`,
     );
   }
 }
@@ -1325,6 +1332,15 @@ interface ResolvedConnectClient {
   clientRef: string;
 }
 
+/**
+ * This instance's Client ID Metadata Document as the connect-time client of `issuer`'s server
+ * (`null` = the manifest's): no row, the document URL is both `client_id` and `client_ref`.
+ */
+function metadataDocumentClient(issuer: string | null): ResolvedConnectClient {
+  const url = clientMetadataDocumentUrl(issuer);
+  return { clientId: url, redirectUri: clientMetadataRedirectUri(issuer), clientRef: url };
+}
+
 /** Project a registered system client into the connect-time resolved shape. */
 function systemConnectClient(def: SystemIntegrationClientDefinition): ResolvedConnectClient {
   return {
@@ -1393,8 +1409,9 @@ function customConnectClient(client: IntegrationOAuthClientWithSecret): Resolved
  * Resolve WHICH OAuth client a connect flow uses, and its credentials — the
  * single home for the client-selection precedence. New connections always use the **default**
  * ({@link pickDefault}) — there is no per-connect picker.
- * Auto-provisioned remote-MCP auths (DCR) use the org's machine client
- * and are never served by a system entry. Throws the operator-facing error when
+ * Auto-provisioned remote-MCP auths use this instance's metadata document
+ * (CIMD) or, failing it, the org's machine client (DCR), and are never served
+ * by a system entry. Throws the operator-facing error when
  * no client can be resolved. The returned `clientRef` is pinned on the
  * connection so token refresh resolves the same credentials. The choice of
  * which client is the default is an admin action (`setDefaultIntegrationClient`,
@@ -1419,6 +1436,7 @@ export function resolveConnectClient(
   if (picked) {
     return "isDefault" in picked ? customConnectClient(picked) : systemConnectClient(picked);
   }
+  if (resolved.metadataDocumentClient) return resolved.metadataDocumentClient;
   if (reconnectsOrgRow && resolved.spaceClients.length > 0) {
     throw scopeNarrowingRefused(
       "Ask an administrator to register an organization OAuth client for it, or create a new connection here.",
@@ -1448,7 +1466,9 @@ export function resolveConnectClient(
  * credentials that mint/refresh a connection's tokens. The token-refresh
  * counterpart of `resolveConnectClient` — and the direct analogue of the
  * model-provider `loadInferenceCredentials`: try the system registry by id
- * first, then the `integration_oauth_clients` table by id.
+ * first, then this instance's Client ID Metadata Documents by URL (a public
+ * client with no row, bound to the server its name encodes), then the
+ * `integration_oauth_clients` table by id.
  *
  * SECURITY: the custom lookup is scoped to `(spaceId or its org, integrationId,
  * authKey)` so a custom id belonging to another space/org/integration/auth never
@@ -1503,12 +1523,21 @@ export async function resolveIntegrationClientById(
     return resolved(sys.clientId, method === "none" ? "" : (sys.clientSecret ?? ""), method);
   }
 
+  // 2) A metadata document of this instance: public by construction, whatever the manifest says.
+  const document = parseClientMetadataDocumentRef(clientRef);
+  if (document) {
+    return {
+      ...resolved(clientRef, "", "none"),
+      ...(document.issuer !== null ? { issuer: document.issuer } : {}),
+    };
+  }
+
   // A custom client id is the row's UUID PK. Anything else — a since-removed
   // system id, a remapped id, garbage — cannot be a custom row, so skip the
   // typed lookup (and avoid a `uuid` cast error on a non-UUID literal).
   if (!isUuid(clientRef)) return null;
 
-  // 2) Custom client of this space or its org, by id AND fully scoped.
+  // 3) Custom client of this space or its org, by id AND fully scoped.
   const spaceOrg = db.select({ orgId: spaces.orgId }).from(spaces).where(eq(spaces.id, spaceId));
   const [row] = await db
     .select({
@@ -1730,6 +1759,11 @@ export interface ResolvedOAuthConnect {
   spaceClients: IntegrationOAuthClientWithSecret[];
   /** The org's clients the space inherits — its one machine client for an auto-provisioned auth. */
   orgClients: IntegrationOAuthClientWithSecret[];
+  /**
+   * Set when an auto-provisioned auth's server accepts Client ID Metadata Documents and this
+   * instance can serve one: the client is the document, ahead of any DCR machine client.
+   */
+  metadataDocumentClient?: ResolvedConnectClient;
   /** Discovered/declared issuer (overrides the manifest when set). */
   issuer?: string;
   authorizationEndpoint?: string;
@@ -1741,7 +1775,7 @@ export interface ResolvedOAuthConnect {
    * failing step authors the complete, operator-facing reason — *including the
    * remedy* — so the caller renders it verbatim and never decides what to
    * advise. Adding a failure point (no registration endpoint, blocked endpoint,
-   * AS rejection, network failure, future CIMD) is "set the field with its own
+   * AS rejection, network failure) is "set the field with its own
    * message"; no new branch and no remedy heuristic in the caller. `status` is
    * the authorization server's HTTP status when the failure came from a
    * response, surfaced alongside the message.
@@ -1752,8 +1786,9 @@ export interface ResolvedOAuthConnect {
 /**
  * Whether an auth's OAuth client is provisioned automatically at connect time
  * (the MCP-spec onboarding path) rather than pre-registered: the authorization
- * server is discovered (RFC 9728 → RFC 8414) and a client registered with it by
- * RFC 7591 dynamic registration, so no hand-registered client is needed.
+ * server is discovered (RFC 9728 → RFC 8414) and the client is this instance's
+ * Client ID Metadata Document when the server accepts one, else one registered
+ * by RFC 7591 dynamic registration, so no hand-registered client is needed.
  *
  * Derived from the manifest shape rather than an opt-in flag, but it is NOT
  * enough to be `oauth2` + `source.kind: "remote"`: the auto-provisioned client
@@ -1762,8 +1797,8 @@ export interface ResolvedOAuthConnect {
  * is a classic *pre-registered* client that happens to be remote (e.g. the
  * GitHub/Gmail MCP connectors, which ship explicit endpoints + expect an
  * admin-registered secret) — it must keep requiring a manually-registered
- * client. The AS advertising (or not) a `registration_endpoint` is the
- * additional runtime gate.
+ * client. The AS advertising (or not) `client_id_metadata_document_supported`
+ * or a `registration_endpoint` is the additional runtime gate.
  */
 export function usesAutoProvisionedClient(
   manifest: IntegrationManifest,
@@ -1822,16 +1857,24 @@ export function assertEndpointsMatchMetadata(
 }
 
 /**
- * Resolve the OAuth connect config for an auth, auto-registering a client via
- * RFC 7591 Dynamic Client Registration for remote MCP integrations when none is
- * pre-registered. This is the MCP-spec onboarding path: an operator installs
- * the connector, the first actor clicks Connect, and Appstrate self-registers
- * — no hand-created OAuth app, no client secret.
+ * Resolve the OAuth connect config for an auth, provisioning a client for
+ * remote MCP integrations in the MCP 2026-07-28 order: this instance's Client
+ * ID Metadata Document when the server advertises
+ * `client_id_metadata_document_supported` and `APP_URL` is public https
+ * ({@link clientMetadataDocumentsServable}) — nothing registered, nothing
+ * stored — else RFC 7591 Dynamic Client Registration (deprecated, kept for the
+ * servers without CIMD, and for tier 0 / localhost, which no server can fetch a
+ * document from). This is the MCP-spec onboarding path: an operator installs
+ * the connector, the first actor clicks Connect, and the client exists — no
+ * hand-created OAuth app, no client secret. An auto-provisioned auth takes no
+ * manually registered client ({@link assertClientAuth}), so no pre-registered
+ * one precedes these two.
  *
  * Discovery chain:
  *   `source.remote.url` → RFC 9728 protected-resource metadata
  *   (`resource` + `authorization_servers`) → RFC 8414 AS metadata
- *   (`authorization_endpoint` / `token_endpoint` / `registration_endpoint`).
+ *   (`authorization_endpoint` / `token_endpoint` / `client_id_metadata_document_supported` /
+ *   `registration_endpoint`).
  *
  * A server chosen per connection (AFPS §7.3) goes to {@link ensurePerConnectionOAuthClient}.
  * Otherwise best-effort: a discovery/registration failure comes back as `provisioningFailure`.
@@ -1856,9 +1899,6 @@ export async function ensureIntegrationOAuthClient(
     const { space, org } = await loadClientTiers(scope, packageId, authKey);
     return { spaceClients: space, orgClients: org };
   }
-
-  // Auto-provisioned path: there is exactly one machine client (DCR).
-  const existing = await getAutoProvisionedClient(scope, packageId, authKey, null);
 
   // Resolve the AS issuer + RFC 8707 resource. The protected-resource metadata
   // (RFC 9728) is authoritative for the canonical `resource` (the token's
@@ -1911,7 +1951,7 @@ export async function ensureIntegrationOAuthClient(
   // so drop any blocked endpoint before threading it into the connect state.
   const resolved: ResolvedOAuthConnect = {
     spaceClients: [],
-    orgClients: existing ? [existing] : [],
+    orgClients: [],
     ...(issuer ? { issuer } : {}),
     ...(safeUrl(endpoints.authorizationEndpoint)
       ? { authorizationEndpoint: endpoints.authorizationEndpoint }
@@ -1920,12 +1960,20 @@ export async function ensureIntegrationOAuthClient(
     ...(resource ? { resource } : {}),
   };
 
-  // Client already registered — nothing to mint; just return discovered config.
-  if (existing) return resolved;
+  // CIMD ahead of DCR, even of a machine client DCR registered before: its connections keep it
+  // (their `client_ref`), new ones take the document.
+  if (endpoints.clientIdMetadataDocumentSupported === true && clientMetadataDocumentsServable()) {
+    return { ...resolved, metadataDocumentClient: metadataDocumentClient(null) };
+  }
+
+  // Auto-provisioned by DCR: there is exactly one machine client, registered once.
+  const existing = await getAutoProvisionedClient(scope, packageId, authKey, null);
+  if (existing) return { ...resolved, orgClients: [existing] };
 
   return registerAutoProvisionedClient({ orgId: scope.orgId }, packageId, authKey, auth, {
     registrationEndpoint: endpoints.registrationEndpoint,
     grantTypesSupported: endpoints.grantTypesSupported,
+    clientIdMetadataDocumentSupported: endpoints.clientIdMetadataDocumentSupported,
     redirectUri,
     issuer: null,
     resolved,
@@ -1941,8 +1989,9 @@ export async function ensureIntegrationOAuthClient(
  *     rendered `issuer`, else share the URL's origin — never another provider's server. Its
  *     `resource` is sent (RFC 8707).
  *   - otherwise the rendered `issuer`, no resource.
- *   - endpoints from that server's RFC 8414 metadata only; a public DCR client per issuer with a
- *     redirect URI of its own (`<callback>/<tag>`).
+ *   - endpoints from that server's RFC 8414 metadata only; a redirect URI per issuer
+ *     (`<callback>/<tag>`), carried by the issuer's own metadata document (CIMD) when the server
+ *     accepts one and this instance can serve it, else by a public DCR client per issuer.
  *
  * A failure the user's choice explains is a 400 on the variable that chose it.
  */
@@ -1956,7 +2005,7 @@ async function ensurePerConnectionOAuthClient(
 ): Promise<ResolvedOAuthConnect> {
   if (auth.token_endpoint_auth_method !== "none") {
     throw invalidRequest(
-      `Integration '${packageId}' auth '${authKey}' chooses its authorization server per connection, so its OAuth client is registered automatically as a public client (RFC 7591): the auth must declare token_endpoint_auth_method 'none'.`,
+      `Integration '${packageId}' auth '${authKey}' chooses its authorization server per connection, so its OAuth client is provisioned automatically as a public client (client metadata document or RFC 7591 registration): the auth must declare token_endpoint_auth_method 'none'.`,
     );
   }
   const remoteTemplate = getRemoteSource(manifest)?.url;
@@ -2020,10 +2069,13 @@ async function ensurePerConnectionOAuthClient(
       `the authorization server ${candidate} publishes no valid metadata (RFC 8414)`,
     );
   }
+  const byDocument =
+    endpoints.clientIdMetadataDocumentSupported === true && clientMetadataDocumentsServable();
   for (const url of [
     endpoints.authorizationEndpoint,
     endpoints.tokenEndpoint,
-    ...(endpoints.registrationEndpoint ? [endpoints.registrationEndpoint] : []),
+    // Reached only to register by DCR.
+    ...(endpoints.registrationEndpoint && !byDocument ? [endpoints.registrationEndpoint] : []),
   ]) {
     if (!(await isUserUrlReachable(url))) {
       throw refuse(
@@ -2034,27 +2086,29 @@ async function ensurePerConnectionOAuthClient(
   }
 
   const issuer = endpoints.issuer;
-  const existing = await getAutoProvisionedClient(scope, packageId, authKey, issuer);
   const resolved: ResolvedOAuthConnect = {
     spaceClients: [],
-    orgClients: existing ? [existing] : [],
+    orgClients: [],
     issuer,
     authorizationEndpoint: endpoints.authorizationEndpoint,
     tokenEndpoint: endpoints.tokenEndpoint,
     ...(resource ? { resource } : {}),
   };
+  if (byDocument) return { ...resolved, metadataDocumentClient: metadataDocumentClient(issuer) };
+  const existing = await getAutoProvisionedClient(scope, packageId, authKey, issuer);
   if (existing) {
     // A reuse renews the client's lease against {@link pruneUnusedPerConnectionClients}.
     await db
       .update(integrationOauthClients)
       .set({ updatedAt: new Date() })
       .where(eq(integrationOauthClients.id, existing.id));
-    return resolved;
+    return { ...resolved, orgClients: [existing] };
   }
   await pruneUnusedPerConnectionClients(scope, packageId, authKey);
   return registerAutoProvisionedClient({ orgId: scope.orgId }, packageId, authKey, auth, {
     registrationEndpoint: endpoints.registrationEndpoint,
     grantTypesSupported: endpoints.grantTypesSupported,
+    clientIdMetadataDocumentSupported: endpoints.clientIdMetadataDocumentSupported,
     redirectUri: integrationCallbackUrlFor(issuer),
     issuer,
     resolved,
@@ -2098,6 +2152,8 @@ async function registerAutoProvisionedClient(
   input: {
     registrationEndpoint: string | undefined;
     grantTypesSupported: string[] | undefined;
+    /** Advertised, but refused for want of a public https `APP_URL`: the failure says so. */
+    clientIdMetadataDocumentSupported: boolean | undefined;
     redirectUri: string;
     issuer: string | null;
     resolved: ResolvedOAuthConnect;
@@ -2118,15 +2174,19 @@ async function registerAutoProvisionedClient(
       authKey,
       issuer: resolved.issuer,
     });
-    return {
-      ...resolved,
-      provisioningFailure: {
-        message:
-          issuer === null
-            ? "the authorization server did not advertise dynamic client registration; register an OAuth client manually, or retry once the server advertises it"
-            : `the authorization server ${issuer} does not advertise dynamic client registration (RFC 7591), which a server chosen per connection requires`,
-      },
-    };
+    const server =
+      issuer === null ? "the authorization server" : `the authorization server ${issuer}`;
+    const message =
+      input.clientIdMetadataDocumentSupported === true
+        ? `${server} accepts client metadata documents but not dynamic client registration, and it can fetch a document only from a public https APP_URL, which this instance's is not; ${
+            issuer === null
+              ? "serve the instance from a public https APP_URL, or register an OAuth client manually"
+              : "serve the instance from a public https APP_URL to connect to it"
+          }`
+        : issuer === null
+          ? `${server} advertises neither client metadata documents nor dynamic client registration; register an OAuth client manually, or retry once the server advertises one of them`
+          : `${server} advertises neither client metadata documents nor dynamic client registration (RFC 7591), one of which a server chosen per connection requires`;
+    return { ...resolved, provisioningFailure: { message } };
   }
 
   // SSRF pre-check — the endpoint is manifest/discovery-derived and we POST to
@@ -2152,14 +2212,6 @@ async function registerAutoProvisionedClient(
   const racedClient = await getAutoProvisionedClient(org, packageId, authKey, issuer);
   if (racedClient) return { ...resolved, orgClients: [racedClient] };
 
-  const host = (() => {
-    try {
-      return new URL(getEnv().APP_URL).host;
-    } catch {
-      return "appstrate";
-    }
-  })();
-
   // Limitation: the registered client is persisted once and reused for every
   // subsequent connect. If the authorization server later revokes or expires it
   // (RFC 7591 §3.2 `client_secret_expires_at`, or operator-side deletion),
@@ -2180,7 +2232,7 @@ async function registerAutoProvisionedClient(
     const registration = await registerDynamicClient({
       registrationEndpoint,
       redirectUri,
-      clientName: `Appstrate (${host})`,
+      clientName: platformClientName(),
       grantTypes,
       ...(auth.default_scopes && auth.default_scopes.length > 0
         ? { scopes: auth.default_scopes }
@@ -2792,7 +2844,7 @@ async function mintingClientSpace(
   tx: Tx,
   clientRef: string | null | undefined,
 ): Promise<string | null> {
-  // System ids are never UUID-shaped (the registry refuses them): a non-UUID names the system tier.
+  // System ids and metadata-document URLs are never UUID-shaped: a non-UUID names no row's tier.
   if (!clientRef || !isUuid(clientRef)) return null;
   const [client] = await tx
     .select({ spaceId: integrationOauthClients.spaceId })
@@ -4150,7 +4202,7 @@ export async function getIntegrationAuthStatuses(
       // even without an org-registered client. Registry is in-memory — no DB cost.
       has_system_client: listSystemIntegrationClientsFor(packageId, key).length > 0,
       // MCP-spec onboarding: an oauth2 auth on a remote MCP integration provisions
-      // its client at connect time (DCR), so the UI enables Connect even
+      // its client at connect time (CIMD or DCR), so the UI enables Connect even
       // when no client is pre-registered. Derived from the manifest shape.
       client_auto_provisioned: usesAutoProvisionedClient(manifest, auth),
     };
