@@ -4,7 +4,7 @@
   "type": "integration",
   "schema_version": "0.3",
   "display_name": "Garmin Connect (API)",
-  "description": "Fitness — reads the owner's Garmin Connect activities (list by date, summary, dense GPS track and time series, splits, heart-rate zones, weather, GPX and original FIT files), daily health data (sleep, body battery, stress, heart rate, HRV, respiration, SpO2, training readiness) and profile. Relies on the undocumented API of the Garmin Connect mobile app: it may break, and automated reading may fall outside Garmin's terms of use. Connected with a refresh token obtained once outside Appstrate (Garmin's mobile sign-in, MFA included, has no redirect flow); Garmin rotates it at each refresh.",
+  "description": "Advanced — connecting needs a refresh token obtained once with python-garminconnect (uv/Python) on your own computer. Fitness — reads the owner's Garmin Connect activities (list by date, summary, dense GPS track and time series, splits, heart-rate zones, weather, GPX and original FIT files), daily health data (sleep, body battery, stress, heart rate, HRV, respiration, SpO2, training readiness) and profile. Relies on the undocumented API of the Garmin Connect mobile app: it may break, and automated reading may fall outside Garmin's terms of use. A refresh token is needed because Garmin's mobile sign-in (MFA included) has no redirect flow; Garmin rotates it at each refresh.",
   "keywords": [
     "garmin",
     "fitness",
@@ -49,6 +49,7 @@
         "name": "$.fullName",
         "garmin_guid": "$.garminGUID"
       },
+      "required_identity_claims": ["userName"],
       "authorized_uris": ["https://connectapi.garmin.com/**"],
       "credentials": {
         "schema": {

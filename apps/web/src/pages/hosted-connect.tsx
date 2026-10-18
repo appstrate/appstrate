@@ -19,10 +19,9 @@ import type { IntegrationManifestAuth } from "../hooks/use-integrations";
 import { errorMessage } from "../lib/mutation-error";
 import {
   missingVariables,
-  hostedConnectErrorMessage,
+  hostedConnectFailure,
   submitHostedConnect,
   usesAuthorizationFlow,
-  variableFieldErrors,
 } from "../lib/hosted-connect-submit";
 
 /**
@@ -43,7 +42,8 @@ type ConnectContext = Omit<
   "auth"
 > & { auth: IntegrationManifestAuth };
 
-type Phase = "loading" | "form" | "submitting" | "done" | "error";
+/** `ended`: a refusal spent the page session, so the form is not offered again. */
+type Phase = "loading" | "form" | "submitting" | "done" | "error" | "ended";
 
 const closeWindow = () => {
   try {
@@ -166,9 +166,14 @@ export function HostedConnectPage() {
       else setTimeout(closeWindow, 1200);
       setPhase("done");
     } catch (err) {
-      const { byName, complete } = variableFieldErrors(err, variableLabels);
-      setVariableErrors(byName);
-      setError(complete ? null : hostedConnectErrorMessage(err));
+      const failure = hostedConnectFailure(err, variableLabels);
+      if (failure.kind === "ended") {
+        setError(failure.message);
+        setPhase("ended");
+        return;
+      }
+      setVariableErrors(failure.fieldErrors);
+      setError(failure.message);
       setPhase("form");
     }
   };
@@ -192,6 +197,20 @@ export function HostedConnectPage() {
             </p>
             {errorDetail && (
               <p className="text-muted-foreground/60 font-mono text-xs">{errorDetail}</p>
+            )}
+          </div>
+        )}
+
+        {phase === "ended" && (
+          <div className="flex flex-col gap-3 text-center" data-testid="connect-ended">
+            <h1 className="text-lg font-semibold">{t("integration.connect.hosted.endedTitle")}</h1>
+            <p className="text-muted-foreground text-sm">
+              {t("integration.connect.hosted.endedBody")}
+            </p>
+            {error && (
+              <Alert variant="destructive">
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
             )}
           </div>
         )}

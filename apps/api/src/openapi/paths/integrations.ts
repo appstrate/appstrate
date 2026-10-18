@@ -753,7 +753,7 @@ const connectRunResponses = {
 
 /** How a declarative `connect.login` (AFPS §7.7) refuses, on both connect surfaces. */
 const CONNECT_LOGIN_400 =
-  "A login the service refused is `login_rejected` on `credentials`; on an oauth2 auth, that is a token endpoint answering `invalid_grant`, or HTTP 400 or 401 other than a refused OAuth client. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. oauth2 declaring `connect.login` and an `issuer`: a `token_endpoint` the issuer's metadata contradicts is `invalid_request`, before anything is sent.";
+  "A login the service refused is `login_rejected` on `credentials`; on an oauth2 auth, that is a token endpoint answering `invalid_grant`, or HTTP 400 or 401 other than a refused OAuth client. A `login_rejected` says what was refused in the extension member `login_refusal`: `grant` for an oauth2 token request, `integration` for an integration's login tool (a connect-run), whose own untranslated text, if any, is `integration_diagnostic`; it is absent when the service refused the submitted credentials. A credential value the declarative login request cannot carry where it is placed, a `null` included, is `login_input_unencodable` on `credentials.<field>`, and a submitted base URL it may not reach `login_url_refused`, with one `errors[]` entry per `credentials.<field>` the address comes from. None echoes a credential value nor the service's answer. oauth2 declaring `connect.login` and an `issuer`: a `token_endpoint` the issuer's metadata contradicts is `invalid_request`, before anything is sent.";
 const CONNECT_LOGIN_502 =
   "A declarative login (`connect.login`) could not complete: the service could not be reached, or answered 429 or 5xx (`login_upstream_unavailable`). A `Retry-After` the service sent is relayed, as the header and as `retry_after`, except on an oauth2 auth, whose token request relays none. On an oauth2 auth, `login_upstream_unavailable` also covers any other 4xx (a 403 is often a firewall refusing the client), an unusable 2xx (no `access_token`, or a `token_type` absent or other than `Bearer`, compared case-insensitively), and an `issuer` whose metadata cannot be read, refused before anything is sent. On an oauth2 auth, an OAuth client its token endpoint refuses is `oauth_client_rejected`. Once an oauth2 token request may have redeemed the grant — a timeout, a 5xx, an unusable 2xx, or any refusal after a successful token request, whatever its status (400, 404, 500 or 502) — the problem carries the extension member `grant_may_be_redeemed: true` and its detail says so; it is absent when the answer was a 4xx or the request was never sent.";
 const CONNECT_LOGIN_403 =
@@ -773,8 +773,27 @@ const connectLogin502Headers = {
 const problemJson = {
   "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
 } as const;
+const grantMayBeRedeemedProperty = {
+  grant_may_be_redeemed: {
+    type: "boolean",
+    const: true,
+    description:
+      "oauth2 declaring `connect.login`: the token request may have redeemed the submitted grant (a rotating refresh token, say), so a retry may be refused and a new grant needed. Present on any refusal after the token request may have reached the service, whatever its status; absent otherwise.",
+  },
+} as const;
 /** A `connect.login` 502, with the RFC 9457 extension member an oauth2 token request may add. */
 const connectLogin502Json = {
+  "application/problem+json": {
+    schema: {
+      allOf: [
+        { $ref: "#/components/schemas/ProblemDetail" },
+        { type: "object", properties: grantMayBeRedeemedProperty },
+      ],
+    },
+  },
+} as const;
+/** A hosted-form refusal: a `connect.login` 502's members, and whether it ended the page session. */
+const hostedSubmitProblemJson = {
   "application/problem+json": {
     schema: {
       allOf: [
@@ -782,11 +801,12 @@ const connectLogin502Json = {
         {
           type: "object",
           properties: {
-            grant_may_be_redeemed: {
+            ...grantMayBeRedeemedProperty,
+            connect_session_ended: {
               type: "boolean",
               const: true,
               description:
-                "oauth2 declaring `connect.login`: the token request may have redeemed the submitted grant (a rotating refresh token, say), so a retry may be refused and a new grant needed. Present on any refusal after the token request may have reached the service, whatever its status; absent otherwise.",
+                "The refusal ended the page session: a resubmission is a 404 and reaches no service, so the connection must be restarted from the application (a new connection link). Present on every refusal that ends it, whatever its status; absent when the form can be submitted again.",
             },
           },
         },
@@ -1542,7 +1562,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Hosted form credential submit (page cookie + CSRF)",
       description:
-        "Persists credentials entered on the hosted form (for an oauth2 auth declaring `connect.login`, the grant they render is sent to the token endpoint first) — or, for another oauth2 auth (reached only when the integration declares connection variables), starts its OAuth flow with the submitted `variables` and returns the provider URL to navigate to; the connection is then created by the callback. Context + actor come from the page cookie; the request carries only the credentials and/or the variables and echoes the CSRF nonce in the `x-connect-csrf` header. An oauth2 refusal mirrors `startIntegrationConnect`: a variable to fix is a 400 `validation_failed` and the form can be resubmitted; another refusal keeps its status with a generic detail, and keeps the page session only when it preceded any request to the authorization server; anything else is a 502 that ends the session. An oauth2 `connect.login` submission is single-use: the page session is spent before the token request, so a concurrent or repeated submission is a 404 and a grant is presented once. A refusal before the grant leaves the platform (an invalid submission, no usable or an unsupported OAuth client, an `issuer` binding refusal, a token endpoint the egress guard refuses) hands the session back and the form can be submitted again; once the token request may have been sent, any outcome ends it.",
+        "Persists credentials entered on the hosted form (for an oauth2 auth declaring `connect.login`, the grant they render is sent to the token endpoint first) — or, for another oauth2 auth (reached only when the integration declares connection variables), starts its OAuth flow with the submitted `variables` and returns the provider URL to navigate to; the connection is then created by the callback. Context + actor come from the page cookie; the request carries only the credentials and/or the variables and echoes the CSRF nonce in the `x-connect-csrf` header. An oauth2 refusal mirrors `startIntegrationConnect`: a variable to fix is a 400 `validation_failed` and the form can be resubmitted; another refusal keeps its status with a generic detail, and keeps the page session only when it preceded any request to the authorization server; anything else is a 502 that ends the session. An oauth2 `connect.login` submission is single-use: the page session is spent before the token request, so a concurrent or repeated submission is a 404 and a grant is presented once. A refusal before the grant leaves the platform (an invalid submission, no usable or an unsupported OAuth client, an `issuer` binding refusal, a token endpoint the egress guard refuses) hands the session back and the form can be submitted again; once the token request may have been sent, any outcome ends it. A refusal that ends the page session carries the RFC 9457 extension member `connect_session_ended: true`, whatever its status: the form must not be offered again, since a resubmission is a 404 that reaches no service.",
       parameters: [
         {
           name: "x-connect-csrf",
@@ -1612,9 +1632,7 @@ export const integrationsPaths = {
           description:
             "oauth2: the authorization server's client could not be provisioned or is refused (`connection_not_ready`); the detail is generic, the operator-facing reason stays on the server log. " +
             CONNECT_LOGIN_403,
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
+          content: hostedSubmitProblemJson,
         },
         "404": {
           $ref: "#/components/responses/NotFound",
@@ -1623,9 +1641,9 @@ export const integrationsPaths = {
         },
         "409": CONNECT_LOGIN_409,
         "502": {
-          description: `oauth2: the OAuth flow could not be started (\`connect_start_failed\`); the page session ends — request a new connection link. ${CONNECT_LOGIN_502} The page session survives, unless an oauth2 \`connect.login\` token request may have been sent.`,
+          description: `oauth2: the OAuth flow could not be started (\`connect_start_failed\`); the page session ends — request a new connection link. ${CONNECT_LOGIN_502} The page session survives, unless an oauth2 \`connect.login\` token request may have been sent. A refusal that ends the page session carries \`connect_session_ended: true\`.`,
           headers: connectLogin502Headers,
-          content: connectLogin502Json,
+          content: hostedSubmitProblemJson,
         },
         "429": { $ref: "#/components/responses/RateLimited" },
         ...connectRunResponses,

@@ -160,6 +160,8 @@ describe("declarative connect.login at the route boundary", () => {
       expect(body.param).toBe("credentials");
       expect(body.detail).toContain("HTTP 401");
       expect(body.detail).toContain("Check the credentials you submitted");
+      // The service refused the credentials: no `login_refusal` member, the default wording.
+      expect(JSON.parse(raw)).not.toHaveProperty("login_refusal");
       expect(raw).not.toContain("wrong&password");
       expect(raw).not.toContain(UPSTREAM_BODY);
     });

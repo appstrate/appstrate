@@ -332,6 +332,7 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).status).toBe(400);
     expect((err as ApiError).code).toBe("login_rejected");
+    expect((err as ApiError).extensions?.login_refusal).toBe("grant");
     expect(await db.select().from(integrationConnections)).toHaveLength(0);
   });
 
@@ -441,6 +442,58 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
     expect(row.clientRef).toBe(SYSTEM_CLIENT);
   });
 
+  it("refuses a reconnect whose userinfo read fails: the connection keeps its identity and tokens", async () => {
+    // The identity the account key is read from is required: an unread userinfo must not fall
+    // back to the 'default' account and slip past the same-account check.
+    await seed(
+      manifest(upstream.base, {
+        name: REQUIRES_EMAIL,
+        auth: { required_identity_claims: ["displayName"] },
+      }),
+    );
+    const requiresCtx = { ...connectCtx, integrationId: REQUIRES_EMAIL };
+    upstream.setToken({
+      access_token: "at-fresh",
+      token_type: "Bearer",
+      refresh_token: "rt-1",
+      expires_in: 3600,
+    });
+    const first = await strategy.complete(requiresCtx, {
+      kind: "fields",
+      credentials: { refresh_token: "rt-submitted" },
+    });
+    const before = await storedRow(first.id);
+    // Another account's token: the userinfo endpoint refuses it (401), so no identity is read.
+    upstream.setToken({
+      access_token: "at-other-account",
+      token_type: "Bearer",
+      refresh_token: "rt-other",
+      expires_in: 3600,
+    });
+
+    const err = await submit(
+      { refresh_token: "rt-other-submitted" },
+      {
+        ...requiresCtx,
+        target: { id: first.id, spaceId: ctx.defaultSpaceId, scopesGranted: [] },
+      },
+    );
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(400);
+    expect((err as ApiError).message).toContain("'displayName'");
+    // The token request was sent: the submitted grant may be spent, and the refusal says so.
+    expect(upstream.tokenRequests()).toBe(2);
+    expect((err as ApiError).message).toContain("may have redeemed the submitted grant");
+    expect((err as ApiError).extensions?.grant_may_be_redeemed).toBe(true);
+    const after = await storedRow(first.id);
+    expect(await db.select().from(integrationConnections)).toHaveLength(1);
+    expect(after.accountId).toBe("pierre-trek");
+    expect(after.identityClaims).toEqual(before.identityClaims);
+    expect(after.credentialsEncrypted).toBe(before.credentialsEncrypted);
+    expect(decryptCredentialsToStringMap(after.credentialsEncrypted).refresh_token).toBe("rt-1");
+  });
+
   it("is refreshed later with the same client, and the rotation is written back", async () => {
     upstream.setToken({
       access_token: "at-fresh",
@@ -495,6 +548,7 @@ describe("OAuth2Strategy — connect.login acquisition", () => {
       expect((err as ApiError).status).toBe(400);
       expect((err as ApiError).code).toBe("login_rejected");
       expect((err as ApiError).message).toContain(`HTTP ${status}`);
+      expect((err as ApiError).extensions?.login_refusal).toBe("grant");
       expect(await db.select().from(integrationConnections)).toHaveLength(0);
     });
   }

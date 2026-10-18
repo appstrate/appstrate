@@ -327,7 +327,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   once: the page session is spent before the token request, so a repeated or
   concurrent submission is a 404, and it is handed back only when the refusal
   preceded any request (an invalid field, no usable client, an issuer or egress
-  refusal), so the form can be fixed and submitted again. The connection is then an
+  refusal), so the form can be fixed and submitted again. Every refusal that ends
+  the page session — on this path or an authorization flow begun from the form —
+  carries the RFC 9457 extension member `connect_session_ended: true`, and the
+  hosted form then stops on the spent link, telling the user to restart the
+  connection from the application (with the redemption sentence when
+  `grant_may_be_redeemed` is set) instead of offering a submission that would be
+  a 404. A `login_rejected` names what was refused in the extension member
+  `login_refusal` — `grant` for an oauth2 token request, `integration` for a
+  login tool, whose own text rides `integration_diagnostic` — and the SPA words
+  each case in the reader's language: it no longer interpolates the server's
+  English detail into its sentence (any `connect.login` or `connect.tool` auth).
+  The connection is then an
   ordinary oauth2 one: proactive and on-401 refresh, rotated tokens written back.
   `connect/oauth2` refuses such an auth and connect offers skip it.
   `@afps-spec/schema` enforces the manifest rules (URL equal to `token_endpoint`,
@@ -337,7 +348,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `@appstrate/garmin-connect@1.0.0` lists activities by date and reads their
   summary, dense track and time series (`details`), laps, heart-rate zones,
   weather, GPX and original FIT files through `api_call`, on
-  `connectapi.garmin.com`. It is the first oauth2 auth acquired through
+  `connectapi.garmin.com`. Its description presents it as advanced: connecting
+  needs a refresh token obtained with python-garminconnect (uv/Python). The auth
+  requires the `userName` identity claim, so a reconnect whose profile read
+  fails is refused (the existing connection keeps its identity and tokens; the
+  refusal says the submitted grant may have been redeemed) instead of falling
+  back to the `default` account and replacing another account's tokens. It is
+  the first oauth2 auth acquired through
   `connect.login`: the user obtains a refresh token once with
   python-garminconnect (Garmin's mobile sign-in, MFA included) and pastes it;
   Garmin rotates it at each refresh and it lapses after 30 days unused. Garmin

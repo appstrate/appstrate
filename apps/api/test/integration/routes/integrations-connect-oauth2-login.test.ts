@@ -204,7 +204,9 @@ describe("oauth2 acquired by connect.login — connect routes", () => {
 
     const first = await submit({ refresh_token: "rt-submitted" });
     expect(first.status).toBe(502);
-    expect(((await first.json()) as Record<string, unknown>).grant_may_be_redeemed).toBe(true);
+    const problem = (await first.json()) as Record<string, unknown>;
+    expect(problem.grant_may_be_redeemed).toBe(true);
+    expect(problem.connect_session_ended).toBe(true);
     expect(first.headers.get("set-cookie")).toContain("appstrate_connect=;");
     tokenStatus = 200;
     const again = await submit({ refresh_token: "rt-submitted" });
@@ -213,11 +215,30 @@ describe("oauth2 acquired by connect.login — connect routes", () => {
     expect(exchanged).toEqual(["rt-submitted"]);
   });
 
+  it("says the hosted form is spent when the token endpoint refused the grant", async () => {
+    const submit = await openHostedForm(ctx);
+    tokenStatus = 400;
+
+    const refused = await submit({ refresh_token: "rt-submitted" });
+    tokenStatus = 200;
+
+    expect(refused.status).toBe(400);
+    const problem = (await refused.json()) as Record<string, unknown>;
+    expect(problem.code).toBe("login_rejected");
+    expect(problem.connect_session_ended).toBe(true);
+    expect((await submit({ refresh_token: "rt-submitted" })).status).toBe(404);
+    expect(exchanged).toEqual(["rt-submitted"]);
+  });
+
   it("the hosted form can be submitted again after a refusal before any token request", async () => {
     const submit = await openHostedForm(ctx);
 
     const invalid = await submit({ token: "rt-submitted" });
     expect(invalid.status).toBe(400);
+    expect(
+      ((await invalid.json()) as Record<string, unknown>).connect_session_ended,
+    ).toBeUndefined();
+    expect(invalid.headers.get("set-cookie")).toBeNull();
     expect(exchanged).toEqual([]);
     const fixed = await submit({ refresh_token: "rt-submitted" });
 

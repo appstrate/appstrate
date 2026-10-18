@@ -1378,6 +1378,27 @@ export function createIntegrationsRouter() {
     });
   });
 
+  /**
+   * Ends the page session on a refusal, and says so with the RFC 9457 extension member
+   * `connect_session_ended: true`: a resubmission would meet no session, so the form must not
+   * offer one — the connection restarts from the application.
+   */
+  function endConnectSession(c: Context<AppEnv>, err: ApiError): ApiError {
+    clearConnectPageCookie(c);
+    return new ApiError({
+      status: err.status,
+      code: err.code,
+      title: err.title,
+      detail: err.message,
+      param: err.param,
+      retryAfter: err.retryAfter,
+      errors: err.fieldErrors,
+      headers: err.headers,
+      extensions: { ...err.extensions, connect_session_ended: true },
+      cause: err.cause ?? err,
+    });
+  }
+
   // POST /connect/submit — hosted-form credential submit. Context + actor come
   // from the page cookie; the request carries only the credentials + CSRF nonce.
   // Rate-limited per IP like `/connect/start`: no session, and an oauth2 submit
@@ -1421,8 +1442,7 @@ export function createIntegrationsRouter() {
           return c.json({ ok: true, redirect_url: begun.redirectUrl });
         }
         if ("connectionGone" in begun) {
-          clearConnectPageCookie(c);
-          throw notFound("Connection not found");
+          throw endConnectSession(c, notFound("Connection not found"));
         }
         if ("refused" in begun && begun.refused.code === "validation_failed") {
           // A variable to fix, shown beside its field: the form may be submitted again.
@@ -1431,9 +1451,8 @@ export function createIntegrationsRouter() {
         }
         const reusable = "refused" in begun ? begun.reusable : begun.beforeEgress;
         if (reusable) await releaseJti(claims.jti);
-        else clearConnectPageCookie(c);
         if ("refused" in begun) {
-          throw new ApiError({
+          const notReady = new ApiError({
             status: begun.refused.status,
             code: "connection_not_ready",
             title: "Connection Not Ready",
@@ -1441,14 +1460,18 @@ export function createIntegrationsRouter() {
               reusable ? "submit this form again" : "request a new connection link"
             }.`,
           });
+          throw reusable ? notReady : endConnectSession(c, notReady);
         }
         if (begun.beforeEgress) throw internalError();
-        throw new ApiError({
-          status: 502,
-          code: "connect_start_failed",
-          title: "Bad Gateway",
-          detail: "Could not start the connection. Please request a new connection link.",
-        });
+        throw endConnectSession(
+          c,
+          new ApiError({
+            status: 502,
+            code: "connect_start_failed",
+            title: "Bad Gateway",
+            detail: "Could not start the connection. Please request a new connection link.",
+          }),
+        );
       }
       if (auth.type === "oauth2") {
         if (!(await consumeJti(claims.jti, claims.exp))) {
@@ -1520,14 +1543,15 @@ export function createIntegrationsRouter() {
           : {}),
       });
     } catch (err) {
+      if (!(err instanceof ApiError))
+        logger.error("Hosted connect submit failed", { err: String(err) });
+      const apiErr = err instanceof ApiError ? err : internalError();
       if (loginJti.consumed) {
         // Refused before the grant left the platform: the form can be fixed and submitted again.
-        if (loginJti.grantPresented) clearConnectPageCookie(c);
-        else await releaseJti(claims.jti);
+        if (loginJti.grantPresented) throw endConnectSession(c, apiErr);
+        await releaseJti(claims.jti);
       }
-      if (err instanceof ApiError) throw err;
-      logger.error("Hosted connect submit failed", { err: String(err) });
-      throw internalError();
+      throw apiErr;
     }
   });
 

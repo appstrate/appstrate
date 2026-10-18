@@ -86,8 +86,8 @@ const MAX_DIAGNOSTIC_CHARS = 300;
 /**
  * Extract the caller-safe login diagnostic from a raw `APPSTRATE_CONNECT_ERROR:`
  * message, or `null` when the message is a sidecar-internal fault (which the
- * caller must never see). Returns a sentence — the tool's own text when it
- * carried one, a neutral fallback when it did not.
+ * caller must never see). Returns the tool's own text as a sentence, or `""`
+ * when it carried none.
  *
  * The discriminator is `CONNECT_LOGIN_TOOL_ERROR_PREFIX`, which the sidecar's
  * connect-login primitive puts on a failure the LOGIN TOOL ITSELF reported — the
@@ -104,7 +104,7 @@ const MAX_DIAGNOSTIC_CHARS = 300;
 function loginToolDiagnostic(msg: string): string | null {
   if (!msg.startsWith(CONNECT_LOGIN_TOOL_ERROR_PREFIX)) return null;
   const detail = msg.slice(CONNECT_LOGIN_TOOL_ERROR_PREFIX.length).replace(/^:\s*/, "").trim();
-  if (!detail) return "The integration rejected the submitted credentials.";
+  if (!detail) return "";
   // The text is authored by the integration package — clip it so a runaway
   // upstream body can't be pasted wholesale into an API response.
   const clipped =
@@ -392,7 +392,10 @@ export function parseConnectResult(
         // their input, not a server fault. Surface the tool's diagnostic so the
         // connect form can say "wrong password" / "MFA required" instead of
         // "An internal error occurred", and name the remedy.
-        throw loginRejected(diagnostic);
+        // The tool's own text, if any, rides `integration_diagnostic` for a client to show as is.
+        throw diagnostic
+          ? loginRejected(diagnostic, { kind: "integration", diagnostic })
+          : loginRejected("The integration rejected the submitted credentials.");
       }
       // Anything else on this channel is a sidecar-internal fault: stay a plain
       // Error so the routes map it to a generic 500 (the raw text is logged

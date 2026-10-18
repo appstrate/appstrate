@@ -103,3 +103,25 @@ export function hostedConnectErrorMessage(err: unknown): string {
   if (!(err instanceof ApiError) || err.details?.grant_may_be_redeemed !== true) return message;
   return `${message} ${i18n.t("integration.connect.hosted.grantMayBeRedeemed", { ns: "settings" })}`;
 }
+
+type HostedConnectFailure =
+  /** The form stays: field errors beside their inputs, and a message unless they say it all. */
+  | { kind: "retry"; fieldErrors: Record<string, string>; message: string | null }
+  /** The server ended the page session (`connect_session_ended`): a resubmission would be a 404. */
+  | { kind: "ended"; message: string };
+
+/** What the page does after a failed submit: offer the form again, or end on the spent link. */
+export function hostedConnectFailure(
+  err: unknown,
+  labels: Readonly<Record<string, string>>,
+): HostedConnectFailure {
+  if (err instanceof ApiError && err.details?.connect_session_ended === true) {
+    return { kind: "ended", message: hostedConnectErrorMessage(err) };
+  }
+  const { byName, complete } = variableFieldErrors(err, labels);
+  return {
+    kind: "retry",
+    fieldErrors: byName,
+    message: complete ? null : hostedConnectErrorMessage(err),
+  };
+}

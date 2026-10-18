@@ -12,6 +12,7 @@ import { toApiError } from "../../api/client.ts";
 import {
   connectSubmitBody,
   hostedConnectErrorMessage,
+  hostedConnectFailure,
   missingVariables,
   submitHostedConnect,
   usesAuthorizationFlow,
@@ -223,6 +224,90 @@ describe("hostedConnectErrorMessage", () => {
   it("says only the refusal otherwise", async () => {
     expect(hostedConnectErrorMessage(await upstream({}))).toBe(
       "Le service n'a pas pu terminer la connexion. Réessayez plus tard.",
+    );
+  });
+});
+
+describe("hostedConnectFailure", () => {
+  const refusal = (status: number, code: string, extensions: Record<string, unknown>) =>
+    toApiError(
+      new Response(
+        JSON.stringify({ status, code, detail: "English server detail.", ...extensions }),
+        { status, headers: { "content-type": "application/problem+json" } },
+      ),
+    );
+
+  it("ends on the spent link when the server ended the page session, the redemption said", async () => {
+    const err = await refusal(502, "login_upstream_unavailable", {
+      connect_session_ended: true,
+      grant_may_be_redeemed: true,
+    });
+    expect(hostedConnectFailure(err, {})).toEqual({
+      kind: "ended",
+      message:
+        "Le service n'a pas pu terminer la connexion. Réessayez plus tard. " +
+        "Le service a peut-être déjà consommé ce jeton : si une nouvelle tentative est refusée, obtenez-en un nouveau.",
+    });
+  });
+
+  it("ends on a refused grant without offering the form again", async () => {
+    const err = await refusal(400, "login_rejected", {
+      connect_session_ended: true,
+      login_refusal: "grant",
+    });
+    expect(hostedConnectFailure(err, {})).toEqual({
+      kind: "ended",
+      message:
+        "Le service a refusé le jeton saisi : il est invalide, expiré ou déjà utilisé. Obtenez-en un nouveau.",
+    });
+  });
+
+  it("offers the form again when the session survives", async () => {
+    const err = await refusal(400, "login_rejected", {});
+    expect(hostedConnectFailure(err, {})).toEqual({
+      kind: "retry",
+      fieldErrors: {},
+      message: "Le service a refusé les identifiants saisis. Vérifiez-les et réessayez.",
+    });
+  });
+});
+
+describe("login_rejected wording", () => {
+  const rejected = (extensions: Record<string, unknown>) =>
+    toApiError(
+      new Response(
+        JSON.stringify({
+          status: 400,
+          code: "login_rejected",
+          param: "credentials",
+          detail:
+            "The service refused the submitted credentials (HTTP 401). Check the credentials you submitted and try again.",
+          ...extensions,
+        }),
+        { status: 400, headers: { "content-type": "application/problem+json" } },
+      ),
+    );
+
+  it("never interpolates the server's English detail", async () => {
+    for (const extensions of [{}, { login_refusal: "grant" }]) {
+      expect(hostedConnectErrorMessage(await rejected(extensions))).not.toContain("HTTP");
+    }
+  });
+
+  it("shows an integration login tool's own text inside a translated sentence", async () => {
+    expect(
+      hostedConnectErrorMessage(
+        await rejected({
+          login_refusal: "integration",
+          integration_diagnostic: "MFA code required.",
+        }),
+      ),
+    ).toBe("L'intégration a refusé les identifiants saisis. Son message : MFA code required.");
+  });
+
+  it("falls back to the credentials sentence for an integration refusal without text", async () => {
+    expect(hostedConnectErrorMessage(await rejected({ login_refusal: "integration" }))).toBe(
+      "Le service a refusé les identifiants saisis. Vérifiez-les et réessayez.",
     );
   });
 });

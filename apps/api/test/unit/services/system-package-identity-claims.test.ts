@@ -27,7 +27,10 @@ import { describe, it, expect } from "bun:test";
 import { join } from "node:path";
 import { loadSystemPackages } from "@appstrate/core/system-packages";
 import type { IntegrationManifest } from "@appstrate/core/integration";
-import { extractIdentity } from "../../../src/services/integration-connections.ts";
+import {
+  assertRequiredIdentityClaims,
+  extractIdentity,
+} from "../../../src/services/integration-connections.ts";
 
 const ARCHIVE_DIR = join(import.meta.dir, "../../../../../system-packages");
 
@@ -538,6 +541,25 @@ describe("system-package identity_claims → accountId", () => {
       if (identityClaims.sub === undefined || identityClaims.sub === "") empty.push(packageId);
     }
     expect(empty).toEqual([]);
+  });
+
+  // A declared `required_identity_claims` must hold on the documented payload, or that gate
+  // refuses every connection: the gate is what stops an unidentified reconnect from replacing
+  // another account's credentials.
+  it("satisfies every declared required_identity_claims on the documented payload", async () => {
+    const declaring = await loadDeclaring();
+    const refused: string[] = [];
+    for (const [packageId, testCase] of Object.entries(CASES)) {
+      const pkg = declaring.get(packageId);
+      if (!pkg) continue;
+      const { identityClaims } = extractIdentity(pkg.manifest, testCase.authKey, testCase.source);
+      try {
+        assertRequiredIdentityClaims(pkg.manifest, testCase.authKey, identityClaims);
+      } catch (err) {
+        refused.push(`${packageId}: ${(err as Error).message}`);
+      }
+    }
+    expect(refused).toEqual([]);
   });
 
   it("has a fixture for every shipped package that declares identity_claims", async () => {

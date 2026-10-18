@@ -287,6 +287,7 @@ function tokenRequestRefusal(err: RefreshError): ApiError {
   if (err.kind === "revoked") {
     return loginRejected(
       "The service refused the submitted grant: it is invalid, expired or already used.",
+      { kind: "grant" },
     );
   }
   if (err.kind === "client_rejected") {
@@ -302,6 +303,7 @@ function tokenRequestRefusal(err: RefreshError): ApiError {
   if (status === 400 || status === 401) {
     return loginRejected(
       `The service refused the token request (HTTP ${status}): the submitted grant cannot be used as given.`,
+      { kind: "grant" },
     );
   }
   if (
