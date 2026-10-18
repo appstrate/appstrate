@@ -350,7 +350,10 @@ async function discoverAuth(
     const advertised = md.authorizationServers[0]!;
     const issuer = isBlockedEgressUrl(advertised) ? undefined : advertised;
     const endpoints = issuer ? await resolveOAuthEndpoints({ issuer, fetchImpl }) : {};
-    const scopes = scopeTokens(challengeScopes ?? md.scopesSupported ?? []);
+    const scopes = withOfflineAccess(
+      scopeTokens(challengeScopes ?? md.scopesSupported ?? []),
+      endpoints.scopesSupported,
+    );
     const autoClient = endpoints.registrationEndpoint !== undefined;
     const warning = !issuer
       ? {
@@ -392,6 +395,18 @@ async function discoverAuth(
   }
   return { key: "primary", auth: apiKeyAuth(origin), provenance: "guessed", warnings: [] };
 }
+
+/**
+ * The OIDC `offline_access` scope added when the authorization server advertises it: without it
+ * such a server issues no refresh token, and a connection that cannot renew is refused.
+ */
+function withOfflineAccess(scopes: string[], asScopes: string[] | undefined): string[] {
+  return asScopes?.includes(OFFLINE_ACCESS) && !scopes.includes(OFFLINE_ACCESS)
+    ? [...scopes, OFFLINE_ACCESS]
+    : scopes;
+}
+
+const OFFLINE_ACCESS = "offline_access";
 
 /** Distinct RFC 6749 §3.3 scope tokens; anything else is dropped. */
 function scopeTokens(scopes: string[]): string[] {
