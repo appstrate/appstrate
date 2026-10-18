@@ -13,17 +13,6 @@ interface AdminPinValue {
 }
 
 /**
- * The body of an admin pin write. The PUT replaces the whole pin, the flag included (absent is
- * `false`, whatever was stored), so it is always sent.
- */
-export function adminPinBody(pin: AdminPinValue): AdminPinBody {
-  return {
-    connection_ids: pin.connection_ids,
-    allow_additional_connections: pin.allow_additional_connections,
-  };
-}
-
-/**
  * The two modes of an admin pin, named by their effect: runs use exactly its set (the default,
  * `allow_additional_connections: false`), or its set plus the connections the user adds (`true`).
  */
@@ -54,22 +43,21 @@ export const ADDITIONS_REFUSAL_KEYS = {
 } as const;
 
 /**
- * Why an admin pin cannot be saved in « plus » (or, for the first two, at all), else `null`. The
- * server refuses (404) every write of a pin whose agent is not active in the space
- * (`agentInactive`, the pin's own `agent_active`) or whose set names a connection no longer shared
- * into the space (`unavailableIds`, the table's « Connexion indisponible »). « plus » is also
- * refused over an empty (or not yet chosen) set, which imposes nothing to add to, and while the
- * space enforces a default, which accepts only « exact ».
+ * Why a pin over `pin.connection_ids` cannot be saved in « plus » (or, for the first two, at all),
+ * else `null`. The server refuses (404) every write of a pin whose agent is not active in the
+ * space (`agentInactive`, the pin's own `agent_active`) or whose set names a connection no longer
+ * shared into the space (`unavailableIds`, the table's « Connexion indisponible »). « plus » is
+ * also refused over an empty (or not yet chosen) set, which imposes nothing to add to, and while
+ * the space enforces a default, which accepts only « exact ».
  */
 export function additionsRefusal(
-  pin: { connection_ids: readonly string[] | null; allow_additional_connections: boolean },
+  pin: { connection_ids: readonly string[] | null },
   context: { enforcedDefault: boolean; unavailableIds: readonly string[]; agentInactive: boolean },
 ): keyof typeof ADDITIONS_REFUSAL_KEYS | null {
   if (context.agentInactive) return "inactive_agent";
   if (pin.connection_ids?.some((id) => context.unavailableIds.includes(id))) {
     return "unavailable_connection";
   }
-  if (pin.allow_additional_connections) return null;
   if (pin.connection_ids === null || pin.connection_ids.length === 0) {
     return "no_imposed_connection";
   }
@@ -104,11 +92,14 @@ export const PIN_SAVE_CONSEQUENCE_KEYS = {
 } as const;
 
 /**
- * The pin form's verdict on a draft (`stored` is `null` for a new pin). « plus » unavailable reads
- * « exact », whatever was chosen before; an unchanged pin, or one the server would refuse whatever
- * its mode, has nothing to save. Saving deletes the members' own choices for the agent whenever
- * the saved or the stored pin is « exact » (a member pin never survives under it), and going from
- * « plus » to « exact » also disables the schedules whose overrides add connections.
+ * The pin form's verdict on a draft (`stored` is `null` for a new pin). A draft the server would
+ * refuse whatever its mode (inactive agent, unavailable member) keeps the mode chosen for display
+ * and announces nothing; a « plus » refused for another reason reads « exact », whatever was
+ * chosen before. An unchanged pin, or a blocked one, has nothing to save. The consequence follows
+ * the server: a NEW pin saved in « exact » deletes the members' own choices for the agent (a
+ * member pin never survives under it); going from « plus » to « exact » does too and also
+ * disables the schedules whose overrides add connections; editing an « exact » pin, or saving in
+ * « plus », announces nothing.
  */
 export function pinDraftVerdict(input: {
   stored: AdminPinValue | null;
@@ -125,30 +116,22 @@ export function pinDraftVerdict(input: {
   body: AdminPinBody;
 } {
   const { stored, connectionIds } = input;
-  const refusal = additionsRefusal(
-    { connection_ids: connectionIds, allow_additional_connections: false },
-    input,
-  );
-  const mode: PinMode = refusal === null ? input.chosenMode : "exact";
+  const refusal = additionsRefusal({ connection_ids: connectionIds }, input);
+  const blocked = refusal === "inactive_agent" || refusal === "unavailable_connection";
+  const mode: PinMode = refusal === null || blocked ? input.chosenMode : "exact";
   const changed =
     stored === null || pinMode(stored) !== mode || !sameSet(stored.connection_ids, connectionIds);
-  const blocked = refusal === "inactive_agent" || refusal === "unavailable_connection";
-  const storedMode = stored ? pinMode(stored) : null;
-  const consequence = !changed
-    ? null
-    : storedMode === "plus" && mode === "exact"
-      ? "clears_choices_and_schedules"
-      : mode === "exact" || storedMode === "exact"
-        ? "clears_choices"
-        : null;
+  let consequence: keyof typeof PIN_SAVE_CONSEQUENCE_KEYS | null = null;
+  if (changed && !blocked && mode === "exact") {
+    if (stored === null) consequence = "clears_choices";
+    else if (pinMode(stored) === "plus") consequence = "clears_choices_and_schedules";
+  }
   return {
     mode,
     refusal,
     savable: changed && !blocked,
     consequence,
-    body: adminPinBody({
-      connection_ids: connectionIds,
-      allow_additional_connections: mode === "plus",
-    }),
+    // The PUT replaces the whole pin, the flag included (absent is « exact », whatever was stored).
+    body: { connection_ids: connectionIds, allow_additional_connections: mode === "plus" },
   };
 }

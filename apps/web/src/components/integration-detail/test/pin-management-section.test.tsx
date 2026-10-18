@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * An admin's per-agent pins of an integration. The table only reads (Agent, Connexions, Mode in
+ * An admin's per-agent specific connections (pins) of an integration. The table only reads (Agent, Connexions, Mode in
  * words); its « … » holds « Modifier » and « Supprimer ». « Ajouter » and « Modifier » open one form:
  * Agent (fixed when editing), the shared connections as boxes (none ticked pins « Aucune
  * connexion »), Mode (« Exactement ces connexions » by default, « Ces connexions, plus celles de
@@ -25,6 +25,7 @@ installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 const i18nModule = await import("../../../i18n.ts");
 const { $api } = await import("../../../api/client.ts");
 const { render } = await import("../../../test/render.tsx");
+const { ApiError } = await import("../../../api/errors.ts");
 const { spaceStore } = await import("../../../stores/space-store.ts");
 const { usePinColumns } = await import("../pin-columns.tsx");
 const { PinManagementSection } = await import("../pin-management-section.tsx");
@@ -80,17 +81,34 @@ function pin(over: Partial<IntegrationPin> = {}): IntegrationPin {
   };
 }
 
-function renderSection(opts: { pins?: IntegrationPin[]; connections?: unknown[] }): string {
+type PinRead = "pins" | "connections" | "consuming-agents";
+
+function renderSection(opts: {
+  pins?: IntegrationPin[];
+  connections?: unknown[];
+  /** The reads that fail (a 500) instead of landing. */
+  failed?: PinRead[];
+}): string {
   const qc = new QueryClient();
   const key = (p: string) =>
     $api.queryOptions("get", p as "/api/integrations/{packageId}/pins", {
       params: { path, header },
     }).queryKey;
-  const seed = (p: string, data: unknown[]) =>
-    qc.setQueryData(key(p), { object: "list", data, hasMore: false });
-  seed("/api/integrations/{packageId}/pins", opts.pins ?? []);
-  seed("/api/integrations/{packageId}/connections", opts.connections ?? []);
-  seed("/api/integrations/{packageId}/consuming-agents", [
+  const seed = (read: PinRead, data: unknown[]) => {
+    const queryKey = key(`/api/integrations/{packageId}/${read}`);
+    if (opts.failed?.includes(read)) {
+      const query = qc.getQueryCache().build(qc, { queryKey });
+      query.setState({
+        ...query.state,
+        status: "error",
+        fetchStatus: "idle",
+        error: new ApiError("internal_error", "boom", 500),
+      });
+    } else qc.setQueryData(queryKey, { object: "list", data, hasMore: false });
+  };
+  seed("pins", opts.pins ?? []);
+  seed("connections", opts.connections ?? []);
+  seed("consuming-agents", [
     { agent_package_id: AGENT, display_name: "Ops" },
     { agent_package_id: "@acme/triage", display_name: "Triage" },
   ]);
@@ -105,6 +123,36 @@ function renderSection(opts: { pins?: IntegrationPin[]; connections?: unknown[] 
     space.mockRestore();
   }
 }
+
+describe("a read the section's action needs fails", () => {
+  const generic = "Une erreur est survenue.";
+
+  it("says so instead of « no active agent uses this integration », and offers no « Ajouter »", () => {
+    const html = renderSection({ failed: ["consuming-agents"], connections: [WEB_CONNECTION] });
+    expect(html).toContain(generic);
+    expect(html).not.toContain(fr("noConsumingAgents"));
+    expect(html).not.toContain('data-testid="pin-add"');
+  });
+
+  it("says so when the connections fail, rather than leaving « Ajouter » disabled forever", () => {
+    const html = renderSection({ failed: ["connections"] });
+    expect(html).toContain(generic);
+    expect(html).not.toContain('data-testid="pin-add"');
+  });
+
+  it("offers neither « Ajouter » nor the empty sentence when the pins fail, the table naming it", () => {
+    const html = renderSection({ failed: ["pins"], connections: [WEB_CONNECTION] });
+    expect(html).toContain(generic);
+    expect(html).not.toContain('data-testid="pin-add"');
+    expect(html).not.toContain(fr("noConsumingAgents"));
+  });
+
+  it("control: the same reads landing offer « Ajouter »", () => {
+    const html = renderSection({ connections: [WEB_CONNECTION] });
+    expect(html).toContain('data-testid="pin-add"');
+    expect(html).not.toContain(generic);
+  });
+});
 
 /** The pins table's columns, with the pins its « … » hands back. */
 function pinColumns(opts: { loaded?: boolean } = {}) {
@@ -174,7 +222,7 @@ describe("the pins table", () => {
     ).props.actions;
     expect(actions.map((a) => [a.id, a.label, a.destructive === true])).toEqual([
       ["edit", "Modifier", false],
-      ["delete", "Supprimer", true],
+      ["delete", "Retirer", true],
     ]);
     actions[0]!.onSelect!();
     expect(edited).toEqual([pin()]);
@@ -323,16 +371,15 @@ describe("the pin form, editing", () => {
     expect(formFields(pin(), { edit: { connectionIds: [WEB, DB] } }).verdict.savable).toBe(true);
   });
 
-  it("says each consequence of saving by the move it makes", () => {
+  it("says each consequence of saving by the move it makes, nothing for an « exact » pin edited", () => {
+    const plusPin = pin({ allow_additional_connections: true });
     const cases: [IntegrationPin, Partial<ReturnType<typeof initialPinDraft>>, string | null][] = [
-      [pin(), { connectionIds: [DB] }, fr("clearsMemberChoices")],
-      [pin(), { chosenMode: "plus" }, fr("clearsMemberChoices")],
-      [
-        pin({ allow_additional_connections: true }),
-        { chosenMode: "exact" },
-        fr("clearsMemberChoicesAndSchedules"),
-      ],
-      [pin({ allow_additional_connections: true }), { connectionIds: [WEB, DB] }, null],
+      // A closed pin has no member choice left to clear: editing it or opening it says nothing.
+      [pin(), { connectionIds: [DB] }, null],
+      [pin(), { connectionIds: [WEB, DB] }, null],
+      [pin(), { chosenMode: "plus" }, null],
+      [plusPin, { chosenMode: "exact" }, fr("clearsMemberChoicesAndSchedules")],
+      [plusPin, { connectionIds: [WEB, DB] }, null],
     ];
     for (const [stored, edit, sentence] of cases) {
       const { html } = formFields(stored, { edit });
@@ -372,6 +419,22 @@ describe("the pin form, editing", () => {
     expect(optionsOf(propsOf(tree, "pin-form-mode")!)[1]!.disabled).toBe(true);
     expect(html).toContain(fr("additionsInactiveAgent"));
     expect(verdict.savable).toBe(false);
+  });
+
+  it("keeps the mode chosen and announces nothing while the draft cannot be saved", () => {
+    // Stored « plus » drafted to « exact » would clear choices and disable schedules; blocked, it
+    // saves nothing, so it announces nothing and the select keeps what was chosen.
+    const inactive = formFields(pin({ allow_additional_connections: true, agent_active: false }), {
+      edit: { chosenMode: "exact" },
+    });
+    expect(inactive.html).not.toContain('data-testid="pin-form-consequence"');
+    expect(propsOf(inactive.tree, "pin-form-mode")!.value).toBe("exact");
+    const gone = formFields(
+      pin({ connection_ids: [WEB, GONE], allow_additional_connections: true }),
+    );
+    expect(gone.verdict.savable).toBe(false);
+    expect(propsOf(gone.tree, "pin-form-mode")!.value).toBe("plus");
+    expect(gone.html).not.toContain('data-testid="pin-form-consequence"');
   });
 
   it("sends a « plus » pin back to « exact » with its set, even under an enforced default", () => {
@@ -435,10 +498,10 @@ describe("deleting a pin", () => {
     const { props, confirmed } = deleteConfirm(pin());
     expect(props).toMatchObject({
       open: true,
-      title: fr("delete"),
+      title: "Retirer les connexions spécifiques",
       description:
-        "Ops reviendra à la règle générale de l’intégration : la connexion spécifique sera retirée.",
-      confirmLabel: "Supprimer",
+        "Ops reviendra à la règle générale de l’intégration : ses connexions spécifiques seront retirées.",
+      confirmLabel: "Retirer",
     });
     expect(props.variant).toBeUndefined();
     expect(confirmed).toEqual([]);
@@ -446,15 +509,21 @@ describe("deleting a pin", () => {
     expect(confirmed).toEqual([AGENT]);
   });
 
-  it("says what a closed and an open pin take with them", () => {
-    expect(render(deleteConfirm(pin()).props.children as ReactElement)).toContain(
-      fr("deleteClosedClearsChoices"),
+  it("says a closed pin only disables schedules, an open one also takes member choices", () => {
+    const closed = render(deleteConfirm(pin()).props.children as ReactElement);
+    expect(closed).toContain(fr("deleteClosedDisablesSchedules"));
+    // A closed pin has no member choice to clear: the text speaks of schedules alone.
+    expect(settingsFr[`integration.admin.pinManagement.deleteClosedDisablesSchedules`]).not.toMatch(
+      /choix|membres/,
     );
-    expect(
-      render(
-        deleteConfirm(pin({ allow_additional_connections: true })).props.children as ReactElement,
-      ),
-    ).toContain(fr("deleteOpenClearsChoices"));
+    expect(settingsEn[`integration.admin.pinManagement.deleteClosedDisablesSchedules`]).not.toMatch(
+      /choice|member/,
+    );
+    const open = render(
+      deleteConfirm(pin({ allow_additional_connections: true })).props.children as ReactElement,
+    );
+    expect(open).toContain(fr("deleteOpenClearsChoices"));
+    expect(open).not.toContain(fr("deleteClosedDisablesSchedules"));
   });
 
   it("says, for an open pin, that an enforced space default clears every member's choices", () => {
@@ -467,9 +536,9 @@ describe("deleting a pin", () => {
 
   it("says, for a closed and an open pin alike, that schedules may be disabled", () => {
     for (const lang of [settingsFr, settingsEn]) {
-      for (const key of ["deleteClosedClearsChoices", "deleteOpenClearsChoices"] as const) {
+      for (const key of ["deleteClosedDisablesSchedules", "deleteOpenClearsChoices"] as const) {
         const sentence = lang[`integration.admin.pinManagement.${key}`];
-        expect(sentence).toMatch(/planifications|schedules/);
+        expect(sentence).toMatch(/planifications|[Ss]chedules/);
         expect(sentence.match(/[.!?](\s|$)/g)).toHaveLength(1);
       }
     }

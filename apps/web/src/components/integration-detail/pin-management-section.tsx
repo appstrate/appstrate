@@ -5,6 +5,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { SettingsHeading } from "../settings/settings-heading";
 import { DataTable } from "../data-table";
+import { ErrorState } from "../page-states";
 import { usePinColumns } from "./pin-columns";
 import { usePinEditor } from "./use-pin-editor";
 
@@ -58,7 +59,10 @@ export function PinManagementSection({ packageId }: { packageId: string }) {
 
       {editor.agentsLoading || editor.connectionsLoading || editor.pinsLoading ? (
         <Skeleton className="h-8 w-32" />
-      ) : editor.unpinnedAgents.length === 0 ? (
+      ) : editor.agentsError || editor.connectionsError ? (
+        // Neither « no agent » nor a dead « Ajouter »: the reads this action needs failed.
+        <ErrorState error={editor.agentsError ?? editor.connectionsError} compact />
+      ) : editor.pinsError ? null : editor.unpinnedAgents.length === 0 ? (
         <p className="text-muted-foreground text-xs italic">
           {t("integration.admin.pinManagement.noConsumingAgents")}
         </p>

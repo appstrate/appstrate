@@ -13,7 +13,7 @@ import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
 import type { ConnectionChoice } from "../../lib/connection-choice.ts";
 import { ScheduleActorConnectionChoice } from "../schedule-actor-connection-choice.tsx";
-import { menuItems, type MenuItem } from "../../test/connection-menu-tree.tsx";
+import { elementsByTestId, type TestIdProps } from "../../test/testid-walker.tsx";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -61,9 +61,9 @@ function Choice({
   onItems,
 }: {
   props: Parameters<typeof ScheduleActorConnectionChoice>[0];
-  onItems: (items: Map<string, MenuItem>) => void;
+  onItems: (items: Map<string, TestIdProps>) => void;
 }) {
-  onItems(menuItems(ScheduleActorConnectionChoice(props)));
+  onItems(elementsByTestId(ScheduleActorConnectionChoice(props)));
   return null;
 }
 
@@ -72,8 +72,8 @@ function itemsOf(
   value: Record<string, string[]>,
   integrations: { id: string; required?: boolean }[] = REQUIRED,
   choices: readonly ConnectionChoice[] = CHOICES,
-): Map<string, MenuItem> {
-  let items = new Map<string, MenuItem>();
+): Map<string, TestIdProps> {
+  let items = new Map<string, TestIdProps>();
   render(
     <Choice
       props={{ choices, integrations, value, onChange: () => {} }}
@@ -206,7 +206,7 @@ describe("ScheduleActorConnectionChoice", () => {
 
   it("writes « Aucune connexion » as [] and unticks it back to no choice", () => {
     const written: Array<[string, string[] | null]> = [];
-    let items = new Map<string, MenuItem>();
+    let items = new Map<string, TestIdProps>();
     const probe = (value: Record<string, string[]>) =>
       render(
         <Choice

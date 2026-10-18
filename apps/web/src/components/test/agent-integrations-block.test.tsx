@@ -363,7 +363,10 @@ function adminPin(over: Partial<IntegrationPin> = {}): IntegrationPin {
 }
 
 /** The agent's rows for a caller holding `permissions` in the space, its pins and agents read. */
-function renderAs(permissions: string[], opts: { schedule?: boolean } = {}): string {
+function renderAs(
+  permissions: string[],
+  opts: { schedule?: boolean; active?: boolean } = {},
+): string {
   const qc = new QueryClient();
   const key = (path: string, params: Record<string, unknown>) =>
     $api.queryOptions("get", path as "/api/integrations/{packageId}", {
@@ -398,7 +401,7 @@ function renderAs(permissions: string[], opts: { schedule?: boolean } = {}): str
   qc.setQueryData(key("/api/integrations/{packageId}", integration), {
     manifest: { display_name: "Gmail", auths: { oauth: { type: "oauth2" } } },
     auths: [],
-    active: true,
+    active: opts.active ?? true,
   });
   const list = (data: unknown[]) => ({ object: "list", data, hasMore: false });
   qc.setQueryData(key("/api/integrations/{packageId}/pins", integration), list([]));
@@ -439,6 +442,13 @@ describe("AgentIntegrationsBlock — the admin pin in the row's « … »", () =
     expect(member).not.toContain(MENU);
   });
 
+  it("is not offered on an integration that is not active in the space", () => {
+    const admin = ["integrations:read", "integrations:configure"];
+    // Control: the same caller and row, active, has it.
+    expect(renderAs(admin, { active: true })).toContain(MENU);
+    expect(renderAs(admin, { active: false })).not.toContain(MENU);
+  });
+
   it("is not offered on a schedule's rows: a pin binds the agent, not the schedule", () => {
     const html = renderAs(["integrations:read", "integrations:configure"], { schedule: true });
     expect(html).not.toContain(MENU);
@@ -471,7 +481,7 @@ describe("AgentIntegrationsBlock — the admin pin in the row's « … »", () =
   it("imposes connections when the agent has none, on the form fixed to this agent", () => {
     const { actions, added } = actionsFor(undefined);
     expect(actions.map((a) => [a.id, a.label, a.hidden === true])).toEqual([
-      ["impose", "Imposer des connexions", false],
+      ["impose", "Définir des connexions spécifiques", false],
     ]);
     actions[0]!.onSelect!();
     expect(added).toEqual([AGENT]);
@@ -489,8 +499,8 @@ describe("AgentIntegrationsBlock — the admin pin in the row's « … »", () =
     const stored = adminPin({ connection_ids: [candidate(true).id] });
     const { actions, edited, removed } = actionsFor(stored);
     expect(actions.map((a) => [a.id, a.label, a.destructive === true])).toEqual([
-      ["edit-pin", "Modifier les connexions imposées", false],
-      ["remove-pin", "Retirer l’épinglage", true],
+      ["edit-pin", "Modifier les connexions spécifiques", false],
+      ["remove-pin", "Retirer les connexions spécifiques", true],
     ]);
     actions[0]!.onSelect!();
     expect(edited).toEqual([stored]);

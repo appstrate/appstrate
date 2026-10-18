@@ -25,10 +25,10 @@ import {
   resolveScopeToolSelection,
 } from "@appstrate/core/integration";
 import {
-  connectionSetToSave,
   type ConnectionSet,
   imposedThenAdded,
   keepAvailable,
+  pickerSetToSave,
   placeCreatedConnection,
   shownConnectionPick,
   unavailableConnectionIds,
@@ -263,14 +263,16 @@ export function useConnectionPicker(
 
   // The modal opens on what binds, the imposed set aside; « Enregistrer » writes the ticks.
   const initialTicks = keepAvailable(shownAddedIds, addableIds);
-  // Unticking every addition under an imposed set is « no addition »: no pin for the member,
-  // `[]` for an override. Elsewhere an empty tick is no answer: « Aucune connexion » is.
-  const emptyValue: ConnectionSet | undefined =
-    imposedIds.length > 0 ? (overrideMode ? [] : null) : undefined;
   const busy = upsertPin.isPending || deletePin.isPending;
   /** What « Enregistrer » writes for `ticked`, `undefined` while it would write nothing. */
   const saveValue = (ticked: readonly string[]): ConnectionSet | undefined =>
-    connectionSetToSave({ ticked, initial: initialTicks, stored: explicitIds, emptyValue });
+    pickerSetToSave({
+      ticked,
+      initial: initialTicks,
+      stored: storedIds,
+      imposedIds,
+      overrideMode,
+    });
   // « Revenir au choix par défaut » clears a choice; under an imposed set the member's own pin
   // is already what an empty tick clears.
   const offersDefault = explicitIds !== null && (!additionsAllowed || overrideMode);

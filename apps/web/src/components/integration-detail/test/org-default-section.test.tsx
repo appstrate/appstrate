@@ -176,7 +176,7 @@ describe("the enforced mode beside admin pins in « plus » mode", () => {
     );
     expect(html).toContain(locked);
     expect(html).toContain(
-      "les épinglages de Ops, Triage sont en « Ces connexions, plus celles de l’utilisateur »",
+      "les connexions spécifiques de Ops, Triage sont en « Ces connexions, plus celles de l’utilisateur »",
     );
     expect(html).toContain("Passez-les d’abord en « Exactement ces connexions »");
     expect(html).not.toContain("@acme/closed");
@@ -200,7 +200,7 @@ describe("the enforced mode beside admin pins in « plus » mode", () => {
       ],
     );
     expect(html).toContain(
-      "l’épinglage de Ops est en « Ces connexions, plus celles de l’utilisateur »",
+      "les connexions spécifiques de Ops sont en « Ces connexions, plus celles de l’utilisateur »",
     );
     expect(html).not.toContain("@acme/gone");
   });
@@ -213,7 +213,7 @@ describe("the enforced mode beside admin pins in « plus » mode", () => {
     );
     expect(html).toContain(locked);
     expect(html).toContain(
-      "l’épinglage de @acme/ops est en « Ces connexions, plus celles de l’utilisateur »",
+      "les connexions spécifiques de @acme/ops sont en « Ces connexions, plus celles de l’utilisateur »",
     );
   });
 

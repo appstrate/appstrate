@@ -75,8 +75,9 @@ const displayNameOf = ({ entry, state }: IntegrationRow) =>
  *
  * One self-contained block per integration, stacked, so a phone keeps every part without
  * scrolling: name, id and access on the left, status and the admin's « … » on the right (the pin
- * of the integration for this agent, `integrations:configure` only, edited in the same dialogs as
- * the integration page's pins table), and the connections cell under them at full width.
+ * of the integration for this agent, `integrations:configure` only and only once the integration
+ * is active in the space, edited in the same dialogs as the integration page's pins table), and
+ * the connections cell under them at full width.
  */
 export function AgentIntegrationsBlock({
   entries,
@@ -125,7 +126,8 @@ export function AgentIntegrationsBlock({
                     agentPackageId={agentPackageId}
                   />
                 )}
-                {canPin && (
+                {/* A pin binds an integration placed in the space: none to write for an inactive one. */}
+                {canPin && row.state.detail?.active === true && (
                   <IntegrationPinActions
                     integrationId={row.entry.id}
                     integrationName={displayNameOf(row)}

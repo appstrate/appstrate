@@ -96,7 +96,7 @@ export function usePinColumns({
           },
           {
             id: "delete",
-            label: t("btn.delete", { ns: "common" }),
+            label: t("btn.remove", { ns: "common" }),
             icon: Trash2,
             onSelect: () => onDelete(pin),
             destructive: true,

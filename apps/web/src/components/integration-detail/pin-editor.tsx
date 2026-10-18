@@ -36,8 +36,10 @@ export interface PinForm {
 }
 
 /**
- * The one way to delete a pin. A closed pin takes every member choice with it; an open one, those
- * that only narrowed it (all of them under an enforced default); either may disable schedules.
+ * The one way to delete a pin. A closed pin has no member choice to lose (the server purged them
+ * when it was closed): only the schedules whose override narrowed its set are disabled. An open
+ * one also takes the member choices that only narrowed it (all of them under an enforced default),
+ * and may disable schedules.
  */
 export function PinDeleteConfirm({
   pin,
@@ -60,14 +62,14 @@ export function PinDeleteConfirm({
       onConfirm={onConfirm}
       title={t("integration.admin.pinManagement.delete")}
       description={t("integration.admin.pinManagement.deleteConfirm", { agent })}
-      confirmLabel={t("btn.delete", { ns: "common" })}
+      confirmLabel={t("btn.remove", { ns: "common" })}
       isPending={isPending}
     >
-      <p className="text-muted-foreground text-sm" data-testid="pin-delete-clears-choices">
+      <p className="text-muted-foreground text-sm" data-testid="pin-delete-consequence">
         {t(
           pin.allow_additional_connections
             ? "integration.admin.pinManagement.deleteOpenClearsChoices"
-            : "integration.admin.pinManagement.deleteClosedClearsChoices",
+            : "integration.admin.pinManagement.deleteClosedDisablesSchedules",
         )}
       </p>
     </ConfirmModal>

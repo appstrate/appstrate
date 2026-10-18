@@ -508,7 +508,7 @@ export function useUpdateIntegrationSettings() {
 export function useUpsertIntegrationPin() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  // The body is the WHOLE pin, its set and its additions flag (`adminPinBody`): this write
+  // The body is the WHOLE pin, its set and its additions flag (built by `pinDraftVerdict`): this write
   // replaces both, an absent flag closing the pin.
   return $api.useMutation("put", "/api/integrations/{packageId}/pins/{agentPackageId}", {
     onSuccess: () => {

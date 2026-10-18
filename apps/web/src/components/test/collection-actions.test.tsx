@@ -9,7 +9,7 @@ import { useDocumentColumns } from "../document-columns.tsx";
 import type { FileDto } from "../../hooks/use-files.ts";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { render } from "../../test/render.tsx";
-import { textsOf } from "../../test/connection-menu-tree.tsx";
+import { textsOf } from "../../test/testid-walker.tsx";
 
 await i18nReady;
 await i18n.changeLanguage("fr");

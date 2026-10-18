@@ -256,36 +256,39 @@ Top to bottom, every detail page (agent, run, schedule, integration, skill):
     `CheckboxField`s in the order the SERVER ranked them (`scope_fit` then least privilege; the
     client never sorts them again), imposed ones ticked and disabled (« Imposée par un admin »),
     the cap (`MAX_CONNECTIONS_PER_INTEGRATION`), one line per problem with its way out (renew,
-    upgrade behind a `ConfirmModal`, connect a new account). « Enregistrer » writes the ticks
-    (`connectionSetToSave`), « Revenir au choix par défaut » writes `null`, « Aucune connexion »
-    writes `[]` (optional integration, no lock). A closed imposed set (an admin pin in « Exactement
-    ces connexions », an enforced space default) is read-only with its reason, no « Modifier ».
-    Under « Ces connexions, plus celles de l'utilisateur » (`additional_connections_allowed`) the UI
+    upgrade behind a `ConfirmModal`, connect a new account). « Enregistrer » writes the ticks,
+    « Revenir au choix par défaut » writes `null`, « Aucune connexion » writes `[]` (optional
+    integration, no lock). A closed imposed set (specific connections in « Exactement ces
+    connexions », an enforced space default) is read-only with its reason, no « Modifier ». Under
+    « Ces connexions, plus celles de l’utilisateur » (`additional_connections_allowed`) the UI
     writes the additions only: an imposed id is never part of an override or a member pin, and
     unticking every addition means « no addition » (`null` for the member's pin, `[]` in an
     override), never « no connection »;
-  - the sets an admin imposes on an integration page (the space default and the agents' pins):
-    `ConnectionCheckboxList` (`integration-detail/connection-checkbox-list.tsx`, the shared
-    connections, capped, a stored member no longer shared listed as « Connexion indisponible »:
-    ticked it can be unticked, never ticked again). The space default (`OrgDefaultSection`) lists it
-    beside its usage select (an empty set is « no default », which the select says), the set and its enforcement mode saved together by the section's save bar. The **pins**
-    (`PinManagementSection`) are a read-only `DataTable` (Agent, Connexions imposées, Mode in
-    words) whose « … » holds « Modifier » and « Supprimer »; « Ajouter » and « Modifier » open one
-    `FormModal`: Agent (an `OptionSelect` of the agents without a pin, fixed when editing), the
-    boxes (none ticked pins « Aucune connexion »), Mode (an `OptionSelect`, « Exactement ces
-    connexions » by default, « Ces connexions, plus celles de l'utilisateur » disabled with its
-    reason under the field, `additionsRefusal`), then the one sentence saying whom saving
-    affects (`pinDraftVerdict`), and one PUT (`adminPinBody`). « Supprimer » only opens its
-    `ConfirmModal`, which says what the members and the schedules lose. **The same pin is edited
-    from the agent's Connexions**: for a caller holding `integrations:configure`, each row's « … »
-    holds « Imposer des connexions » (no pin yet, and only for an agent active in the space) or
-    « Modifier les connexions imposées » and « Retirer l'épinglage », which open that same form,
-    its Agent fixed to the agent, and that same confirmation. Both screens read and write through
-    one hook (`usePinEditor`, `integration-detail/pin-editor.tsx`: the pins, the shared
-    connections, the consuming agents, the default's enforcement, the two dialogs), so a write
-    on either refreshes both and the readiness the connections cell reads. A member sees no menu,
-    and the cell stays their view (padlock, « Épinglée par un admin »), never a link to the pin;
-    a schedule's rows have no menu (a pin binds the agent);
+  - the sets an admin imposes on an integration page (the space default and the agents' specific
+    connections): `ConnectionCheckboxList` (`integration-detail/connection-checkbox-list.tsx`, the
+    shared connections, capped, a stored member no longer shared listed as « Connexion
+    indisponible »: ticked it can be unticked, never ticked again). The space default
+    (`OrgDefaultSection`) lists it beside its usage select (an empty set is « no default », which
+    the select says), the set and its enforcement mode saved together by the section's save bar.
+    The **specific connections per agent** (`PinManagementSection`) are a read-only `DataTable`
+    (Agent, Connexions, Mode in words) whose « … » holds « Modifier » and « Supprimer »; « Ajouter »
+    and « Modifier » open one `FormModal`: Agent (an `OptionSelect` of the agents without any,
+    fixed when editing), the boxes (none ticked: « Aucune connexion »), Mode (an `OptionSelect`,
+    « Exactement ces connexions » by default, « Ces connexions, plus celles de l’utilisateur »
+    disabled with its reason under the field), then the one sentence saying whom saving affects.
+    « Supprimer » only opens its `ConfirmModal`, which says what the members and the schedules
+    lose. **The same connections are edited from the agent's Connexions**: for a caller holding
+    `integrations:configure`, the « … » of a row whose integration is active in the space holds
+    « Définir des connexions spécifiques » (none yet, and only for an agent active in the space) or
+    « Modifier les connexions spécifiques » and « Retirer les connexions spécifiques », which open
+    that same form, its Agent fixed to the agent, and that same confirmation. Both screens go
+    through one hook (`usePinEditor`, `integration-detail/use-pin-editor.tsx`: the specific
+    connections, the shared connections, the agents using the integration, the default's
+    enforcement, the two dialogs), so a write on either refreshes both and the readiness the
+    connections cell reads; a read it needs that fails is shown as an error where « Ajouter »
+    would be, never as an empty list. A member sees no menu, and the cell stays their view
+    (padlock, « Épinglée par un admin »), never a link to the specific connections; a schedule's
+    rows have no menu (they bind the agent);
   - the **identity of a schedule** (`ScheduleActorConnectionChoice`, in Identité, Connexions and
     the creation modal): after a 409 the refused candidates as boxes and « Aucune connexion » as a
     box of its own when optional; where nothing was refused, a line says the identity's usual

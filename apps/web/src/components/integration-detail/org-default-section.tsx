@@ -58,10 +58,7 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
   // server ignores the pins of agents inactive in the space (`agent_active`), so only active
   // ones count; a name is the consuming agent's, else the package id.
   const openPinAgents = (pins ?? [])
-    .filter(
-      (p) =>
-        p.integration_package_id === packageId && p.allow_additional_connections && p.agent_active,
-    )
+    .filter((p) => p.allow_additional_connections && p.agent_active)
     .map(
       (p) =>
         consumingAgents?.find((a) => a.agent_package_id === p.agent_package_id)?.display_name ??
@@ -158,7 +155,6 @@ export function OrgDefaultSection({ packageId }: { packageId: string }) {
             {shared.length > 0 && forcedLocked && (
               <p className="text-muted-foreground text-xs" data-testid="org-default-forced-locked">
                 {t("integration.admin.orgDefault.forcedNeedsClosedPins", {
-                  count: openPinAgents.length,
                   agents: openPinAgents.join(", "),
                 })}
               </p>

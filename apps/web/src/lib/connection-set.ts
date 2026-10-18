@@ -79,6 +79,31 @@ export function connectionSetToSave(input: {
 }
 
 /**
+ * What the connection picker's « Enregistrer » writes for its ticks: a member's pin
+ * (`overrideMode` false) or a schedule's override (true). Under an imposed set (`imposedIds`: an
+ * admin pin open to additions) the write holds the additions alone, so an imposed id is dropped
+ * from the ticks and from what was stored (one written before the lock opened); unticking every
+ * addition is « no addition », which a pin encodes as no pin (`null`) and an override as `[]`.
+ * Without an imposed set an empty tick writes nothing. See `connectionSetToSave` for the rest.
+ */
+export function pickerSetToSave(input: {
+  ticked: readonly string[];
+  initial: readonly string[];
+  stored: ConnectionSet;
+  imposedIds: readonly string[];
+  overrideMode: boolean;
+}): ConnectionSet | undefined {
+  const { ticked, initial, stored, imposedIds, overrideMode } = input;
+  const additions = (ids: readonly string[]) => ids.filter((id) => !imposedIds.includes(id));
+  return connectionSetToSave({
+    ticked: additions(ticked),
+    initial: additions(initial),
+    stored: stored === null ? null : additions(stored),
+    emptyValue: imposedIds.length > 0 ? (overrideMode ? [] : null) : undefined,
+  });
+}
+
+/**
  * Explicit pick, else the member's pin, then a soft space default, else what the fallback binds.
  * `[]`: a layer chose no connection. `null`: no layer chose and nothing binds.
  */

@@ -8,14 +8,14 @@
 
 import { isValidElement, type ReactNode } from "react";
 
-export type MenuItem = Record<string, unknown> & {
+export type TestIdProps = Record<string, unknown> & {
   disabled?: boolean;
   onSelect?: (e: { preventDefault: () => void }) => void;
 };
 
 /** Every element carrying a `data-testid`, by test id, with its props; an inner one wins. */
-export function menuItems(root: ReactNode): Map<string, MenuItem> {
-  const items = new Map<string, MenuItem>();
+export function elementsByTestId(root: ReactNode): Map<string, TestIdProps> {
+  const items = new Map<string, TestIdProps>();
   const walk = (node: ReactNode): void => {
     if (Array.isArray(node)) return node.forEach(walk);
     if (!isValidElement<Record<string, unknown>>(node)) return;

@@ -25,9 +25,16 @@ import { PinDeleteConfirm, PinFormModal, type PinForm } from "./pin-editor";
  */
 export function usePinEditor(packageId: string): PinEditor {
   const { data: pins, isLoading: pinsLoading, error: pinsError } = useIntegrationPins(packageId);
-  const { data: connections, isLoading: connectionsLoading } = useIntegrationConnections(packageId);
-  const { data: consumingAgents, isLoading: agentsLoading } =
-    useAgentsConsumingIntegration(packageId);
+  const {
+    data: connections,
+    isLoading: connectionsLoading,
+    error: connectionsError,
+  } = useIntegrationConnections(packageId);
+  const {
+    data: consumingAgents,
+    isLoading: agentsLoading,
+    error: agentsError,
+  } = useAgentsConsumingIntegration(packageId);
   // An enforced default accepts only « exact »: no pin of this integration may leave it meanwhile.
   const { data: orgDefault } = useIntegrationOrgDefault(packageId);
   const deletePin = useDeleteIntegrationPin();
@@ -54,7 +61,9 @@ export function usePinEditor(packageId: string): PinEditor {
     pinsError,
     connections,
     connectionsLoading,
+    connectionsError,
     agentsLoading,
+    agentsError,
     consumingAgents,
     pinnable,
     unpinnedAgents,
@@ -106,7 +115,11 @@ export interface PinEditor {
   /** Undefined while loading: an unknown connection is then not yet "unavailable". */
   connections: IntegrationConnection[] | undefined;
   connectionsLoading: boolean;
+  /** Set when the connections could not be read: no pin can then be added or edited. */
+  connectionsError: unknown;
   agentsLoading: boolean;
+  /** Set when the consuming agents could not be read: an empty list would then read « no agent ». */
+  agentsError: unknown;
   /** The agents active in the space that use the integration: the only ones a pin can be written for. */
   consumingAgents: ConsumingAgentSummary[] | undefined;
   /** The connections shared into this space: the ones a pin can name. */

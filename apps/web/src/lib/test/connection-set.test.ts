@@ -12,6 +12,7 @@ import {
   toggleCapped,
   keepAvailable,
   connectionSetToSave,
+  pickerSetToSave,
   imposedThenAdded,
   placeCreatedConnection,
   shownConnectionPick,
@@ -50,8 +51,13 @@ describe("imposedThenAdded", () => {
   it("binds the imposed set whole, in its order, then the additions it lacks", () => {
     expect(imposedThenAdded(["t1", "t2"], ["p", "t1", "q"])).toEqual(["t1", "t2", "p", "q"]);
     expect(imposedThenAdded(["t1"], [])).toEqual(["t1"]);
-    // An addition is never cut to fit: the server refuses the union over the cap.
+    // An addition that is already imposed is not bound twice.
     expect(imposedThenAdded(["t1"], ["t1"])).toEqual(["t1"]);
+  });
+
+  it("never cuts the additions to fit the cap: the server refuses the union over it", () => {
+    const additions = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION }, (_, i) => `p${i}`);
+    expect(imposedThenAdded(["t1"], additions)).toEqual(["t1", ...additions]);
   });
 });
 
@@ -108,6 +114,54 @@ describe("connectionSetToSave", () => {
     expect(save([], null, [], null)).toBeUndefined();
     // An unset override showing the member's additions, unticked: « no addition » is a change.
     expect(save([], null, ["db"], [])).toEqual([]);
+  });
+});
+
+describe("pickerSetToSave", () => {
+  const save = (
+    ticked: string[],
+    stored: string[] | null,
+    over: { initial?: string[]; imposedIds?: string[]; overrideMode?: boolean } = {},
+  ) =>
+    pickerSetToSave({
+      ticked,
+      stored,
+      initial: over.initial ?? stored ?? [],
+      imposedIds: over.imposedIds ?? [],
+      overrideMode: over.overrideMode ?? false,
+    });
+
+  it("writes the ticks as connectionSetToSave does while nothing is imposed", () => {
+    expect(save(["a", "b"], ["a"])).toEqual(["a", "b"]);
+    expect(save(["a"], ["a"])).toBeUndefined();
+    // An empty tick is no answer there, pin or override: « Aucune connexion » is.
+    expect(save([], ["a"])).toBeUndefined();
+    expect(save([], ["a"], { overrideMode: true })).toBeUndefined();
+  });
+
+  it("encodes « no addition » under an imposed set as no pin for a member, [] for an override", () => {
+    const imposed = { imposedIds: ["t1"], initial: ["db"] };
+    expect(save([], ["db"], imposed)).toBeNull();
+    expect(save([], ["db"], { ...imposed, overrideMode: true })).toEqual([]);
+    // Already no addition: nothing to write, whichever the encoding.
+    expect(save([], null, { imposedIds: ["t1"] })).toBeUndefined();
+    expect(save([], [], { imposedIds: ["t1"], overrideMode: true })).toBeUndefined();
+    // An unset override showing the member's additions, unticked, is a change.
+    expect(save([], null, { ...imposed, overrideMode: true })).toEqual([]);
+  });
+
+  it("never writes an imposed id: not from the ticks, not from a stored pick", () => {
+    expect(save(["t1", "db"], ["db"], { imposedIds: ["t1"], initial: ["db"] })).toBeUndefined();
+    expect(save(["t1", "db", "web"], ["db"], { imposedIds: ["t1"], initial: ["db"] })).toEqual([
+      "db",
+      "web",
+    ]);
+    // Stored before the lock opened: [t1, db] is the addition [db], so ticking db again changes nothing.
+    expect(save(["db"], ["t1", "db"], { imposedIds: ["t1"], initial: ["db"] })).toBeUndefined();
+    // Only an imposed id was stored: no addition is stored, and ticking none writes nothing.
+    expect(
+      save([], ["t1"], { imposedIds: ["t1"], initial: [], overrideMode: true }),
+    ).toBeUndefined();
   });
 });
 
