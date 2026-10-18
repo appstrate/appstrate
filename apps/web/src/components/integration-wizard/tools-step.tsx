@@ -332,7 +332,14 @@ export function ToolsChoice({
                 )}
               </span>
             }
-            description={tool.description}
+            description={
+              // A server's description runs up to a kilobyte: two lines here, the rest on hover.
+              tool.description && (
+                <span className="line-clamp-2" title={tool.description}>
+                  {tool.description}
+                </span>
+              )
+            }
           />
         ))}
       </div>
