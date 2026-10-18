@@ -104,7 +104,7 @@ export function defaultIntegrationManifest(
             type: "object",
             required: ["api_key"],
             properties: {
-              api_key: { type: "string", description: "API key for this integration." },
+              api_key: { type: "string" },
             },
           },
         },

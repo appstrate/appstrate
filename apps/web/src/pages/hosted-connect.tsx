@@ -266,7 +266,9 @@ export function HostedConnectPage() {
               <p className="text-muted-foreground text-sm">
                 {isOAuth
                   ? t("integration.connect.variables.oauthSubtitle")
-                  : t("integration.connect.modal.subtitle", { type: context.auth.type })}
+                  : t("integration.connect.modal.subtitle", {
+                      type: t(`integration.auth.type.${context.auth.type}`),
+                    })}
               </p>
               <VariableFields
                 fields={fields}

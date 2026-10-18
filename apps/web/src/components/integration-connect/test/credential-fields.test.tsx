@@ -220,3 +220,37 @@ describe("initialCredentialValues", () => {
     });
   });
 });
+
+describe("CredentialFields — a conventional field without a title", () => {
+  it("labels `api_key` in the UI language, not by its raw name", () => {
+    const markup = html({
+      type: "api_key",
+      credentials: {
+        schema: {
+          type: "object",
+          required: ["api_key"],
+          properties: { api_key: { type: "string", writeOnly: true } },
+        },
+      },
+    } as unknown as IntegrationManifestAuth);
+    expect(markup).toContain(">Clé API</label>");
+    expect(markup).not.toContain(">api_key</label>");
+  });
+});
+
+describe("CredentialFields — a declared title wins", () => {
+  it("keeps the manifest's title over the conventional label", () => {
+    const markup = html({
+      type: "api_key",
+      credentials: {
+        schema: {
+          type: "object",
+          required: ["api_key"],
+          properties: { api_key: { type: "string", title: "Jeton du projet en lecture seule" } },
+        },
+      },
+    } as unknown as IntegrationManifestAuth);
+    expect(markup).toContain(">Jeton du projet en lecture seule</label>");
+    expect(markup).not.toContain(">Clé API</label>");
+  });
+});

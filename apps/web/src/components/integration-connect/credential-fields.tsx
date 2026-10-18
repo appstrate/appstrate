@@ -27,9 +27,10 @@ export function CredentialFields({ auth, values, onChange }: CredentialFieldsPro
       {fields.map((field) => {
         const isMultiline = MULTILINE_FIELD_PATTERN.test(field);
         const schema = schemas[field];
-        // Localized override, then the manifest's `title`, then the raw name.
-        const labelKey = `integration.connect.fields.${field}.label`;
-        const labelText = t(labelKey, { defaultValue: schema?.title ?? field });
+        // The manifest's `title` (the author's words), then a localized label for a
+        // conventional field name, then the raw name.
+        const labelText =
+          schema?.title ?? t(`integration.connect.fields.${field}.label`, { defaultValue: field });
         const description = schema?.description;
         // Defaults reach the input through `initialCredentialValues`, which also submits them.
         const value = values[field] ?? "";
