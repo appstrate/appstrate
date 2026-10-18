@@ -1,33 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "@appstrate/ui/components/spinner";
-import { errorMessage } from "../../lib/mutation-error";
-import type { DiscoveryBadges, DiscoveryProposal } from "../../lib/integration-discovery-merge";
 import { FormField } from "../form-field";
-import { DiscoveryBadge } from "./discovery-badge";
-import { DiscoveryWarnings } from "./discovery-warnings";
 import { LocalServerField } from "./local-server-field";
 import { getSource, setSource, type SourceKind } from "./utils";
 
 interface SourceSectionProps {
   manifest: Record<string, unknown>;
   onChange: (manifest: Record<string, unknown>) => void;
-  /**
-   * Creation only: analyses the remote URL into a proposal the editor merges. The request is
-   * the editor's, so its result still lands when this tab is left before it answers.
-   */
-  discovery?: {
-    analyse: (url: string) => void;
-    isPending: boolean;
-    error: unknown;
-    badges: DiscoveryBadges;
-    warnings: DiscoveryProposal["warnings"];
-  };
 }
 
-export function SourceSection({ manifest, onChange, discovery }: SourceSectionProps) {
+export function SourceSection({ manifest, onChange }: SourceSectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   const source = getSource(manifest);
   const update = (patch: Partial<typeof source>) =>
@@ -46,40 +29,17 @@ export function SourceSection({ manifest, onChange, discovery }: SourceSectionPr
 
       {source.kind === "remote" && (
         <>
-          <div className="flex items-start gap-2">
-            <div className="flex-1">
-              <FormField
-                id="int-source-url"
-                label={t("integrationEditor.source.remoteUrl")}
-                // Text, not `url`: a URL template (`{$variable.base_url}/mcp`) is
-                // not a URL until a connection's values render it.
-                required
-                value={source.remoteUrl}
-                onChange={(v) => update({ remoteUrl: v })}
-                placeholder="https://example.com/mcp/v1"
-                description={t("integrationEditor.source.remoteUrlDesc")}
-              />
-            </div>
-            {discovery && (
-              <Button
-                type="button"
-                variant="outline"
-                className="mt-7"
-                disabled={discovery.isPending || !URL.canParse(source.remoteUrl)}
-                onClick={() => discovery.analyse(source.remoteUrl)}
-                data-testid="integration-editor-analyse"
-              >
-                {discovery.isPending && <Spinner />}
-                {t("integrationEditor.discover.analyse")}
-              </Button>
-            )}
-          </div>
-          {discovery?.error != null && (
-            <p role="alert" className="text-destructive text-sm">
-              {errorMessage(discovery.error)}
-            </p>
-          )}
-          {discovery && <DiscoveryWarnings warnings={discovery.warnings} />}
+          <FormField
+            id="int-source-url"
+            label={t("integrationEditor.source.remoteUrl")}
+            // Text, not `url`: a URL template (`{$variable.base_url}/mcp`) is
+            // not a URL until a connection's values render it.
+            required
+            value={source.remoteUrl}
+            onChange={(v) => update({ remoteUrl: v })}
+            placeholder="https://example.com/mcp/v1"
+            description={t("integrationEditor.source.remoteUrlDesc")}
+          />
           <FormField
             id="int-source-transport"
             label={t("integrationEditor.source.transport")}
@@ -92,7 +52,6 @@ export function SourceSection({ manifest, onChange, discovery }: SourceSectionPr
               if (v === "streamable-http" || v === "sse") update({ remoteTransport: v });
             }}
             enumValues={["streamable-http", "sse"]}
-            badge={<DiscoveryBadge provenance={discovery?.badges["/source/remote/transport"]} />}
           />
         </>
       )}

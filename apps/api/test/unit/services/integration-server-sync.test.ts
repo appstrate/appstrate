@@ -34,11 +34,72 @@ describe("proposalFromServer", () => {
       fetchImpl,
     );
     expect(proposal).toEqual({
-      manifest: { default_tools: ["a", "b"], tools_policy: { a: {}, b: {} } },
+      manifest: { default_tools: [], tools_policy: { a: {}, b: {} } },
       iconSource: null,
       instructions: null,
+      tools: [
+        { name: "a", readOnly: false, destructive: false },
+        { name: "b", readOnly: false, destructive: false },
+      ],
       warnings: [],
     });
+  });
+
+  it("pre-selects only the tools annotated readOnlyHint: true, listing every tool", async () => {
+    const { fetchImpl } = fakeFetch({});
+    const proposal = await proposalFromServer(
+      {
+        url: "https://mcp.test/mcp",
+        info: { name: "x", version: "1" },
+        instructions: undefined,
+        tools: [
+          { ...tool("read"), title: " Read ", annotations: { readOnlyHint: true } },
+          { ...tool("write"), description: "Writes.", annotations: { readOnlyHint: false } },
+          { ...tool("titled"), annotations: { title: "From annotations", readOnlyHint: true } },
+          { ...tool("bare"), title: "", description: "   " },
+          { ...tool("destroy"), annotations: { destructiveHint: true } },
+          // Both hints: never pre-selected, whatever the read-only one says.
+          { ...tool("purge"), annotations: { readOnlyHint: true, destructiveHint: true } },
+        ],
+        truncated: false,
+      },
+      fetchImpl,
+    );
+    expect(proposal.manifest.default_tools).toEqual(["read", "titled"]);
+    expect(Object.keys(proposal.manifest.tools_policy as object)).toEqual([
+      "read",
+      "write",
+      "titled",
+      "bare",
+      "destroy",
+      "purge",
+    ]);
+    expect(proposal.tools).toEqual([
+      { name: "read", title: "Read", readOnly: true, destructive: false },
+      { name: "write", description: "Writes.", readOnly: false, destructive: false },
+      { name: "titled", title: "From annotations", readOnly: true, destructive: false },
+      { name: "bare", readOnly: false, destructive: false },
+      { name: "destroy", readOnly: false, destructive: true },
+      { name: "purge", readOnly: true, destructive: true },
+    ]);
+  });
+
+  it("caps a tool's title and description, never splitting a code point", async () => {
+    const { fetchImpl } = fakeFetch({});
+    const proposal = await proposalFromServer(
+      {
+        url: "https://mcp.test/mcp",
+        info: { name: "x", version: "1" },
+        instructions: undefined,
+        tools: [{ ...tool("long"), title: "t".repeat(500), description: "😀".repeat(2000) }],
+        truncated: false,
+      },
+      fetchImpl,
+    );
+    const [long] = proposal.tools;
+    expect(long?.title).toBe(`${"t".repeat(199)}…`);
+    expect(long?.description).toBe(`${"😀".repeat(1023)}…`);
+    expect([...(long?.description ?? "")]).toHaveLength(1024);
   });
 
   it("falls back to serverInfo.name, drops a non-http homepage, and warns on truncation", async () => {

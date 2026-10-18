@@ -80,6 +80,11 @@ export interface OAuthEndpointResolution {
    * `undefined` unless the document carries a boolean.
    */
   clientIdMetadataDocumentSupported?: boolean;
+  /**
+   * RFC 8414 §2 `scopes_supported`. Tells whether the AS issues refresh tokens on the OIDC
+   * `offline_access` scope, which an MCP client then requests (`undefined` when omitted).
+   */
+  scopesSupported?: string[];
   /** The validated document's `issuer`, verbatim: what a client is bound to, `iss` compared with. */
   issuer?: string;
   authorizationResponseIssParameterSupported?: boolean;
@@ -169,6 +174,7 @@ interface DiscoveredMetadata {
   registrationEndpoint?: string;
   grantTypesSupported?: string[];
   clientIdMetadataDocumentSupported?: boolean;
+  scopesSupported?: string[];
   issuer?: string;
   authorizationResponseIssParameterSupported?: boolean;
 }
@@ -250,6 +256,7 @@ async function discover(
     if (typeof doc.client_id_metadata_document_supported === "boolean") {
       found.clientIdMetadataDocumentSupported ??= doc.client_id_metadata_document_supported;
     }
+    found.scopesSupported ??= stringArray(doc.scopes_supported);
     if (
       found.authorizationEndpoint &&
       found.tokenEndpoint &&
@@ -281,6 +288,7 @@ interface DiscoveryDocument {
   registration_endpoint?: unknown;
   grant_types_supported?: unknown;
   client_id_metadata_document_supported?: unknown;
+  scopes_supported?: unknown;
   authorization_response_iss_parameter_supported?: unknown;
 }
 

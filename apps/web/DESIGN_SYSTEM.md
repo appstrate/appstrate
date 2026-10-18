@@ -693,7 +693,11 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   (`components/creation-handoff-modal.tsx`, `hooks/use-creation-handoff.ts`:
   manual / chat / coding agent), then, for the manual way, the editor page: an agent
   is created from `components/create-agent-modal.tsx` (name, identifier, description, prompt)
-  and edited on its own page; skills and integrations keep a creation page.
+  and edited on its own page; skills and integrations keep a creation page. An integration
+  is also added from an MCP server URL, the hand-off's first card (`onFromUrl`): one page,
+  `pages/integration-from-mcp-url.tsx`, whose steps (`components/integration-wizard/`) appear
+  in turn, each heading taking the focus; nothing of it is stored but `?package=<id>` once the
+  package exists, and the step is read from the package (`integrationWizardStep`).
 
 ## 10. Feedback
 

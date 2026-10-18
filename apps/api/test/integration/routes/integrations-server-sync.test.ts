@@ -11,6 +11,7 @@ import {
   connectionCalls,
   integrationConnectionShares,
   integrationOrgDefaults,
+  packages,
   spacePackages,
 } from "@appstrate/db/schema";
 import { drainAudits } from "../../../src/services/audit.ts";
@@ -34,9 +35,13 @@ import {
   localIntegrationManifest,
   remoteIntegrationManifest,
 } from "../../helpers/integration-manifests.ts";
-import { startFakeMcpServer, type FakeMcpServer } from "../../helpers/fake-mcp-server.ts";
+import {
+  startFakeMcpServer,
+  type FakeMcpServer,
+  type FakeMcpTool,
+} from "../../helpers/fake-mcp-server.ts";
 import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
-import { serverSyncBody } from "../../../../web/src/lib/integration-discovery-merge.ts";
+import { serverSyncBody } from "../../../../web/src/lib/integration-server-sync.ts";
 import type { IntegrationAuthStatus } from "@appstrate/shared-types";
 
 /** A 1×1 PNG header: what `isIconImage` reads (signature + `IHDR` size). */
@@ -49,7 +54,21 @@ const ICON = `data:image/png;base64,${PNG.toBase64()}`;
 const SVG = `data:image/svg+xml;base64,${btoa("<svg xmlns='http://www.w3.org/2000/svg'/>")}`;
 const TOKEN = "tok-live-123";
 const ID = "@acme/docs";
-const TOOLS = ["search", "fetch", "create", "update", "delete"];
+/** Annotated read-only, explicitly not, and not at all: only the first two are pre-selected. */
+const TOOLS: FakeMcpTool[] = [
+  {
+    name: "search",
+    title: "Search documents",
+    description: "Full-text search.",
+    annotations: { readOnlyHint: true },
+  },
+  { name: "fetch", annotations: { readOnlyHint: true } },
+  { name: "create", description: "Create a document.", annotations: { readOnlyHint: false } },
+  "update",
+  { name: "delete", annotations: { destructiveHint: true } },
+];
+const TOOL_NAMES = ["search", "fetch", "create", "update", "delete"];
+const READ_ONLY = ["search", "fetch"];
 
 let server: FakeMcpServer;
 let restoreEgress: () => void;
@@ -118,7 +137,7 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     server.methods.length = 0;
   });
 
-  it("lists every tool through the proxy, with the connection's bearer, and maps serverInfo", async () => {
+  it("lists every tool through the proxy, with the connection's bearer, pre-selecting the read-only ones", async () => {
     await seedProxyIntegration(ctx, remote());
     const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
 
@@ -126,8 +145,8 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({
       manifest: {
-        default_tools: TOOLS,
-        tools_policy: Object.fromEntries(TOOLS.map((name) => [name, {}])),
+        default_tools: READ_ONLY,
+        tools_policy: Object.fromEntries(TOOL_NAMES.map((name) => [name, {}])),
         display_name: "Acme Docs",
         description: "Search and edit Acme documents.",
         homepage: "https://acme.example/",
@@ -135,6 +154,24 @@ describe("POST /api/integrations/{packageId}/discover", () => {
       },
       icon_source: ICON,
       instructions: "Call search before fetch.",
+      tools: [
+        {
+          name: "search",
+          title: "Search documents",
+          description: "Full-text search.",
+          read_only: true,
+          destructive: false,
+        },
+        { name: "fetch", read_only: true, destructive: false },
+        {
+          name: "create",
+          description: "Create a document.",
+          read_only: false,
+          destructive: false,
+        },
+        { name: "update", description: "Tool update", read_only: false, destructive: false },
+        { name: "delete", read_only: false, destructive: true },
+      ],
       warnings: [],
     });
     // initialize + initialized + three tools/list pages, each carrying the injected credential;
@@ -217,7 +254,7 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     expect(res.status).toBe(200);
     expect(
       ((await res.json()) as { manifest: { default_tools: string[] } }).manifest.default_tools,
-    ).toEqual(TOOLS);
+    ).toEqual(READ_ONLY);
   });
 
   it("syncs with the imposed org connection instead of the caller's only own account", async () => {
@@ -251,7 +288,7 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     expect(res.status).toBe(200);
     expect(
       ((await res.json()) as { manifest: { default_tools: string[] } }).manifest.default_tools,
-    ).toEqual(TOOLS);
+    ).toEqual(READ_ONLY);
     expect(server.authorizations.every((value) => value === `Bearer ${TOKEN}`)).toBe(true);
   });
 
@@ -285,21 +322,74 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     expect(server.methods).toEqual([]);
   });
 
-  it("answers 409 integration_not_published for a draft never published", async () => {
-    const manifest = remote();
+  it("syncs a draft never published, through the draft's auth, journaling each exchange", async () => {
     await seedPackage({
       id: ID,
       orgId: ctx.orgId,
       type: "integration",
       source: "local",
-      draftManifest: manifest,
+      draftManifest: remote(),
     });
     await db
       .insert(spacePackages)
       .values({ enabled: true, spaceId: ctx.defaultSpaceId, packageId: ID });
+    const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+    const res = await sync(ctx, { connection_id: connectionId });
+    expect(res.status).toBe(200);
+    expect(
+      ((await res.json()) as { manifest: { default_tools: string[] } }).manifest.default_tools,
+    ).toEqual(READ_ONLY);
+    expect(server.authorizations.every((a) => a === `Bearer ${TOKEN}`)).toBe(true);
+    await drainAudits(5_000);
+    const rows = await db
+      .select()
+      .from(connectionCalls)
+      .where(eq(connectionCalls.connectionId, connectionId));
+    expect(rows).toHaveLength(5);
+  });
+
+  it("authorizes against the draft, not the published version", async () => {
+    // Published: the server's origin authorized. Draft: another host only.
+    await seedProxyIntegration(ctx, remote());
+    await db
+      .update(packages)
+      .set({ draftManifest: remote({ authorizedUris: ["https://api.example.com/**"] }) })
+      .where(eq(packages.id, ID));
+    await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
     const res = await sync(ctx, {});
-    expect(res.status).toBe(409);
-    expect(((await res.json()) as { code: string }).code).toBe("integration_not_published");
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe("unauthorized_target");
+    expect(server.methods).toEqual([]);
+  });
+
+  it("reads the draft's source: a draft no longer remote is refused", async () => {
+    await seedProxyIntegration(ctx, remote());
+    await db
+      .update(packages)
+      .set({
+        draftManifest: localIntegrationManifest({
+          name: ID,
+          auths: { api_key: { type: "api_key" } },
+        }),
+      })
+      .where(eq(packages.id, ID));
+    const res = await sync(ctx, {});
+    expect(res.status).toBe(422);
+    expect(((await res.json()) as { code: string }).code).toBe("integration_not_remote");
+  });
+
+  it("answers 404 for a draft not active in the space", async () => {
+    await seedPackage({
+      id: ID,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: remote(),
+    });
+    await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+    const res = await sync(ctx, {});
+    expect(res.status).toBe(404);
     expect(server.methods).toEqual([]);
   });
 

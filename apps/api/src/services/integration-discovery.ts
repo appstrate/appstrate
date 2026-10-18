@@ -351,7 +351,10 @@ async function discoverAuth(
     const advertised = md.authorizationServers[0]!;
     const issuer = isBlockedEgressUrl(advertised) ? undefined : advertised;
     const endpoints = issuer ? await resolveOAuthEndpoints({ issuer, fetchImpl }) : {};
-    const scopes = scopeTokens(challengeScopes ?? md.scopesSupported ?? []);
+    const scopes = withOfflineAccess(
+      scopeTokens(challengeScopes ?? md.scopesSupported ?? []),
+      endpoints.scopesSupported,
+    );
     const autoClient = provisionsClientItself(endpoints);
     const warning = !issuer
       ? {
@@ -383,7 +386,7 @@ async function discoverAuth(
 
   const atOrigin = await resolveOAuthEndpoints({ issuer: origin, fetchImpl });
   if (provisionsClientItself(atOrigin)) {
-    const scopes = scopeTokens(challengeScopes ?? []);
+    const scopes = withOfflineAccess(scopeTokens(challengeScopes ?? []), atOrigin.scopesSupported);
     return {
       key: "oauth",
       auth: oauth2Auth(origin, { issuer: origin, method: "none", scopes, catalog: scopes }),
@@ -407,6 +410,20 @@ function provisionsClientItself(endpoints: {
 }): boolean {
   return presentsClientMetadataDocument(endpoints) || endpoints.registrationEndpoint !== undefined;
 }
+
+/**
+ * The OIDC `offline_access` scope added to a proposed list when the authorization server
+ * advertises it: without it such a server issues no refresh token, and a connection that cannot
+ * renew is refused. An empty list stays empty: the request then names no scope and the server
+ * applies its defaults, which one added scope would replace.
+ */
+function withOfflineAccess(scopes: string[], asScopes: string[] | undefined): string[] {
+  return scopes.length > 0 && asScopes?.includes(OFFLINE_ACCESS) && !scopes.includes(OFFLINE_ACCESS)
+    ? [...scopes, OFFLINE_ACCESS]
+    : scopes;
+}
+
+const OFFLINE_ACCESS = "offline_access";
 
 /** Distinct RFC 6749 §3.3 scope tokens; anything else is dropped. */
 function scopeTokens(scopes: string[]): string[] {

@@ -98,10 +98,13 @@ import { listSpacesForPrincipal } from "../services/spaces.ts";
 import { getSpaceScope, type OrgScope, type SpaceScope } from "../lib/scope.ts";
 import type { AuditPayload } from "@appstrate/core/module";
 import { auditDiff, recordAuditAs, recordAuditFromContext } from "./../services/audit.ts";
-import { listIntegrations } from "../services/integration-service.ts";
+import { listIntegrations, listIntegrationsAtRemoteUrl } from "../services/integration-service.ts";
 import { discoverRemoteIntegration } from "../services/integration-discovery.ts";
 import { syncIntegrationFromServer } from "../services/integration-server-sync.ts";
-import { reachOutsideRun } from "../services/credential-proxy/access.ts";
+import {
+  reachOutsideRun,
+  reachOutsideRunIfPermitted,
+} from "../services/credential-proxy/access.ts";
 import { assertPackageMutationAccess } from "../lib/package-access.ts";
 import { getActor } from "../lib/actor.ts";
 import {
@@ -1048,11 +1051,17 @@ export function createIntegrationsRouter() {
       { url, orgSlug: c.get("orgSlug") },
       { signal: c.req.raw.signal },
     );
+    // What the caller can already reach at this URL, under the listing's own visibility.
+    const existing = await listIntegrationsAtRemoteUrl(getSpaceScope(c), url);
     return c.json({
       manifest: proposal.manifest,
       icon_source: proposal.iconSource,
       provenance: proposal.provenance,
       warnings: proposal.warnings,
+      existing: existing.map(({ id, manifest }) => ({
+        integration_package_id: id,
+        display_name: manifest.display_name || id,
+      })),
     });
   });
 
@@ -1086,6 +1095,7 @@ export function createIntegrationsRouter() {
         manifest: proposal.manifest,
         icon_source: proposal.iconSource,
         instructions: proposal.instructions,
+        tools: proposal.tools.map(({ readOnly, ...tool }) => ({ ...tool, read_only: readOnly })),
         warnings: proposal.warnings,
       });
     },
@@ -1095,7 +1105,12 @@ export function createIntegrationsRouter() {
     const packageId = c.req.param("packageId")!;
     const scope = getSpaceScope(c);
     await assertIsIntegration(scope, packageId);
-    const status = await getIntegrationAuthStatuses(scope, packageId, ...spaceListCaller(c));
+    const status = await getIntegrationAuthStatuses(
+      scope,
+      packageId,
+      ...spaceListCaller(c),
+      reachOutsideRunIfPermitted(callerPermissions(c)),
+    );
     return c.json(status);
   });
 
@@ -1662,7 +1677,12 @@ export function createIntegrationsRouter() {
       // 200 + the bare integration resource — same serializer as
       // GET /integrations/:packageId; the toggled gate is part of the
       // resource (`block_user_connections`), not an operation scrap.
-      const detail = await getIntegrationAuthStatuses(scope, packageId, ...spaceListCaller(c));
+      const detail = await getIntegrationAuthStatuses(
+        scope,
+        packageId,
+        ...spaceListCaller(c),
+        reachOutsideRunIfPermitted(callerPermissions(c)),
+      );
       return c.json(detail);
     },
   );

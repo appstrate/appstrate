@@ -55,9 +55,9 @@ import {
   resolveIntegrationProxyCredentials,
   forceRefreshIntegrationProxyCredentials,
   IntegrationCredentialNotFoundError,
-  type ProxyRunSelection,
+  type ProxyCallPath,
 } from "./integration-resolver.ts";
-import { clearUpstreamRejections, type ProxySelectionPath } from "../integration-connections.ts";
+import { clearUpstreamRejections } from "../integration-connections.ts";
 
 /**
  * Minimal async cookie-jar shape consumed by {@link proxyCall}. The full
@@ -152,7 +152,7 @@ type ProxyCallInput = {
   /** Transport override (tests): keeps every per-hop guard, disables the address pin. */
   fetch?: typeof fetch;
   resolveHost?: HostResolver;
-} & ProxySelectionPath<ProxyRunSelection>;
+} & ProxyCallPath;
 
 interface ProxyCallResult {
   /** The `integration_connections` row whose credential the call carried. */
@@ -210,13 +210,19 @@ function logRefreshFault(err: unknown, integrationId: string, connectionId: stri
  * upstream response headers + body, streamed back as-is.
  */
 export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult> {
+  // The type forbids it; a caller that casts past it is refused, not silently narrowed.
+  if (input.run && input.version) {
+    throw new Error("A proxy call for a run is authorized against the version the run froze");
+  }
   const selection = {
     integrationId: input.integrationId,
     orgId: input.orgId,
     spaceId: input.spaceId,
     actor: input.actor,
     ...(input.connectionId ? { connectionId: input.connectionId } : {}),
-    ...(input.run ? { run: input.run } : { reach: input.reach }),
+    ...(input.run
+      ? { run: input.run }
+      : { reach: input.reach, ...(input.version ? { version: input.version } : {}) }),
   };
   let resolved;
   let declaredUris: readonly string[];

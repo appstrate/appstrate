@@ -812,6 +812,7 @@
   "creation.chat.description": "Ouvrir le Chat avec une courte demande modifiable pour cette ressource.",
   "creation.chat.unavailableDescription": "Le Chat ne vous est pas accessible sur cette installation Appstrate.",
   "creation.chat.draft.agent": "Aide-moi à créer un nouvel agent Appstrate. Commence par me poser les questions nécessaires.",
+  "creation.chat.draft.withIntegration": "Il utilise l’intégration {{name}} ({{id}}).",
   "creation.chat.draft.skill": "Aide-moi à créer un nouveau skill Appstrate. Commence par me poser les questions nécessaires.",
   "creation.chat.draft.integration": "Aide-moi à créer une nouvelle intégration Appstrate. Commence par me poser les questions nécessaires.",
   "creation.chat.draft.mcp-server": "Aide-moi à créer un nouveau serveur MCP local Appstrate. Commence par me poser les questions nécessaires.",
@@ -1505,5 +1506,9 @@
   "models.choice.failed": "Impossible de terminer pour : {{ids}}",
   "models.choice.manualAdd": "Ajouter un identifiant de modèle",
   "models.choice.manualConfirm": "Ajouter à la liste",
-  "models.form.subscriptionRequired": "Choisissez un abonnement de l'organisation ou « Clé perso »."
+  "models.form.subscriptionRequired": "Choisissez un abonnement de l'organisation ou « Clé perso ».",
+  "creation.fromUrl.title": "À partir d’une URL MCP",
+  "creation.fromUrl.description": "Collez l’adresse d’un serveur MCP. Appstrate vous guide pour ajouter ses outils.",
+  "creation.manual.integrationTitle": "Configuration manuelle",
+  "creation.manual.integrationDescription": "Définissez vous-même la source, l’authentification et les outils."
 }

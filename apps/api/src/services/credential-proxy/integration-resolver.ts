@@ -45,7 +45,6 @@ import {
   selectAccessibleConnection,
   upstreamRejectionStreak,
   type ProxyReach,
-  type ProxySelectionPath,
   type ResolvedConnectionRow,
   type RunBoundSelection,
 } from "../integration-connections.ts";
@@ -86,6 +85,20 @@ export function runBoundSelection(input: {
   };
 }
 
+/**
+ * Which way a proxy call is authorized: for a run, against the version it froze; outside one,
+ * against the latest published version, or the one `version` names.
+ *
+ * `version` is internal-only: no HTTP door sets it. The `/api/credential-proxy/proxy` route (and
+ * the MCP `api_call` tool, which re-enters it) builds its input field by field and never names it;
+ * the one caller is the server sync of a draft (`integration-server-sync.ts`), whose route
+ * requires write authority on the package's home, the authority a run launched with the
+ * integration's draft (`dependency_overrides`, `403 draft_not_writable`) requires.
+ */
+export type ProxyCallPath =
+  | { run: ProxyRunSelection; reach?: never; version?: never }
+  | { reach: ProxyReach; run?: never; version?: ResolvedIntegrationVersion };
+
 /** Errors mapped by the route to 404 (credential not found). */
 export class IntegrationCredentialNotFoundError extends Error {
   readonly code = "CREDENTIAL_NOT_FOUND";
@@ -103,7 +116,7 @@ type ResolveIntegrationProxyInput = {
   actor: Actor;
   /** Optional connection id pin (from `X-Connection-Id`). */
   connectionId?: string;
-} & ProxySelectionPath<ProxyRunSelection>;
+} & ProxyCallPath;
 
 interface ResolvedIntegrationProxyCredentials {
   /** `payload.authorizedUris` is rendered for the connection: it decides what matches. */
@@ -291,7 +304,7 @@ function noConnectionMessage(input: ResolveIntegrationProxyInput): string {
 
 async function loadManifest(input: ResolveIntegrationProxyInput): Promise<IntegrationManifest> {
   const { integrationId } = input;
-  const frozen = input.run ? await input.run.frozenVersion() : null;
+  const frozen = input.run ? await input.run.frozenVersion() : (input.version ?? null);
   const res = await readIntegrationManifestForProxy(integrationId, input.orgId, frozen);
   if (res.ok) return res.manifest;
   switch (res.failure.kind) {

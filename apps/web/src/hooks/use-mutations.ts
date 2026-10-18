@@ -314,22 +314,29 @@ export function useCreatePackage(type: PackageType) {
       manifest: Record<string, unknown>;
       content: string;
       operations?: components["schemas"]["PackageFileWriteOperation"][];
+      /** Integration only: create the draft without its initial version (`wizardCreateBody`). */
+      publish?: false;
     }): Promise<{ id: string; version_count?: number }> => {
+      if (body.publish === false && type !== "integration") {
+        throw new Error("Only an integration is created without publishing");
+      }
       switch (type) {
         case "mcp-server":
           throw new Error("MCP servers are created by importing their bundle");
         case "agent": {
+          const { publish: _publish, ...agentBody } = body;
           const { data } = await client.POST("/api/packages/agents", {
             // Assert only the manifest across the dynamic-object → strict `AgentManifest` boundary; the server validates it.
             body: {
-              ...body,
-              manifest: body.manifest as components["schemas"]["AgentManifest"],
+              ...agentBody,
+              manifest: agentBody.manifest as components["schemas"]["AgentManifest"],
             },
           });
           return data!;
         }
         case "skill": {
-          const { data } = await client.POST("/api/packages/skills", { body });
+          const { publish: _publish, ...skillBody } = body;
+          const { data } = await client.POST("/api/packages/skills", { body: skillBody });
           return data!;
         }
         case "integration": {
@@ -338,9 +345,11 @@ export function useCreatePackage(type: PackageType) {
         }
       }
     },
-    onSuccess: (data) => {
-      // The create route skips the initial version when the publish gate would refuse it.
-      if (data.version_count === 0) toast.warning(i18n.t("agents:editor.createdUnpublished"));
+    onSuccess: (data, body) => {
+      // The create route skips the initial version when the publish gate would refuse it; a
+      // create that asked for no version expects none.
+      if (data.version_count === 0 && body.publish !== false)
+        toast.warning(i18n.t("agents:editor.createdUnpublished"));
       qc.invalidateQueries({ queryKey: packageKeys.all });
       if (type === "agent") qc.invalidateQueries({ queryKey: agentsKeys.all });
       if (type === "integration") void invalidateIntegrationQueries(qc);
