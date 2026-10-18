@@ -41,11 +41,11 @@ import {
 // OAuth clients
 // ─────────────────────────────────────────────
 
-/** The label key of a client's level; an auto-provisioned space client is told apart. */
+/** The label key of a client's level; an auto-provisioned client is told apart, at any tier. */
 export function clientLevelKey({ client, level }: ClientRow) {
   if (level === "system") return "source.builtIn";
-  if (level === "org") return "source.org";
-  return client.auto_provisioned ? "source.autoProvisioned" : "source.space";
+  if (client.auto_provisioned) return "source.autoProvisioned";
+  return level === "org" ? "source.org" : "source.space";
 }
 
 /**
@@ -53,10 +53,20 @@ export function clientLevelKey({ client, level }: ClientRow) {
  * one the org integrations admin's, the system's nobody's. A system client is the platform's and
  * an auto-provisioned one was minted by the server at connect time: neither has settings an admin
  * could edit (the auto-provisioned one may be deleted, which re-triggers registration).
+ *
+ * `canDeleteOrgMachineClients` (the caller holds `org-integrations:configure`) is apart from
+ * `canManageOrg`, which an auto-provisioned auth never grants (it has no org list to manage):
+ * the org's auto-provisioned client of such an auth is still the org admin's to delete.
  */
-export function clientDeeds({ client, level }: ClientRow, canManageOrg: boolean) {
+export function clientDeeds(
+  { client, level }: ClientRow,
+  canManageOrg: boolean,
+  canDeleteOrgMachineClients = false,
+) {
   const ownLevel = level === "space" || (level === "org" && canManageOrg);
-  return { ownLevel, editable: ownLevel && !client.auto_provisioned };
+  const deletable =
+    ownLevel || (level === "org" && client.auto_provisioned && canDeleteOrgMachineClients);
+  return { ownLevel, editable: ownLevel && !client.auto_provisioned, deletable };
 }
 
 /**
@@ -76,6 +86,7 @@ export function clientDeeds({ client, level }: ClientRow, canManageOrg: boolean)
 export function useIntegrationClientColumns({
   canUseHere,
   canManageOrg,
+  canDeleteOrgMachineClients,
   canChooseOrgDefault,
   pendingClientRef,
   onUseHere,
@@ -86,8 +97,10 @@ export function useIntegrationClientColumns({
 }: {
   /** Choosing one only means something when the space can mint with more than one. */
   canUseHere: boolean;
-  /** The caller holds `org-integrations:configure`. */
+  /** The caller holds `org-integrations:configure`, on an auth with an org list (not auto-provisioned). */
   canManageOrg: boolean;
+  /** The caller holds `org-integrations:configure`: it may delete the org's auto-provisioned client. */
+  canDeleteOrgMachineClients: boolean;
   /** Same rule for the organization's own choice. */
   canChooseOrgDefault: boolean;
   /** The row with a write in flight — only that row shows pending. */
@@ -133,7 +146,7 @@ export function useIntegrationClientColumns({
     },
     rowActionsColumn((row) => {
       const { client, level } = row;
-      const { ownLevel, editable } = clientDeeds(row, canManageOrg);
+      const { editable, deletable } = clientDeeds(row, canManageOrg, canDeleteOrgMachineClients);
       const promotable = level === "space" && !client.auto_provisioned && canManageOrg;
       // An auto-provisioned client is listed for display and deletion, never chosen as a default.
       const choosable = !client.auto_provisioned;
@@ -185,7 +198,7 @@ export function useIntegrationClientColumns({
               onSelect: () => onDelete(row),
               disabled: pendingClientRef === client.client_ref,
               destructive: true,
-              hidden: !ownLevel,
+              hidden: !deletable,
               testId: `oauth-client-delete-${client.client_ref}`,
             },
           ]}
