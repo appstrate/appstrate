@@ -5,17 +5,20 @@
  * removing the layer applies to the ones it leaves unnamed: an unattended run never falls back to
  * another account, however many connections its actor holds. Re-enabling goes through the schedule
  * write rule (`schedule-connections.ts`). Which fired versions resolve a set for the integration
- * is the resolver's answer, read before the removal's transaction opens (the resolver reads outside
- * any); every layer fact is read from rows, inside it.
+ * is the resolver's answer, read outside any transaction (the resolver reads on `db`): once before
+ * the removal's, and once more after it committed, judging in a second transaction the schedules
+ * the first read missed; every layer fact is read from rows, inside them. Every armed schedule
+ * write takes `lockIntegrationGovernance` for the integrations its judgment relied on and re-checks
+ * that governance (`assertScheduleGovernanceUnchanged`), and every removal takes it first: a write
+ * either commits before the removal's does, so before the second read (found there), or re-checks
+ * after it (refused).
  *
  * Removing an imposed FLOOR (an admin pin, an enforced org default, or the enforcement itself) also
  * disables the schedules whose selection strictly narrows it ({@link withinFloor}): under the floor
  * it meant "no addition", ungoverned it would bind fewer connections, or none. Those are read
  * inside the removal's transaction, behind `lockIntegrationGovernance`: a key in
- * `connection_overrides` is a selection, no resolver needed. A schedule write carrying overrides
- * takes the same lock and re-checks the governance it was judged under
- * (`assertScheduleGovernanceUnchanged`), so either it commits first and the removal sees it, or it
- * sees the removal and is refused.
+ * `connection_overrides` is a selection, no resolver needed, and a write storing one re-checks
+ * behind the same lock.
  */
 
 import { and, asc, eq, inArray, isNull, notExists, or, sql, type SQL } from "drizzle-orm";
@@ -33,6 +36,7 @@ import { resolveAgentRunVersion } from "./agent-version-resolver.ts";
 import { integrationsResolvedForRun } from "./integration-connection-resolver.ts";
 import { getPackage } from "./package-catalog.ts";
 import { seedPinnedIntegrationManifests } from "./run-pipeline.ts";
+import { lockIntegrationGovernance } from "./integration-pins-service.ts";
 import { disableSchedules } from "./schedules-naming-connection.ts";
 
 /** A layer naming `integrationId`'s set in a space: its org default, or a pin on one agent. */
@@ -294,7 +298,10 @@ export async function disableSchedulesSelectingWithin(
 
 /**
  * Remove `layer` with `remove` (`previous: null` when there was no row); when there was one, disable
- * the schedules that leaves unnamed, and those selecting within the floor it imposed, if any.
+ * the schedules that leaves unnamed, and those selecting within the floor it imposed, if any. The
+ * schedules written between the first read of the fires and the removal's commit are judged by a
+ * second pass behind the governance lock, `leftUnnamed` re-asking every layer: one re-created
+ * meanwhile keeps them armed.
  */
 export async function removeNamingLayer<
   R extends { previous: unknown; removedFloor?: readonly string[] | null },
@@ -303,7 +310,7 @@ export async function removeNamingLayer<
   remove: (tx: Tx) => Promise<R>,
 ): Promise<R & { disabledScheduleIds: string[] }> {
   const mayName = await schedulesLayerMayName(layer);
-  return db.transaction(async (tx) => {
+  const removed = await db.transaction(async (tx) => {
     const removed = await remove(tx);
     if (removed.previous === null) return { ...removed, disabledScheduleIds: [] };
     const unnamed = await disableSchedulesLeftUnnamed(tx, layer, mayName, "connection_set_unnamed");
@@ -312,4 +319,13 @@ export async function removeNamingLayer<
       : [];
     return { ...removed, disabledScheduleIds: [...unnamed, ...selectingWithin] };
   });
+  if (removed.previous === null) return removed;
+  const judged = new Set(mayName);
+  const since = (await schedulesLayerMayName(layer)).filter((id) => !judged.has(id));
+  if (since.length === 0) return removed;
+  const late = await db.transaction(async (tx) => {
+    await lockIntegrationGovernance(tx, layer.spaceId, layer.integrationId);
+    return disableSchedulesLeftUnnamed(tx, layer, since, "connection_set_unnamed");
+  });
+  return { ...removed, disabledScheduleIds: [...removed.disabledScheduleIds, ...late] };
 }

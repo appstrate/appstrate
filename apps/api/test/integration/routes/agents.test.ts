@@ -37,7 +37,8 @@ import { assertDbCount } from "../../helpers/assertions.ts";
 import { packages, runs, schedules } from "@appstrate/db/schema";
 import { addMemories, upsertPinned } from "../../../src/services/state/package-persistence.ts";
 import { resolveEffectiveInput } from "../../../src/services/input-resolution.ts";
-import { updateSchedule, type ScheduleWriteSnapshot } from "../../../src/services/scheduler.ts";
+import { type ScheduleWriteSnapshot } from "../../../src/services/scheduler.ts";
+import { updateJudgedSchedule } from "../../helpers/schedule-fixtures.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 
 const app = getTestApp();
@@ -760,7 +761,7 @@ describe("Agents API", () => {
       expect((await readScheduleRow(second.id)).input).toEqual({ label: "x" });
 
       await expect(
-        updateSchedule(spaceScope(), first, { input: { folder: "inbox" } }, null, undefined),
+        updateJudgedSchedule(spaceScope(), first, { input: { folder: "inbox" } }, null, undefined),
       ).rejects.toMatchObject({ status: 409, code: "schedule_modified_concurrently" });
       expect((await readScheduleRow(first.id)).input).toEqual({});
     });

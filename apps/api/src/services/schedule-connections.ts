@@ -6,7 +6,7 @@
  * stands when it commits.
  */
 
-import { and, eq, inArray, isNull, type Column } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, type Column } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import {
   integrationConnections,
@@ -271,16 +271,21 @@ async function withSharedCandidatesOnly(
 }
 
 /**
- * What governed each integration's connection set for an agent in a space when a schedule write
- * was judged: per integration, its admin pin (ids, additions allowed) and the space's default
- * (ids, enforced), as one comparable value. An integration with neither has no entry.
+ * What governed each integration's connection set for an agent and a schedule actor in a space when
+ * a schedule write was judged: per integration, its admin pin (ids, additions allowed), the space's
+ * default (ids, enforced) and the actor's member pin (ids; a user actor only, end users pin
+ * nothing), as one comparable value. An integration with none has no entry.
  */
-export type ScheduleGovernance = ReadonlyMap<string, string>;
+export type ScheduleGovernance = {
+  readonly actorUserId: string | null;
+  readonly layers: ReadonlyMap<string, string>;
+};
 
 async function governanceOf(
   executor: DbOrTx,
   spaceId: string,
   agentPackageId: string,
+  actorUserId: string | null,
   integrationIds?: readonly string[],
 ): Promise<Map<string, string>> {
   const only = (column: Column) =>
@@ -288,6 +293,7 @@ async function governanceOf(
   const pins = await executor
     .select({
       integrationId: integrationPins.integrationId,
+      userId: integrationPins.userId,
       connectionIds: integrationPins.connectionIds,
       flag: integrationPins.allowAdditionalConnections,
     })
@@ -296,7 +302,9 @@ async function governanceOf(
       and(
         eq(integrationPins.spaceId, spaceId),
         eq(integrationPins.packageId, agentPackageId),
-        isNull(integrationPins.userId),
+        actorUserId === null
+          ? isNull(integrationPins.userId)
+          : or(isNull(integrationPins.userId), eq(integrationPins.userId, actorUserId)),
         only(integrationPins.integrationId),
       ),
     );
@@ -312,56 +320,68 @@ async function governanceOf(
     );
   const layer = (row: { connectionIds: string[]; flag: boolean } | undefined) =>
     row ? [row.connectionIds.map((id) => id.toLowerCase()).sort(), row.flag] : null;
+  const pinOf = (integrationId: string, member: boolean) =>
+    pins.find((row) => row.integrationId === integrationId && (row.userId !== null) === member);
   const governed = new Set([...pins, ...defaults].map((row) => row.integrationId));
   return new Map(
     [...governed].map((integrationId) => [
       integrationId,
       JSON.stringify([
-        layer(pins.find((row) => row.integrationId === integrationId)),
+        layer(pinOf(integrationId, false)),
         layer(defaults.find((row) => row.integrationId === integrationId)),
+        layer(pinOf(integrationId, true)),
       ]),
     ]),
   );
 }
 
 /**
- * The governance a schedule write of `agentPackageId` is judged under, read BEFORE the judgment
- * (`withScheduleFallback`, `assertScheduleConnectionsChosen`). The write hands it to
- * `createSchedule` / `updateSchedule`, which re-check it on commit
+ * The governance a schedule write of `agentPackageId` for the actor `actorUserId` (`null` for an
+ * end user) is judged under, read BEFORE the judgment (`withScheduleFallback`,
+ * `assertScheduleConnectionsChosen`). The write hands it to `createSchedule` / `updateSchedule`,
+ * which re-check it on commit when it leaves the schedule armed
  * ({@link assertScheduleGovernanceUnchanged}).
  */
-export function readScheduleGovernance(
+export async function readScheduleGovernance(
   spaceId: string,
   agentPackageId: string,
+  actorUserId: string | null,
 ): Promise<ScheduleGovernance> {
-  return governanceOf(db, spaceId, agentPackageId);
+  return { actorUserId, layers: await governanceOf(db, spaceId, agentPackageId, actorUserId) };
 }
 
 /**
- * In the transaction storing `connectionOverrides`: take {@link lockIntegrationGovernance} for each
- * of its integrations (sorted, one order for every writer), re-read their governance on `tx`, and
- * refuse with 409 `schedule_governance_changed` when it differs from `judged`. A removal of a floor
- * reads the schedules narrowing it behind the same lock (`disableSchedulesSelectingWithin`): the
- * write commits first and the removal sees it, or the removal does and the write is refused —
- * a selection judged under a floor never lands once the floor is gone. An optimistic re-check, not
- * a lock held across the judgment, which reads on `db` (PGlite's one connection would deadlock).
+ * In the transaction of a write leaving a schedule armed: take {@link lockIntegrationGovernance} for
+ * each integration `judged` holds a layer for or `connectionOverrides` (the set stored after the
+ * write) selects (sorted, one order for every writer), re-read their governance on `tx`, and refuse
+ * with 409 `schedule_governance_changed` when it differs from `judged`. A removal of a layer takes
+ * the same lock: the schedules narrowing a floor are read behind it
+ * (`disableSchedulesSelectingWithin`), and those it may leave unnamed are read again once it
+ * committed (`removeNamingLayer`). So the write commits first and the removal sees it, or the
+ * removal does and the write is refused. An optimistic re-check, not a lock held across the
+ * judgment, which reads on `db` (PGlite's one connection would deadlock).
  */
 export async function assertScheduleGovernanceUnchanged(
   tx: Tx,
   spaceId: string,
   agentPackageId: string,
+  /** The schedule's actor after the write. */
+  actor: Actor,
   judged: ScheduleGovernance | undefined,
-  connectionOverrides: ConnectionOverrides,
+  connectionOverrides: ConnectionOverrides | null,
 ): Promise<void> {
-  // Every caller storing a set passes what it judged it under: none means a check skipped.
-  if (!judged) throw internalError();
-  const integrationIds = Object.keys(connectionOverrides).sort();
+  const actorUserId = actor.type === "user" ? actor.id : null;
+  // Every armed write passes what it judged it under, for its own actor: else a check skipped.
+  if (!judged || judged.actorUserId !== actorUserId) throw internalError();
+  const integrationIds = [
+    ...new Set([...judged.layers.keys(), ...Object.keys(connectionOverrides ?? {})]),
+  ].sort();
   if (integrationIds.length === 0) return;
   for (const integrationId of integrationIds) {
     await lockIntegrationGovernance(tx, spaceId, integrationId);
   }
-  const current = await governanceOf(tx, spaceId, agentPackageId, integrationIds);
-  const changed = integrationIds.filter((id) => judged.get(id) !== current.get(id));
+  const current = await governanceOf(tx, spaceId, agentPackageId, actorUserId, integrationIds);
+  const changed = integrationIds.filter((id) => judged.layers.get(id) !== current.get(id));
   if (changed.length === 0) return;
   throw conflict(
     "schedule_governance_changed",

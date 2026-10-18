@@ -48,6 +48,7 @@ import {
 } from "../../../src/services/integration-pins-service.ts";
 import {
   disableSchedulesLeftUnnamed,
+  pinLayer,
   removeNamingLayer,
   schedulesLayerMayName,
   type NamingLayer,
@@ -986,7 +987,7 @@ describe("removing the layer that names a schedule's connection set", () => {
     /** `[]` under the admin pin of one connection: "no addition", judged while the pin stands. */
     async function judgedUnderPin() {
       await pin([await sharedConnection()]);
-      return readScheduleGovernance(ctx.defaultSpaceId, AGENT);
+      return readScheduleGovernance(ctx.defaultSpaceId, AGENT, ctx.user.id);
     }
     const narrowing = { [INTEGRATION]: [] };
     const refusedAsChanged = { status: 409, code: "schedule_governance_changed" };
@@ -1051,6 +1052,111 @@ describe("removing the layer that names a schedule's connection set", () => {
       // The pin it was judged under goes after it stored: the removal sees it and disables it.
       expect(await remove(ADMIN_PIN_PATH)).toBe(1);
       expect(await unnamed()).toEqual([created.id]);
+    });
+
+    // A schedule relying on the layer alone, no key of its own, is no candidate of the removal's
+    // first read when stored after it: the second pass, once the removal committed, judges it
+    // (fails with the first pass alone, verified).
+    for (const owner of ["an admin pin", "a member pin"] as const) {
+      it(`the removal of ${owner} disables a schedule relying on it stored after the read of the fires`, async () => {
+        const userId = owner === "a member pin" ? ctx.user.id : null;
+        await pin([await sharedConnection()], { userId });
+        const id = `sched_${crypto.randomUUID()}`;
+
+        const layer = pinLayer(
+          { spaceId: ctx.defaultSpaceId, agentPackageId: AGENT, integrationId: INTEGRATION },
+          userId,
+        );
+        const { disabledScheduleIds } = await removeNamingLayer(layer, async (tx) => {
+          await lockIntegrationGovernance(tx, ctx.defaultSpaceId, INTEGRATION);
+          // On `tx` (PGlite has one connection): after the read, committed with the removal.
+          await tx.insert(schedules).values({
+            id,
+            packageId: AGENT,
+            orgId: ctx.orgId,
+            spaceId: ctx.defaultSpaceId,
+            userId: ctx.user.id,
+            enabled: true,
+            cronExpression: "0 * * * *",
+          });
+          const [row] = await tx
+            .delete(integrationPins)
+            .where(
+              and(
+                eq(integrationPins.packageId, AGENT),
+                userId === null
+                  ? isNull(integrationPins.userId)
+                  : eq(integrationPins.userId, userId),
+              ),
+            )
+            .returning({ connectionIds: integrationPins.connectionIds });
+          return { previous: row ?? null };
+        });
+
+        expect(disabledScheduleIds).toEqual([id]);
+        expect(await rowOf(id)).toMatchObject({
+          enabled: false,
+          disabledReason: "connection_set_unnamed",
+        });
+      });
+    }
+
+    /** The actor's own pin of one connection naming the set, judged while it stands. */
+    async function judgedUnderOwnPin() {
+      await ownPin([await sharedConnection()]);
+      return readScheduleGovernance(ctx.defaultSpaceId, AGENT, ctx.user.id);
+    }
+    const removeOwnPin = () => deletePin(scope(), AGENT, INTEGRATION, ctx.user.id);
+
+    // The member pin is in the fingerprint, and an armed write re-checks it with no override
+    // stored (both fail without the member pin's layer and the re-check of every armed write).
+    it("a create relying on the actor's member pin, removed before it stores, is refused and stores nothing", async () => {
+      const judgedGovernance = await judgedUnderOwnPin();
+      await removeOwnPin();
+
+      await expect(
+        createSchedule(
+          scope(),
+          AGENT,
+          { type: "user", id: ctx.user.id },
+          { cronExpression: "0 * * * *", judgedGovernance },
+        ),
+      ).rejects.toMatchObject(refusedAsChanged);
+      expect(await db.select().from(schedules)).toEqual([]);
+    });
+
+    it("a patch arming a schedule on the actor's member pin, removed before it stores, is refused and writes nothing", async () => {
+      // Paused: the removal leaves it as it was.
+      const seeded = await armedSchedule({ enabled: false, nextRunAt: null });
+      const judged = (await getSchedule(seeded.id, scope(), null, undefined))!;
+      const judgedGovernance = await judgedUnderOwnPin();
+      await removeOwnPin();
+
+      await expect(
+        updateSchedule(scope(), judged, { enabled: true, judgedGovernance }, null, undefined),
+      ).rejects.toMatchObject(refusedAsChanged);
+      expect(await rowOf(seeded.id)).toMatchObject({
+        enabled: false,
+        updatedAt: seeded.updatedAt,
+      });
+    });
+
+    // It fires nothing, and arming it later is judged then (fails while any write storing a set
+    // re-checks, verified).
+    it("a patch leaving the schedule paused is not refused by a governance change", async () => {
+      const seeded = await armedSchedule({ enabled: false, nextRunAt: null });
+      const judged = (await getSchedule(seeded.id, scope(), null, undefined))!;
+      const judgedGovernance = await judgedUnderPin();
+      await deletePin(scope(), AGENT, INTEGRATION, null);
+
+      const updated = await updateSchedule(
+        scope(),
+        judged,
+        { connectionOverrides: narrowing, judgedGovernance },
+        null,
+        undefined,
+      );
+      expect(updated).toMatchObject({ enabled: false, connection_overrides: narrowing });
     });
   });
 });
