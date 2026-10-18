@@ -321,6 +321,19 @@ export interface IntegrationOAuthCallbackResult {
   variables?: Record<string, string>;
 }
 
+/**
+ * The `redirectTag` prefix of a Client ID Metadata Document client's redirect URI
+ * (`…/callback/cimd/<tag>`). Any authorization server can fetch any document, so a response on
+ * that path is only trusted with `iss` naming the server the request went to: a state carrying
+ * such a tag without an issuer and the RFC 9207 requirement is refused outright.
+ */
+export const CLIENT_METADATA_REDIRECT_TAG_PREFIX = "cimd/";
+
+/** Whether a `redirectTag` is a metadata-document client's. */
+export function isClientMetadataRedirectTag(tag: string): boolean {
+  return tag.startsWith(CLIENT_METADATA_REDIRECT_TAG_PREFIX);
+}
+
 /** Where an authorization response arrived (`null` = `/callback`) and its RFC 9207 `iss`. */
 export interface IntegrationAuthorizationResponse {
   iss?: string;
@@ -337,6 +350,13 @@ function mixUpRefusal(
 ): string | null {
   if ((integration.redirectTag ?? null) !== response.redirectTag) {
     return "The authorization response arrived at the redirect URI of another authorization server";
+  }
+  if (
+    integration.redirectTag !== undefined &&
+    isClientMetadataRedirectTag(integration.redirectTag) &&
+    (integration.issuer === undefined || integration.issParameterSupported !== true)
+  ) {
+    return "The authorization response arrived at a client metadata document's redirect URI for a flow that does not require the authorization server's iss";
   }
   if (response.iss !== undefined) {
     if (integration.issuer !== undefined && response.iss !== integration.issuer) {

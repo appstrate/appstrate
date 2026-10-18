@@ -59,6 +59,7 @@ import {
   registerDynamicClient,
   DynamicClientRegistrationError,
   OAUTH_STATE_TTL_SECONDS,
+  isClientMetadataRedirectTag,
   sameUrlIdentifier,
 } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
@@ -1194,6 +1195,7 @@ export async function createIntegrationOAuthClient(
   opts: { autoProvisioned?: boolean; issuer?: string | null } = {},
 ): Promise<IntegrationOAuthClientWithSecret> {
   if (isSpaceOwner(owner)) await assertSpaceInScope(owner);
+  assertRedirectUriOutsideDocumentNamespace(input.redirectUri);
   const autoProvisioned = opts.autoProvisioned ?? false;
   const issuer = opts.issuer ?? null;
   assertClientAuth(await loadManifestOrThrow(owner, packageId), authKey, autoProvisioned);
@@ -1267,6 +1269,7 @@ export async function updateIntegrationOAuthClient(
   client: IntegrationOAuthClientWithSecret;
 }> {
   if (isSpaceOwner(owner)) await assertSpaceInScope(owner);
+  assertRedirectUriOutsideDocumentNamespace(input.redirectUri);
   const byId = clientByIdFilter(owner, packageId, clientId);
   const [existing] = await db.select().from(integrationOauthClients).where(byId).limit(1);
   if (!existing) {
@@ -1420,8 +1423,10 @@ interface ResolvedConnectClient {
   /** Pre-registered redirect URI override, or null to use the platform default. */
   redirectUri: string | null;
   /**
-   * The tag of `redirectUri` when it is a per-server callback (`…/callback/<tag>`): recorded in the
-   * OAuth state so the callback refuses a response arriving through any other path (mix-up).
+   * The tag of `redirectUri` when it is a per-server callback — `<tag>` for a DCR client's
+   * `…/callback/<tag>`, `cimd/<tag>` for a metadata document's `…/callback/cimd/<tag>` (only
+   * {@link metadataDocumentClient} yields one): recorded in the OAuth state so the callback refuses
+   * a response arriving through any other path (mix-up).
    */
   redirectTag?: string;
   clientRef: string;
@@ -1492,11 +1497,50 @@ function assertConnectClientUsable(client: IntegrationOAuthClientWithSecret): vo
   }
 }
 
+/**
+ * Refuse a stored client's redirect URI inside the metadata documents' callback namespace
+ * (`…/callback/cimd/<tag>`). That namespace is the documents' alone: a response there completes a
+ * flow only because a document client's state requires `iss` from its server, and a row would put
+ * the same tag in a state that requires none — a hostile server could then hand an honest one our
+ * document and have its code delivered on the row's flow. The write paths refuse such a URI
+ * ({@link assertRedirectUriOutsideDocumentNamespace}); this catches a row written before.
+ */
+function assertNotDocumentRedirect(client: IntegrationOAuthClientWithSecret, tag: string): void {
+  if (isClientMetadataRedirectTag(tag)) {
+    throw forbidden(
+      `OAuth client '${client.id}' for '${client.integration_package_id}' auth '${client.auth_key}' declares a redirect URI in the client metadata document callback namespace (${client.redirect_uri}), which only this instance's metadata documents use; change or clear the client's redirect_uri.`,
+    );
+  }
+}
+
+/** Refuse a client `redirect_uri` in the documents' callback namespace: a 400 at every writer. */
+function assertRedirectUriOutsideDocumentNamespace(redirectUri: string | null | undefined): void {
+  const tag = redirectUri ? redirectTagOf(redirectUri) : undefined;
+  if (tag !== undefined && isClientMetadataRedirectTag(tag)) {
+    throw new ApiError({
+      status: 400,
+      code: "redirect_uri_reserved",
+      title: "Reserved Redirect URI",
+      detail: `redirect_uri ${redirectUri} is in the callback namespace of this instance's client metadata documents (/api/integrations/callback/cimd/…), which no registered OAuth client may use.`,
+      errors: [
+        {
+          field: "redirect_uri",
+          code: "redirect_uri_reserved",
+          title: "Reserved Redirect URI",
+          message:
+            "The /api/integrations/callback/cimd/ path is reserved for client metadata documents.",
+        },
+      ],
+    });
+  }
+}
+
 /** Project a custom (space or org) client into the resolved shape. */
 function customConnectClient(client: IntegrationOAuthClientWithSecret): ResolvedConnectClient {
   // Before the authorize redirect, never after the user has consented.
   assertConnectClientUsable(client);
   const redirectTag = client.redirect_uri ? redirectTagOf(client.redirect_uri) : undefined;
+  if (redirectTag !== undefined) assertNotDocumentRedirect(client, redirectTag);
   return {
     clientId: client.client_id,
     redirectUri: client.redirect_uri ?? null,

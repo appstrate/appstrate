@@ -67,6 +67,7 @@
   "apiError.invalid_request": "Requête refusée : {{message}}",
   "apiError.not_a_platform_account": "Ce compte appartient à l'application d'un espace et ne peut pas rejoindre une organisation. Connectez-vous avec un compte de la plateforme.",
   "apiError.scope_reserved": "Ce scope de package est réservé par la plateforme. Utilisez celui de votre organisation.",
+  "apiError.redirect_uri_reserved": "Cette URI de redirection est réservée aux documents de métadonnées client de l'instance (/api/integrations/callback/cimd/…) : choisissez-en une autre, ou laissez-la vide.",
   "apiError.validation_failed": "Les données envoyées sont invalides.",
   "apiError.unauthorized": "Authentification refusée : {{message}}",
   "apiError.forbidden": "Vous n'avez pas les droits nécessaires pour cette action.",

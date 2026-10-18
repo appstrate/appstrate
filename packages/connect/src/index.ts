@@ -101,6 +101,8 @@ export {
 export {
   initiateIntegrationOAuth,
   handleIntegrationOAuthCallback,
+  CLIENT_METADATA_REDIRECT_TAG_PREFIX,
+  isClientMetadataRedirectTag,
   OAUTH_STATE_TTL_SECONDS,
 } from "./integration-oauth.ts";
 // Only the callback-result type crosses the package boundary (apps/api's

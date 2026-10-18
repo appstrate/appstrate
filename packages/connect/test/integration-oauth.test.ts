@@ -1007,6 +1007,51 @@ describe("integration OAuth mix-up defence (RFC 9207, RFC 9700 §4.4)", () => {
     expect(store._data.get(without.state)?.integration?.issParameterSupported).toBeUndefined();
   });
 
+  it("refuses a response on a document's redirect URI for a state that requires no iss", async () => {
+    // A state carrying a `cimd/` tag without the issuer + RFC 9207 requirement (a row's redirect URI
+    // on the documents' path): the tag matches, an honest server's iss is present — still refused.
+    for (const opts of [
+      // Issuer recorded, requirement not: even a matching iss does not complete it.
+      { issSupported: false, redirectTag: "cimd/" + "T".repeat(22), iss: ISSUER },
+      // No issuer at all: the iss compare would be skipped.
+      {
+        issSupported: true,
+        redirectTag: "cimd/" + "T".repeat(22),
+        noIssuer: true,
+        iss: "https://honest-b.example.com",
+      },
+    ]) {
+      const { state } = await initiateIntegrationOAuth(store, {
+        packageId: "@org/forge",
+        authKey: "oauth",
+        ...(opts.noIssuer ? {} : { issuer: ISSUER }),
+        authorizationEndpoint: `${ISSUER}/oauth/authorize`,
+        tokenEndpoint: `${ISSUER}/oauth/token`,
+        clientId: "client-id",
+        clientRef: "client-ref",
+        redirectUri: `http://localhost:3000/api/integrations/callback/${opts.redirectTag}`,
+        orgId: "org_1",
+        spaceId: "spc_1",
+        actor: { type: "user", id: "u_1" },
+        discover: opts.noIssuer
+          ? async () => ({
+              authorizationEndpoint: `${ISSUER}/oauth/authorize`,
+              tokenEndpoint: `${ISSUER}/oauth/token`,
+            })
+          : discoverFor(opts.issSupported),
+        redirectTag: opts.redirectTag,
+      });
+      const before = tokenStub.calls.length;
+      await refusal(
+        handleIntegrationOAuthCallback(store, resolverFor(), "CODE", state, tokenStub.impl, {
+          iss: opts.iss,
+          redirectTag: opts.redirectTag,
+        }),
+      );
+      expect(tokenStub.calls.length).toBe(before);
+    }
+  });
+
   it("accepts a matching iss and returns the issuer and variables", async () => {
     const { state } = await initiate({ issSupported: true });
     const result = await handleIntegrationOAuthCallback(

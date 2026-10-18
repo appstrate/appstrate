@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { getEnv } from "@appstrate/env";
+import { CLIENT_METADATA_REDIRECT_TAG_PREFIX } from "@appstrate/connect";
 
 /**
  * Path of the shared OAuth redirect endpoint every integration connect flow
@@ -38,7 +39,8 @@ const AUTHORIZATION_SERVER_TAG_LENGTH = 22;
  * response on a document's redirect URI can only satisfy the state of a document client — which
  * requires RFC 9207 `iss` — and never that of a DCR or admin client that does not.
  */
-const CLIENT_METADATA_CALLBACK_SEGMENT = "cimd";
+// The segment the connect package reads its tags by (`CLIENT_METADATA_REDIRECT_TAG_PREFIX`).
+const CLIENT_METADATA_CALLBACK_SEGMENT = CLIENT_METADATA_REDIRECT_TAG_PREFIX.slice(0, -1);
 
 export const INTEGRATION_TAGGED_CALLBACK_PATH = new RegExp(
   `^${INTEGRATION_CALLBACK_PATH}/(?:${CLIENT_METADATA_CALLBACK_SEGMENT}/)?[A-Za-z0-9_-]{${AUTHORIZATION_SERVER_TAG_LENGTH}}$`,
@@ -63,7 +65,7 @@ export function clientMetadataCallbackUrlFor(issuer: string): string {
 
 /** The `redirectTag` of a response on `/callback/cimd/:tag` (a document client's namespace). */
 export function clientMetadataRedirectTag(tag: string): string {
-  return `${CLIENT_METADATA_CALLBACK_SEGMENT}/${tag}`;
+  return `${CLIENT_METADATA_REDIRECT_TAG_PREFIX}${tag}`;
 }
 
 /**
