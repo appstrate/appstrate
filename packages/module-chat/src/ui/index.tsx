@@ -784,7 +784,8 @@ function ConversationSkeleton({
       aria-label={label}
       className="flex size-full flex-col overflow-hidden"
     >
-      <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-6 px-4 pt-8">
+      {/* The thread's column (`--thread-max-width`, 42rem). */}
+      <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col gap-6 px-4 pt-8">
         <Skeleton aria-hidden className="ml-auto h-10 w-2/5 rounded-2xl" />
         <div aria-hidden className="flex flex-col gap-2.5">
           <Skeleton className="h-3.5 w-full" />
@@ -797,8 +798,13 @@ function ConversationSkeleton({
           <Skeleton className="h-3.5 w-2/5" />
         </div>
       </div>
-      {placeholder !== null && (
+      {placeholder === null ? (
+        // A reader's footer is the read-only note (`Composer`'s `chat:write` branch).
         <div aria-hidden className="mx-auto w-full max-w-2xl px-4 pb-4">
+          <Skeleton className="h-[46px] w-full rounded-xl" />
+        </div>
+      ) : (
+        <div aria-hidden className="mx-auto flex w-full max-w-2xl flex-col gap-2 px-4 pb-4">
           <div className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
             <div className="text-muted-foreground flex min-h-9 items-center py-1 text-sm">
               {placeholder}
@@ -810,6 +816,10 @@ function ConversationSkeleton({
               </div>
               <Skeleton className="size-8 rounded-lg" />
             </div>
+          </div>
+          {/* `Disclaimer`, the writer's line under the composer. */}
+          <div className="flex h-4 justify-center">
+            <Skeleton className="h-3 w-64" />
           </div>
         </div>
       )}

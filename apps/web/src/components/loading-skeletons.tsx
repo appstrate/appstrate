@@ -23,6 +23,9 @@ import { cn } from "@appstrate/ui/cn";
 import { usePageBreadcrumb } from "../hooks/use-overlay-breadcrumb";
 import type { BreadcrumbEntry } from "../stores/breadcrumb-store";
 import { useCurrentOrgId } from "../hooks/use-org";
+import { usePermissions } from "../hooks/use-permissions";
+import { useListView } from "../stores/list-view-store";
+import { CardGridSkeleton } from "./card-grid";
 import { useCurrentSpaceId } from "../hooks/use-current-space";
 import { agentsKeys, packageKeys } from "../lib/query-keys";
 import { usePackageListCrumb } from "../hooks/use-package-list-crumb";
@@ -186,30 +189,51 @@ export function ScheduleDetailSkeleton() {
   );
 }
 
-/** A collection page: title, toolbar, the table's frame with its header and rows. */
-export function ListPageSkeleton() {
+/**
+ * A collection page: title, toolbar, then the table's frame with its header and rows — or the
+ * card grid, when `list` names a screen the reader (or its default) shows as cards.
+ */
+export function ListPageSkeleton({ list }: { list?: string }) {
   return (
     <Waiting>
       <HeaderBlocks breadcrumbs={NO_CRUMBS} />
+      {list ? <ViewedCollectionBlocks list={list} /> : <CollectionBlocks />}
+    </Waiting>
+  );
+}
+
+function ViewedCollectionBlocks({ list }: { list: string }) {
+  const [view] = useListView(list);
+  return <CollectionBlocks cards={view === "cards"} />;
+}
+
+/** A collection under its title: `ListToolbar`, then `DataTable`'s frame, head and rows. */
+function CollectionBlocks({ cards = false }: { cards?: boolean }) {
+  return (
+    <>
       {/* `ListToolbar`: an `h-8` search of at most 280px, then its filter button. */}
       <div className="mb-3 flex items-center gap-2">
         <Skeleton className="h-8 min-w-40 flex-1 sm:max-w-[280px]" />
         <Skeleton className="h-8 w-20" />
       </div>
-      <Card className="overflow-hidden">
-        <div className="border-border flex h-10 items-center border-b px-3">
-          <Skeleton className="h-3 w-1/3" />
-        </div>
-        {Array.from({ length: 3 }, (_, i) => (
-          <div
-            key={i}
-            className="border-border/60 flex h-12 items-center border-b px-3 last:border-b-0"
-          >
-            <Skeleton className="h-3.5 w-full" />
+      {cards ? (
+        <CardGridSkeleton />
+      ) : (
+        <Card className="overflow-hidden">
+          <div className="border-border flex h-10 items-center border-b px-3">
+            <Skeleton className="h-3 w-1/3" />
           </div>
-        ))}
-      </Card>
-    </Waiting>
+          {Array.from({ length: 3 }, (_, i) => (
+            <div
+              key={i}
+              className="border-border/60 flex h-12 items-center border-b px-3 last:border-b-0"
+            >
+              <Skeleton className="h-3.5 w-full" />
+            </div>
+          ))}
+        </Card>
+      )}
+    </>
   );
 }
 
@@ -248,6 +272,31 @@ export function EditorPanelSkeleton() {
         <Skeleton className="mt-1.5 h-4 w-80 max-w-full" />
       </div>
       <SettingsSkeleton />
+    </Waiting>
+  );
+}
+
+/**
+ * A settings page that is a table (`DataTable` on the panel's integrated surface: no frame, the
+ * head ruled above and below), with the list's toolbar when it has one.
+ */
+export function SettingsTableSkeleton({ toolbar = false }: { toolbar?: boolean }) {
+  return (
+    <Waiting>
+      {toolbar && (
+        <div className="mb-3 flex items-center gap-2">
+          <Skeleton className="h-8 min-w-40 flex-1 sm:max-w-[280px]" />
+          <Skeleton className="h-8 w-20" />
+        </div>
+      )}
+      <div className="border-border flex h-10 items-center border-y px-3">
+        <Skeleton className="h-3 w-1/3" />
+      </div>
+      {Array.from({ length: 3 }, (_, i) => (
+        <div key={i} className="border-border/60 flex h-12 items-center border-b px-3">
+          <Skeleton className="h-3.5 w-full" />
+        </div>
+      ))}
     </Waiting>
   );
 }
@@ -307,20 +356,11 @@ export function DashboardBodySkeleton() {
   );
 }
 
-/** The whole dashboard, greeting included: the route's fallback. */
-export function DashboardSkeleton() {
-  const { t } = useTranslation("agents");
-  usePageBreadcrumb([{ label: t("common:nav.dashboard") }]);
+/** A panel page's title row (`settings/layout.tsx`): `mb-6 min-h-9` around an `text-xl` title. */
+export function PanelTitleBlock() {
   return (
-    <div className="mx-auto w-full max-w-[1300px]">
-      <div className="mb-4 flex min-h-9 items-start justify-between gap-4">
-        <div className="flex flex-col gap-2">
-          <Skeleton className="h-9 w-64" />
-          <Skeleton className="h-3.5 w-56" />
-        </div>
-        <Skeleton className="h-9 w-36" />
-      </div>
-      <DashboardBodySkeleton />
+    <div className="mb-6 flex min-h-9 items-center" aria-hidden>
+      <Skeleton className="h-6 w-48" />
     </div>
   );
 }
@@ -340,21 +380,105 @@ export function OverlayPanelSkeleton({ list }: { list?: boolean }) {
           <Skeleton key={i} className="h-7 w-full" />
         ))}
       </aside>
-      <div className="min-w-0 flex-1 p-6 pt-12">
-        <Skeleton className="mb-6 h-7 w-48" />
-        {list ? <TextSkeleton lines={6} /> : <SettingsSkeleton />}
+      {/* `PanelLayout`'s pane: its band (`py-3` around a `min-h-8` line) leaves 57px above the
+          page, whose title row is `mb-6 min-h-9`. */}
+      <div className="min-w-0 flex-1 p-6 pt-[57px]">
+        <PanelTitleBlock />
+        {list ? (
+          <Waiting>
+            <CollectionBlocks />
+          </Waiting>
+        ) : (
+          <SettingsSkeleton />
+        )}
       </div>
     </>
   );
 }
 
-/** The chat panel while its code loads: the welcome lines over the composer. */
-export function ChatPanelSkeleton() {
+/**
+ * The chat's composer (`module-chat` `Composer`): a `min-h-9` line over its tool row, in a card
+ * of the thread's width.
+ */
+function ComposerBlock() {
   return (
-    <Waiting className="mx-auto flex h-full w-full max-w-3xl flex-col items-center justify-center gap-3 px-4">
-      <Skeleton className="h-5 w-40" />
-      <Skeleton className="h-3.5 w-72 max-w-full" />
-      <Skeleton className="mt-3 h-28 w-full rounded-2xl" />
+    <div className="bg-card flex w-full flex-col gap-1 rounded-xl border px-3 py-2 shadow-sm">
+      <div className="flex min-h-9 items-center py-1">
+        <Skeleton className="h-3.5 w-48" />
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1">
+          <Skeleton className="size-8 rounded-lg" />
+          <Skeleton className="h-7 w-32 rounded-md" />
+        </div>
+        <Skeleton className="size-8 rounded-lg" />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * `/chat` while its code loads: `ThreadWelcome` — the title and hint, the composer, then the
+ * suggestions (a writer's only), centred in the thread's 42rem column. The module's own wait for
+ * a stored conversation is {@link ChatConversationSkeleton}'s shape.
+ */
+export function ChatPanelSkeleton() {
+  const canWrite = usePermissions().can("chat:write");
+  return (
+    <Waiting className="flex h-full flex-col items-center justify-center px-4">
+      <div className="flex w-full max-w-2xl flex-col items-stretch gap-6">
+        <div className="flex flex-col items-center">
+          <div className="flex h-7 items-center">
+            <Skeleton className="h-5 w-40" />
+          </div>
+          <div className="mt-1 flex h-5 items-center">
+            <Skeleton className="h-3.5 w-72 max-w-full" />
+          </div>
+        </div>
+        {canWrite ? (
+          <>
+            <ComposerBlock />
+            <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
+              {Array.from({ length: 4 }, (_, i) => (
+                <Skeleton key={i} className="h-[38px] rounded-lg" />
+              ))}
+            </div>
+          </>
+        ) : (
+          // A reader's composer is a read-only note.
+          <Skeleton className="h-[46px] w-full rounded-xl" />
+        )}
+      </div>
+    </Waiting>
+  );
+}
+
+/**
+ * `/chat/:conversationId` while its code loads: the stored conversation's wait, as the module
+ * draws it (`ConversationSkeleton`) — turns at the top, the composer and its line at the bottom.
+ */
+export function ChatConversationSkeleton() {
+  const canWrite = usePermissions().can("chat:write");
+  return (
+    <Waiting className="flex size-full flex-col overflow-hidden">
+      <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col gap-6 px-4 pt-8">
+        <Skeleton className="ml-auto h-10 w-2/5 rounded-2xl" />
+        <Lines lines={3} />
+        <Skeleton className="ml-auto h-10 w-1/3 rounded-2xl" />
+        <Lines lines={2} />
+      </div>
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-2 px-4 pb-4">
+        {canWrite ? (
+          <>
+            <ComposerBlock />
+            <div className="flex h-4 justify-center">
+              <Skeleton className="h-3 w-64" />
+            </div>
+          </>
+        ) : (
+          <Skeleton className="h-[46px] w-full rounded-xl" />
+        )}
+      </div>
     </Waiting>
   );
 }

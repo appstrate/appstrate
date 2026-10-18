@@ -29,8 +29,8 @@ import { OverlayUnavailable } from "./components/overlay-unavailable";
 import { AppSidebar, ShellHeader } from "./components/app-shell";
 import { ShellFrameProvider } from "./components/shell-header-slots";
 import {
+  ChatConversationSkeleton,
   ChatPanelSkeleton,
-  DashboardSkeleton,
   FormPageSkeleton,
   ListPageSkeleton,
   OverlayPanelSkeleton,
@@ -38,6 +38,7 @@ import {
   RunDetailSkeleton,
   ScheduleDetailSkeleton,
   SettingsSkeleton,
+  SettingsTableSkeleton,
 } from "./components/loading-skeletons";
 import { PendingPairingsWatcher } from "./components/pending-pairings-watcher";
 import { ViewAsBanner } from "./components/view-as-banner";
@@ -337,17 +338,40 @@ const DETAIL_PACKAGE_TYPE: [string, PackageType][] = [
 ];
 
 /** What a route draws while its chunk or permissions load: the same skeleton its page draws for data. */
+/** The collections a reader may show as cards: the screen key `useListView` stores their choice under. */
+const LIST_VIEW_OF: Partial<Record<RoutePath, string>> = {
+  "/agents": "agent",
+  "/skills": "skill",
+  "/mcp-servers": "mcp-server",
+  "/integrations": "integrations",
+};
+
+/** The settings pages that are a table, not rows of fields; the value says whether a toolbar leads. */
+const SETTINGS_TABLES: Partial<Record<RoutePath, boolean>> = {
+  "/org-settings/members": false,
+  "/org-settings/spaces": false,
+  "/org-settings/proxies": false,
+  "/org-settings/cli-sessions": false,
+  "/preferences/devices": false,
+  "/workspace-settings/members": false,
+  "/workspace-settings/api-keys": false,
+  "/workspace-settings/webhooks": false,
+  "/workspace-settings/end-users": true,
+};
+
 function skeletonOf(path: RoutePath): ReactNode {
+  const table = SETTINGS_TABLES[path];
+  if (table !== undefined) return <SettingsTableSkeleton toolbar={table} />;
   if (inLayout(path)) return <SettingsSkeleton />;
   if (isOverlayPath(path)) return <OverlayPanelSkeleton list />;
+  if (path === "/chat/:conversationId") return <ChatConversationSkeleton />;
   if (isUnder(path, "/chat")) return <ChatPanelSkeleton />;
-  if (path === "/") return <DashboardSkeleton />;
   if (path.endsWith("/new")) return <FormPageSkeleton />;
   if (path === "/agents/:scope/:name/runs/:runId") return <RunDetailSkeleton />;
   if (path === "/schedules/:id") return <ScheduleDetailSkeleton />;
   const packageType = DETAIL_PACKAGE_TYPE.find(([prefix]) => path.startsWith(prefix))?.[1];
   if (packageType && path.includes("/:")) return <PackageDetailSkeleton type={packageType} />;
-  return <ListPageSkeleton />;
+  return <ListPageSkeleton list={LIST_VIEW_OF[path]} />;
 }
 
 function pageRoute(path: RoutePath) {
