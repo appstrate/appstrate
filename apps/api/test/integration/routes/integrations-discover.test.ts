@@ -182,6 +182,16 @@ describe("POST /api/integrations/discover", () => {
     expect((await discover(ctx, { url: `${origin}/mcp`, transport: "sse" })).status).toBe(400);
   });
 
+  it("refuses a URL carrying a username or password", async () => {
+    const at = new URL(`${origin}/mcp`);
+    for (const userinfo of ["user@", "user:pass@", ":pass@"]) {
+      const res = await discover(ctx, { url: `${at.protocol}//${userinfo}${at.host}/mcp` });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { errors?: { field: string }[] };
+      expect(body.errors?.map((e) => e.field)).toEqual(["url"]);
+    }
+  });
+
   it("answers 422 for a URL that is not an MCP server", async () => {
     const res = await discover(ctx, { url: `${origin}/nothing-here` });
     expect(res.status).toBe(422);

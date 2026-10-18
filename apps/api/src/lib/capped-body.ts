@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * A response body read under `maxBytes`, or null once it crosses, the stream
- * cancelled on the spot. The budget is spent on the stream: a declared
- * `content-length` from an endpoint that is not ours is not a bound.
- */
+/** A body under `maxBytes`, else null: counted on the stream, a foreign `content-length` is no bound. */
 export async function readBodyUnder(
   response: Response,
   maxBytes: number,
@@ -26,11 +22,7 @@ export async function readBodyUnder(
   return Buffer.concat(chunks);
 }
 
-/**
- * The first `maxBytes` of a body as text — or less, once `until` holds on what
- * was read — the stream cancelled either way. For a body only its head matters
- * of (an HTML `<head>`), or one that never ends (an SSE stream).
- */
+/** The first `maxBytes` of a body as text, or less once `until` holds; for a head or an endless stream. */
 export async function readBodyPrefix(
   response: Response,
   maxBytes: number,

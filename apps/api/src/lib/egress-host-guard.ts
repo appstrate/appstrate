@@ -172,3 +172,12 @@ export function egressFetchImpl(opts?: Omit<GuardedFetchOptions, "allowHost">): 
       opts,
     )) as typeof fetch;
 }
+
+/** `fetchImpl` whose every request also ends with `signal` (a whole operation's deadline). */
+export function fetchWithin(fetchImpl: typeof fetch, signal: AbortSignal): typeof fetch {
+  return ((input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+    fetchImpl(input, {
+      ...init,
+      signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal,
+    })) as typeof fetch;
+}

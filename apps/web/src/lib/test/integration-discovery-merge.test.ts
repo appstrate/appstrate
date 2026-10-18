@@ -2,12 +2,14 @@
 
 import { describe, expect, it } from "bun:test";
 import { defaultIntegrationManifest } from "../../components/agent-editor/utils.ts";
+import { getSource, setSource } from "../../components/integration-editor/utils.ts";
 import {
   mergeDiscovery,
   mergeServerSync,
   hasIntegrationDoc,
   badgeUnder,
   proposalBadges,
+  serverSyncProvenance,
   type DiscoveryProposal,
   type ServerSyncProposal,
 } from "../integration-discovery-merge.ts";
@@ -53,6 +55,18 @@ describe("mergeDiscovery", () => {
     const badges = proposalBadges(manifest, proposal);
     expect(badges).toEqual(proposal.provenance);
     expect(badgeUnder(badges, "/auths")).toBe("detected");
+  });
+
+  it("treats the skeleton auth as untouched once typing the URL moved its allowlist", () => {
+    // What the source field does on every keystroke: the skeleton's auth follows the URL's host.
+    const current = setSource(defaults, {
+      ...getSource(defaults),
+      remoteUrl: "https://mcp.notion.com/mcp",
+    });
+    expect(
+      (current.auths as Record<string, { authorized_uris: string[] }>).primary!.authorized_uris,
+    ).toEqual(["https://mcp.notion.com/**"]);
+    expect(mergeDiscovery(current, defaults, proposal).auths).toEqual({ oauth });
   });
 
   it("keeps what the author touched and does not badge it", () => {
@@ -199,11 +213,13 @@ describe("mergeServerSync", () => {
     expect(manifest.display_name).toBe("Mine");
     expect(manifest.description).toBe("Server");
     expect(manifest.homepage).toBe("https://x.test");
-    const badges = proposalBadges(manifest, {
-      manifest: proposed,
-      provenance: { "/display_name": "detected", "/description": "detected" },
+    // Only the fields the sync filled keep a badge: the author's display name is kept as is.
+    const badges = proposalBadges(manifest, serverSyncProvenance(sync(proposed)));
+    expect(badges).toEqual({
+      "/default_tools": "detected",
+      "/description": "detected",
+      "/homepage": "detected",
     });
-    expect(badges).toEqual({ "/description": "detected" });
   });
 
   it("does not mutate the current manifest", () => {

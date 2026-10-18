@@ -23,7 +23,12 @@ import { scopeTokenSchema } from "@appstrate/core/integration";
 import { toSlug } from "@appstrate/core/naming";
 import { parseSseFrames, parseSseJsonData } from "@appstrate/core/sse";
 import { ApiError, badGateway, invalidRequest } from "../lib/errors.ts";
-import { checkEgressUrl, egressFetchImpl, isBlockedEgressUrl } from "../lib/egress-host-guard.ts";
+import {
+  checkEgressUrl,
+  egressFetchImpl,
+  fetchWithin,
+  isBlockedEgressUrl,
+} from "../lib/egress-host-guard.ts";
 import { readBodyPrefix } from "../lib/capped-body.ts";
 import { logger } from "../lib/logger.ts";
 import { fetchSiteIcon } from "./integration-icon.ts";
@@ -57,12 +62,7 @@ export async function discoverRemoteIntegration(
   const timeout = AbortSignal.timeout(DISCOVERY_TIMEOUT_MS);
   // The caller's own bound (its request going away) ends the discovery too.
   const deadline = deps.signal ? AbortSignal.any([deps.signal, timeout]) : timeout;
-  const baseFetch = deps.fetchImpl ?? egressFetchImpl();
-  const fetchImpl = ((target: Parameters<typeof fetch>[0], init?: RequestInit) =>
-    baseFetch(target, {
-      ...init,
-      signal: init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline,
-    })) as typeof fetch;
+  const fetchImpl = fetchWithin(deps.fetchImpl ?? egressFetchImpl(), deadline);
   const egress = await checkEgressUrl(url, { requireHttpsForUntrustedHost: true });
   if (!egress.ok) {
     throw invalidRequest(
@@ -139,17 +139,6 @@ async function probeServer(url: string, fetchImpl: typeof fetch): Promise<Protec
   }
   if (res.ok) {
     const answered = await readOrFail(url, () => answersJsonRpc(res));
-    const sessionId = res.headers.get("mcp-session-id");
-    if (sessionId) {
-      // Best-effort: end the session the probe opened.
-      void fetchImpl(url, {
-        method: "DELETE",
-        headers: { "Mcp-Session-Id": sessionId },
-        signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-      })
-        .then((r) => r.body?.cancel())
-        .catch(() => {});
-    }
     throw answered ? authNotSupported(url) : notAnMcpServer(url);
   }
   await res.body?.cancel().catch(() => {});
@@ -202,15 +191,23 @@ async function readOrFail<T>(url: string, read: () => Promise<T>): Promise<T> {
   }
 }
 
+/** Logs and problem details name the origin only: a URL's path or query may carry a secret. */
+const originOf = (url: string) => new URL(url).origin;
+
 function unreachable(url: string, err: unknown): ApiError {
-  logger.warn("integration discovery: server unreachable", { url, error: getErrorMessage(err) });
-  return badGateway(`The server at ${url} could not be reached.`);
+  const origin = originOf(url);
+  logger.warn("integration discovery: server unreachable", { origin, error: getErrorMessage(err) });
+  return badGateway(`The server at ${origin} could not be reached.`);
 }
 
 /** Whether a JSON or SSE answer carries a JSON-RPC response (notifications before it skipped). */
 async function answersJsonRpc(res: Response): Promise<boolean> {
   if (!res.headers.get("content-type")?.includes("text/event-stream")) {
-    return isJsonRpcResponse(parseSseJsonData(await readBodyPrefix(res, PROBE_BODY_MAX_BYTES)));
+    const head = await readBodyPrefix(res, PROBE_BODY_MAX_BYTES);
+    const parsed = parseSseJsonData(head);
+    // A body cut at the prefix does not parse: its head still says JSON-RPC 2.0.
+    if (parsed === null) return /^\s*\{[\s\S]*?"jsonrpc"\s*:\s*"2\.0"/.test(head);
+    return isJsonRpcResponse(parsed);
   }
   const answered = (text: string) =>
     parseSseFrames(text, "").frames.some((frame) =>
@@ -234,7 +231,7 @@ const notAnMcpServer = (url: string) =>
     status: 422,
     code: "not_an_mcp_server",
     title: "Not an MCP Server",
-    detail: `The server at ${url} did not answer as a Streamable HTTP or SSE MCP server.`,
+    detail: `The server at ${originOf(url)} did not answer as a Streamable HTTP or SSE MCP server.`,
   });
 
 const authNotSupported = (url: string) =>
@@ -242,7 +239,7 @@ const authNotSupported = (url: string) =>
     status: 422,
     code: "remote_mcp_auth_not_supported",
     title: "Unauthenticated MCP Server",
-    detail: `The server at ${url} serves MCP without authentication, which integrations do not support yet.`,
+    detail: `The server at ${originOf(url)} serves MCP without authentication, which integrations do not support yet.`,
   });
 
 interface DiscoveredAuth {

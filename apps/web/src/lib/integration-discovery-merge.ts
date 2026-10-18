@@ -6,6 +6,7 @@ import {
 } from "@appstrate/core/integration";
 import { isToolsWildcard } from "@appstrate/core/dependencies";
 import type { paths } from "../api/schema";
+import { getSource, setSource } from "../components/integration-editor/utils";
 
 export type DiscoveryProposal =
   paths["/api/integrations/discover"]["post"]["responses"][200]["content"]["application/json"];
@@ -26,10 +27,8 @@ const isEmpty = (v: unknown) =>
 const FILLABLE = ["display_name", "name", "documentation", "privacy_policies", "icon"] as const;
 
 /**
- * Applies a discovery proposal over the author's draft. A field is overwritten only when it is
- * still empty, still the creation skeleton (`defaults`) or still what the previous analysis
- * (`previous`) set, so analysing a second URL replaces the first one's proposal; `source.remote`
- * always follows the analysed URL.
+ * A field is overwritten only while empty, the skeleton (`defaults`) or the previous analysis's
+ * value, so a second analysis replaces the first; `source.remote` always follows the URL.
  */
 export function mergeDiscovery(
   current: Manifest,
@@ -39,9 +38,12 @@ export function mergeDiscovery(
 ): Manifest {
   const proposed: Manifest = proposal.manifest;
   const manifest: Manifest = { ...current };
+  // The skeleton as typing the URL left it: its auth's allowlist follows the URL (`setSource`).
+  const skeleton = setSource(defaults, getSource(current));
   const untouched = (key: string) =>
     isEmpty(current[key]) ||
     isDeepEqual(current[key], defaults[key]) ||
+    isDeepEqual(current[key], skeleton[key]) ||
     (previous !== undefined && isDeepEqual(current[key], previous[key]));
 
   for (const key of FILLABLE) {
@@ -59,10 +61,7 @@ export function mergeDiscovery(
   return manifest;
 }
 
-/**
- * The provenance of every proposed field the draft still holds as proposed: editing a field
- * drops its badge, and a field the merge kept as the author's never gets one.
- */
+/** The provenance of every proposed field the draft still holds as proposed. */
 export function proposalBadges(
   manifest: Manifest,
   proposal: { manifest: Manifest; provenance: DiscoveryBadges },
@@ -74,7 +73,7 @@ export function proposalBadges(
   );
 }
 
-/** The value at an RFC 6901 JSON pointer, `undefined` when a segment is missing. */
+/** An RFC 6901 pointer lookup; `undefined` past a missing segment. */
 function valueAt(root: unknown, pointer: string): unknown {
   let node = root;
   for (const raw of pointer.split("/").slice(1)) {
@@ -86,7 +85,6 @@ function valueAt(root: unknown, pointer: string): unknown {
   return node;
 }
 
-/** Structural equality over JSON values, blind to key order. */
 function isDeepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
@@ -116,16 +114,12 @@ export function badgeUnder(
   return pointer ? badges[pointer] : undefined;
 }
 
-/** Identity fields a sync fills only when the author left them empty. */
 const SYNC_IDENTITY = ["display_name", "description", "homepage", "icon"] as const;
 
 /**
- * Applies what a connected server reports over an existing integration. `tools_policy` keeps the
- * entry of every tool still listed (its `required_scopes` are the author's), adds an empty one per
- * new tool and drops the others, unless the list came back truncated. `default_tools` is the
- * author's choice: an existing list only loses the tools the integration no longer exposes, and an absent or
- * empty one becomes every listed tool the integration exposes (none a `hidden_tools` entry or a
- * connect tool). Identity is the author's too: a field is only filled when empty.
+ * `tools_policy` keeps each still-listed tool's entry (its scopes are the author's) and drops the
+ * rest unless the list was truncated. `default_tools` is the author's: it only loses unexposed
+ * tools, and when empty becomes every exposed listed tool. Identity is filled only when empty.
  */
 export function mergeServerSync(
   current: Manifest,
@@ -159,6 +153,19 @@ export function mergeServerSync(
     if (proposed[key] !== undefined && isEmpty(current[key])) manifest[key] = proposed[key];
   }
   return manifest;
+}
+
+/** A sync proposal as `proposalBadges` reads one: every reported field is detected. */
+export function serverSyncProvenance(proposal: Pick<ServerSyncProposal, "manifest">): {
+  manifest: Manifest;
+  provenance: DiscoveryBadges;
+} {
+  return {
+    manifest: proposal.manifest,
+    provenance: Object.fromEntries(
+      Object.keys(proposal.manifest).map((key) => [`/${key}`, "detected" as const]),
+    ),
+  };
 }
 
 /**

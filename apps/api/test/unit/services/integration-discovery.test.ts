@@ -365,9 +365,9 @@ describe("discoverRemoteIntegration", () => {
     });
   });
 
-  it("refuses an open Streamable HTTP server and ends the session it opened", async () => {
+  it("refuses an open Streamable HTTP server", async () => {
     const notification = { jsonrpc: "2.0", method: "notifications/message", params: {} };
-    const { fetchImpl, seen } = fakeFetch({
+    const { fetchImpl } = fakeFetch({
       "POST https://mcp.open.test/mcp": () =>
         new Response(
           // A notification may come before the response: it is skipped.
@@ -375,7 +375,6 @@ describe("discoverRemoteIntegration", () => {
             `event: message\ndata: ${JSON.stringify({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-11-25" } })}\n\n`,
           { headers: { "Content-Type": "text/event-stream", "Mcp-Session-Id": "s-1" } },
         ),
-      "DELETE https://mcp.open.test/mcp": () => new Response(null, { status: 204 }),
     });
     const err = await refusal(
       discoverRemoteIntegration(
@@ -384,8 +383,36 @@ describe("discoverRemoteIntegration", () => {
       ),
     );
     expect(err.code).toBe("remote_mcp_auth_not_supported");
-    await Bun.sleep(0);
-    expect(seen).toContain("DELETE https://mcp.open.test/mcp");
+  });
+
+  it("reads a JSON answer larger than the probe's prefix as JSON-RPC", async () => {
+    const result = { protocolVersion: "2025-11-25", instructions: "x".repeat(128 * 1024) };
+    const { fetchImpl } = fakeFetch({
+      "POST https://mcp.open.test/mcp": () => json({ jsonrpc: "2.0", id: 1, result }),
+    });
+    const err = await refusal(
+      discoverRemoteIntegration(
+        { url: "https://mcp.open.test/mcp", orgSlug: "acme" },
+        { fetchImpl },
+      ),
+    );
+    expect(err.code).toBe("remote_mcp_auth_not_supported");
+  });
+
+  it("names only the origin in a refusal: a path or query may carry a secret", async () => {
+    const { fetchImpl } = fakeFetch({
+      "POST https://www.html.test/mcp?key=s3cret": () =>
+        new Response("<html></html>", { headers: { "Content-Type": "text/html" } }),
+    });
+    const err = await refusal(
+      discoverRemoteIntegration(
+        { url: "https://www.html.test/mcp?key=s3cret", orgSlug: "acme" },
+        { fetchImpl },
+      ),
+    );
+    expect(err.code).toBe("not_an_mcp_server");
+    expect(err.message).toContain("https://www.html.test");
+    expect(err.message).not.toContain("s3cret");
   });
 
   it("refuses a URL that is not an MCP server", async () => {

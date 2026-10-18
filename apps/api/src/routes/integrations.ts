@@ -288,7 +288,16 @@ export const setOrgDefaultSchema = z
 
 export const connectionShareAllSpacesSchema = z.object({ share_all_spaces: z.boolean() }).strict();
 
-export const discoverIntegrationSchema = z.object({ url: z.url() }).strict();
+export const discoverIntegrationSchema = z
+  .object({
+    // Credentials in a URL would reach logs and the stored manifest. Zod 4 runs a refinement
+    // after a failed `url` check too: an unparsable value is left to that check.
+    url: z.url().refine((url) => {
+      const parsed = URL.parse(url);
+      return !parsed || (parsed.username === "" && parsed.password === "");
+    }, "The URL must not carry a username or password."),
+  })
+  .strict();
 
 export const syncFromServerSchema = z.object({ connection_id: z.uuid().optional() }).strict();
 
@@ -1059,12 +1068,12 @@ export function createIntegrationsRouter() {
           authMethod: c.get("authMethod"),
           requestId: c.get("requestId"),
         },
+        signal: c.req.raw.signal,
       });
       return c.json({
         manifest: proposal.manifest,
         icon_source: proposal.iconSource,
         instructions: proposal.instructions,
-        provenance: proposal.provenance,
         warnings: proposal.warnings,
       });
     },

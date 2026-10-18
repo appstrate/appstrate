@@ -34,7 +34,7 @@ export function SyncFromServer({
   const { t } = useTranslation("agents");
   return (
     <div className="flex flex-col gap-3" data-testid="integration-editor-sync">
-      <div className="flex items-center gap-3">
+      <div className="flex flex-col items-start gap-2">
         <Button
           type="button"
           variant="outline"

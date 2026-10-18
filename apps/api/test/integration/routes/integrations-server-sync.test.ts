@@ -6,10 +6,11 @@
  */
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { db } from "@appstrate/db/client";
-import { connectionCalls } from "@appstrate/db/schema";
+import { connectionCalls, spacePackages } from "@appstrate/db/schema";
 import { drainAudits } from "../../../src/services/audit.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
+import { seedPackage } from "../../helpers/seed.ts";
 import { flushRedis } from "../../helpers/redis.ts";
 import {
   authHeaders,
@@ -125,14 +126,6 @@ describe("POST /api/integrations/{packageId}/discover", () => {
       },
       icon_source: ICON,
       instructions: "Call search before fetch.",
-      provenance: {
-        "/default_tools": "detected",
-        "/tools_policy": "detected",
-        "/display_name": "detected",
-        "/description": "detected",
-        "/homepage": "detected",
-        "/icon": "detected",
-      },
       warnings: [],
     });
     // initialize + initialized + three tools/list pages, each carrying the injected credential;
@@ -192,6 +185,24 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     const res = await sync(ctx, {});
     expect(res.status).toBe(409);
     expect(((await res.json()) as { code: string }).code).toBe("integration_not_connected");
+    expect(server.methods).toEqual([]);
+  });
+
+  it("answers 409 integration_not_published for a draft never published", async () => {
+    const manifest = remote();
+    await seedPackage({
+      id: ID,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: manifest,
+    });
+    await db
+      .insert(spacePackages)
+      .values({ enabled: true, spaceId: ctx.defaultSpaceId, packageId: ID });
+    const res = await sync(ctx, {});
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("integration_not_published");
     expect(server.methods).toEqual([]);
   });
 
@@ -271,13 +282,12 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     expect(((await res.json()) as { code: string }).code).toBe("bad_gateway");
   });
 
-  it("sends the server's own values back as written: no placeholder reaches a credential", async () => {
+  it("sends the server's own header values back as written: no placeholder reaches a credential", async () => {
     const hostile = startFakeMcpServer({
       tools: TOOLS,
       pageSize: 2,
       bearer: TOKEN,
       sessionId: "{{token}}",
-      cursorPrefix: "{{token}}",
     });
     try {
       await seedProxyIntegration(
@@ -290,13 +300,11 @@ describe("POST /api/integrations/{packageId}/discover", () => {
       // Past `initialize`, every MCP exchange (the icon lookup's GETs carry no body).
       const echoed = hostile.requests.slice(1).filter(({ body }) => body !== "");
       expect(echoed).toHaveLength(4);
-      for (const { headers, body } of echoed) {
+      for (const { headers } of echoed) {
         expect(headers.get("mcp-session-id")).toBe("{{token}}");
         const sent = [...headers].filter(([name]) => name !== "authorization");
         expect(JSON.stringify(sent)).not.toContain(TOKEN);
-        expect(body).not.toContain(TOKEN);
       }
-      expect(echoed.some(({ body }) => body.includes('"cursor":"{{token}}'))).toBe(true);
     } finally {
       hostile.stop();
     }

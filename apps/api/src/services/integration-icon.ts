@@ -13,7 +13,6 @@ const ICON_MAX_BYTES = 256 * 1024;
 /** The `<head>` is near the top; a homepage can weigh megabytes. */
 const HTML_HEAD_MAX_BYTES = 256 * 1024;
 const FETCH_TIMEOUT_MS = 5_000;
-/** Linked icons tried per page, before `/favicon.ico`. */
 const MAX_LINKED_ICONS = 4;
 /** Sniffed from the bytes, never the declared type. SVG is a document (scripts), never taken. */
 const RASTER_TYPES = new Set([
@@ -24,10 +23,7 @@ const RASTER_TYPES = new Set([
   "image/x-icon",
 ]);
 
-/**
- * The URL's origin, then its registrable domain's (Public Suffix List) when the host is below it
- * (`mcp.notion.com` → `notion.com`, `mcp.example.co.uk` → `example.co.uk`).
- */
+/** The origin, then its registrable domain's (`mcp.example.co.uk` → `example.co.uk`). */
 export function iconOrigins(url: string): string[] {
   const u = new URL(url);
   const { domain } = parse(u.hostname, { allowPrivateDomains: true, extractHostname: false });
@@ -84,10 +80,7 @@ async function linkedIcons(pageUrl: string, fetchImpl: typeof fetch): Promise<st
     .map((f) => f.href);
 }
 
-/**
- * An icon a server names (an MCP `Implementation.icons[].src`) as a raster data URI, or null: an
- * `http(s)` URL fetched through `fetchImpl`, or a `data:` URI decoded, both sniffed the same way.
- */
+/** An MCP `Implementation.icons[].src` (`http(s)` or `data:`) as a raster data URI, or null. */
 export async function rasterIcon(src: string, fetchImpl: typeof fetch): Promise<string | null> {
   const url = URL.parse(src);
   if (url?.protocol === "http:" || url?.protocol === "https:")

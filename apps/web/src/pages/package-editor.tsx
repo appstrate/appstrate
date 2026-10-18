@@ -56,6 +56,7 @@ import {
   mergeDiscovery,
   mergeServerSync,
   proposalBadges,
+  serverSyncProvenance,
   type DiscoveryBadges,
   type DiscoveryProposal,
 } from "../lib/integration-discovery-merge";
@@ -392,7 +393,7 @@ function IntegrationEditorInner({
   onTabRequest?: (tab: PackageEditorTab) => void;
   /** Editing: the saved package's tool catalog, shown with the draft's policy. */
   toolCatalog?: IntegrationToolCatalogEntry[];
-  /** Editing: the caller holds a connection to this integration, so its server can be asked. */
+  /** Editing: the published version's server can be asked (see `IntegrationDefinitionEditor`). */
   syncable?: boolean;
   /** Editing: the package already has an `INTEGRATION.md`, which a sync never replaces. */
   hasIntegrationDoc?: boolean;
@@ -462,20 +463,13 @@ function IntegrationEditorInner({
     },
   });
 
-  const sourceNow = getSource(state.manifest);
-  // The server is called at the published URL; a templated one needs a connection's values.
-  const canSync =
-    isEdit &&
-    syncable &&
-    sourceNow.kind === "remote" &&
-    sourceNow.remoteTransport !== "sse" &&
-    !sourceNow.remoteUrl.includes("{$");
+  const canSync = isEdit && syncable === true;
 
   const sync = $api.useMutation("post", "/api/integrations/{packageId}/discover", {
     meta: { errorHandledByCaller: true },
     onSuccess: (proposal) => {
       editor.setState((s) => ({ ...s, manifest: mergeServerSync(s.manifest, proposal) }));
-      setApplied(proposal);
+      setApplied(serverSyncProvenance(proposal));
       // A sync never replaces an authored `INTEGRATION.md`.
       const instructions = hasDoc ? null : proposal.instructions;
       setSyncResult({
@@ -563,7 +557,6 @@ function IntegrationEditorInner({
                   isPending: sync.isPending,
                   error: sync.error,
                   result: syncResult,
-                  badge: syncResult ? "detected" : undefined,
                 }
               : undefined
           }
@@ -587,7 +580,10 @@ export function IntegrationDefinitionEditor({
   section: IntegrationDefinitionSection;
   onSection: (section: IntegrationDefinitionSection) => void;
   toolCatalog: IntegrationToolCatalogEntry[];
-  /** The caller holds a connection to the integration. */
+  /**
+   * The published version is served by a Streamable HTTP server at a fixed URL, and the caller
+   * may call it through one of its connections: what the sync reads, not the draft.
+   */
   syncable: boolean;
 }) {
   return (

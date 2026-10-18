@@ -117,11 +117,11 @@ type ProxyCallInput = {
   bodyLength?: number;
   substituteBody?: boolean;
   /**
-   * `false`: headers and body go as written, no `{{field}}` substituted (the credential header is
-   * still injected). For a caller relaying another party's values, such as a protocol client
-   * echoing what the upstream sent it, which must never name a credential field.
+   * Headers go as written, no `{{field}}` substituted (the credential header is still injected).
+   * For a caller relaying another party's values, such as a protocol client echoing what the
+   * upstream sent it, which must never name a credential field.
    */
-  substitute?: false;
+  literalHeaders?: true;
 
   /**
    * Cookie jar store — read before the upstream call, written after.
@@ -242,12 +242,12 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   }
 
   const fields = resolved.credentials;
-  const literal = input.substitute === false;
+  const literal = input.literalHeaders === true;
   const prepareFor = (credentials: Record<string, string>) =>
     prepareApiCallRequest({
       target: input.target,
       headers: literal ? {} : (input.headers ?? {}),
-      body: !literal && typeof input.body === "string" && input.substituteBody ? input.body : null,
+      body: typeof input.body === "string" && input.substituteBody ? input.body : null,
       fields: credentials,
     });
   const prepared = prepareFor(fields);

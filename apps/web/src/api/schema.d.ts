@@ -1900,7 +1900,7 @@ export interface paths {
         put?: never;
         /**
          * Propose manifest fields from the integration's connected MCP server
-         * @description Connects to the remote MCP server of the integration's latest published version through the credential proxy — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, each exchange journaled like one of its calls (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500) as `default_tools` with an empty `tools_policy` entry each, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning). Persists nothing. Only a Streamable HTTP server is supported. Requires `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too) and write authority on the package in its home space. Rate limited to 10 requests per minute.
+         * @description Connects to the remote MCP server of the integration's latest published version through the credential proxy — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, each exchange journaled like one of its calls (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500 tools over 20 pages of at most 2 MiB each) as `default_tools` with an empty `tools_policy` entry each, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning). The whole sync is bounded to 20 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Only a Streamable HTTP server is supported. Requires `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too) and write authority on the package in its home space. Rate limited to 10 requests per minute.
          */
         post: operations["syncIntegrationFromServer"];
         delete?: never;
@@ -13599,7 +13599,7 @@ export interface operations {
                 "application/json": {
                     /**
                      * Format: uri
-                     * @description The MCP server URL, as it would be `source.remote.url`.
+                     * @description The MCP server URL, as it would be `source.remote.url`. A URL carrying a username or password is refused.
                      */
                     url: string;
                 };
@@ -14857,10 +14857,6 @@ export interface operations {
                         icon_source: string | null;
                         /** @description The server's `initialize` instructions, for the editor to propose as `INTEGRATION.md`; null when it sent none. */
                         instructions: string | null;
-                        /** @description Per proposed field, keyed by JSON pointer into `manifest`: always `detected`. */
-                        provenance: {
-                            [key: string]: "detected";
-                        };
                         warnings: {
                             /** @enum {string} */
                             code: "tools_truncated" | "instructions_truncated";
@@ -14882,7 +14878,7 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
-            /** @description `integration_not_connected` — no connection of the integration usable by the caller in this space (or no published version); the proxy's own connection-selection conflicts (`needs_reconnection`, `must_choose_connection`) are relayed. */
+            /** @description `integration_not_published` — the integration has no usable published version; `integration_not_connected` — no connection of the integration usable by the caller in this space; the proxy's own connection-selection conflicts (`needs_reconnection`, `must_choose_connection`) are relayed. */
             409: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];

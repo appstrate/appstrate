@@ -37,7 +37,6 @@ describe("proposalFromServer", () => {
       manifest: { default_tools: ["a", "b"], tools_policy: { a: {}, b: {} } },
       iconSource: null,
       instructions: null,
-      provenance: { "/default_tools": "detected", "/tools_policy": "detected" },
       warnings: [],
     });
   });

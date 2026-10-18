@@ -16,7 +16,7 @@ import { isIconImage } from "@appstrate/core/appearance";
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { Actor } from "../lib/actor.ts";
 import { ApiError, badGateway } from "../lib/errors.ts";
-import { egressFetchImpl } from "../lib/egress-host-guard.ts";
+import { egressFetchImpl, fetchWithin } from "../lib/egress-host-guard.ts";
 import { logger } from "../lib/logger.ts";
 import { proxyProblem } from "../lib/proxy-status.ts";
 import type { SpaceScope } from "../lib/scope.ts";
@@ -26,21 +26,21 @@ import { proxyCall, ProxyCallError } from "./credential-proxy/core.ts";
 import type { ProxyReach } from "./integration-connections.ts";
 import { readIntegrationManifestForProxy } from "./integration-service.ts";
 import { fetchSiteIcon, rasterIcon } from "./integration-icon.ts";
-import { getCredentialProxyLimits } from "./proxy-limits.ts";
 
 export interface ServerSyncProposal {
   manifest: Record<string, unknown>;
   iconSource: string | null;
   /** The server's `instructions`, for the editor to propose as `INTEGRATION.md`. */
   instructions: string | null;
-  provenance: Record<string, "detected">;
   warnings: { code: string; message: string }[];
 }
 
 const SYNC_TIMEOUT_MS = 20_000;
 const MAX_TOOLS = 500;
 /** Bounds a server answering `nextCursor` forever with empty pages. */
-const MAX_PAGES = 50;
+const MAX_PAGES = 20;
+/** Per MCP exchange: a `tools/list` page is kilobytes, not the proxy's general ceiling. */
+const MAX_EXCHANGE_BYTES = 2 * 1024 * 1024;
 /** `serverInfo.icons` entries tried before the site's own icon. */
 const MAX_SERVER_ICONS = 4;
 /** `instructions` is the server's free text, proposed as a file: bounded like one. */
@@ -54,11 +54,20 @@ export async function syncIntegrationFromServer(input: {
   reach: ProxyReach;
   /** Who called, as the call journal records it. */
   caller: Pick<ConnectionCall, "apiKeyId" | "authMethod" | "requestId">;
+  /** The caller's request: its going away ends the sync. */
+  signal?: AbortSignal;
 }): Promise<ServerSyncProposal> {
   const { scope, packageId } = input;
   // The published version: the one `proxyCall` authorizes the call against.
   const loaded = await readIntegrationManifestForProxy(packageId, scope.orgId, null);
-  if (!loaded.ok) throw notConnected(`Integration '${packageId}' has no usable published version.`);
+  if (!loaded.ok) {
+    throw new ApiError({
+      status: 409,
+      code: "integration_not_published",
+      title: "Integration Not Published",
+      detail: `Integration '${packageId}' has no usable published version.`,
+    });
+  }
   const source = loaded.manifest.source;
   if (source?.kind !== "remote") {
     throw new ApiError({
@@ -74,7 +83,7 @@ export async function syncIntegrationFromServer(input: {
       status: 422,
       code: "sync_transport_unsupported",
       title: "Transport Not Supported",
-      detail: `Integration '${packageId}' uses the SSE transport; only Streamable HTTP servers can be synchronised.`,
+      detail: `Integration '${packageId}' uses the SSE transport; only Streamable HTTP servers can be synchronized.`,
     });
   }
   if (isVariableTemplate(url)) {
@@ -82,12 +91,13 @@ export async function syncIntegrationFromServer(input: {
       status: 422,
       code: "sync_url_templated",
       title: "Server URL Is Templated",
-      detail: `Integration '${packageId}' chooses its server URL per connection; it cannot be synchronised.`,
+      detail: `Integration '${packageId}' chooses its server URL per connection; it cannot be synchronized.`,
     });
   }
 
-  const deadline = AbortSignal.timeout(SYNC_TIMEOUT_MS);
-  const { max_response_bytes } = getCredentialProxyLimits();
+  // One bound for the whole sync, the icon lookup included.
+  const timeout = AbortSignal.timeout(SYNC_TIMEOUT_MS);
+  const deadline = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout;
   const proxied = (async (target: Parameters<typeof fetch>[0], init?: RequestInit) => {
     // The standalone GET stream carries server-initiated messages, which a list-and-close never reads.
     if (init?.method === "GET") return new Response(null, { status: 405 });
@@ -125,8 +135,8 @@ export async function syncIntegrationFromServer(input: {
         headers: Object.fromEntries(new Headers(init?.headers)),
         body: typeof init?.body === "string" ? init.body : null,
         // The SDK echoes the server's values (`Mcp-Session-Id`, `nextCursor`): never a placeholder.
-        substitute: false,
-        maxResponseBytes: max_response_bytes,
+        literalHeaders: true,
+        maxResponseBytes: MAX_EXCHANGE_BYTES,
         signal: init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline,
       });
     } catch (err) {
@@ -149,7 +159,8 @@ export async function syncIntegrationFromServer(input: {
         tools,
         truncated,
       },
-      egressFetchImpl(),
+      // Best-effort: past the deadline it finds nothing.
+      fetchWithin(egressFetchImpl(), deadline),
     );
   } catch (err) {
     throw syncFailure(err, packageId, url);
@@ -202,9 +213,6 @@ export async function proposalFromServer(
   // Only an icon the manifest accepts as is; any other raster is the editor's to re-encode.
   if (iconSource && isIconImage(iconSource)) manifest.icon = iconSource;
 
-  const provenance = Object.fromEntries(
-    Object.keys(manifest).map((key) => [`/${key}`, "detected" as const]),
-  );
   const warnings: ServerSyncProposal["warnings"] = [];
   if (server.truncated) {
     warnings.push({
@@ -219,7 +227,7 @@ export async function proposalFromServer(
       message: `The server's instructions exceed ${MAX_INSTRUCTIONS_BYTES / 1024} KiB: they are cut at the last line that fits.`,
     });
   }
-  return { manifest, iconSource, instructions: instructions.text || null, provenance, warnings };
+  return { manifest, iconSource, instructions: instructions.text || null, warnings };
 }
 
 /** At most {@link MAX_INSTRUCTIONS_BYTES} of UTF-8, cut after the last whole line that fits. */
@@ -262,15 +270,16 @@ function syncFailure(err: unknown, packageId: string, url: string): Error {
       ? notConnected(err.message)
       : proxyProblem(err.code, err.message);
   }
+  const origin = URL.parse(url)?.origin;
   logger.warn("integration server sync: MCP exchange failed", {
     packageId,
-    url,
+    origin,
     error: getErrorMessage(err),
   });
   if (err instanceof StreamableHTTPError && (err.code === 401 || err.code === 403)) {
     return badGateway(
-      `The MCP server at ${url} refused the connection's credential (HTTP ${err.code}); reconnect the integration.`,
+      `The MCP server at ${origin} refused the connection's credential (HTTP ${err.code}); reconnect the integration.`,
     );
   }
-  return badGateway(`The MCP server at ${url} could not be synchronised.`);
+  return badGateway(`The MCP server at ${origin} could not be synchronized.`);
 }

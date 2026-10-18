@@ -22,8 +22,6 @@ export interface FakeMcpServerOptions {
   bearer?: string;
   /** Answered as `Mcp-Session-Id` on every response: the client echoes it on each request. */
   sessionId?: string;
-  /** Prefixes each `nextCursor`: the client sends it back in the next `tools/list` body. */
-  cursorPrefix?: string;
 }
 
 export interface FakeMcpServer {
@@ -49,7 +47,6 @@ export function startFakeMcpServer(opts: FakeMcpServerOptions = {}): FakeMcpServ
   const authorizations: (string | null)[] = [];
   const methods: string[] = [];
   const requests: { headers: Headers; body: string }[] = [];
-  const cursorPrefix = opts.cursorPrefix ?? "";
 
   const handle = async (request: Request): Promise<Response> => {
     const server = new Server(opts.serverInfo ?? { name: "fake-mcp", version: "1.0.0" }, {
@@ -57,11 +54,11 @@ export function startFakeMcpServer(opts: FakeMcpServerOptions = {}): FakeMcpServ
       ...(opts.instructions ? { instructions: opts.instructions } : {}),
     });
     server.setRequestHandler(ListToolsRequestSchema, async (req) => {
-      const start = Number(req.params?.cursor?.slice(cursorPrefix.length) ?? 0);
+      const start = Number(req.params?.cursor ?? 0);
       const end = start + pageSize;
       return {
         tools: tools.slice(start, end),
-        ...(end < tools.length ? { nextCursor: `${cursorPrefix}${end}` } : {}),
+        ...(end < tools.length ? { nextCursor: String(end) } : {}),
       };
     });
     const transport = new WebStandardStreamableHTTPServerTransport({

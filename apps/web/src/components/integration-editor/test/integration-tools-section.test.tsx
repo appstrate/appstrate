@@ -46,7 +46,6 @@ describe("IntegrationToolsSection sync", () => {
       warnings: [{ code: "tools_truncated" as const, message: "en" }],
       docProposed: true,
     },
-    badge: "detected" as const,
   };
 
   it("offers the sync, its confirmation and warnings when given", () => {
@@ -57,7 +56,6 @@ describe("IntegrationToolsSection sync", () => {
     expect(html).toContain("Synchroniser depuis le serveur");
     expect(html).toContain("3 outils synchronisés");
     expect(html).toContain("INTEGRATION.md");
-    expect(html).toContain("détecté");
   });
 
   it("offers nothing without it", () => {
