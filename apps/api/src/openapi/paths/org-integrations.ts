@@ -42,7 +42,7 @@ export const orgIntegrationsPaths = {
         "Returns the org's own clients (`org`, oldest first) plus the default it " +
         "inherits, the platform-provided system client (`system`), if any. " +
         "`is_default` marks the org-tier default. Secrets are never returned. Only oauth2 auths " +
-        "whose client is not auto-provisioned (DCR/CIMD) are listed here — the org's machine " +
+        "whose client is not auto-provisioned (DCR) are listed here — the org's machine " +
         "client of an auto-provisioned auth is not chosen by an admin; " +
         `any other auth is a 400. ${PERMISSION_NOTE}`,
       parameters: [...packageParams, authKeyParam],
@@ -90,7 +90,7 @@ export const orgIntegrationsPaths = {
       description:
         "Registers a custom (BYO-app) client at the org level (`spaceId: null`), " +
         "inherited by every space of the org. The first one becomes the org " +
-        "default. Rejected (400) for auto-provisioned (DCR/CIMD) auths, whose " +
+        "default. Rejected (400) for auto-provisioned (DCR) auths, whose " +
         "org-level client the platform registers itself at the first connect from any space. " +
         PERMISSION_NOTE,
       parameters: [...packageParams, authKeyParam],

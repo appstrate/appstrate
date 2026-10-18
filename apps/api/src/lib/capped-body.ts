@@ -25,3 +25,33 @@ export async function readBodyUnder(
   }
   return Buffer.concat(chunks);
 }
+
+/**
+ * The first `maxBytes` of a body as text — or less, once `until` holds on what
+ * was read — the stream cancelled either way. For a body only its head matters
+ * of (an HTML `<head>`), or one that never ends (an SSE stream).
+ */
+export async function readBodyPrefix(
+  response: Response,
+  maxBytes: number,
+  until?: (text: string) => boolean,
+): Promise<string> {
+  if (response.body === null) return "";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let total = 0;
+  try {
+    while (total < maxBytes) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = value.subarray(0, maxBytes - total);
+      total += chunk.byteLength;
+      text += decoder.decode(chunk, { stream: true });
+      if (until?.(text)) break;
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  return text;
+}

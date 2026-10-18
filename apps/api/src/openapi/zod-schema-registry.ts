@@ -135,6 +135,7 @@ import {
   connectSessionSchema,
   connectSubmitSchema,
   setDefaultClientSchema,
+  discoverIntegrationSchema,
 } from "../routes/integrations.ts";
 
 // ---------------------------------------------------------------------------
@@ -573,6 +574,12 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   // ─── Package draft file tree ────────────────────────────────────────────
 
   // ─── Integrations ───────────────────────────────────────────────────────
+  {
+    method: "POST",
+    path: "/api/integrations/discover",
+    jsonSchema: toJsonSchema(discoverIntegrationSchema),
+    description: "Propose an integration manifest from a remote MCP server URL",
+  },
   {
     method: "POST",
     path: "/api/integrations/{packageId}/auths/{authKey}/oauth-clients",

@@ -7,6 +7,7 @@
  *
  *   - `GET    /`                                     — list available + active status
  *   - `GET    /calls`                                — admin: the credential proxy's calls made in this space
+ *   - `POST   /discover`                             — a manifest proposal from a remote MCP server URL
  *
  * Activating and deactivating an integration are NOT here: they are the same
  * act as activating any other package type, on the one pair of doors that
@@ -97,6 +98,7 @@ import { getSpaceScope, type OrgScope, type SpaceScope } from "../lib/scope.ts";
 import type { AuditPayload } from "@appstrate/core/module";
 import { auditDiff, recordAuditAs, recordAuditFromContext } from "./../services/audit.ts";
 import { listIntegrations } from "../services/integration-service.ts";
+import { discoverRemoteIntegration } from "../services/integration-discovery.ts";
 import {
   assertConnectionBelongsToActor,
   assertIsIntegration,
@@ -280,6 +282,8 @@ export const setOrgDefaultSchema = z
   .strict();
 
 export const connectionShareAllSpacesSchema = z.object({ share_all_spaces: z.boolean() }).strict();
+
+export const discoverIntegrationSchema = z.object({ url: z.url() }).strict();
 
 export const updateConnectionSchema = z
   .object({
@@ -1006,6 +1010,20 @@ export function createIntegrationsRouter() {
     requirePermission("integrations", "configure"),
     serveSpaceConnectionCalls,
   );
+
+  // What a remote MCP server URL says about the integration it would back, before
+  // one exists: a manifest proposal for the editor. Reaches a caller-supplied
+  // URL, hence the egress guard inside and the rate limit here; persists nothing.
+  router.post("/discover", rateLimit(10), requirePermission("integrations", "write"), async (c) => {
+    const { url } = await readJsonBody(c, discoverIntegrationSchema);
+    const proposal = await discoverRemoteIntegration({ url, orgSlug: c.get("orgSlug") });
+    return c.json({
+      manifest: proposal.manifest,
+      icon_source: proposal.iconSource,
+      provenance: proposal.provenance,
+      warnings: proposal.warnings,
+    });
+  });
 
   router.get("/:packageId{@[^/]+/[^/]+}", requirePermission("integrations", "read"), async (c) => {
     const packageId = c.req.param("packageId")!;

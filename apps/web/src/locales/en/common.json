@@ -236,6 +236,8 @@
   "apiError.integration_not_active": "An integration the agent depends on is not active in this space: {{message}}",
   "apiError.integration_wrong_type": "A dependency declared as an integration is not one: {{message}}",
   "apiError.integration_invalid_manifest": "The manifest of an integration the agent depends on is invalid: {{message}}",
+  "apiError.not_an_mcp_server": "This address does not answer as an MCP server (Streamable HTTP or SSE).",
+  "apiError.remote_mcp_auth_not_supported": "This MCP server requires no authentication: integrations without authentication are not supported yet.",
   "apiError.missing_integration_connection": "An integration connection is missing or must be chosen before launching.",
   "apiError.model_not_configured": "No model is configured for this agent. Pick one or set the organization's default model.",
   "apiError.model_credential_missing": "This model's key is gone. Choose its models again under Settings › Models.",

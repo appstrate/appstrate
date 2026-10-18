@@ -113,8 +113,12 @@ export type { IntegrationOAuthCallbackResult } from "./integration-oauth.ts";
 // dynamic client registration). The apps/api orchestrator chains these to
 // self-register an OAuth client when an integration opts into dynamic
 // registration and no client is pre-registered.
-// Only the two orchestrating entry points cross the boundary; callers build
-// the argument inline and read the result via inference, so neither module's
-// input/output types are re-exported here.
-export { discoverProtectedResourceMetadata } from "./mcp-oauth-discovery.ts";
+// The challenge parsers serve integration discovery (reading a server's 401).
+// Callers build the arguments inline and read the results via inference, so
+// neither module's input/output types are re-exported here.
+export {
+  discoverProtectedResourceMetadata,
+  parseResourceMetadataChallenge,
+  parseScopeChallenge,
+} from "./mcp-oauth-discovery.ts";
 export { registerDynamicClient, DynamicClientRegistrationError } from "./dcr.ts";

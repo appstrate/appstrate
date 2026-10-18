@@ -236,6 +236,8 @@
   "apiError.integration_not_active": "Une intégration dont dépend l'agent n'est pas activée dans cet espace : {{message}}",
   "apiError.integration_wrong_type": "Une dépendance déclarée comme intégration n'en est pas une : {{message}}",
   "apiError.integration_invalid_manifest": "Le manifeste d'une intégration dont dépend l'agent est invalide : {{message}}",
+  "apiError.not_an_mcp_server": "Cette adresse ne répond pas comme un serveur MCP (Streamable HTTP ou SSE).",
+  "apiError.remote_mcp_auth_not_supported": "Ce serveur MCP ne demande aucune authentification : les intégrations sans authentification ne sont pas encore prises en charge.",
   "apiError.missing_integration_connection": "Une connexion d'intégration manque ou doit être choisie avant de lancer.",
   "apiError.model_not_configured": "Aucun modèle n'est configuré pour cet agent. Choisissez-en un ou définissez le modèle par défaut de l'organisation.",
   "apiError.model_credential_missing": "La clé de ce modèle est introuvable. Choisissez à nouveau ses modèles dans Paramètres › Modèles.",

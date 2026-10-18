@@ -67,7 +67,7 @@ import {
   renderUrlTemplate,
   variableRefs,
 } from "@appstrate/afps-shared/connection-variables";
-import { egressGuardedFetch, isBlockedEgressUrl } from "../lib/egress-host-guard.ts";
+import { egressFetchImpl, isBlockedEgressUrl } from "../lib/egress-host-guard.ts";
 import {
   resolveSystemClientForAuth,
   getDefaultSystemIntegrationClient,
@@ -210,7 +210,7 @@ interface IntegrationOAuthClientWithSecret extends IntegrationOAuthClient {
   clientSecret: string;
   /** Whether this custom client is the default for new connections (else system). */
   isDefault: boolean;
-  /** `true` for a DCR/CIMD-minted machine client (remote MCP public client). */
+  /** `true` for a DCR-minted machine client (remote MCP public client). */
   autoProvisioned: boolean;
   /** Server chosen per connection the client is bound to (AFPS §7.3); null = the manifest's. */
   issuer: string | null;
@@ -843,7 +843,7 @@ async function assertOwnerInScope(
   assertClientAuth(await loadManifestOrThrow(owner, packageId), authKey);
 }
 
-/** oauth2 auths only; a manual client on a DCR/CIMD auth would shadow auto-registration. */
+/** oauth2 auths only; a manual client on a DCR auth would shadow auto-registration. */
 function assertClientAuth(
   manifest: IntegrationManifest,
   authKey: string,
@@ -862,7 +862,7 @@ function assertClientAuth(
   }
   if (!autoProvisioned && usesAutoProvisionedClient(manifest, auth)) {
     throw invalidRequest(
-      `Integration '${manifest.name}' auth '${authKey}' provisions its OAuth client automatically at connect time (DCR/CIMD); a manual client must not be registered. Connect without supplying credentials, or delete the existing client to restore auto-registration.`,
+      `Integration '${manifest.name}' auth '${authKey}' provisions its OAuth client automatically at connect time (DCR); a manual client must not be registered. Connect without supplying credentials, or delete the existing client to restore auto-registration.`,
     );
   }
 }
@@ -931,7 +931,7 @@ function inheritedDefault<C extends { isDefault: boolean }, S>(
 }
 
 /**
- * Load the auto-provisioned (DCR/CIMD) client for `(packageId, authKey, issuer)`, if any (`null`
+ * Load the auto-provisioned (DCR) client for `(packageId, authKey, issuer)`, if any (`null`
  * issuer = the manifest's server). `idx_ioc_one_auto` guarantees at most one — the find half of
  * the DCR find-or-create.
  */
@@ -1070,7 +1070,7 @@ export function encodeClientAuthForStorage(input: {
  * — no ciphertext at all, so "has a secret" is a column read rather than a
  * decryption. The `ioc_public_iff_no_secret` CHECK enforces that biconditional.
  *
- * `opts.autoProvisioned` marks a DCR/CIMD machine client (internal — the admin
+ * `opts.autoProvisioned` marks a DCR machine client (internal — the admin
  * route never sets it; a remote-MCP auth keeps exactly one, enforced by
  * `idx_ioc_one_auto`).
  */
@@ -1170,7 +1170,7 @@ export async function updateIntegrationOAuthClient(
   // (it would point the DCR find-or-create at hand-entered credentials).
   if (existing.autoProvisioned) {
     throw invalidRequest(
-      `OAuth client '${clientId}' is auto-provisioned (DCR/CIMD) and cannot be edited manually; an org administrator deletes it to re-trigger registration.`,
+      `OAuth client '${clientId}' is auto-provisioned (DCR) and cannot be edited manually; an org administrator deletes it to re-trigger registration.`,
     );
   }
   // `null` = the secret field was not submitted → keep the stored credential
@@ -1282,7 +1282,7 @@ function moveClientToOrg(
     ) {
       throw conflict(
         "auto_client_exists_at_org",
-        `OAuth client '${clientId}' is auto-provisioned (DCR/CIMD), and the organization already holds the auto-provisioned client of this auth${existing.issuer ? ` for ${existing.issuer}` : ""}. Reconnect this space's connections to move them onto it, then delete this client.`,
+        `OAuth client '${clientId}' is auto-provisioned (DCR), and the organization already holds the auto-provisioned client of this auth${existing.issuer ? ` for ${existing.issuer}` : ""}. Reconnect this space's connections to move them onto it, then delete this client.`,
       );
     }
     // An auto client of a server chosen per connection is picked by its issuer, never the default.
@@ -1384,7 +1384,7 @@ function customConnectClient(client: IntegrationOAuthClientWithSecret): Resolved
  * Resolve WHICH OAuth client a connect flow uses, and its credentials — the
  * single home for the client-selection precedence. New connections always use the **default**
  * ({@link pickDefault}) — there is no per-connect picker.
- * Auto-provisioned remote-MCP auths (DCR/CIMD) use the org's machine client
+ * Auto-provisioned remote-MCP auths (DCR) use the org's machine client
  * and are never served by a system entry. Throws the operator-facing error when
  * no client can be resolved. The returned `clientRef` is pinned on the
  * connection so token refresh resolves the same credentials. The choice of
@@ -1574,7 +1574,7 @@ interface IntegrationClientDescriptor {
   client_id: string;
   /** True for the client used when no explicit `client_ref` is given at connect. */
   is_default: boolean;
-  /** True for a DCR/CIMD machine client — read-only in the UI (no manual edit). */
+  /** True for a DCR machine client — read-only in the UI (no manual edit). */
   auto_provisioned: boolean;
   /** True when the client carries a non-empty secret (confidential client). */
   has_client_secret: boolean;
@@ -1742,21 +1742,19 @@ export interface ResolvedOAuthConnect {
 
 /**
  * Whether an auth's OAuth client is provisioned automatically at connect time
- * (the MCP-spec onboarding path) rather than pre-registered. Per the MCP
- * Authorization spec a remote MCP server is an OAuth protected resource whose
- * client is obtained at connect time — discovery (RFC 9728 → RFC 8414) plus
- * client acquisition without manual pre-registration (CIMD when advertised,
- * else RFC 7591 dynamic registration) — so no hand-registered client is needed.
+ * (the MCP-spec onboarding path) rather than pre-registered: the authorization
+ * server is discovered (RFC 9728 → RFC 8414) and a client registered with it by
+ * RFC 7591 dynamic registration, so no hand-registered client is needed.
  *
  * Derived from the manifest shape rather than an opt-in flag, but it is NOT
  * enough to be `oauth2` + `source.kind: "remote"`: the auto-provisioned client
- * is a **public client** (`token_endpoint_auth_method: "none"` + PKCE — the
- * MCP-spec norm for both CIMD and DCR). A remote integration that declares a
- * confidential method (`client_secret_*`) is a classic *pre-registered*
- * client that happens to be remote (e.g. the GitHub/Gmail MCP connectors,
- * which ship explicit endpoints + expect an admin-registered secret) — it must
- * keep requiring a manually-registered client. The AS advertising (or not) a
- * `registration_endpoint` / CIMD support is the additional runtime gate.
+ * is a **public client** (`token_endpoint_auth_method: "none"` + PKCE). A
+ * remote integration that declares a confidential method (`client_secret_*`)
+ * is a classic *pre-registered* client that happens to be remote (e.g. the
+ * GitHub/Gmail MCP connectors, which ship explicit endpoints + expect an
+ * admin-registered secret) — it must keep requiring a manually-registered
+ * client. The AS advertising (or not) a `registration_endpoint` is the
+ * additional runtime gate.
  */
 export function usesAutoProvisionedClient(
   manifest: IntegrationManifest,
@@ -1770,16 +1768,9 @@ export function usesAutoProvisionedClient(
 }
 
 /** Discovery and DCR URLs are manifest-, user- (AFPS §8.7) and server-derived: every hop guarded. */
-const egressFetch = (opts?: { maxRedirects: number }) =>
-  ((input: Parameters<typeof fetch>[0], init?: RequestInit) =>
-    egressGuardedFetch(
-      typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
-      init,
-      opts,
-    )) as typeof fetch;
-const ssrfGuardedFetch = egressFetch();
+const ssrfGuardedFetch = egressFetchImpl();
 /** The DCR POST is never redirected (a 3xx bounces the registration). */
-const dcrGuardedFetch = egressFetch({ maxRedirects: 0 });
+const dcrGuardedFetch = egressFetchImpl({ maxRedirects: 0 });
 
 /** Drop a URL that targets a blocked (loopback/RFC1918/link-local/metadata) host. */
 function safeUrl(url: string | undefined): string | undefined {
@@ -1857,7 +1848,7 @@ export async function ensureIntegrationOAuthClient(
     return { spaceClients: space, orgClients: org };
   }
 
-  // Auto-provisioned path: there is exactly one machine client (DCR/CIMD).
+  // Auto-provisioned path: there is exactly one machine client (DCR).
   const existing = await getAutoProvisionedClient(scope, packageId, authKey, null);
 
   // Resolve the AS issuer + RFC 8707 resource. The protected-resource metadata
@@ -4106,7 +4097,7 @@ export async function getIntegrationAuthStatuses(
       // even without an org-registered client. Registry is in-memory — no DB cost.
       has_system_client: listSystemIntegrationClientsFor(packageId, key).length > 0,
       // MCP-spec onboarding: an oauth2 auth on a remote MCP integration provisions
-      // its client at connect time (CIMD/DCR), so the UI enables Connect even
+      // its client at connect time (DCR), so the UI enables Connect even
       // when no client is pre-registered. Derived from the manifest shape.
       client_auto_provisioned: usesAutoProvisionedClient(manifest, auth),
     };
