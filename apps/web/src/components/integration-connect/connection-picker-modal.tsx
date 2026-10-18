@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Lock, Plus, RefreshCw } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
@@ -38,6 +38,13 @@ export function ConnectionPickerModal({
   const name = useIntegrationName(integrationId);
   const [ticked, setTicked] = useState<string[]>(picker.initialTicks);
   const [upgradeTargetId, setUpgradeTargetId] = useState<string | null>(null);
+  // Aborted on unmount: a connect still pending when the modal closes must not write its ticks.
+  const closing = useRef<AbortController | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    closing.current = controller;
+    return () => controller.abort();
+  }, []);
   const { busy, offersDefault, offersNone } = picker;
   const value = picker.saveValue(ticked);
   // Stays open on a refused write: the mutation toasted why, the ticks are still there.
@@ -95,7 +102,11 @@ export function ConnectionPickerModal({
         onToggle={(id) => setTicked(toggleCapped(ticked, id, picker.additionCap))}
         onConnect={(authKey, replacing) =>
           void picker
-            .triggerConnect(authKey, { ticked, ...(replacing ? { replacing } : {}) })
+            .triggerConnect(authKey, {
+              ticked,
+              ...(replacing ? { replacing } : {}),
+              ...(closing.current ? { signal: closing.current.signal } : {}),
+            })
             .then((ok) => {
               if (ok) onClose();
             })

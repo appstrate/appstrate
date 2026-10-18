@@ -1191,6 +1191,28 @@ describe("useConnectionPicker — triggerConnect after the connect popup", () =>
     mounted.unsubscribe();
   });
 
+  it("writes nothing when the modal closed while the popup was pending, the connection staying created", async () => {
+    const closed = new AbortController();
+    let finish: () => void = () => {};
+    const pending = new Promise<void>((resolve) => (finish = resolve));
+    const deferred =
+      (qc: QueryClient): OpenPopup =>
+      async () => {
+        await pending;
+        await invalidateIntegrationQueries(qc);
+        return true;
+      };
+    const { mounted, picked, picker } = await setup([before, withAdded], deferred, [WEB]);
+    const connected = picker.triggerConnect("primary", { ticked: [DB], signal: closed.signal });
+    closed.abort();
+    finish();
+    expect(await connected).toBe(false);
+    expect(picked).toEqual([]);
+    // The popup did refetch: the created connection exists, only the abandoned draft is dropped.
+    expect(mounted.asked()).toBe(2);
+    mounted.unsubscribe();
+  });
+
   it("adds the created connection to the member's pin an unset override shows, kept to its candidates", async () => {
     // The pin names a member that is no candidate: the server binds none of it.
     const brokenPin = {

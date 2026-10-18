@@ -302,12 +302,13 @@ export function useConnectionPicker(
 
   /**
    * Connects a NEW connection, then writes `ticked` (the modal's ticks, else what binds) with it
-   * added, in place of `replacing`. True once that write landed.
+   * added, in place of `replacing`. True once that write landed; an aborted `signal` (the modal
+   * closed meanwhile) abandons the write, the new connection staying created.
    * Never sends a `connection_id`: the server would union scopes into it, widening every agent bound to it.
    */
   const triggerConnect = async (
     authKey: string,
-    opts: { replacing?: string; ticked?: readonly string[] } = {},
+    opts: { replacing?: string; ticked?: readonly string[]; signal?: AbortSignal } = {},
   ): Promise<boolean> => {
     // The popup cannot return the new id: it is the candidate this snapshot lacks.
     const before = new Set(candidateIds);
@@ -319,7 +320,7 @@ export function useConnectionPicker(
       forceAccountSelect: true,
     });
     // A settled popup has refetched the verdict: read it, never ask again.
-    if (!settled) return false;
+    if (!settled || opts.signal?.aborted) return false;
     let refetchedIds: string[];
     try {
       refetchedIds = (readResolution()?.candidates ?? []).map((c) => c.id);
