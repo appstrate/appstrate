@@ -170,7 +170,7 @@ describe("GET /oauth/client-metadata/{document} (public)", () => {
       client_id: documentUrl(issuer),
       client_name: "Appstrate (appstrate.example.com)",
       client_uri: PUBLIC_APP_URL,
-      redirect_uris: [`${CALLBACK}/${authorizationServerTag(issuer)}`],
+      redirect_uris: [`${CALLBACK}/cimd/${authorizationServerTag(issuer)}`],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
       token_endpoint_auth_method: "none",
@@ -318,16 +318,23 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
 
     const authUrl = await begin();
     expect(authUrl.searchParams.get("client_id")).toBe(document);
-    expect(authUrl.searchParams.get("redirect_uri")).toBe(`${CALLBACK}/${tag}`);
+    expect(authUrl.searchParams.get("redirect_uri")).toBe(`${CALLBACK}/cimd/${tag}`);
+    // The state requires `iss`, as decided from the metadata the client was chosen on.
+    const stateRecord = await oauthStateStore.get(authUrl.searchParams.get("state")!);
+    expect(stateRecord!.integration).toMatchObject({
+      issuer: meta.base,
+      issParameterSupported: true,
+      redirectTag: `cimd/${tag}`,
+    });
     // The document the server would fetch lists exactly that redirect URI.
     const served = await app.request(new URL(document).pathname);
     expect(await served.json()).toMatchObject({
       client_id: document,
-      redirect_uris: [`${CALLBACK}/${tag}`],
+      redirect_uris: [`${CALLBACK}/cimd/${tag}`],
     });
 
     const back = await consent(authUrl);
-    expect(back.pathname).toBe(`/api/integrations/callback/${tag}`);
+    expect(back.pathname).toBe(`/api/integrations/callback/cimd/${tag}`);
     expect(await callbackText(back)).not.toContain("error");
 
     expect(meta.registrations).toBe(0);
@@ -383,6 +390,20 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
     expect(await db.select().from(integrationConnections)).toEqual([]);
   });
 
+  it("never completes a DCR flow with a response on a document's redirect URI", async () => {
+    // A DCR client of a server without `iss` (fixed server: no tag). A response arriving on the
+    // document namespace — where a server handed our document would send it — is refused.
+    await install({ cimd: false, registration: true, iss: false }, { clientId: "dcr-1" });
+    const back = await consent(await begin());
+    expect(back.pathname).toBe("/api/integrations/callback");
+    const onDocumentPath = `/api/integrations/callback/cimd/${authorizationServerTag(meta.base)}${back.search}`;
+    expect(await callbackText(onDocumentPath)).toContain(
+      "did not come from the authorization server",
+    );
+    expect(meta.provider!.tokenRequests).toHaveLength(0);
+    expect(await db.select().from(integrationConnections)).toEqual([]);
+  });
+
   it("refuses a document client bound to another server than the state's (issuer_mismatch)", async () => {
     await install({ cimd: true, registration: true });
     const back = await consent(await begin());
@@ -419,8 +440,8 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
     const { picked } = await connectClient();
     expect(picked).toEqual({
       clientId: documentUrl(meta.base),
-      redirectUri: `${CALLBACK}/${authorizationServerTag(meta.base)}`,
-      redirectTag: authorizationServerTag(meta.base),
+      redirectUri: `${CALLBACK}/cimd/${authorizationServerTag(meta.base)}`,
+      redirectTag: `cimd/${authorizationServerTag(meta.base)}`,
       clientRef: documentUrl(meta.base),
     });
     // The registered client stays, for the connections that pinned it.

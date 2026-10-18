@@ -5742,7 +5742,7 @@
         "operationId": "integrationsOAuthCallback",
         "tags": ["Integrations"],
         "summary": "Integration OAuth2 callback (popup)",
-        "description": "Browser-side OAuth callback for an authorization server fixed by the manifest. Exchanges code + state for tokens, persists the connection, and returns an HTML page that closes the popup window. A response for a flow started with an authorization server chosen per connection is refused here: it must arrive at that server's own `/callback/{tag}`. When the response carries `iss` (RFC 9207) it must name the authorization server the request was sent to, and a response without it is refused from a server that advertises `authorization_response_iss_parameter_supported`.",
+        "description": "Browser-side OAuth callback for an authorization server fixed by the manifest. Exchanges code + state for tokens, persists the connection, and returns an HTML page that closes the popup window. A response for a flow started with a per-server redirect URI is refused here: one with an authorization server chosen per connection must arrive at that server's own `/callback/{tag}`, one with a client metadata document at `/callback/cimd/{tag}`. When the response carries `iss` (RFC 9207) it must name the authorization server the request was sent to, and a response without it is refused from a server that advertises `authorization_response_iss_parameter_supported`.",
         "parameters": [
           {
             "name": "code",
@@ -5801,7 +5801,76 @@
         "operationId": "integrationsOAuthCallbackForServer",
         "tags": ["Integrations"],
         "summary": "Integration OAuth2 callback of an authorization server chosen per connection (popup)",
-        "description": "The redirect URI registered with, and sent to, an authorization server chosen per connection (AFPS §7.3: an oauth2 auth whose `issuer` or `source.remote.url` is a URL template over connection variables). One per server — the RFC 9700 §4.4 mix-up defence — so the response must arrive at the tag of the server the request was sent to: a mismatch is refused, as is a response for a fixed server. Otherwise identical to `integrationsOAuthCallback`, including the RFC 9207 `iss` check.",
+        "description": "The redirect URI registered with, and sent to, an authorization server chosen per connection (AFPS §7.3: an oauth2 auth whose `issuer` or `source.remote.url` is a URL template over connection variables). One per server — the RFC 9700 §4.4 mix-up defence — so the response must arrive at the tag of the server the request was sent to: a mismatch is refused, as is a response for a fixed server or for a client metadata document (`/callback/cimd/{tag}`). Otherwise identical to `integrationsOAuthCallback`, including the RFC 9207 `iss` check.",
+        "parameters": [
+          {
+            "name": "tag",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{22}$"
+            },
+            "description": "The authorization server's tag: the first 22 characters of base64url(SHA-256(issuer)), the issuer of its validated RFC 8414 metadata."
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Authorization code returned by the IdP"
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "OAuth state parameter (UUID)"
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "OAuth error code (if the IdP rejected the request)"
+          },
+          {
+            "name": "iss",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "RFC 9207 issuer identifier of the authorization server that issued the response. Compared with the issuer the request was sent to whenever present."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTML page that closes the popup window. Renders either a success page or an error page (missing params, IdP error, response from another authorization server, code exchange failure, identity mismatch, or persistence failure).",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/integrations/callback/cimd/{tag}": {
+      "get": {
+        "operationId": "integrationsOAuthCallbackForMetadataDocument",
+        "tags": ["Integrations"],
+        "summary": "Integration OAuth2 callback of a client metadata document (popup)",
+        "description": "The redirect URI a Client ID Metadata Document of this instance lists (`GET /oauth/client-metadata/{document}`), one per authorization server, in a namespace dynamic registration never uses: a response here only completes a flow started with a metadata-document client of the server whose tag it carries — never one started with a DCR or administrator client, and never at `/callback` or `/callback/{tag}`. Any server can fetch any document, so such a flow also requires RFC 9207 `iss` naming the server the request was sent to; a response without it, or naming another server, is refused (RFC 9700 §4.4 mix-up defence). Otherwise identical to `integrationsOAuthCallback`.",
         "parameters": [
           {
             "name": "tag",
@@ -16985,7 +17054,7 @@
         "operationId": "getOAuthClientMetadataDocument",
         "tags": ["Integrations"],
         "summary": "OAuth client metadata document",
-        "description": "Public. This instance's OAuth Client ID Metadata Document (draft-ietf-oauth-client-id-metadata-document) for one authorization server: its URL is the `client_id` an auto-provisioned integration auth (remote MCP, or a server chosen per connection — `token_endpoint_auth_method: none`) presents to a server whose validated metadata advertises `client_id_metadata_document_supported` and RFC 9207 `authorization_response_iss_parameter_supported` (the `iss` check is what refuses a response another server returns on this redirect URI), which fetches it — the client registration MCP 2026-07-28 prefers to dynamic registration (RFC 7591), the fallback otherwise. `document` is `<base64url(issuer)>.json`, and the document names that server's own redirect URI (`/api/integrations/callback/<tag>`), so each server is given a `client_id` and a redirect URI of its own (RFC 9700 §4.4). Presented only when `APP_URL` is `https` on a public host and `INTEGRATION_OAUTH_CIMD` is not `off`; otherwise connect registers by DCR. Computed from `APP_URL` and the issuer, nothing stored.",
+        "description": "Public. This instance's OAuth Client ID Metadata Document (draft-ietf-oauth-client-id-metadata-document) for one authorization server: its URL is the `client_id` an auto-provisioned integration auth (remote MCP, or a server chosen per connection — `token_endpoint_auth_method: none`) presents to a server whose validated metadata advertises `client_id_metadata_document_supported` and RFC 9207 `authorization_response_iss_parameter_supported` (the `iss` check is what refuses a response another server returns on this redirect URI), which fetches it — the client registration MCP 2026-07-28 prefers to dynamic registration (RFC 7591), the fallback otherwise. `document` is `<base64url(issuer)>.json`, and the document names that server's own redirect URI (`/api/integrations/callback/cimd/<tag>`), so each server is given a `client_id` and a redirect URI of its own (RFC 9700 §4.4). Presented only when `APP_URL` is `https` on a public host and `INTEGRATION_OAUTH_CIMD` is not `off`; otherwise connect registers by DCR. Computed from `APP_URL` and the issuer, nothing stored.",
         "security": [],
         "parameters": [
           {
@@ -17051,7 +17120,7 @@
                         "type": "string",
                         "format": "uri"
                       },
-                      "description": "The one redirect URI the connect flow sends with this `client_id`: the server's own `<APP_URL>/api/integrations/callback/<tag>` — never the shared callback, so a response from another server cannot land on it (mix-up, RFC 9700 §4.4)."
+                      "description": "The one redirect URI the connect flow sends with this `client_id`: the server's own `<APP_URL>/api/integrations/callback/cimd/<tag>` — never the shared callback, nor the `/callback/<tag>` a DCR client of the same server registers (mix-up, RFC 9700 §4.4)."
                     },
                     "grant_types": {
                       "type": "array",
@@ -17079,7 +17148,7 @@
                   "client_name": "Appstrate (app.example.com)",
                   "client_uri": "https://app.example.com",
                   "redirect_uris": [
-                    "https://app.example.com/api/integrations/callback/ZUGRhbwa83_JyNgKjMOax-"
+                    "https://app.example.com/api/integrations/callback/cimd/ZUGRhbwa83_JyNgKjMOax-"
                   ],
                   "grant_types": ["authorization_code", "refresh_token"],
                   "response_types": ["code"],

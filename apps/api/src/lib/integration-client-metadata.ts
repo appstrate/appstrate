@@ -10,26 +10,30 @@
  *
  * One document per authorization server, never a shared one:
  * `/oauth/client-metadata/<base64url(issuer)>.json`, listing that server's own
- * redirect URI `<callback>/<tag>` (`integrationCallbackUrlFor`), so every
- * response must come back on its server's tag. The name carries the issuer
- * itself, not its tag, so the client resolved from the ref is bound to that
- * server (callback `iss` check, refresh endpoint) with no row to read it from.
+ * redirect URI `<callback>/cimd/<tag>` (`clientMetadataCallbackUrlFor`). The
+ * name carries the issuer itself, not its tag, so the client resolved from the
+ * ref is bound to that server (callback `iss` check, refresh endpoint) with no
+ * row to read it from.
  *
- * The tag alone does not stop a mix-up (RFC 9700 §4.4) here, which is why a
- * document is presented only to a server advertising RFC 9207 `iss`: any
- * server fetches any document, so a hostile server A can bounce the user to an
- * honest server B with A's own `client_id` and redirect URI — B reads A's
- * document, accepts both, and returns the code to A's tag, after which the code
- * and the PKCE verifier would go to A's token endpoint. With A advertising
- * `authorization_response_iss_parameter_supported`, the OAuth state requires an
- * `iss` equal to A's issuer, so B's response — its own `iss`, or none — is
- * refused before any token request.
+ * Mix-up (RFC 9700 §4.4): any server fetches any document, so a hostile server
+ * A can bounce the user to an honest server B with A's document as `client_id`
+ * and its redirect URI — B reads the document, accepts both, and returns the
+ * code to A's redirect URI, after which the code and the PKCE verifier would
+ * go to A's token endpoint. Two rules close it:
+ *
+ *   - a document is presented only to a server advertising RFC 9207 `iss`, and
+ *     the OAuth state of a document client requires an `iss` equal to its
+ *     issuer — B's response, its own `iss` or none, is refused;
+ *   - the document's redirect URI is in a namespace DCR never registers
+ *     (`/callback/cimd/<tag>`, not `/callback/<tag>`), so a response there can
+ *     only satisfy a document client's state — never the state of a DCR client
+ *     of a server without `iss` whose tag is the same.
  */
 
 import { getEnv } from "@appstrate/env";
 import { isBlockedHost } from "@appstrate/core/ssrf";
 import { isAllowedInternalIdpHost } from "@appstrate/connect";
-import { integrationCallbackUrlFor } from "./integration-callback-url.ts";
+import { clientMetadataCallbackUrlFor } from "./integration-callback-url.ts";
 
 const CLIENT_METADATA_PREFIX = "/oauth/client-metadata/";
 const DOCUMENT_NAME = /^([A-Za-z0-9_-]+)\.json$/;
@@ -140,7 +144,7 @@ export function clientMetadataDocument(issuer: string): ClientMetadataDocument {
     client_id: clientMetadataDocumentUrl(issuer),
     client_name: platformClientName(),
     client_uri: getEnv().APP_URL,
-    redirect_uris: [integrationCallbackUrlFor(issuer)],
+    redirect_uris: [clientMetadataCallbackUrlFor(issuer)],
     grant_types: ["authorization_code", "refresh_token"],
     response_types: ["code"],
     token_endpoint_auth_method: "none",

@@ -107,7 +107,10 @@ export {
 // integrations route + connect strategy). The initiate-side input/result
 // shapes stay internal — callers build the argument inline and read the
 // result via inference.
-export type { IntegrationOAuthCallbackResult } from "./integration-oauth.ts";
+export type {
+  AuthorizationServerBinding,
+  IntegrationOAuthCallbackResult,
+} from "./integration-oauth.ts";
 
 // MCP-spec auto-DCR primitives (RFC 9728 protected-resource discovery + RFC 7591
 // dynamic client registration). The apps/api orchestrator chains these to

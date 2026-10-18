@@ -198,6 +198,10 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
     why: "the per-authorization-server OAuth redirect (AFPS §7.3) — the echoed `state` is the credential, and its tag must match",
   },
   {
+    path: "/api/integrations/callback/cimd/{tag}",
+    why: "the OAuth redirect a client metadata document lists — the echoed `state` is the credential; its tag and iss must match",
+  },
+  {
     path: "/api/model-providers-oauth/pair/redeem",
     why: "the one-shot pairing token minted for `npx @appstrate/connect-helper`",
   },

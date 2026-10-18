@@ -440,6 +440,10 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       // A per-server redirect URI (a server chosen per connection, or any metadata-document
       // client): the callback refuses a response that arrives through another path (mix-up).
       ...(redirectTag ? { redirectTag } : {}),
+      // The server binding the client choice was made on, not a second discovery's answer.
+      ...(resolved.authorizationServer
+        ? { authorizationServer: resolved.authorizationServer }
+        : {}),
       ...(variables ? { variables } : {}),
     });
     return { redirectUrl: result.authUrl, state: result.state };

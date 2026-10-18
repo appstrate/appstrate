@@ -323,6 +323,8 @@ services:
       - OIDC_INSTANCE_CLIENTS
       # Comma-separated hostnames trusted on a private address (SSRF allowlist).
       - EGRESS_ALLOW_INTERNAL_HOSTS
+      # Integration OAuth clients: `off` = always DCR, never a client metadata document.
+      - INTEGRATION_OAUTH_CIMD
       # Social login (opt-in).
       - GOOGLE_CLIENT_ID
       - GOOGLE_CLIENT_SECRET

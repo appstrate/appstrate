@@ -133,13 +133,14 @@ import {
 } from "../lib/package-helpers.ts";
 import {
   integrationCallbackUrl,
+  clientMetadataCallbackUrlFor,
   integrationCallbackUrlFor,
   redirectTagOf,
 } from "../lib/integration-callback-url.ts";
 import { CONNECTION_LABEL_MAX, toMintedLabel } from "../lib/connection-label.ts";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
-import type { Actor, ResolvedOAuthClient } from "@appstrate/connect";
+import type { Actor, AuthorizationServerBinding, ResolvedOAuthClient } from "@appstrate/connect";
 import {
   resolveIntegrationToolCatalog,
   readDefaultTools,
@@ -1429,11 +1430,12 @@ interface ResolvedConnectClient {
 /**
  * This instance's Client ID Metadata Document of `issuer`'s server as the connect-time client: no
  * row, the document URL is both `client_id` and `client_ref`, and the redirect URI is the server's
- * own (`<callback>/<tag>`) — never the shared callback, whatever the auth.
+ * own in the documents' namespace (`<callback>/cimd/<tag>`) — never the shared callback, nor the
+ * one a DCR client of the same server registers.
  */
 function metadataDocumentClient(issuer: string): ResolvedConnectClient {
   const url = clientMetadataDocumentUrl(issuer);
-  const redirectUri = integrationCallbackUrlFor(issuer);
+  const redirectUri = clientMetadataCallbackUrlFor(issuer);
   return { clientId: url, redirectUri, redirectTag: redirectTagOf(redirectUri)!, clientRef: url };
 }
 
@@ -1859,6 +1861,12 @@ export interface ResolvedOAuthConnect {
    * instance can serve one: the client is the document, ahead of any DCR machine client.
    */
   metadataDocumentClient?: ResolvedConnectClient;
+  /**
+   * The authorization server the client was chosen for, from the validated metadata the choice
+   * read — handed to the OAuth state as is, so its `iss` requirement is the one that choice relied
+   * on (a document client is chosen only when it is set). Absent when no metadata was read.
+   */
+  authorizationServer?: AuthorizationServerBinding;
   /** Discovered/declared issuer (overrides the manifest when set). */
   issuer?: string;
   authorizationEndpoint?: string;
@@ -2053,6 +2061,14 @@ export async function ensureIntegrationOAuthClient(
       : {}),
     ...(safeUrl(endpoints.tokenEndpoint) ? { tokenEndpoint: endpoints.tokenEndpoint } : {}),
     ...(resource ? { resource } : {}),
+    ...(discovered.issuer !== undefined
+      ? {
+          authorizationServer: {
+            issuer: discovered.issuer,
+            issParameterSupported: discovered.authorizationResponseIssParameterSupported === true,
+          },
+        }
+      : {}),
   };
 
   // CIMD ahead of DCR, even of a machine client DCR registered before: its connections keep it
@@ -2188,6 +2204,10 @@ async function ensurePerConnectionOAuthClient(
     authorizationEndpoint: endpoints.authorizationEndpoint,
     tokenEndpoint: endpoints.tokenEndpoint,
     ...(resource ? { resource } : {}),
+    authorizationServer: {
+      issuer,
+      issParameterSupported: endpoints.authorizationResponseIssParameterSupported === true,
+    },
   };
   if (byDocument) return { ...resolved, metadataDocumentClient: metadataDocumentClient(issuer) };
   const existing = await getAutoProvisionedClient(scope, packageId, authKey, issuer);

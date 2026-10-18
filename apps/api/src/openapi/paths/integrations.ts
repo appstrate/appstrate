@@ -1014,7 +1014,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Integration OAuth2 callback (popup)",
       description:
-        "Browser-side OAuth callback for an authorization server fixed by the manifest. Exchanges code + state for tokens, persists the connection, and returns an HTML page that closes the popup window. A response for a flow started with an authorization server chosen per connection is refused here: it must arrive at that server's own `/callback/{tag}`. When the response carries `iss` (RFC 9207) it must name the authorization server the request was sent to, and a response without it is refused from a server that advertises `authorization_response_iss_parameter_supported`.",
+        "Browser-side OAuth callback for an authorization server fixed by the manifest. Exchanges code + state for tokens, persists the connection, and returns an HTML page that closes the popup window. A response for a flow started with a per-server redirect URI is refused here: one with an authorization server chosen per connection must arrive at that server's own `/callback/{tag}`, one with a client metadata document at `/callback/cimd/{tag}`. When the response carries `iss` (RFC 9207) it must name the authorization server the request was sent to, and a response without it is refused from a server that advertises `authorization_response_iss_parameter_supported`.",
       parameters: oauthCallbackQueryParameters,
       responses: oauthCallbackResponses,
     },
@@ -1026,7 +1026,28 @@ export const integrationsPaths = {
       summary:
         "Integration OAuth2 callback of an authorization server chosen per connection (popup)",
       description:
-        "The redirect URI registered with, and sent to, an authorization server chosen per connection (AFPS §7.3: an oauth2 auth whose `issuer` or `source.remote.url` is a URL template over connection variables). One per server — the RFC 9700 §4.4 mix-up defence — so the response must arrive at the tag of the server the request was sent to: a mismatch is refused, as is a response for a fixed server. Otherwise identical to `integrationsOAuthCallback`, including the RFC 9207 `iss` check.",
+        "The redirect URI registered with, and sent to, an authorization server chosen per connection (AFPS §7.3: an oauth2 auth whose `issuer` or `source.remote.url` is a URL template over connection variables). One per server — the RFC 9700 §4.4 mix-up defence — so the response must arrive at the tag of the server the request was sent to: a mismatch is refused, as is a response for a fixed server or for a client metadata document (`/callback/cimd/{tag}`). Otherwise identical to `integrationsOAuthCallback`, including the RFC 9207 `iss` check.",
+      parameters: [
+        {
+          name: "tag",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^[A-Za-z0-9_-]{22}$" },
+          description:
+            "The authorization server's tag: the first 22 characters of base64url(SHA-256(issuer)), the issuer of its validated RFC 8414 metadata.",
+        },
+        ...oauthCallbackQueryParameters,
+      ],
+      responses: oauthCallbackResponses,
+    },
+  },
+  "/api/integrations/callback/cimd/{tag}": {
+    get: {
+      operationId: "integrationsOAuthCallbackForMetadataDocument",
+      tags: ["Integrations"],
+      summary: "Integration OAuth2 callback of a client metadata document (popup)",
+      description:
+        "The redirect URI a Client ID Metadata Document of this instance lists (`GET /oauth/client-metadata/{document}`), one per authorization server, in a namespace dynamic registration never uses: a response here only completes a flow started with a metadata-document client of the server whose tag it carries — never one started with a DCR or administrator client, and never at `/callback` or `/callback/{tag}`. Any server can fetch any document, so such a flow also requires RFC 9207 `iss` naming the server the request was sent to; a response without it, or naming another server, is refused (RFC 9700 §4.4 mix-up defence). Otherwise identical to `integrationsOAuthCallback`.",
       parameters: [
         {
           name: "tag",

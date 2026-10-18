@@ -338,6 +338,8 @@ services:
       - PROXY_URL=${PROXY_URL:-}
       # Comma-separated hostnames trusted on a private address (SSRF allowlist).
       - EGRESS_ALLOW_INTERNAL_HOSTS
+      # Integration OAuth clients: `off` = always DCR, never a client metadata document.
+      - INTEGRATION_OAUTH_CIMD
       - OIDC_INSTANCE_CLIENTS
       # ── Social login (optional) ──
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}

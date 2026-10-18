@@ -32,6 +32,8 @@ interface Forge {
   advertise: Map<string, string[]>;
   /** Advertise `client_id_metadata_document_supported` (CIMD) in the RFC 8414 metadata. */
   cimd: boolean;
+  /** Advertise RFC 9207 `authorization_response_iss_parameter_supported` and send `iss`. */
+  iss: boolean;
   stop: () => void;
 }
 
@@ -45,6 +47,7 @@ function startForge(): Forge {
     tokenRequests,
     advertise,
     cimd: false,
+    iss: true,
     stop: () => {},
   };
   let n = 0;
@@ -87,7 +90,7 @@ function startForge(): Forge {
           registration_endpoint: `${base}/oauth/register`,
           grant_types_supported: ["authorization_code", "refresh_token"],
           code_challenge_methods_supported: ["S256"],
-          authorization_response_iss_parameter_supported: true,
+          ...(handle.iss ? { authorization_response_iss_parameter_supported: true } : {}),
           ...(handle.cimd ? { client_id_metadata_document_supported: true } : {}),
         });
       }
@@ -107,7 +110,7 @@ function startForge(): Forge {
         const back = new URL(url.searchParams.get("redirect_uri")!);
         back.searchParams.set("code", `code-${++n}`);
         back.searchParams.set("state", url.searchParams.get("state")!);
-        back.searchParams.set("iss", base);
+        if (handle.iss) back.searchParams.set("iss", base);
         return new Response(null, { status: 302, headers: { Location: back.toString() } });
       }
       if (req.method === "POST" && url.pathname === "/oauth/token") {
@@ -427,6 +430,7 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     forge.tokenRequests.length = 0;
     forge.advertise.clear();
     forge.cimd = false;
+    forge.iss = true;
     ctx = await createTestContext({ orgSlug: "myorg" });
     await seedIntegration(ctx.orgId, forgeManifest("@myorg/forge"));
   });
@@ -585,6 +589,48 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     expect(JSON.stringify(await res.json())).toContain("per connection");
   });
 
+  it("refuses the mix-up through a document: a DCR server without iss bouncing to a CIMD server", async () => {
+    // A (per connection, DCR, no iss) sends the user to B with our document of A as client_id and
+    // its redirect URI, plus A's state; B — which fetches any document — returns the code there
+    // without iss. The document's redirect URI is not A's DCR one, so A's state refuses it.
+    const previousAppUrl = process.env.APP_URL;
+    process.env.APP_URL = "https://appstrate.example.com";
+    resetEnvCache();
+    try {
+      forge.iss = false;
+      const res = await app.request("/api/integrations/@myorg/forge/auths/oauth/connect/oauth2", {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ variables: { base_url: base } }),
+      });
+      expect(res.status).toBe(200);
+      const toA = new URL(((await res.json()) as { auth_url: string }).auth_url);
+      expect(toA.searchParams.get("redirect_uri")).toBe(
+        `https://appstrate.example.com/api/integrations/callback/${authorizationServerTag(base)}`,
+      );
+      const documentOfA = `/oauth/client-metadata/${Buffer.from(base).toString("base64url")}.json`;
+      const doc = (await (await app.request(documentOfA)).json()) as { redirect_uris: string[] };
+      expect(doc.redirect_uris).toEqual([
+        `https://appstrate.example.com/api/integrations/callback/cimd/${authorizationServerTag(base)}`,
+      ]);
+
+      const toB = new URL(`${otherBase}/oauth/authorize`);
+      for (const [k, v] of toA.searchParams) toB.searchParams.set(k, v);
+      toB.searchParams.set("client_id", `https://appstrate.example.com${documentOfA}`);
+      toB.searchParams.set("redirect_uri", doc.redirect_uris[0]!);
+      const fromB = await authorize(toB.toString());
+      expect(fromB.searchParams.get("iss")).toBeNull();
+      const done = await app.request(fromB.pathname + fromB.search);
+      expect(await done.text()).toContain("did not come from the authorization server");
+      expect(forge.tokenRequests).toHaveLength(0);
+      expect(await db.select().from(integrationConnections)).toHaveLength(0);
+    } finally {
+      if (previousAppUrl === undefined) delete process.env.APP_URL;
+      else process.env.APP_URL = previousAppUrl;
+      resetEnvCache();
+    }
+  });
+
   it("takes the server's own client metadata document when it accepts CIMD: no row, bound to it", async () => {
     const previousAppUrl = process.env.APP_URL;
     process.env.APP_URL = "https://appstrate.example.com";
@@ -603,7 +649,7 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
       const authorizeUrl = new URL(authUrl);
       expect(authorizeUrl.searchParams.get("client_id")).toBe(documentUrl);
       expect(authorizeUrl.searchParams.get("redirect_uri")).toBe(
-        `https://appstrate.example.com/api/integrations/callback/${tag}`,
+        `https://appstrate.example.com/api/integrations/callback/cimd/${tag}`,
       );
       // The document the server would fetch lists exactly that redirect URI.
       const doc = await app.request(new URL(documentUrl).pathname);

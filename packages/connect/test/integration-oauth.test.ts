@@ -921,7 +921,13 @@ describe("integration OAuth mix-up defence (RFC 9207, RFC 9700 §4.4)", () => {
     });
   }
 
-  async function initiate(opts: { issSupported?: boolean; redirectTag?: string } = {}) {
+  async function initiate(
+    opts: {
+      issSupported?: boolean;
+      redirectTag?: string;
+      authorizationServer?: { issuer: string; issParameterSupported: boolean };
+    } = {},
+  ) {
     return initiateIntegrationOAuth(store, {
       packageId: "@org/forge",
       authKey: "oauth",
@@ -935,6 +941,7 @@ describe("integration OAuth mix-up defence (RFC 9207, RFC 9700 §4.4)", () => {
       discover: discoverFor(opts.issSupported ?? false),
       variables: { base_url: ISSUER },
       ...(opts.redirectTag ? { redirectTag: opts.redirectTag } : {}),
+      ...(opts.authorizationServer ? { authorizationServer: opts.authorizationServer } : {}),
     });
   }
 
@@ -965,6 +972,39 @@ describe("integration OAuth mix-up defence (RFC 9207, RFC 9700 §4.4)", () => {
       redirectTag: "T".repeat(22),
       variables: { base_url: ISSUER },
     });
+  });
+
+  it("takes the issuer and the iss requirement from the caller's binding, not a second discovery", async () => {
+    // The client was chosen on metadata requiring `iss`; this call's discovery (a cache expiry,
+    // a server answering differently) says otherwise and names nothing new: the binding wins.
+    const { state } = await initiate({
+      issSupported: false,
+      authorizationServer: { issuer: ISSUER, issParameterSupported: true },
+    });
+    expect(store._data.get(state)?.integration).toMatchObject({
+      issuer: ISSUER,
+      issParameterSupported: true,
+    });
+    const before = tokenStub.calls.length;
+    await refusal(
+      handleIntegrationOAuthCallback(store, resolverFor(), "CODE", state, tokenStub.impl, {
+        redirectTag: null,
+      }),
+    );
+    expect(tokenStub.calls.length).toBe(before);
+  });
+
+  it("a discovery advertising iss still adds the requirement to a binding without it", async () => {
+    const withIt = await initiate({
+      issSupported: true,
+      authorizationServer: { issuer: ISSUER, issParameterSupported: false },
+    });
+    expect(store._data.get(withIt.state)?.integration?.issParameterSupported).toBe(true);
+    const without = await initiate({
+      issSupported: false,
+      authorizationServer: { issuer: ISSUER, issParameterSupported: false },
+    });
+    expect(store._data.get(without.state)?.integration?.issParameterSupported).toBeUndefined();
   });
 
   it("accepts a matching iss and returns the issuer and variables", async () => {

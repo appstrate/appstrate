@@ -2125,6 +2125,7 @@ const RESPONSE_SCHEMA_ALLOWLIST = new Set<string>([
   "POST /activate/deny 200",
   "GET /api/integrations/callback 200",
   "GET /api/integrations/callback/{tag} 200",
+  "GET /api/integrations/callback/cimd/{tag} 200",
   // The three `/api/llm-proxy/*` 200s are NOT here: `openapi/paths/llm-proxy.ts`
   // declares a permissive `{ type: "object", additionalProperties: true }`
   // passthrough schema for them, so an exemption would contradict it and win by

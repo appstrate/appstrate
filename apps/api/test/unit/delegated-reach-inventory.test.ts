@@ -74,6 +74,10 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     category: "public",
     reason: "server-side OAuth state minted under integrations:connect, tag-checked",
   },
+  integrationsOAuthCallbackForMetadataDocument: {
+    category: "public",
+    reason: "server-side OAuth state minted under integrations:connect, tag- and iss-checked",
+  },
   mcpProtectedResourceMetadata: { category: "public", reason: "RFC 9728 static metadata" },
   mcpProtectedResourceMetadataInSpace: {
     category: "public",
