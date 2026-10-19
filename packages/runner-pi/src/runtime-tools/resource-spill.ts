@@ -74,6 +74,9 @@ export interface ResourceSpillOptions {
   }>;
 }
 
+/** Per-call spill state: the options plus every workspace path already handed out. */
+type SpillContext = ResourceSpillOptions & { taken: Set<string> };
+
 type EmbeddedResource = {
   uri?: string;
   mimeType?: string;
@@ -119,6 +122,7 @@ export async function spillResourcesToWorkspace(
     return result;
   }
 
+  const ctx: SpillContext = { ...opts, taken: new Set() };
   const out: CallToolResult["content"] = [];
   let index = 0;
   for (const block of blocks) {
@@ -130,7 +134,7 @@ export async function spillResourcesToWorkspace(
         continue;
       }
       const n = index;
-      const written = await writeSpill(ensureExtension(`image-${n}`, block.mimeType), bytes, opts);
+      const written = await writeSpill(ensureExtension(`image-${n}`, block.mimeType), bytes, ctx);
       if (!written) {
         out.push(block);
         continue;
@@ -140,15 +144,15 @@ export async function spillResourcesToWorkspace(
       const sniffed = await sniffImageMime(written.abs);
       if (sniffed && extensionForMime(sniffed) !== extensionForMime(block.mimeType)) {
         // Mislabelled bytes: the file takes the extension of what it really is.
-        const sniffedRel = spillRel(ensureExtension(`image-${n}`, sniffed), opts);
+        const sniffedRel = spillRel(ensureExtension(`image-${n}`, sniffed), ctx);
         try {
-          await fs.rename(written.abs, await resolveSafePath(opts.workspace, sniffedRel));
+          await fs.rename(written.abs, await resolveSafePath(ctx.workspace, sniffedRel));
           rel = sniffedRel;
         } catch {
           // Keep the declared name — the bytes are on disk either way.
         }
       }
-      emitSpilled(undefined, rel, bytes, opts);
+      emitSpilled(undefined, rel, bytes, ctx);
       if (sniffed) out.push({ ...block, mimeType: sniffed });
       const text = sniffed
         ? pointerText("image", rel, bytes, sniffed, { readHint: "read it to view it again" })
@@ -162,7 +166,7 @@ export async function spillResourcesToWorkspace(
     if (block.type === "resource") {
       const inner = block.resource as EmbeddedResource;
       const bytes = resourceBytes(inner);
-      const replaced = bytes ? await writeAndPointer(inner, bytes, index, opts) : null;
+      const replaced = bytes ? await writeAndPointer(inner, bytes, index, ctx) : null;
       if (replaced) index++;
       out.push(replaced ?? block);
       continue;
@@ -190,7 +194,7 @@ export async function spillResourcesToWorkspace(
           // Fetch failed — leave the link untouched (degraded, not dropped).
         }
       }
-      const replaced = inner && bytes ? await writeAndPointer(inner, bytes, index, opts) : null;
+      const replaced = inner && bytes ? await writeAndPointer(inner, bytes, index, ctx) : null;
       if (replaced) index++;
       out.push(replaced ?? block);
       continue;
@@ -210,12 +214,12 @@ async function writeAndPointer(
   inner: EmbeddedResource,
   bytes: Uint8Array,
   index: number,
-  opts: ResourceSpillOptions,
+  ctx: SpillContext,
 ): Promise<{ type: "text"; text: string } | null> {
   const base = ensureExtension(basenameFromUri(inner.uri, index), inner.mimeType);
-  const written = await writeSpill(base, bytes, opts);
+  const written = await writeSpill(base, bytes, ctx);
   if (!written) return null;
-  emitSpilled(inner.uri, written.rel, bytes, opts);
+  emitSpilled(inner.uri, written.rel, bytes, ctx);
   let preview = "";
   if (typeof inner.text === "string") {
     const firstLine = inner.text.split("\n", 1)[0]!.slice(0, 120);
@@ -229,9 +233,21 @@ async function writeAndPointer(
   };
 }
 
-/** Workspace-relative path of a spilled file: `resources/<toolCallId>-<base>`. */
-function spillRel(base: string, opts: ResourceSpillOptions): string {
-  return `${SPILL_DIR}/${sanitizeSegment(opts.toolCallId)}-${base}`;
+/**
+ * Reserve the workspace-relative path of a spilled file,
+ * `resources/<toolCallId>-<base>`. Every block of a call gets its own path:
+ * a name already handed out in this call (an image's `image-0.png` against a
+ * resource's URI basename, two URIs with the same tail, a post-sniff rename)
+ * becomes `<stem>-2.<ext>`, `-3`, … so no spilled file overwrites another.
+ */
+function spillRel(base: string, ctx: SpillContext): string {
+  const prefix = `${SPILL_DIR}/${sanitizeSegment(ctx.toolCallId)}-`;
+  const ext = /\.[A-Za-z0-9]{1,8}$/.exec(base)?.[0] ?? "";
+  const stem = base.slice(0, base.length - ext.length);
+  let rel = `${prefix}${base}`;
+  for (let n = 2; ctx.taken.has(rel); n++) rel = `${prefix}${stem}-${n}${ext}`;
+  ctx.taken.add(rel);
+  return rel;
 }
 
 /**
@@ -241,11 +257,11 @@ function spillRel(base: string, opts: ResourceSpillOptions): string {
 async function writeSpill(
   base: string,
   bytes: Uint8Array,
-  opts: ResourceSpillOptions,
+  ctx: SpillContext,
 ): Promise<{ rel: string; abs: string } | null> {
-  const rel = spillRel(base, opts);
+  const rel = spillRel(base, ctx);
   try {
-    const abs = await resolveSafePath(opts.workspace, rel);
+    const abs = await resolveSafePath(ctx.workspace, rel);
     await fs.mkdir(path.dirname(abs), { recursive: true });
     await fs.writeFile(abs, bytes);
     return { rel, abs };

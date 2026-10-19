@@ -342,5 +342,104 @@ describe("spillResourcesToWorkspace", () => {
       expect(events[0]!.path).toBe("resources/img6-image-0.png");
       expect(events[0]!.bytes).toBe(PNG_BYTES.byteLength);
     });
+
+    describe("one workspace path per spilled block", () => {
+      const pointers = (out: CallToolResult) =>
+        out.content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text);
+      const read = (name: string) => fs.readFile(path.join(workspace, "resources", name));
+      const replacing = {
+        type: "resource",
+        resource: { uri: "file:///image-0.png", mimeType: "image/png", text: "REPLACED" },
+      };
+
+      it("keeps an image and a resource named like it apart, image first", async () => {
+        const result = {
+          content: [{ type: "image", data: PNG_B64, mimeType: "image/png" }, replacing],
+        } as unknown as CallToolResult;
+        const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "c1" });
+
+        const [imagePointer, resourcePointer] = pointers(out);
+        expect(imagePointer).toContain("resources/c1-image-0.png (70 bytes");
+        expect(resourcePointer).toContain("resources/c1-image-0-2.png (8 bytes");
+        expect(new Uint8Array(await read("c1-image-0.png"))).toEqual(PNG_BYTES);
+        expect(await read("c1-image-0-2.png").then(String)).toBe("REPLACED");
+      });
+
+      it("keeps a resource and an image named like it apart, resource first", async () => {
+        const result = {
+          content: [
+            { ...replacing, resource: { ...replacing.resource, uri: "file:///image-1.png" } },
+            { type: "image", data: PNG_B64, mimeType: "image/png" },
+          ],
+        } as unknown as CallToolResult;
+        const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "c2" });
+
+        const [resourcePointer, imagePointer] = pointers(out);
+        expect(resourcePointer).toContain("resources/c2-image-1.png (8 bytes");
+        expect(imagePointer).toContain("resources/c2-image-1-2.png (70 bytes");
+        expect(await read("c2-image-1.png").then(String)).toBe("REPLACED");
+        expect(new Uint8Array(await read("c2-image-1-2.png"))).toEqual(PNG_BYTES);
+      });
+
+      it("keeps an image and a fetched resource_link named like it apart", async () => {
+        const result = {
+          content: [
+            { type: "image", data: PNG_B64, mimeType: "image/png" },
+            { type: "resource_link", uri: "file:///image-0.png", mimeType: "image/png" },
+          ],
+        } as unknown as CallToolResult;
+        const out = await spillResourcesToWorkspace(result, {
+          workspace,
+          toolCallId: "c3",
+          readResource: async (uri) => ({
+            contents: [{ uri, mimeType: "image/png", text: "REPLACED" }],
+          }),
+        });
+
+        const [imagePointer, linkPointer] = pointers(out);
+        expect(imagePointer).toContain("resources/c3-image-0.png (70 bytes");
+        expect(linkPointer).toContain("resources/c3-image-0-2.png (8 bytes");
+        expect(new Uint8Array(await read("c3-image-0.png"))).toEqual(PNG_BYTES);
+        expect(await read("c3-image-0-2.png").then(String)).toBe("REPLACED");
+      });
+
+      it("keeps two resources with the same URI basename apart", async () => {
+        const result = {
+          content: [
+            { type: "resource", resource: { uri: "repo://a/README.md", text: "first" } },
+            { type: "resource", resource: { uri: "repo://b/README.md", text: "second" } },
+          ],
+        } as unknown as CallToolResult;
+        const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "c4" });
+
+        const [first, second] = pointers(out);
+        expect(first).toContain("resources/c4-README.md");
+        expect(second).toContain("resources/c4-README-2.md");
+        expect(await read("c4-README.md").then(String)).toBe("first");
+        expect(await read("c4-README-2.md").then(String)).toBe("second");
+      });
+
+      it("does not rename a mislabelled image onto a name already taken", async () => {
+        // The resource takes `image-1.png`; the jpeg-labelled PNG at index 1 is
+        // written as `image-1.jpg`, and its sniffed rename must not clobber it.
+        const result = {
+          content: [
+            { ...replacing, resource: { ...replacing.resource, uri: "file:///image-1.png" } },
+            { type: "image", data: PNG_B64, mimeType: "image/jpeg" },
+          ],
+        } as unknown as CallToolResult;
+        const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "c5" });
+
+        const [resourcePointer, imagePointer] = pointers(out);
+        expect(resourcePointer).toContain("resources/c5-image-1.png (8 bytes");
+        expect(imagePointer).toContain("resources/c5-image-1-2.png (70 bytes, image/png");
+        expect(await read("c5-image-1.png").then(String)).toBe("REPLACED");
+        expect(new Uint8Array(await read("c5-image-1-2.png"))).toEqual(PNG_BYTES);
+        expect((await fs.readdir(path.join(workspace, "resources"))).sort()).toEqual([
+          "c5-image-1-2.png",
+          "c5-image-1.png",
+        ]);
+      });
+    });
   });
 });
