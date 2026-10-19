@@ -98,6 +98,7 @@ import {
   readRequestBodyBounded,
 } from "./helpers.ts";
 import { TokenBudget } from "./token-budget.ts";
+import { spillTextIfOverBudget } from "./tool-output-spill.ts";
 import type { LimitFunction } from "p-limit";
 import { logger } from "./logger.ts";
 
@@ -1251,38 +1252,6 @@ interface ResponseToToolResultOptions {
 }
 
 /**
- * Pure helper: decide whether a text body should spill.
- *
- * Folded out of {@link responseToToolResult} so the budget logic is
- * unit-testable in isolation and the surrounding async flow stays
- * linear. Calls {@link TokenBudget.tryReserve} so the inline-record is
- * atomic with the decision (no decide/record interleave under
- * concurrent calls).
- *
- * `estimatedTokens` rides along because the two caller-driven
- * forced-inline paths (blob store full, no blob store configured) must
- * `record()` the tokens `tryReserve` deliberately did not.
- */
-function evaluateBudget(args: { text: string; tokenBudget: TokenBudget }): {
-  shouldSpill: boolean;
-  estimatedTokens: number;
-} {
-  const estimated = args.tokenBudget.estimate(args.text);
-  const decision = args.tokenBudget.tryReserve(estimated);
-  // Per-call trace at debug only, and the only place the tracker's
-  // `reason` is surfaced. Spill outcomes are separately surfaced by the
-  // downstream "spilled to blob store" / "blob store full" / "no blob
-  // store configured" logs below.
-  logger.debug("token-budget decision", {
-    decision: decision.decision,
-    reason: decision.reason,
-    estimatedTokens: estimated,
-    consumedTokens: decision.consumedTokens,
-  });
-  return { shouldSpill: decision.decision === "spill", estimatedTokens: estimated };
-}
-
-/**
  * Convert an upstream `Response` into an MCP CallToolResult.
  *
  * Non-OK responses become tool-level errors (`isError: true`) — the
@@ -1439,73 +1408,13 @@ async function responseToToolResult(
   const readCap = options.blobStore ? ABSOLUTE_MAX_RESPONSE_SIZE : MAX_RESPONSE_SIZE;
   const text = await readBodyBounded(res, readCap);
 
-  // Token-aware spill decision. The token-budget path uses an atomic
-  // tryReserve() so cumulative state doesn't drift under concurrent
-  // calls (two awaits between decide() and record() would otherwise
-  // let two callers both observe a stale `consumed`).
-  const { shouldSpill: shouldSpillForBudget, estimatedTokens } = evaluateBudget({
-    text,
-    tokenBudget: options.tokenBudget,
+  // Token-aware spill decision, shared with third-party MCP tool results.
+  const link = spillTextIfOverBudget(text, options, {
+    mimeType: ct || "text/plain",
+    ...(options.source !== undefined ? { source: options.source } : {}),
   });
-
-  // If the text body should spill AND we have a blob store, spill it.
-  // The agent gets a pointer instead of poisoning its context with a
-  // dense JSON dump that would silently consume its run budget.
-  if (options.blobStore && shouldSpillForBudget) {
-    const bytes = new TextEncoder().encode(text);
-    let record;
-    try {
-      record = options.blobStore.put(bytes, {
-        mimeType: ct || "text/plain",
-        ...(options.source !== undefined ? { source: options.source } : {}),
-      });
-    } catch (err) {
-      // Blob store full — force the body inline and record the tokens
-      // against the budget. tryReserve() did NOT record on the spill
-      // path, so we record explicitly here.
-      options.tokenBudget.record(estimatedTokens);
-      logger.warn("token-budget: blob store full, forced inline", {
-        source: options.source,
-        estimatedTokens,
-        consumedTokens: options.tokenBudget.consumedTokens(),
-        error: getErrorMessage(err),
-      });
-      const fallback: Result = res.ok
-        ? { content: [{ type: "text", text }] }
-        : { content: [{ type: "text", text }], isError: true };
-      return withMeta(fallback);
-    }
-    logger.info("token-budget: spilled to blob store", {
-      source: options.source,
-      estimatedTokens,
-      consumedTokens: options.tokenBudget.consumedTokens(),
-      uri: record.uri,
-    });
-    const link = {
-      type: "resource_link" as const,
-      uri: record.uri,
-      name: options.source ?? "blob",
-      mimeType: record.mimeType,
-    };
-    return withMeta(res.ok ? { content: [link] } : { content: [link], isError: true });
-  }
-
-  // Inline path — when the budget said spill but no blob store is
-  // configured, record the forced-inline tokens. tryReserve() did NOT
-  // record on the spill path, so we record explicitly here.
-  if (shouldSpillForBudget && !options.blobStore) {
-    options.tokenBudget.record(estimatedTokens);
-    logger.warn("token-budget: no blob store configured, forced inline", {
-      source: options.source,
-      estimatedTokens,
-      consumedTokens: options.tokenBudget.consumedTokens(),
-    });
-  }
-
-  if (!res.ok) {
-    return withMeta({ content: [{ type: "text", text }], isError: true });
-  }
-  return withMeta({ content: [{ type: "text", text }] });
+  const content: Result["content"] = [link ?? { type: "text", text }];
+  return withMeta(res.ok ? { content } : { content, isError: true });
 }
 
 /**

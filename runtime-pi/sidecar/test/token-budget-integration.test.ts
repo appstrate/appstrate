@@ -33,6 +33,11 @@ import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import { BlobStore } from "../blob-store.ts";
 import { TokenBudget, estimateTokens } from "../token-budget.ts";
 import type { CredentialsResponse } from "../helpers.ts";
+import {
+  createInProcessPair,
+  wrapClient,
+  type AppstrateToolDefinition,
+} from "@appstrate/mcp-transport";
 
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
@@ -93,6 +98,8 @@ async function buildTestApp(opts: {
   deps: AppDeps;
   tokenBudget: TokenBudget;
   blobStore?: BlobStore;
+  /** Untrusted third-party upstream registered under the `fs` namespace. */
+  thirdParty?: AppstrateToolDefinition[];
 }): Promise<Hono> {
   const app = new Hono();
   const blobStore =
@@ -120,6 +127,13 @@ async function buildTestApp(opts: {
     ],
     { proxyDeps, blobStore, tokenBudget: opts.tokenBudget },
   );
+  if (opts.thirdParty) {
+    const pair = await createInProcessPair(opts.thirdParty);
+    await host.register({
+      namespace: "fs",
+      client: wrapClient(pair.client, { close: () => pair.close() }),
+    });
+  }
   mountMcp(app, {
     blobStore,
     tokenBudget: opts.tokenBudget,
@@ -550,5 +564,85 @@ describe("token-aware spill — fallback when blob store is full", () => {
     // agent paid the context cost. This is what separates a failed spill
     // from a successful one, which records nothing.
     expect(tokenBudget.consumedTokens()).toBe(estimateTokens(payload));
+  });
+});
+
+describe("token-aware spill — third-party MCP tool results", () => {
+  const textTool = (text: () => string): AppstrateToolDefinition => ({
+    descriptor: { name: "directory_tree", description: "tree", inputSchema: { type: "object" } },
+    handler: async () => ({ content: [{ type: "text", text: text() }] }),
+  });
+  const callTree = (app: Hono) =>
+    rpc(app, { method: "tools/call", params: { name: "fs__directory_tree", arguments: {} } });
+  const callApi = (app: Hono) =>
+    rpc(app, {
+      method: "tools/call",
+      params: {
+        name: "test__api_call",
+        arguments: { target: "https://api.example.com/items", method: "GET" },
+      },
+    });
+
+  it("spills an oversized text result readable back through resources/read", async () => {
+    const tree = "dir/sub/file.txt\n".repeat(5_000);
+    const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
+    const app = await buildTestApp({
+      deps: makeDeps(),
+      tokenBudget,
+      thirdParty: [textTool(() => tree)],
+    });
+
+    const result = (await callTree(app)).json.result as CallToolResult;
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0]!.type).toBe("resource_link");
+    const read = await rpc(app, {
+      method: "resources/read",
+      params: { uri: result.content[0]!.uri },
+    });
+    const contents = (read.json.result as { contents: Array<{ text?: string; mimeType?: string }> })
+      .contents;
+    expect(contents[0]!.text).toBe(tree);
+    expect(contents[0]!.mimeType).toBe("text/plain");
+    expect(tokenBudget.consumedTokens()).toBe(0);
+  });
+
+  it("api_call consumption forces the next third-party result to spill", async () => {
+    const payload = JSON.stringify({ rows: "x".repeat(10_000) });
+    const fetchFn = mock(
+      async () =>
+        new Response(payload, { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    const small = "y".repeat(5_000); // 1429 tokens: fits the cap, not what api_call left
+    const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 4_000 });
+    const app = await buildTestApp({
+      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
+      tokenBudget,
+      thirdParty: [textTool(() => small)],
+    });
+
+    expect(((await callApi(app)).json.result as CallToolResult).content[0]!.type).toBe("text");
+    // Recorded once: the host does not budget the trusted api_call upstream a second time.
+    expect(tokenBudget.consumedTokens()).toBe(estimateTokens(payload));
+    const tree = (await callTree(app)).json.result as CallToolResult;
+    expect(tree.content[0]!.type).toBe("resource_link");
+  });
+
+  it("third-party consumption forces the next api_call to spill", async () => {
+    const payload = JSON.stringify({ rows: "x".repeat(3_000) });
+    const fetchFn = mock(
+      async () =>
+        new Response(payload, { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 4_000 });
+    const app = await buildTestApp({
+      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
+      tokenBudget,
+      thirdParty: [textTool(() => "y".repeat(13_000))],
+    });
+
+    expect(((await callTree(app)).json.result as CallToolResult).content[0]!.type).toBe("text");
+    expect(tokenBudget.consumedTokens()).toBe(estimateTokens("y".repeat(13_000)));
+    const api = (await callApi(app)).json.result as CallToolResult;
+    expect(api.content[0]!.type).toBe("resource_link");
   });
 });

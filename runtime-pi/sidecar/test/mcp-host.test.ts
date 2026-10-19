@@ -24,6 +24,9 @@ import {
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
 import { McpHost, normaliseNamespace } from "../mcp-host.ts";
+import { BlobStore } from "../blob-store.ts";
+import { TokenBudget } from "../token-budget.ts";
+import type { ToolOutputBudgetDeps } from "../tool-output-spill.ts";
 import { allocateMcpToolName } from "@appstrate/core/naming";
 import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
 
@@ -1652,5 +1655,186 @@ describe("McpHost — one integration, several connections", () => {
     } finally {
       for (const upstream of upstreams) await upstream.pair.close();
     }
+  });
+});
+
+describe("McpHost — tool output budget", () => {
+  // Cap 100 tokens ≈ 350 chars under the default chars/3.5 estimator.
+  const newBudget = () => new TokenBudget({ inlineCapTokens: 100, runBudgetTokens: 10_000 });
+  const newStore = () => new BlobStore("run-test", { maxTotalBytes: 1024 * 1024 });
+  const IMAGE = { type: "image" as const, data: "aGVsbG8=", mimeType: "image/png" };
+  const RESOURCE = {
+    type: "resource" as const,
+    resource: { uri: "file:///a.txt", mimeType: "text/plain", text: "embedded" },
+  };
+  const LINK = { type: "resource_link" as const, uri: "file:///b.txt", name: "b.txt" };
+
+  async function callDump(
+    result: Awaited<ReturnType<AppstrateToolDefinition["handler"]>>,
+    outputBudget?: ToolOutputBudgetDeps,
+    opts: { trusted?: boolean } = {},
+  ) {
+    const upstream = await makeUpstream([
+      {
+        descriptor: { name: "dump", description: "dump", inputSchema: { type: "object" } },
+        handler: async () => result,
+      },
+    ]);
+    try {
+      const host = new McpHost(outputBudget ? { outputBudget } : {});
+      await host.register({
+        connection: CONN_A,
+        namespace: "fs",
+        client: upstream.client,
+        ...(opts.trusted ? { trusted: true } : {}),
+      });
+      const tool = host.buildTools().find((t) => t.descriptor.name === "fs__dump")!;
+      return await tool.handler({}, { signal: undefined as never } as never);
+    } finally {
+      await upstream.pair.close();
+    }
+  }
+
+  it("spills an oversized text result to the blob store as one resource_link", async () => {
+    const big = "line of a very large directory tree\n".repeat(200);
+    const tokenBudget = newBudget();
+    const blobStore = newStore();
+    const result = await callDump(
+      { content: [{ type: "text", text: big }] },
+      {
+        tokenBudget,
+        blobStore,
+      },
+    );
+    expect(result.content).toHaveLength(1);
+    const link = result.content[0] as { type: string; uri: string; name: string; mimeType: string };
+    expect(link.type).toBe("resource_link");
+    expect(link.name).toBe("fs__dump");
+    expect(link.mimeType).toBe("text/plain");
+    expect(new TextDecoder().decode(blobStore.read(link.uri)!.bytes)).toBe(big);
+    // Spilled content never reached the context: nothing recorded.
+    expect(tokenBudget.consumedTokens()).toBe(0);
+  });
+
+  it("returns a small result untouched and records its tokens", async () => {
+    const tokenBudget = newBudget();
+    const blobStore = newStore();
+    const original = {
+      content: [{ type: "text" as const, text: "small" }, IMAGE],
+      structuredContent: { ok: true },
+    };
+    const result = await callDump(original, { tokenBudget, blobStore });
+    expect(result.content).toEqual(original.content);
+    expect(result.structuredContent).toEqual({ ok: true });
+    expect(tokenBudget.consumedTokens()).toBe(tokenBudget.estimate("small"));
+    expect(blobStore.list()).toHaveLength(0);
+  });
+
+  it("budgets all text blocks together: many small blocks over the cap spill as one", async () => {
+    const blocks = Array.from({ length: 500 }, (_, i) => ({
+      type: "text" as const,
+      text: `entry-${i}`,
+    }));
+    const blobStore = newStore();
+    const result = await callDump({ content: blocks }, { tokenBudget: newBudget(), blobStore });
+    expect(result.content).toHaveLength(1);
+    const link = result.content[0] as { type: string; uri: string };
+    expect(link.type).toBe("resource_link");
+    expect(new TextDecoder().decode(blobStore.read(link.uri)!.bytes)).toBe(
+      blocks.map((b) => b.text).join("\n"),
+    );
+  });
+
+  it("keeps non-text blocks in order around the single resource_link", async () => {
+    const blobStore = newStore();
+    const half = "x".repeat(300);
+    const result = await callDump(
+      {
+        content: [
+          IMAGE,
+          { type: "text", text: half },
+          RESOURCE,
+          { type: "text", text: half },
+          LINK,
+        ],
+      },
+      { tokenBudget: newBudget(), blobStore },
+    );
+    expect(result.content.map((b) => b.type)).toEqual([
+      "image",
+      "resource_link",
+      "resource",
+      "resource_link",
+    ]);
+    expect(result.content[0]).toEqual(IMAGE);
+    expect(result.content[2]).toEqual(RESOURCE);
+    expect(result.content[3]).toEqual(LINK);
+    const spilled = result.content[1] as { uri: string };
+    expect(new TextDecoder().decode(blobStore.read(spilled.uri)!.bytes)).toBe(`${half}\n${half}`);
+  });
+
+  it("labels JSON-shaped text as application/json", async () => {
+    const json = JSON.stringify({ entries: Array.from({ length: 100 }, (_, i) => `file-${i}`) });
+    const result = await callDump(
+      { content: [{ type: "text", text: json }] },
+      {
+        tokenBudget: newBudget(),
+        blobStore: newStore(),
+      },
+    );
+    expect((result.content[0] as { mimeType?: string }).mimeType).toBe("application/json");
+  });
+
+  it("never spills an oversized error: keeps head and tail around a marker", async () => {
+    const head = "H".repeat(1000);
+    const tail = "T".repeat(1000);
+    const error = `${head}${"m".repeat(5000)}${tail}`;
+    const tokenBudget = newBudget();
+    const blobStore = newStore();
+    const result = await callDump(
+      { content: [{ type: "text", text: error }, IMAGE], isError: true },
+      { tokenBudget, blobStore },
+    );
+    expect(result.isError).toBe(true);
+    expect(blobStore.list()).toHaveLength(0);
+    expect(result.content.map((b) => b.type)).toEqual(["text", "image"]);
+    const text = (result.content[0] as { text: string }).text;
+    const match = /^(H+)\n\n\[… (\d+) characters of this error output removed …\]\n\n(T+)$/.exec(
+      text,
+    );
+    expect(match).not.toBeNull();
+    const [, keptHead, removed, keptTail] = match!;
+    expect(Number(removed)).toBe(error.length - keptHead!.length - keptTail!.length);
+    // Head + tail together hold what the inline cap allows.
+    expect(tokenBudget.estimate(keptHead! + keptTail!)).toBeLessThanOrEqual(
+      tokenBudget.inlineCapTokens,
+    );
+  });
+
+  it("keeps a small error untouched", async () => {
+    const original = { content: [{ type: "text" as const, text: "boom" }], isError: true };
+    const result = await callDump(original, { tokenBudget: newBudget(), blobStore: newStore() });
+    expect(result.content).toEqual(original.content);
+    expect(result.isError).toBe(true);
+  });
+
+  it("without a blob store forces the oversized text inline and records it", async () => {
+    const big = "y".repeat(2000);
+    const tokenBudget = newBudget();
+    const result = await callDump({ content: [{ type: "text", text: big }] }, { tokenBudget });
+    expect(result.content).toEqual([{ type: "text", text: big }]);
+    expect(tokenBudget.consumedTokens()).toBe(tokenBudget.estimate(big));
+  });
+
+  it("leaves a trusted (first-party) upstream to budget its own output", async () => {
+    const big = "z".repeat(2000);
+    const tokenBudget = newBudget();
+    const result = await callDump(
+      { content: [{ type: "text", text: big }] },
+      { tokenBudget, blobStore: newStore() },
+      { trusted: true },
+    );
+    expect(result.content).toEqual([{ type: "text", text: big }]);
+    expect(tokenBudget.consumedTokens()).toBe(0);
   });
 });
