@@ -423,6 +423,7 @@ describe("extensionForMime", () => {
   it("maps common image types", () => {
     expect(extensionForMime("image/png")).toBe("png");
     expect(extensionForMime("image/jpeg")).toBe("jpg");
+    expect(extensionForMime("image/jpg")).toBe("jpg");
     expect(extensionForMime("image/gif")).toBe("gif");
     expect(extensionForMime("image/webp")).toBe("webp");
     expect(extensionForMime("image/bmp")).toBe("bmp");

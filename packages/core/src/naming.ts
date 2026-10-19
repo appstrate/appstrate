@@ -292,6 +292,7 @@ const MIME_EXTENSIONS: ReadonlyMap<string, string> = new Map([
   ["application/pdf", "pdf"],
   ["image/png", "png"],
   ["image/jpeg", "jpg"],
+  ["image/jpg", "jpg"],
   ["image/gif", "gif"],
   ["image/webp", "webp"],
   ["image/bmp", "bmp"],
