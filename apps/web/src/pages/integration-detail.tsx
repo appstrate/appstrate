@@ -127,11 +127,10 @@ function IntegrationSettings({
     draftSource?.kind === "remote" &&
     draftSource.transport !== "sse" &&
     !isVariableTemplate(draftSource.url) &&
-    // A draft declaring no auths (AFPS §7.2) is read without the credential proxy.
+    // A draft declaring no auths (AFPS §7.2) is read without the credential proxy nor a connection.
     (isUnauthenticatedIntegration(definition?.manifest ?? {}) ||
-      can("credential-proxy:call-own")) &&
-    // An integration declaring no auths (AFPS §7.2) is read without a connection.
-    (detail.auths.length === 0 || detail.auths.some((auth) => auth.connections.length > 0));
+      (can("credential-proxy:call-own") &&
+        detail.auths.some((auth) => auth.connections.length > 0)));
   const resolve = (requested: string | null): IntegrationSettingsSection =>
     requested === "tools" ||
     requested === "functioning" ||

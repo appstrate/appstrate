@@ -322,9 +322,9 @@ describe("the tools step, resumed", () => {
     );
   };
 
-  it("warns when the draft holds changes at mount, though it declares the listed tools", () => {
-    // Published without tools; the wizard saved them, the publish failed; another file of the
-    // draft changed since; the step reopens.
+  it("follows the server flag has_unarchived_changes: the publication ships the whole draft", () => {
+    // The warning follows the server flag read at mount and states that the publication ships the
+    // whole draft; it also shows after a wizard save whose publish failed.
     const savedByWizard = {
       ...published,
       version: "1.1.0",
