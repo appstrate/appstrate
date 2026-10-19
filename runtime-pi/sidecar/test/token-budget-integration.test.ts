@@ -35,6 +35,7 @@ import { TokenBudget, estimateTokens } from "../token-budget.ts";
 import type { CredentialsResponse } from "../helpers.ts";
 import {
   createInProcessPair,
+  McpError,
   wrapClient,
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
@@ -563,7 +564,7 @@ describe("token-aware spill — fallback when blob store is full", () => {
     const text = result.content[0]!.text!;
     expect(text).toContain("characters removed (spill unavailable: blob store full)");
     expect(payload.startsWith(text.slice(0, text.indexOf("\n\n[… output cut")))).toBe(true);
-    expect(estimateTokens(text)).toBeLessThan(4_100);
+    expect(estimateTokens(text)).toBeLessThanOrEqual(4_000);
     // What reached the context is recorded, not the whole body.
     expect(tokenBudget.consumedTokens()).toBe(estimateTokens(text));
   });
@@ -611,6 +612,31 @@ describe("token-aware spill — third-party MCP tool results", () => {
     treeText = "z".repeat(2_000); // 572 tokens: above the always-inline floor
     const larger = (await callTree(app)).json.result as CallToolResult;
     expect(larger.content[0]!.type).toBe("resource_link");
+  });
+
+  it("bounds a huge upstream JSON-RPC error on the /mcp wire, keeping its code", async () => {
+    const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
+    const app = await buildTestApp({
+      deps: makeDeps(),
+      tokenBudget,
+      thirdParty: [
+        {
+          descriptor: {
+            name: "directory_tree",
+            description: "tree",
+            inputSchema: { type: "object" },
+          },
+          handler: async () => {
+            throw new McpError(-32001, "E".repeat(100_000));
+          },
+        },
+      ],
+    });
+    const res = await callTree(app);
+    const error = res.json.error as { code: number; message: string; data?: unknown };
+    expect(error.code).toBe(-32001);
+    expect(error.message).toContain("characters removed (upstream error over the inline cap)");
+    expect(estimateTokens(error.message)).toBeLessThanOrEqual(4_000);
   });
 
   it("spills an oversized text result readable back through resources/read", async () => {

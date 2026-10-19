@@ -19,6 +19,7 @@ import {
   API_CALL_TOOL_META_KEY,
   API_UPLOAD_TOOL_META_KEY,
   createInProcessPair,
+  McpError,
   wrapClient,
   type AppstrateRequestExtra,
   type AppstrateToolDefinition,
@@ -1680,9 +1681,40 @@ describe("McpHost — tool output budget", () => {
     expect(original.endsWith(keptTail)).toBe(true);
     expect(keptHead.length).toBeGreaterThan(0);
     expect(Number(marker![1])).toBe(original.length - keptHead.length - keptTail.length);
-    expect(tokenBudget.estimate(keptHead + keptTail)).toBeLessThanOrEqual(
-      tokenBudget.inlineCapTokens,
-    );
+    // The whole delivered text, marker included, fits the cap.
+    expect(tokenBudget.estimate(text)).toBeLessThanOrEqual(tokenBudget.inlineCapTokens);
+  }
+
+  /** Calls `fs__fail`, whose upstream handler runs `fail`; resolves to what the host throws. */
+  async function callFailing(
+    fail: () => Promise<never>,
+    outputBudget: ToolOutputBudgetDeps,
+    opts: { trusted?: boolean; signal?: AbortSignal } = {},
+  ): Promise<unknown> {
+    const upstream = await makeUpstream([
+      {
+        descriptor: { name: "fail", description: "fail", inputSchema: { type: "object" } },
+        handler: fail,
+      },
+    ]);
+    try {
+      const host = new McpHost({ outputBudget });
+      await host.register({
+        connection: CONN_A,
+        namespace: "fs",
+        client: upstream.client,
+        ...(opts.trusted ? { trusted: true } : {}),
+      });
+      const tool = host.buildTools().find((t) => t.descriptor.name === "fs__fail")!;
+      try {
+        await tool.handler({}, { signal: opts.signal } as never);
+      } catch (err) {
+        return err;
+      }
+      throw new Error("expected the call to throw");
+    } finally {
+      await upstream.pair.close();
+    }
   }
 
   async function callDump(
@@ -1831,6 +1863,85 @@ describe("McpHost — tool output budget", () => {
     expect(result.content.map((b) => b.type)).toEqual(["text", "image"]);
     const text = (result.content[0] as { text: string }).text;
     expectCut(text, error, "error output over the inline cap", tokenBudget);
+  });
+
+  it("bounds a huge JSON-RPC error message and drops its oversized data", async () => {
+    const tokenBudget = newBudget();
+    const huge = `${"E".repeat(5000)}END`;
+    const err = await callFailing(
+      async () => {
+        throw new McpError(-32001, huge, { blob: "d".repeat(5000) });
+      },
+      { tokenBudget, blobStore: newStore() },
+    );
+    expect(err).toBeInstanceOf(McpError);
+    const mcpErr = err as McpError;
+    expect(mcpErr.code).toBe(-32001);
+    expect(mcpErr.data).toBeUndefined();
+    expect(mcpErr.message).toContain("characters removed (upstream error over the inline cap)");
+    expect(mcpErr.message.endsWith("END")).toBe(true);
+    expect(tokenBudget.estimate(mcpErr.message)).toBeLessThanOrEqual(tokenBudget.inlineCapTokens);
+    expect(tokenBudget.consumedTokens()).toBe(tokenBudget.estimate(mcpErr.message));
+  });
+
+  it("leaves a small JSON-RPC error and its data unchanged", async () => {
+    const fail = async (): Promise<never> => {
+      throw new McpError(-32001, "not found", { id: 7 });
+    };
+    const bounded = (await callFailing(fail, {
+      tokenBudget: newBudget(),
+      blobStore: newStore(),
+    })) as McpError;
+    const plain = (await callFailing(
+      fail,
+      { tokenBudget: newBudget() },
+      { trusted: true },
+    )) as McpError;
+    expect(bounded).toBeInstanceOf(McpError);
+    expect(bounded.code).toBe(-32001);
+    expect(bounded.message).toBe(plain.message);
+    expect(bounded.data).toEqual({ id: 7 });
+  });
+
+  it("rethrows a cancellation untouched", async () => {
+    const tokenBudget = newBudget();
+    const controller = new AbortController();
+    const reason = "R".repeat(5000);
+    const err = await callFailing(
+      () => {
+        controller.abort(reason);
+        return new Promise<never>(() => {});
+      },
+      { tokenBudget, blobStore: newStore() },
+      { signal: controller.signal },
+    );
+    expect((err as Error).message).toContain(reason);
+    expect(tokenBudget.consumedTokens()).toBe(0);
+  });
+
+  it("leaves a trusted upstream's error untouched", async () => {
+    const tokenBudget = newBudget();
+    const huge = "E".repeat(5000);
+    const err = await callFailing(
+      async () => {
+        throw new McpError(-32001, huge);
+      },
+      { tokenBudget, blobStore: newStore() },
+      { trusted: true },
+    );
+    expect((err as McpError).message).toContain(huge);
+    expect(tokenBudget.consumedTokens()).toBe(0);
+  });
+
+  it("delivers the marker alone when the cap cannot hold it", async () => {
+    const tokenBudget = new TokenBudget({ inlineCapTokens: 5, runBudgetTokens: 100 });
+    const result = await callDump(
+      { content: [{ type: "text", text: "H".repeat(1000) }], isError: true },
+      { tokenBudget, blobStore: newStore() },
+    );
+    expect((result.content[0] as { text: string }).text).toBe(
+      "[… output cut: 1000 characters removed (error output over the inline cap) …]",
+    );
   });
 
   it("keeps a small error untouched", async () => {

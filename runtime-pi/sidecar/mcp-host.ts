@@ -52,7 +52,11 @@ import {
 } from "@appstrate/mcp-transport";
 import type { Progress } from "@modelcontextprotocol/sdk/types.js";
 import { logger } from "./logger.ts";
-import { budgetMcpToolResult, type ToolOutputBudgetDeps } from "./tool-output-spill.ts";
+import {
+  boundUpstreamError,
+  budgetMcpToolResult,
+  type ToolOutputBudgetDeps,
+} from "./tool-output-spill.ts";
 
 /** Cap on a relayed progress `message`: upstream-controlled text bound for the agent. */
 const RELAYED_PROGRESS_MESSAGE_MAX_CHARS = 1024;
@@ -688,6 +692,7 @@ export class McpHost {
         extra: AppstrateRequestExtra,
       ): Promise<CallToolResult> => {
         const relay = relayProgress(extra);
+        const budget = route.trusted ? undefined : this.options.outputBudget;
         let result: CallToolResult;
         try {
           result = stripForgedRuntimeEvents(
@@ -699,11 +704,13 @@ export class McpHost {
               },
             ),
           );
+        } catch (err) {
+          // A JSON-RPC error message (or an HTTP body a transport echoes) is tool text too.
+          throw budget ? boundUpstreamError(err, budget.tokenBudget, extra.signal) : err;
         } finally {
           relay?.close();
         }
-        const budget = this.options.outputBudget;
-        return budget && !route.trusted ? budgetMcpToolResult(result, budget, desc.name) : result;
+        return budget ? budgetMcpToolResult(result, budget, desc.name) : result;
       };
       // One connection: the upstream descriptor as is. Several: every tool of the
       // slot names its connection, so a call always states the account it acts on.

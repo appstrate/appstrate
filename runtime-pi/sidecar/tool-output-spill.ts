@@ -108,30 +108,90 @@ export function spillTextIfOverBudget(
 }
 
 /**
- * `text` when it fits the inline cap, else its head and tail (together
- * sized to the cap) around a marker naming how much was cut and why.
+ * `text` when it fits the inline cap, else its head and tail around a
+ * marker naming how much was cut and why, the whole sized to the cap.
  * Records the tokens of what it returns: that is what reaches the model.
  */
 function fitToInlineCap(text: string, tokenBudget: TokenBudget, reason: string): string {
-  const estimated = tokenBudget.estimate(text);
-  let delivered = text;
-  if (estimated > tokenBudget.inlineCapTokens) {
-    // The share of characters that fits under the cap, whatever the estimator.
-    const half = Math.floor((text.length * tokenBudget.inlineCapTokens) / estimated / 2);
-    const head = text.slice(0, codePointBoundary(text, half));
-    const tail = text.slice(codePointBoundary(text, text.length - half));
-    const removed = text.length - head.length - tail.length;
-    delivered = `${head}\n\n[… output cut: ${removed} characters removed (${reason}) …]\n\n${tail}`;
-  }
+  const delivered = cutToInlineCap(text, tokenBudget, reason);
   const deliveredTokens = tokenBudget.estimate(delivered);
   if (deliveredTokens > 0) tokenBudget.record(deliveredTokens);
   return delivered;
 }
 
-/** Moves `index` off the low half of a surrogate pair, so no cut splits a code point. */
-function codePointBoundary(text: string, index: number): number {
-  const code = text.charCodeAt(index);
-  return code >= 0xdc00 && code <= 0xdfff ? index + 1 : index;
+function cutToInlineCap(text: string, tokenBudget: TokenBudget, reason: string): string {
+  const cap = tokenBudget.inlineCapTokens;
+  const estimated = tokenBudget.estimate(text);
+  if (estimated <= cap) return text;
+  const marker = (removed: number) =>
+    `\n\n[… output cut: ${removed} characters removed (${reason}) …]\n\n`;
+  // Sized with the widest count it can carry, so the real marker is never larger.
+  const endsBudget = cap - tokenBudget.estimate(marker(text.length));
+  // A cap below the marker's own cost delivers the marker alone: it overshoots by at most itself.
+  if (endsBudget <= 0) return marker(text.length).trim();
+  let half = Math.floor((text.length * endsBudget) / estimated / 2);
+  for (;;) {
+    const head = text.slice(0, headBoundary(text, half));
+    const tail = text.slice(tailBoundary(text, text.length - half));
+    const cut = `${head}${marker(text.length - head.length - tail.length)}${tail}`;
+    // The share-of-characters sizing is exact for the default estimator; a custom one may need a shrink.
+    if (tokenBudget.estimate(cut) <= cap || half === 0) return cut;
+    half = Math.floor(half * 0.9);
+  }
+}
+
+/** Never ends the head on the high half of a surrogate pair. */
+function headBoundary(text: string, index: number): number {
+  return isLowSurrogate(text.charCodeAt(index)) ? index - 1 : index;
+}
+
+/** Never starts the tail on the low half of a surrogate pair. */
+function tailBoundary(text: string, index: number): number {
+  return isLowSurrogate(text.charCodeAt(index)) ? index + 1 : index;
+}
+
+function isLowSurrogate(code: number): boolean {
+  return code >= 0xdc00 && code <= 0xdfff;
+}
+
+/**
+ * Bound an error thrown by an untrusted upstream before it is re-emitted
+ * to the agent as a JSON-RPC error, whose message the runtime turns into
+ * tool text. The message is cut like an `isError` result; `data` never
+ * reaches the model (the agent runtime reads `message` only), so it is
+ * kept only while it fits the inline cap. Cancellations pass untouched.
+ */
+export function boundUpstreamError(
+  err: unknown,
+  tokenBudget: TokenBudget,
+  signal: AbortSignal | undefined,
+): unknown {
+  if (signal?.aborted || !(err instanceof Error) || err.name === "AbortError") return err;
+  const message = fitToInlineCap(err.message, tokenBudget, "upstream error over the inline cap");
+  if (message !== err.message) {
+    try {
+      err.message = message;
+    } catch {
+      // `message` is a getter on some host errors (DOMException): rebuild instead.
+      return Object.assign(new Error(message), { name: err.name });
+    }
+  }
+  const holder = err as Error & { data?: unknown };
+  if (holder.data !== undefined) {
+    let serialised: string | undefined;
+    try {
+      serialised = JSON.stringify(holder.data);
+    } catch {
+      serialised = undefined;
+    }
+    if (
+      serialised === undefined ||
+      tokenBudget.estimate(serialised) > tokenBudget.inlineCapTokens
+    ) {
+      holder.data = undefined;
+    }
+  }
+  return err;
 }
 
 type ContentBlock = CallToolResult["content"][number];
