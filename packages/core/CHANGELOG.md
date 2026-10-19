@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Image MIME types in `extensionForMime`** (`@appstrate/core/naming`): `image/png`, `image/jpeg` and `image/jpg` (`jpg`), `image/gif`, `image/webp`, `image/bmp` and `image/svg+xml` (`svg`) now resolve to an extension, so spilled images are no longer extensionless. (#2120)
 - **`AJV_FORMATS_OPTIONS`** (`@appstrate/core/ajv`): the ajv-formats options `createAjv` uses, so
   the RJSF validator registers the same formats and client and server agree.
 
@@ -98,6 +99,7 @@ providerMessage? }` — the `<status> <JSON body>` envelope of a provider refusa
 
 ### Changed
 
+- **`extensionForMime`**: `image/jpeg` now returns `jpg` (platform-named inline inputs: `.jpeg` → `.jpg`) and `image/svg+xml` returns `svg` (was `xml`). (#2120)
 - **Requires `@afps-spec/schema` `^0.12.0`** (was `^0.10.0`): `auths` is optional (AFPS §7.2,
   an empty map stays invalid); a `{$credential.<field>}` in `source.remote.url` stays invalid.
 - **BREAKING: `ConnectionResolutionErrorCode` gains `auth_key_on_unauthenticated_integration`**
