@@ -27,6 +27,13 @@
  *
  * Always spills (no size threshold): the whole point is to keep file bytes
  * out of the LLM context, so even small resources are written out.
+ *
+ * `image` blocks are spilled too, but KEPT inline: an MCP `ImageContent` is
+ * meant to be seen, while the written copy lets the agent reuse the exact bytes
+ * through its tools (`fromFile`, commit, convert). The inline copy survives
+ * only when Pi's own sniffer — the predicate its `read` tool uses — recognises
+ * the file, so "shown inline" and "readable as an image" agree. No resizing
+ * here: Pi already downsizes tool-result images (`normalizeToolResultImages`).
  */
 
 import { promises as fs } from "node:fs";
@@ -34,6 +41,7 @@ import * as path from "node:path";
 import { resolveSafePath } from "@appstrate/afps-runtime/resolvers";
 import { extensionForMime } from "@appstrate/core/naming";
 import type { CallToolResult } from "@appstrate/mcp-transport";
+import { loadPiCodingAgentSdk } from "../pi-sdk.ts";
 import type { RuntimeEventEmitter } from "./mcp-forward.ts";
 
 /** Workspace-relative directory spilled resources land in. */
@@ -77,10 +85,13 @@ type EmbeddedResource = {
  *   - `resource_link` blocks (URI only) are spilled when {@link
  *     ResourceSpillOptions.readResource} is provided — the bytes are fetched
  *     via MCP `resources/read` first. Without a fetcher they pass through.
+ *   - `image` blocks (base64 `data`) are always spilled; the block stays
+ *     inline, with Pi's sniffed mime, only when Pi recognises the format.
  *
- * Each spilled block is replaced by a short `text` pointer naming the workspace
- * file (with a mime-derived extension so `jq` / `grep` work), so the agent uses
- * its native filesystem tools (read with offset, grep, head/tail) on it.
+ * Each spilled resource is replaced by a short `text` pointer naming the
+ * workspace file (with a mime-derived extension so `jq` / `grep` work), so the
+ * agent uses its native filesystem tools (read with offset, grep, head/tail)
+ * on it; a spilled image is followed by that pointer.
  *
  * Never throws: a fetch/write failure falls back to leaving the original block
  * in place so {@link callToolResultToPi} renders it as before.
@@ -93,7 +104,12 @@ export async function spillResourcesToWorkspace(
   const canFetchLinks = typeof opts.readResource === "function";
   if (
     !Array.isArray(blocks) ||
-    !blocks.some((c) => c.type === "resource" || (canFetchLinks && c.type === "resource_link"))
+    !blocks.some(
+      (c) =>
+        c.type === "resource" ||
+        c.type === "image" ||
+        (canFetchLinks && c.type === "resource_link"),
+    )
   ) {
     return result;
   }
@@ -101,6 +117,33 @@ export async function spillResourcesToWorkspace(
   const out: CallToolResult["content"] = [];
   let index = 0;
   for (const block of blocks) {
+    // Image — spill the bytes; keep the block inline when Pi can show it.
+    if (block.type === "image") {
+      const bytes = resourceBytes({ blob: block.data });
+      if (!bytes) {
+        out.push(block);
+        continue;
+      }
+      const base = ensureExtension(`image-${index}`, block.mimeType);
+      const written = await writeSpill(base, bytes, undefined, opts);
+      if (!written) {
+        out.push(block);
+        continue;
+      }
+      index++;
+      const sniffed = await sniffImageMime(written.abs);
+      if (sniffed) out.push({ ...block, mimeType: sniffed });
+      const text = pointerText(
+        "image",
+        written.rel,
+        bytes,
+        block.mimeType,
+        sniffed ? "" : " — this image format can't be shown inline",
+        sniffed ? "read it to view it again" : undefined,
+      );
+      out.push({ type: "text", text });
+      continue;
+    }
     // Embedded resource — content is inline.
     if (block.type === "resource") {
       const inner = block.resource as EmbeddedResource;
@@ -156,6 +199,35 @@ async function writeAndPointer(
   opts: ResourceSpillOptions,
 ): Promise<{ type: "text"; text: string } | null> {
   const base = ensureExtension(basenameFromUri(inner.uri, index), inner.mimeType);
+  const written = await writeSpill(base, bytes, inner.uri, opts);
+  if (!written) return null;
+  let preview = "";
+  if (typeof inner.text === "string") {
+    const firstLine = inner.text.split("\n", 1)[0]!.slice(0, 120);
+    if (firstLine) preview = ` — first line: ${JSON.stringify(firstLine)}`;
+  }
+  return {
+    type: "text",
+    text: pointerText(
+      `resource ${inner.uri ?? "(no uri)"}`,
+      written.rel,
+      bytes,
+      inner.mimeType,
+      preview,
+    ),
+  };
+}
+
+/**
+ * Write `bytes` to `resources/<toolCallId>-<base>` and emit `resource.spilled`.
+ * Returns the workspace-relative and absolute paths, or `null` on any failure.
+ */
+async function writeSpill(
+  base: string,
+  bytes: Uint8Array,
+  uri: string | undefined,
+  opts: ResourceSpillOptions,
+): Promise<{ rel: string; abs: string } | null> {
   const rel = `${SPILL_DIR}/${sanitizeSegment(opts.toolCallId)}-${base}`;
   try {
     const abs = await resolveSafePath(opts.workspace, rel);
@@ -165,12 +237,22 @@ async function writeAndPointer(
       type: "resource.spilled",
       runId: opts.runId,
       toolCallId: opts.toolCallId,
-      uri: inner.uri,
+      uri,
       path: rel,
       bytes: bytes.byteLength,
       timestamp: Date.now(),
     });
-    return { type: "text", text: pointerText(inner, rel, bytes) };
+    return { rel, abs };
+  } catch {
+    return null;
+  }
+}
+
+/** Pi's own image sniffer on the written file; a sniff failure counts as unknown. */
+async function sniffImageMime(abs: string): Promise<string | null> {
+  try {
+    const { detectSupportedImageMimeTypeFromFile } = await loadPiCodingAgentSdk();
+    return await detectSupportedImageMimeTypeFromFile(abs);
   } catch {
     return null;
   }
@@ -238,18 +320,19 @@ function sanitizeSegment(s: string): string {
     .slice(0, 128);
 }
 
-/** Build the LLM-facing pointer that replaces the inline resource. */
-function pointerText(inner: EmbeddedResource, rel: string, bytes: Uint8Array): string {
+/** Build the LLM-facing pointer naming the spilled workspace file. */
+function pointerText(
+  subject: string,
+  rel: string,
+  bytes: Uint8Array,
+  mimeType: string | undefined,
+  note: string,
+  readHint = "read it directly",
+): string {
   const parts = [`${bytes.byteLength} bytes`];
-  if (inner.mimeType) parts.push(inner.mimeType);
-  let preview = "";
-  if (typeof inner.text === "string") {
-    const firstLine = inner.text.split("\n", 1)[0]!.slice(0, 120);
-    if (firstLine) preview = ` — first line: ${JSON.stringify(firstLine)}`;
-  }
+  if (mimeType) parts.push(mimeType);
   return (
-    `[resource ${inner.uri ?? "(no uri)"} → saved to workspace file ${rel} ` +
-    `(${parts.join(", ")})${preview}. ` +
-    `Pass ${rel} as fromFile to upload it, or read it directly.]`
+    `[${subject} → saved to workspace file ${rel} (${parts.join(", ")})${note}. ` +
+    `Pass ${rel} as fromFile to upload it, or ${readHint}.]`
   );
 }
