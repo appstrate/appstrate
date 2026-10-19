@@ -811,3 +811,54 @@ describe("HOP_BY_HOP_HEADERS", () => {
     }
   });
 });
+
+describe("fetchApiCall — a refused target", () => {
+  const refusedTarget = {
+    matches: (url: URL) => url.pathname.startsWith("/refused"),
+    message: "refused target",
+  };
+
+  for (const allowAllUris of [false, true]) {
+    it(`refuses it on a redirect hop without sending to it (allowAllUris: ${allowAllUris})`, async () => {
+      const sent: string[] = [];
+      const fetchFn = mock(async (input: string | URL | Request) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        sent.push(url.pathname);
+        return url.pathname === "/start"
+          ? new Response(null, { status: 307, headers: { location: "/refused/x" } })
+          : new Response("ok");
+      }) as unknown as typeof fetch;
+      const err = await fetchApiCall({
+        url: "https://api.example.com/start",
+        init: { method: "POST", body: "{}" },
+        authorizedUris: ["https://api.example.com/**"],
+        declaredUris: ["https://api.example.com/**"],
+        allowAllUris,
+        credentialHeaders: [],
+        internalHost: () => false,
+        integrationId: "i",
+        fetchFn,
+        resolveHost: publicResolver,
+        refusedTarget,
+        credentialFields: {},
+        targetHost: "api.example.com",
+      }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ApiCallRefusedError);
+      expect((err as ApiCallRefusedError).message).toBe("refused target");
+      expect((err as ApiCallRefusedError).redirect).toBe(true);
+      expect(sent).toEqual(["/start"]);
+    });
+
+    it(`refuses it as the initial target (allowAllUris: ${allowAllUris})`, async () => {
+      const err = await gate("https://api.example.com/refused", {
+        allowAllUris,
+        authorizedUris: ["https://api.example.com/**"],
+        declaredUris: ["https://api.example.com/**"],
+        resolveHost: publicResolver,
+        refusedTarget,
+      });
+      expect(err?.message).toBe("refused target");
+      expect(err?.redirect).toBe(false);
+    });
+  }
+});

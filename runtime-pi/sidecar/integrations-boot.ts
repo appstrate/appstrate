@@ -46,6 +46,7 @@ import { ListRootsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import {
   createInProcessPair,
   createMcpHttpClient,
+  httpStatusOf,
   wrapClient,
   type AppstrateMcpClient,
   type AppstrateToolDefinition,
@@ -132,6 +133,11 @@ function safeUrlForLog(url: string): string {
   } catch {
     return "<unparseable>";
   }
+}
+
+/** A URL's origin for log surfaces, or `undefined` when absent or unparseable. */
+function originForLog(url: string | undefined): string | undefined {
+  return url && URL.canParse(url) ? new URL(url).origin : undefined;
 }
 
 function decodeWorkspaceHandle(): WorkspaceHandle | null {
@@ -376,6 +382,8 @@ export interface ConnectRemoteHttpDeps {
    * injecting a transport factory does NOT disable it.
    */
   resolveHost?: HostResolver;
+  /** Budget of the Streamable HTTP connect, retries included (tests). Default 30s. */
+  connectDeadlineMs?: number;
 }
 
 /**
@@ -413,6 +421,96 @@ async function defaultCreateSseClient(
     throw err;
   }
   return wrapClient(client, transport, toolTimeoutMsFromEnv());
+}
+
+/** A refusal the credential closure of a remote MCP server authored itself: safe to relay. */
+class RemoteCredentialRefusal extends Error {
+  override readonly name = "RemoteCredentialRefusal";
+}
+
+/** Why a remote MCP exchange failed, named without any text the server or the transport wrote. */
+type RemoteFailureCause = "http_error" | "timeout" | "aborted" | "network" | "protocol";
+
+/** A remote MCP failure as the sidecar reports it: the server's origin, a cause, a status. */
+export class RemoteMcpError extends Error {
+  override readonly name = "RemoteMcpError";
+  constructor(
+    readonly origin: string,
+    readonly failure: RemoteFailureCause,
+    readonly status?: number,
+  ) {
+    super(
+      `remote MCP server ${origin}: ${failure.replace("_", " ")}${status === undefined ? "" : ` (HTTP ${status})`}`,
+    );
+  }
+}
+
+/**
+ * Names of the errors relayed as they are: the sidecar's own refusals (they name a host or an
+ * origin, a header name), and the JSON-RPC answers of the exchange (`McpError` legacy,
+ * `ProtocolError` modern), which are the server's protocol content like a tool result is.
+ */
+const RELAYED_REMOTE_ERRORS = new Set([
+  "RemoteCredentialRefusal",
+  "RemoteMcpError",
+  "SsrfBlockedError",
+  "InvalidHeaderValueError",
+  "McpError",
+  "ProtocolError",
+]);
+
+/**
+ * The error a remote MCP failure is reported as, everywhere it goes (boot report, run error,
+ * logs, a tool call's result). Anything but a {@link RELAYED_REMOTE_ERRORS} one is rebuilt from
+ * safe fields only, never its message: an HTTP error body or a transport message can quote the
+ * endpoint's path, which may itself be a capability. The `cause` chain is searched first so a
+ * relayed refusal wrapped by a retry deadline keeps its own text.
+ */
+function remoteMcpFailure(err: unknown, origin: string): Error {
+  const chain: unknown[] = [];
+  for (let e: unknown = err; e !== undefined && chain.length < 8;) {
+    chain.push(e);
+    e = e instanceof Error ? e.cause : undefined;
+  }
+  const relayed = chain.find(
+    (e): e is Error => e instanceof Error && RELAYED_REMOTE_ERRORS.has(e.name),
+  );
+  if (relayed) return relayed;
+  const status = chain.map(httpStatusOf).find((s) => s !== undefined);
+  const names = chain.map((e) => (e instanceof Error ? e.name : ""));
+  const text = chain.map((e) => (e instanceof Error ? e.message : String(e))).join(" ");
+  let failure: RemoteFailureCause;
+  if (names.includes("AbortError")) failure = "aborted";
+  else if (names.includes("TimeoutError") || /deadline exceeded|timed? ?out/i.test(text)) {
+    failure = "timeout";
+  } else if (status !== undefined) failure = "http_error";
+  else if (
+    chain.some(
+      (e) => e instanceof TypeError || typeof (e as { code?: unknown } | null)?.code === "string",
+    )
+  ) {
+    failure = "network";
+  } else failure = "protocol";
+  return new RemoteMcpError(origin, failure, status);
+}
+
+/** `client` with every failure reported through {@link remoteMcpFailure}. */
+function withRemoteFailures(client: AppstrateMcpClient, origin: string): AppstrateMcpClient {
+  const guard = <T>(pending: Promise<T>): Promise<T> =>
+    pending.catch((err: unknown) => {
+      throw remoteMcpFailure(err, origin);
+    });
+  return {
+    getServerCapabilities: () => client.getServerCapabilities(),
+    getServerVersion: () => client.getServerVersion(),
+    getInstructions: () => client.getInstructions(),
+    getProtocol: () => client.getProtocol(),
+    listTools: (options) => guard(client.listTools(options)),
+    listToolsPage: (options) => guard(client.listToolsPage(options)),
+    callTool: (args, options) => guard(client.callTool(args, options)),
+    readResource: (args, options) => guard(client.readResource(args, options)),
+    close: () => guard(client.close()),
+  };
 }
 
 export async function connectRemoteHttpIntegration(
@@ -519,8 +617,9 @@ export async function connectRemoteHttpIntegration(
           validateHop = (url) => {
             if (url.origin !== origin) return;
             if (!authorizedUris.some((pattern) => matchesAuthorizedUriSpec(pattern, url.href))) {
-              throw new Error(
-                `integration ${spec.integrationId}: ${url.href} is outside the authorized URIs of its connection; the credential is not sent`,
+              throw new RemoteCredentialRefusal(
+                // The origin only: the endpoint's path may itself be a capability.
+                `integration ${spec.integrationId}: ${url.origin} is outside the authorized URIs of its connection; the credential is not sent`,
               );
             }
           };
@@ -586,18 +685,22 @@ export async function connectRemoteHttpIntegration(
   // (`customFetch` above), so credential injection + refresh semantics
   // are identical across Streamable HTTP and SSE.
   const toolTimeoutMs = toolTimeoutMsFromEnv();
-  const client =
+  const origin = originForLog(serverUrl) ?? "<unparseable>";
+  const connecting =
     transport === "sse"
-      ? await createSseClient(serverUrl, { fetch: customFetch, clientInfo })
-      : await createClient(serverUrl, {
+      ? createSseClient(serverUrl, { fetch: customFetch, clientInfo })
+      : createClient(serverUrl, {
           fetch: customFetch,
           clientInfo,
           onWarning: (message, data) =>
             logger.warn(message, { integrationId: spec.integrationId, ...data }),
-          retry: { deadlineMs: 30_000 },
+          retry: { deadlineMs: deps.connectDeadlineMs ?? 30_000 },
           ...(toolTimeoutMs !== undefined ? { defaultTimeoutMs: toolTimeoutMs } : {}),
         });
-  return { client, authKey: credential?.authKey ?? null };
+  const client = await connecting.catch((err: unknown) => {
+    throw remoteMcpFailure(err, origin);
+  });
+  return { client: withRemoteFailures(client, origin), authKey: credential?.authKey ?? null };
 }
 
 /**
@@ -1649,6 +1752,16 @@ export async function bootIntegrations(
         connectionId: connection.id,
         toolName: apiCall.toolName,
         declaredUris: apiCall.authorizedUris,
+        ...(spec.manifest.server?.url
+          ? {
+              mcpEndpoint: {
+                url: spec.manifest.server.url,
+                ...(spec.manifest.server.transport
+                  ? { transport: spec.manifest.server.transport }
+                  : {}),
+              },
+            }
+          : {}),
         fetchCredentials: credAdapter.fetchCredentials,
         refreshCredentials: credAdapter.refreshCredentials,
         reportUpstreamSuccess: credAdapter.reportUpstreamSuccess,
@@ -1767,7 +1880,8 @@ export async function bootIntegrations(
           integrationId: spec.integrationId,
           ...connectionLabelOf(spec),
           namespace: spec.namespace,
-          serverUrl: spec.manifest.server?.url,
+          // The origin only: the endpoint's path may itself be a capability.
+          serverOrigin: originForLog(spec.manifest.server?.url),
           // AFPS §7.1 — surface the actual transport the sidecar
           // dispatched to so operators can audit which path executed.
           transport: spec.manifest.server?.transport,

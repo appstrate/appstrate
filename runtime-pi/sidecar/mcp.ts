@@ -811,6 +811,7 @@ function buildSidecarTools(options: MountMcpOptions): {
       proxyDeps: {
         ...proxyDeps,
         declaredUris: integ.declaredUris,
+        ...(integ.mcpEndpoint ? { mcpEndpoint: integ.mcpEndpoint } : {}),
         fetchCredentials: integ.fetchCredentials,
         refreshCredentials: integ.refreshCredentials,
         reportUpstreamSuccess: integ.reportUpstreamSuccess,
@@ -1537,6 +1538,8 @@ export interface ApiCallIntegrationConfig {
   connectionId: string;
   /** See {@link ApiCallDeps.declaredUris}. */
   declaredUris: ApiCallDeps["declaredUris"];
+  /** See {@link ApiCallDeps.mcpEndpoint}. */
+  mcpEndpoint?: ApiCallDeps["mcpEndpoint"];
   /** Resolve the integration's credentials into the proxy payload. */
   fetchCredentials: ApiCallDeps["fetchCredentials"];
   /** Force-refresh on a mid-run 401 and re-resolve (null when not rotated). */

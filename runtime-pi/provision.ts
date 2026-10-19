@@ -176,7 +176,36 @@ export async function provisionWorkspace(deps: ProvisionDeps): Promise<void> {
   // bundled runtime (see `provisionFiles`).
   await fs.mkdir(deps.workspace, { recursive: true });
   const bytes = new Uint8Array(await res.arrayBuffer());
-  await Bun.write(path.join(deps.workspace, "agent-package.afps"), bytes);
+  await Bun.write(agentPackagePath(deps.workspace), bytes);
+}
+
+/** Where {@link provisionWorkspace} writes the run's AFPS bundle. */
+export function agentPackagePath(workspace: string): string {
+  return path.join(workspace, "agent-package.afps");
+}
+
+/**
+ * Remove the provisioned AFPS bundle before the agent starts. It holds every member's manifest,
+ * which carries connection data the agent must not hold, and the run reads the bundle from
+ * memory once it is loaded. Fails the run through `die()` when the file is still there.
+ */
+export async function removeAgentPackage(
+  deps: Pick<ProvisionDeps, "workspace" | "die">,
+): Promise<void> {
+  const packagePath = agentPackagePath(deps.workspace);
+  let failure = "";
+  try {
+    await fs.rm(packagePath, { force: true });
+  } catch (err) {
+    failure = `: ${getErrorMessage(err)}`;
+  }
+  const remains = await fs.lstat(packagePath).then(
+    () => true,
+    (err: unknown) => (err as NodeJS.ErrnoException).code !== "ENOENT",
+  );
+  if (remains) {
+    return await deps.die(`Failed to remove the provisioned agent package${failure}`);
+  }
 }
 
 /**

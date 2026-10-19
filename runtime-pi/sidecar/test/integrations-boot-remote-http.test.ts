@@ -346,6 +346,31 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     expect(fetchCalls).toBe(0);
   });
 
+  it("names only the origin of an endpoint outside the authorized URIs, never its path", async () => {
+    const initial = wire(
+      [{ authKey: "oauth", authType: "oauth2" }],
+      { oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: "TOKEN" } },
+      ["https://other.example.com/**"],
+    );
+    const { deps, source, getFetch } = makeDeps(initial, async () => true);
+    await connectRemoteHttpIntegration(spec(), source, deps);
+
+    let message = "";
+    await withGlobalFetch(
+      (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
+      async () => {
+        try {
+          await getFetch()(`${SERVER_URL}?k=v`, { method: "POST" });
+        } catch (err) {
+          message = String(err);
+        }
+      },
+    );
+    expect(message).toContain(new URL(SERVER_URL).origin);
+    expect(message).not.toContain(new URL(SERVER_URL).pathname);
+    expect(message).not.toContain("k=v");
+  });
+
   // The runtime's own `Headers` TypeError quotes the value, and the boot report is agent-readable.
   it("refuses a credential that is not a header value without quoting it", async () => {
     const secret = "TOKEN\r\nX-Injected: 1";
