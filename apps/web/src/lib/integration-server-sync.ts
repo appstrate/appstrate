@@ -42,7 +42,8 @@ export function isToolsTruncated(proposal: Pick<ServerSyncProposal, "warnings">)
 
 /**
  * `tools_policy` keeps each still-listed tool's entry (its scopes are the author's) and drops the
- * rest unless the list was truncated. `default_tools` is the author's: it only loses unexposed
+ * rest unless the list was truncated. The draft's key order is kept, new tools are appended: the
+ * editor's dirty check compares serialized JSON, so a reorder would read as an edit. `default_tools` is the author's: it only loses unexposed
  * tools, and when absent becomes the proposal's pre-selection. Identity is filled only when empty.
  */
 export function mergeServerSync(
@@ -53,7 +54,9 @@ export function mergeServerSync(
   const listed = Object.keys(proposal.manifest.tools_policy);
   const policy = asRecord(current.tools_policy);
   const truncated = isToolsTruncated(proposal);
-  const names = [...(truncated ? Object.keys(policy) : []), ...listed];
+  const listedSet = new Set(listed);
+  const kept = Object.keys(policy).filter((name) => truncated || listedSet.has(name));
+  const names = [...kept, ...listed.filter((name) => !hasOwn(policy, name))];
   const manifest: Manifest = {
     ...current,
     tools_policy: Object.fromEntries(
