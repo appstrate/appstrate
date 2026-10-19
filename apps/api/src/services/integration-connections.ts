@@ -75,6 +75,8 @@ import {
   issuerOfClientMetadataDocumentRef,
   presentsClientMetadataDocument,
   platformClientName,
+  provisionabilityProblems,
+  type ProvisionabilityProblem,
 } from "../lib/integration-client-metadata.ts";
 import {
   resolveSystemClientForAuth,
@@ -136,6 +138,7 @@ import {
 import {
   integrationCallbackUrl,
   clientMetadataCallbackUrlFor,
+  clientMetadataRedirectTag,
   authorizationServerTag,
   integrationCallbackUrlFor,
   redirectTagOf,
@@ -1093,13 +1096,7 @@ async function hasTierDefault(
     .select({ id: integrationOauthClients.id })
     .from(integrationOauthClients)
     .where(
-      and(
-        tierAuthFilter(owner, packageId, authKey),
-        eq(integrationOauthClients.isDefault, true),
-        // A flag an auto-provisioned row still carries (registered before DCR rows stopped being
-        // defaults) is inert: no flow or picker reads it.
-        eq(integrationOauthClients.autoProvisioned, false),
-      ),
+      and(tierAuthFilter(owner, packageId, authKey), eq(integrationOauthClients.isDefault, true)),
     )
     .limit(1);
   return row !== undefined;
@@ -1252,9 +1249,8 @@ export async function createIntegrationOAuthClient(
       })
       .returning();
   const [row] = await insert(isDefault).catch((err: unknown) => {
-    // A concurrent write took the tier's first default — or an auto-provisioned row registered
-    // before DCR rows stopped being defaults still holds the flag: land as non-default (the
-    // manual tier's `pickDefault` falls back to its first client anyway).
+    // A concurrent create took the tier's first default since `hasTierDefault` read it: land as
+    // non-default (`pickDefault` falls back to the tier's first client anyway).
     if (!isDefault || !isUniqueViolation(err)) throw err;
     return insert(false);
   });
@@ -1430,8 +1426,8 @@ function moveClientToOrg(
         .set({ spaceId: null, isDefault: asDefault, updatedAt: new Date() })
         .where(eq(integrationOauthClients.id, existing.id))
         .returning();
-    // A savepoint, so a refused flag (an auto-provisioned row registered before DCR rows stopped
-    // being defaults still holds the org slot) leaves the transaction usable for the plain move.
+    // A savepoint, so a flag refused because a concurrent write took the org default since
+    // `hasTierDefault` read it leaves the transaction usable for the plain move.
     const [row] = isDefault
       ? await tx
           .transaction((sp) => move(sp, true))
@@ -1476,8 +1472,12 @@ interface ResolvedConnectClient {
  */
 function metadataDocumentClient(issuer: string): ResolvedConnectClient {
   const url = clientMetadataDocumentUrl(issuer);
-  const redirectUri = clientMetadataCallbackUrlFor(issuer);
-  return { clientId: url, redirectUri, redirectTag: redirectTagOf(redirectUri)!, clientRef: url };
+  return {
+    clientId: url,
+    redirectUri: clientMetadataCallbackUrlFor(issuer),
+    redirectTag: clientMetadataRedirectTag(authorizationServerTag(issuer)),
+    clientRef: url,
+  };
 }
 
 /** Project a registered system client into the connect-time resolved shape. */
@@ -1663,22 +1663,7 @@ export function resolveConnectClient(
     );
   }
 
-  if (autoProvisioned) {
-    // Auto-provisioning auth (public client on a remote MCP integration): client
-    // acquisition failed. `resolved.provisioningFailure` carries the complete
-    // reason + remedy, authored by whichever step failed. Render it verbatim.
-    const failure = resolved.provisioningFailure;
-    if (failure?.transient) {
-      throw authorizationServerUnreachable(integrationId, authKey, failure.message);
-    }
-    const detail = failure?.message ?? "discovery or client registration failed";
-    const statusPart = failure?.status ? ` (HTTP ${failure.status})` : "";
-    throw forbidden(
-      `Could not automatically provision an OAuth client for '${integrationId}' auth '${authKey}'${statusPart}: ${detail}`,
-    );
-  }
-  // Confidential/classic auth: an admin must pre-register a client, or the
-  // platform must provide a system client via SYSTEM_INTEGRATIONS.
+  // `ensureIntegrationOAuthClient` throws when it provisions no client for an auto-provisioned auth.
   throw forbidden(
     `Administrator must register OAuth client credentials for '${integrationId}' auth '${authKey}' before connection`,
   );
@@ -1875,8 +1860,9 @@ export async function listIntegrationClients(
   authKey: string,
 ): Promise<IntegrationClientDescriptor[]> {
   await assertOwnerInScope(owner, packageId, authKey);
-  const { space, org } = await loadClientTiers(owner, packageId, authKey);
   const all = await loadClientTiers(owner, packageId, authKey, "all");
+  const space = all.space.filter((c) => !c.autoProvisioned);
+  const org = all.org.filter((c) => !c.autoProvisioned);
   const system = getDefaultSystemIntegrationClient(packageId, authKey);
   // A space also sees the org's machine clients it uses (an auto-provisioned row lives at the org).
   const own = isSpaceOwner(owner)
@@ -2003,16 +1989,10 @@ export interface ResolvedOAuthConnect {
   /** RFC 8707 resource indicator (discovered for MCP, else manifest `resource`). */
   resource?: string;
   /**
-   * Set when auto-provisioning a client failed and `client` is null. The
-   * failing step authors the complete, operator-facing reason — *including the
-   * remedy* — so the caller renders it verbatim and never decides what to
-   * advise. Adding a failure point (no registration endpoint, blocked endpoint,
-   * AS rejection, network failure) is "set the field with its own
-   * message"; no new branch and no remedy heuristic in the caller. `status` is
-   * the authorization server's HTTP status when the failure came from a
-   * response, surfaced alongside the message.
+   * The metadata of a remote source's authorization server, already checked against the auth
+   * (endpoints, PKCE): the authorize request reads its scopes and requires S256 when it has an issuer.
    */
-  provisioningFailure?: { message: string; status?: number; transient?: true };
+  serverMetadata?: { issuer?: string; scopesSupported?: string[] };
 }
 
 /**
@@ -2061,6 +2041,16 @@ function sameOrigin(a: string, b: string): boolean {
   }
 }
 
+/**
+ * No client could be provisioned for an auto-provisioned auth. `reason` is authored by the failing
+ * step, remedy included; `status` is the authorization server's when it answered.
+ */
+function provisioningFailed(packageId: string, authKey: string, reason: string, status?: number) {
+  return forbidden(
+    `Could not automatically provision an OAuth client for '${packageId}' auth '${authKey}'${status ? ` (HTTP ${status})` : ""}: ${reason}`,
+  );
+}
+
 /** An authorization server that did not answer: retryable, unlike a refusal of its metadata. */
 function authorizationServerUnreachable(packageId: string, authKey: string, reason: string) {
   return new ApiError({
@@ -2071,30 +2061,32 @@ function authorizationServerUnreachable(packageId: string, authKey: string, reas
   });
 }
 
-/**
- * MCP 2026-07-28 Security Considerations: an MCP server's authorization server whose validated
- * metadata lists no S256 is refused before any client is provisioned, whatever the manifest says.
- */
-export function assertPkceS256Advertised(
+/** The 403 refusing a server that lacks `problem` ({@link provisionabilityProblems}). */
+function unprovisionableServer(
+  problem: ProvisionabilityProblem,
   packageId: string,
   authKey: string,
-  metadata: { issuer: string; codeChallengeMethodsSupported?: string[] },
-): void {
-  if (metadata.codeChallengeMethodsSupported?.includes("S256")) return;
-  throw new ApiError({
-    status: 403,
-    code: "authorization_server_pkce_unsupported",
-    title: "Authorization Server Without PKCE",
-    detail: `The authorization server ${metadata.issuer} of '${packageId}' auth '${authKey}' does not advertise PKCE S256 in its metadata (code_challenge_methods_supported), which an MCP connection requires.`,
-  });
+  issuer: string,
+): ApiError {
+  const server = `The authorization server ${issuer} of '${packageId}' auth '${authKey}'`;
+  return problem === "authorization_server_pkce_unsupported"
+    ? new ApiError({
+        status: 403,
+        code: problem,
+        title: "Authorization Server Without PKCE",
+        detail: `${server} does not advertise PKCE S256 in its metadata (code_challenge_methods_supported), which an MCP connection requires.`,
+      })
+    : new ApiError({
+        status: 403,
+        code: problem,
+        title: "Authorization Server Without Issuer Identification",
+        detail: `${server} does not advertise RFC 9207 issuer identification (authorization_response_iss_parameter_supported), which a client this platform provisions for an integration other than a system one requires.`,
+      });
 }
 
 /**
- * What the authorization server of an auto-provisioned (DCR or CIMD) client must advertise before
- * any client is provisioned for it: PKCE S256 on an MCP server, and RFC 9207 `iss` unless the
- * platform vouches for it — a system integration's own fixed server. RFC 9700 §4.4.2.2: an attacker
- * defeats per-server redirect URIs by "registering a new client with the honest authorization
- * server", on the redirect URI assigned to its own server.
+ * Refuse, before any client is provisioned, a server that misses an advertisement
+ * {@link provisionabilityProblems} requires; `vouched` is a system integration's own fixed server.
  */
 function assertProvisionableServer(
   packageId: string,
@@ -2108,14 +2100,31 @@ function assertProvisionableServer(
   policy: { mcp: boolean; vouched: boolean },
 ): void {
   if (acquiresByConnectLogin(auth)) return;
-  if (policy.mcp) assertPkceS256Advertised(packageId, authKey, metadata);
-  if (policy.vouched || metadata.authorizationResponseIssParameterSupported === true) return;
-  throw new ApiError({
-    status: 403,
-    code: "authorization_server_iss_unsupported",
-    title: "Authorization Server Without Issuer Identification",
-    detail: `The authorization server ${metadata.issuer} of '${packageId}' auth '${authKey}' does not advertise RFC 9207 issuer identification (authorization_response_iss_parameter_supported), which a client this platform provisions for an integration other than a system one requires.`,
-  });
+  const [problem] = provisionabilityProblems(metadata, policy);
+  if (problem) throw unprovisionableServer(problem, packageId, authKey, metadata.issuer);
+}
+
+/**
+ * The metadata of the declared issuer of a remote source's pre-registered client: AFPS §7.3 client
+ * binding (no contradicted endpoint) and MCP PKCE S256 — no `iss`, which binds provisioned clients
+ * only. None for a `connect.login` auth, which runs no authorization request.
+ */
+async function preRegisteredServerMetadata(
+  packageId: string,
+  authKey: string,
+  manifest: IntegrationManifest,
+  auth: AfpsManifestAuth,
+): Promise<ResolvedOAuthConnect["serverMetadata"]> {
+  if (!auth.issuer || getRemoteSource(manifest) === null || acquiresByConnectLogin(auth)) {
+    return undefined;
+  }
+  const metadata = await resolveOAuthEndpoints({ issuer: auth.issuer });
+  assertEndpointsMatchMetadata(packageId, authKey, auth, metadata);
+  if (metadata.issuer !== undefined) {
+    const [problem] = provisionabilityProblems(metadata, { mcp: true, vouched: true });
+    if (problem) throw unprovisionableServer(problem, packageId, authKey, metadata.issuer);
+  }
+  return metadata;
 }
 
 /**
@@ -2146,28 +2155,12 @@ export function assertEndpointsMatchMetadata(
 }
 
 /**
- * Resolve the OAuth connect config for an auth, provisioning a client for
- * remote MCP integrations in the MCP 2026-07-28 order: this instance's Client
- * ID Metadata Document when the server advertises
- * `client_id_metadata_document_supported` and `APP_URL` is public https
- * ({@link clientMetadataDocumentsServable}) — nothing registered, nothing
- * stored — else RFC 7591 Dynamic Client Registration (deprecated, kept for the
- * servers without CIMD, and for tier 0 / localhost, which no server can fetch a
- * document from). This is the MCP-spec onboarding path: an operator installs
- * the connector, the first actor clicks Connect, and the client exists — no
- * hand-created OAuth app, no client secret. An auto-provisioned auth takes no
- * manually registered client ({@link assertClientAuth}), so no pre-registered
- * one precedes these two.
- *
- * Discovery chain:
- *   `source.remote.url` → RFC 9728 protected-resource metadata
- *   (`resource` + `authorization_servers`) → RFC 8414 AS metadata
- *   (`authorization_endpoint` / `token_endpoint` / `client_id_metadata_document_supported` /
- *   `registration_endpoint`).
- *
- * A server chosen per connection (AFPS §7.3) goes to {@link ensurePerConnectionOAuthClient}.
- * Otherwise best-effort: a discovery/registration failure comes back as `provisioningFailure`.
- * Classic (non-auto) auths early-return with the existing lookup.
+ * Resolve the OAuth connect config for an auth. A remote MCP auto-provisioned auth gets its client
+ * in the MCP 2026-07-28 order: this instance's Client ID Metadata Document when the server accepts
+ * one and the instance can serve it, else RFC 7591 Dynamic Client Registration, its server found by
+ * `source.remote.url` → RFC 9728 → RFC 8414; a server chosen per connection (AFPS §7.3) goes to
+ * {@link ensurePerConnectionOAuthClient}. Throws when no client can be provisioned. A classic auth
+ * gets its registered clients, and the checked metadata of a remote source's declared issuer.
  */
 export async function ensureIntegrationOAuthClient(
   scope: SpaceScope,
@@ -2185,7 +2178,8 @@ export async function ensureIntegrationOAuthClient(
   // manifest in the caller.
   if (!usesAutoProvisionedClient(manifest, auth)) {
     const { space, org } = await loadClientTiers(scope, packageId, authKey);
-    return { spaceClients: space, orgClients: org };
+    const serverMetadata = await preRegisteredServerMetadata(packageId, authKey, manifest, auth);
+    return { spaceClients: space, orgClients: org, ...(serverMetadata ? { serverMetadata } : {}) };
   }
 
   // Resolve the AS issuer + RFC 8707 resource. The protected-resource metadata
@@ -2234,10 +2228,7 @@ export async function ensureIntegrationOAuthClient(
       authKey,
       auth,
       { ...discovered, issuer: discovered.issuer },
-      {
-        mcp: true,
-        vouched: isSystemPackage(packageId),
-      },
+      { mcp: remote !== null, vouched: isSystemPackage(packageId) },
     );
   }
   const endpoints = {
@@ -2258,6 +2249,7 @@ export async function ensureIntegrationOAuthClient(
       : {}),
     ...(safeUrl(endpoints.tokenEndpoint) ? { tokenEndpoint: endpoints.tokenEndpoint } : {}),
     ...(resource ? { resource } : {}),
+    serverMetadata: discovered,
     ...(discovered.issuer !== undefined
       ? {
           authorizationServer: {
@@ -2276,19 +2268,19 @@ export async function ensureIntegrationOAuthClient(
   }
 
   // RFC 9700 §4.4.2: a DCR client is bound to, and called back for, one validated server.
+  if (discovered.metadataUnreachable) {
+    throw authorizationServerUnreachable(
+      packageId,
+      authKey,
+      "its metadata (RFC 8414) did not answer; retry shortly",
+    );
+  }
   if (discovered.issuer === undefined) {
-    return {
-      ...resolved,
-      provisioningFailure: discovered.metadataUnreachable
-        ? {
-            message: "its metadata (RFC 8414) did not answer; retry shortly",
-            transient: true,
-          }
-        : {
-            message:
-              "the authorization server publishes no valid metadata (RFC 8414), so no client can be registered for it; register an OAuth client manually, or retry once it does",
-          },
-    };
+    throw provisioningFailed(
+      packageId,
+      authKey,
+      "the authorization server publishes no valid metadata (RFC 8414), so no client can be registered for it; register an OAuth client manually, or retry once it does",
+    );
   }
   const existing = await getAutoProvisionedClient(scope, packageId, authKey, discovered.issuer);
   if (existing) return { ...resolved, orgClients: [existing] };
@@ -2405,10 +2397,7 @@ async function ensurePerConnectionOAuthClient(
     authKey,
     auth,
     { ...endpoints, issuer: endpoints.issuer },
-    {
-      mcp: remote !== null,
-      vouched: false,
-    },
+    { mcp: remote !== null, vouched: false },
   );
   const byDocument = presentsClientMetadataDocument(endpoints);
   for (const url of [
@@ -2433,6 +2422,7 @@ async function ensurePerConnectionOAuthClient(
     authorizationEndpoint: endpoints.authorizationEndpoint,
     tokenEndpoint: endpoints.tokenEndpoint,
     ...(resource ? { resource } : {}),
+    ...(remote ? { serverMetadata: endpoints } : {}),
     authorizationServer: {
       issuer,
       issParameterSupported: endpoints.authorizationResponseIssParameterSupported === true,
@@ -2487,7 +2477,7 @@ async function pruneUnusedPerConnectionClients(
 
 /**
  * Register a public client (RFC 7591) as the auth's auto-provisioned client of `issuer`, on that
- * server's own redirect URI. Every failure comes back as `resolved.provisioningFailure`.
+ * server's own redirect URI; a failure is {@link provisioningFailed}, its reason naming the remedy.
  */
 async function registerAutoProvisionedClient(
   org: OrgScope,
@@ -2513,8 +2503,6 @@ async function registerAutoProvisionedClient(
     ? "a server chosen per connection must support it"
     : "register an OAuth client manually for this integration";
 
-  // No registration endpoint discovered — can't auto-register; let the caller
-  // surface the existing "register a client" error.
   if (!registrationEndpoint) {
     logger.warn("auto-DCR: no registration_endpoint discovered", {
       packageId,
@@ -2532,25 +2520,22 @@ async function registerAutoProvisionedClient(
         : chosenPerConnection
           ? `${server} advertises neither client metadata documents nor dynamic client registration (RFC 7591), one of which a server chosen per connection requires`
           : `${server} advertises neither client metadata documents nor dynamic client registration; register an OAuth client manually, or retry once the server advertises one of them`;
-    return { ...resolved, provisioningFailure: { message } };
+    throw provisioningFailed(packageId, authKey, message);
   }
 
-  // SSRF pre-check — the endpoint is manifest/discovery-derived and we POST to
-  // it. This LITERAL check (no DNS) exists to surface the friendly
-  // provisioningFailure below for obviously-internal targets; the authoritative
-  // guard is the DCR transport itself, `dcrGuardedFetch` (per-hop DNS, no redirect).
+  // A literal pre-check (no DNS) for a friendly refusal of an obviously-internal target; the
+  // authoritative guard is the DCR transport itself, `dcrGuardedFetch` (per-hop DNS, no redirect).
   if (isBlockedEgressUrl(registrationEndpoint)) {
     logger.warn("auto-DCR: registration_endpoint blocked by SSRF guard", {
       packageId,
       authKey,
       registrationEndpoint,
     });
-    return {
-      ...resolved,
-      provisioningFailure: {
-        message: `the discovered registration endpoint was refused as an unsafe (loopback/internal) target; ${manualRemedy}`,
-      },
-    };
+    throw provisioningFailed(
+      packageId,
+      authKey,
+      `the discovered registration endpoint was refused as an unsafe (loopback/internal) target; ${manualRemedy}`,
+    );
   }
 
   // Narrow the concurrency window: re-check in case a parallel Connect just
@@ -2624,15 +2609,13 @@ async function registerAutoProvisionedClient(
       const did = declaresSecretMethod
         ? `registered a confidential client${method ? ` (token_endpoint_auth_method='${method}')` : ""}`
         : "returned a client_secret";
-      return {
-        ...resolved,
-        provisioningFailure: {
-          message:
-            `the authorization server ${did} although Appstrate requested a public client ` +
-            `(token_endpoint_auth_method='none' + PKCE — the only shape automatic registration drives); ` +
-            manualRemedy,
-        },
-      };
+      throw provisioningFailed(
+        packageId,
+        authKey,
+        `the authorization server ${did} although Appstrate requested a public client ` +
+          `(token_endpoint_auth_method='none' + PKCE — the only shape automatic registration drives); ` +
+          manualRemedy,
+      );
     }
     let client: IntegrationOAuthClientWithSecret;
     try {
@@ -2707,27 +2690,23 @@ async function registerAutoProvisionedClient(
       // an operator fixes in a minute. Rendered through `oauthDiagnosticSuffix`
       // — the same shape-guarded, code-only rendering the OAuth callback path
       // uses, so both paths name the provider's code identically — passing no
-      // status of its own, since `resolveConnectClient` already renders
-      // `status` as its own `(HTTP n)` part.
-      const reachedServer = err.status !== undefined;
+      // status of its own, since `provisioningFailed` renders `status` as its
+      // own `(HTTP n)` part.
+      if (err.status === undefined) {
+        // No response, so no body and no code to name.
+        throw provisioningFailed(
+          packageId,
+          authKey,
+          "could not reach the authorization server to register a client; retry once it is reachable",
+        );
+      }
       const codeSuffix = oauthDiagnosticSuffix(err.errorCode, undefined);
-      return {
-        ...resolved,
-        provisioningFailure: reachedServer
-          ? {
-              message: `${
-                err.errorDescription ??
-                "the authorization server rejected dynamic client registration"
-              }${codeSuffix}`,
-              status: err.status,
-            }
-          : {
-              // No `codeSuffix` here: with no response there is no body, so the
-              // AS named no code — the branch is defined by that absence.
-              message:
-                "could not reach the authorization server to register a client; retry once it is reachable",
-            },
-      };
+      throw provisioningFailed(
+        packageId,
+        authKey,
+        `${err.errorDescription ?? "the authorization server rejected dynamic client registration"}${codeSuffix}`,
+        err.status,
+      );
     }
     throw err;
   }
@@ -3560,6 +3539,31 @@ export async function getIntegrationConnectionCredentialFields(
     connectionId,
   });
   return fields === KEY_UNAVAILABLE ? null : fields;
+}
+
+/**
+ * The refresh token stored on `connectionId` when `clientRef` minted it: a refresh token is bound to
+ * the client it was issued to (RFC 6749 §6), so a reconnect through another client keeps none.
+ */
+export async function refreshTokenMintedBy(
+  connectionId: string,
+  clientRef: string,
+): Promise<string | undefined> {
+  const [row] = await db
+    .select({ credentialsEncrypted: integrationConnections.credentialsEncrypted })
+    .from(integrationConnections)
+    .where(
+      and(
+        eq(integrationConnections.id, connectionId),
+        eq(integrationConnections.clientRef, clientRef),
+      ),
+    )
+    .limit(1);
+  if (!row?.credentialsEncrypted) return undefined;
+  const fields = decryptForDisplay(() => decryptCredentialsToStringMap(row.credentialsEncrypted), {
+    connectionId,
+  });
+  return fields === KEY_UNAVAILABLE ? undefined : fields?.refresh_token || undefined;
 }
 
 /** The only `needs_reconnection = true` write keeping the credentials; no-op once the row is gone. */

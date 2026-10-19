@@ -58,7 +58,8 @@ const HOSTS = [
   "mcp.toolsbig.test",
   "mcp.both5xx.test",
   "mcp.offline.test",
-  "mcp.online.test",
+  "mcp.nopkce.test",
+  "mcp.manualnopkce.test",
   "mcp.noscope.test",
   "mcp.guessoffline.test",
   "mcp.guessempty.test",
@@ -111,6 +112,8 @@ function protectedServer(
     asScopes?: string[];
     /** RFC 9207 `authorization_response_iss_parameter_supported` (default true). */
     iss?: boolean;
+    /** `code_challenge_methods_supported: ["S256"]` (default true). */
+    pkce?: boolean;
   } = {},
 ): Record<string, Route> {
   const origin = `https://${host}`;
@@ -126,7 +129,7 @@ function protectedServer(
         issuer: origin,
         authorization_endpoint: `${origin}/authorize`,
         token_endpoint: `${origin}/token`,
-        code_challenge_methods_supported: ["S256"],
+        ...(opts.pkce === false ? {} : { code_challenge_methods_supported: ["S256"] }),
         ...(opts.registration === false ? {} : { registration_endpoint: `${origin}/register` }),
         ...(opts.cimd ? { client_id_metadata_document_supported: true } : {}),
         ...(opts.iss === false ? {} : { authorization_response_iss_parameter_supported: true }),
@@ -205,6 +208,29 @@ describe("discoverRemoteIntegration", () => {
     expect(proposal.iconSource).toBeNull();
   });
 
+  it("warns before saving that a server without PKCE S256 cannot be connected", async () => {
+    const { fetchImpl } = fakeFetch(protectedServer("mcp.nopkce.test", { pkce: false }));
+    const proposal = await discoverRemoteIntegration(
+      { url: "https://mcp.nopkce.test/mcp", orgSlug: "acme" },
+      { fetchImpl },
+    );
+    expect(proposal.warnings.map((w) => w.code)).toEqual(["authorization_server_pkce_unsupported"]);
+  });
+
+  it("warns a pre-registered client's author of a server without PKCE, not of a missing iss", async () => {
+    const { fetchImpl } = fakeFetch(
+      protectedServer("mcp.manualnopkce.test", { registration: false, pkce: false, iss: false }),
+    );
+    const proposal = await discoverRemoteIntegration(
+      { url: "https://mcp.manualnopkce.test/mcp", orgSlug: "acme" },
+      { fetchImpl },
+    );
+    expect(proposal.warnings.map((w) => w.code)).toEqual([
+      "manual_client_required",
+      "authorization_server_pkce_unsupported",
+    ]);
+  });
+
   it("warns before saving that a server without RFC 9207 iss cannot be connected", async () => {
     const { fetchImpl } = fakeFetch(protectedServer("mcp.noiss.test", { iss: false }));
     const proposal = await discoverRemoteIntegration(
@@ -252,7 +278,7 @@ describe("discoverRemoteIntegration", () => {
     expect(auth.default_scopes).toEqual(["org:read", "event:write"]);
   });
 
-  it("requests offline_access when the authorization server advertises it (Appstrate)", async () => {
+  it("proposes no offline_access, which connect requests itself when advertised", async () => {
     const { fetchImpl } = fakeFetch(
       protectedServer("mcp.offline.test", {
         prm: { scopes_supported: ["mcp:read", "mcp:invoke"] },
@@ -264,22 +290,7 @@ describe("discoverRemoteIntegration", () => {
       { fetchImpl },
     );
     const auth = (manifest.auths as Record<string, Record<string, unknown>>).oauth!;
-    expect(auth.default_scopes).toEqual(["mcp:read", "mcp:invoke", "offline_access"]);
-  });
-
-  it("adds no offline_access the authorization server does not advertise", async () => {
-    const { fetchImpl } = fakeFetch(
-      protectedServer("mcp.online.test", {
-        prm: { scopes_supported: ["mcp:read"] },
-        asScopes: ["mcp:read"],
-      }),
-    );
-    const { manifest } = await discoverRemoteIntegration(
-      { url: "https://mcp.online.test/mcp", orgSlug: "acme" },
-      { fetchImpl },
-    );
-    const auth = (manifest.auths as Record<string, Record<string, unknown>>).oauth!;
-    expect(auth.default_scopes).toEqual(["mcp:read"]);
+    expect(auth.default_scopes).toEqual(["mcp:read", "mcp:invoke"]);
   });
 
   it("keeps an empty scope list empty, offline_access advertised or not", async () => {
@@ -311,14 +322,14 @@ describe("discoverRemoteIntegration", () => {
     });
   };
 
-  it("adds offline_access on a guessed origin server that advertises it", async () => {
+  it("proposes no offline_access on a guessed origin server either", async () => {
     const { fetchImpl } = guessedOrigin("mcp.guessoffline.test", 'Bearer scope="read"');
     const { manifest } = await discoverRemoteIntegration(
       { url: "https://mcp.guessoffline.test/mcp", orgSlug: "acme" },
       { fetchImpl },
     );
     const auth = (manifest.auths as Record<string, Record<string, unknown>>).oauth!;
-    expect(auth.default_scopes).toEqual(["read", "offline_access"]);
+    expect(auth.default_scopes).toEqual(["read"]);
   });
 
   it("keeps a guessed origin server's empty scope list empty", async () => {

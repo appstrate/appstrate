@@ -48,12 +48,11 @@ import { logger } from "../../lib/logger.ts";
 import { oauthStateStore } from "./oauth-state-store.ts";
 import {
   assertEndpointsMatchMetadata,
-  assertPkceS256Advertised,
   assertRequiredIdentityClaims,
   ensureIntegrationOAuthClient,
   extractIdentity,
-  getIntegrationConnectionCredentialFields,
   readIntegrationAuth,
+  refreshTokenMintedBy,
   resolveConnectClient,
   saveIntegrationConnection,
   type IntegrationConnectionSummary,
@@ -365,9 +364,8 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
         "oauth2 auth must declare an issuer (for discovery) or explicit authorization_endpoint + token_endpoint for marketplace connect.",
       );
     }
-    // Resolve the client (auto-registering via DCR for remote MCP integrations
-    // when unregistered) and the connect endpoints/resource (discovered for
-    // MCP, else manifest).
+    // The client, provisioned for a remote MCP auth, and the endpoints/resource (discovered, else
+    // the manifest's), checked against the server's metadata.
     const resolved = await ensureIntegrationOAuthClient(
       ctx.scope,
       ctx.integrationId,
@@ -376,11 +374,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       auth,
       variables ?? {},
     );
-    // Client selection (multi-client) — full precedence lives in
-    // `resolveConnectClient`. New connections always use the default (the
-    // model-provider cascade). There is no per-connect picker. The chosen
-    // `clientRef` is pinned on the connection so token refresh resolves the
-    // same credentials.
+    // The default client; its `clientRef` is pinned so refresh resolves the same credentials.
     const {
       clientId,
       redirectUri: clientRedirectUri,
@@ -396,25 +390,12 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     );
     // The shared callback, the very string the admin UI displays (`platform_redirect_uri`).
     const effectiveRedirectUri = clientRedirectUri ?? integrationCallbackUrl();
-    // Threaded endpoints/resource: discovery result wins, manifest is the
-    // fallback (classic integrations have no resolved.* fields).
     const issuer = resolved.issuer ?? auth.issuer;
     const authorizationEndpoint = resolved.authorizationEndpoint ?? auth.authorization_endpoint;
     const tokenEndpoint = resolved.tokenEndpoint ?? auth.token_endpoint;
     // A server chosen per connection takes no declared resource.
     const resource = perConnection ? resolved.resource : (resolved.resource ?? auth.resource);
-    const metadata =
-      getRemoteSource(manifest) && issuer ? await resolveOAuthEndpoints({ issuer }) : undefined;
-    // AFPS §7.3 client binding on a remote source, a manually registered client included.
-    if (metadata && !perConnection) {
-      assertEndpointsMatchMetadata(ctx.integrationId, ctx.authKey, auth, metadata);
-    }
-    if (metadata?.issuer !== undefined) {
-      assertPkceS256Advertised(ctx.integrationId, ctx.authKey, {
-        ...metadata,
-        issuer: metadata.issuer,
-      });
-    }
+    const metadata = resolved.serverMetadata;
     const result = await initiateIntegrationOAuth(oauthStateStore, {
       packageId: ctx.integrationId,
       authKey: ctx.authKey,
@@ -475,15 +456,13 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     // half-identified connection never lands in `integration_connections`.
     assertRequiredIdentityClaims(manifest, result.authKey, identityClaims);
 
-    // Re-auth (update) path: an IdP may omit `refresh_token` on re-consent
-    // (e.g. Google without `prompt=consent`). Preserve the still-valid stored
-    // token instead of clobbering it with none — mirrors the refresh path's
-    // `parsed.refreshToken ?? refreshToken` carry-forward.
-    let refreshToken = result.refreshToken;
-    if (!refreshToken && result.connectionId) {
-      const existing = await getIntegrationConnectionCredentialFields(result.connectionId);
-      if (existing?.refresh_token) refreshToken = existing.refresh_token;
-    }
+    // An IdP may omit `refresh_token` on re-consent (Google without `prompt=consent`): a reconnect
+    // keeps the stored one, but only through the client it was issued to.
+    const refreshToken =
+      result.refreshToken ||
+      (result.connectionId
+        ? await refreshTokenMintedBy(result.connectionId, result.clientRef)
+        : undefined);
 
     // A short-lived token (`expires_at` set) with no `refresh_token` is only a
     // misconfig when the authorization server CAN issue refresh tokens. Many MCP

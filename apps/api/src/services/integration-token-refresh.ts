@@ -446,8 +446,8 @@ export async function buildIntegrationOAuthRefreshContext(
     // `token_endpoint` is NOT terminal — discovery is best-effort and a routine
     // IdP/network blip would otherwise brick refresh and falsely flag the
     // connection `needsReconnection`. Surface it as TRANSIENT so the caller
-    // keeps the cached credential and retries later (resolveOAuthEndpoints no
-    // longer negatively-caches, so the next attempt re-discovers). Only a
+    // keeps the cached credential and retries later (resolveOAuthEndpoints does
+    // not cache metadata that did not answer, so the next attempt re-discovers). Only a
     // manifest with neither `issuer` NOR `token_endpoint` is genuinely
     // unrefreshable (terminal → null).
     if (issuer) {

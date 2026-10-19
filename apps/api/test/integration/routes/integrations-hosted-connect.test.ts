@@ -461,7 +461,7 @@ describe("hosted connect portal — oauth2 dispatch without a client (issues #12
     const html = await res.text();
     expect(html).toContain("Could not start the connection");
     // This `detail` embeds the authorization server's OWN message verbatim
-    // (`resolveConnectClient` renders `provisioningFailure.message` as-is), so
+    // (the provisioning refusal renders the failing step's reason as-is), so
     // it is upstream-controlled text on a session-less page. Log only.
     expect(html).not.toContain("Could not automatically provision an OAuth client");
     expect(html).not.toContain("RFC 8414");

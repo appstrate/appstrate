@@ -18,7 +18,6 @@ import {
   parseResourceMetadataChallenge,
   parseScopeChallenge,
   resolveOAuthEndpoints,
-  withOfflineAccess,
 } from "@appstrate/connect";
 import { isIconImage } from "@appstrate/core/appearance";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -34,7 +33,10 @@ import {
 } from "../lib/egress-host-guard.ts";
 import { readBodyPrefix, readBodyUnder } from "../lib/capped-body.ts";
 import { logger } from "../lib/logger.ts";
-import { presentsClientMetadataDocument } from "../lib/integration-client-metadata.ts";
+import {
+  presentsClientMetadataDocument,
+  provisionabilityProblems,
+} from "../lib/integration-client-metadata.ts";
 import { fetchServerIcon, siteIconFetch } from "./integration-icon.ts";
 
 type Provenance = "detected" | "guessed";
@@ -402,10 +404,7 @@ async function discoverAuth(
     const advertised = md.authorizationServers[0]!;
     const issuer = isBlockedEgressUrl(advertised) ? undefined : advertised;
     const endpoints = issuer ? await resolveOAuthEndpoints({ issuer, fetchImpl }) : {};
-    const scopes = withOfflineAccess(
-      scopeTokens(challengeScopes ?? md.scopesSupported ?? []),
-      endpoints.scopesSupported,
-    );
+    const scopes = scopeTokens(challengeScopes ?? md.scopesSupported ?? []);
     const autoClient = provisionsClientItself(endpoints);
     const warning = !issuer
       ? {
@@ -430,7 +429,10 @@ async function discoverAuth(
       provenance: "detected",
       warnings: [
         ...(warning ? [warning] : []),
-        ...(autoClient ? issWarnings(advertised, endpoints) : []),
+        // A pre-registered client of a validated server owes PKCE too, not `iss`.
+        ...(endpoints.issuer !== undefined
+          ? provisionabilityWarnings(advertised, endpoints, !autoClient)
+          : []),
       ],
       ...(md.resourceName ? { resourceName: md.resourceName } : {}),
       ...(md.resourceDocumentation ? { documentation: md.resourceDocumentation } : {}),
@@ -440,30 +442,33 @@ async function discoverAuth(
 
   const atOrigin = await resolveOAuthEndpoints({ issuer: origin, fetchImpl });
   if (provisionsClientItself(atOrigin)) {
-    const scopes = withOfflineAccess(scopeTokens(challengeScopes ?? []), atOrigin.scopesSupported);
+    const scopes = scopeTokens(challengeScopes ?? []);
     return {
       key: "oauth",
       auth: oauth2Auth(origin, { issuer: origin, method: "none", scopes, catalog: scopes }),
       provenance: "guessed",
-      warnings: issWarnings(origin, atOrigin),
+      warnings: provisionabilityWarnings(origin, atOrigin, false),
     };
   }
   return { key: "primary", auth: apiKeyAuth(origin), provenance: "guessed", warnings: [] };
 }
 
-/** Connect refuses such a server for an integration it creates (`assertProvisionableServer`). */
-function issWarnings(
+/** What connect refuses at this server for an integration created from it (`provisionabilityProblems`). */
+function provisionabilityWarnings(
   server: string,
-  endpoints: { authorizationResponseIssParameterSupported?: boolean },
+  endpoints: {
+    codeChallengeMethodsSupported?: string[];
+    authorizationResponseIssParameterSupported?: boolean;
+  },
+  preRegistered: boolean,
 ): { code: string; message: string }[] {
-  return endpoints.authorizationResponseIssParameterSupported === true
-    ? []
-    : [
-        {
-          code: "authorization_server_iss_unsupported",
-          message: `The authorization server ${server} does not support RFC 9207 issuer identification (authorization_response_iss_parameter_supported): an integration created from this server cannot connect.`,
-        },
-      ];
+  return provisionabilityProblems(endpoints, { mcp: true, vouched: preRegistered }).map((code) => ({
+    code,
+    message:
+      code === "authorization_server_pkce_unsupported"
+        ? `The authorization server ${server} does not advertise PKCE S256 (code_challenge_methods_supported): an integration created from this server cannot connect.`
+        : `The authorization server ${server} does not support RFC 9207 issuer identification (authorization_response_iss_parameter_supported): an integration created from this server cannot connect.`,
+  }));
 }
 
 /**
