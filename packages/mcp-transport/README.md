@@ -135,12 +135,14 @@ picks a **protocol era**; other documents link here rather than restate it.
 `listTools()` walks every page, up to 64, and throws past that. On a modern
 connection a tool with an invalid `x-mcp-header` is excluded and reported
 through `onWarning`. A server repeating its cursor throws too, never a
-partial list. The definitions of the session's last listing are handed to
-each `callTool`: the SDK validates the output against the tool's
-`outputSchema` in both eras, and on a modern connection mirrors `x-mcp-header`
-parameters. A modern call made before any listing gets both only through the
-SDK's own recovery, so list first (current consumers do). A tool whose
-`outputSchema` cannot compile is refused before the call is sent. A
+partial list. The definitions of the session's last complete `listTools()`
+are handed to each `callTool`, installed in one swap once the walk ends: a
+failed walk leaves them untouched, a call made mid-walk sees the previous set,
+and `listToolsPage()` only reads. The SDK validates the output against the
+tool's `outputSchema` in both eras, and on a modern connection mirrors
+`x-mcp-header` parameters. A modern call made before any listing gets both
+only through the SDK's own recovery, so list first (current consumers do). A
+tool whose `outputSchema` cannot compile is refused before the call is sent. A
 `HeaderMismatch` (-32020) on a modern call refreshes the list and resends the
 call once. On a legacy connection -32020 is the server's own error and is
 never resent.
@@ -152,7 +154,8 @@ the injected fetch throws during the connect comes back as itself.
 `wrapClient(client, transport)` gives the same surface over a connected v1
 SDK `Client`: in-process pairs, stdio subprocesses, the HTTP+SSE transport.
 Their servers are 2025-era by construction. `listTools()` walks the pages
-there too, and the v1 client validates outputs against every page's tools.
+there too, and the v1 client validates outputs against every page's tools,
+installed only once the walk completes.
 
 ### `@appstrate/mcp-transport/testing`
 

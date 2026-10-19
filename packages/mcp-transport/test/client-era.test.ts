@@ -18,7 +18,9 @@ import {
   createMcpServer,
   httpStatusOf,
   wrapClient,
+  type AppstrateMcpClient,
   type AppstrateToolDefinition,
+  type Tool,
 } from "../src/index.ts";
 import {
   handlerFetch,
@@ -994,4 +996,133 @@ describe("tools/list pagination on every SDK line", () => {
       await client.close();
     }
   });
+});
+
+describe("a tools/list refresh installs its definitions only once complete", () => {
+  const strict = { type: "object", required: ["ok"], properties: { ok: { type: "boolean" } } };
+  const outsideSchema = /does not match the tool's output schema/;
+
+  /**
+   * Two pages: `typed` (strict, permissive once `refreshing`), then `other`. Page 2 waits on
+   * `page2()` and answers a server error when it says `fail`.
+   */
+  function catalogue() {
+    const state = {
+      refreshing: false,
+      answer: { ok: true } as unknown,
+      page2: async (): Promise<"ok" | "fail"> => "ok",
+    };
+    const page = async (cursor: unknown): Promise<{ tools: Tool[]; nextCursor?: string }> => {
+      if (cursor === undefined) {
+        const outputSchema = (
+          state.refreshing ? { type: "object" } : strict
+        ) as Tool["outputSchema"];
+        return {
+          tools: [{ name: "typed", inputSchema: { type: "object" }, outputSchema }],
+          nextCursor: "1",
+        };
+      }
+      if ((await state.page2()) === "fail") throw new Error("page 2 unavailable");
+      return { tools: [{ name: "other", inputSchema: { type: "object" } }] };
+    };
+    return { state, page };
+  }
+
+  type State = ReturnType<typeof catalogue>["state"];
+
+  async function overHttp(era: "modern" | "legacy") {
+    const { state, page } = catalogue();
+    const base =
+      era === "modern" ? modernMcpHandler({ tools: [echo] }) : legacyMcpHandler({ tools: [echo] });
+    const complete = era === "modern" ? { resultType: "complete" } : {};
+    const cacheable = era === "modern" ? { ttlMs: 0, cacheScope: "public" } : {};
+    const fetch = handlerFetch(async (request) => {
+      const text = request.method === "POST" ? await request.clone().text() : "";
+      const body = text
+        ? (JSON.parse(text) as { id?: number; method?: string; params?: { cursor?: string } })
+        : {};
+      if (body.method === "tools/list") {
+        try {
+          const result = { ...complete, ...cacheable, ...(await page(body.params?.cursor)) };
+          return Response.json({ jsonrpc: "2.0", id: body.id, result });
+        } catch {
+          return new Response("upstream down", { status: 500 });
+        }
+      }
+      if (body.method === "tools/call") {
+        const result = { ...complete, content: [], structuredContent: state.answer };
+        return Response.json({ jsonrpc: "2.0", id: body.id, result });
+      }
+      return base(request);
+    });
+    const client = await createMcpHttpClient(freshUrl(), { fetch });
+    expect(client.getProtocol()?.era).toBe(era);
+    return { client, state };
+  }
+
+  async function inProcess() {
+    const { state, page } = catalogue();
+    const server = createMcpServer([echo]);
+    server.setRequestHandler(ListToolsRequestSchema, async (request) =>
+      page(request.params?.cursor),
+    );
+    server.setRequestHandler(CallToolRequestSchema, async () => ({
+      content: [],
+      structuredContent: state.answer as Record<string, unknown>,
+    }));
+    const legacy = new Client({ name: "refresh-test", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), legacy.connect(clientTransport)]);
+    return { client: wrapClient(legacy, { close: () => server.close() }), state };
+  }
+
+  const lines: [string, () => Promise<{ client: AppstrateMcpClient; state: State }>][] = [
+    ["modern HTTP", () => overHttp("modern")],
+    ["legacy HTTP", () => overHttp("legacy")],
+    ["wrapClient (v1)", inProcess],
+  ];
+
+  for (const [line, connect] of lines) {
+    it(`${line}: a refresh failing on page 2 keeps the previous complete set`, async () => {
+      const { client, state } = await connect();
+      try {
+        await client.listTools();
+        state.refreshing = true;
+        state.page2 = async () => "fail";
+        await expect(client.listTools()).rejects.toThrow();
+        state.answer = { ok: "wrong" };
+        await expect(client.callTool({ name: "typed" })).rejects.toThrow(outsideSchema);
+      } finally {
+        await client.close();
+      }
+    });
+
+    it(`${line}: a call made mid-refresh validates against the previous complete set`, async () => {
+      const { client, state } = await connect();
+      try {
+        await client.listTools();
+        state.refreshing = true;
+        let reached!: () => void;
+        let release!: () => void;
+        const atPage2 = new Promise<void>((resolve) => (reached = resolve));
+        const held = new Promise<void>((resolve) => (release = resolve));
+        state.page2 = async () => {
+          reached();
+          await held;
+          return "ok";
+        };
+        const refresh = client.listTools();
+        await atPage2;
+        state.answer = { ok: "wrong" };
+        await expect(client.callTool({ name: "typed" })).rejects.toThrow(outsideSchema);
+        release();
+        expect((await refresh).tools.map((t) => t.name)).toEqual(["typed", "other"]);
+        expect((await client.callTool({ name: "typed" })).structuredContent).toEqual({
+          ok: "wrong",
+        });
+      } finally {
+        await client.close();
+      }
+    });
+  }
 });

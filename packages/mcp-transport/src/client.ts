@@ -26,6 +26,7 @@ import { createCache } from "@appstrate/core/cache";
 import { readToolListPage } from "./tool-list.ts";
 import {
   ErrorCode,
+  ListToolsResultSchema,
   McpError,
   type CallToolResult,
   type Implementation,
@@ -128,7 +129,10 @@ export interface AppstrateMcpClient {
    * still paginating past {@link MAX_TOOL_PAGES}.
    */
   listTools(options?: { signal?: AbortSignal }): Promise<{ tools: Tool[] }>;
-  /** One `tools/list` page: the first without `cursor`, else the page `cursor` names. */
+  /**
+   * One `tools/list` page: the first without `cursor`, else the page `cursor` names. Read only:
+   * calls keep validating against the definitions of the last complete {@link listTools}.
+   */
   listToolsPage(options?: {
     cursor?: string;
     signal?: AbortSignal;
@@ -548,9 +552,9 @@ interface SdkSession {
   serverVersion(): Implementation | undefined;
   instructions(): string | undefined;
   protocol(): McpProtocol | undefined;
-  /** One page; its definitions join those the session validates calls against. */
+  /** One page, read only: no definition the session validates calls against changes. */
   listToolsPage(cursor: string | undefined, options: SessionRequestOptions): Promise<ToolPage>;
-  /** A complete listing: the definitions it carries replace the session's. */
+  /** A complete listing: the definitions it carries replace the session's, in one swap. */
   replaceTools(tools: Tool[]): void;
   callTool(
     args: { name: string; arguments?: Record<string, unknown> },
@@ -562,7 +566,10 @@ interface SdkSession {
 
 const MAX_TOOL_PAGES = 64;
 
-/** Every `tools/list` page, then the complete listing replaces the session's definitions. */
+/**
+ * Every `tools/list` page, then the complete listing replaces the session's definitions: a walk
+ * that fails leaves them as they were, and a call made mid-walk sees the previous set.
+ */
 async function walkTools(
   session: SdkSession,
   options: SessionRequestOptions,
@@ -616,7 +623,6 @@ function dualEraSession(
           reason,
         });
       }
-      for (const tool of read.tools) listed.set(tool.name, tool);
       return { tools: read.tools, ...(read.nextCursor ? { nextCursor: read.nextCursor } : {}) };
     },
     replaceTools(tools) {
@@ -673,12 +679,16 @@ function legacySession(client: LegacyClient): SdkSession {
     protocol: () =>
       client.getServerCapabilities() ? { era: "legacy", version: undefined } : undefined,
     async listToolsPage(cursor, options) {
-      const page = await client.listTools(cursor ? { cursor } : undefined, options);
+      // A raw request: `client.listTools()` would reset the validators to this one page.
+      const page = await client.request(
+        { method: "tools/list", params: cursor ? { cursor } : {} },
+        ListToolsResultSchema,
+        options,
+      );
       return { tools: page.tools, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}) };
     },
     replaceTools(tools) {
-      // The v1 client validates `callTool` outputs against the validators of the last
-      // `listTools()` response, one page: a walk re-caches them from every page.
+      // The v1 client validates `callTool` outputs against the validators this caches.
       (client as unknown as { cacheToolMetadata(tools: Tool[]): void }).cacheToolMetadata(tools);
     },
     async callTool(args, options) {
