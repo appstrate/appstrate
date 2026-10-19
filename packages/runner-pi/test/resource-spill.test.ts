@@ -403,6 +403,36 @@ describe("spillResourcesToWorkspace", () => {
         expect(await read("c3-image-0-2.png").then(String)).toBe("REPLACED");
       });
 
+      it("keeps names that differ only by case apart, in both orders", async () => {
+        // A case-insensitive FS (macOS) would fold `image-0.png` and
+        // `image-0.PNG` into one file; the paths must differ once lowercased.
+        const upper = {
+          ...replacing,
+          resource: { ...replacing.resource, uri: "file:///image-0.PNG" },
+        };
+        const image = { type: "image", data: PNG_B64, mimeType: "image/png" };
+        const spilledPath = (text: string) => /resources\/(\S+)/.exec(text)![1]!;
+
+        for (const [id, content, imageFirst] of [
+          ["k1", [image, upper], true],
+          [
+            "k2",
+            [{ ...upper, resource: { ...upper.resource, uri: "file:///image-1.PNG" } }, image],
+            false,
+          ],
+        ] as const) {
+          const out = await spillResourcesToWorkspace({ content } as unknown as CallToolResult, {
+            workspace,
+            toolCallId: id,
+          });
+          const [first, second] = pointers(out).map(spilledPath);
+          expect(first!.toLowerCase()).not.toBe(second!.toLowerCase());
+          const [imageFile, resourceFile] = imageFirst ? [first!, second!] : [second!, first!];
+          expect(new Uint8Array(await read(imageFile))).toEqual(PNG_BYTES);
+          expect(await read(resourceFile).then(String)).toBe("REPLACED");
+        }
+      });
+
       it("keeps two resources with the same URI basename apart", async () => {
         const result = {
           content: [

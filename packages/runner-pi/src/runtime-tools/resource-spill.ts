@@ -75,7 +75,7 @@ export interface ResourceSpillOptions {
 }
 
 /** Per-call spill state: the options plus every workspace path already handed out. */
-type SpillContext = ResourceSpillOptions & { taken: Set<string> };
+type SpillContext = ResourceSpillOptions & { taken: Set<string> }; // lowercased paths
 
 type EmbeddedResource = {
   uri?: string;
@@ -239,14 +239,16 @@ async function writeAndPointer(
  * a name already handed out in this call (an image's `image-0.png` against a
  * resource's URI basename, two URIs with the same tail, a post-sniff rename)
  * becomes `<stem>-2.<ext>`, `-3`, … so no spilled file overwrites another.
+ * Compared case-insensitively, since the workspace may sit on a
+ * case-insensitive FS (macOS); names are ASCII-sanitised, so lowercasing is enough.
  */
 function spillRel(base: string, ctx: SpillContext): string {
   const prefix = `${SPILL_DIR}/${sanitizeSegment(ctx.toolCallId)}-`;
   const ext = /\.[A-Za-z0-9]{1,8}$/.exec(base)?.[0] ?? "";
   const stem = base.slice(0, base.length - ext.length);
   let rel = `${prefix}${base}`;
-  for (let n = 2; ctx.taken.has(rel); n++) rel = `${prefix}${stem}-${n}${ext}`;
-  ctx.taken.add(rel);
+  for (let n = 2; ctx.taken.has(rel.toLowerCase()); n++) rel = `${prefix}${stem}-${n}${ext}`;
+  ctx.taken.add(rel.toLowerCase());
   return rel;
 }
 
