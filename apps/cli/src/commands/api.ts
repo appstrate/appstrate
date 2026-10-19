@@ -45,21 +45,16 @@
  * detours into 100-line helpers.
  */
 
-import { readConfig, resolveProfileName } from "../lib/config.ts";
-import {
-  resolveAuthContext,
-  resolveApiKeyAuthContext,
-  explicitApiKey,
-  AuthError,
-  ApiError,
-} from "../lib/api.ts";
 import { loginRemedy } from "../lib/remedy.ts";
 import { classifyNetworkError, labelForExitCode } from "../lib/http-classify.ts";
 
+import { resolveApiAuth } from "./api/auth.ts";
+import { apiBatchCommand } from "./api/batch.ts";
 import { buildBody, collectGetDataAsQuery } from "./api/body.ts";
 import { buildHeaders } from "./api/headers.ts";
 import { pickMethod } from "./api/method.ts";
 import { executeWithRetry } from "./api/retry.ts";
+import { skipTlsVerification } from "./api/tls.ts";
 import { consumeResponseStream, fileChunkSink, streamChunkSink } from "./api/stream.ts";
 import { DEFAULT_IO, type ApiCommandIO, type ApiCommandOptions } from "./api/types.ts";
 import { HostMismatchError, buildUrl } from "./api/url.ts";
@@ -81,6 +76,8 @@ export async function apiCommand(
   opts: ApiCommandOptions,
   io: ApiCommandIO = DEFAULT_IO,
 ): Promise<void> {
+  if (opts.batch !== undefined) return apiBatchCommand(opts, io);
+
   // Error output gate: curl `-s` silences errors; `-sS` restores
   // them. A bare (no-flag) invocation always prints errors. This
   // helper is applied to every error-class stderr write in the
@@ -152,23 +149,12 @@ export async function apiCommand(
 
   // 1. Resolve the credential: explicit API key (`profileName` stays
   //    undefined), else auth profile + fresh access token.
-  let profileName: string | undefined;
-  let auth: Awaited<ReturnType<typeof resolveAuthContext>>;
-  try {
-    const apiKey = explicitApiKey(opts.apiKey);
-    if (apiKey) {
-      auth = await resolveApiKeyAuthContext(apiKey, opts.profile);
-    } else {
-      profileName = resolveProfileName(opts.profile, await readConfig());
-      auth = await resolveAuthContext(profileName);
-    }
-  } catch (err) {
-    if (err instanceof AuthError || err instanceof ApiError) {
-      writeError(`${err.message}\n`);
-      return exit(1);
-    }
-    throw err;
+  const resolved = await resolveApiAuth(opts);
+  if ("error" in resolved) {
+    writeError(`${resolved.error}\n`);
+    return exit(1);
   }
+  const { auth, profileName } = resolved;
 
   const hasUrlencode = Array.isArray(opts.dataUrlencode) && opts.dataUrlencode.length > 0;
 
@@ -308,8 +294,7 @@ export async function apiCommand(
   }
 
   // 7. TLS skip (process-wide; restored in finally).
-  const prevTlsReject = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-  if (opts.insecure) process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+  const restoreTls = opts.insecure ? skipTlsVerification() : undefined;
 
   // Single source of cleanup — `--max-time` spans fetch() AND the
   // body-stream read loop, so we can't clear the timeout inside a
@@ -459,7 +444,7 @@ export async function apiCommand(
   } finally {
     if (timeoutHandle) clearTimeout(timeoutHandle);
     if (connectTimeoutHandle) clearTimeout(connectTimeoutHandle);
-    if (opts.insecure) restoreTls(prevTlsReject);
+    restoreTls?.();
   }
 }
 
@@ -471,11 +456,6 @@ function formatStatusLine(res: Response): string {
   // the runtime gave us — don't lie about HTTP/1.1 vs HTTP/2).
   const text = res.statusText || "";
   return `HTTP/1.1 ${res.status} ${text}\r\n`;
-}
-
-function restoreTls(prev: string | undefined): void {
-  if (prev === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-  else process.env.NODE_TLS_REJECT_UNAUTHORIZED = prev;
 }
 
 function errorMessage(err: unknown): string {
