@@ -5,6 +5,14 @@
  * integration members on disk (`.pi/skills/`, `.pi/integrations/`), where the
  * prompt tells the agent to read them.
  *
+ * What lands there is each member's content files: `SKILL.md` /
+ * `INTEGRATION.md` and the companion files they reference. A member's
+ * `manifest.json` is not written: the agent only reads `INTEGRATION.md` /
+ * `SKILL.md`, and an integration manifest carries connection data (remote
+ * URL, header values, auth configuration) the run must not hand the agent.
+ * The runtime reads manifests from the in-memory {@link Bundle}, never from
+ * the workspace.
+ *
  * Runtime tools (`output` / `log` / `note` / `pin`) are not registered here:
  * they are transport-neutral MCP tool definitions
  * (`@appstrate/core/runtime-tool-defs`) hosted by the sidecar (over `/mcp`)
@@ -35,6 +43,8 @@ export interface PrepareBundleOptions {
    * Agent workspace directory. The helper writes:
    *   - `{workspaceDir}/.pi/skills/<packageId>/**`        (skill members)
    *   - `{workspaceDir}/.pi/integrations/<packageId>/**`  (integration members)
+   *
+   * Every file of a member except `manifest.json` and `RECORD`.
    */
   workspaceDir: string;
 }
@@ -84,14 +94,27 @@ export async function prepareBundleForPi(
 // ---------------------------------------------------------------------------
 
 /**
- * Write every file of a {@link BundlePackage} into `destDir`. The
- * `RECORD` file is stripped since it is a packaging artefact, not part
- * of the executable surface.
+ * Files of a member that are never written to the workspace: `RECORD` is a
+ * packaging artefact, and the manifest (`manifest.json`, or the
+ * `integration.json` an integration may carry instead) holds connection data
+ * the agent must not hold (it reads `SKILL.md` / `INTEGRATION.md` instead).
+ */
+const NOT_MATERIALISED: ReadonlySet<string> = new Set([
+  "RECORD",
+  "manifest.json",
+  "integration.json",
+]);
+
+/**
+ * Write the content files of a {@link BundlePackage} into `destDir`, skipping
+ * {@link NOT_MATERIALISED}. `destDir` is always created, even for a member
+ * whose only file is its manifest, so a materialised member always has its
+ * directory (the entrypoint's post-check relies on it).
  */
 async function materialisePackage(pkg: BundlePackage, destDir: string): Promise<void> {
   await fs.mkdir(destDir, { recursive: true });
   for (const [relative, bytes] of pkg.files) {
-    if (relative === "RECORD") continue;
+    if (NOT_MATERIALISED.has(relative)) continue;
     if (!relative || relative.endsWith("/")) continue;
     const target = path.join(destDir, relative);
     await fs.mkdir(path.dirname(target), { recursive: true });

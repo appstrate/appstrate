@@ -430,13 +430,16 @@ try {
       { missingMembers },
     );
   }
-
-  // Fire-and-forget cleanup of the original AFPS; the materialised members
-  // are all the run needs from it.
-  void fs.unlink(packagePath).catch(() => {});
 } catch (err) {
   await emitError(`Failed to prepare agent package: ${getErrorMessage(err)}`);
 }
+
+// Remove the original AFPS before the agent starts, on success and failure
+// alike: it holds every member's manifest, which carries connection data the
+// agent must not hold, and the run reads the bundle from memory from here on.
+// Awaited so the file is gone before the session opens; a failure stays
+// non-fatal.
+await fs.unlink(packagePath).catch(() => {});
 
 phaseTimings.bundlePrepareMs = Math.round(performance.now() - bundlePrepareStart);
 // No extension count here: `extensionFactories` is still empty at this point —
