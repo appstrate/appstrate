@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { inlineImageBudgetExtension } from "./inline-image-budget.ts";
 import type { ExtensionFactory, PiCodingAgentSdk } from "./pi-sdk.ts";
 
 interface IsolatedResourceLoaderOptions extends Pick<
@@ -30,6 +31,9 @@ const NO_PACKAGE_RESOURCES = {
  * `packageManager` is private in Pi's TypeScript surface but a normal instance
  * field at runtime. The guard fails loudly if a Pi version no longer exposes
  * those two methods, because an unpatched loader would scan the host.
+ *
+ * Every session also gets {@link inlineImageBudgetExtension}: this is the one
+ * assembly point runs and chat share.
  */
 export async function createIsolatedResourceLoader({
   DefaultResourceLoader,
@@ -46,7 +50,7 @@ export async function createIsolatedResourceLoader({
     cwd,
     agentDir,
     settingsManager: SettingsManager.inMemory(),
-    extensionFactories,
+    extensionFactories: [...extensionFactories, inlineImageBudgetExtension],
     additionalSkillPaths: skillPaths,
     noExtensions: true,
     noSkills: true,

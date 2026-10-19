@@ -130,7 +130,8 @@ describe("createIsolatedResourceLoader", () => {
     expect(loader.getAppendSystemPrompt()).toEqual([]);
     expect(loader.getSystemPrompt()).toBe("Platform prompt");
     expect(loader.getExtensions().errors).toEqual([]);
-    expect(loader.getExtensions().extensions).toHaveLength(1);
+    // The given extension plus the inline-image budget every loader carries.
+    expect(loader.getExtensions().extensions).toHaveLength(2);
     expect(await Bun.file(seeded().extensionMarker).exists()).toBe(false);
   });
 
