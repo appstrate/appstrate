@@ -1,23 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * OAuth2Strategy — authorization-code + PKCE acquisition.
- *
- *   - `begin`    → client lookup + endpoint validation + PKCE authorize URL
- *                  (wraps `initiateIntegrationOAuth`). State lives in Redis.
- *   - `complete` → identity extraction (token response + id_token + userinfo)
- *                  + persist. The token exchange itself stays in the stateless
- *                  /callback route (it reconstructs actor/scope from the signed
- *                  state and owns the `OAuthCallbackError` UX mapping); this
- *                  consumes the already-exchanged result.
- *
- * An auth declaring `connect.login` (`acquiresByConnectLogin`, AFPS §7.7) has no
- * `begin`: `complete` takes the submitted `fields`, renders the login's grant from
- * them and posts it to the token endpoint with the auth's client — the token request
- * a later refresh sends — then extracts identity (no `id_token`) and persists the same way.
- *
- * Re-acquisition (refresh) is not a strategy method — the live resolvers call
- * `refreshConnectionCredential`, since only `oauth2` refreshes.
+ * OAuth2Strategy — authorization-code + PKCE acquisition. `begin` resolves the client and endpoints
+ * and builds the PKCE authorize URL (state in Redis); `complete` extracts identity from the result
+ * the stateless /callback route exchanged, and persists. An auth acquiring by `connect.login`
+ * (AFPS §7.7) has no `begin`: `complete` posts the grant rendered from the submitted fields with
+ * the auth's client. Refresh is `refreshConnectionCredential`'s.
  */
 
 import { decodeJwtPayload } from "@appstrate/core/jwt";
@@ -38,7 +26,6 @@ import { buildIntegrationOAuthRefreshContext } from "../integration-token-refres
 import { integrationCallbackUrl } from "../../lib/integration-callback-url.ts";
 import {
   getRemoteSource,
-  fixedAuthorizationServer,
   hasPerConnectionAuthServer,
   toSupportedTokenEndpointAuthMethod,
   type AfpsManifestAuth,
@@ -48,9 +35,10 @@ import { logger } from "../../lib/logger.ts";
 import { oauthStateStore } from "./oauth-state-store.ts";
 import {
   assertEndpointsMatchMetadata,
-  assertPkceS256Advertised,
-  assertRequiredIdentityClaims,
   ensureIntegrationOAuthClient,
+} from "../integration-oauth-provisioning.ts";
+import {
+  assertRequiredIdentityClaims,
   extractIdentity,
   getIntegrationConnectionCredentialFields,
   readIntegrationAuth,
@@ -71,20 +59,12 @@ import {
   type IntegrationConnectStrategy,
 } from "./strategy.ts";
 
-/**
- * Ceiling for the identity (`userinfo`) request. Deliberately tighter than the
- * 30s token-exchange budget: by the time this runs the credential is already
- * in hand, so waiting longer trades a saved connection for a nicer label.
- */
+/** The userinfo budget, tighter than the token exchange's: the credential is already in hand. */
 const USERINFO_TIMEOUT_MS = 10_000;
 
 /**
- * The manifest's `_meta["dev.appstrate/oauth"].refresh_token_issuance`, when it
- * declares one.
- *
- * `"not_supported"` = the authorization server issues access-only tokens by
- * design (the connection re-authorises at expiry). `"default"` = it issues a
- * refresh token unconditionally, which needs no special handling here.
+ * The manifest's `_meta["dev.appstrate/oauth"].refresh_token_issuance`: `"not_supported"`, the
+ * server issues access-only tokens by design (re-authorised at expiry).
  */
 function refreshTokenIssuance(auth: Record<string, unknown>): string | undefined {
   const meta = auth._meta;
@@ -96,17 +76,12 @@ function refreshTokenIssuance(auth: Record<string, unknown>): string | undefined
 }
 
 /**
- * Build the identity source for `extractIdentity`. Three layers, applied in
- * order so later layers don't overwrite earlier ones:
- *   1. Token response top-level (some IdPs put identity there).
- *   2. `id_token` JWT claims — OIDC providers, on the authorization-code flow only
- *      (`readIdToken`). No sig check: the channel that delivered the token was already
- *      vetted; claims are identity hints only. A `connect.login` token request answers a
- *      grant the user brought, with no nonce or authorization request to tie an `id_token`
- *      to (OIDC Core §3.1.3.7 validation is not performed), so its claims are not read.
- *   3. `userinfoUrl` GET — non-OIDC OAuth2 (GitHub, Slack, Notion, …).
- *      Without it, accountId falls back to "default" and every new
- *      connection collapses onto the same row.
+ * The identity source of `extractIdentity`, each layer filling only what earlier ones left:
+ *   1. the token response's top level;
+ *   2. the `id_token` claims, unverified hints on the authorization-code flow only (`readIdToken`):
+ *      a `connect.login` grant has no nonce or authorization request to tie one to (OIDC Core
+ *      §3.1.3.7), so its claims are not read;
+ *   3. a `userinfoUrl` GET (non-OIDC providers) — without it, accounts collapse onto "default".
  */
 async function identitySourceFor(
   tokenResponse: Record<string, unknown>,
@@ -127,12 +102,8 @@ async function identitySourceFor(
   }
   if (!userinfoUrl) return identitySource;
   try {
-    // SSRF-guarded: `userinfoUrl` is manifest-declared and fetched with the
-    // user's access token. `oauthEgressFetch` does per-hop DNS + blocklist
-    // and refuses loopback / RFC1918 / link-local / metadata targets
-    // (throwing SsrfBlockedError, caught below) so a malicious manifest
-    // can't exfiltrate the token to internal infra — unless the operator
-    // opted the host into EGRESS_ALLOW_INTERNAL_HOSTS.
+    // SSRF: a manifest-declared URL fetched with the user's token; `oauthEgressFetch` refuses
+    // internal targets per hop (SsrfBlockedError, below) unless EGRESS_ALLOW_INTERNAL_HOSTS lists them.
     const res = await oauthEgressFetch(userinfoUrl, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -201,12 +172,8 @@ function authorizationServer(
 }
 
 /**
- * Userinfo URL precedence (AFPS §7.3), the same fallback chain as
- * `code_challenge_methods_supported`:
- *   1. Manifest-declared `userinfo_endpoint` (authoritative).
- *   2. Discovery-projected `userinfo_endpoint` (a manifest that only declares
- *      an `issuer` rides on whatever the IdP advertises).
- *   3. undefined — the caller skips userinfo enrichment.
+ * The userinfo URL (AFPS §7.3): the manifest's `userinfo_endpoint`, else the discovered one, else
+ * none (no enrichment).
  */
 async function resolveUserinfoUrl(
   server: AuthorizationServer,
@@ -277,11 +244,9 @@ function connectionNotReady(detail: string): ApiError {
 }
 
 /**
- * A failed `connect.login` token request as its API error. Unlike a refresh — where only
- * `invalid_grant` condemns a stored credential — a grant typed into a form that the token endpoint
- * answers with a 400 or 401 (RFC 6749 §5.2) is unusable as submitted. Any other 4xx (a 403 is
- * often a WAF refusing the client, a 429 a throttle) or a request the egress guard never sent
- * leaves the grant intact. Retry-After is not captured by the token request, so none is relayed.
+ * A failed `connect.login` token request as its API error. Unlike a refresh, a typed grant the
+ * token endpoint answers with 400 or 401 (RFC 6749 §5.2) is unusable as submitted; any other 4xx
+ * (a WAF's 403, a 429) or a request the egress guard never sent leaves the grant intact.
  */
 function tokenRequestRefusal(err: RefreshError): ApiError {
   if (err.kind === "revoked") {
@@ -346,16 +311,11 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     // persisted with the credential at the callback.
     const variables = await resolveConnectionVariables(manifest, auth, ctx.variables);
     const perConnection = hasPerConnectionAuthServer(manifest, auth);
-    // AFPS §7.3 / §7.4: `authorization_endpoint`, `token_endpoint`,
-    // `resource`, `token_endpoint_auth_method`, `default_scopes`,
-    // `code_challenge_methods_supported` (PKCE), `issuer` (discovery).
     // `scope_separator` lives under `_meta["dev.appstrate/oauth"]`.
     const oauthMeta = (auth._meta?.["dev.appstrate/oauth"] ?? undefined) as
       { scope_separator?: string } | undefined;
-    // AFPS §7.3: an oauth2 auth declares EITHER an `issuer` (discovery fills the
-    // endpoints in) OR explicit `authorization_endpoint` + `token_endpoint` —
-    // except on a `remote` source, whose authorization server is discovered
-    // from `source.remote.url` at connect time.
+    // AFPS §7.3: an `issuer` or both explicit endpoints — unless a remote source's server is
+    // discovered from `source.remote.url`.
     if (
       !auth.issuer &&
       !getRemoteSource(manifest) &&
@@ -365,9 +325,8 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
         "oauth2 auth must declare an issuer (for discovery) or explicit authorization_endpoint + token_endpoint for marketplace connect.",
       );
     }
-    // Resolve the client (auto-registering via DCR for remote MCP integrations
-    // when unregistered) and the connect endpoints/resource (discovered for
-    // MCP, else manifest).
+    // The client, provisioned for a remote MCP auth, and the endpoints/resource (discovered, else
+    // the manifest's), checked against the server's metadata.
     const resolved = await ensureIntegrationOAuthClient(
       ctx.scope,
       ctx.integrationId,
@@ -376,11 +335,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       auth,
       variables ?? {},
     );
-    // Client selection (multi-client) — full precedence lives in
-    // `resolveConnectClient`. New connections always use the default (the
-    // model-provider cascade). There is no per-connect picker. The chosen
-    // `clientRef` is pinned on the connection so token refresh resolves the
-    // same credentials.
+    // The default client; its `clientRef` is pinned so refresh resolves the same credentials.
     const {
       clientId,
       redirectUri: clientRedirectUri,
@@ -396,25 +351,12 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     );
     // The shared callback, the very string the admin UI displays (`platform_redirect_uri`).
     const effectiveRedirectUri = clientRedirectUri ?? integrationCallbackUrl();
-    // Threaded endpoints/resource: discovery result wins, manifest is the
-    // fallback (classic integrations have no resolved.* fields).
     const issuer = resolved.issuer ?? auth.issuer;
     const authorizationEndpoint = resolved.authorizationEndpoint ?? auth.authorization_endpoint;
     const tokenEndpoint = resolved.tokenEndpoint ?? auth.token_endpoint;
     // A server chosen per connection takes no declared resource.
     const resource = perConnection ? resolved.resource : (resolved.resource ?? auth.resource);
-    const metadata =
-      getRemoteSource(manifest) && issuer ? await resolveOAuthEndpoints({ issuer }) : undefined;
-    // AFPS §7.3 client binding on a remote source, a manually registered client included.
-    if (metadata && !perConnection) {
-      assertEndpointsMatchMetadata(ctx.integrationId, ctx.authKey, auth, metadata);
-    }
-    if (metadata?.issuer !== undefined) {
-      assertPkceS256Advertised(ctx.integrationId, ctx.authKey, {
-        ...metadata,
-        issuer: metadata.issuer,
-      });
-    }
+    const metadata = resolved.serverMetadata;
     const result = await initiateIntegrationOAuth(oauthStateStore, {
       packageId: ctx.integrationId,
       authKey: ctx.authKey,
@@ -470,38 +412,28 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     );
 
     const { accountId, identityClaims } = extractIdentity(manifest, result.authKey, identitySource);
-    // AFPS §7.4 — refuse the connection if any `required_identity_claims`
-    // came back missing/empty from the IdP. Fail BEFORE persistence so a
-    // half-identified connection never lands in `integration_connections`.
+    // AFPS §7.4, before persistence: no half-identified connection is stored.
     assertRequiredIdentityClaims(manifest, result.authKey, identityClaims);
 
-    // Re-auth (update) path: an IdP may omit `refresh_token` on re-consent
-    // (e.g. Google without `prompt=consent`). Preserve the still-valid stored
-    // token instead of clobbering it with none — mirrors the refresh path's
-    // `parsed.refreshToken ?? refreshToken` carry-forward.
-    let refreshToken = result.refreshToken;
-    if (!refreshToken && result.connectionId) {
-      const existing = await getIntegrationConnectionCredentialFields(result.connectionId);
-      if (existing?.refresh_token) refreshToken = existing.refresh_token;
-    }
+    // An IdP may omit `refresh_token` on re-consent (Google without `prompt=consent`): a reconnect
+    // keeps the stored one, but only through the client it was issued to (RFC 6749 §6).
+    const refreshToken =
+      result.refreshToken ||
+      (result.connectionId
+        ? (
+            await getIntegrationConnectionCredentialFields(result.connectionId, {
+              mintedBy: result.clientRef,
+            })
+          )?.refresh_token || undefined
+        : undefined);
 
-    // A short-lived token (`expires_at` set) with no `refresh_token` is only a
-    // misconfig when the authorization server CAN issue refresh tokens. Many MCP
-    // servers (e.g. ClickUp MCP) advertise no `refresh_token` grant at all (RFC
-    // 8414 `grant_types_supported`) — for them an access-only token is expected,
-    // and the connection should persist and re-authorise at expiry
-    // (needs_reconnection), not be refused outright. Keep the hard refusal for
-    // servers that DO support refresh yet returned none — a real offline-access
-    // misconfig (e.g. the original `@appstrate/gmail` self-disconnect: Google
-    // without `access_type=offline` + `prompt=consent`).
+    // A short-lived token without `refresh_token` is a misconfiguration (missing offline access)
+    // only when the server can issue one: many MCP servers advertise no `refresh_token` grant
+    // (RFC 8414 `grant_types_supported`), and their connection re-authorises at expiry.
     if (result.expiresAt && !refreshToken) {
       let refreshGrantSupported = true; // strict default when capability is unknown
-      // A manifest that states the provider issues no refresh token at all is
-      // authoritative — it is the same fact discovery would report, written
-      // down for a provider that publishes no metadata. Without this the
-      // declaration was inert: the conformance gate accepted
-      // `refresh_token_issuance: "not_supported"` while this path still refused
-      // the connection, so a manifest could pass CI and fail at consent.
+      // The manifest's declaration is the fact discovery would report, for a provider that
+      // publishes no metadata.
       if (refreshTokenIssuance(auth) === "not_supported") {
         refreshGrantSupported = false;
       } else if (issuer) {
@@ -534,9 +466,7 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
             `must be revoked in your account settings and re-authorised.`,
         );
       }
-      // AS issues access-only tokens (no `refresh_token` grant advertised).
-      // Persist; the connection surfaces needs_reconnection at expiry for a
-      // manual re-auth — the only renewal path such a server supports.
+      // Access-only by design: persisted, it is re-authorised at expiry.
       logger.info(
         "Integration OAuth connection persisted without a refresh token — authorization server advertises no refresh_token grant; re-authorisation required at expiry",
         {
@@ -570,10 +500,8 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
 
   /**
    * `connect.login` acquisition (AFPS §7.7): the grant rendered from the submitted fields is posted
-   * to the token endpoint with the auth's default client before anything is stored, so a dead,
-   * mistyped or already-spent grant is a 400 on the form and never a born-dead connection. The
-   * request is the one every later refresh sends (`performTokenRequest`), on the context the
-   * refresh builds from the pinned client.
+   * to the token endpoint before anything is stored — a dead or mistyped grant is a 400 on the form,
+   * never a born-dead connection — by the request every later refresh sends.
    */
   private async completeFromLogin(
     ctx: ConnectContext,
@@ -621,13 +549,10 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
       tokenContext = await buildIntegrationOAuthRefreshContext(
         ctx.integrationId,
         ctx.authKey,
+        manifest,
         auth,
         ctx.scope.spaceId,
-        {
-          clientRef,
-          oauthResource,
-          fixedServer: fixedAuthorizationServer(manifest, auth),
-        },
+        { clientRef, oauthResource },
       );
     } catch (err) {
       if (err instanceof RefreshError && err.kind === "transient") {

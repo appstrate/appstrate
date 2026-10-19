@@ -22,10 +22,8 @@ import type {
   RefreshExchangeResult,
 } from "@appstrate/connect";
 import {
-  fixedAuthorizationServer,
   isFixedAuthorizationServer,
   type AfpsManifestAuth,
-  type FixedAuthorizationServer,
 } from "./integration-manifest-helpers.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
@@ -344,9 +342,10 @@ export async function refreshConnectionCredential(input: {
     refreshContext = await buildIntegrationOAuthRefreshContext(
       integrationId,
       authKey,
+      manifest,
       authDef,
       scope.spaceId,
-      { ...connection, fixedServer: fixedAuthorizationServer(manifest, authDef) },
+      connection,
     );
   } catch (err) {
     if (!(err instanceof RefreshError && err.kind === "transient")) throw err;
@@ -399,17 +398,12 @@ function expiresWithinLeadWindow(expiresAt: Date | null): boolean {
 export async function buildIntegrationOAuthRefreshContext(
   packageId: string,
   authKey: string,
+  /** The current manifest, and the declaration of the connection's auth in it. */
+  manifest: IntegrationManifest,
   authDef: AfpsManifestAuth,
   spaceId: string,
-  /**
-   * The minting client (`client_ref`) and RFC 8707 `resource` pinned on the connection, and the
-   * server the current manifest fixes (`fixedAuthorizationServer`; `null`: chosen per connection).
-   */
-  connection: {
-    clientRef: string | null;
-    oauthResource: string | null;
-    fixedServer: FixedAuthorizationServer | null;
-  },
+  /** The minting client (`client_ref`) and RFC 8707 `resource` pinned on the connection. */
+  connection: { clientRef: string | null; oauthResource: string | null },
   /** Seam for tests. */
   discover: typeof resolveOAuthEndpoints = resolveOAuthEndpoints,
 ): Promise<IntegrationRefreshContext | null> {
@@ -446,8 +440,8 @@ export async function buildIntegrationOAuthRefreshContext(
     // `token_endpoint` is NOT terminal — discovery is best-effort and a routine
     // IdP/network blip would otherwise brick refresh and falsely flag the
     // connection `needsReconnection`. Surface it as TRANSIENT so the caller
-    // keeps the cached credential and retries later (resolveOAuthEndpoints no
-    // longer negatively-caches, so the next attempt re-discovers). Only a
+    // keeps the cached credential and retries later (resolveOAuthEndpoints does
+    // not cache metadata that did not answer, so the next attempt re-discovers). Only a
     // manifest with neither `issuer` NOR `token_endpoint` is genuinely
     // unrefreshable (terminal → null).
     if (issuer) {
@@ -469,10 +463,7 @@ export async function buildIntegrationOAuthRefreshContext(
   // unresolvable host is a blip; any other refusal is terminal.
   if (boundIssuer !== undefined) {
     const egress = await checkEgressUrl(tokenEndpoint, {
-      requireHttpsForUntrustedHost: !isFixedAuthorizationServer(
-        boundIssuer,
-        connection.fixedServer,
-      ),
+      requireHttpsForUntrustedHost: !isFixedAuthorizationServer(boundIssuer, manifest, authDef),
     });
     if (!egress.ok) {
       if (egress.detail === "resolution-failed") {

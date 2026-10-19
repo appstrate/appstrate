@@ -1,7 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Appstrate Integration Manifest",
-  "description": "Appstrate integration manifest — AFPS (packages/core/src/integration.ts). Cross-field rules (≥1 auth, oauth2 discovery, delivery, scope-catalog subset, per-tool auth-key) are enforced by the Zod superRefines and are not representable in JSON Schema.",
+  "description": "Appstrate integration manifest — the canonical AFPS schema. Appstrate's own rules (authorized_uris, delivery and scope-catalog policies, per-tool auth keys) are Zod refinements in packages/core/src/integration.ts, with no JSON Schema form.",
+  "$comment": "SPDX-License-Identifier: Apache-2.0 — Copyright (c) 2026 AFPS contributors",
   "type": "object",
   "properties": {
     "name": {
@@ -281,7 +282,10 @@
                   "anyOf": [
                     {
                       "type": "string",
-                      "format": "uri"
+                      "format": "uri",
+                      "not": {
+                        "pattern": "\\{\\$"
+                      }
                     },
                     {
                       "type": "string",
@@ -344,6 +348,27 @@
                   "const": "object"
                 }
               }
+            },
+            {
+              "properties": {
+                "properties": {
+                  "minProperties": 1,
+                  "propertyNames": {
+                    "pattern": "^[a-z][a-z0-9_]*$"
+                  },
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "const": "string"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ]
+                  }
+                }
+              }
             }
           ]
         }
@@ -376,7 +401,10 @@
             "anyOf": [
               {
                 "type": "string",
-                "format": "uri"
+                "format": "uri",
+                "not": {
+                  "pattern": "\\{\\$"
+                }
               },
               {
                 "type": "string",
@@ -386,15 +414,24 @@
           },
           "authorization_endpoint": {
             "type": "string",
-            "format": "uri"
+            "format": "uri",
+            "not": {
+              "pattern": "\\{\\$"
+            }
           },
           "token_endpoint": {
             "type": "string",
-            "format": "uri"
+            "format": "uri",
+            "not": {
+              "pattern": "\\{\\$"
+            }
           },
           "userinfo_endpoint": {
             "type": "string",
-            "format": "uri"
+            "format": "uri",
+            "not": {
+              "pattern": "\\{\\$"
+            }
           },
           "token_endpoint_auth_method": {
             "type": "string",
@@ -415,7 +452,10 @@
             }
           },
           "resource": {
-            "type": "string"
+            "type": "string",
+            "not": {
+              "pattern": "\\{\\$"
+            }
           },
           "authorization_params": {
             "type": "object",
@@ -813,12 +853,69 @@
                 }
               }
             },
-            "additionalProperties": {}
+            "additionalProperties": {},
+            "allOf": [
+              {
+                "anyOf": [
+                  {
+                    "required": [
+                      "http"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "env"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "files"
+                    ]
+                  }
+                ]
+              },
+              {
+                "if": {
+                  "required": [
+                    "http"
+                  ]
+                },
+                "then": {
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "env"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "files"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
           },
           "authorized_uris": {
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "string",
+              "anyOf": [
+                {
+                  "not": {
+                    "pattern": "\\{\\$variable\\."
+                  }
+                },
+                {
+                  "pattern": "^(\\{\\$variable\\.[a-z][a-z0-9_]*\\})(?:\\/[^{}]*)?$"
+                },
+                {
+                  "pattern": "^([A-Za-z][A-Za-z0-9+.-]*:\\/\\/\\{\\$variable\\.[a-z][a-z0-9_]*\\}(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*(?::[0-9]+)?)(?:[/?#][^{}]*)?$"
+                }
+              ]
             }
           },
           "allow_all_uris": {
@@ -832,8 +929,257 @@
           "type",
           "delivery"
         ],
-        "additionalProperties": {}
-      }
+        "additionalProperties": {},
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "enum": [
+                    "api_key",
+                    "basic",
+                    "mtls",
+                    "custom"
+                  ]
+                }
+              },
+              "required": [
+                "type"
+              ]
+            },
+            "then": {
+              "required": [
+                "credentials"
+              ],
+              "properties": {
+                "credentials": {
+                  "required": [
+                    "schema"
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "connect"
+              ]
+            },
+            "then": {
+              "properties": {
+                "type": {
+                  "enum": [
+                    "custom",
+                    "oauth2"
+                  ]
+                },
+                "connect": {
+                  "oneOf": [
+                    {
+                      "required": [
+                        "login"
+                      ],
+                      "not": {
+                        "required": [
+                          "tool"
+                        ]
+                      }
+                    },
+                    {
+                      "required": [
+                        "tool"
+                      ],
+                      "not": {
+                        "required": [
+                          "login"
+                        ]
+                      }
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "type"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "oauth2"
+                }
+              },
+              "required": [
+                "type",
+                "connect"
+              ]
+            },
+            "then": {
+              "required": [
+                "token_endpoint",
+                "credentials"
+              ],
+              "not": {
+                "required": [
+                  "scope_catalog"
+                ]
+              },
+              "properties": {
+                "issuer": {
+                  "not": {
+                    "pattern": "\\{\\$"
+                  }
+                },
+                "credentials": {
+                  "required": [
+                    "schema"
+                  ]
+                },
+                "connect": {
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "tool"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "limits"
+                        ]
+                      }
+                    ]
+                  },
+                  "properties": {
+                    "login": {
+                      "not": {
+                        "anyOf": [
+                          {
+                            "required": [
+                              "outputs"
+                            ]
+                          },
+                          {
+                            "required": [
+                              "success_criteria"
+                            ]
+                          },
+                          {
+                            "required": [
+                              "expires_in_output"
+                            ]
+                          },
+                          {
+                            "required": [
+                              "identity_outputs"
+                            ]
+                          }
+                        ]
+                      },
+                      "properties": {
+                        "request": {
+                          "required": [
+                            "content_type",
+                            "body"
+                          ],
+                          "not": {
+                            "required": [
+                              "headers"
+                            ]
+                          },
+                          "properties": {
+                            "method": {
+                              "const": "POST"
+                            },
+                            "url": {
+                              "not": {
+                                "pattern": "\\{\\{"
+                              }
+                            },
+                            "content_type": {
+                              "const": "application/x-www-form-urlencoded"
+                            },
+                            "body": {
+                              "allOf": [
+                                {
+                                  "pattern": "^[A-Za-z0-9._-]+(?:=[^&]*)?(?:&[A-Za-z0-9._-]+(?:=[^&]*)?)*$"
+                                },
+                                {
+                                  "pattern": "(?:^|&)grant_type(?:=|&|$)"
+                                },
+                                {
+                                  "not": {
+                                    "pattern": "(?:^|&)grant_type=[^&]*\\{\\{"
+                                  }
+                                },
+                                {
+                                  "not": {
+                                    "pattern": "(?:^|&)grant_type=(?:p|%7[00])(?:a|%6[11])(?:s|%7[33])(?:s|%7[33])(?:w|%7[77])(?:o|%6[fF])(?:r|%7[22])(?:d|%6[44])(?:&|$)"
+                                  }
+                                },
+                                {
+                                  "not": {
+                                    "pattern": "(?:^|&)(?:client_id|client_secret|client_assertion|client_assertion_type|resource)(?:=|&|$)"
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "type": {
+                  "const": "oauth2"
+                },
+                "issuer": {
+                  "pattern": "\\{\\$"
+                }
+              },
+              "required": [
+                "type",
+                "issuer"
+              ]
+            },
+            "then": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "authorization_endpoint"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "token_endpoint"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "userinfo_endpoint"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "resource"
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "minProperties": 1
     },
     "tools_policy": {
       "type": "object",
@@ -915,5 +1261,240 @@
     "type",
     "source"
   ],
-  "additionalProperties": {}
+  "additionalProperties": {},
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "source": {
+            "properties": {
+              "kind": {
+                "const": "remote"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        },
+        "required": [
+          "source"
+        ]
+      },
+      "then": true,
+      "else": {
+        "properties": {
+          "auths": {
+            "additionalProperties": {
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "type": {
+                        "const": "oauth2"
+                      }
+                    },
+                    "required": [
+                      "type"
+                    ]
+                  },
+                  "then": {
+                    "anyOf": [
+                      {
+                        "required": [
+                          "issuer"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "authorization_endpoint",
+                          "token_endpoint"
+                        ]
+                      },
+                      {
+                        "required": [
+                          "connect"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "source": {
+            "properties": {
+              "kind": {
+                "const": "remote"
+              },
+              "remote": {
+                "properties": {
+                  "url": {
+                    "pattern": "\\{\\$"
+                  }
+                },
+                "required": [
+                  "url"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "remote"
+            ]
+          }
+        },
+        "required": [
+          "source"
+        ]
+      },
+      "then": {
+        "properties": {
+          "auths": {
+            "additionalProperties": {
+              "if": {
+                "properties": {
+                  "type": {
+                    "const": "oauth2"
+                  }
+                },
+                "required": [
+                  "type"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "issuer": {
+                    "pattern": "\\{\\$"
+                  }
+                },
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "authorization_endpoint"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "token_endpoint"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "userinfo_endpoint"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "resource"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "source": {
+            "properties": {
+              "kind": {
+                "const": "remote"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          }
+        },
+        "required": [
+          "source"
+        ]
+      },
+      "then": {
+        "properties": {
+          "auths": {
+            "additionalProperties": {
+              "not": {
+                "properties": {
+                  "type": {
+                    "const": "oauth2"
+                  }
+                },
+                "required": [
+                  "type",
+                  "connect"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "not": {
+          "required": [
+            "auths"
+          ]
+        }
+      },
+      "then": {
+        "properties": {
+          "source": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "local",
+                  "remote"
+                ]
+              }
+            }
+          },
+          "tools_policy": {
+            "additionalProperties": {
+              "not": {
+                "required": [
+                  "required_scopes"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "default_tools": {
+            "const": "*"
+          }
+        },
+        "required": [
+          "default_tools"
+        ]
+      },
+      "then": {
+        "properties": {
+          "allow_undeclared_tools": {
+            "const": true
+          }
+        },
+        "required": [
+          "allow_undeclared_tools"
+        ]
+      }
+    }
+  ]
 }

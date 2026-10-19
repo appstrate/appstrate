@@ -57,20 +57,16 @@ export function WizardSection({
   title,
   description,
   focus = true,
-  className,
   children,
 }: {
   title: string;
   description?: ReactNode;
   /** The first section of a page is reached by Tab, not given the focus. */
   focus?: boolean;
-  className?: string;
   children: ReactNode;
 }) {
   return (
-    <section
-      className={cn("bg-card border-border flex flex-col gap-4 rounded-lg border p-6", className)}
-    >
+    <section className="bg-card border-border flex flex-col gap-4 rounded-lg border p-6">
       <header>
         <h2
           ref={focus ? focusOnMount : undefined}

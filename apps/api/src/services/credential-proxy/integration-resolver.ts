@@ -55,7 +55,10 @@ import {
   type ResolvedIntegrationVersion,
 } from "../integration-service.ts";
 import { refreshConnectionCredential } from "../integration-token-refresh.ts";
-import type { IntegrationManifest } from "@appstrate/core/integration";
+import {
+  isUnauthenticatedIntegration,
+  type IntegrationManifest,
+} from "@appstrate/core/integration";
 
 /** An `X-Run-Id` run, which also names the integration version the call is authorized against. */
 export interface ProxyRunSelection extends RunBoundSelection {
@@ -142,7 +145,7 @@ export async function resolveIntegrationProxyCredentials(
   const manifest = await loadManifest(input);
   await assertIntegrationActive(input.integrationId, input.spaceId);
 
-  if (Object.keys(manifest.auths ?? {}).length === 0) {
+  if (isUnauthenticatedIntegration(manifest)) {
     throw new IntegrationCredentialNotFoundError(
       `Integration '${input.integrationId}' declares no auth methods`,
     );

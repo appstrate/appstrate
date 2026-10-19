@@ -346,6 +346,50 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
         resolved_connection_ids: [],
       });
     });
+
+    it("an unauthenticated integration switched off in the space still warns integration_not_active", async () => {
+      const OPEN = "@verdictorg/open";
+      const { auths: _auths, ...openManifest } = localIntegrationManifest({
+        name: OPEN,
+        serverName: "@verdictorg/open-server",
+        version: "1.0.0",
+        auths: {},
+        tools_policy: { search: {} },
+      }) as unknown as Record<string, unknown>;
+      await seedPackage({
+        id: OPEN,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+        draftManifest: openManifest,
+      });
+      await activatePackage(scope, OPEN);
+      await seedAgent({
+        id: AGENT,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: AGENT,
+          version: "1.0.0",
+          type: "agent",
+          schema_version: "0.2",
+          display_name: "Verdict Agent",
+          dependencies: { integrations: { [OPEN]: "^1.0.0" } },
+          integrations_configuration: { [OPEN]: TOOLS },
+        },
+      });
+      await activatePackage(scope, AGENT);
+      await deactivatePackage(scope, OPEN);
+      const entry = await entryOf(OPEN);
+      expect(entry.run_blocking).toBe(false);
+      expect(entry.resolution).toMatchObject({
+        source: null,
+        error_code: null,
+        warning: { code: "integration_not_active" },
+        resolved_connection_ids: [],
+        candidates: [],
+      });
+    });
   });
 
   it("no verdict — a declared integration whose manifest cannot load → both null", async () => {

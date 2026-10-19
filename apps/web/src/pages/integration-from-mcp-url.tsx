@@ -8,7 +8,7 @@
  * package (published version, usable connection, declared tools).
  */
 
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
@@ -43,7 +43,6 @@ import {
   defaultToolCount,
   integrationCreationManifest,
   integrationWizardStep,
-  isCurrentAnalysis,
   isRemoteSource,
   proposalEdits,
   toolsPublishVersion,
@@ -93,8 +92,6 @@ function NewIntegrationWizard() {
   const { user } = useAuth();
   const { currentOrg } = useOrg();
   const [url, setUrl] = useState("");
-  // The input's value as the last keystroke left it, for a response to tell whether it is stale.
-  const latestUrl = useRef("");
   const [review, setReview] = useState<Review | null>(null);
   const analysis = $api.useMutation("post", "/api/integrations/discover", {
     meta: { errorHandledByCaller: true },
@@ -106,20 +103,18 @@ function NewIntegrationWizard() {
   // While a creation is in flight nothing it was built from may change: its controls are disabled.
   const changeUrl = (next: string) => {
     if (create.isPending) return;
-    latestUrl.current = next;
     setUrl(next);
     setReview(null);
     analysis.reset();
     create.reset();
   };
 
+  // Per call: `analysis.reset()` on an edit detaches the request, so a stale answer never lands.
   const analyse = () => {
-    const requested = url.trim();
     analysis.mutate(
-      { body: { url: requested } },
+      { body: { url: url.trim() } },
       {
         onSuccess: (result) => {
-          if (!isCurrentAnalysis(latestUrl.current, requested)) return;
           setReview({ result, edits: proposalEdits(result.manifest), icon: result.manifest.icon });
           // A raster the manifest does not take as is is re-encoded; it lands only on this result.
           if (!result.manifest.icon && result.icon_source) {
@@ -255,7 +250,6 @@ function ExistingPackageWizard({ packageId }: { packageId: string }) {
             packageId={packageId}
             draft={draft.data}
             detail={detail}
-            connect={<ConnectStep packageId={packageId} detail={detail} />}
             version={version}
             published={published}
           />

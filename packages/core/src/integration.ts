@@ -1710,6 +1710,7 @@ export const CONNECTION_RESOLUTION_ERROR_CODES = [
   "auth_key_mismatch",
   "auth_serves_no_selected_tool",
   "auth_key_serves_no_selected_tool",
+  "auth_key_on_unauthenticated_integration",
   "required_integration_unbound",
   "integration_not_active",
 ] as const;
@@ -1820,7 +1821,8 @@ export interface ConnectionResolutionError {
    * The layer that named the failing row (or set), on every layer-bound code — the adding layer on
    * `override_outranked` and `connection_set_too_large` — and the layer that chose `[]`
    * on an `integration_unbound` warning; absent when no layer bound anything (`not_connected`,
-   * `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`).
+   * `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`,
+   * `auth_key_on_unauthenticated_integration`).
    */
   source?: ConnectionResolutionSource;
   /** The whole set that failed to bind, in its order: under governance, the floor then its additions. */
@@ -1832,9 +1834,10 @@ export interface ConnectionResolutionError {
    */
   ownedByActor?: boolean;
   /**
-   * AFPS §4.1 — the agent dep's `auth_key`, on `auth_key_mismatch` and on
-   * `auth_key_serves_no_selected_tool` (an auth exposing none of the selected tools: the
-   * agent's configuration must change, no connection clears it).
+   * AFPS §4.1 — the agent dep's `auth_key`, on `auth_key_mismatch`, on
+   * `auth_key_serves_no_selected_tool` (an auth exposing none of the selected tools) and on
+   * `auth_key_on_unauthenticated_integration` (an integration declaring no auth, AFPS §4.4): on
+   * both, the agent's configuration must change, no connection clears it.
    */
   requiredAuthKey?: string;
   /**

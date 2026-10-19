@@ -41,15 +41,21 @@ import {
 import { refreshConnectionCredential } from "../../../src/services/integration-token-refresh.ts";
 import {
   createIntegrationOAuthClient,
-  ensureIntegrationOAuthClient,
   readCredentialRevision,
   readIntegrationAuth,
   resolveConnectClient,
   resolveIntegrationClientById,
+  saveIntegrationConnection,
 } from "../../../src/services/integration-connections.ts";
+import { ensureIntegrationOAuthClient } from "../../../src/services/integration-oauth-provisioning.ts";
 import { oauthStateStore } from "../../../src/services/connect/oauth-state-store.ts";
 import { initiateIntegrationOAuth } from "@appstrate/connect";
-import { authorizationServerTag } from "../../../src/lib/integration-callback-url.ts";
+import {
+  authorizationServerTag,
+  integrationCallbackUrlFor,
+} from "../../../src/lib/integration-callback-url.ts";
+import { presentsClientMetadataDocument } from "../../../src/lib/integration-client-metadata.ts";
+import { decryptCredentialsToStringMap } from "@appstrate/connect";
 import { _setSystemPackagesForTesting } from "../../../src/services/system-packages.ts";
 import type { SystemPackageEntry } from "@appstrate/core/system-packages";
 import type { AfpsManifestAuth } from "../../../src/services/integration-manifest-helpers.ts";
@@ -219,6 +225,29 @@ describe("GET /oauth/client-metadata/{document} (public)", () => {
     ).toBe(404);
   });
 
+  it("presents a document exactly when the route serves it, at the name bound", async () => {
+    setEnv("INTEGRATION_OAUTH_CIMD", undefined);
+    // base64url of n bytes is ceil(4n/3) characters: 1532 bytes name 2048 with `.json`, 1533 name 2049.
+    const prefix = "https://idp.example.com/";
+    for (const [bytes, served] of [
+      [1532, true],
+      [1533, false],
+    ] as const) {
+      const issuer = prefix + "a".repeat(bytes - prefix.length);
+      expect(documentName(issuer).length).toBe(served ? 2048 : 2049);
+      expect((await app.request(`/oauth/client-metadata/${documentName(issuer)}`)).status).toBe(
+        served ? 200 : 404,
+      );
+      expect(
+        presentsClientMetadataDocument({
+          issuer,
+          clientIdMetadataDocumentSupported: true,
+          authorizationResponseIssParameterSupported: true,
+        }),
+      ).toBe(served);
+    }
+  });
+
   it("404s a name encoding no admissible issuer, a non-canonical one, or an overlong one", async () => {
     const overlong = documentName(`https://idp.example.com/${"a".repeat(1600)}`);
     expect(overlong.length).toBeGreaterThan(2048);
@@ -253,6 +282,12 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
       clientId?: string;
       /** A system package id the platform vouches for (the installed integration's by default). */
       system?: string | true;
+      /** The provider issues no refresh token (it waits for a flag connect never sends). */
+      withholdsRefreshToken?: boolean;
+      /** The auth declares the metadata server as its `issuer`. */
+      declaresIssuer?: boolean;
+      /** The auth's declared `token_endpoint`. */
+      tokenEndpoint?: string;
     } = {},
   ): Promise<void> {
     meta = startMetadataServer(advertise);
@@ -260,6 +295,7 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
       clientId: opts.clientId ?? documentUrl(meta.base),
       ...(opts.clientSecret ? { clientSecret: opts.clientSecret } : {}),
       ...(opts.clientSecret ? {} : { acceptedAuthMethods: ["none"] as const }),
+      ...(opts.withholdsRefreshToken ? { offlineParam: { name: "never_sent", value: "1" } } : {}),
       expiresIn: 60,
     });
     const manifest = remoteIntegrationManifest({
@@ -271,6 +307,8 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
           tokenEndpointAuthMethod: opts.method ?? "none",
           defaultScopes: ["read"],
           codeChallengeMethodsSupported: ["S256"],
+          ...(opts.declaresIssuer ? { issuer: meta.base } : {}),
+          ...(opts.tokenEndpoint ? { tokenEndpoint: opts.tokenEndpoint } : {}),
         },
       },
     });
@@ -307,26 +345,24 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
       manifest as IntegrationManifest,
       auth as AfpsManifestAuth,
     );
-    const picked = resolved.provisioningFailure
-      ? null
-      : resolveConnectClient(
-          INTEGRATION,
-          AUTH_KEY,
-          manifest as IntegrationManifest,
-          auth as AfpsManifestAuth,
-          resolved,
-        );
+    const picked = resolveConnectClient(
+      INTEGRATION,
+      AUTH_KEY,
+      manifest as IntegrationManifest,
+      auth as AfpsManifestAuth,
+      resolved,
+    );
     return { resolved, picked };
   }
 
   /** POST …/connect/oauth2 → the authorize URL and its `state`. */
-  async function begin(): Promise<URL> {
+  async function begin(body: { connection_id?: string } = {}): Promise<URL> {
     const res = await app.request(
       `/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/connect/oauth2`,
       {
         method: "POST",
         headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify(body),
       },
     );
     expect(res.status).toBe(200);
@@ -426,6 +462,100 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
     expect(provider.tokenRequests[1]!.params.client_id).toBe(document);
   });
 
+  /** The user's connection, minted by `clientRef` with the refresh token `rt`. */
+  async function seedConnection(clientRef: string, rt: string): Promise<string> {
+    const saved = await saveIntegrationConnection(
+      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+      {
+        packageId: INTEGRATION,
+        authKey: AUTH_KEY,
+        accountId: "default",
+        credentials: { access_token: "old-at", refresh_token: rt },
+        expiresAt: new Date(Date.now() + 60_000),
+        actor: { type: "user", id: ctx.user.id },
+        clientRef,
+      },
+    );
+    return saved.id;
+  }
+
+  /** A DCR client of the metadata server, as an earlier connect registered it. */
+  async function seedDcrClient(): Promise<string> {
+    const row = await createIntegrationOAuthClient(
+      { orgId: ctx.orgId },
+      INTEGRATION,
+      AUTH_KEY,
+      {
+        clientId: "dcr-old",
+        clientSecret: "",
+        tokenEndpointAuthMethod: "none",
+        redirectUri: integrationCallbackUrlFor(meta.base),
+      },
+      { autoProvisioned: true, issuer: meta.base },
+    );
+    return row.id;
+  }
+
+  async function storedTokens(connectionId: string) {
+    const [row] = await db
+      .select()
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connectionId));
+    return {
+      clientRef: row!.clientRef,
+      refreshToken: decryptCredentialsToStringMap(row!.credentialsEncrypted).refresh_token,
+    };
+  }
+
+  /** Reconnect `connectionId` through the flow `begin` resolves; the callback page's text. */
+  const reconnect = async (connectionId: string) =>
+    callbackText(await consent(await begin({ connection_id: connectionId })));
+
+  describe("a reconnect keeps a refresh token only through the client it was issued to", () => {
+    it("DCR → document, no new token: refused, the DCR token never paired with the document", async () => {
+      await install({ cimd: true, registration: true }, { withholdsRefreshToken: true });
+      const dcr = await seedDcrClient();
+      const id = await seedConnection(dcr, "rt-dcr");
+      expect(await reconnect(id)).toContain('"ok":false');
+      expect(await storedTokens(id)).toEqual({ clientRef: dcr, refreshToken: "rt-dcr" });
+    });
+
+    it("DCR → document, new token: the document's token replaces the DCR one", async () => {
+      await install({ cimd: true, registration: true });
+      const id = await seedConnection(await seedDcrClient(), "rt-dcr");
+      expect(await reconnect(id)).toContain('"ok":true');
+      expect(await storedTokens(id)).toEqual({
+        clientRef: documentUrl(meta.base),
+        refreshToken: meta.provider!.issuedRefreshTokens[0],
+      });
+    });
+
+    it("same client, token omitted (Google without prompt=consent): the stored token is kept", async () => {
+      await install({ cimd: true, registration: true }, { withholdsRefreshToken: true });
+      const id = await seedConnection(documentUrl(meta.base), "rt-doc");
+      expect(await reconnect(id)).toContain('"ok":true');
+      expect(meta.provider!.issuedRefreshTokens).toEqual([]);
+      expect(await storedTokens(id)).toEqual({
+        clientRef: documentUrl(meta.base),
+        refreshToken: "rt-doc",
+      });
+    });
+
+    it("document → DCR, no new token: refused, the document's token never paired with DCR", async () => {
+      await install(
+        { cimd: false, registration: true },
+        { clientId: "dcr-1", withholdsRefreshToken: true },
+      );
+      const id = await seedConnection(documentUrl(meta.base), "rt-doc");
+      expect(await reconnect(id)).toContain('"ok":false');
+      expect(meta.registrations).toBe(1);
+      expect(await storedTokens(id)).toEqual({
+        clientRef: documentUrl(meta.base),
+        refreshToken: "rt-doc",
+      });
+    });
+  });
+
   it("refuses a response from another server: at the shared callback, without iss, or with its iss", async () => {
     await install({ cimd: true, registration: true });
     const refused = "did not come from the authorization server";
@@ -513,6 +643,62 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
       expect(await db.select().from(integrationOauthClients)).toEqual([]);
     },
   );
+
+  describe("a pre-registered client of a remote source's declared issuer", () => {
+    const preRegistered = {
+      method: "client_secret_post",
+      clientId: "admin-app",
+      clientSecret: "shh",
+      declaresIssuer: true,
+    } as const;
+    const registerAdminClient = () =>
+      createIntegrationOAuthClient(
+        { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        INTEGRATION,
+        AUTH_KEY,
+        { clientId: "admin-app", clientSecret: "shh" },
+      );
+
+    it("connects without iss, sending S256", async () => {
+      await install({ cimd: false, registration: false, iss: false }, preRegistered);
+      await registerAdminClient();
+      const authUrl = await begin();
+      expect(authUrl.searchParams.get("client_id")).toBe("admin-app");
+      expect(authUrl.searchParams.get("code_challenge_method")).toBe("S256");
+    });
+
+    it("refuses a server without PKCE S256, before any authorize request", async () => {
+      await install({ cimd: false, registration: false, pkce: null }, preRegistered);
+      await registerAdminClient();
+      const res = await postConnect();
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { code: string }).code).toBe(
+        "authorization_server_pkce_unsupported",
+      );
+      expect(meta.provider!.authorizeRequests).toHaveLength(0);
+    });
+
+    it("refuses the server's missing PKCE S256 before asking for a client to be registered", async () => {
+      await install({ cimd: false, registration: false, pkce: null }, preRegistered);
+      const res = await postConnect();
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { code: string }).code).toBe(
+        "authorization_server_pkce_unsupported",
+      );
+    });
+
+    it("refuses a token endpoint the server's metadata contradicts (AFPS §7.3)", async () => {
+      await install(
+        { cimd: false, registration: false },
+        { ...preRegistered, tokenEndpoint: "https://elsewhere.example.com/token" },
+      );
+      await registerAdminClient();
+      const res = await postConnect();
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { detail: string }).detail).toContain("contradicts");
+      expect(meta.provider!.authorizeRequests).toHaveLength(0);
+    });
+  });
 
   it("refuses PKCE-less metadata on a CIMD flow too, before any authorize request", async () => {
     await install({ cimd: true, registration: true, pkce: null });
@@ -853,9 +1039,10 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
   it("says why when the server accepts only documents and the instance presents none", async () => {
     await install({ cimd: true, registration: false });
     setEnv("APP_URL", "http://localhost:3000");
-    const { resolved } = await connectClient();
-    expect(resolved.provisioningFailure?.message).toContain("public https APP_URL");
-    expect(resolved.provisioningFailure?.message).toContain("INTEGRATION_OAUTH_CIMD");
+    const refusal = await connectClient().catch((err: unknown) => err);
+    expect(refusal).toMatchObject({ status: 403 });
+    expect((refusal as Error).message).toContain("public https APP_URL");
+    expect((refusal as Error).message).toContain("INTEGRATION_OAUTH_CIMD");
     expect(await db.select().from(integrationOauthClients)).toEqual([]);
   });
 
@@ -972,7 +1159,6 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
         clientId: "dcr-x",
         clientSecretEncrypted: "",
         tokenEndpointAuthMethod: "none",
-        isDefault: true,
         autoProvisioned: true,
         issuer: "https://honest-x.example.com",
         redirectUri: `${CALLBACK}/${authorizationServerTag("https://honest-x.example.com")}`,
@@ -1024,8 +1210,7 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
     );
     expect(setDefault.status).toBe(400);
 
-    // Its inert default flag (written before DCR rows stopped being defaults) holds no slot: a
-    // manual org client registered now is the effective default.
+    // A manual org client registered now is the effective default, never the leftover.
     const created = await app.request(
       `/api/org-integrations/${INTEGRATION}/auths/${AUTH_KEY}/oauth-clients`,
       {
@@ -1046,41 +1231,6 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
     );
     expect(removed.status).toBeLessThan(300);
     expect((await clientsOf()).map((c) => c.client_id)).toEqual(["admin-app"]);
-  });
-
-  it("promotes a space client to the org default past a DCR row's inert default flag", async () => {
-    await install(
-      { cimd: true, registration: true },
-      { method: "client_secret_post", clientId: "admin-app", clientSecret: "shh" },
-    );
-    await db.insert(integrationOauthClients).values({
-      orgId: ctx.orgId,
-      spaceId: null,
-      integrationId: INTEGRATION,
-      authKey: AUTH_KEY,
-      clientId: "dcr-legacy",
-      clientSecretEncrypted: "",
-      tokenEndpointAuthMethod: "none",
-      isDefault: true,
-      autoProvisioned: true,
-    });
-    const scope = { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId };
-    const spaceClient = await createIntegrationOAuthClient(scope, INTEGRATION, AUTH_KEY, {
-      clientId: "admin-app",
-      clientSecret: "shh",
-    });
-    const res = await app.request(
-      `/api/integrations/${INTEGRATION}/oauth-clients/${spaceClient.id}/promote`,
-      { method: "POST", headers: authHeaders(ctx) },
-    );
-    expect(res.status).toBe(200);
-    const [row] = await db
-      .select()
-      .from(integrationOauthClients)
-      .where(eq(integrationOauthClients.id, spaceClient.id));
-    expect(row!.spaceId).toBeNull();
-    const { picked } = await connectClient();
-    expect(picked!.clientRef).toBe(spaceClient.id);
   });
 
   it("binds a per-server DCR row's redirect URI to the flow's own server", async () => {

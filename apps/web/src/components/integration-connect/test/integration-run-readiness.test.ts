@@ -204,6 +204,8 @@ describe("describeResolution — empty picker prompt", () => {
       ["auth_key_mismatch", "connect"],
       // The agent's own auth_key serves none of its selected tools: no connection clears it.
       ["auth_key_serves_no_selected_tool", "reconfigure"],
+      // It names an auth on an integration declaring none (AFPS §4.4).
+      ["auth_key_on_unauthenticated_integration", "reconfigure"],
       [null, "connect"],
     ] as const;
     for (const [error_code, prompt] of cases) {

@@ -63,7 +63,11 @@ import {
   resolveRunIntegrationVersions,
   type IntegrationManifestCache,
 } from "./integration-service.ts";
-import { authKeyServingNoSelectedTool, getLocalServerRef } from "./integration-manifest-helpers.ts";
+import {
+  authKeyOnUnauthenticatedIntegration,
+  authKeyServingNoSelectedTool,
+  getLocalServerRef,
+} from "./integration-manifest-helpers.ts";
 
 /** One version of one package carried inside an incoming bundle. */
 export interface CarriedVersion {
@@ -355,10 +359,13 @@ export async function validateAgentIntegrationSelections(
   );
 
   // The declared-but-empty gate is precisely about the entries the subset
-  // filter above DROPS, so it needs the full declared list.
-  const inspected = requireCallableTools ? integrations : configuredEntries;
-  if (inspected.length === 0) return [];
+  // filter above DROPS, so it needs the full declared list. An `auth_key` alone
+  // is a configuration too (AFPS §4.4), judged on every path.
   const configuredIds = new Set(configuredEntries.map((e) => e.id));
+  const inspected = requireCallableTools
+    ? integrations
+    : integrations.filter((e) => configuredIds.has(e.id) || e.auth_key !== undefined);
+  if (inspected.length === 0) return [];
 
   // Two ways to reach the pinned versions: a freeze point resolves them itself,
   // and a run kickoff hands over the memo it already seeded. Either way the
@@ -415,6 +422,16 @@ export async function validateAgentIntegrationSelections(
       ? (postImportManifest as unknown as IntegrationManifest)
       : pinnedManifests?.get(entry.id);
     const judgedManifest = pinnedManifest ?? catalogManifest;
+
+    if (authKeyOnUnauthenticatedIntegration(judgedManifest, entry.auth_key)) {
+      errors.push({
+        field: `integrations_configuration.${entry.id}.auth_key`,
+        code: "auth_key_on_unauthenticated_integration",
+        title: "Integration declares no auth method",
+        message: `integrations_configuration.${entry.id}.auth_key names auth '${entry.auth_key}', but ${entry.id} declares no auth method (AFPS §4.4). Remove auth_key.`,
+      });
+    }
+    if (!requireCallableTools && !configuredIds.has(entry.id)) continue;
 
     // For local-source integrations the catalog comes from the referenced
     // mcp-server's MCPB tools. Fetched BEFORE both checks: the emptiness gate

@@ -31,11 +31,11 @@ describe("newPackageBody", () => {
     for (const description of ["Counts words.", 'Counts: words, # and "quotes"', "a\nb"]) {
       const body = newPackageBody("skill", { ...input, description });
       expect(body.manifest).toMatchObject({ type: "skill", name: "@acme/word-count" });
-      expect(checkSkillMarkdown(body.content)).toBeNull();
+      expect(checkSkillMarkdown(body.content ?? "")).toBeNull();
     }
   });
 
-  it("points an integration's remote source, and the auth allowlist that follows it, at the URL", () => {
+  it("points an integration's remote source, and the auth allowlist that follows it, at the URL, manifest only", () => {
     const body = newPackageBody("integration", input);
     expect(body.manifest).toMatchObject({
       type: "integration",
@@ -43,7 +43,8 @@ describe("newPackageBody", () => {
       source: { kind: "remote", remote: { url: "https://example.com/mcp" } },
       auths: { primary: { authorized_uris: ["https://example.com/**"] } },
     });
-    expect(JSON.parse(body.content)).toEqual(body.manifest);
+    // The API serialises `manifest.json` itself: the manifest travels once.
+    expect(Object.keys(body)).toEqual(["manifest"]);
   });
 
   it("declares no integration for an agent unless one is given", () => {

@@ -25,9 +25,9 @@ import {
   resolveIntegrationClientById,
   encodeClientAuthForStorage,
   listIntegrationClients,
-  ensureIntegrationOAuthClient,
   resolveConnectClient,
 } from "../../../src/services/integration-connections.ts";
+import { ensureIntegrationOAuthClient } from "../../../src/services/integration-oauth-provisioning.ts";
 import { __resetSystemIntegrationsForTest } from "../../../src/services/integration-client-registry.ts";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";

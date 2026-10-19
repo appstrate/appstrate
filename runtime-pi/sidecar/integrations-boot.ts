@@ -1730,7 +1730,6 @@ export async function bootIntegrations(
           namespace: spec.namespace,
           ...connectionLabelOf(spec),
           toolCount: apiCallToolCount,
-          // serverless integration — no `source.server`, so `vendored` is N/A.
         });
         continue;
       }
@@ -1760,7 +1759,6 @@ export async function bootIntegrations(
           namespace: spec.namespace,
           ...connectionLabelOf(spec),
           toolCount: added + apiCallAdded,
-          // remote-source integration — no `source.server.vendored` field.
         });
         logger.info("integration registered (remote http)", {
           integrationId: spec.integrationId,
@@ -1835,11 +1833,6 @@ export async function bootIntegrations(
         namespace: spec.namespace,
         ...connectionLabelOf(spec),
         toolCount: added + apiCallAdded,
-        // AFPS §7.1 — forward the local source's `vendored` build-provenance
-        // flag so the boot report surfaces it for audit/security consumers.
-        ...(typeof spec.manifest.server?.vendored === "boolean"
-          ? { vendored: spec.manifest.server.vendored }
-          : {}),
       });
       logger.info("integration registered", {
         integrationId: spec.integrationId,

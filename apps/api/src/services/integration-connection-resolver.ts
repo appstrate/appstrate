@@ -78,6 +78,7 @@ import { userConnectionsBlocked } from "./connection-reach.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "./integration-service.ts";
 import {
+  authKeyOnUnauthenticatedIntegration,
   authKeysServingSelection,
   authKeyServingNoSelectedTool,
 } from "./integration-manifest-helpers.ts";
@@ -191,6 +192,16 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
   };
 
   for (const req of input.requirements) {
+    // The agent's configuration, not a connection: refused even when inert or switched off.
+    if (authKeyOnUnauthenticatedIntegration(req.manifest, req.requiredAuthKey)) {
+      errors.push({
+        integrationId: req.integrationId,
+        code: "auth_key_on_unauthenticated_integration",
+        requiredAuthKey: req.requiredAuthKey,
+        message: `The agent requires auth '${req.requiredAuthKey}' for ${req.integrationId}, which declares no auth method — the agent's auth_key must be removed.`,
+      });
+      continue;
+    }
     if (isInert(req) && !input.includeInert) continue;
     if (input.inactiveIntegrationIds?.has(req.integrationId)) {
       record(
@@ -1088,7 +1099,9 @@ export function translateResolutionError(e: ResolutionItem): ResolutionFieldErro
         }
       : {}),
     // AFPS §4.1: the dep's `auth_key` and, on a mismatch, the auths the actor's rows use.
-    ...(e.code === "auth_key_mismatch" || e.code === "auth_key_serves_no_selected_tool"
+    ...(e.code === "auth_key_mismatch" ||
+    e.code === "auth_key_serves_no_selected_tool" ||
+    e.code === "auth_key_on_unauthenticated_integration"
       ? {
           ...(e.requiredAuthKey ? { required_auth_key: e.requiredAuthKey } : {}),
           ...(e.availableAuthKeys && e.availableAuthKeys.length > 0
@@ -1111,6 +1124,7 @@ const TITLE_BY_CODE: Record<ResolutionItem["code"], string> = {
   auth_key_mismatch: "Connection Auth Method Mismatch",
   auth_serves_no_selected_tool: "Connection Auth Serves No Selected Tool",
   auth_key_serves_no_selected_tool: "Required Auth Exposes No Selected Tool",
+  auth_key_on_unauthenticated_integration: "Integration Declares No Auth Method",
   required_integration_unbound: "Required Integration Bound To No Connection",
   integration_not_active: "Integration Not Active",
   integration_unbound: "Integration Bound To No Connection — Run Proceeds Without It",

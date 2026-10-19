@@ -1,23 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration connection layer — the write side of `/api/integrations/*`.
- *
- * Covers:
- *
- *   - Space- and org-level OAuth2 client registration (admin) backing the
- *     "Configure OAuth" admin form. Stored in `integration_oauth_clients`
- *     with the client_secret v1-envelope encrypted (empty string for
- *     public clients).
- *   - Connection writers (`persistCredentialBundle`, `saveIntegrationConnection`)
- *     that store per-(integration, auth, account) rows in
- *     `integration_connections` with v2-envelope encrypted credentials.
- *     The acquisition flows themselves live in `services/connect/*-strategy.ts`.
- *   - Lookup helpers consumed by the UI (per-auth status, scopes granted,
- *     expiry, multi-account list) and by the runtime resolver cascade.
- *
- * The runtime spawn path reads `integration_connections` directly; this
- * module is the write side that populates it.
+ * Integration connection layer, the write side of `/api/integrations/*`: OAuth2 client
+ * registration (space and org, `integration_oauth_clients`, the secret v1-envelope encrypted), the
+ * connection writers (`integration_connections`, v2 envelope; the acquisition flows live in
+ * `services/connect/*-strategy.ts`), and the lookups of the UI and the runtime resolvers. Client
+ * provisioning at connect time lives in `integration-oauth-provisioning.ts`.
  */
 
 import {
@@ -31,8 +19,6 @@ import {
   inArray,
   isNotNull,
   isNull,
-  lt,
-  notExists,
   or,
   sql,
   type SQL,
@@ -54,28 +40,10 @@ import {
   encryptCredentialEnvelope,
   decryptCredentials,
   decryptCredentialsToStringMap,
-  resolveOAuthEndpoints,
-  discoverProtectedResourceMetadata,
-  registerDynamicClient,
-  DynamicClientRegistrationError,
-  OAUTH_STATE_TTL_SECONDS,
   isClientMetadataRedirectTag,
-  sameUrlIdentifier,
-  withOfflineAccess,
 } from "@appstrate/connect";
 import { getEnv } from "@appstrate/env";
-import {
-  isVariableTemplate,
-  renderUrlTemplate,
-  variableRefs,
-} from "@appstrate/afps-shared/connection-variables";
-import { egressFetchImpl, isBlockedEgressUrl } from "../lib/egress-host-guard.ts";
-import {
-  clientMetadataDocumentUrl,
-  issuerOfClientMetadataDocumentRef,
-  presentsClientMetadataDocument,
-  platformClientName,
-} from "../lib/integration-client-metadata.ts";
+import { issuerOfClientMetadataDocumentRef } from "../lib/integration-client-metadata.ts";
 import {
   resolveSystemClientForAuth,
   getDefaultSystemIntegrationClient,
@@ -98,14 +66,7 @@ import {
   encryptionKeyUnavailable,
   KEY_UNAVAILABLE,
 } from "../lib/stored-credential.ts";
-import {
-  ApiError,
-  notFound,
-  conflict,
-  invalidRequest,
-  forbidden,
-  validationFailed,
-} from "../lib/errors.ts";
+import { ApiError, notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
 import { proxyProblem } from "../lib/proxy-status.ts";
 import {
   evaluateJsonPath,
@@ -135,14 +96,11 @@ import {
 } from "../lib/package-helpers.ts";
 import {
   integrationCallbackUrl,
-  clientMetadataCallbackUrlFor,
   authorizationServerTag,
-  integrationCallbackUrlFor,
   redirectTagOf,
 } from "../lib/integration-callback-url.ts";
 import { CONNECTION_LABEL_MAX, toMintedLabel } from "../lib/connection-label.ts";
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
-import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
 import type { Actor, AuthorizationServerBinding, ResolvedOAuthClient } from "@appstrate/connect";
 import {
   isUnauthenticatedIntegration,
@@ -152,11 +110,9 @@ import {
   type ConnectionOverrides,
   type ConnectionResolutionError,
   type IntegrationManifest,
-  acquiresByConnectLogin,
 } from "@appstrate/core/integration";
-import { isSystemPackage } from "./system-packages.ts";
 import type { ConnectionReach, IntegrationToolCatalogEntry } from "@appstrate/shared-types";
-import { isUserUrlReachable, type ConnectionVariables } from "./connect/connection-variables.ts";
+import type { ConnectionVariables } from "./connect/connection-variables.ts";
 import {
   PLACEHOLDER_ACCOUNT_ID,
   connectionVariablesOf,
@@ -165,10 +121,9 @@ import {
 } from "../lib/connection-identity.ts";
 import {
   getLocalServerRef,
-  getRemoteSource,
   hasPerConnectionAuthServer,
-  renderRemoteSource,
   toSupportedTokenEndpointAuthMethod,
+  usesAutoProvisionedClient,
 } from "./integration-manifest-helpers.ts";
 import { fetchMcpServerManifest, readMcpServerTools } from "./integration-service.ts";
 import { resolveConnectionOwnerNames } from "./integration-connection-owner-names.ts";
@@ -214,12 +169,8 @@ import type {
   IntegrationOAuthClient,
 } from "@appstrate/shared-types";
 
-/**
- * Internal — full record incl. decrypted `clientSecret`. Used by the
- * OAuth initiate handler. Route handlers MUST project to
- * {@link IntegrationOAuthClient} (omit `clientSecret`) before responding.
- */
-interface IntegrationOAuthClientWithSecret extends IntegrationOAuthClient {
+/** A client record with its decrypted secret: project with {@link toPublicClient} before responding. */
+export interface IntegrationOAuthClientWithSecret extends IntegrationOAuthClient {
   /** Row PK — the connection's `client_ref` when this custom client mints it. */
   id: string;
   clientSecret: string;
@@ -267,22 +218,13 @@ async function loadManifestOrThrow(
 // Cross-service helpers (shared with the credentials + spawn resolvers)
 // ─────────────────────────────────────────────
 
-/**
- * The shape every credential/spawn resolver needs out of a connection
- * row. `id` is included so the credentials resolver can write back to the
- * row when refreshing tokens.
- */
+/** What every credential and spawn resolver reads of a connection row (`id`: refresh write-back). */
 interface ActorConnectionRow {
   id: string;
   credentialsEncrypted: string;
   expiresAt: Date | null;
   scopesGranted: string[];
-  /**
-   * Which registered client minted the connection — a flat client id (system
-   * env id or custom `integration_oauth_clients.id`) for oauth2; `null` only for
-   * non-oauth2 auths (no OAuth client). Threaded into the token-refresh client
-   * resolution so refresh uses the SAME credentials that minted the tokens.
-   */
+  /** The minting client's flat id, so refresh uses the same credentials; `null` for non-oauth2. */
   clientRef: string | null;
   refreshFailureCount: number;
   /** Read with `credentialsEncrypted`: the upstream that credential is for. */
@@ -290,11 +232,7 @@ interface ActorConnectionRow {
   oauthResource: string | null;
 }
 
-/**
- * Spawn-side connection row — carries the `authKey` so the spawn
- * resolver can pick the right `manifest.auths[authKey].delivery`
- * declaration without iterating every declared auth on the integration.
- */
+/** Spawn-side row: its `authKey` picks the auth's `delivery` declaration. */
 export interface ResolvedConnectionRow extends ActorConnectionRow {
   authKey: string;
   /** {@link credentialRevision} of `credentialsEncrypted`, read in the same statement. */
@@ -378,19 +316,11 @@ export async function readCredentialRevision(connectionId: string): Promise<stri
 }
 
 /**
- * Load a specific connection row by its id, scoped to the space
- * and protected by the actor's access predicate (own OR shared). Used
- * by the spawn and live-credentials resolvers to load a run-bound connection.
- *
- * SECURITY — `integrationId` is a REQUIRED filter: a connection id is
- * caller-supplied on some paths (`connection_id` on the internal
- * credentials routes), so without the integration binding a caller could pin
- * integration B's connection while requesting integration A and have
- * B's credentials injected under A's manifest + `authorized_uris`
- * allowlist. The id must resolve to a row of the REQUESTED integration
- * or not resolve at all. `expectedAuthKey` narrows further when the
- * caller has pinned a specific auth (AFPS §4.1 `auth_key`); pass `null`
- * when the connection's own authKey is authoritative.
+ * A connection by id, in the space, within the actor's reach (own or shared): the spawn and
+ * live-credential resolvers' run-bound load. `integrationId` is a required filter: the id is
+ * caller-supplied on some paths, and without it integration B's credentials could be injected
+ * under A's manifest and `authorized_uris`. `expectedAuthKey` narrows to a pinned auth (`null`:
+ * the row's own is authoritative).
  */
 export async function loadAccessibleConnectionById(
   connectionId: string,
@@ -422,10 +352,7 @@ export async function loadAccessibleConnectionById(
     .limit(1);
   if (!row) return null;
 
-  // Defence in depth: re-assert the binding on the loaded row before any
-  // caller decrypts it. The WHERE clause above already guarantees this —
-  // a mismatch here means the query drifted, so fail closed rather than
-  // hand integration B's credentials to integration A's delivery plan.
+  // Defence in depth: the WHERE already binds the row; a mismatch means the query drifted.
   if (
     row.integrationId !== integrationId ||
     (expectedAuthKey !== null && row.authKey !== expectedAuthKey)
@@ -567,31 +494,23 @@ export async function selectAccessibleConnection(
 }
 
 /**
- * The connection an unnamed credential-proxy call outside a run gets for the caller, as one
- * status: the selection {@link selectAccessibleConnection} makes under `reach`, its outcome or
- * refusal mapped one to one, judged against `manifest` — the one the integration detail serves:
- * its latest published version, else its draft while nothing is published. That is what the proxy
- * authorizes a call against once a version exists, and what the server sync of a never-published
- * draft authorizes against. A published integration whose draft changed its auths is judged on
- * the published ones. It names no connection and no colleague. The proxy also requires the
- * integration active in the space, which `active` reports beside it.
+ * The connection an unnamed credential-proxy call outside a run gets for the caller, as one status:
+ * {@link selectAccessibleConnection}'s outcome under `reach`, judged against `manifest` — the one
+ * the integration detail serves (its latest published version, else the draft while none is), which
+ * the proxy authorizes against. It names no connection and no colleague; `active` reports the
+ * other condition the proxy checks.
  *
- *   - `ready` — one connection is bound and passes its health checks.
- *   - `must_choose` — `must_choose_connection`: several apply (or only colleagues' shared ones),
- *     a call names one.
- *   - `needs_reconnection` — `needs_reconnection`: the bound connection must be reconnected.
- *   - `none` — no connection in reach (`not_connected`).
- *   - `not_permitted` — the caller holds neither proxy permission (`reach` is `null`), or
- *     `call_permission_required`: an enforced org default governs the integration and the caller
- *     holds only `credential-proxy:call-own`.
- *   - `default_unavailable` — the org default cannot bind: `pinned_connection_unavailable` (a
- *     member is gone or off-auth), `required_integration_unbound` (an empty set),
- *     `connection_set_too_large`. Pins never apply outside a run, so only the default yields them.
- *   - `unusable` — the bound connection cannot serve: `insufficient_scopes`,
- *     `auth_serves_no_selected_tool`, or another resolution refusal (logged).
+ *   - `ready`: one connection binds and passes its health checks.
+ *   - `must_choose`: several apply (or only colleagues' shared ones); a call names one.
+ *   - `needs_reconnection`: the bound connection must be reconnected.
+ *   - `none`: no connection in reach.
+ *   - `not_permitted`: no proxy permission, or `call_permission_required` (an enforced org
+ *     default, and only `credential-proxy:call-own`).
+ *   - `default_unavailable`: the org default cannot bind (a member gone or off-auth, an empty set,
+ *     a set too large); pins never apply outside a run.
+ *   - `unusable`: `insufficient_scopes`, `auth_serves_no_selected_tool`, or another refusal (logged).
  *
- * `imposed` — an ENFORCED org default governs the integration in this space: the space's admins,
- * not the caller, decide the connection.
+ * `imposed`: an enforced org default governs the integration here — the space's admins decide.
  */
 export type ProxyConnectionStatus =
   | "ready"
@@ -729,42 +648,18 @@ function resolutionConflict(error: ConnectionResolutionError): ApiError {
   });
 }
 
-/**
- * Per-space activation state for an integration: the `active` flag plus the admin
- * `block_user_connections` gate. `blockUserConnections` defaults to `false` when
- * no per-space row exists.
- */
+/** An integration's activation in a space; `blockUserConnections` is `false` without a row. */
 interface IntegrationActivation {
   active: boolean;
   blockUserConnections: boolean;
 }
 
 /**
- * The integration reading of the activation rule — the entry point every
- * integration call site (spawn resolver, agent readiness, sidecar guards,
- * settings list, agent-editor detail) consults, directly or via the
- * {@link isIntegrationActive} / {@link listActiveIntegrationIds} wrappers
- * below. One SELECT over `space_packages` for the whole set, and the verdict
- * itself comes from {@link isActiveHere} (`services/package-activation.ts`),
- * which states the rule for all four package types:
- *
- *   1. An `space_packages` row EXISTS → its `enabled` flag wins. This is
- *      the explicit, sticky operator decision: an enabled row is
- *      active; a disabled row (`enabled = false`) is inactive and STAYS inactive
- *      across runs (never silently re-enabled).
- *   2. NO row → auto-active iff the integration is a SYSTEM integration (offered
- *      by the deployment via `SYSTEM_INTEGRATIONS`, with or without a shared
- *      OAuth client, via `isSystemIntegration`). System integrations work
- *      out of the box without an explicit activation; everything else stays
- *      inactive until somebody switches it on — the deployment ships far more
- *      integration packages than it offers.
- *
- * Deactivating a system integration that has no row materializes one with
- * `enabled = false` (see the enable/disable upsert), which then wins via rule 1
- * — that is what makes the opt-out sticky.
- *
- * Returns a map keyed by package id; every requested id is present (rows absent
- * from the table resolve via the system-integration fallback).
+ * The activation of each integration of `packageIds` in the space, in one SELECT, by the rule
+ * {@link isActiveHere} states for every package type: a `space_packages` row's `enabled` wins (a
+ * deactivated system integration keeps an `enabled = false` row: the opt-out is sticky); without a
+ * row, a system integration (`SYSTEM_INTEGRATIONS`) is active and any other is not. Every
+ * requested id is in the map.
  */
 export async function resolveIntegrationActivations(
   packageIds: readonly string[],
@@ -789,9 +684,7 @@ export async function resolveIntegrationActivations(
   for (const id of packageIds) {
     const row = byId.get(id);
     result.set(id, {
-      // One rule, one implementation: the row wins, the deployment's default
-      // decides when there is none. `source` is not read for an integration —
-      // `SYSTEM_INTEGRATIONS` is the offer, not the package's provenance.
+      // `source` is not read for an integration: `SYSTEM_INTEGRATIONS` is the offer.
       active: isActiveHere({ id, type: "integration", source: null }, row),
       blockUserConnections: row?.blockUserConnections === true,
     });
@@ -799,21 +692,13 @@ export async function resolveIntegrationActivations(
   return result;
 }
 
-/**
- * `true` when the integration is active in the space — thin wrapper over
- * {@link resolveIntegrationActivations}. Use {@link assertIntegrationActive}
- * when the caller needs a structured 404 instead of a boolean.
- */
+/** Whether the integration is active in the space ({@link resolveIntegrationActivations}). */
 export async function isIntegrationActive(packageId: string, spaceId: string): Promise<boolean> {
   const map = await resolveIntegrationActivations([packageId], spaceId);
   return map.get(packageId)!.active;
 }
 
-/**
- * Active subset of `packageIds` — thin wrapper over
- * {@link resolveIntegrationActivations}. Used on the run-kickoff hot path
- * (agent readiness) where an agent may declare several integrations.
- */
+/** The active subset of `packageIds` ({@link resolveIntegrationActivations}). */
 export async function listActiveIntegrationIds(
   packageIds: readonly string[],
   spaceId: string,
@@ -840,19 +725,9 @@ export async function assertIntegrationActive(packageId: string, spaceId: string
 type IntegrationOAuthClientRow = typeof integrationOauthClients.$inferSelect;
 
 /**
- * Project a stored client row into the internal `…WithSecret` shape, decrypting
- * `client_secret`.
- *
- * A decrypt failure does NOT throw here, and that is deliberate rather than
- * lenient: this projection also feeds the ADMIN client list, and an admin who
- * cannot load the list cannot fix the row the list is complaining about. It
- * degrades to an empty `clientSecret` while still reporting
- * `has_client_secret: true` from the column — the persisted, machine-readable
- * marker that says "this row holds a secret nobody can read".
- *
- * The path that would ACT on that client refuses it: `assertConnectClientUsable`,
- * before the connect redirect — the 503 for a key id missing from the keyring
- * (`secretKeyUnavailable`), else a 403 naming the key and the re-registration.
+ * Project a client row, decrypting `client_secret`. A decrypt failure does not throw — the admin
+ * list must still load to fix the row — but yields an empty secret beside `has_client_secret: true`;
+ * acting on the client is refused by `assertConnectClientUsable` (503 or 403).
  */
 function projectClientWithSecret(row: IntegrationOAuthClientRow): IntegrationOAuthClientWithSecret {
   // A public client stores no ciphertext at all, so there is nothing to decrypt.
@@ -873,21 +748,10 @@ function projectClientWithSecret(row: IntegrationOAuthClientRow): IntegrationOAu
     auth_key: row.authKey,
     client_id: row.clientId,
     clientSecret: secret,
-    // Presence comes from the COLUMN, never from what we managed to decrypt. A
-    // row whose ciphertext no longer opens (key rotated without re-encrypt,
-    // corruption) has a secret we cannot see — which is not the same thing as
-    // having none, and reporting it as none would hand the connect flow an
-    // empty credential for a confidential client: the exact substitution this
-    // column exists to prevent. The column is also the only reading that stays
-    // safe for a ciphertext that opens to an EMPTY secret —
-    // `encodeClientAuthForStorage` refuses to write one, but a row that
-    // predates that refusal reports `true` here and is stopped by
-    // `assertConnectClientUsable` instead of going out as public.
+    // From the column, never from the decrypt: an unreadable secret is not an absent one, and
+    // `assertConnectClientUsable` stops the row rather than send it as public.
     has_client_secret: row.clientSecretEncrypted.length > 0,
-    // `null` = the row declares nothing, so the manifest's method applies. That
-    // is the ONLY reading; the method is never re-derived from the secret.
-    // Inferring `"none"` from an empty decrypt is exactly the inference that
-    // put `client_secret=` (present but empty) on the wire.
+    // `null`: the manifest's method applies; never re-derived from the secret.
     token_endpoint_auth_method: row.tokenEndpointAuthMethod ?? null,
     redirect_uri: row.redirectUri,
     isDefault: row.isDefault,
@@ -925,7 +789,7 @@ function tierFilter(owner: ClientOwner): SQL {
     : and(eq(integrationOauthClients.orgId, owner.orgId), isNull(integrationOauthClients.spaceId))!;
 }
 
-function tierAuthFilter(owner: ClientOwner, packageId: string, authKey: string): SQL {
+export function tierAuthFilter(owner: ClientOwner, packageId: string, authKey: string): SQL {
   return and(
     tierFilter(owner),
     eq(integrationOauthClients.integrationId, packageId),
@@ -982,15 +846,11 @@ function assertClientAuth(
 }
 
 /**
- * `owner`'s custom clients for the auth, decrypted, oldest-first; a space also sees its org's.
- *
- * `selectable` (the default) returns the manual rows only — the clients a classic flow and the
- * default picker choose among: an auto-provisioned (DCR) row is the machine client of one server,
- * found by {@link getAutoProvisionedClient} on the auto-provisioned path alone — never a classic
- * flow's client nor a default an admin picks, even once a new version made its auth classic.
- * `all` adds them back, for the listing that displays them and lets an admin delete them.
+ * `owner`'s custom clients, decrypted, oldest-first (a space sees its org's): `selectable`, the
+ * manual rows only — an auto-provisioned one is found by {@link getAutoProvisionedClient} alone,
+ * even once its auth turned classic; `all` adds them.
  */
-async function loadClientTiers(
+export async function loadClientTiers(
   owner: ClientOwner,
   packageId: string,
   authKey: string,
@@ -1015,10 +875,7 @@ async function loadClientTiers(
   };
 }
 
-/**
- * The effective default (connect, lists, set-default): flagged space client ?? flagged
- * org client ?? system client ?? first space client ?? first org client.
- */
+/** The effective default: flagged space ?? flagged org ?? system ?? first space ?? first org client. */
 function pickDefault<C extends { isDefault: boolean }, S>(
   space: readonly C[],
   org: readonly C[],
@@ -1039,10 +896,7 @@ function unflagged<C extends { isDefault: boolean }>(clients: readonly C[]): C[]
   return clients.map((c) => ({ ...c, isDefault: false }));
 }
 
-/**
- * The {@link pickDefault} of `owner`'s tier when none of its own clients is flagged
- * (an org owner sees no space tier). Compare by `.id`: own clients come back as copies.
- */
+/** The {@link pickDefault} of `owner`'s tier with its own clients unflagged; compare by `.id`. */
 function inheritedDefault<C extends { isDefault: boolean }, S>(
   owner: ClientOwner,
   space: readonly C[],
@@ -1054,12 +908,8 @@ function inheritedDefault<C extends { isDefault: boolean }, S>(
     : pickDefault([], unflagged(org), system);
 }
 
-/**
- * Load the auto-provisioned (DCR) client for `(packageId, authKey, issuer)`, if any (`null`
- * matches a row bound to no server, which no flow takes). `idx_ioc_one_auto` guarantees at most one — the find half of
- * the DCR find-or-create.
- */
-async function getAutoProvisionedClient(
+/** The auto-provisioned client of `(packageId, authKey, issuer)` (at most one, `idx_ioc_one_auto`). */
+export async function getAutoProvisionedClient(
   org: OrgScope,
   packageId: string,
   authKey: string,
@@ -1093,64 +943,24 @@ async function hasTierDefault(
     .select({ id: integrationOauthClients.id })
     .from(integrationOauthClients)
     .where(
-      and(
-        tierAuthFilter(owner, packageId, authKey),
-        eq(integrationOauthClients.isDefault, true),
-        // A flag an auto-provisioned row still carries (registered before DCR rows stopped being
-        // defaults) is inert: no flow or picker reads it.
-        eq(integrationOauthClients.autoProvisioned, false),
-      ),
+      and(tierAuthFilter(owner, packageId, authKey), eq(integrationOauthClients.isDefault, true)),
     )
     .limit(1);
   return row !== undefined;
 }
 
 /**
- * Encode the (auth method, ciphertext) pair a client row will carry, writing
- * both halves together so the row can never claim to be public while holding a
- * secret, or claim a secret-based method while holding none.
- *
- * Three inputs, three meanings — and the distinction between the last two is
- * the point:
- *
- *   - `tokenEndpointAuthMethod: "none"` → PUBLIC. No ciphertext is stored.
- *   - `clientSecret: ""` with NO method declared → REFUSED. An empty secret is
- *     accepted only next to an explicit `"none"`, so the stored row always
- *     records a declaration somebody made rather than one this function
- *     inferred. Every production path now declares it: the admin routes refuse
- *     a missing secret unless `"none"` is sent, and auto-DCR declares `"none"`
- *     itself after reading the authorization server's own
- *     `token_endpoint_auth_method`. The throw is therefore unreachable in
- *     production and exists as a chokepoint for any future direct caller.
- *   - `clientSecret: undefined` (the field was not submitted at all) → PRESERVE.
- *     Returns `null` so the caller leaves the stored pair untouched. Rotation
- *     submits an empty secret input when the admin only meant to change the
- *     redirect URI; without this distinction that keystroke-free edit silently
- *     destroyed the secret AND flipped a confidential client to public.
- *
- * An empty secret next to an explicitly declared secret-based method throws for
- * the same reason. It used to win over the declaration and write
- * `token_endpoint_auth_method = 'none'`: a caller that declared
- * `client_secret_basic` and supplied no secret got a public client and a 201,
- * and the contradiction only surfaced as an HTTP 400 from the provider's token
- * endpoint months later.
- *
- * Note that DELETING these guards rather than throwing would be worse than the
- * inference they replace: falling through to the final return writes a NULL
- * method beside a ciphertext over an EMPTY secret — a row
- * `ioc_public_iff_no_secret` accepts, because the CHECK reads the ciphertext's
- * length and cannot see through it. Nothing reads such a row as a public
- * client, so the only place it surfaces is the provider's token endpoint,
- * long after the `201`. This is the one write path that can still tell the
- * difference; it refuses here rather than deferring the answer.
+ * Encode a client row's (method, ciphertext) pair together, so a row never claims public with a
+ * secret nor a secret-based method without one: `"none"` → no ciphertext; an undefined secret →
+ * `null` (preserve); an empty secret otherwise → refused, as the CHECK cannot see it inside a
+ * ciphertext and it would surface only at the provider.
  */
 export function encodeClientAuthForStorage(input: {
   clientSecret?: string | undefined;
   tokenEndpointAuthMethod?: string | undefined;
 }): { tokenEndpointAuthMethod: string | null; clientSecretEncrypted: string } | null {
   if (input.clientSecret === undefined) {
-    // Declaring a client public is a deliberate act and does not need a secret
-    // field; anything else with no secret submitted is a preserve.
+    // Declaring a client public needs no secret; anything else without one is a preserve.
     if (input.tokenEndpointAuthMethod === "none") {
       return { tokenEndpointAuthMethod: "none", clientSecretEncrypted: "" };
     }
@@ -1158,20 +968,13 @@ export function encodeClientAuthForStorage(input: {
   }
   const secret = input.clientSecret;
   if (input.tokenEndpointAuthMethod === "none") {
-    // A non-empty secret alongside an explicit `"none"` is refused by
-    // `oauthClientCreateSchema` / `oauthClientUpdateSchema`, and auto-DCR only
-    // declares `"none"` once it has confirmed the authorization server
-    // registered a public client. Dropping the secret here is therefore not a
-    // downgrade of anything a caller asked to keep.
+    // A secret beside "none" is refused by the route schemas, and auto-DCR declares "none" only
+    // once the server registered a public client: nothing a caller asked to keep is dropped.
     return { tokenEndpointAuthMethod: "none", clientSecretEncrypted: "" };
   }
   if (secret.length === 0) {
-    // Defence in depth for the callers that bypass the route schema — auto-DCR
-    // calls `createIntegrationOAuthClient` directly, so "the route already
-    // refused this" is not a premise this function may rely on. An empty
-    // secret is stored only next to an explicit `"none"`; anything else is a
-    // declaration this function would have to invent, and inventing it is what
-    // produced a public client from a confidential registration.
+    // Callers may bypass the route schema (auto-DCR): an empty secret is stored only beside an
+    // explicit "none", never a method this function would have to invent.
     throw invalidRequest(
       input.tokenEndpointAuthMethod !== undefined
         ? `token_endpoint_auth_method='${input.tokenEndpointAuthMethod}' requires a client_secret, but an empty one was supplied. Send the secret, or declare token_endpoint_auth_method='none' to register a public client.`
@@ -1185,24 +988,9 @@ export function encodeClientAuthForStorage(input: {
 }
 
 /**
- * Register a NEW space or org OAuth2 client for an integration auth — one of
- * the N custom (BYO-app) clients (model-provider pattern). Always an INSERT (no
- * upsert): a fresh client id is minted each time so multiple clients coexist.
- *
- * `is_default` is set to `true` only when no client of its tier is already the
- * default (mirrors `org-models` first-credential-wins); the loser of a race on
- * `idx_ioc_one_default` (space) / `idx_ioc_one_org_default` (org) is stored non-default.
- *
- * Creation always supplies `clientSecret` (blank means "register a public
- * client"), so `encodeClientAuthForStorage` never returns the preserve
- * sentinel here. A public client is stored as
- * `token_endpoint_auth_method = 'none'` with an EMPTY `client_secret_encrypted`
- * — no ciphertext at all, so "has a secret" is a column read rather than a
- * decryption. The `ioc_public_iff_no_secret` CHECK enforces that biconditional.
- *
- * `opts.autoProvisioned` marks a DCR machine client (internal — the admin
- * route never sets it; a remote-MCP auth keeps exactly one, enforced by
- * `idx_ioc_one_auto`).
+ * Register a new custom OAuth2 client (an INSERT: N coexist), the default when its tier has none.
+ * A public client is stored as `none` with no ciphertext; `opts.autoProvisioned` marks a DCR
+ * machine client, one per auth and issuer (`idx_ioc_one_auto`).
  */
 export async function createIntegrationOAuthClient(
   owner: ClientOwner,
@@ -1228,8 +1016,6 @@ export async function createIntegrationOAuthClient(
   // classic client wins the default only when no manual client holds it.
   const isDefault = !autoProvisioned && !(await hasTierDefault(owner, packageId, authKey));
 
-  // Creation always supplies the field (blank means "register a public
-  // client"), so the encoder never returns the preserve sentinel here.
   const clientAuth = encodeClientAuthForStorage(input)!;
   const now = new Date();
   const insert = (asDefault: boolean) =>
@@ -1252,9 +1038,8 @@ export async function createIntegrationOAuthClient(
       })
       .returning();
   const [row] = await insert(isDefault).catch((err: unknown) => {
-    // A concurrent write took the tier's first default — or an auto-provisioned row registered
-    // before DCR rows stopped being defaults still holds the flag: land as non-default (the
-    // manual tier's `pickDefault` falls back to its first client anyway).
+    // A concurrent create took the tier's first default since `hasTierDefault` read it: land as
+    // non-default (`pickDefault` falls back to the tier's first client anyway).
     if (!isDefault || !isUniqueViolation(err)) throw err;
     return insert(false);
   });
@@ -1266,15 +1051,8 @@ export async function createIntegrationOAuthClient(
 }
 
 /**
- * Update an existing custom client in place, by its id; an absent field is unchanged. Scoped to
- * `owner`'s tier and `packageId` (escalation guard) — any other client id is a 404.
- * `is_default` / `auto_provisioned` are not touched here
- * (default selection is `setDefaultIntegrationClient`'s job).
- *
- * An omitted `clientSecret` PRESERVES the stored pair — except when the caller
- * also declares a secret-based `tokenEndpointAuthMethod`, which is a change
- * request rather than a preserve: it is applied against the stored secret, or
- * refused when there is none. See the `methodOnly` block.
+ * Update a custom client of `owner`'s tier in place (any other id: 404); an absent field is
+ * unchanged, an omitted secret preserves the stored pair unless a method is declared.
  */
 export async function updateIntegrationOAuthClient(
   owner: ClientOwner,
@@ -1300,17 +1078,14 @@ export async function updateIntegrationOAuthClient(
   if (!existing) {
     throw notFound(`OAuth client '${clientId}' not found`);
   }
-  // Auto-provisioned (DCR) clients are machine-managed — refuse manual rotation
-  // (it would point the DCR find-or-create at hand-entered credentials).
+  // Machine-managed: a manual edit would point DCR's find-or-create at hand-entered credentials.
   if (existing.autoProvisioned) {
     throw invalidRequest(
       `OAuth client '${clientId}' is auto-provisioned (DCR) and cannot be edited manually; an org administrator deletes it to re-trigger registration.`,
     );
   }
-  // `null` = the secret field was not submitted → keep the stored credential
-  // and its declared method exactly as they are. Rotating only the redirect URI
-  // must not silently clear the secret (nor flip a confidential client public).
-  // A new secret alone keeps the stored secret-based method (not a public client's `"none"`).
+  // An omitted secret keeps the stored pair (a redirect-URI edit must not clear it); a new secret
+  // alone keeps the stored secret-based method.
   const keptMethod =
     input.clientSecret && existing.tokenEndpointAuthMethod !== "none"
       ? (existing.tokenEndpointAuthMethod ?? undefined)
@@ -1320,22 +1095,8 @@ export async function updateIntegrationOAuthClient(
     tokenEndpointAuthMethod: input.tokenEndpointAuthMethod ?? keptMethod,
   });
 
-  // …with one exception, which the preserve sentinel alone gets wrong. An
-  // ABSENT secret alongside an EXPLICITLY declared secret-based method is not
-  // a preserve: the caller asked for a change. Skipping both columns dropped
-  // that declaration and answered 200 — the admin saw success on a row that
-  // never moved. (`"none"` never lands here: the encoder returns a value for
-  // it, so `clientAuth === null` with a declared method means a secret-based
-  // one.) Not reachable from the web form, which sends no method unless it is
-  // declaring the client public — but reachable from the API.
-  //
-  // Honour it when there is a stored secret to attach the method to: choosing
-  // between `client_secret_post` and `client_secret_basic` is a change of
-  // TRANSPORT for the same credential, and demanding the admin re-type a
-  // secret they are not changing is how secrets get pasted from the wrong
-  // place. With NO stored secret there is nothing to authenticate with, so the
-  // request is refused rather than half-applied — the biconditional CHECK
-  // would reject the write anyway, as an opaque 500 instead of this.
+  // An absent secret beside a secret-based method is a change: with a stored secret it switches
+  // its transport; with none it is refused rather than half-applied.
   let methodOnly: string | undefined;
   if (clientAuth === null && input.tokenEndpointAuthMethod !== undefined) {
     if (existing.clientSecretEncrypted === "") {
@@ -1430,8 +1191,8 @@ function moveClientToOrg(
         .set({ spaceId: null, isDefault: asDefault, updatedAt: new Date() })
         .where(eq(integrationOauthClients.id, existing.id))
         .returning();
-    // A savepoint, so a refused flag (an auto-provisioned row registered before DCR rows stopped
-    // being defaults still holds the org slot) leaves the transaction usable for the plain move.
+    // A savepoint, so a flag refused because a concurrent write took the org default since
+    // `hasTierDefault` read it leaves the transaction usable for the plain move.
     const [row] = isDefault
       ? await tx
           .transaction((sp) => move(sp, true))
@@ -1448,36 +1209,14 @@ function moveClientToOrg(
   });
 }
 
-/**
- * A connect-time client resolved from a credential source — either an
- * env-provided system client or a custom (space or org) client. The
- * `clientRef` is what gets pinned on the connection so refresh resolves the
- * same credentials.
- */
-interface ResolvedConnectClient {
+/** A connect-time client (system or custom); its `clientRef` is pinned on the connection. */
+export interface ResolvedConnectClient {
   clientId: string;
   /** Pre-registered redirect URI override, or null to use the platform default. */
   redirectUri: string | null;
-  /**
-   * The tag of `redirectUri` when it is a per-server callback — `<tag>` for a DCR client's
-   * `…/callback/<tag>`, `cimd/<tag>` for a metadata document's `…/callback/cimd/<tag>` (only
-   * {@link metadataDocumentClient} yields one): recorded in the OAuth state so the callback refuses
-   * a response arriving through any other path (mix-up).
-   */
+  /** A per-server callback's tag, in the OAuth state so the callback refuses another path (mix-up). */
   redirectTag?: string;
   clientRef: string;
-}
-
-/**
- * This instance's Client ID Metadata Document of `issuer`'s server as the connect-time client: no
- * row, the document URL is both `client_id` and `client_ref`, and the redirect URI is the server's
- * own in the documents' namespace (`<callback>/cimd/<tag>`) — never the shared callback, nor the
- * one a DCR client of the same server registers.
- */
-function metadataDocumentClient(issuer: string): ResolvedConnectClient {
-  const url = clientMetadataDocumentUrl(issuer);
-  const redirectUri = clientMetadataCallbackUrlFor(issuer);
-  return { clientId: url, redirectUri, redirectTag: redirectTagOf(redirectUri)!, clientRef: url };
 }
 
 /** Project a registered system client into the connect-time resolved shape. */
@@ -1491,28 +1230,8 @@ function systemConnectClient(def: SystemIntegrationClientDefinition): ResolvedCo
 }
 
 /**
- * Refuse a stored client whose ciphertext cannot be read — at RESOLUTION time,
- * which is the earliest moment the answer is knowable.
- *
- * Timing is the whole point. The state used to travel all the way through
- * `OAuth2Strategy.begin`: the user was redirected, consented at the provider,
- * came back, and only then did the token exchange fail — with a message about
- * an incoherent pair that named neither the row nor a remedy. And in one case
- * it did not fail at all: a manifest declaring
- * `token_endpoint_auth_method: "none"` made `assertClientAuthCoherent` return
- * early, so a confidential client whose secret could not be read went out on
- * the wire as a PUBLIC one — the silent substitution this column exists to
- * prevent.
- *
- * The state is a property of the row rather than of the caller:
- * `has_client_secret` WITH an empty `clientSecret` means the ciphertext did not
- * open (key rotated without re-encrypt, corruption). Only a failed decrypt can
- * produce that pair — `ioc_public_iff_no_secret` makes "declares a
- * secret-based method while storing none" unrepresentable, so no write path
- * reaches it.
- *
- * The admin client list deliberately keeps rendering the row (see
- * `projectClientWithSecret`): the admin has to see the broken row to fix it.
+ * Refuse, before the user consents, a client whose secret cannot be decrypted: sent on, it would
+ * fail at the token exchange, or under a "none" manifest go out as public — a silent downgrade.
  */
 function assertConnectClientUsable(client: IntegrationOAuthClientWithSecret): void {
   if (client.secretKeyUnavailable) {
@@ -1534,14 +1253,9 @@ function assertConnectClientUsable(client: IntegrationOAuthClientWithSecret): vo
 }
 
 /**
- * The per-server callbacks (`…/callback/<tag>` of a DCR client of a server chosen per connection,
- * `…/callback/cimd/<tag>` of a metadata document) are the platform's own: each is trusted for one
- * authorization server, and the state of the flow that sends it holds what makes it safe (the
- * server's issuer; for a document, its `iss` requirement). A client an administrator registers
- * names no such server, so a row on one of those URIs would put another server's tag in a state
- * that requires nothing of it — a hostile server could then bounce the user to that server and have
- * its code delivered on the row's flow. Only an auto-provisioned (DCR) row, registered by the
- * platform with `integrationCallbackUrlFor(issuer)`, may carry a plain tag; a `cimd/` tag, none.
+ * The per-server callbacks are each trusted for one server by what the flow's state holds. A row an
+ * admin registers on one would carry its tag into a state requiring nothing — a hostile server's
+ * code delivered on that row's flow (mix-up). Only an auto-provisioned row carries a plain tag.
  */
 function isReservedRedirectTag(tag: string, autoProvisioned: boolean): boolean {
   // Write side; the connect side is the stricter {@link assertRedirectBoundToFlow}.
@@ -1549,12 +1263,9 @@ function isReservedRedirectTag(tag: string, autoProvisioned: boolean): boolean {
 }
 
 /**
- * Refuse a stored row's per-server redirect URI unless it is the one of THIS flow's server: a plain
- * tag only on an auto-provisioned row of an auto-provisioned auth, and only the tag of the issuer
- * this flow resolved (`flowIssuer`); a `cimd/` tag on no row (a document
- * client carries its own, bound by its ref). Anything else would send another server's tag with
- * this flow's token endpoint — rows written before the write guard, or a DCR row left over from
- * a version whose server was chosen per connection.
+ * Refuse a row's per-server redirect URI unless it is this flow's server's: a plain tag on an
+ * auto-provisioned row, for the issuer the flow resolved; a `cimd/` tag on no row. Anything else
+ * would send another server's tag with this flow's token endpoint.
  */
 function assertRedirectBoundToFlow(
   client: IntegrationOAuthClientWithSecret,
@@ -1576,10 +1287,7 @@ function assertRedirectBoundToFlow(
   }
 }
 
-/**
- * Refuse a `redirect_uri` in the platform's per-server callback namespaces (`/callback/<tag>`,
- * `/callback/cimd/<tag>`) for a client that is not auto-provisioned: a 400 at every writer.
- */
+/** A 400 at every writer for a non-provisioned client's `redirect_uri` among the per-server callbacks. */
 function assertRedirectUriNotReserved(
   redirectUri: string | null | undefined,
   autoProvisioned: boolean,
@@ -1622,16 +1330,31 @@ function customConnectClient(
 }
 
 /**
- * Resolve WHICH OAuth client a connect flow uses, and its credentials — the
- * single home for the client-selection precedence. New connections always use the **default**
- * ({@link pickDefault}) — there is no per-connect picker.
- * Auto-provisioned remote-MCP auths use this instance's metadata document
- * (CIMD) or, failing it, the org's machine client (DCR), and are never served
- * by a system entry. Throws the operator-facing error when
- * no client can be resolved. The returned `clientRef` is pinned on the
- * connection so token refresh resolves the same credentials. The choice of
- * which client is the default is an admin action (`setDefaultIntegrationClient`,
- * the model-provider `setDefaultModel` analogue), not a connect-time argument.
+ * The OAuth connect config of an initiate call (`ensureIntegrationOAuthClient`); for a classic auth
+ * the endpoints stay `undefined` and the caller reads the manifest's.
+ */
+export interface ResolvedOAuthConnect {
+  /** The space's custom (BYO-app) clients — none for an auto-provisioned auth. */
+  spaceClients: IntegrationOAuthClientWithSecret[];
+  /** The org's clients the space inherits — its one machine client for an auto-provisioned auth. */
+  orgClients: IntegrationOAuthClientWithSecret[];
+  /** This instance's metadata document, ahead of any DCR machine client, when the server accepts one. */
+  metadataDocumentClient?: ResolvedConnectClient;
+  /** The server the client was chosen for: the OAuth state holds the `iss` requirement it relied on. */
+  authorizationServer?: AuthorizationServerBinding;
+  /** Discovered/declared issuer (overrides the manifest when set). */
+  issuer?: string;
+  authorizationEndpoint?: string;
+  tokenEndpoint?: string;
+  /** RFC 8707 resource indicator (discovered for MCP, else manifest `resource`). */
+  resource?: string;
+  /** A remote source's checked server metadata: the authorize request reads scopes and S256 from it. */
+  serverMetadata?: { issuer?: string; scopesSupported?: string[] };
+}
+
+/**
+ * Which OAuth client a connect flow uses: the default ({@link pickDefault}); for an auto-provisioned
+ * auth its machine client or metadata document, never a system entry. The `clientRef` is pinned.
  */
 export function resolveConnectClient(
   integrationId: string,
@@ -1663,61 +1386,18 @@ export function resolveConnectClient(
     );
   }
 
-  if (autoProvisioned) {
-    // Auto-provisioning auth (public client on a remote MCP integration): client
-    // acquisition failed. `resolved.provisioningFailure` carries the complete
-    // reason + remedy, authored by whichever step failed. Render it verbatim.
-    const failure = resolved.provisioningFailure;
-    if (failure?.transient) {
-      throw authorizationServerUnreachable(integrationId, authKey, failure.message);
-    }
-    const detail = failure?.message ?? "discovery or client registration failed";
-    const statusPart = failure?.status ? ` (HTTP ${failure.status})` : "";
-    throw forbidden(
-      `Could not automatically provision an OAuth client for '${integrationId}' auth '${authKey}'${statusPart}: ${detail}`,
-    );
-  }
-  // Confidential/classic auth: an admin must pre-register a client, or the
-  // platform must provide a system client via SYSTEM_INTEGRATIONS.
+  // `ensureIntegrationOAuthClient` throws when it provisions no client for an auto-provisioned auth.
   throw forbidden(
     `Administrator must register OAuth client credentials for '${integrationId}' auth '${authKey}' before connection`,
   );
 }
 
 /**
- * Resolve a pinned `client_ref` (flat client id) to the OAuth client
- * credentials that mint/refresh a connection's tokens. The token-refresh
- * counterpart of `resolveConnectClient` — and the direct analogue of the
- * model-provider `loadInferenceCredentials`: try the system registry by id
- * first, then this instance's Client ID Metadata Documents by URL (a public
- * client with no row, bound to the server its name encodes), then the
- * `integration_oauth_clients` table by id.
- *
- * SECURITY: the custom lookup is scoped to `(spaceId or its org, integrationId,
- * authKey)` so a custom id belonging to another space/org/integration/auth never
- * resolves — the same re-validation the system branch applies. Returns `null`
- * when the id resolves to neither (since-removed client, remapped system entry,
- * cross-scope id) → the caller skips refresh (surfaces needs_reconnection).
- *
- * Returns the client-authentication method ALONGSIDE the credentials, and the
- * two are coherent for every representable row: `ioc_public_iff_no_secret`
- * makes "public with a ciphertext" and "secret-based method with none"
- * unrepresentable, so a public client comes back as `"none"` with an empty
- * secret and a confidential one as its declared method with a non-empty
- * secret. Callers post what they are given — nothing downstream re-derives the
- * method, which is how `client_secret=` (present but empty) used to reach
- * providers that reject it. An incoherent pair that somehow got past the CHECK
- * is refused downstream by `assertClientAuthCoherent`, never smoothed over.
- *
- * Precedence: the client row's own `token_endpoint_auth_method` (the admin's
- * explicit declaration) wins over `manifestAuthMethod`, which is the
- * manifest's `auths.{key}.token_endpoint_auth_method` and stands in when the
- * row does not declare one; `toSupportedTokenEndpointAuthMethod` narrows it as on the callback.
- *
- * `null` is reserved for "no such client here" (since-removed, remapped,
- * cross-scope) and for an unreadable ciphertext — the caller skips the
- * refresh, which surfaces as `needs_reconnection` at expiry. A ciphertext under
- * a key id the keyring lacks throws the 503 instead.
+ * Resolve a pinned `client_ref` to the credentials that mint and refresh a connection's tokens: the
+ * system registry, then this instance's metadata documents (public, bound to the server their URL
+ * names), then `integration_oauth_clients` scoped to the space's tiers, integration and auth. The
+ * method comes back coherent with the secret; the row's declaration wins over the manifest's.
+ * `null`: no such client here, or an unreadable ciphertext; a missing key id throws the 503.
  */
 export async function resolveIntegrationClientById(
   clientRef: string,
@@ -1737,11 +1417,8 @@ export async function resolveIntegrationClientById(
   // 1) System client (env), validated against this (integrationId, authKey).
   const sys = resolveSystemClientForAuth(clientRef, integrationId, authKey);
   if (sys) {
-    // The entry's own declaration wins; the manifest stands in when it has
-    // none — the same precedence as the custom branch below. Never re-derived
-    // from an empty secret: `SYSTEM_INTEGRATIONS` refuses to boot on a client
-    // that omits its secret without declaring `"none"`, so emptiness here is
-    // always a declaration, never a gap.
+    // The entry's declaration wins, the manifest's stands in; `SYSTEM_INTEGRATIONS` refuses to
+    // boot on a client omitting its secret without declaring "none".
     const method = sys.tokenEndpointAuthMethod ?? manifestAuthMethod;
     return resolved(sys.clientId, method === "none" ? "" : (sys.clientSecret ?? ""), method);
   }
@@ -1752,9 +1429,7 @@ export async function resolveIntegrationClientById(
     return { ...resolved(clientRef, "", "none"), issuer: documentIssuer };
   }
 
-  // A custom client id is the row's UUID PK. Anything else — a since-removed
-  // system id, a remapped id, garbage — cannot be a custom row, so skip the
-  // typed lookup (and avoid a `uuid` cast error on a non-UUID literal).
+  // A custom id is the row's UUID: anything else names no row (and would fail the `uuid` cast).
   if (!isUuid(clientRef)) return null;
 
   // 3) Custom client of this space or its org, by id AND fully scoped.
@@ -1788,10 +1463,7 @@ export async function resolveIntegrationClientById(
 
   // The row's declaration wins; the manifest stands in when it has none.
   const method = row.tokenEndpointAuthMethod ?? manifestAuthMethod;
-  // A public client stores no ciphertext, so there is nothing to decrypt. The
-  // converse needs no test: `ioc_public_iff_no_secret` (migration 0038) makes an empty ciphertext
-  // with any other declared method unrepresentable, so emptiness here always
-  // arrives as `"none"`.
+  // A public client stores no ciphertext (`ioc_public_iff_no_secret` makes emptiness "none").
   if (method === "none") {
     return bound(resolved(row.clientId, "", "none"));
   }
@@ -1802,33 +1474,18 @@ export async function resolveIntegrationClientById(
   );
   if (!stored) return null;
   const clientSecret = stored.client_secret ?? "";
-  // A ciphertext that opens to an EMPTY secret is not normalised to `"none"`
-  // here — that inference is what sent `client_secret=` (present but empty) to
-  // providers that reject it. The pair travels on as it was stored, and the
-  // refresh path refuses it: `performRefreshTokenExchange` resolves an absent
-  // method to `client_secret_basic` before calling `assertClientAuthCoherent`,
-  // so a secret-based (or unstated) method with no secret throws
-  // `ClientAuthInvariantError` before anything reaches the wire.
+  // An empty secret is not normalised to "none" (which would send `client_secret=`): the refresh
+  // refuses the pair through `assertClientAuthCoherent` before anything reaches the wire.
   return bound(resolved(row.clientId, clientSecret, method));
 }
 
-/**
- * A client available to connect an integration auth — surfaced in the UI so a
- * user can see the shared system client and/or the org's own (BYO) client and
- * which one is the default. Secrets are never included.
- */
+/** A client that can connect an integration auth, as the UI lists it; never its secret. */
 interface IntegrationClientDescriptor {
   /** `client_ref` to pass back at connect time. */
   client_ref: string;
   /** The owning tier: `"system"` (env system client), `"org"` (org-level) or `"space"`. */
   source: "system" | "org" | "space";
-  /**
-   * For `"space"` / `"org"` clients, the OAuth `client_id` the admin registered.
-   * For `"system"` clients, a stable opaque FINGERPRINT (truncated
-   * SHA-256) — never the real `SYSTEM_INTEGRATIONS` client_id, which is a
-   * deployment secret and must not leak to the front. It is display-only; the
-   * connect/refresh keyspace is `client_ref`, not this field.
-   */
+  /** The registered `client_id`; for a system client an opaque fingerprint (display only). */
   client_id: string;
   /** True for the client used when no explicit `client_ref` is given at connect. */
   is_default: boolean;
@@ -1837,37 +1494,24 @@ interface IntegrationClientDescriptor {
   /** True when the client carries a non-empty secret (confidential client). */
   has_client_secret: boolean;
   /**
-   * `token_endpoint_auth_method` declared for this client, or `null` when
-   * undeclared (the manifest's value applies). `"none"` = PUBLIC client.
-   *
-   * The UI's "public client" checkbox reads THIS rather than
-   * `!has_client_secret`: the two differ for a confidential client whose
-   * secret has simply not been re-entered, and conflating them left the secret
-   * field permanently disabled on such a row.
+   * The declared method (`null`: the manifest's; `"none"`: public), which the UI reads — not
+   * `!has_client_secret`, false too for a confidential client whose secret was not re-entered.
    */
   token_endpoint_auth_method: string | null;
   /** Pre-registered redirect URI override, or null (custom only; system → null). */
   redirect_uri: string | null;
 }
 
-/**
- * Stable, non-reversible fingerprint of a system client_id for display. The real
- * `SYSTEM_INTEGRATIONS` client_id is a deployment secret that must not leak to
- * the front; the UI only needs an opaque, stable identifier to render and diff,
- * which a truncated SHA-256 provides. `sys_`-prefixed so it never reads as a
- * real OAuth client_id.
- */
+/** An opaque, stable display fingerprint of a system client_id, which is a deployment secret. */
 function fingerprintSystemClientId(clientId: string): string {
   const hex = new Bun.CryptoHasher("sha256").update(clientId).digest("hex");
   return `sys_${hex.slice(0, 16)}`;
 }
 
 /**
- * List the OAuth clients of `owner`'s tier for `(packageId, authKey)`, secrets omitted: its
- * {@link inheritedDefault} (when not its own) then its own clients, oldest-first. `is_default`
- * marks the effective default, chosen among the manual clients only. Its auto-provisioned (DCR)
- * clients are listed too — `auto_provisioned: true`, never `is_default` — for display and
- * deletion; none can be made the default ({@link setDefaultIntegrationClient} refuses them).
+ * The OAuth clients of `owner`'s tier, secrets omitted: its {@link inheritedDefault} when not its
+ * own, then its own clients oldest-first. Auto-provisioned clients are listed for deletion, never
+ * as the default.
  */
 export async function listIntegrationClients(
   owner: ClientOwner,
@@ -1875,8 +1519,9 @@ export async function listIntegrationClients(
   authKey: string,
 ): Promise<IntegrationClientDescriptor[]> {
   await assertOwnerInScope(owner, packageId, authKey);
-  const { space, org } = await loadClientTiers(owner, packageId, authKey);
   const all = await loadClientTiers(owner, packageId, authKey, "all");
+  const space = all.space.filter((c) => !c.autoProvisioned);
+  const org = all.org.filter((c) => !c.autoProvisioned);
   const system = getDefaultSystemIntegrationClient(packageId, authKey);
   // A space also sees the org's machine clients it uses (an auto-provisioned row lives at the org).
   const own = isSpaceOwner(owner)
@@ -1897,15 +1542,12 @@ function describeClient(
     return {
       client_ref: client.id,
       source: "system",
-      // Never expose the real system client_id (deployment secret) — only an
-      // opaque, stable fingerprint for the UI to show/diff.
+      // Never the real system client_id (a deployment secret).
       client_id: fingerprintSystemClientId(client.clientId),
       is_default: isDefault,
       auto_provisioned: false,
       has_client_secret: client.clientSecret !== undefined,
-      // The entry's own declaration, `null` when it defers to the manifest —
-      // mirroring the custom row's nullable column below. Same rule as every
-      // other consumer: read the declaration, never infer it from the secret.
+      // The entry's declaration, `null` when it defers to the manifest; never inferred.
       token_endpoint_auth_method: client.tokenEndpointAuthMethod ?? null,
       redirect_uri: null,
     };
@@ -1923,11 +1565,8 @@ function describeClient(
 }
 
 /**
- * Choose the default OAuth client of `owner`'s tier for new connections — the
- * model-provider `setDefaultModel` analogue: an own client is flagged (the others
- * cleared), the tier's {@link inheritedDefault} clears its flags, anything else is
- * rejected, never silently stored. Clear-then-set runs in one transaction so the
- * partial unique never sees two defaults mid-flight.
+ * Choose `owner`'s tier default: an own client is flagged (others cleared), its
+ * {@link inheritedDefault} clears the flags, anything else is refused.
  */
 export async function setDefaultIntegrationClient(
   owner: ClientOwner,
@@ -1969,776 +1608,7 @@ export async function setDefaultIntegrationClient(
   });
 }
 
-// ─────────────────────────────────────────────
-// Auto-DCR (MCP-spec dynamic client registration)
-// ─────────────────────────────────────────────
-
-/**
- * The OAuth connect config resolved for the initiate call, plus the client
- * to authenticate as. For dynamic-registration integrations the endpoints +
- * resource are discovered (RFC 9728 → RFC 8414) and threaded back so the
- * initiate call uses them; for classic integrations they stay `undefined` and
- * the caller falls back to the manifest's declared values.
- */
-export interface ResolvedOAuthConnect {
-  /** The space's custom (BYO-app) clients — none for an auto-provisioned auth. */
-  spaceClients: IntegrationOAuthClientWithSecret[];
-  /** The org's clients the space inherits — its one machine client for an auto-provisioned auth. */
-  orgClients: IntegrationOAuthClientWithSecret[];
-  /**
-   * Set when an auto-provisioned auth's server accepts Client ID Metadata Documents and this
-   * instance can serve one: the client is the document, ahead of any DCR machine client.
-   */
-  metadataDocumentClient?: ResolvedConnectClient;
-  /**
-   * The authorization server the client was chosen for, from the validated metadata the choice
-   * read — handed to the OAuth state as is, so its `iss` requirement is the one that choice relied
-   * on (a document client is chosen only when it is set). Absent when no metadata was read.
-   */
-  authorizationServer?: AuthorizationServerBinding;
-  /** Discovered/declared issuer (overrides the manifest when set). */
-  issuer?: string;
-  authorizationEndpoint?: string;
-  tokenEndpoint?: string;
-  /** RFC 8707 resource indicator (discovered for MCP, else manifest `resource`). */
-  resource?: string;
-  /**
-   * Set when auto-provisioning a client failed and `client` is null. The
-   * failing step authors the complete, operator-facing reason — *including the
-   * remedy* — so the caller renders it verbatim and never decides what to
-   * advise. Adding a failure point (no registration endpoint, blocked endpoint,
-   * AS rejection, network failure) is "set the field with its own
-   * message"; no new branch and no remedy heuristic in the caller. `status` is
-   * the authorization server's HTTP status when the failure came from a
-   * response, surfaced alongside the message.
-   */
-  provisioningFailure?: { message: string; status?: number; transient?: true };
-}
-
-/**
- * Whether an auth's OAuth client is provisioned automatically at connect time
- * (the MCP-spec onboarding path) rather than pre-registered: the authorization
- * server is discovered (RFC 9728 → RFC 8414) and the client is this instance's
- * Client ID Metadata Document when the server accepts one, else one registered
- * by RFC 7591 dynamic registration, so no hand-registered client is needed.
- *
- * Derived from the manifest shape rather than an opt-in flag, but it is NOT
- * enough to be `oauth2` + `source.kind: "remote"`: the auto-provisioned client
- * is a **public client** (`token_endpoint_auth_method: "none"` + PKCE). A
- * remote integration that declares a confidential method (`client_secret_*`)
- * is a classic *pre-registered* client that happens to be remote (e.g. the
- * GitHub/Gmail MCP connectors, which ship explicit endpoints + expect an
- * admin-registered secret) — it must keep requiring a manually-registered
- * client. The AS advertising (or not) `client_id_metadata_document_supported`
- * or a `registration_endpoint` is the additional runtime gate.
- */
-export function usesAutoProvisionedClient(
-  manifest: IntegrationManifest,
-  auth: AfpsManifestAuth,
-): boolean {
-  return (
-    auth.type === "oauth2" &&
-    auth.token_endpoint_auth_method === "none" &&
-    (getRemoteSource(manifest) !== null || hasPerConnectionAuthServer(manifest, auth))
-  );
-}
-
-/** Discovery and DCR URLs are manifest-, user- (AFPS §8.7) and server-derived: every hop guarded. */
-const ssrfGuardedFetch = egressFetchImpl();
-/** The DCR POST is never redirected (a 3xx bounces the registration). */
-const dcrGuardedFetch = egressFetchImpl({ maxRedirects: 0 });
-
-/** Drop a URL that targets a blocked (loopback/RFC1918/link-local/metadata) host. */
-function safeUrl(url: string | undefined): string | undefined {
-  return url && !isBlockedEgressUrl(url) ? url : undefined;
-}
-
-function sameOrigin(a: string, b: string): boolean {
-  try {
-    return new URL(a).origin === new URL(b).origin;
-  } catch {
-    return false;
-  }
-}
-
-/** An authorization server that did not answer: retryable, unlike a refusal of its metadata. */
-function authorizationServerUnreachable(packageId: string, authKey: string, reason: string) {
-  return new ApiError({
-    status: 503,
-    code: "authorization_server_unreachable",
-    title: "Authorization Server Unreachable",
-    detail: `The authorization server of '${packageId}' auth '${authKey}' could not be reached: ${reason}`,
-  });
-}
-
-/**
- * MCP 2026-07-28 Security Considerations: an MCP server's authorization server whose validated
- * metadata lists no S256 is refused before any client is provisioned, whatever the manifest says.
- */
-export function assertPkceS256Advertised(
-  packageId: string,
-  authKey: string,
-  metadata: { issuer: string; codeChallengeMethodsSupported?: string[] },
-): void {
-  if (metadata.codeChallengeMethodsSupported?.includes("S256")) return;
-  throw new ApiError({
-    status: 403,
-    code: "authorization_server_pkce_unsupported",
-    title: "Authorization Server Without PKCE",
-    detail: `The authorization server ${metadata.issuer} of '${packageId}' auth '${authKey}' does not advertise PKCE S256 in its metadata (code_challenge_methods_supported), which an MCP connection requires.`,
-  });
-}
-
-/**
- * What the authorization server of an auto-provisioned (DCR or CIMD) client must advertise before
- * any client is provisioned for it: PKCE S256 on an MCP server, and RFC 9207 `iss` unless the
- * platform vouches for it — a system integration's own fixed server. RFC 9700 §4.4.2.2: an attacker
- * defeats per-server redirect URIs by "registering a new client with the honest authorization
- * server", on the redirect URI assigned to its own server.
- */
-function assertProvisionableServer(
-  packageId: string,
-  authKey: string,
-  auth: AfpsManifestAuth,
-  metadata: {
-    issuer: string;
-    codeChallengeMethodsSupported?: string[];
-    authorizationResponseIssParameterSupported?: boolean;
-  },
-  policy: { mcp: boolean; vouched: boolean },
-): void {
-  if (acquiresByConnectLogin(auth)) return;
-  if (policy.mcp) assertPkceS256Advertised(packageId, authKey, metadata);
-  if (policy.vouched || metadata.authorizationResponseIssParameterSupported === true) return;
-  throw new ApiError({
-    status: 403,
-    code: "authorization_server_iss_unsupported",
-    title: "Authorization Server Without Issuer Identification",
-    detail: `The authorization server ${metadata.issuer} of '${packageId}' auth '${authKey}' does not advertise RFC 9207 issuer identification (authorization_response_iss_parameter_supported), which a client this platform provisions for an integration other than a system one requires.`,
-  });
-}
-
-/**
- * AFPS §7.3 *Client binding*: refuse a manifest-declared endpoint that the validated metadata of
- * the auth's authorization server contradicts — its client is presented to that server only.
- */
-export function assertEndpointsMatchMetadata(
-  packageId: string,
-  authKey: string,
-  auth: Pick<AfpsManifestAuth, "authorization_endpoint" | "token_endpoint">,
-  metadata: { issuer?: string; authorizationEndpoint?: string; tokenEndpoint?: string },
-): void {
-  if (metadata.issuer === undefined) return;
-  const contradicted = (
-    [
-      ["authorization_endpoint", auth.authorization_endpoint, metadata.authorizationEndpoint],
-      ["token_endpoint", auth.token_endpoint, metadata.tokenEndpoint],
-    ] as const
-  ).find(
-    ([, declared, validated]) =>
-      declared !== undefined && validated !== undefined && declared !== validated,
-  )?.[0];
-  if (contradicted) {
-    throw invalidRequest(
-      `Integration '${packageId}' auth '${authKey}' declares a ${contradicted} that the metadata of its authorization server (${metadata.issuer}) contradicts; its OAuth client is presented only to that server's own endpoints.`,
-    );
-  }
-}
-
-/**
- * Resolve the OAuth connect config for an auth, provisioning a client for
- * remote MCP integrations in the MCP 2026-07-28 order: this instance's Client
- * ID Metadata Document when the server advertises
- * `client_id_metadata_document_supported` and `APP_URL` is public https
- * ({@link clientMetadataDocumentsServable}) — nothing registered, nothing
- * stored — else RFC 7591 Dynamic Client Registration (deprecated, kept for the
- * servers without CIMD, and for tier 0 / localhost, which no server can fetch a
- * document from). This is the MCP-spec onboarding path: an operator installs
- * the connector, the first actor clicks Connect, and the client exists — no
- * hand-created OAuth app, no client secret. An auto-provisioned auth takes no
- * manually registered client ({@link assertClientAuth}), so no pre-registered
- * one precedes these two.
- *
- * Discovery chain:
- *   `source.remote.url` → RFC 9728 protected-resource metadata
- *   (`resource` + `authorization_servers`) → RFC 8414 AS metadata
- *   (`authorization_endpoint` / `token_endpoint` / `client_id_metadata_document_supported` /
- *   `registration_endpoint`).
- *
- * A server chosen per connection (AFPS §7.3) goes to {@link ensurePerConnectionOAuthClient}.
- * Otherwise best-effort: a discovery/registration failure comes back as `provisioningFailure`.
- * Classic (non-auto) auths early-return with the existing lookup.
- */
-export async function ensureIntegrationOAuthClient(
-  scope: SpaceScope,
-  packageId: string,
-  authKey: string,
-  manifest: IntegrationManifest,
-  auth: AfpsManifestAuth,
-  variables: ConnectionVariables = {},
-): Promise<ResolvedOAuthConnect> {
-  if (hasPerConnectionAuthServer(manifest, auth)) {
-    return ensurePerConnectionOAuthClient(scope, packageId, authKey, manifest, auth, variables);
-  }
-  // Classic path: not a remote MCP oauth2 auth — load ALL space and org clients (the
-  // connect resolver picks the default among the N); endpoints come from the
-  // manifest in the caller.
-  if (!usesAutoProvisionedClient(manifest, auth)) {
-    const { space, org } = await loadClientTiers(scope, packageId, authKey);
-    return { spaceClients: space, orgClients: org };
-  }
-
-  // Resolve the AS issuer + RFC 8707 resource. The protected-resource metadata
-  // (RFC 9728) is authoritative for the canonical `resource` (the token's
-  // audience — a mismatch makes the access token unusable against the MCP
-  // server) and advertises the AS issuer. Discover it whenever the integration
-  // exposes a remote MCP URL; the manifest is a fallback (the author may pin the
-  // issuer, but the discovered resource wins). Best-effort — discovery failure
-  // falls back to the manifest values.
-  let issuer = auth.issuer;
-  let resource = auth.resource;
-  const remote = getRemoteSource(manifest);
-  if (remote?.url) {
-    // SSRF: the well-known + 401-challenge probes (and the server-advertised
-    // metadata URL) are guarded per-request by `ssrfGuardedFetch`.
-    const md = await discoverProtectedResourceMetadata({
-      resourceServerUrl: remote.url,
-      fetchImpl: ssrfGuardedFetch,
-    });
-    if (md) {
-      issuer = issuer ?? md.authorizationServers[0];
-      resource = md.resource ?? resource;
-    }
-  }
-
-  // SSRF: the issuer may be server-advertised (from protected-resource
-  // metadata), so a hostile MCP server could otherwise steer RFC 8414 discovery
-  // at internal infra. `resolveOAuthEndpoints` fetches the well-known on the
-  // issuer host, so guarding the issuer host guards those probes; a blocked
-  // issuer degrades to "no discovery".
-  if (issuer && isBlockedEgressUrl(issuer)) {
-    logger.warn("auto-DCR: discovered issuer blocked by SSRF guard", {
-      packageId,
-      authKey,
-      issuer,
-    });
-    issuer = undefined;
-  }
-
-  // AFPS §7.3: the issuer's validated metadata wins; a manifest endpoint stands in only without it.
-  const discovered = issuer ? await resolveOAuthEndpoints({ issuer }) : {};
-  assertEndpointsMatchMetadata(packageId, authKey, auth, discovered);
-  if (discovered.issuer !== undefined) {
-    assertProvisionableServer(
-      packageId,
-      authKey,
-      auth,
-      { ...discovered, issuer: discovered.issuer },
-      {
-        mcp: true,
-        vouched: isSystemPackage(packageId),
-      },
-    );
-  }
-  const endpoints = {
-    ...discovered,
-    authorizationEndpoint: discovered.authorizationEndpoint ?? auth.authorization_endpoint,
-    tokenEndpoint: discovered.tokenEndpoint ?? auth.token_endpoint,
-  };
-
-  // SSRF: a discovery document is server-controlled and can advertise endpoints
-  // on internal hosts. The token endpoint is fetched server-side at exchange,
-  // so drop any blocked endpoint before threading it into the connect state.
-  const resolved: ResolvedOAuthConnect = {
-    spaceClients: [],
-    orgClients: [],
-    ...(issuer ? { issuer } : {}),
-    ...(safeUrl(endpoints.authorizationEndpoint)
-      ? { authorizationEndpoint: endpoints.authorizationEndpoint }
-      : {}),
-    ...(safeUrl(endpoints.tokenEndpoint) ? { tokenEndpoint: endpoints.tokenEndpoint } : {}),
-    ...(resource ? { resource } : {}),
-    ...(discovered.issuer !== undefined
-      ? {
-          authorizationServer: {
-            issuer: discovered.issuer,
-            issParameterSupported: discovered.authorizationResponseIssParameterSupported === true,
-          },
-        }
-      : {}),
-  };
-
-  // CIMD ahead of DCR, even of a machine client DCR registered before: its connections keep it
-  // (their `client_ref`), new ones take the document — the one of the server whose validated
-  // metadata advertised it, with that server's own redirect URI.
-  if (presentsClientMetadataDocument(discovered)) {
-    return { ...resolved, metadataDocumentClient: metadataDocumentClient(discovered.issuer) };
-  }
-
-  // RFC 9700 §4.4.2: a DCR client is bound to, and called back for, one validated server.
-  if (discovered.issuer === undefined) {
-    return {
-      ...resolved,
-      provisioningFailure: discovered.metadataUnreachable
-        ? {
-            message: "its metadata (RFC 8414) did not answer; retry shortly",
-            transient: true,
-          }
-        : {
-            message:
-              "the authorization server publishes no valid metadata (RFC 8414), so no client can be registered for it; register an OAuth client manually, or retry once it does",
-          },
-    };
-  }
-  const existing = await getAutoProvisionedClient(scope, packageId, authKey, discovered.issuer);
-  if (existing) return { ...resolved, orgClients: [existing] };
-
-  return registerAutoProvisionedClient({ orgId: scope.orgId }, packageId, authKey, auth, {
-    registrationEndpoint: endpoints.registrationEndpoint,
-    grantTypesSupported: endpoints.grantTypesSupported,
-    clientIdMetadataDocumentSupported: endpoints.clientIdMetadataDocumentSupported,
-    scopesSupported: endpoints.scopesSupported,
-    issuer: discovered.issuer,
-    chosenPerConnection: false,
-    resolved,
-  });
-}
-
-/**
- * The OAuth connect config of an auth whose authorization server is chosen per connection (AFPS
- * §7.3). Every URL here is rendered from the user's variables or learned from a response to one,
- * so it is egress-checked, never trusted as author-declared (§8.6, §8.7):
- *
- *   - remote source: RFC 9728 metadata of the rendered URL; the advertised server must equal the
- *     rendered `issuer`, else share the URL's origin — never another provider's server. Its
- *     `resource` is sent (RFC 8707).
- *   - otherwise the rendered `issuer`, no resource.
- *   - endpoints from that server's RFC 8414 metadata only; a redirect URI per issuer
- *     (`<callback>/<tag>`), carried by the issuer's own metadata document (CIMD) when the server
- *     accepts one and this instance can serve it, else by a public DCR client per issuer.
- *
- * A failure the user's choice explains is a 400 on the variable that chose it.
- */
-async function ensurePerConnectionOAuthClient(
-  scope: SpaceScope,
-  packageId: string,
-  authKey: string,
-  manifest: IntegrationManifest,
-  auth: AfpsManifestAuth,
-  variables: ConnectionVariables,
-): Promise<ResolvedOAuthConnect> {
-  if (auth.token_endpoint_auth_method !== "none") {
-    throw invalidRequest(
-      `Integration '${packageId}' auth '${authKey}' chooses its authorization server per connection, so its OAuth client is provisioned automatically as a public client (client metadata document or RFC 7591 registration): the auth must declare token_endpoint_auth_method 'none'.`,
-    );
-  }
-  const remoteTemplate = getRemoteSource(manifest)?.url;
-  // The template the user's server is chosen by: the remote URL when it is one, else the issuer.
-  const chooser = isVariableTemplate(remoteTemplate) ? remoteTemplate : auth.issuer!;
-  const refuse = (code: string, message: string): ApiError => {
-    const [name] = variableRefs(chooser);
-    return validationFailed([
-      { field: `variables.${name}`, code, title: "Invalid Connection Variable", message },
-    ]);
-  };
-  // Both render: the caller's `resolveConnectionVariables` refused any value that would not.
-  const remote = renderRemoteSource(manifest, variables);
-  const declaredIssuer =
-    auth.issuer === undefined ? undefined : renderUrlTemplate(auth.issuer, variables)!;
-
-  let candidate: string;
-  let resource: string | undefined;
-  if (remote) {
-    const md = await discoverProtectedResourceMetadata({
-      resourceServerUrl: remote.url,
-      fetchImpl: ssrfGuardedFetch,
-    });
-    if (!md) {
-      throw refuse(
-        "authorization_server_unavailable",
-        `the server at ${remote.url} publishes no OAuth protected-resource metadata for it (RFC 9728)`,
-      );
-    }
-    const named = md.authorizationServers.find((advertised) =>
-      declaredIssuer === undefined
-        ? sameOrigin(advertised, remote.url)
-        : sameUrlIdentifier(advertised, declaredIssuer),
-    );
-    if (named === undefined) {
-      throw refuse(
-        "authorization_server_mismatch",
-        `the server at ${remote.url} names no authorization server ${
-          declaredIssuer === undefined
-            ? `on ${new URL(remote.url).origin}`
-            : `equal to ${declaredIssuer}`
-        } (it names ${md.authorizationServers.join(", ")})`,
-      );
-    }
-    candidate = named;
-    resource = md.resource;
-  } else {
-    candidate = declaredIssuer!;
-  }
-
-  if (!(await isUserUrlReachable(candidate))) {
-    throw refuse(
-      "egress_blocked",
-      `names the authorization server ${candidate}, which this platform does not reach`,
-    );
-  }
-  const endpoints = await resolveOAuthEndpoints({ issuer: candidate });
-  if (endpoints.metadataUnreachable) {
-    throw authorizationServerUnreachable(
-      packageId,
-      authKey,
-      `${candidate}'s metadata (RFC 8414) did not answer; retry shortly`,
-    );
-  }
-  if (!endpoints.issuer || !endpoints.authorizationEndpoint || !endpoints.tokenEndpoint) {
-    throw refuse(
-      "authorization_server_unavailable",
-      `the authorization server ${candidate} publishes no valid metadata (RFC 8414)`,
-    );
-  }
-  assertProvisionableServer(
-    packageId,
-    authKey,
-    auth,
-    { ...endpoints, issuer: endpoints.issuer },
-    {
-      mcp: remote !== null,
-      vouched: false,
-    },
-  );
-  const byDocument = presentsClientMetadataDocument(endpoints);
-  for (const url of [
-    endpoints.authorizationEndpoint,
-    endpoints.tokenEndpoint,
-    // Reached only to register by DCR.
-    ...(endpoints.registrationEndpoint && !byDocument ? [endpoints.registrationEndpoint] : []),
-  ]) {
-    if (!(await isUserUrlReachable(url))) {
-      throw refuse(
-        "egress_blocked",
-        `the authorization server ${candidate} advertises the endpoint ${url}, which this platform does not reach`,
-      );
-    }
-  }
-
-  const issuer = endpoints.issuer;
-  const resolved: ResolvedOAuthConnect = {
-    spaceClients: [],
-    orgClients: [],
-    issuer,
-    authorizationEndpoint: endpoints.authorizationEndpoint,
-    tokenEndpoint: endpoints.tokenEndpoint,
-    ...(resource ? { resource } : {}),
-    authorizationServer: {
-      issuer,
-      issParameterSupported: endpoints.authorizationResponseIssParameterSupported === true,
-    },
-  };
-  if (byDocument) return { ...resolved, metadataDocumentClient: metadataDocumentClient(issuer) };
-  const existing = await getAutoProvisionedClient(scope, packageId, authKey, issuer);
-  if (existing) {
-    // A reuse renews the client's lease against {@link pruneUnusedPerConnectionClients}.
-    await db
-      .update(integrationOauthClients)
-      .set({ updatedAt: new Date() })
-      .where(eq(integrationOauthClients.id, existing.id));
-    return { ...resolved, orgClients: [existing] };
-  }
-  await pruneUnusedPerConnectionClients(scope, packageId, authKey);
-  return registerAutoProvisionedClient({ orgId: scope.orgId }, packageId, authKey, auth, {
-    registrationEndpoint: endpoints.registrationEndpoint,
-    grantTypesSupported: endpoints.grantTypesSupported,
-    clientIdMetadataDocumentSupported: endpoints.clientIdMetadataDocumentSupported,
-    scopesSupported: endpoints.scopesSupported,
-    issuer,
-    chosenPerConnection: true,
-    resolved,
-  });
-}
-
-/**
- * Delete the org's per-connection-server clients of this auth that minted no connection: whoever
- * opens a connect flow chooses the server. One used within an OAuth state's lifetime may await it.
- */
-async function pruneUnusedPerConnectionClients(
-  org: OrgScope,
-  packageId: string,
-  authKey: string,
-): Promise<void> {
-  await db.delete(integrationOauthClients).where(
-    and(
-      tierAuthFilter({ orgId: org.orgId }, packageId, authKey),
-      eq(integrationOauthClients.autoProvisioned, true),
-      isNotNull(integrationOauthClients.issuer),
-      lt(integrationOauthClients.updatedAt, new Date(Date.now() - OAUTH_STATE_TTL_SECONDS * 1000)),
-      notExists(
-        db
-          .select({ id: integrationConnections.id })
-          .from(integrationConnections)
-          .where(eq(integrationConnections.clientRef, sql`${integrationOauthClients.id}::text`)),
-      ),
-    ),
-  );
-}
-
-/**
- * Register a public client (RFC 7591) as the auth's auto-provisioned client of `issuer`, on that
- * server's own redirect URI. Every failure comes back as `resolved.provisioningFailure`.
- */
-async function registerAutoProvisionedClient(
-  org: OrgScope,
-  packageId: string,
-  authKey: string,
-  auth: AfpsManifestAuth,
-  input: {
-    registrationEndpoint: string | undefined;
-    grantTypesSupported: string[] | undefined;
-    /** Advertised, but no document presented (`presentsClientMetadataDocument`): the failure says so. */
-    clientIdMetadataDocumentSupported: boolean | undefined;
-    /** RFC 8414 `scopes_supported`: the registration asks for the scopes connect requests. */
-    scopesSupported: string[] | undefined;
-    issuer: string;
-    chosenPerConnection: boolean;
-    resolved: ResolvedOAuthConnect;
-  },
-): Promise<ResolvedOAuthConnect> {
-  const { registrationEndpoint, issuer, chosenPerConnection, resolved } = input;
-  const redirectUri = integrationCallbackUrlFor(issuer);
-  // A server chosen per connection takes no manual client: the remedy is on its side.
-  const manualRemedy = chosenPerConnection
-    ? "a server chosen per connection must support it"
-    : "register an OAuth client manually for this integration";
-
-  // No registration endpoint discovered — can't auto-register; let the caller
-  // surface the existing "register a client" error.
-  if (!registrationEndpoint) {
-    logger.warn("auto-DCR: no registration_endpoint discovered", {
-      packageId,
-      authKey,
-      issuer: resolved.issuer,
-    });
-    const server = `the authorization server ${issuer}`;
-    const message =
-      input.clientIdMetadataDocumentSupported === true
-        ? `${server} accepts client metadata documents but not dynamic client registration, and this instance presents no document: it takes a server that also advertises RFC 9207 iss (authorization_response_iss_parameter_supported), a public https APP_URL the server can fetch, and INTEGRATION_OAUTH_CIMD not set to 'off'; ${
-            chosenPerConnection
-              ? "meet those conditions to connect to it"
-              : "register an OAuth client manually, or meet those conditions"
-          }`
-        : chosenPerConnection
-          ? `${server} advertises neither client metadata documents nor dynamic client registration (RFC 7591), one of which a server chosen per connection requires`
-          : `${server} advertises neither client metadata documents nor dynamic client registration; register an OAuth client manually, or retry once the server advertises one of them`;
-    return { ...resolved, provisioningFailure: { message } };
-  }
-
-  // SSRF pre-check — the endpoint is manifest/discovery-derived and we POST to
-  // it. This LITERAL check (no DNS) exists to surface the friendly
-  // provisioningFailure below for obviously-internal targets; the authoritative
-  // guard is the DCR transport itself, `dcrGuardedFetch` (per-hop DNS, no redirect).
-  if (isBlockedEgressUrl(registrationEndpoint)) {
-    logger.warn("auto-DCR: registration_endpoint blocked by SSRF guard", {
-      packageId,
-      authKey,
-      registrationEndpoint,
-    });
-    return {
-      ...resolved,
-      provisioningFailure: {
-        message: `the discovered registration endpoint was refused as an unsafe (loopback/internal) target; ${manualRemedy}`,
-      },
-    };
-  }
-
-  // Narrow the concurrency window: re-check in case a parallel Connect just
-  // registered a client for the same (org, package, authKey, issuer).
-  const racedClient = await getAutoProvisionedClient(org, packageId, authKey, issuer);
-  if (racedClient) return { ...resolved, orgClients: [racedClient] };
-
-  // Limitation: the registered client is persisted once and reused for every
-  // subsequent connect. If the authorization server later revokes or expires it
-  // (RFC 7591 §3.2 `client_secret_expires_at`, or operator-side deletion),
-  // connect/refresh will fail with an `invalid_client` error and an admin must
-  // delete the stored client (DELETE /oauth-clients/:clientId) to trigger
-  // re-registration. There is no automatic re-registration on `invalid_client`.
-  try {
-    const dcrAuthMethod = toSupportedTokenEndpointAuthMethod(auth.token_endpoint_auth_method);
-    // MCP-spec refresh: register for the `refresh_token` grant only when the AS
-    // advertises it (RFC 8414 `grant_types_supported`). Without it the client is
-    // registered for authorization_code alone, so the AS never issues a refresh
-    // token and the connection can't self-renew. Conditional,
-    // not unconditional: a server that lacks the grant (e.g. ClickUp MCP) may
-    // reject a registration that requests it.
-    const grantTypes = input.grantTypesSupported?.includes("refresh_token")
-      ? ["authorization_code", "refresh_token"]
-      : ["authorization_code"];
-    const scopes = withOfflineAccess(auth.default_scopes ?? [], input.scopesSupported);
-    const registration = await registerDynamicClient({
-      registrationEndpoint,
-      redirectUri,
-      clientName: platformClientName(),
-      grantTypes,
-      ...(scopes.length > 0 ? { scopes } : {}),
-      ...(dcrAuthMethod ? { tokenEndpointAuthMethod: dcrAuthMethod } : {}),
-      fetchImpl: dcrGuardedFetch,
-    });
-    // RFC 7591 §3.2.1: the RESPONSE, not the request, states what the server
-    // registered — an AS "MAY replace any invalid values with suitable default
-    // values" and reports what it settled on. This path only ever ASKS for a
-    // public client (`usesAutoProvisionedClient` gates on
-    // `token_endpoint_auth_method: "none"`, so `dcrAuthMethod` is provably
-    // `"none"`), so an answer declaring a secret-based method — or carrying a
-    // `client_secret` at all — is the server registering something the connect
-    // flow cannot drive.
-    //
-    // Refuse it HERE, where the contradiction is first visible and nothing has
-    // been stored. Persisted, it satisfies the `ioc_public_iff_no_secret` CHECK
-    // (a declared method of NULL next to a real ciphertext) and detonates far
-    // away instead: `assertClientAuthCoherent` throws at the OAuth CALLBACK,
-    // reading the manifest's `"none"` against a stored secret — after the user
-    // has already granted consent at the provider, identically on every retry,
-    // on a row no admin can repair through the API (`updateIntegrationOAuthClient`
-    // refuses auto-provisioned clients). The upstream registration is abandoned
-    // unused, exactly as when this call loses the insert race below.
-    const registeredMethod = registration.tokenEndpointAuthMethod;
-    const declaresSecretMethod = registeredMethod !== undefined && registeredMethod !== "none";
-    if (declaresSecretMethod || registration.clientSecret !== undefined) {
-      logger.warn("auto-DCR: authorization server registered a confidential client", {
-        packageId,
-        authKey,
-        registrationEndpoint,
-        clientId: registration.clientId,
-        tokenEndpointAuthMethod: registeredMethod,
-        returnedClientSecret: registration.clientSecret !== undefined,
-      });
-      // The method comes from the same server-controlled JSON body as an OAuth
-      // error code and has the same shape (a short registry token), so it goes
-      // through the same shape guard before being named in an operator-facing
-      // message — one guard rather than a second regex. A non-token-shaped
-      // answer is described by what it produced; the raw value stays on the
-      // warn line above.
-      const method = normalizeOAuthErrorCode(registeredMethod);
-      const did = declaresSecretMethod
-        ? `registered a confidential client${method ? ` (token_endpoint_auth_method='${method}')` : ""}`
-        : "returned a client_secret";
-      return {
-        ...resolved,
-        provisioningFailure: {
-          message:
-            `the authorization server ${did} although Appstrate requested a public client ` +
-            `(token_endpoint_auth_method='none' + PKCE — the only shape automatic registration drives); ` +
-            manualRemedy,
-        },
-      };
-    }
-    let client: IntegrationOAuthClientWithSecret;
-    try {
-      client = await createIntegrationOAuthClient(
-        org,
-        packageId,
-        authKey,
-        {
-          clientId: registration.clientId,
-          // Public client, now DECLARED rather than inferred from emptiness.
-          // The guard above proved the AS returned neither a secret nor a
-          // secret-based method, so this pair restates the server's own answer;
-          // it is not the `?? ""` coercion it replaces, which silently dropped
-          // any secret the AS did return and left the method unstated.
-          clientSecret: "",
-          tokenEndpointAuthMethod: "none",
-          redirectUri,
-        },
-        { autoProvisioned: true, issuer },
-      );
-    } catch (insertErr) {
-      // Concurrent auto-DCR: a parallel Connect for the same (org, package,
-      // authKey, issuer) registered its client between our `racedClient` re-check above
-      // and this insert. The partial unique `idx_ioc_one_auto` rejects the
-      // second auto-provisioned row (Postgres 23505) — catch it and re-select
-      // the winner instead of surfacing a 500. Our own upstream registration is
-      // abandoned (harmless: an unused DCR client), the connection proceeds on
-      // the winning client.
-      if (isUniqueViolation(insertErr)) {
-        const winner = await getAutoProvisionedClient(org, packageId, authKey, issuer);
-        if (winner) {
-          logger.info("auto-DCR: lost registration race, reusing concurrently-registered client", {
-            packageId,
-            authKey,
-            clientId: winner.client_id,
-          });
-          return { ...resolved, orgClients: [winner] };
-        }
-      }
-      throw insertErr;
-    }
-    logger.info("auto-DCR: registered OAuth client", {
-      packageId,
-      authKey,
-      clientId: registration.clientId,
-      ...(issuer ? { issuer } : {}),
-    });
-    return { ...resolved, orgClients: [client] };
-  } catch (err) {
-    if (err instanceof DynamicClientRegistrationError) {
-      logger.warn("auto-DCR: dynamic client registration failed", {
-        packageId,
-        authKey,
-        registrationEndpoint,
-        status: err.status,
-        oauthError: err.errorCode,
-        err: err.message,
-      });
-      // Two distinct DCR failures, authored explicitly (not inferred
-      // downstream): a server response (HTTP status present) is a deliberate
-      // refusal — surface the AS `error_description`, which carries its own
-      // remedy (e.g. an allowlist form). Fall back to a generic line rather
-      // than `err.message` so the raw (possibly non-JSON) response body is not
-      // echoed into the operator-facing 403 — it stays in the warn log above.
-      // No status means a network/timeout/malformed-body failure, where a retry
-      // is the remedy.
-      //
-      // On the refusal branch the RFC 6749 §5.2 `error` CODE is appended too,
-      // because the description is OPTIONAL in the RFC and plenty of servers
-      // send only the code: `{"error":"invalid_redirect_uri"}` used to arrive
-      // as the generic sentence plus a bare HTTP status, hiding the one failure
-      // an operator fixes in a minute. Rendered through `oauthDiagnosticSuffix`
-      // — the same shape-guarded, code-only rendering the OAuth callback path
-      // uses, so both paths name the provider's code identically — passing no
-      // status of its own, since `resolveConnectClient` already renders
-      // `status` as its own `(HTTP n)` part.
-      const reachedServer = err.status !== undefined;
-      const codeSuffix = oauthDiagnosticSuffix(err.errorCode, undefined);
-      return {
-        ...resolved,
-        provisioningFailure: reachedServer
-          ? {
-              message: `${
-                err.errorDescription ??
-                "the authorization server rejected dynamic client registration"
-              }${codeSuffix}`,
-              status: err.status,
-            }
-          : {
-              // No `codeSuffix` here: with no response there is no body, so the
-              // AS named no code — the branch is defined by that absence.
-              message:
-                "could not reach the authorization server to register a client; retry once it is reachable",
-            },
-      };
-    }
-    throw err;
-  }
-}
-
-/**
- * Delete one custom client by its id, scoped to `owner`'s tier and `packageId`
- * (escalation guard). If it was the default, no auto-promotion — the resolution
- * cascade simply falls to the next tier (or the admin re-picks a default);
- * this matches the model-provider behaviour and keeps the operation predictable.
- */
+/** Delete one custom client of `owner`'s tier; a deleted default is not replaced. */
 export async function deleteIntegrationOAuthClient(
   owner: ClientOwner,
   packageId: string,
@@ -2785,16 +1655,9 @@ export async function deleteIntegrationOAuthClient(
       .delete(integrationOauthClients)
       .where(eq(integrationOauthClients.id, client.id))
       .returning();
-    // Cascade: every connection pinned to this client is now dead — the
-    // client_id/secret that minted its tokens is gone, so it can never refresh
-    // again (resolveIntegrationClientById → null → needs_reconnection forever).
-    // Industry standard mirrors this: deleting an OAuth app at the IdP
-    // (GitHub/Google) revokes all tokens it issued. We delete the orphaned
-    // connections in the SAME transaction rather than leave un-refreshable
-    // zombies. `client_ref` holds this client's UUID PK — globally unique and
-    // never collides with a non-UUID system id — so the tier-scoped
-    // match is exact. The pg_notify DELETE trigger fires `connection_update`
-    // so live UI badges clear without a manual publish.
+    // Cascade: a connection whose minting client is gone can never refresh, so it is deleted in
+    // the same transaction (as an IdP revokes an app's tokens). `client_ref` holds the client's
+    // UUID, which no system id collides with; the DELETE trigger notifies the UI.
     const deletedConns =
       minted.length === 0
         ? []
@@ -2807,9 +1670,8 @@ export async function deleteIntegrationOAuthClient(
               ),
             )
             .returning(deletedConnectionOwner);
-    // Each forget below locks its connection's rows: the owner's member pins naming it, then every
-    // schedule naming it or that a pin it may drop names a set for. Locked here first for all of
-    // them, in the plan's order, so two batches cannot each hold a row the other waits on.
+    // Every forget below locks its pins then schedules: locked here first for all of them, in the
+    // plan's order, so two batches cannot each hold a row the other waits on.
     const forgotten = deletedConns.map((c) => c.id);
     const owners = [...new Set(deletedConns.flatMap((c) => (c.userId ? [c.userId] : [])))];
     if (owners.length > 0) {
@@ -2854,12 +1716,8 @@ export async function deleteIntegrationOAuthClient(
 // ─────────────────────────────────────────────
 
 /**
- * Apply the AFPS `identity_claims` JSONPaths to a token response (or a
- * credentials bag). A path selecting nothing is omitted; an unsupported path
- * fails the connect with `invalid_config`.
- *
- * `accountId` is the declared `account_id` claim, else the source's `email` /
- * `account_email` / `sub`, else `"default"` (single-account).
+ * Apply the AFPS `identity_claims` JSONPaths to a source (an unsupported path is `invalid_config`).
+ * `accountId`: the `account_id` claim, else `email`/`account_email`/`sub`, else `"default"`.
  */
 export function extractIdentity(
   manifest: IntegrationManifest,
@@ -2903,32 +1761,9 @@ function evaluateIdentityPath(
 }
 
 /**
- * AFPS §7.4 — enforce `auth.required_identity_claims`.
- *
- * Per spec §7.4 line 931, `required_identity_claims` enumerates **OIDC
- * source-side claim names** that MUST be present on the resolved identity
- * (e.g. `["sub"]`). The resolved `identityClaims` bag passed in here is keyed
- * by **AFPS internal keys** (the keys of `auth.identity_claims`), because
- * `extractIdentity` walks `identity_claims: { <afps_key>: "<source_path>" }`
- * and writes the extracted value under `<afps_key>`. The two keyspaces differ,
- * so we resolve OIDC → AFPS via reverse-lookup on the mapping before checking
- * the bag.
- *
- * Resolution rules:
- *   1. If `auth.identity_claims` declares a mapping whose value (after
- *      stripping the `$.` JSONPath prefix) equals the required OIDC claim
- *      name, the claim is satisfied iff the bag carries a non-empty value
- *      under any AFPS key that maps to it. Multiple AFPS keys MAY reference
- *      the same OIDC claim — any one of them satisfying is enough.
- *   2. If no mapping references the required OIDC claim (or
- *      `identity_claims` is undefined entirely — typically a login strategy
- *      promoting engine-output names directly), fall back to a direct lookup
- *      on the bag by the OIDC claim name. This serves strategies whose claim bag is already keyed by the
- *      source-side name (login engine `identity_outputs` are merged into
- *      the bag verbatim — see `login-strategy.ts`).
- *
- * Throws `invalidRequest` listing every missing claim in a single error so
- * the connect UX surfaces the full gap (not just the first one).
+ * AFPS §7.4: every `required_identity_claims` (OIDC claim names) must be non-empty in the bag keyed
+ * by AFPS keys — through any AFPS key whose path names it, else the bag's own key of that name
+ * (login `identity_outputs` merge verbatim). One error lists them all.
  */
 export function assertRequiredIdentityClaims(
   manifest: IntegrationManifest,
@@ -2940,8 +1775,7 @@ export function assertRequiredIdentityClaims(
   if (!Array.isArray(required) || required.length === 0) return;
 
   const mapping = auth.identity_claims ?? {};
-  // Build a reverse index OIDC-claim-name → AFPS keys that reference it.
-  // Only a single-member path (`"$.sub"`) names an OIDC claim.
+  // OIDC claim name → the AFPS keys whose single-member path (`"$.sub"`) names it.
   const oidcToAfpsKeys = new Map<string, string[]>();
   for (const [afpsKey, path] of Object.entries(mapping)) {
     const segments = parseJsonPath(path);
@@ -2959,16 +1793,11 @@ export function assertRequiredIdentityClaims(
   for (const oidcClaim of required) {
     const afpsKeys = oidcToAfpsKeys.get(oidcClaim);
     if (afpsKeys && afpsKeys.length > 0) {
-      // Mapped: any AFPS key referencing this OIDC claim being non-empty
-      // satisfies the requirement (multi-mapping → first-non-empty wins).
       if (afpsKeys.some((k) => isPresent(identityClaims[k]))) continue;
       missing.push(oidcClaim);
       continue;
     }
-    // Unmapped: fall back to a direct hit on the bag. Covers (a) strategies
-    // that promote source-keyed claims into the bag (login engine), and (b)
-    // manifests that omit `identity_claims` entirely yet still require a
-    // standard claim be present.
+    // Unmapped: a direct hit on the bag (source-keyed claims of the login engine, or no mapping).
     if (isPresent(identityClaims[oidcClaim])) continue;
     missing.push(oidcClaim);
   }
@@ -2994,26 +1823,11 @@ interface StoreConnectionInput {
   scopesGranted?: string[];
   expiresAt?: Date | null;
   actor: Actor;
-  /**
-   * When provided, UPDATE this specific row (reconnect / upgrade-scopes
-   * paths). Owner predicate is still applied as defence in depth — a
-   * stale id from another actor can never land on someone else's row.
-   * When omitted, always INSERT a new row — the user explicitly asked
-   * for a new connection and we let them own duplicates if they want.
-   */
+  /** Update this row (reconnect, scope upgrade), owner predicate applied; omitted: insert. */
   connectionId?: string;
-  /**
-   * Optional display-name seed used ONLY on INSERT when no upstream identity
-   * was extracted (e.g. a masked API-key fingerprint from FieldsStrategy).
-   * Identity still wins; ignored on reconnect (label is never re-derived).
-   */
+  /** Insert-only label seed when no identity was extracted (a masked API-key fingerprint). */
   labelHint?: string;
-  /**
-   * Which registered client minted this connection — a flat client id (system
-   * env id or custom `integration_oauth_clients.id`). Pinned on the row so token
-   * refresh resolves the same credentials. Set by OAuth2Strategy on every oauth2
-   * connect; absent for non-oauth2 auths (persists NULL — no OAuth client).
-   */
+  /** The minting client's flat id, pinned so refresh resolves it; absent for non-oauth2. */
   clientRef?: string | null;
   /** See {@link PersistCredentialInput}. */
   variables?: Record<string, string> | null;
@@ -3025,21 +1839,9 @@ interface StoreConnectionInput {
 }
 
 /**
- * Where a {@link persistCredentialBundle} write lands. Matches the three
- * converged write sites:
- *
- *   - `insert`       — first acquisition (OAuth2 callback / fields submit).
- *   - `update-owned` — user-initiated reconnect / scope upgrade. Owner-scoped
- *                      WHERE (id + the actor's own row reaching the space + the
- *                      (packageId, authKey) the credentials belong to); throws
- *                      `notFound` when the row isn't the caller's OR belongs to
- *                      a different integration/auth (a caller-supplied id can
- *                      never overwrite an unrelated connection of theirs).
- *   - `update-by-id` — system write-back (token refresh). Keyed by id — the id
- *                      came from an already-authorized resolution — and a
- *                      compare-and-set on `expect`, the client and ciphertext
- *                      the refresh spent: it writes nothing when the row is
- *                      gone or was reconnected meanwhile.
+ * Where a {@link persistCredentialBundle} write lands: `insert`; `update-owned`, owner-scoped and
+ * bound to (packageId, authKey); `update-by-id`, the refresh write-back, a compare-and-set on the
+ * client and ciphertext it spent.
  */
 export type PersistTarget =
   | {
@@ -3054,8 +1856,7 @@ export type PersistTarget =
       scope: SpaceScope;
       actor: Actor;
       connectionId: string;
-      /** The (packageId, authKey) the credentials belong to — re-stamped into
-       * the WHERE so a mismatched `connectionId` matches zero rows. */
+      /** Re-stamped into the WHERE: a mismatched `connectionId` matches no row. */
       packageId: string;
       authKey: string;
       /** A delegated credential's write: the row must be scoped to `scope.spaceId`, never widened. */
@@ -3070,48 +1871,25 @@ export type PersistTarget =
     };
 
 /**
- * Persist input for the credential columns.
- *
- * `credentials` is the injectable **outputs** plane. `inputs` (spec §4.6) is
- * the bootstrap-secret plane, persisted ONLY when an OrchestratedStrategy
- * declares `persistLoginSecret`. The writer always emits the structured v2
- * envelope `{ v:2, outputs, inputs? }`; the injection path can never read
- * `inputs` (it only ever projects `outputs`).
- *
- * UPDATE column semantics (preserving today's behaviour exactly):
- *   - `credentials`, `expiresAt`, `needsReconnection` are ALWAYS written.
- *   - `accountId`, `identityClaims`, `scopesGranted` are written ONLY when
- *     provided (`undefined` = leave untouched). The refresh write-back relies
- *     on this: it must not clobber the identity, nor — when the IdP omits
- *     `scope` — the stored grant.
+ * The credential columns of a write: `credentials` the injectable plane, `inputs` (spec §4.6) the
+ * bootstrap secrets injection never reads. An UPDATE writes identity and grant only when provided:
+ * the refresh write-back clobbers neither.
  */
 interface PersistCredentialInput {
   credentials: Record<string, unknown>;
-  /**
-   * Bootstrap secrets (login password) — persisted NON-injectable (v2). JSON-typed
-   * per JSON Schema 2020-12 §7.5 (string/number/boolean/object/array).
-   */
+  /** Bootstrap secrets (login password), stored non-injectable (v2 envelope `inputs`). */
   inputs?: Record<string, unknown>;
   expiresAt?: Date | null;
   needsReconnection?: boolean;
   accountId?: string;
   identityClaims?: Record<string, unknown>;
   scopesGranted?: string[];
-  /**
-   * INSERT-only label seed (masked secret fingerprint). Used after identity
-   * but before the "Connexion N" counter. Never applied on UPDATE paths.
-   */
+  /** Insert-only label seed (a masked secret fingerprint), after identity, before "Connexion N". */
   labelHint?: string;
   /** INSERT only — the `(packageId, authKey)` the new row belongs to. */
   packageId?: string;
   authKey?: string;
-  /**
-   * Which registered client minted this connection — a flat client id (oauth2
-   * only). Stamped on INSERT and on the acquisition UPDATE (reconnect may switch
-   * clients) so token refresh resolves the same credentials. Omitted by the
-   * refresh write-back (`update-by-id`) → never clobbered on refresh. Absent for
-   * non-oauth2 writes → persists NULL.
-   */
+  /** The minting client (oauth2 only), on insert and reconnect; the refresh write-back omits it. */
   clientRef?: string | null;
   /** AFPS §7.12, written with the credential they were acquired with; the refresh omits it. */
   variables?: Record<string, string> | null;
@@ -3141,10 +1919,7 @@ function labelKeyFilter(key: ConnectionLabelKey): SQL {
   )!;
 }
 
-/**
- * Serialise the label writes (insert, rename, widening) of each key, in {@link labelLockKey} order,
- * so a pick cannot be taken between its read and its write.
- */
+/** Serialise each key's label writes, in {@link labelLockKey} order: no pick between read and write. */
 export async function lockLabelKeys(tx: Tx, keys: ConnectionLabelKey[]): Promise<void> {
   for (const lockKey of [...new Set(keys.map(labelLockKey))].sort()) {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey})::bigint)`);
@@ -3270,35 +2045,15 @@ export async function widenConnectionsToOrgScope(tx: Tx, where: SQL): Promise<Wi
   return widened;
 }
 
-/**
- * The owner's view of the row a connect wrote. A delegated write is scoped to its space
- * (`writesOrgScope`), so its shares and origin can only be that space's.
- */
+/** The owner's view of a written row; a delegated write is scoped to its space. */
 function writerView(target: { scope: SpaceScope; delegated?: boolean }): ConnectionView["owner"] {
   return { boundSpaceId: target.delegated ? target.scope.spaceId : null };
 }
 
 /**
- * The single low-level writer of the credential columns
- * (`credentials_encrypted`, `expires_at`, `scopes_granted`, `identity_claims`,
- * `needs_reconnection`) on `integration_connections`. Every acquisition and
- * refresh path converges here (spec §4.1 — "1 writer"). Returns the persisted
- * summary; `null` only for an `update-by-id` that wrote nothing.
- *
- * Why no upsert-by-accountId: the previous model collapsed every connection on
- * the same `(packageId, authKey, accountId, space, owner)` tuple and silently
- * overwrote rows when `accountId` defaulted to "default". The current model
- * trusts the caller's intent — explicit connectionId = update; no id = insert.
- *
- * Callers that pass explicit `connectionId` for UPDATE: token refresh paths,
- * dashboard renew CTAs (agent-page MemberConnectionPicker per-row Renew,
- * integration-detail ConnectionRow reconnect), the run-kickoff
- * MissingConnectionsModal reconnect button, and an upgrade the user chose. The
- * latter consume the `connection_id` field carried on `needs_reconnection` /
- * `insufficient_scopes` ProblemDetails by
- * `integration-connection-resolver.ts:translateResolutionError` and forward it
- * through the OAuth state record so the callback lands here on the
- * `update-owned` path.
+ * The single writer of the credential columns of `integration_connections`: every acquisition and
+ * refresh converges here. An explicit `connectionId` updates, none inserts (no upsert by account).
+ * `null` only for an `update-by-id` that wrote nothing.
  */
 export async function persistCredentialBundle(
   target: PersistTarget,
@@ -3317,17 +2072,13 @@ export async function persistCredentialBundle(
     if (!input.packageId || !input.authKey || input.accountId === undefined) {
       throw new Error("persistCredentialBundle(insert): packageId, authKey, accountId required");
     }
-    // Capture the narrowed (non-undefined) values in locals: TypeScript does
-    // not carry the guard's narrowing into the transaction closure below, so
-    // `input.packageId` etc. would widen back to `string | undefined` there.
+    // Narrowed locals: the guard's narrowing does not reach the transaction closure.
     const insertPackageId = input.packageId;
     const insertAuthKey = input.authKey;
     const insertAccountId = input.accountId;
-    // No mono-auth-per-actor gate: an actor may hold N connections across any
-    // mix of declared auths (OAuth + PAT + custom).
-    //
-    // Label: identity or `labelHint` (" (n)"-suffixed when taken), else "Connexion N" past the
-    // owner's highest N — unique per owner in the scope under the advisory lock.
+    // An actor may hold N connections across any mix of auths. Label: identity or `labelHint`
+    // (" (n)"-suffixed when taken), else "Connexion N" past the owner's highest N — unique per
+    // owner in the scope under the advisory lock.
     const namedLabel = [displayAccountId(input.accountId), input.labelHint]
       .map((raw) => (raw ? toMintedLabel(raw) : ""))
       .find((label) => label.length > 0);
@@ -3387,51 +2138,30 @@ export async function persistCredentialBundle(
     credentialsEncrypted: ciphertext,
     expiresAt: input.expiresAt ?? null,
     needsReconnection: input.needsReconnection ?? false,
-    // Any successful credential write clears the failure count — a working
-    // refresh (or a user reconnect) proves the connection is healthy
-    // again, so the escalation counter must not carry over. See
-    // `recordIntegrationRefreshFailure`.
+    // A credential write proves the connection healthy: the escalation count restarts.
     refreshFailureCount: 0,
     updatedAt: now,
   };
   if (input.accountId !== undefined) set.accountId = input.accountId;
   if (input.identityClaims !== undefined) set.identityClaims = input.identityClaims;
   if (input.scopesGranted !== undefined) set.scopesGranted = input.scopesGranted;
-  // Re-stamp the minting client on reconnect (acquisition UPDATE passes it);
-  // the refresh write-back omits it so the high-water client_ref is preserved.
+  // A reconnect re-stamps the minting client; the refresh write-back omits it.
   if (input.clientRef !== undefined) set.clientRef = input.clientRef;
   if (input.variables !== undefined) set.variables = input.variables;
 
   if (target.kind === "update-owned") {
     set.oauthResource = input.oauthResource ?? null;
     await assertSpaceInScope(target.scope);
-    // Owner-scoped reconnect: id + the actor's own row reaching the space, PLUS the
-    // (packageId, authKey) the new credentials belong to. Without the latter
-    // two, a caller-supplied `connectionId` could overwrite ANY connection they
-    // own — including one for a different integration — with this integration's
-    // credentials. Re-stamping them in the WHERE makes a mismatched id match
-    // zero rows → the caller gets `notFound`, never a cross-integration clobber.
+    // The id must also match (packageId, authKey): otherwise a caller-supplied `connectionId`
+    // could overwrite another integration's connection it owns. A mismatch matches no row (404).
     const ownerScope = and(
       eq(integrationConnections.id, target.connectionId),
       eq(integrationConnections.integrationId, target.packageId),
       eq(integrationConnections.authKey, target.authKey),
       ownRowInSpace(target.scope.spaceId, target.actor),
     );
-    // Identity guard: a reconnect / scope-upgrade must stay on the SAME
-    // upstream account. If the re-consent authenticated a different identity
-    // (e.g. the user picked another Google account on the consent screen),
-    // refuse — silently rebinding a connection (possibly shared or pinned to
-    // agents under the assumption it's account A) to a different account is a
-    // data-integrity and access surprise. Only enforced between two real
-    // identities; "default" (identity-less) never blocks an upgrade.
-    //
-    // The variables (AFPS §7.12) name the instance the account lives on: same rule.
-    //
-    // The read (identity check) and the write must be atomic: performed as two
-    // separate statements, a concurrent update could change `accountId` between
-    // them and slip a different-account clobber past the guard. Do both in one
-    // transaction and take a row lock (`FOR UPDATE`) on the SELECT so the row
-    // is pinned for the duration.
+    // A reconnect stays on the same upstream account and instance (AFPS §7.12); "default" never
+    // blocks. Read and write share one `FOR UPDATE` transaction, so no update slips between.
     const checksAccount =
       input.accountId !== undefined && input.accountId !== PLACEHOLDER_ACCOUNT_ID;
     const checksVariables = input.variables !== undefined && input.variables !== null;
@@ -3515,15 +2245,9 @@ export async function persistCredentialBundle(
     });
   }
 
-  // update-by-id (system write-back) — keyed by id, a no-op (`null`) on miss.
-  // Monotonic clear: the proactive refresh write-back always passes
-  // `needsReconnection: false`, which would race-clobber a `true` set
-  // concurrently by `markIntegrationConnectionNeedsReconnection` (revoked grant,
-  // missing refresh token, unreadable credential). When this write CLEARS the flag, gate the row on
-  // `needs_reconnection = false` so a concurrently-set `true` is preserved — the
-  // refresh simply no-ops on that row (a flagged connection's cached credentials
-  // are stale anyway, so skipping the write-back is harmless). An explicit
-  // `true` write (or any non-clearing write) stays unconditional.
+  // update-by-id (system write-back), a no-op (`null`) on miss. A clearing write is gated on
+  // `needs_reconnection = false`, so a `true` set concurrently by
+  // `markIntegrationConnectionNeedsReconnection` survives (that row's credentials are stale anyway).
   const { clientRef, credentialsEncrypted } = target.expect;
   const byIdWhere = and(
     eq(integrationConnections.id, target.connectionId),
@@ -3538,22 +2262,25 @@ export async function persistCredentialBundle(
 }
 
 /**
- * Read and decrypt the stored credential fields for one connection by id.
- * Returns `null` when the row is gone or its blob cannot be read (logged): every
- * caller only enriches a reconnect or a deletion with them.
- *
- * Keyed by id alone — it carries NO ownership, org or space predicate, so it
- * hands back plaintext for any connection in the deployment. Every caller must
- * therefore have established that the actor owns this connection BEFORE
- * calling it.
+ * One connection's decrypted credential fields (`null`: gone or unreadable). Keyed by id alone: the
+ * caller must have established that the actor owns it. `mintedBy` also requires the connection to
+ * have been minted through that OAuth client.
  */
 export async function getIntegrationConnectionCredentialFields(
   connectionId: string,
+  filter: { mintedBy?: string } = {},
 ): Promise<Record<string, string> | null> {
   const [row] = await db
     .select({ credentialsEncrypted: integrationConnections.credentialsEncrypted })
     .from(integrationConnections)
-    .where(eq(integrationConnections.id, connectionId))
+    .where(
+      and(
+        eq(integrationConnections.id, connectionId),
+        filter.mintedBy === undefined
+          ? undefined
+          : eq(integrationConnections.clientRef, filter.mintedBy),
+      ),
+    )
     .limit(1);
   if (!row?.credentialsEncrypted) return null;
   const fields = decryptForDisplay(() => decryptCredentialsToStringMap(row.credentialsEncrypted), {
@@ -3580,13 +2307,9 @@ type RefreshFailureGate =
   | { reachable: SQL };
 
 /**
- * Record a failure on a connection's credential: a transient OAuth refresh
- * failure (`invalid_grant` goes through
- * {@link markIntegrationConnectionNeedsReconnection}) or an upstream rejection
- * of an unrefreshable credential. Increment and escalation are one statement,
- * so concurrent failures cannot lose a count; `needsReconnection` is OR'd,
- * never cleared, and a credential write resets the count. `null` when no row
- * was counted (gone, or outside `reachable`).
+ * Record a credential failure (a transient refresh failure, or an upstream rejection of an
+ * unrefreshable credential): increment and escalation in one statement, so concurrent failures lose
+ * no count; `needsReconnection` is OR'd, never cleared. `null` when no row was counted.
  */
 export async function recordIntegrationRefreshFailure(
   connectionId: string,
@@ -3619,9 +2342,8 @@ export async function recordIntegrationRefreshFailure(
 }
 
 /**
- * Count an upstream rejection of a credential nothing can refresh toward
- * `INTEGRATION_REFRESH_MAX_FAILURES`, while `reach` still reaches the connection and it still holds
- * the rejected credential `revision`. `null` when nothing was counted.
+ * Count an upstream rejection of an unrefreshable credential toward the max, while `reach` reaches
+ * the connection and it still holds `revision`. `null` when nothing was counted.
  */
 export async function recordUnrefreshableRejection(
   connectionId: string,
@@ -3640,9 +2362,8 @@ export async function recordUnrefreshableRejection(
 }
 
 /**
- * A successful upstream call ends the rejection streak of the connection `connection` selects.
- * Only a non-OAuth2 connection (`client_ref IS NULL`): an OAuth2 count tracks refreshes, which a
- * call does not prove. A flagged connection keeps its count.
+ * A successful call ends the rejection streak, for a non-OAuth2 connection only (an OAuth2 count
+ * tracks refreshes, which a call does not prove). A flagged connection keeps its count.
  */
 async function clearRejections(connection: SQL): Promise<void> {
   await db
@@ -3667,10 +2388,7 @@ export function clearUpstreamRejections(
   return clearRejections(reachableConnection(connectionId, integrationId, reach));
 }
 
-/**
- * {@link clearRejections} on a run's report of a 2xx with credential `revision`, while the run's
- * actor can still reach the connection ({@link loadAccessibleConnectionById}'s reach).
- */
+/** {@link clearRejections} on a run's report of a 2xx with credential `revision`, while in reach. */
 export function clearReachableUpstreamRejections(
   connectionId: string,
   integrationId: string,
@@ -3693,14 +2411,7 @@ export function upstreamRejectionStreak(connection: {
   return connection.clientRef === null ? connection.refreshFailureCount : 0;
 }
 
-/**
- * Persist a new connection (INSERT) or refresh an existing one (UPDATE —
- * caller passes `connectionId`) from the user-facing acquisition paths.
- * Thin adapter over {@link persistCredentialBundle}: it passes explicit
- * `?? {}` / `?? []` defaults so the acquisition write always sets
- * `identityClaims`/`scopesGranted` (matching the pre-convergence behaviour),
- * unlike the refresh write-back which leaves them untouched.
- */
+/** Persist from an acquisition path: unlike the refresh write-back, it always sets identity and grant. */
 export async function saveIntegrationConnection(
   scope: SpaceScope,
   input: StoreConnectionInput,
@@ -3740,15 +2451,13 @@ export async function saveIntegrationConnection(
         },
         { ...persistInput, packageId: input.packageId, authKey: input.authKey },
       );
-  // INSERT and update-owned always return a summary (or throw).
   return summary!;
 }
 
 /**
- * The resolver's set ({@link listReachableConnections} under `usable`), each row projected for `caller`
- * ({@link connectionViewOf}), with the actions it holds and, for its owner, the spaces it may share
- * it into under its org role `orgRole` here (`null`: none). `locked_by`: what a 409 would refuse —
- * an own row's delete (a lock anywhere), another's withdrawal from this space.
+ * The resolver's `usable` set, each row projected for `caller` with the actions it holds and, for
+ * its owner, the spaces it may share it into (`orgRole` `null`: none). `locked_by`: what a 409 would
+ * refuse — an own row's delete, another's withdrawal from this space.
  */
 export async function listIntegrationConnections(
   scope: SpaceScope,
@@ -3797,32 +2506,15 @@ interface UsableIntegration {
   integration_package_id: string;
   name: string;
   source: "own" | "shared" | "both";
-  /**
-   * The integration package's own manifest version (e.g. "1.1.0"), when known.
-   * Lets a caller building an agent (or an inline run) pin a satisfiable
-   * `dependencies.integrations` range without guessing.
-   */
+  /** The integration's own manifest version, so a caller pins a satisfiable range. */
   version?: string;
-  /**
-   * The integration's declared `default_tools` (AFPS §4.4) — the tool(s) an
-   * agent inherits when it declares the integration without an
-   * `integrations_configuration.<id>.tools` selection. Read straight off the
-   * manifest (no mcp-server resolution). Lets an agent-builder see what it
-   * gets for free and whether it must select tools explicitly for anything
-   * else. `undefined` when the integration declares no default.
-   */
+  /** AFPS §4.4 `default_tools`: what an agent inherits without a `tools` selection. */
   default_tools?: readonly string[] | "*";
 }
 
 /**
- * Integrations the actor could use when building an agent manually in the
- * current space: any integration with a connection the actor may bind there —
- * {@link usableInSpace}, the resolver's access predicate.
- *
- * Deduped to the integration level (the agent picks an integration; the
- * connection itself is resolved at run time by `resolveAgentIntegrationPick`).
- * `source` reflects whether the actor owns a connection, only inherits a
- * shared one, or both.
+ * The integrations the actor could attach to an agent here, one per integration with a connection
+ * it may bind ({@link usableInSpace}); `source`: own, shared, or both.
  */
 export async function listUsableIntegrationsForActor(
   scope: SpaceScope,
@@ -3840,8 +2532,6 @@ export async function listUsableIntegrationsForActor(
     .where(usableInSpace(scope.spaceId, actor));
   if (rows.length === 0) return [];
 
-  // own = row owned by this actor; shared = row shared into this space.
-  // A single integration can have both kinds across multiple connection rows.
   const acc = new Map<string, { own: boolean; shared: boolean }>();
   for (const row of rows) {
     const entry = acc.get(row.integrationId) ?? { own: false, shared: false };
@@ -3850,31 +2540,23 @@ export async function listUsableIntegrationsForActor(
     acc.set(row.integrationId, entry);
   }
 
-  // Sorted, and that is load-bearing rather than cosmetic. The chat renders this
-  // list into its system prompt, which pi-ai emits as ONE cache block with ONE
-  // breakpoint: a reshuffle rewrites the prompt and invalidates the cached
-  // prefix — and the conversation history behind it — for no reason. Map
-  // insertion order follows the row order of an unordered SELECT, so Postgres is
-  // free to hand back a different permutation between two identical calls.
+  // Sorted on purpose: the chat renders this list into its system prompt, one cache block, and an
+  // unordered SELECT may permute it between identical calls, invalidating the cached prefix.
   const ids = [...acc.keys()].sort();
   const pkgRows = await db
     .select({ id: packages.id, draftManifest: packages.draftManifest })
     .from(packages)
     .where(inArray(packages.id, ids));
   const nameMap = new Map(pkgRows.map((p) => [p.id, getPackageDisplayName(p)]));
-  // The integration package's own version, read straight off the draft manifest
-  // (already selected — no extra query). Surfaced so a caller pinning a
-  // `dependencies.integrations` range doesn't have to guess it.
+  // The integration's own version, off the selected draft manifest: a caller pinning a
+  // `dependencies.integrations` range needs no guess.
   const versionMap = new Map(
     pkgRows.map((p) => {
       const m = p.draftManifest as { version?: unknown } | null;
       return [p.id, typeof m?.version === "string" ? m.version : undefined] as const;
     }),
   );
-  // The integration's declared `default_tools` (AFPS §4.4), read straight off
-  // the same already-selected draft manifest — no extra query, no mcp-server
-  // resolution. Surfaced so an agent-builder sees what tools it inherits for
-  // free and whether it must select tools explicitly for anything else.
+  // AFPS §4.4 `default_tools`, off the same manifest: what an agent-builder inherits.
   const defaultToolsMap = new Map(
     pkgRows.map((p) => [p.id, readDefaultTools(p.draftManifest as IntegrationManifest)] as const),
   );
@@ -3895,9 +2577,8 @@ export async function listUsableIntegrationsForActor(
 type ConnectionLock = NonNullable<IntegrationConnectionSummary["locked_by"]>;
 
 /**
- * Which of `ids` an admin pin or an org default names — the pin wins when both do. Each binds
- * whole for every member of the space, so neither may lose a member. A member pin never locks —
- * its owner's next run reports `pinned_connection_unavailable`.
+ * Which of `ids` an admin pin or an org default names (the pin wins): each binds whole, so neither
+ * may lose a member. A member pin never locks — its owner's next run reports the loss.
  */
 export async function connectionLocks(
   executor: DbOrTx,
@@ -4014,10 +2695,7 @@ interface PinNaming {
   scheduleIds: string[];
 }
 
-/**
- * Read the member pins, take their governance locks before any row lock, then read the schedules
- * to lock together. The actual fired definitions are resolved after the pin is removed, on `tx`.
- */
+/** The member pins naming the connections, governance-locked, with the schedules to lock together. */
 async function schedulesByPinNaming(
   tx: Tx,
   connectionIds: string[],
@@ -4062,9 +2740,8 @@ function schedulesIn(schedulesByPin: ReadonlyMap<string, PinNaming>): SQL | unde
 }
 
 /**
- * `lockIntegrationGovernance` for each (space, integration) of `schedulesByPin`, sorted, before any
- * row lock. An armed schedule write takes it, then writes its schedule
- * row; taken after the delete's row locks, it would deadlock against one.
+ * `lockIntegrationGovernance` for each (space, integration), sorted, before any row lock: an armed
+ * schedule write takes it before its row, so taken after, it would deadlock.
  */
 async function lockPinsGovernance(
   tx: Tx,
@@ -4081,10 +2758,9 @@ async function lockPinsGovernance(
 }
 
 /**
- * Drop a deleted connection from its OWNER's member pins and schedule overrides, and disable other
- * actors' schedules naming it ({@link planConnectionForget}) and those of `schedulesByPin` a pin it
- * drops leaves unnamed ({@link schedulesByPinNaming}). Returns the schedules it disabled, whose
- * jobs the caller removes once committed (importing the scheduler here would close a cycle).
+ * Drop a deleted connection from its owner's member pins and schedule overrides, and disable the
+ * schedules {@link planConnectionForget} and an emptied pin leave unnamed. Returns those schedules:
+ * the caller removes their jobs once committed (importing the scheduler would close a cycle).
  */
 async function forgetDeletedConnection(
   tx: Tx,
@@ -4178,12 +2854,10 @@ const pinForgetColumns = {
 };
 
 /**
- * The rewrites forgetting connection `id` makes to its `owner`'s member pins and schedule
- * overrides, and the other actors' schedules it disables; their member pins keep the id and fail
- * loudly. `lock` takes the rows `FOR UPDATE`, pins then schedules (every actor's, in id order), for
- * a caller that applies the plan in the same transaction; `alsoLock` joins schedules to that
- * statement, outside the plan. `scheduleFilter` narrows both schedule lists (a schedule may name a
- * connection of another space), `pinFilter` the pins.
+ * The rewrites forgetting connection `id` makes to its `owner`'s member pins and schedule overrides,
+ * and the other actors' schedules it disables (their member pins keep the id and fail loudly).
+ * `lock` takes the rows `FOR UPDATE`, pins then schedules in id order; `alsoLock` joins schedules to
+ * that statement outside the plan; the filters narrow the pins and schedules.
  */
 export async function planConnectionForget(
   executor: DbOrTx,
@@ -4301,10 +2975,7 @@ export async function loadConnectionShares(
   return shares;
 }
 
-/**
- * How one reader sees a row: the request space (`here`, `null` where there is none), the row's
- * shares, and, when the reader owns the row, the space its credential is bound to.
- */
+/** One reader's view of a row: the request space, the row's shares, and, for its owner, its bound space. */
 interface ConnectionView {
   here: string | null;
   shares: readonly string[];
@@ -4326,10 +2997,7 @@ export function connectionViewOf(
   };
 }
 
-/**
- * Where a row reaches, as one reader sees it: `shared_here` against the request space; for its
- * owner, its shares and origin, within the space its credential is bound to.
- */
+/** Where a row reaches for one reader: `shared_here`; for its owner, its shares and origin. */
 export function connectionReach(
   row: Pick<
     typeof integrationConnections.$inferSelect,
@@ -4354,11 +3022,7 @@ export function connectionReach(
   };
 }
 
-/**
- * Single wire serializer for an `integration_connections` row — every route
- * that returns a connection (list, connect flows, metadata PATCH) goes
- * through this so the DTO shape never forks. Only the owner sees the identity claims.
- */
+/** The one wire serializer of an `integration_connections` row; only the owner sees identity claims. */
 export function serializeIntegrationConnection(
   row: typeof integrationConnections.$inferSelect,
   view: ConnectionView,
@@ -4382,9 +3046,7 @@ export function serializeIntegrationConnection(
     owner_id: (row.userId ?? row.endUserId)!,
     label: row.label,
     ...connectionReach(row, view),
-    // Which registered client minted this connection (system env id or custom
-    // `integration_oauth_clients.id`); null for non-oauth2 auths. Surfaced so the
-    // UI can show, per connection, exactly which client is in use.
+    // The minting client (system id or `integration_oauth_clients.id`); null for non-oauth2.
     client_ref: row.clientRef,
     variables: row.variables ?? null,
     createdAt: row.createdAt.toISOString(),
@@ -4405,113 +3067,54 @@ export async function getIntegrationConnectionVariables(
 }
 
 // ─────────────────────────────────────────────
-// Non-OAuth connect flows
-// ─────────────────────────────────────────────
-
-// The api_key/basic/custom paste-the-bag connect flow now lives in
-// `services/connect/fields-strategy.ts` (FieldsStrategy) — selected via
-// `resolveStrategy`, reached through the programmatic import-connection route
-// (`POST .../connect/fields`) and the hosted Connect portal submit.
-
-// ─────────────────────────────────────────────
 // Aggregate views for the marketplace UI
 // ─────────────────────────────────────────────
 
-/**
- * Marketplace "detail" view — manifest + per-auth status for the calling
- * actor. Drives the connect buttons + "configure OAuth client" admin
- * panel.
- */
+/** Marketplace detail view: the manifest and the per-auth status for the calling actor. */
 export async function getIntegrationAuthStatuses(
   scope: SpaceScope,
   packageId: string,
   caller: ConnectionCaller,
   orgRole: OrgRole | null,
-  /**
-   * The caller's proxy reach outside a run (`reachOutsideRunIfPermitted`), for `proxy_connection`;
-   * `null` when it holds neither proxy permission.
-   */
+  /** Outside-run proxy reach (`reachOutsideRunIfPermitted`); `null` without either permission. */
   reach: ProxyReach | null,
 ): Promise<{
   manifest: IntegrationManifest;
   auths: IntegrationAuthStatus[];
-  /**
-   * Effective agent-facing tool catalog — what the agent editor's picker
-   * should display. Resolved server-side via
-   * {@link resolveIntegrationToolCatalog} so the UI doesn't need a second
-   * fetch for the referenced mcp-server's MCPB tool advertisement.
-   */
+  /** The agent-facing tool catalog ({@link resolveIntegrationToolCatalog}). */
   tool_catalog: IntegrationToolCatalogEntry[];
-  /**
-   * AFPS §4.4 — the tool(s) an agent inherits when it declares the
-   * integration without an `integrations_configuration.<id>.tools`
-   * selection. Read straight off the manifest (no mcp-server resolution).
-   * Pairs with `tool_catalog`: it tells an agent-builder which catalog
-   * entries are on by default vs which must be selected explicitly.
-   * `undefined` when the integration declares no default.
-   */
+  /** AFPS §4.4: the tools an agent inherits without a `tools` selection; `undefined` when none. */
   default_tools: readonly string[] | "*" | undefined;
-  /**
-   * AFPS §7.8 — surfaced verbatim from the manifest so the agent editor
-   * can gate its "Include all upstream tools" advanced toggle. `false`
-   * (default) keeps the picker in per-tool mode; `true` lets the agent
-   * set `integrations_configuration.<id>.tools = "*"`.
-   */
+  /** AFPS §7.8, verbatim: gates the editor's "include all upstream tools" toggle. */
   allow_undeclared_tools: boolean;
-  /**
-   * Whether the integration is activated in the current space — an
-   * enabled `space_packages` row exists. Part of the resource state
-   * (mirrors the list endpoint's `active` flag), not an operation scrap.
-   */
+  /** Whether the integration is active in this space (the list endpoint's `active`). */
   active: boolean;
-  /**
-   * Admin gate: when `true`, only org admins may create personal
-   * connections in this space. Defaults to `false` when the
-   * integration is not activated. Same source as the list endpoint.
-   */
+  /** Only org admins may create personal connections here (`false` when not active). */
   block_user_connections: boolean;
   /**
-   * The platform's own OAuth callback — what connect sends when the resolved
-   * client declares no `redirect_uri` of its own. Served from the same helper
-   * the connect strategy uses, so this value cannot drift from the sent one.
-   *
-   * NOT unconditionally the effective redirect: `OAuth2Strategy.begin` prefers
-   * a registered client's stored override (`clientRedirectUri ?? redirectUri`).
-   * A consumer telling an admin which string to register at the provider must
-   * resolve the override of the client that will actually be used — the
-   * default one, for new connections — and fall back to this. A `redirect_uri`
-   * mismatch is the most common connect failure and providers reject it with
-   * an opaque error, so showing the wrong one is worse than showing none.
+   * The platform's own OAuth callback, from the helper connect uses. Not always the effective
+   * redirect: a registered client's `redirect_uri` wins, so a consumer naming the URI to register
+   * resolves the default client's first (a mismatch is the most common connect failure).
    */
   platform_redirect_uri: string;
-  /**
-   * The connection an unnamed credential-proxy call outside a run gets for THIS caller here, on
-   * this response's `manifest` ({@link proxyConnectionVerdict}): the governed answer
-   * `auths[].ready` is not.
-   */
+  /** What an unnamed proxy call outside a run gets for this caller ({@link proxyConnectionVerdict}). */
   proxy_connection: { status: ProxyConnectionStatus; imposed: boolean };
 }> {
   await assertSpaceInScope(scope);
   const manifest = await loadManifestOrThrow(scope, packageId);
   const authsMap = manifest.auths ?? {};
 
-  // For local-source integrations the catalog comes from the referenced
-  // mcp-server's MCPB `tools[]`. Fetch it best-effort: if the mcp-server
-  // package is missing the resolver still falls back to the integration's
-  // sparse `tools{}` keys.
+  // Local source: the referenced mcp-server's tools, best-effort (the resolver falls back).
   const localRef = getLocalServerRef(manifest);
   const mcpServer = localRef ? await fetchMcpServerManifest(localRef.name) : null;
   const mcpServerTools = mcpServer ? readMcpServerTools(mcpServer) : undefined;
-  // The resolver already emits the snake_case wire shape
-  // (`policy.required_scopes`), so the catalog passes through verbatim.
   const toolCatalog: IntegrationToolCatalogEntry[] = resolveIntegrationToolCatalog({
     integration: manifest,
     mcpServerTools,
   });
 
   const allConnections = await listIntegrationConnections(scope, packageId, caller, orgRole);
-  // Same precedence rule as the settings list endpoint, via the shared
-  // resolver — env-backed SYSTEM integrations stay `active` here too.
+  // The settings list's precedence: env-backed system integrations stay active.
   const activation = (await resolveIntegrationActivations([packageId], scope.spaceId)).get(
     packageId,
   )!;
@@ -4528,9 +3131,7 @@ export async function getIntegrationAuthStatuses(
     oauthClients.some((r) => r.authKey === key && (autoProvisioned || !r.autoProvisioned));
 
   const auths: IntegrationAuthStatus[] = Object.entries(authsMap).map(([key, rawAuth]) => {
-    // AFPS: default scopes are `default_scopes`, the OAuth resource is
-    // `resource` (RFC 8707); the Appstrate run-policy `required` flag lives
-    // under `_meta["dev.appstrate/auth"].required` (absent = false).
+    // The run-policy `required` flag lives under `_meta["dev.appstrate/auth"]` (absent = false).
     const auth = rawAuth as AfpsManifestAuth;
     const authMeta = (auth._meta?.["dev.appstrate/auth"] ?? undefined) as
       { required?: boolean } | undefined;
@@ -4541,31 +3142,16 @@ export async function getIntegrationAuthStatuses(
       type: auth.type,
       required: authMeta?.required === true,
       scopes: auth.default_scopes ?? [],
-      // AFPS §7.3 (RFC 8707) names this field `resource`.
       resource,
       connections: keyConnections,
-      // Server-authoritative usability for this auth: at least one connection
-      // that isn't flagged for reconnection. The single per-connection validity
-      // signal (`needs_reconnection`, set by the resolver/refresh path) — so
-      // consumers (chat connect card, …) never re-derive connection state and
-      // stay correct as that logic evolves. Agent-agnostic (no scope/pin gate);
-      // a run's authoritative readiness still comes from `validateInlineRun`.
-      //
-      // Reads the usable set (see `listIntegrationConnections`),
-      // so an actor who owns nothing but inherits a shared connection is
-      // `ready: true` — deliberately, because their run resolves that
-      // connection. This is what makes the state correct under
-      // `block_user_connections`, where a member cannot create a connection at
-      // all and a shared one is the only path to a successful run.
+      // Usable connections, shared ones included (`listIntegrationConnections`): under
+      // `block_user_connections` a shared connection is a member's only path to a run.
+      // Agent-agnostic: a run's readiness is `validateInlineRun`'s.
       ready: keyConnections.some((c) => !c.needs_reconnection),
       has_oauth_client: hasUsableOAuthClient(key, usesAutoProvisionedClient(manifest, auth)),
-      // Shared platform client (SYSTEM_INTEGRATIONS): when one serves this
-      // (integration, auth), connect falls back to it, so the UI is connectable
-      // even without an org-registered client. Registry is in-memory — no DB cost.
+      // A shared platform client (SYSTEM_INTEGRATIONS) also serves connect.
       has_system_client: listSystemIntegrationClientsFor(packageId, key).length > 0,
-      // MCP-spec onboarding: an oauth2 auth on a remote MCP integration provisions
-      // its client at connect time (CIMD or DCR), so the UI enables Connect even
-      // when no client is pre-registered. Derived from the manifest shape.
+      // Provisioned at connect time (CIMD or DCR): connectable without a registered client.
       client_auto_provisioned: usesAutoProvisionedClient(manifest, auth),
     };
   });
@@ -4588,11 +3174,7 @@ export async function getIntegrationAuthStatuses(
   };
 }
 
-/**
- * The `auth` declaration every connect flow acts on (kickoff, hosted page, callback, strategies),
- * with its manifest: the published one, never the draft of a published integration
- * ({@link readIntegrationManifestForConnect}).
- */
+/** The auth every connect flow acts on, with its published manifest ({@link readIntegrationManifestForConnect}). */
 export async function readIntegrationAuth(
   scope: SpaceScope,
   packageId: string,
@@ -4610,20 +3192,9 @@ export async function readIntegrationAuth(
 // ─────────────────────────────────────────────
 
 /**
- * Verify the package exists and is actually an integration before the
- * integration-scoped routes act on it, so the "wrong type" error surface is
- * uniform across them.
- *
- * The catalogue rule is the one its two peers read — `listIntegrations` and
- * `getIntegration` (`services/integration-service.ts`) — not a third wording of
- * it: org-or-system, not ephemeral, and PLACED in the calling space. It runs
- * BEFORE the placement-aware reader, so anything it accepts that the reader
- * would hide leaks through the type refusal: without `placementReadFilter` a
- * member could learn, by naming ids, that `@org/secret` exists and is an
- * `agent` — a package homed in somebody else's PERSONAL space (RBAC spec §3.6).
- * An id this space cannot reach now falls on the `!row` branch, i.e. the 404 of
- * an id that does not exist, and `wrong_package_type` survives only for a
- * package actually placed here.
+ * Refuse a package that is not an integration placed here (the catalogue rule, placement included):
+ * an id this space cannot reach is the 404 of a missing id, never a type refusal revealing a
+ * package homed elsewhere (RBAC spec §3.6).
  */
 export async function assertIsIntegration(scope: SpaceScope, packageId: string): Promise<void> {
   const [row] = await db

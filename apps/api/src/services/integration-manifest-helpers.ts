@@ -1,28 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * AFPS integration-manifest accessors.
- *
- * The AFPS integration manifest type (`@afps-spec/schema`) is built on
- * `z.looseObject`, so most fields surface as `unknown` / index-signature at the
- * TypeScript level. These helpers narrow the specific subset the platform reads
- * on the spawn / credential / connect paths — the `source` discriminant, the
- * per-auth OAuth + delivery + connect blocks, and the Appstrate `_meta`
- * extensions — into typed accessors so call sites stay readable and the snake_case
- * vocabulary lives in exactly one place.
- *
- * Vocabulary (AFPS §7):
- *   - `source.kind: "local" | "remote" | "none"`.
- *   - per-auth OAuth: `authorization_endpoint`, `token_endpoint`, `resource`,
- *     `default_scopes`, `code_challenge_methods_supported`, …
- *   - `delivery.http` is `{ in, name, prefix?, value, encoding?, allow_server_override? }`.
- *   - `connect.login` declarative, `connect.tool: {}` orchestrated; the Appstrate
- *     orchestrated-tool fields live under `connect._meta["dev.appstrate/connect"]`.
- *   - URI restrictions: `authorized_uris`, `allow_all_uris`.
- */
+// Typed accessors over the AFPS integration manifest (§7), whose loose schema types fields `unknown`.
 
 import {
   getApiCallConfigs,
+  isUnauthenticatedIntegration,
   selectedApiCallConfigs,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
@@ -38,39 +20,16 @@ import {
 } from "@appstrate/afps-shared/connection-variables";
 import { renderCredentialTemplate as renderCredentialTemplateCore } from "@appstrate/afps-shared/credential-template";
 
-/**
- * AFPS `delivery.http` block (snake_case). The sidecar's canonical
- * {@link ManifestDeliveryHttp} type (`{ in, name, prefix?, value, encoding?,
- * allow_server_override? }`) is the source of truth so the spawn-side resolver
- * and the sidecar's connect-login renderer can never drift.
- */
+/** The sidecar's type, so the spawn resolver and the connect-login renderer cannot drift. */
 export type AfpsHttpDelivery = ManifestDeliveryHttp;
 
-/** Narrowed view of a single `auths.{key}` method (AFPS §7.2 – §7.9). */
 export interface AfpsManifestAuth {
-  /**
-   * Auth-method type discriminant (AFPS §7.2).
-   *  - `oauth2` / `api_key` / `basic` / `custom`: the base set.
-   *  - `mtls`: mutual TLS client authentication. The client certificate +
-   *    private key (and optional chain) are described by `credentials.schema` (§7.5)
-   *    and injected via `delivery.files` (§7.6) at well-known paths the underlying
-   *    HTTP client loads. Maps to OpenAPI `mutualTLS` (§7.11).
-   */
   type: "oauth2" | "api_key" | "basic" | "custom" | "mtls";
-  // OAuth2 (§7.3)
   issuer?: string;
   authorization_endpoint?: string;
   token_endpoint?: string;
   userinfo_endpoint?: string;
-  /**
-   * OAuth2 token-endpoint client-auth method (§7.3). AFPS 0.1 widened this to
-   * the full RFC 7591 / OIDC Core vocabulary. Appstrate's OAuth client only
-   * implements `client_secret_basic` / `client_secret_post` / `none`; the
-   * JWT-assertion (`client_secret_jwt`, `private_key_jwt`) and mTLS
-   * (`tls_client_auth`, `self_signed_tls_client_auth`) methods are accepted in
-   * the manifest type but normalized away at the token-exchange boundary
-   * (treated as unspecified → RFC 8414 §2 default `client_secret_basic`).
-   */
+  /** Narrowed by {@link toSupportedTokenEndpointAuthMethod} before any token exchange. */
   token_endpoint_auth_method?:
     | "client_secret_basic"
     | "client_secret_post"
@@ -82,38 +41,27 @@ export interface AfpsManifestAuth {
   code_challenge_methods_supported?: string[];
   resource?: string;
   authorization_params?: Record<string, unknown>;
-  // Scopes (§7.4)
   default_scopes?: string[];
   identity_claims?: Record<string, string>;
   required_identity_claims?: string[];
-  // Credentials (§7.5)
   credentials?: { schema: Record<string, unknown> };
-  // Connect (§7.7)
   connect?: AfpsManifestConnect;
-  // Delivery (§7.6) — REQUIRED by the AFPS schema (every auth declares ≥1 channel).
   delivery: {
     http?: AfpsHttpDelivery;
     env?: Record<string, AfpsDeliveryEnvEntry>;
     files?: Record<string, AfpsDeliveryFilesEntry>;
   };
-  // URI restrictions (§7.9)
   authorized_uris?: string[];
   allow_all_uris?: boolean;
   _meta?: Record<string, unknown>;
 }
 
 /**
- * Narrow an AFPS 0.1 `token_endpoint_auth_method` to the subset Appstrate
- * implements. The JWT-assertion / mTLS client-auth methods are valid in a 0.1
- * manifest but unsupported here — they normalize to `undefined`, which the
- * token-exchange path treats as unspecified (RFC 8414 §2 default
- * `client_secret_basic`).
+ * The client-auth methods the platform implements; the JWT-assertion and mTLS ones become
+ * `undefined`, i.e. RFC 8414 §2's default `client_secret_basic`. Takes `string` so a value read
+ * back from the `integration_oauth_clients` text column goes through the same narrowing.
  */
 export function toSupportedTokenEndpointAuthMethod(
-  // Widened to `string` so the SAME narrowing serves a value read back from
-  // `integration_oauth_clients.token_endpoint_auth_method` (a text column,
-  // constrained by a CHECK the type system cannot see) as well as one read off
-  // a manifest. One parse point, one set of accepted values.
   method: AfpsManifestAuth["token_endpoint_auth_method"] | string | undefined,
 ): TokenEndpointAuthMethod | undefined {
   return method === "client_secret_basic" || method === "client_secret_post" || method === "none"
@@ -122,63 +70,28 @@ export function toSupportedTokenEndpointAuthMethod(
 }
 
 /**
- * The two rejection messages guarding the public/confidential client
- * declaration, shared by BOTH surfaces an OAuth client can be declared on:
- * the API body, space or org tier (`oauthClientCreateSchema`,
- * `routes/integrations.ts`) and the env-sourced system entry
- * (`rawSystemIntegrationClientSchema`, `integration-client-registry.ts`).
- *
- * They live here rather than at either end because the requirement is that the
- * two ends stay IDENTICAL — an operator must be able to declare the same client
- * the same way whether it arrives by env or by API, and must be told off in the
- * same words when they get it wrong. Hand-copying the strings stated that
- * invariant in a comment and enforced nothing; importing one constant makes a
- * drift impossible to write.
- */
-
-/**
- * A secret-based method (or none at all, meaning "the manifest's method
- * applies") WITHOUT a secret — the declaration that cannot succeed, because a
- * blank secret cannot tell "declared public" from "operator forgot the secret".
+ * Shared by the API (`oauthClientCreateSchema`) and env (`rawSystemIntegrationClientSchema`)
+ * declarations of an OAuth client, so both refuse the same mistake in the same words. A blank
+ * secret cannot tell "declared public" from "forgot the secret".
  */
 export const CLIENT_SECRET_REQUIRED_MESSAGE =
   "client_secret is required and must not be empty; if the provider registered this app as a public client (no secret at all), declare it with token_endpoint_auth_method='none' instead of omitting the secret";
 
-/**
- * `"none"` WITH a secret — the declarer resolved a credential and then said it
- * would not be used. One of the two is a mistake and nothing can tell which.
- */
+/** `"none"` with a secret: one of the two is a mistake, and nothing can tell which. */
 export const PUBLIC_CLIENT_WITH_SECRET_MESSAGE =
   "token_endpoint_auth_method='none' declares a public client; do not send a client_secret with it";
 
 export interface AfpsDeliveryEnvEntry {
   value: string;
   sensitive?: boolean;
-  /**
-   * AFPS §7.6 — when this `delivery.env` entry's value flows into the
-   * referenced mcp-server's `${user_config.<key>}` placeholder (in
-   * `server.mcp_config.env`). The resolver pre-renders the substitution so the
-   * same integration package works in both Appstrate's local-source path AND a
-   * standalone MCPB host. When omitted, consumers default to the env-variable
-   * name itself (the map key).
-   */
+  /** The mcp-server `${user_config.<key>}` this value fills (AFPS §7.6); defaults to the map key. */
   user_config_key?: string;
 }
 export interface AfpsDeliveryFilesEntry {
-  /**
-   * Value template rendered against the credential bag — same grammar as
-   * `delivery.env` (`{$credential.<field>}`). The rendered bytes are
-   * materialised as the file's contents.
-   */
   value: string;
-  /**
-   * POSIX permission bits as an octal string (e.g. `"0400"`, `"0600"`).
-   * Defaults to `"0400"` (read-only owner) per AFPS §7.6.
-   */
   mode?: string;
 }
 
-/** A connect block: declarative `login` OR orchestrated `tool: {}` (§7.7). */
 export interface AfpsManifestConnect {
   login?: {
     request: {
@@ -198,12 +111,7 @@ export interface AfpsManifestConnect {
   _meta?: Record<string, unknown>;
 }
 
-/**
- * Appstrate orchestrated-tool extension carried under
- * `connect._meta["dev.appstrate/connect"]` — the run-policy fields AFPS
- * leaves to the consumer (`tool` name, `run_at`, `reauth_on`, `produces`,
- * `persist_login_secret`).
- */
+/** `connect._meta["dev.appstrate/connect"]`: the run policy AFPS leaves to the consumer. */
 interface AppstrateConnectMeta {
   tool?: string;
   run_at?: "link" | "run-start";
@@ -215,17 +123,8 @@ interface AppstrateConnectMeta {
 const APPSTRATE_CONNECT_META_KEY = "dev.appstrate/connect";
 
 /**
- * Render an AFPS `{$credential.<field>}` value template (used by
- * `delivery.env` / `delivery.files`) against a decrypted credential bag.
- * `{$variable.<name>}` renders from the connection's variables.
- * Unknown refs render empty — a missing field means "nothing to inject".
- * Returns `null` when the template resolves to an empty string (so callers can
- * skip env vars / files whose backing credential field is absent), mirroring
- * the old `delivery.env.from` "field missing → skip" behaviour.
- *
- * Thin wrapper over the shared `@appstrate/afps-shared/credential-template` renderer
- * (single implementation of the `{$credential.<field>}` syntax) pinned to the
- * `delivery.env` / `delivery.files` empty→null policy.
+ * A `delivery.env` / `delivery.files` template rendered for one connection; `null` when it renders
+ * empty, so an entry whose credential field is absent is skipped rather than injected blank.
  */
 export function renderCredentialTemplate(
   template: string,
@@ -235,7 +134,6 @@ export function renderCredentialTemplate(
   return renderCredentialTemplateCore(template, fields, { emptyAs: "null", variables });
 }
 
-/** An auth's `authorized_uris` rendered for one connection (see {@link renderAuthorizedUris}). */
 export function renderAuthAuthorizedUris(
   auth: Pick<AfpsManifestAuth, "authorized_uris">,
   fields: Readonly<Record<string, string>>,
@@ -258,67 +156,37 @@ export function runnerEgressFor(
   };
 }
 
-/**
- * Default file mode for `delivery.files` entries (AFPS §7.6: `"0400"`).
- * Read-only by owner — the strictest sane default for credential material.
- */
+/** AFPS §7.6 default: owner read-only, for credential material. */
 export const DEFAULT_DELIVERY_FILE_MODE = "0400";
 
-/**
- * Parse a `delivery.files.<path>.mode` octal-string into a normalized
- * lowercase form (`"0400"`). Returns `null` for malformed input — callers
- * should fall back to {@link DEFAULT_DELIVERY_FILE_MODE} in that case.
- *
- * Accepted forms: `"0400"`, `"400"`, `"0o400"`. POSIX permissions only —
- * we reject values that don't fit `[0-7]{3,4}` after stripping an optional
- * `0o`/`0` prefix.
- */
+/** `"0400"`, `"400"` or `"0o400"` → `"0400"`; `null` when malformed. */
 export function parseFileMode(raw: string): string | null {
   const trimmed = raw.trim();
   if (trimmed.length === 0) return null;
-  // Strip optional `0o` prefix; otherwise treat a leading `0` as the octal
-  // prefix convention (`"0400"`).
   const body =
     trimmed.startsWith("0o") || trimmed.startsWith("0O")
       ? trimmed.slice(2)
       : trimmed.replace(/^0+/, "");
   if (body.length === 0 || body.length > 4) return null;
   if (!/^[0-7]+$/.test(body)) return null;
-  // Re-pad to 4 chars with leading zero (POSIX convention).
   return `0${body.padStart(3, "0").slice(-3)}`;
 }
 
-/**
- * Validate a `delivery.files.<path>` key: must be an absolute POSIX path
- * (`/run/creds/token`), MUST NOT contain `..` segments, and MUST NOT contain
- * NUL bytes. Returns `true` when safe to materialise inside the runner's
- * filesystem.
- *
- * Rejection criteria (any one → invalid):
- *   - relative path (no leading `/`)
- *   - empty / whitespace-only
- *   - contains `..` segment after normalisation
- *   - contains NUL byte
- *   - path collapses to `/` (we won't overwrite the root)
- */
+/** A `delivery.files` key safe to write in the runner: absolute, no NUL, no `..`, not the root. */
 export function isSafeDeliveryFilePath(path: string): boolean {
   if (typeof path !== "string" || path.length === 0) return false;
   if (path.includes("\0")) return false;
   if (!path.startsWith("/")) return false;
-  // Normalise: split on `/`, reject any `..` segment. We don't allow them
-  // even if they don't escape because the manifest can declare paths
-  // directly; a `..` is always operator error.
+  // Refused even when it would not escape: in a declared path a `..` is always a mistake.
   const segments = path.split("/");
   for (const seg of segments) {
     if (seg === "..") return false;
   }
-  // Reject pure-root.
   const meaningful = segments.filter((s) => s.length > 0 && s !== ".");
   if (meaningful.length === 0) return false;
   return true;
 }
 
-/** The integration source discriminant kind (`local` | `remote` | `none`). */
 export function getIntegrationSourceKind(
   manifest: IntegrationManifest,
 ): "local" | "remote" | "none" | undefined {
@@ -366,48 +234,33 @@ export function authKeyServingNoSelectedTool(
   return { authKey, servingAuthKeys: [...serving] };
 }
 
-/** `source.server` reference for a `local`-source integration (the mcp-server package). */
+/**
+ * AFPS §4.4 MUST: an `auth_key` naming an auth of an unauthenticated integration (§7.2), which
+ * has none. Judged before every short-circuit: an integration can lose its `auths` after the
+ * agent was saved, so the write gate alone cannot hold it.
+ */
+export function authKeyOnUnauthenticatedIntegration(
+  manifest: IntegrationManifest,
+  authKey: string | undefined,
+): authKey is string {
+  return authKey !== undefined && isUnauthenticatedIntegration(manifest);
+}
+
 export function getLocalServerRef(
   manifest: IntegrationManifest,
-): { name: string; version: string; vendored?: boolean } | null {
+): { name: string; version: string } | null {
   const source = (
-    manifest as {
-      source?: {
-        kind?: string;
-        server?: { name?: unknown; version?: unknown; vendored?: unknown };
-      };
-    }
+    manifest as { source?: { kind?: string; server?: { name?: unknown; version?: unknown } } }
   ).source;
   if (source?.kind !== "local" || !source.server) return null;
-  const { name, version, vendored } = source.server;
+  const { name, version } = source.server;
   if (typeof name !== "string" || typeof version !== "string") return null;
-  // AFPS §7.1 — `source.server.vendored` is an optional boolean build-provenance
-  // signal: `true` means the referenced mcp-server's source is vendored into
-  // the integration's own bundle (audit + reproducibility). Forwarded verbatim
-  // through `IntegrationSpawnSpec.manifest.server.vendored` and surfaced on the
-  // sidecar's boot report so operators can audit "this run used a vendored
-  // foreign package".
-  return typeof vendored === "boolean" ? { name, version, vendored } : { name, version };
+  return { name, version };
 }
 
 /**
- * `source.remote` for a `remote`-source integration (`{ url, transport }`).
- *
- * `transport` is validated against AFPS §7.1's enum, not merely against
- * `string`. Returning the union is what makes every caller's narrowing real:
- * accept `string` here and the spawn resolver has to turn it into the union
- * somehow, and the only cheap way to do that is to map everything that is not
- * `"sse"` onto `"streamable-http"` — which silently rewrites a manifest
- * declaring `"websocket"` into one declaring HTTP, and hands the sidecar a
- * spec that can never trip its own guard.
- *
- * This is defence in depth, NOT the gate. Every path that produces an
- * `IntegrationManifest` re-parses it against `integrationManifestSchema`
- * first (`integration-service.ts` — the uncached fetch and all three cache
- * seeds), and an out-of-enum transport fails that parse whole, so a caller
- * here has already been handed a conforming manifest. The null branch is
- * therefore unreachable in practice; it exists so the TYPE is honest and so a
- * future caller that skips the parse cannot silently get a coercion.
+ * `transport` is checked against AFPS §7.1's enum so no caller is tempted to coerce an unknown one
+ * to HTTP. The schema parse already refuses it; this keeps the type honest, it is not the gate.
  */
 export function getRemoteSource(
   manifest: IntegrationManifest,
@@ -441,35 +294,22 @@ export function getVariablesSchema(manifest: IntegrationManifest): JSONSchemaObj
 }
 
 /**
- * The authorization server an oauth2 auth's manifest fixes, as data a bound issuer is compared
- * with: its declared `issuer`, else the origin of its remote URL; `null` when chosen per connection.
+ * Whether `issuer` is the authorization server an oauth2 auth's manifest fixes: its declared
+ * `issuer`, else an issuer of its remote URL's origin; none when chosen per connection.
  */
-export interface FixedAuthorizationServer {
-  issuer?: string;
-  remoteUrl?: string;
-}
-
-export function fixedAuthorizationServer(
-  manifest: IntegrationManifest,
-  auth: Pick<AfpsManifestAuth, "type" | "issuer">,
-): FixedAuthorizationServer | null {
-  if (hasPerConnectionAuthServer(manifest, auth)) return null;
-  const remoteUrl = getRemoteSource(manifest)?.url;
-  return { ...(auth.issuer ? { issuer: auth.issuer } : {}), ...(remoteUrl ? { remoteUrl } : {}) };
-}
-
-/** Whether `issuer` is the server `fixed` names (an issuer of the remote URL's origin, without one). */
 export function isFixedAuthorizationServer(
   issuer: string,
-  fixed: FixedAuthorizationServer | null,
+  manifest: IntegrationManifest,
+  auth: Pick<AfpsManifestAuth, "type" | "issuer">,
 ): boolean {
-  if (!fixed) return false;
-  if (fixed.issuer) return stripTrailingSlashes(fixed.issuer) === stripTrailingSlashes(issuer);
+  if (hasPerConnectionAuthServer(manifest, auth)) return false;
+  if (auth.issuer) return stripTrailingSlashes(auth.issuer) === stripTrailingSlashes(issuer);
+  const remoteUrl = getRemoteSource(manifest)?.url;
   return (
-    fixed.remoteUrl !== undefined &&
+    remoteUrl !== undefined &&
     URL.canParse(issuer) &&
-    URL.canParse(fixed.remoteUrl) &&
-    new URL(issuer).origin === new URL(fixed.remoteUrl).origin
+    URL.canParse(remoteUrl) &&
+    new URL(issuer).origin === new URL(remoteUrl).origin
   );
 }
 
@@ -482,7 +322,21 @@ export function hasPerConnectionAuthServer(
   return isVariableTemplate(auth.issuer) || isVariableTemplate(getRemoteSource(manifest)?.url);
 }
 
-/** Read the Appstrate orchestrated-tool extension off a connect block. */
+/**
+ * A client provisioned at connect time is public (`none` + PKCE), so a remote auth declaring a
+ * confidential method stays admin-registered; whether its server accepts either is checked at run.
+ */
+export function usesAutoProvisionedClient(
+  manifest: IntegrationManifest,
+  auth: AfpsManifestAuth,
+): boolean {
+  return (
+    auth.type === "oauth2" &&
+    auth.token_endpoint_auth_method === "none" &&
+    (getRemoteSource(manifest) !== null || hasPerConnectionAuthServer(manifest, auth))
+  );
+}
+
 export function getAppstrateConnectMeta(
   connect: AfpsManifestConnect | undefined,
 ): AppstrateConnectMeta | undefined {

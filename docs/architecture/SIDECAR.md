@@ -75,7 +75,7 @@ The converse rule governs the result shape. `api_call` declares **no `outputSche
 
 ### MCP transport retry: Bun-side error codes (#critical for the integration-runtime race)
 
-`packages/mcp-transport/src/client.ts` retries the initial `client.connect(transport)` (era probe, then `initialize` when the server is legacy — the sidecar's own `/mcp` is, on the v1 SDK) on connection-level failures (sidecar boot race, DNS not yet propagated, etc.). The retry classifier matches `err.code` against `RETRYABLE_CODES` — and that set **must include both Node and Bun naming conventions**:
+`packages/mcp-transport/src/client.ts` retries the initial `client.connect(transport)` (the agent hop pins `era: "legacy"`: the sidecar's `/mcp` is on the v1 SDK, so it is the `initialize` handshake, no era probe) on connection-level failures (sidecar boot race, DNS not yet propagated, etc.). The retry classifier matches `err.code` against `RETRYABLE_CODES` — and that set **must include both Node and Bun naming conventions**:
 
 - **Node / undici**: E-prefix UPPER_SNAKE_CASE (`ECONNREFUSED`, `ENOTFOUND`, `ETIMEDOUT`, …)
 - **Bun fetch**: PascalCase, no E-prefix (`ConnectionRefused`, `ConnectionTimeout`, `DNSNotFound`, …)

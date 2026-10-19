@@ -1,7 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Appstrate MCP-Server Manifest",
-  "description": "Appstrate mcp-server manifest — the canonical AFPS / MCPB schema (re-exported from @afps-spec/schema). The AFPS identity contract (type, name, schema_version, dependencies) lives at the manifest root (AFPS §3.4 / §11.2).",
+  "description": "Appstrate mcp-server manifest — the canonical AFPS / MCPB schema. The AFPS identity contract (type, name, schema_version, dependencies) lives at the manifest root (AFPS §3.4 / §11.2).",
+  "$comment": "SPDX-License-Identifier: Apache-2.0 — Copyright (c) 2026 AFPS contributors",
   "type": "object",
   "properties": {
     "name": {
@@ -369,5 +370,33 @@
     "manifest_version",
     "server"
   ],
-  "additionalProperties": {}
+  "additionalProperties": {},
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "server": {
+            "properties": {
+              "type": {
+                "const": "uv"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          }
+        },
+        "required": [
+          "server"
+        ]
+      },
+      "then": {
+        "properties": {
+          "manifest_version": {
+            "const": "0.4"
+          }
+        }
+      }
+    }
+  ]
 }

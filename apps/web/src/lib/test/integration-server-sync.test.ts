@@ -33,6 +33,18 @@ describe("mergeServerSync", () => {
     expect(manifest.tools_policy).toEqual({ a: { required_scopes: { oauth: ["x"] } }, b: {} });
   });
 
+  it("keeps the draft's tools_policy order so an unchanged server reads as no edit", () => {
+    const current = { source: remote, tools_policy: { ping: {}, stats: {}, search: {} } };
+    const manifest = mergeServerSync(current, sync(listing(["search", "ping", "stats"])));
+    expect(JSON.stringify(manifest.tools_policy)).toBe(JSON.stringify(current.tools_policy));
+  });
+
+  it("appends new tools after the draft's order and drops unlisted ones in place", () => {
+    const current = { source: remote, tools_policy: { ping: {}, gone: {}, search: {} } };
+    const manifest = mergeServerSync(current, sync(listing(["fresh", "search", "ping"])));
+    expect(Object.keys(manifest.tools_policy as object)).toEqual(["ping", "search", "fresh"]);
+  });
+
   it("drops no policy entry when the server's list was truncated", () => {
     const current = { source: remote, tools_policy: { kept: { required_scopes: { o: ["s"] } } } };
     const manifest = mergeServerSync(

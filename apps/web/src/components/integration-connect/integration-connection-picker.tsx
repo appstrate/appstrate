@@ -87,7 +87,9 @@ function LoadedPicker({ persistence = DEFAULT_PERSISTENCE, ...options }: LoadedP
 
   // Nothing to pick or connect: the agent's configuration must change, whatever the lock.
   if (picker.emptyPickerPrompt === "reconfigure") {
-    return <ReconfigurePicker integrationId={integrationId} />;
+    return (
+      <ReconfigurePicker integrationId={integrationId} code={entry?.resolution.error_code ?? ""} />
+    );
   }
 
   // An admin force (pin or enforced org default) closed to additions renders read-only: nothing

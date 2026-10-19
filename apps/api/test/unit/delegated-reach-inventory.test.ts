@@ -358,6 +358,11 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     category: "handler-guarded",
     reason: "validateSSEAuth: ceilinged canReadRuns + run ownership or read-all",
   },
+  syncIntegrationFromServer: {
+    category: "handler-guarded",
+    reason:
+      "assertPackageMutationAccess: integrations:write in home space; credential-proxy:call-own when the draft declares auths",
+  },
   testWebhook: {
     category: "handler-guarded",
     reason: "loadWebhookForAction: webhooks:write|org-webhooks:write",

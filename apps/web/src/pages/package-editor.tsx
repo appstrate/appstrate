@@ -43,11 +43,8 @@ import {
   fieldsToSchema,
 } from "../components/agent-editor/utils";
 import type { ResourceEntry, SchemaField } from "../components/agent-editor/types";
-import {
-  mergeServerSync,
-  serverSyncBody,
-  type ServerSyncBody,
-} from "../lib/integration-server-sync";
+import { INTEGRATION_DOC, mergeServerSync, serverSyncBody } from "../lib/integration-server-sync";
+import { fileTextOperation } from "../lib/package-file-drafts";
 import { encodeIconDataUri } from "../lib/icon-image";
 
 const asNumber = (value: unknown) => (typeof value === "number" ? value : undefined);
@@ -334,15 +331,15 @@ function IntegrationEditorInner({
   packageId,
   tab,
   toolCatalog,
-  syncBody,
+  canSync,
 }: {
   initialState: EditorState;
   packageId: string;
   tab: PackageEditorTab;
   /** The saved package's tool catalog, shown with the draft's policy. */
   toolCatalog: IntegrationToolCatalogEntry[];
-  /** The sync request, when the published version's server can be asked. */
-  syncBody?: ServerSyncBody;
+  /** The draft's server can be asked for its tools. */
+  canSync: boolean;
 }) {
   const { t } = useTranslation(["agents", "common"]);
   const editor = usePackageEditor({
@@ -385,9 +382,9 @@ function IntegrationEditorInner({
         docProposed: Boolean(instructions),
       });
       if (instructions) {
-        const operation = { op: "write", path: "INTEGRATION.md", text: instructions } as const;
+        const operation = fileTextOperation(INTEGRATION_DOC, instructions);
         editor.setState((s) =>
-          (s.operations ?? []).some((o) => o.op === "write" && o.path === operation.path)
+          (s.operations ?? []).some((o) => o.op === "write" && o.path === INTEGRATION_DOC)
             ? s
             : { ...s, operations: [...(s.operations ?? []), operation] },
         );
@@ -439,7 +436,7 @@ function IntegrationEditorInner({
           tools={toolCatalog}
           edit={{ manifest: state.manifest, onChange: onManifestChange }}
           sync={
-            syncBody
+            canSync
               ? {
                   run: (connectionId) =>
                     sync.mutate({
@@ -465,17 +462,13 @@ export function IntegrationDefinitionEditor({
   detail,
   section,
   toolCatalog,
-  syncBody,
+  canSync,
 }: {
   detail: Versioned<OrgPackageItemDetail>;
   section: IntegrationDefinitionSection;
   toolCatalog: IntegrationToolCatalogEntry[];
-  /**
-   * The sync request, set when the published version is served by a Streamable HTTP server at a
-   * fixed URL and the caller may call it through one of its connections (the sync reads it, not
-   * the draft).
-   */
-  syncBody: ServerSyncBody | undefined;
+  /** The draft is served by a Streamable HTTP server at a fixed URL the caller may read. */
+  canSync: boolean;
 }) {
   return (
     <DraftEditorMount id={detail.id} etag={detail.etag}>
@@ -484,7 +477,7 @@ export function IntegrationDefinitionEditor({
         packageId={detail.id}
         tab={section}
         toolCatalog={toolCatalog}
-        syncBody={syncBody}
+        canSync={canSync}
       />
     </DraftEditorMount>
   );

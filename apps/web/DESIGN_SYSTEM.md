@@ -691,7 +691,7 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   (`components/new-schedule-modal.tsx` is the example to follow). **Creating a package**
   (agent, skill, integration, MCP server): the creation hand-off modal
   (`components/creation-handoff-modal.tsx`, `hooks/use-creation-handoff.ts`:
-  manual / chat / coding agent), then, for the manual way, `components/create-package-modal.tsx`
+  url (when offered) / manual / chat / import), then, for the manual way, `components/create-package-modal.tsx`
   (name, identifier, description, plus an agent's prompt or an integration's server URL), after
   which the new package's page takes the rest, its files included. An MCP server is imported. An integration is also added
   from an MCP server URL, the hand-off's first card (`onFromUrl`): one page,

@@ -250,7 +250,7 @@ function ManagedIntegration({
   entry: AgentIntegrationEntry;
   agentPackageId: string;
 }) {
-  const { t } = useTranslation(["agents"]);
+  const { t } = useTranslation(["agents", "settings"]);
   const packageId = integration.id;
   const { data: entry } = useIntegrationReadinessEntry(packageId, agentPackageId);
   const resolution = entry?.resolution;
@@ -265,7 +265,7 @@ function ManagedIntegration({
   if (entry?.connection_required === false) {
     return (
       <span className="text-muted-foreground text-sm" data-testid="integration-no-connection">
-        {t("detail.connectionsTable.noConnectionNeeded")}
+        {t("integration.auth.none", { ns: "settings" })}
       </span>
     );
   }

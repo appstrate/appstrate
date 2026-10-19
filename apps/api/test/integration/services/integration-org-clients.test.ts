@@ -23,7 +23,6 @@ import { seedShares } from "../../helpers/connection-shares.ts";
 import {
   createIntegrationOAuthClient,
   deleteIntegrationOAuthClient,
-  ensureIntegrationOAuthClient,
   getIntegrationAuthStatuses,
   listIntegrationClients,
   promoteIntegrationOAuthClient,
@@ -32,6 +31,7 @@ import {
   setDefaultIntegrationClient,
   updateIntegrationOAuthClient,
 } from "../../../src/services/integration-connections.ts";
+import { ensureIntegrationOAuthClient } from "../../../src/services/integration-oauth-provisioning.ts";
 import type { ConnectionCaller } from "../../../src/services/connection-reach.ts";
 import { testCaller } from "../../helpers/connection-shares.ts";
 import {

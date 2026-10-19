@@ -335,17 +335,6 @@ export interface IntegrationSpawnSpec {
        */
       version?: string;
       /**
-       * AFPS §7.1 — build-provenance flag. `true` means the referenced
-       * mcp-server's source is vendored into the integration's own bundle
-       * rather than fetched as an independent package (reproducibility +
-       * supply-chain audit). Propagated verbatim from
-       * `manifest.source.server.vendored` for local sources; omitted for
-       * remote and serverless integrations. Surfaced on the sidecar's
-       * `IntegrationBootReport.spawned[].vendored` so operators can audit
-       * "this run used a vendored foreign package".
-       */
-      vendored?: boolean;
-      /**
        * Remote MCP endpoint URL. Required when
        * {@link IntegrationSpawnSpec.sourceKind} is `"remote"`. The sidecar
        * opens a Streamable HTTP MCP client against this URL instead of
@@ -793,19 +782,13 @@ export interface IntegrationBootReport {
   declaredConnections: number;
   /** Runtime adapter that ran the integrations (`"process"` | `"docker"` | `"none"`). */
   adapter: string;
-  /**
-   * Per-connection success — one entry per spawn spec.
-   * `vendored` mirrors the AFPS §7.1 `source.server.vendored` build-provenance
-   * signal forwarded from `IntegrationSpawnSpec.manifest.server.vendored` (set
-   * only for local sources; omitted otherwise).
-   */
+  /** Per-connection success — one entry per spawn spec. */
   spawned: Array<{
     integrationId: string;
     namespace: string;
     /** Tells apart N entries sharing `integrationId` + `namespace`. */
     connectionLabel?: string;
     toolCount: number;
-    vendored?: boolean;
   }>;
   /**
    * Per-connection failure — the error that prevented spawn/connect/register,

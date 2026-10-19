@@ -78,7 +78,7 @@ import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { popupHtmlClose, popupHtmlError } from "../lib/oauth-popup-html.ts";
 import { serveSpaceConnectionCalls } from "./connection-calls-handler.ts";
 import { normalizeOAuthErrorCode, oauthDiagnosticSuffix } from "../lib/oauth-error-diagnostic.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
+import { assertPermission, requirePermission } from "../middleware/require-permission.ts";
 import { rateLimit, rateLimitByIp } from "../middleware/rate-limit.ts";
 import { db } from "@appstrate/db/client";
 import { connectionPrincipal } from "../lib/connection-principal.ts";
@@ -127,7 +127,6 @@ import {
   setDefaultIntegrationClient,
   toPublicClient,
   updateIntegrationOAuthClient,
-  usesAutoProvisionedClient,
   type IntegrationConnectionSummary,
   type ReconnectTarget,
   type WidenedConnection,
@@ -152,6 +151,7 @@ import {
   CLIENT_SECRET_REQUIRED_MESSAGE,
   PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
   getVariablesSchema,
+  usesAutoProvisionedClient,
 } from "../services/integration-manifest-helpers.ts";
 import {
   acquiresByConnectLogin,
@@ -1071,40 +1071,39 @@ export function createIntegrationsRouter() {
   });
 
   // What the connected server says about this integration (tools, serverInfo, instructions), for
-  // its editor. The MCP exchange rides the credential proxy, under the proxy's own permission
-  // outside a run; editing the result needs write authority on the package's home.
-  router.post(
-    "/:packageId{@[^/]+/[^/]+}/discover",
-    rateLimit(10),
-    requirePermission("credential-proxy", "call-own"),
-    async (c) => {
-      const packageId = c.req.param("packageId")!;
-      await assertPackageMutationAccess(c, packageId, "write");
-      const scope = getSpaceScope(c);
-      await assertIsIntegration(scope, packageId);
-      const body = await readJsonBody(c, syncFromServerSchema, { allowEmpty: true });
-      const proposal = await syncIntegrationFromServer({
-        scope,
-        actor: getActor(c),
-        packageId,
-        ...(body.connection_id ? { connectionId: body.connection_id } : {}),
-        reach: reachOutsideRun(callerPermissions(c)),
-        caller: {
-          apiKeyId: c.get("apiKeyId") || null,
-          authMethod: c.get("authMethod"),
-          requestId: c.get("requestId"),
-        },
-        signal: c.req.raw.signal,
-      });
-      return c.json({
-        manifest: proposal.manifest,
-        icon_source: proposal.iconSource,
-        instructions: proposal.instructions,
-        tools: proposal.tools.map(({ readOnly, ...tool }) => ({ ...tool, read_only: readOnly })),
-        warnings: proposal.warnings,
-      });
-    },
-  );
+  // its editor; editing the result needs write authority on the package's home. An authenticated
+  // draft's MCP exchange rides the credential proxy, under the proxy's own permission outside a
+  // run; an unauthenticated one (AFPS §7.2) reaches its server directly and asks no proxy right.
+  router.post("/:packageId{@[^/]+/[^/]+}/discover", rateLimit(10), async (c) => {
+    const packageId = c.req.param("packageId")!;
+    await assertPackageMutationAccess(c, packageId, "write");
+    const scope = getSpaceScope(c);
+    await assertIsIntegration(scope, packageId);
+    const body = await readJsonBody(c, syncFromServerSchema, { allowEmpty: true });
+    const proposal = await syncIntegrationFromServer({
+      scope,
+      actor: getActor(c),
+      packageId,
+      ...(body.connection_id ? { connectionId: body.connection_id } : {}),
+      proxyReach: () => {
+        assertPermission(c, "credential-proxy", "call-own");
+        return reachOutsideRun(callerPermissions(c));
+      },
+      caller: {
+        apiKeyId: c.get("apiKeyId") || null,
+        authMethod: c.get("authMethod"),
+        requestId: c.get("requestId"),
+      },
+      signal: c.req.raw.signal,
+    });
+    return c.json({
+      manifest: proposal.manifest,
+      icon_source: proposal.iconSource,
+      instructions: proposal.instructions,
+      tools: proposal.tools.map(({ readOnly, ...tool }) => ({ ...tool, read_only: readOnly })),
+      warnings: proposal.warnings,
+    });
+  });
 
   router.get("/:packageId{@[^/]+/[^/]+}", requirePermission("integrations", "read"), async (c) => {
     const packageId = c.req.param("packageId")!;

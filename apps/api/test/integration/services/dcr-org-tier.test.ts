@@ -17,13 +17,13 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import {
-  ensureIntegrationOAuthClient,
   persistCredentialBundle,
   promoteIntegrationOAuthClient,
   readCredentialRevision,
   resolveConnectClient,
   resolveIntegrationClientById,
 } from "../../../src/services/integration-connections.ts";
+import { ensureIntegrationOAuthClient } from "../../../src/services/integration-oauth-provisioning.ts";
 import { usableInSpace } from "../../../src/services/connection-reach.ts";
 import {
   integrationCallbackUrl,

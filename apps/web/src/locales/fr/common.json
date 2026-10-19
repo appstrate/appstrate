@@ -128,6 +128,7 @@
   "apiError.unknown_tool": "Un outil sélectionné n'existe pas dans l'intégration : {{message}}",
   "apiError.wildcard_not_authorized": "Cette intégration n'autorise pas la sélection de tous les outils, choisissez-les un par un : {{message}}",
   "apiError.no_tools_selected": "Une intégration est déclarée sans aucun outil utilisable (« {{field}} ») : sélectionnez au moins un de ses outils, ou retirez-la des dépendances.",
+  "apiError.auth_key_on_unauthenticated_integration": "« {{field}} » nomme une méthode d'authentification (auth_key), mais cette intégration n'en déclare aucune : retirez-la de la configuration de l'agent.",
   "apiError.invalid_email_or_password": "Email ou mot de passe incorrect.",
   "apiError.invalid_password": "Mot de passe incorrect.",
   "apiError.invalid_email": "Adresse email invalide.",

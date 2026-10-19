@@ -3368,4 +3368,22 @@ describe("resolveConnections — unauthenticated integration (AFPS §7.2)", () =
     expect(result.errors).toEqual([]);
     expect(Object.keys(result.resolved)).toEqual([sibling]);
   });
+
+  // AFPS §4.4 MUST: the integration may have lost its auths after the agent was saved.
+  it("refuses an auth_key, even on an inert requirement", () => {
+    const inert = { ...req(unauthenticated), hasSelectedTools: false, requiredAuthKey: "oauth" };
+    const result = resolveConnections({
+      requirements: [inert],
+      accessibleConnections: [],
+      pins: [],
+    });
+    expect(result.resolved).toEqual({});
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        integrationId: INTEG,
+        code: "auth_key_on_unauthenticated_integration",
+        requiredAuthKey: "oauth",
+      }),
+    ]);
+  });
 });

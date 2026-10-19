@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Server sync of a published integration: the request body, the connection choice a refusal
-// offers, and the merge of the server's answer into the draft.
+// Server sync of an integration's DRAFT: the request body, the connection choice a refusal offers,
+// and the merge of the server's answer into the draft.
 
 import {
   resolveIntegrationToolCatalog,
@@ -14,8 +14,9 @@ export type ServerSyncProposal =
   paths["/api/integrations/{packageId}/discover"]["post"]["responses"][200]["content"]["application/json"];
 
 type Manifest = Record<string, unknown>;
-/** Whether a field was read from the server or inferred. */
-export type Provenance = "detected" | "guessed";
+
+/** Where a sync proposes the server's instructions; an existing file is never replaced. */
+export const INTEGRATION_DOC = "INTEGRATION.md";
 
 const isEmpty = (v: unknown) =>
   v === undefined ||
@@ -23,7 +24,7 @@ const isEmpty = (v: unknown) =>
   (Array.isArray(v) && v.length === 0) ||
   (typeof v === "object" && v !== null && !Array.isArray(v) && Object.keys(v).length === 0);
 
-/** Own keys only: a tool may be named `constructor`. (`Object.hasOwn` is past this lib target.) */
+/** Own keys only: a tool may be named `constructor`. */
 function hasOwn(record: Manifest, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(record, key);
 }
@@ -34,17 +35,17 @@ function asRecord(v: unknown): Manifest {
 
 const SYNC_IDENTITY = ["display_name", "description", "homepage", "icon"] as const;
 
-/**
- * `tools_policy` keeps each still-listed tool's entry (its scopes are the author's) and drops the
- * rest unless the list was truncated. `default_tools` is the author's (`[]` and `*` included): it
- * only loses unexposed tools, and when absent becomes the proposal's pre-selection (the tools the
- * server annotates read-only), exposed ones only. Identity is filled only when empty.
- */
 /** Whether the server listed more tools than were read: what is not listed may still exist. */
 export function isToolsTruncated(proposal: Pick<ServerSyncProposal, "warnings">): boolean {
   return proposal.warnings.some((w) => w.code === "tools_truncated");
 }
 
+/**
+ * `tools_policy` keeps each still-listed tool's entry (its scopes are the author's) and drops the
+ * rest unless the list was truncated. The draft's key order is kept, new tools are appended: the
+ * editor's dirty check compares serialized JSON, so a reorder would read as an edit. `default_tools` is the author's: it only loses unexposed
+ * tools, and when absent becomes the proposal's pre-selection. Identity is filled only when empty.
+ */
 export function mergeServerSync(
   current: Manifest,
   proposal: Pick<ServerSyncProposal, "manifest" | "warnings">,
@@ -53,7 +54,9 @@ export function mergeServerSync(
   const listed = Object.keys(proposal.manifest.tools_policy);
   const policy = asRecord(current.tools_policy);
   const truncated = isToolsTruncated(proposal);
-  const names = [...(truncated ? Object.keys(policy) : []), ...listed];
+  const listedSet = new Set(listed);
+  const kept = Object.keys(policy).filter((name) => truncated || listedSet.has(name));
+  const names = [...kept, ...listed.filter((name) => !hasOwn(policy, name))];
   const manifest: Manifest = {
     ...current,
     tools_policy: Object.fromEntries(
@@ -83,10 +86,7 @@ export type ServerSyncBody = NonNullable<
   paths["/api/integrations/{packageId}/discover"]["post"]["requestBody"]
 >["content"]["application/json"];
 
-/**
- * The proxy applies governance and selects a connection on the first request. An id is sent
- * only after the caller explicitly chooses a candidate from its refusal.
- */
+/** A connection id only once the caller chose a candidate from a refusal: governance picks first. */
 export function serverSyncBody(connectionId?: string): ServerSyncBody {
   return connectionId ? { connection_id: connectionId } : {};
 }

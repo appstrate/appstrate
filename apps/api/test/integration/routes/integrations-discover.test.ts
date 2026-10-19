@@ -60,6 +60,7 @@ beforeAll(() => {
           authorization_endpoint: `${origin}/authorize`,
           token_endpoint: `${origin}/token`,
           registration_endpoint: `${origin}/register`,
+          code_challenge_methods_supported: ["S256"],
           authorization_response_iss_parameter_supported: true,
         });
       }

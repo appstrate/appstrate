@@ -305,25 +305,26 @@ export function useDeleteAllMemories(packageId: string) {
 
 // --- Package (skill/tool) create/update mutations ---
 
-export function useCreatePackage(type: PackageType) {
+/**
+ * Exactly the keys the creation dialog sends: the create schemas are `.strict()`, so an unmodelled
+ * key is a 400. An integration's content is optional and it alone may skip its initial version.
+ */
+type CreatePackageBody<T extends PackageType> = T extends "integration"
+  ? { manifest: Record<string, unknown>; content?: string; publish?: false }
+  : { manifest: Record<string, unknown>; content: string };
+
+export function useCreatePackage<T extends PackageType>(type: T) {
   const qc = useQueryClient();
   return useMutation({
     meta: { errorHandledByCaller: true },
-    // Exactly the keys the creation dialog sends: the branches forward `body` whole and the create schemas are `.strict()`, so an unmodelled key is a 400.
-    mutationFn: async (body: {
-      manifest: Record<string, unknown>;
-      content: string;
-      /** Integration only: create the draft without its initial version (`wizardCreateBody`). */
-      publish?: false;
-    }): Promise<{ id: string; version_count?: number }> => {
-      if (body.publish === false && type !== "integration") {
-        throw new Error("Only an integration is created without publishing");
-      }
+    mutationFn: async (
+      body: CreatePackageBody<T>,
+    ): Promise<{ id: string; version_count?: number }> => {
       switch (type) {
         case "mcp-server":
           throw new Error("MCP servers are created by importing their bundle");
         case "agent": {
-          const { publish: _publish, ...agentBody } = body;
+          const agentBody = body as CreatePackageBody<"agent">;
           const { data } = await client.POST("/api/packages/agents", {
             // Assert only the manifest across the dynamic-object → strict `AgentManifest` boundary; the server validates it.
             body: {
@@ -334,8 +335,9 @@ export function useCreatePackage(type: PackageType) {
           return data!;
         }
         case "skill": {
-          const { publish: _publish, ...skillBody } = body;
-          const { data } = await client.POST("/api/packages/skills", { body: skillBody });
+          const { data } = await client.POST("/api/packages/skills", {
+            body: body as CreatePackageBody<"skill">,
+          });
           return data!;
         }
         case "integration": {
@@ -347,7 +349,7 @@ export function useCreatePackage(type: PackageType) {
     onSuccess: (data, body) => {
       // The create route skips the initial version when the publish gate would refuse it; a
       // create that asked for no version expects none.
-      if (data.version_count === 0 && body.publish !== false)
+      if (data.version_count === 0 && !("publish" in body && body.publish === false))
         toast.warning(i18n.t("agents:editor.createdUnpublished"));
       qc.invalidateQueries({ queryKey: packageKeys.all });
       if (type === "agent") qc.invalidateQueries({ queryKey: agentsKeys.all });

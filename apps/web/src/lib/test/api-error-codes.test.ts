@@ -148,9 +148,13 @@ const EMITTED_OUT_OF_SIGHT = [
   "missing_content",
   "invalid_content",
   // The per-connection authorization server's refusals (`refuse(code, …)` in
-  // `services/integration-connections.ts`), on a `variables.<name>` field.
+  // `services/integration-oauth-provisioning.ts`), on a `variables.<name>` field.
   "authorization_server_unavailable",
   "authorization_server_mismatch",
+  // The provisioning refusals, `code: problem` of `provisionabilityProblems`
+  // (`lib/integration-client-metadata.ts`, `services/integration-oauth-provisioning.ts`).
+  "authorization_server_pkce_unsupported",
+  "authorization_server_iss_unsupported",
   // An `authorized_uris` entry a credential field leaves unrenderable (`services/connect/fields-strategy.ts`).
   "unrenderable_authorized_uri",
   // Thrown as `CREDENTIAL_CHANGE_REVOCATION_FAILED` (`@appstrate/db/auth`).

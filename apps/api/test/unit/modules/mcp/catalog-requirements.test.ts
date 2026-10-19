@@ -269,6 +269,10 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
     [["POST"], "/api/webhooks/{id}/rotate"],
     [["GET"], "/api/webhooks/{id}/deliveries"],
   ]),
+  ...rowDecided(
+    "write authority on the package's home; `credential-proxy:call-own` only when the draft declares auths",
+    [[["POST"], "/api/integrations/{packageId}/discover"]],
+  ),
   ...rowDecided("the package's home space", [
     [["GET", "PUT"], "/api/packages/{scope}/{name}/home"],
   ]),

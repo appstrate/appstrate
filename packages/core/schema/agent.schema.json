@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Appstrate Agent Manifest",
   "description": "Appstrate agent manifest — extends AFPS agent.",
+  "$comment": "SPDX-License-Identifier: Apache-2.0 — Copyright (c) 2026 AFPS contributors",
   "type": "object",
   "properties": {
     "name": {
