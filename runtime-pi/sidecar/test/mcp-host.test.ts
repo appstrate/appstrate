@@ -1789,6 +1789,21 @@ describe("McpHost — tool output budget", () => {
     expect(new TextDecoder().decode(blobStore.read(spilled.uri)!.bytes)).toBe(`${half}\n${half}`);
   });
 
+  it("labels several joined JSON blocks as text/plain", async () => {
+    const block = JSON.stringify({ entries: Array.from({ length: 50 }, (_, i) => `file-${i}`) });
+    const result = await callDump(
+      {
+        content: [
+          { type: "text", text: block },
+          { type: "text", text: block },
+        ],
+      },
+      { tokenBudget: newBudget(), blobStore: newStore() },
+    );
+    expect(result.content[0]!.type).toBe("resource_link");
+    expect((result.content[0] as { mimeType?: string }).mimeType).toBe("text/plain");
+  });
+
   it("labels JSON-shaped text as application/json", async () => {
     const json = JSON.stringify({ entries: Array.from({ length: 100 }, (_, i) => `file-${i}`) });
     const result = await callDump(

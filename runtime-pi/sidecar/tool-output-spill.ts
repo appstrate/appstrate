@@ -23,6 +23,9 @@ export interface ToolOutputBudgetDeps {
   blobStore?: BlobStore;
 }
 
+// ≈ 900 chars: well above the agent-side workspace pointer (~200 chars) that would replace it.
+const ALWAYS_INLINE_TOKENS = 256;
+
 interface ResourceLinkBlock {
   type: "resource_link";
   uri: string;
@@ -59,6 +62,11 @@ export function spillTextIfOverBudget(
     consumedTokens: decision.consumedTokens,
   });
   if (decision.decision === "inline") return null;
+  // A spent run budget must not turn "Clicked" into a pointer longer than itself.
+  if (estimatedTokens <= Math.min(ALWAYS_INLINE_TOKENS, tokenBudget.inlineCapTokens)) {
+    if (estimatedTokens > 0) tokenBudget.record(estimatedTokens);
+    return null;
+  }
 
   if (!blobStore) {
     const cut = fitToInlineCap(text, tokenBudget, "spill unavailable: no blob store");
@@ -160,7 +168,8 @@ export function budgetMcpToolResult(
   if (result.isError) return truncateErrorResult(result, joined, deps.tokenBudget);
 
   const replacement = spillTextIfOverBudget(joined, deps, {
-    mimeType: textMimeType(joined),
+    // Several JSON blocks joined are NDJSON at best, never one JSON document.
+    mimeType: texts.length === 1 ? textMimeType(joined) : "text/plain",
     source,
   });
   return replacement ? replaceTextBlocks(result, replacement) : result;
@@ -181,15 +190,18 @@ function replaceTextBlocks(result: CallToolResult, replacement: ContentBlock): C
 }
 
 /**
- * Bracket shape only, never `JSON.parse`: parsing a multi-megabyte body
- * would build its whole object graph inside the sidecar's 256 MiB cgroup
- * just to pick a file extension.
+ * Bracket shape only, never `JSON.parse` nor `trim()`: both would copy or
+ * expand a multi-megabyte body inside the sidecar's 256 MiB cgroup just to
+ * pick a file extension.
  */
 function textMimeType(text: string): string {
-  const trimmed = text.trim();
-  const first = trimmed[0];
-  const last = trimmed[trimmed.length - 1];
-  return (first === "{" && last === "}") || (first === "[" && last === "]")
+  let start = 0;
+  let end = text.length - 1;
+  while (start <= end && /\s/.test(text[start]!)) start++;
+  while (end > start && /\s/.test(text[end]!)) end--;
+  const first = text[start];
+  const last = text[end];
+  return start < end && ((first === "{" && last === "}") || (first === "[" && last === "]"))
     ? "application/json"
     : "text/plain";
 }

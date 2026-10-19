@@ -585,6 +585,34 @@ describe("token-aware spill — third-party MCP tool results", () => {
       },
     });
 
+  it("keeps tiny outputs inline once the run budget is spent, and spills larger ones", async () => {
+    const fetchFn = mock(
+      async () =>
+        new Response('{"ok":true}', {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+    let treeText = "Clicked";
+    const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 4_000 });
+    tokenBudget.record(4_000);
+    const app = await buildTestApp({
+      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
+      tokenBudget,
+      thirdParty: [textTool(() => treeText)],
+    });
+
+    const tiny = (await callTree(app)).json.result as CallToolResult;
+    expect(tiny.content).toEqual([{ type: "text", text: "Clicked" }]);
+    const api = (await callApi(app)).json.result as CallToolResult;
+    expect(api.content[0]!.type).toBe("text");
+    expect(api.content[0]!.text).toBe('{"ok":true}');
+
+    treeText = "z".repeat(2_000); // 572 tokens: above the always-inline floor
+    const larger = (await callTree(app)).json.result as CallToolResult;
+    expect(larger.content[0]!.type).toBe("resource_link");
+  });
+
   it("spills an oversized text result readable back through resources/read", async () => {
     const tree = "dir/sub/file.txt\n".repeat(5_000);
     const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
