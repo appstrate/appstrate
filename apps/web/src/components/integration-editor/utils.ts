@@ -182,6 +182,15 @@ export function getAuths(manifest: Rec): AuthState[] {
   return Object.entries(auths).map(([key, raw]) => readAuth(key, asRec(raw), apiKeys.has(key)));
 }
 
+/**
+ * Whether `allow_undeclared_tools` (wildcard) can take effect. An integration declaring no auths
+ * (AFPS §7.2) needs no scope; otherwise some auth must be non-oauth2 or oauth2 with
+ * `default_scopes` (an oauth2 auth without them grants no scope under "*").
+ */
+export function isWildcardUsable(auths: AuthState[]): boolean {
+  return auths.length === 0 || auths.some((a) => a.type !== "oauth2" || a.defaultScopes.length > 0);
+}
+
 /** Merges onto the base entry by `value` to keep `implies` and other per-entry fields. */
 function mergeScopeCatalog(baseRaw: unknown, entries: ScopeCatalogEntry[]): Rec[] {
   const baseArr = Array.isArray(baseRaw) ? baseRaw : [];

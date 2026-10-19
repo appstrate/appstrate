@@ -35,6 +35,7 @@ import { SyncFromServer, type ServerSyncResult } from "./sync-from-server";
 import {
   getAllowUndeclaredTools,
   getAuths,
+  isWildcardUsable,
   getToolsPolicy,
   setAllowUndeclaredTools,
   setToolsPolicy,
@@ -244,9 +245,7 @@ function AllowUndeclaredToggle({
 }) {
   const { t } = useTranslation("agents");
   const allowUndeclared = getAllowUndeclaredTools(manifest);
-  const usable = getAuths(manifest).some(
-    (auth) => auth.type !== "oauth2" || auth.defaultScopes.length > 0,
-  );
+  const usable = isWildcardUsable(getAuths(manifest));
   // The grammar of every activation setting (collaborator SSO, for one): a
   // toggle row, its consequence as the description.
   return (

@@ -10,6 +10,7 @@ import {
   getToolsPolicy,
   emptyAuth,
   isRemoteSourceUrl,
+  isWildcardUsable,
   setAllowUndeclaredTools,
   setAuths,
   setSource,
@@ -353,5 +354,22 @@ describe("integration-editor allow_undeclared_tools (§7.8)", () => {
 
     const disabled = setAllowUndeclaredTools(enabled, false);
     expect(disabled).not.toHaveProperty("allow_undeclared_tools");
+  });
+});
+
+describe("isWildcardUsable", () => {
+  it("is usable with no auths (unauthenticated integration)", () => {
+    expect(isWildcardUsable([])).toBe(true);
+  });
+  it("is not usable with only an oauth2 auth lacking default scopes", () => {
+    expect(isWildcardUsable([{ ...emptyAuth("a"), type: "oauth2", defaultScopes: [] }])).toBe(
+      false,
+    );
+  });
+  it("is usable with oauth2 default scopes or a non-oauth2 auth", () => {
+    expect(isWildcardUsable([{ ...emptyAuth("a"), type: "oauth2", defaultScopes: ["x"] }])).toBe(
+      true,
+    );
+    expect(isWildcardUsable([{ ...emptyAuth("a"), type: "api_key" }])).toBe(true);
   });
 });
