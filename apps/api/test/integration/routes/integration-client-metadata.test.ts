@@ -678,6 +678,15 @@ describe("auto-provisioned client: CIMD first, DCR as fallback", () => {
       expect(meta.provider!.authorizeRequests).toHaveLength(0);
     });
 
+    it("refuses the server's missing PKCE S256 before asking for a client to be registered", async () => {
+      await install({ cimd: false, registration: false, pkce: null }, preRegistered);
+      const res = await postConnect();
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { code: string }).code).toBe(
+        "authorization_server_pkce_unsupported",
+      );
+    });
+
     it("refuses a token endpoint the server's metadata contradicts (AFPS §7.3)", async () => {
       await install(
         { cimd: false, registration: false },

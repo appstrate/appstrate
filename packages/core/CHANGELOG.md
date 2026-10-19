@@ -97,7 +97,7 @@ providerMessage? }` — the `<status> <JSON body>` envelope of a provider refusa
   `auth_key` on an integration that declares no auth method (AFPS §4.4 MUST), which it may have
   lost after the agent was saved. Always an error, carrying `requiredAuthKey`: no connection
   clears it. Exhaustive switches over the union must handle it.
-- **`IntegrationSpawnSpec.manifest.server.vendored` and `IntegrationBootReport.spawned[].vendored`
+- **BREAKING: `IntegrationSpawnSpec.manifest.server.vendored` and `IntegrationBootReport.spawned[].vendored`
   removed** (`@appstrate/core/sidecar-types`): no spawn spec ever carried the field to the
   sidecar, so the boot report never set it. The AFPS manifest field `source.server.vendored` is
   unchanged.

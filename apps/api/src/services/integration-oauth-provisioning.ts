@@ -163,8 +163,13 @@ async function preRegisteredServerMetadata(
   const metadata = await resolveOAuthEndpoints({ issuer: auth.issuer });
   assertEndpointsMatchMetadata(packageId, authKey, auth, metadata);
   if (metadata.issuer !== undefined) {
-    const [problem] = provisionabilityProblems(metadata, { mcp: true, vouched: true });
-    if (problem) throw unprovisionableServer(problem, packageId, authKey, metadata.issuer);
+    assertProvisionableServer(
+      packageId,
+      authKey,
+      auth,
+      { ...metadata, issuer: metadata.issuer },
+      { mcp: true, vouched: true },
+    );
   }
   return metadata;
 }

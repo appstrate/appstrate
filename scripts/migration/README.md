@@ -1430,9 +1430,11 @@ there, or a space client promoted to the org, would land without the flag.
 Run it in the beta.69 window, after the migrations and `0048` to `0050`, before the release serves
 traffic. The dry run lists each row (org, space or org tier, integration, auth, client id, issuer)
 and the count; `--apply` sets `is_default = false`, `updated_at` bumped, on exactly those rows in
-one transaction, and exits 1 unless none is left. A second run finds nothing. Nothing else changes:
-no connection, no other client, and the effective default of every tier is the one it already was,
-since no picker read the flag.
+one transaction, and exits 1 unless none is left. A second run finds nothing. No connection
+and no other client changes, and the effective default of every tier is the one it already was,
+since no picker read the flag; the rewrite also bumps `updated_at`, which gives a per-connection DCR
+row one extra lease window before pruning (harmless). Skipping it leaves the slot held: a manual org
+client registered later may land non-default while a system client exists.
 `set -a && . ./.env && set +a && bun scripts/migration/0051-clear-auto-provisioned-defaults.ts` is
 the dry run; `--apply` commits. It refuses to run with neither `DATABASE_URL` nor
 `PGLITE_DATA_DIR` set.
