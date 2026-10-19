@@ -284,7 +284,8 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  *                   (an unreachable or unhealthy member); `null` when no layer
  *                   bound anything (the fallback's `not_connected` /
  *                   `must_choose_connection`, `auth_key_mismatch`,
- *                   `auth_key_serves_no_selected_tool`) or when
+ *                   `auth_key_serves_no_selected_tool`,
+ *                   `auth_key_on_unauthenticated_integration`) or when
  *                   there is no verdict.
  *  - `error_code` — why the run would be refused on this integration; `null`
  *                   when the set binds (or there is no verdict).

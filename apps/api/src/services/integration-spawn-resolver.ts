@@ -408,7 +408,6 @@ async function resolveOne(
         transport?: "streamable-http" | "sse";
         packageId?: string;
         version?: string;
-        vendored?: boolean;
       }
     | undefined;
   let referencedMcpServer: McpServerManifest | null = null;
@@ -514,9 +513,6 @@ async function resolveOne(
       });
       return drop("mcp_server_not_runnable", `referenced mcp-server '${ref.name}'`);
     }
-    // AFPS §7.1 — propagate `source.server.vendored` build-provenance signal
-    // through the spawn spec → boot report so operators can audit "this run
-    // used a vendored foreign package". Only meaningful for local sources.
     serverSpec = {
       type: effectiveType,
       entry_point: run.entry_point,
@@ -524,7 +520,6 @@ async function resolveOne(
       // The version the byte route must serve. `null` for system mcp-servers
       // (the boot registry holds a single version, fetched by id alone).
       ...(resolution.version ? { version: resolution.version } : {}),
-      ...(typeof ref.vendored === "boolean" ? { vendored: ref.vendored } : {}),
     };
   }
   // sourceKind === "none" (or unknown) → serverless, serverSpec stays undefined.
@@ -541,27 +536,40 @@ async function resolveOne(
       ? resolveWorkspaceMount(integrationId, referencedMcpServer)
       : {};
 
+  // What every spec of this integration shares; `server` differs per connection with a templated URL.
+  const specBase = (server: typeof serverSpec) => ({
+    integrationId,
+    namespace: integrationId,
+    sourceKind: specSourceKind,
+    manifest: {
+      name: manifest.name,
+      version: manifest.version,
+      ...(server ? { server: serverWire(server) } : {}),
+    },
+    ...workspaceMount,
+  });
+  // The tools a spec exposes. A connection's login primitive is its auth's, never the agent's.
+  const toolSurface = (loginToolName: string | undefined) => {
+    const hiddenTools = [...new Set(manifest.hidden_tools ?? [])];
+    if (wildcardSelection) {
+      if (loginToolName && !hiddenTools.includes(loginToolName)) hiddenTools.push(loginToolName);
+      return hiddenTools.length > 0 ? { hiddenTools } : {};
+    }
+    const toolAllowlist = ((effectiveSelection ?? []) as readonly string[]).filter(
+      (t) => t !== loginToolName,
+    );
+    return { toolAllowlist, ...(hiddenTools.length > 0 ? { hiddenTools } : {}) };
+  };
+
   // AFPS §7.2 — an unauthenticated integration binds no connection: one spec, nothing injected.
   if (isUnauthenticatedIntegration(manifest)) {
     if (!exposesTools) return { specs: [], drops: [] };
-    const hiddenTools = [...new Set(manifest.hidden_tools ?? [])];
     return {
       specs: [
         {
-          integrationId,
-          namespace: integrationId,
-          sourceKind: specSourceKind,
-          manifest: {
-            name: manifest.name,
-            version: manifest.version,
-            ...(serverSpec ? { server: serverWire(serverSpec) } : {}),
-          },
-          ...(hiddenTools.length > 0 ? { hiddenTools } : {}),
+          ...specBase(serverSpec),
+          ...toolSurface(undefined),
           spawnEnv: {},
-          ...(wildcardSelection
-            ? {}
-            : { toolAllowlist: (effectiveSelection ?? []) as readonly string[] }),
-          ...workspaceMount,
         } satisfies IntegrationSpawnSpec,
       ],
       drops: [],
@@ -599,53 +607,25 @@ async function resolveOne(
         server = { ...serverSpec, url: rendered.url };
       }
       const apiCalls = selectedApiCalls.filter((cfg) => cfg.authKey === deliveries.authKey);
-
-      // Per connection: the login primitive belongs to the connection's AUTH.
-      const loginToolName = deliveries.connectLogin?.toolName;
-      let toolAllowlist: readonly string[] | undefined;
-      if (wildcardSelection) {
-        toolAllowlist = undefined;
-      } else {
-        const baseAllowlist = (effectiveSelection ?? []) as readonly string[];
-        toolAllowlist =
-          loginToolName === undefined
-            ? baseAllowlist
-            : baseAllowlist.filter((t) => t !== loginToolName);
-      }
-
-      const hiddenToolsUnion: string[] = [...new Set(manifest.hidden_tools ?? [])];
-      if (wildcardSelection && loginToolName && !hiddenToolsUnion.includes(loginToolName)) {
-        hiddenToolsUnion.push(loginToolName);
-      }
-
       return {
-        integrationId,
-        namespace: integrationId,
+        ...specBase(server),
         connection: {
           id: pick.connectionId,
           label: pick.label,
           accountId: displayAccountId(pick.accountId),
         },
-        sourceKind: specSourceKind,
-        manifest: {
-          name: manifest.name,
-          version: manifest.version,
-          ...(server ? { server: serverWire(server) } : {}),
-        },
         ...(apiCalls.length > 0 ? { apiCalls } : {}),
-        ...(hiddenToolsUnion.length > 0 ? { hiddenTools: hiddenToolsUnion } : {}),
+        ...toolSurface(deliveries.connectLogin?.toolName),
         spawnEnv: deliveries.spawnEnv,
         // Remote HTTP injects its own token.
         ...(deliveries.httpDeliveryAuths && !isRemoteHttp
           ? { httpDeliveryAuths: deliveries.httpDeliveryAuths }
           : {}),
-        ...(toolAllowlist !== undefined ? { toolAllowlist } : {}),
         ...(deliveries.connectLogin ? { connectLogin: deliveries.connectLogin } : {}),
         ...(deliveries.fileMounts && Object.keys(deliveries.fileMounts).length > 0
           ? { fileMounts: deliveries.fileMounts }
           : {}),
         ...(deliveries.egress && !isRemoteHttp ? { egress: deliveries.egress } : {}),
-        ...workspaceMount,
       } satisfies IntegrationSpawnSpec;
     }),
   );

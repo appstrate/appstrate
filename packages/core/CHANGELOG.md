@@ -91,6 +91,16 @@ providerMessage? }` — the `<status> <JSON body>` envelope of a provider refusa
 
 - **Requires `@afps-spec/schema` `^0.12.0`** (was `^0.10.0`): `auths` is optional (AFPS §7.2,
   an empty map stays invalid); a `{$credential.<field>}` in `source.remote.url` stays invalid.
+- **BREAKING: `ConnectionResolutionErrorCode` gains `auth_key_on_unauthenticated_integration`**
+  (`@appstrate/core/integration`, in `CONNECTION_RESOLUTION_ERROR_CODES` and so in
+  `MISSING_INTEGRATION_CONNECTION_CODES` and `READINESS_ERROR_CODES`) — the agent sets an
+  `auth_key` on an integration that declares no auth method (AFPS §4.4 MUST), which it may have
+  lost after the agent was saved. Always an error, carrying `requiredAuthKey`: no connection
+  clears it. Exhaustive switches over the union must handle it.
+- **`IntegrationSpawnSpec.manifest.server.vendored` and `IntegrationBootReport.spawned[].vendored`
+  removed** (`@appstrate/core/sidecar-types`): no spawn spec ever carried the field to the
+  sidecar, so the boot report never set it. The AFPS manifest field `source.server.vendored` is
+  unchanged.
 - **`acceptsCompletionMessage`** (`@appstrate/core/connect-handshake`) is now a
   type guard: a `true` narrows `event.data` to `IntegrationConnectCompletion`.
 - **BREAKING: `ConnectionResolutionErrorCode` gains `connection_set_too_large`**
@@ -109,6 +119,15 @@ providerMessage? }` — the `<status> <JSON body>` envelope of a provider refusa
   it adds nothing and the set satisfies the integration. Where nothing imposes
   one, resolution answers `required_integration_unbound` (a
   `ConnectionResolutionErrorCode`, unchanged) as a 409 item instead. (#2043)
+
+### Fixed
+
+- **`schema/*.schema.json`** (`@appstrate/core/schemas`) are generated from the JSON Schemas
+  `@afps-spec/schema` publishes, plus the fields core redefines, instead of from the Zod schemas
+  alone, which dropped the cross-field rules AFPS writes in JSON Schema. The integration schema
+  now refuses what its Zod schema refuses — an empty `auths` map, a `none` source or
+  `required_scopes` without `auths`, among others — and the mcp-server schema keeps
+  `manifest_version: "0.4"` for a `uv` server.
 
 ## [16.0.0] — 2026-10-14
 

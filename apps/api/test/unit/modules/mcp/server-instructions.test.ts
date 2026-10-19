@@ -282,7 +282,7 @@ describe("MCP server instructions — run guidance", () => {
     const bulletOf = (caller: ReadonlySet<string>) =>
       prose(caller)
         .split("\n")
-        .find((line) => line.startsWith("- Code `auth_key_serves_no_selected_tool`"));
+        .find((line) => line.startsWith("- Codes `auth_key_serves_no_selected_tool`"));
     const bullet = bulletOf(RUNNER);
     expect(bullet).toContain("configuration must change");
     expect(bullet).toContain("Do not start a connect flow");

@@ -210,10 +210,6 @@ function logRefreshFault(err: unknown, integrationId: string, connectionId: stri
  * upstream response headers + body, streamed back as-is.
  */
 export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult> {
-  // The type forbids it; a caller that casts past it is refused, not silently narrowed.
-  if (input.run && input.version) {
-    throw new Error("A proxy call for a run is authorized against the version the run froze");
-  }
   const selection = {
     integrationId: input.integrationId,
     orgId: input.orgId,

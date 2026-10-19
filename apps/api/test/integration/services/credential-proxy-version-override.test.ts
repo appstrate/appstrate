@@ -140,20 +140,6 @@ describe("proxyCall — internal version override", () => {
     );
     expect(seen).toEqual([]);
   });
-
-  it("refuses an override beside a run: the run's frozen version is the only answer", async () => {
-    await seedDivergingDraft();
-    const seen: string[] = [];
-    const run = {
-      id: "run_x",
-      boundSet: async () => [],
-      frozenVersion: async () => null,
-    };
-    await expect(
-      call(`${DRAFT_HOST}/v1`, seen, { reach: undefined, run, version: DRAFT }),
-    ).rejects.toThrow("the version the run froze");
-    expect(seen).toEqual([]);
-  });
 });
 
 describe("/api/credential-proxy/proxy never authorizes against the draft", () => {

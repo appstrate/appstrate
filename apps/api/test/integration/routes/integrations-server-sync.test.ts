@@ -422,6 +422,10 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     const member = await memberHolding(ctx, ["integrations:read", "integrations:write"]);
     const res = await sync(member, {});
     expect(res.status).toBe(403);
+    expect(((await res.json()) as { detail: string }).detail).toContain(
+      "credential-proxy:call-own",
+    );
+    expect(server.methods).toEqual([]);
   });
 
   it("enforces the auth's authorized_uris: a server URL outside it is never reached", async () => {
@@ -595,12 +599,21 @@ describe("POST /api/integrations/{packageId}/discover — unauthenticated integr
       source: { kind: "remote", remote: { url, transport: "streamable-http" } },
     }) as unknown as IntegrationManifest;
 
-  const syncOpen = () =>
+  const syncOpen = (caller: TestContext = ctx) =>
     getTestApp().request(`/api/integrations/${OPEN_ID}/discover`, {
       method: "POST",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      headers: { ...authHeaders(caller), "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
+
+  it("asks write authority on the package, not a credential-proxy right", async () => {
+    await seedProxyIntegration(ctx, unauthenticated(open.url));
+    const member = await memberHolding(ctx, ["integrations:read", "integrations:write"]);
+    const res = await syncOpen(member);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { tools: { name: string }[] };
+    expect(body.tools.map((t) => t.name)).toEqual(TOOL_NAMES);
+  });
 
   it("lists the server's tools with no connection and no credential", async () => {
     await seedProxyIntegration(ctx, unauthenticated(open.url));

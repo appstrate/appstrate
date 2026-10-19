@@ -78,7 +78,8 @@ export async function syncIntegrationFromServer(input: {
   actor: Actor;
   packageId: string;
   connectionId?: string;
-  reach: ProxyReach;
+  /** The caller's proxy reach, asked only on the proxied path: it throws when the caller has none. */
+  proxyReach: () => ProxyReach;
   /** Who called, as the call journal records it. */
   caller: Pick<ConnectionCall, "apiKeyId" | "authMethod" | "requestId">;
   /** The caller's request: its going away ends the sync. */
@@ -123,6 +124,7 @@ export async function syncIntegrationFromServer(input: {
   }
 
   const unauthenticated = isUnauthenticatedIntegration(loaded.manifest);
+  const reach = unauthenticated ? null : input.proxyReach();
   if (unauthenticated && !(await checkEgressUrl(url, { requireHttpsForUntrustedHost: true })).ok) {
     throw badGateway(`The MCP server at ${URL.parse(url)?.origin} is refused by the egress guard.`);
   }
@@ -138,58 +140,59 @@ export async function syncIntegrationFromServer(input: {
     if (body === null) throw new Error("an MCP answer exceeds the synchronization's bound");
     return new Response(body, { status: res.status, headers: res.headers });
   }) as typeof fetch;
-  const proxied = (async (target: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    // The standalone GET stream carries server-initiated messages, which a list-and-close never reads.
-    if (init?.method === "GET") return new Response(null, { status: 405 });
-    const method = init?.method ?? "POST";
-    const href = target instanceof Request ? target.url : String(target);
-    const started = Date.now();
-    // Journaled as the proxy route does: once per exchange that may have sent the credential.
-    const journal = (connectionId: string, outcome: string) =>
-      void trackAudit(
-        recordConnectionCall({
-          ...input.caller,
+  const proxiedVia = (reach: ProxyReach) =>
+    (async (target: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      // The standalone GET stream carries server-initiated messages, which a list-and-close never reads.
+      if (init?.method === "GET") return new Response(null, { status: 405 });
+      const method = init?.method ?? "POST";
+      const href = target instanceof Request ? target.url : String(target);
+      const started = Date.now();
+      // Journaled as the proxy route does: once per exchange that may have sent the credential.
+      const journal = (connectionId: string, outcome: string) =>
+        void trackAudit(
+          recordConnectionCall({
+            ...input.caller,
+            orgId: scope.orgId,
+            spaceId: scope.spaceId,
+            connectionId,
+            integrationId: packageId,
+            actor: input.actor,
+            runId: null,
+            method,
+            target: href,
+            outcome,
+            durationMs: Date.now() - started,
+          }),
+        );
+      let result;
+      try {
+        result = await proxyCall({
           orgId: scope.orgId,
           spaceId: scope.spaceId,
-          connectionId,
-          integrationId: packageId,
           actor: input.actor,
-          runId: null,
+          ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+          reach,
+          version: DRAFT,
+          integrationId: packageId,
           method,
           target: href,
-          outcome,
-          durationMs: Date.now() - started,
-        }),
-      );
-    let result;
-    try {
-      result = await proxyCall({
-        orgId: scope.orgId,
-        spaceId: scope.spaceId,
-        actor: input.actor,
-        ...(input.connectionId ? { connectionId: input.connectionId } : {}),
-        reach: input.reach,
-        version: DRAFT,
-        integrationId: packageId,
-        method,
-        target: href,
-        headers: Object.fromEntries(new Headers(init?.headers)),
-        body: typeof init?.body === "string" ? init.body : null,
-        // The SDK echoes the server's values (`Mcp-Session-Id`, `nextCursor`): never a placeholder.
-        literalHeaders: true,
-        maxResponseBytes: Math.min(
-          MAX_EXCHANGE_BYTES,
-          getCredentialProxyLimits().max_response_bytes,
-        ),
-        signal: init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline,
-      });
-    } catch (err) {
-      if (err instanceof ProxyCallError && err.connectionId) journal(err.connectionId, err.code);
-      throw err;
-    }
-    journal(result.connectionId, String(result.status));
-    return new Response(result.body, { status: result.status, headers: result.headers });
-  }) as typeof fetch;
+          headers: Object.fromEntries(new Headers(init?.headers)),
+          body: typeof init?.body === "string" ? init.body : null,
+          // The SDK echoes the server's values (`Mcp-Session-Id`, `nextCursor`): never a placeholder.
+          literalHeaders: true,
+          maxResponseBytes: Math.min(
+            MAX_EXCHANGE_BYTES,
+            getCredentialProxyLimits().max_response_bytes,
+          ),
+          signal: init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline,
+        });
+      } catch (err) {
+        if (err instanceof ProxyCallError && err.connectionId) journal(err.connectionId, err.code);
+        throw err;
+      }
+      journal(result.connectionId, String(result.status));
+      return new Response(result.body, { status: result.status, headers: result.headers });
+    }) as typeof fetch;
 
   // Alongside the exchange; a storage fault surfaces as itself, not as an MCP failure.
   const hasDoc = draftHasIntegrationDoc(scope.orgId, packageId);
@@ -199,7 +202,7 @@ export async function syncIntegrationFromServer(input: {
   let exchanged;
   try {
     client = await createMcpHttpClient(url, {
-      fetch: unauthenticated ? direct : proxied,
+      fetch: reach === null ? direct : proxiedVia(reach),
       signal: deadline,
       onWarning: (message, data) => logger.warn(message, { packageId, ...data }),
     });

@@ -23,6 +23,7 @@
 
 import {
   getApiCallConfigs,
+  isUnauthenticatedIntegration,
   selectedApiCallConfigs,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
@@ -366,28 +367,29 @@ export function authKeyServingNoSelectedTool(
   return { authKey, servingAuthKeys: [...serving] };
 }
 
+/**
+ * AFPS §4.4 MUST: an `auth_key` naming an auth of an unauthenticated integration (§7.2), which
+ * has none. Judged before every short-circuit: an integration can lose its `auths` after the
+ * agent was saved, so the write gate alone cannot hold it.
+ */
+export function authKeyOnUnauthenticatedIntegration(
+  manifest: IntegrationManifest,
+  authKey: string | undefined,
+): authKey is string {
+  return authKey !== undefined && isUnauthenticatedIntegration(manifest);
+}
+
 /** `source.server` reference for a `local`-source integration (the mcp-server package). */
 export function getLocalServerRef(
   manifest: IntegrationManifest,
-): { name: string; version: string; vendored?: boolean } | null {
+): { name: string; version: string } | null {
   const source = (
-    manifest as {
-      source?: {
-        kind?: string;
-        server?: { name?: unknown; version?: unknown; vendored?: unknown };
-      };
-    }
+    manifest as { source?: { kind?: string; server?: { name?: unknown; version?: unknown } } }
   ).source;
   if (source?.kind !== "local" || !source.server) return null;
-  const { name, version, vendored } = source.server;
+  const { name, version } = source.server;
   if (typeof name !== "string" || typeof version !== "string") return null;
-  // AFPS §7.1 — `source.server.vendored` is an optional boolean build-provenance
-  // signal: `true` means the referenced mcp-server's source is vendored into
-  // the integration's own bundle (audit + reproducibility). Forwarded verbatim
-  // through `IntegrationSpawnSpec.manifest.server.vendored` and surfaced on the
-  // sidecar's boot report so operators can audit "this run used a vendored
-  // foreign package".
-  return typeof vendored === "boolean" ? { name, version, vendored } : { name, version };
+  return { name, version };
 }
 
 /**

@@ -930,4 +930,86 @@ describe("connection-readiness — unauthenticated integration (AFPS §7.2)", ()
     const sibling = body.integrations.find((i) => i.integration_package_id === INTEGRATION)!;
     expect(sibling.connection_required).toBe(true);
   });
+
+  /** The agent saved before the integration lost its auths: the write gate never saw it. */
+  async function configureOpenOnly(config: Record<string, unknown>) {
+    await db
+      .update(packages)
+      .set({
+        draftManifest: {
+          name: AGENT,
+          version: "1.0.0",
+          type: "agent",
+          schema_version: "0.2",
+          display_name: "Readiness Agent",
+          dependencies: { integrations: { [OPEN]: "^1.0.0" } },
+          integrations_configuration: { [OPEN]: config },
+        },
+      })
+      .where(eq(packages.id, AGENT));
+  }
+
+  async function readiness(): Promise<ReadinessBody> {
+    const res = await app.request(`/api/agents/${AGENT}/connection-readiness`, {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+    return (await res.json()) as ReadinessBody;
+  }
+
+  async function runStatus(): Promise<number> {
+    const run = await app.request(`/api/agents/${AGENT}/run?version=draft`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    return run.status;
+  }
+
+  it("refuses an auth_key on it (AFPS §4.4): readiness blocks and the run 409s", async () => {
+    await configureOpenOnly({ tools: ["search"], auth_key: "oauth" });
+    const body = await readiness();
+    expect(body.blocks_run).toBe(true);
+    expect(body.errors).toEqual([
+      expect.objectContaining({
+        field: `integrations.${OPEN}`,
+        code: "auth_key_on_unauthenticated_integration",
+        required_auth_key: "oauth",
+      }),
+    ]);
+    expect(await runStatus()).toBe(409);
+  });
+
+  it("refuses an auth_key that is its whole configuration", async () => {
+    await configureOpenOnly({ auth_key: "oauth" });
+    const body = await readiness();
+    expect(body.blocks_run).toBe(true);
+    expect(body.errors.map((e) => e.code)).toEqual(["auth_key_on_unauthenticated_integration"]);
+    expect(await runStatus()).toBe(409);
+  });
+
+  it("reports no pin left over from an authenticated version", async () => {
+    await db.insert(integrationPins).values({
+      spaceId: ctx.defaultSpaceId,
+      packageId: AGENT,
+      integrationId: OPEN,
+      userId: null,
+      connectionIds: [crypto.randomUUID()],
+      allowAdditionalConnections: true,
+    });
+    const open = (await readiness()).integrations.find((i) => i.integration_package_id === OPEN)!;
+    expect(open.resolution).toMatchObject({
+      admin_pinned_connection_ids: null,
+      additional_connections_allowed: false,
+      resolved_connection_ids: [],
+      candidates: [],
+    });
+  });
+
+  it("without auth_key, asks nothing even when required", async () => {
+    await configureOpenOnly({ tools: ["search"], required: true });
+    const body = await readiness();
+    expect(body.blocks_run).toBe(false);
+    expect(body.errors).toEqual([]);
+  });
 });

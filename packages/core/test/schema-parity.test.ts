@@ -1,88 +1,66 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Generated-artifact guard: every committed `schema/<type>.schema.json` ⇄ its
- * canonical Zod source.
+ * Generated-artifact guard for `schema/<type>.schema.json`, the published `$schema` targets the
+ * editor validates against while the API validates against the Zod schemas.
  *
- * The canonical validators live in `src/validation.ts` (agent, skill),
- * `src/mcp-server.ts` (mcp-server), and `src/integration.ts` (integration). The
- * committed `schema/*.schema.json` files are the published `$schema` targets
- * (editor autocomplete / external tooling) and are GENERATED from those Zod
- * schemas by `scripts/generate-schemas.ts` — they are not hand-maintained. This
- * test fails if any committed file falls out of sync, i.e. someone changed a Zod
- * schema and forgot to re-run `generate:schemas`. (A stale mcp-server mirror that
- * slipped through review is exactly what prompted covering all four here, not
- * just integration.)
- *
- * Cross-field rules (≥1 auth, oauth2 discovery, per-auth `delivery`,
- * scope-catalog subset, per-tool auth-key, the mcp-server `_meta` identity)
- * live in the Zod `superRefine`s and are intentionally absent from the JSON
- * Schema — `toJSONSchema` cannot represent refinements. That is expected and is
- * why the JSON Schema is a looser (structural) projection.
- *
- * To fix a failure: `cd packages/core && bun run generate:schemas`. The entries
- * below mirror `scripts/generate-schemas.ts` exactly — keep them in sync.
+ * 1. Every committed file is what `scripts/generate-schemas.ts` builds (fix: `cd packages/core &&
+ *    bun run generate:schemas`).
+ * 2. On the rules both can express, the integration JSON Schema and its Zod schema agree: a JSON
+ *    regenerated from Zod alone drops the cross-field rules AFPS writes into its own JSON.
  */
 
 import { describe, it, expect } from "bun:test";
-import { toJSONSchema } from "zod/v4/core";
-import { afpsJsonSchemaOverride } from "@afps-spec/schema";
-import { agentManifestSchema, skillManifestSchema } from "../src/validation.ts";
-import { mcpServerManifestSchema } from "../src/mcp-server.ts";
+import { createAjv } from "../src/ajv.ts";
+import { buildAppstrateSchemas } from "../scripts/generate-schemas.ts";
 import { integrationManifestSchema } from "../src/integration.ts";
+import integrationJsonSchema from "../schema/integration.schema.json";
 
-// Mirror of scripts/generate-schemas.ts `appstrateSchemas`.
-const entries = [
-  {
-    filename: "agent.schema.json",
-    title: "Appstrate Agent Manifest",
-    description: "Appstrate agent manifest — extends AFPS agent.",
-    schema: agentManifestSchema,
-  },
-  {
-    filename: "skill.schema.json",
-    title: "Appstrate Skill Manifest",
-    description: "Appstrate skill manifest — AFPS skill with relaxed optional metadata.",
-    schema: skillManifestSchema,
-  },
-  {
-    filename: "mcp-server.schema.json",
-    title: "Appstrate MCP-Server Manifest",
-    description:
-      "Appstrate mcp-server manifest — the canonical AFPS / MCPB schema (re-exported from @afps-spec/schema). The AFPS identity contract (type, name, schema_version, dependencies) lives at the manifest root (AFPS §3.4 / §11.2).",
-    schema: mcpServerManifestSchema,
-  },
-  {
-    filename: "integration.schema.json",
-    title: "Appstrate Integration Manifest",
-    description:
-      "Appstrate integration manifest — AFPS (packages/core/src/integration.ts). Cross-field rules (≥1 auth, oauth2 discovery, delivery, scope-catalog subset, per-tool auth-key) are enforced by the Zod superRefines and are not representable in JSON Schema.",
-    schema: integrationManifestSchema,
-  },
-] as const;
+describe("schema/*.schema.json are generated", () => {
+  it("matches generate:schemas output (run `bun run generate:schemas` if this fails)", async () => {
+    for (const { filename, schema } of await buildAppstrateSchemas()) {
+      const committed = (await Bun.file(`${import.meta.dir}/../schema/${filename}`).json()) as
+        Record<string, unknown> | undefined;
+      expect({ filename, schema: committed }).toEqual({ filename, schema });
+    }
+  });
+});
 
-describe("schema/*.schema.json are generated from the Zod schemas", () => {
-  for (const entry of entries) {
-    it(`${entry.filename} matches generate:schemas output (run \`bun run generate:schemas\` if this fails)`, async () => {
-      const committed = JSON.parse(
-        await Bun.file(`${import.meta.dir}/../schema/${entry.filename}`).text(),
-      ) as Record<string, unknown>;
+describe("integration JSON Schema ⇄ Zod parity", () => {
+  const validateJson = createAjv().compile(integrationJsonSchema);
 
-      const jsonSchema = toJSONSchema(entry.schema, {
-        unrepresentable: "any",
-        target: "draft-2020-12",
-        override: afpsJsonSchemaOverride,
-      }) as Record<string, unknown>;
-      delete jsonSchema.$schema;
+  const base = {
+    type: "integration",
+    schema_version: "0.3",
+    name: "@acme/open",
+    version: "1.0.0",
+    display_name: "Open",
+    source: {
+      kind: "remote",
+      remote: { url: "https://mcp.example.com/mcp", transport: "streamable-http" },
+    },
+  };
+  const corpus: { label: string; manifest: Record<string, unknown>; valid: boolean }[] = [
+    { label: "a public integration", manifest: base, valid: true },
+    { label: "an empty auths map", manifest: { ...base, auths: {} }, valid: false },
+    {
+      label: "a none source without auths",
+      manifest: { ...base, source: { kind: "none" } },
+      valid: false,
+    },
+    {
+      label: "required_scopes without auths",
+      manifest: { ...base, tools_policy: { search: { required_scopes: { primary: ["read"] } } } },
+      valid: false,
+    },
+  ];
 
-      const generated = {
-        $schema: "https://json-schema.org/draft/2020-12/schema",
-        title: entry.title,
-        description: entry.description,
-        ...jsonSchema,
-      };
-
-      expect(committed).toEqual(generated);
+  for (const { label, manifest, valid } of corpus) {
+    it(`${valid ? "accepts" : "refuses"} ${label} on both sides`, () => {
+      expect({
+        json: validateJson(manifest),
+        zod: integrationManifestSchema.safeParse(manifest).success,
+      }).toEqual({ json: valid, zod: valid });
     });
   }
 });

@@ -401,7 +401,7 @@ export const schemas = {
       required_auth_key: {
         type: "string",
         description:
-          "Populated on `auth_key_mismatch` and `auth_key_serves_no_selected_tool`. The agent dep's `auth_key` per AFPS §4.1. On `auth_key_serves_no_selected_tool` it names an auth that exposes none of the agent's selected tools: an agent configuration error no connection clears — the agent's `auth_key` or its tool selection must change.",
+          "Populated on `auth_key_mismatch`, `auth_key_serves_no_selected_tool` and `auth_key_on_unauthenticated_integration`. The agent dep's `auth_key` per AFPS §4.1. On `auth_key_serves_no_selected_tool` it names an auth that exposes none of the agent's selected tools: an agent configuration error no connection clears — the agent's `auth_key` or its tool selection must change. On `auth_key_on_unauthenticated_integration` it names an auth of an integration that declares none (AFPS §4.4): the agent's `auth_key` must be removed.",
       },
       available_auth_keys: {
         type: "array",
@@ -2369,7 +2369,7 @@ export const schemas = {
         type: ["string", "null"],
         enum: [...CONNECTION_RESOLUTION_SOURCES, null],
         description:
-          "The cascade layer that bound the FIRST connection of a non-empty set — under governance the floor's (`admin_pin` / `org_default_enforced`), whatever its additions came from; per-connection provenance is the `source` of each entry in the run's `resolved_connections` — or the layer whose set failed (an unreachable member — `pinned_connection_unavailable` / `override_connection_unavailable`; a launch override outside a governing set that allows no additions — `override_outranked`; an empty set on a required integration — `required_integration_unbound`; or one failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`). `null` when no layer bound anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`, `integration_not_active`), when the integration binds none (`[]` — `warning.source` names the layer that chose it) and when there is no verdict at all (the integration manifest could not be loaded; `error_code` is then `null` too).",
+          "The cascade layer that bound the FIRST connection of a non-empty set — under governance the floor's (`admin_pin` / `org_default_enforced`), whatever its additions came from; per-connection provenance is the `source` of each entry in the run's `resolved_connections` — or the layer whose set failed (an unreachable member — `pinned_connection_unavailable` / `override_connection_unavailable`; a launch override outside a governing set that allows no additions — `override_outranked`; an empty set on a required integration — `required_integration_unbound`; or one failing its health check — `needs_reconnection`, `insufficient_scopes`, `auth_serves_no_selected_tool`). `null` when no layer bound anything (`not_connected`, `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`, `auth_key_on_unauthenticated_integration`, `integration_not_active`), when the integration binds none (`[]` — `warning.source` names the layer that chose it) and when there is no verdict at all (the integration manifest could not be loaded; `error_code` is then `null` too).",
       },
       error_code: {
         type: ["string", "null"],
