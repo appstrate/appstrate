@@ -21,6 +21,7 @@ import { Button } from "../components/button.tsx";
 import { Input } from "../components/input.tsx";
 import { Label } from "../components/label.tsx";
 import type { SchemaFormContext } from "./context.ts";
+import { describeDateValue } from "./date-echo.ts";
 
 export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>) {
   const {
@@ -38,7 +39,9 @@ export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>)
     autofocus,
     placeholder,
     rawErrors,
+    registry,
   } = props;
+  const labels = ((registry.formContext ?? {}) as SchemaFormContext).labels;
 
   const formatType =
     schema.format === "email"
@@ -64,10 +67,18 @@ export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>)
   const isConst = schema && "const" in schema;
   const isReadOnly = readonly || isConst;
 
-  return (
+  const echo =
+    schema.format === "date" || schema.format === "date-time"
+      ? describeDateValue(value, schema.format, labels?.locale)
+      : null;
+  const echoId = `${id}-echo`;
+  const warningId = `${id}-year-warning`;
+
+  const input = (
     <Input
       id={id}
       type={inputType}
+      aria-describedby={echo ? (echo.unusualYear ? `${echoId} ${warningId}` : echoId) : undefined}
       step={inputType === "number" ? "any" : undefined}
       // RJSF keeps a `number` as text under a comma-decimal locale.
       inputMode={isNumeric && inputType === "text" ? "decimal" : undefined}
@@ -91,6 +102,21 @@ export function BaseInputTemplate<T = unknown>(props: BaseInputTemplateProps<T>)
       onBlur={(e) => onBlur?.(id, e.target.value)}
       onFocus={(e) => onFocus?.(id, e.target.value)}
     />
+  );
+  if (!echo) return input;
+
+  return (
+    <>
+      {input}
+      <p id={echoId} className="text-muted-foreground text-xs">
+        {echo.text}
+      </p>
+      {echo.unusualYear && (
+        <p id={warningId} role="status" className="text-warning text-xs">
+          {labels?.unusualYear?.(echo.year) ?? `Unusual year (${echo.year}): check the entry.`}
+        </p>
+      )}
+    </>
   );
 }
 
