@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -325,6 +325,64 @@ describe("buildMcpDirectFactories — integration tools", () => {
       expect(result.details).toEqual(structured);
     } finally {
       await pair.close();
+    }
+  });
+
+  it("writes an integration's image to the workspace and keeps it inline with a pointer", async () => {
+    // A valid 1x1 PNG, so the spill's real image sniffer runs end to end.
+    const png =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    const workspace = mkdtempSync(join(tmpdir(), "mcp-direct-image-"));
+    const host = new McpHost();
+    let gateway: Awaited<ReturnType<typeof createInProcessPair>> | undefined;
+    try {
+      const browser = await createInProcessPair([
+        {
+          descriptor: { name: "screenshot", inputSchema: { type: "object" } },
+          handler: async () => ({
+            content: [
+              { type: "text" as const, text: "captured" },
+              { type: "image" as const, data: png, mimeType: "image/png" },
+            ],
+          }),
+        },
+      ]);
+      await host.register({
+        connection: CONN_A,
+        namespace: "browser",
+        client: wrapClient(browser.client, { close: () => browser.close() }),
+      });
+      gateway = await createInProcessPair([
+        { descriptor: { name: "run_history", inputSchema: { type: "object" } }, handler: echo },
+        { descriptor: { name: "recall_memory", inputSchema: { type: "object" } }, handler: echo },
+        ...host.buildTools(),
+      ]);
+      const factories = await buildMcpDirectFactories({
+        mcp: wrapClient(gateway.client, { close: () => Promise.resolve() }),
+        runId: "run-image",
+        emit: () => {},
+        workspace,
+        drainer: EMPTY_DRAINER,
+      });
+      const captured: CapturedTool[] = [];
+      for (const f of factories) f(makeMockExtensionApi(captured));
+      const result = (await captured
+        .find((c) => c.name === "browser__screenshot")!
+        .execute("call-shot", {})) as {
+        content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+      };
+
+      expect(result.content.map((c) => c.type)).toEqual(["text", "image", "text"]);
+      expect(result.content[0]!.text).toBe("captured");
+      expect(result.content[1]).toEqual({ type: "image", data: png, mimeType: "image/png" });
+      expect(result.content[2]!.text).toContain("resources/call-shot-image-0.png");
+      expect(
+        new Uint8Array(readFileSync(join(workspace, "resources", "call-shot-image-0.png"))),
+      ).toEqual(new Uint8Array(Buffer.from(png, "base64")));
+    } finally {
+      await gateway?.close();
+      await host.dispose();
+      rmSync(workspace, { recursive: true, force: true });
     }
   });
 

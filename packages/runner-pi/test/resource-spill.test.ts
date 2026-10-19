@@ -209,20 +209,66 @@ describe("spillResourcesToWorkspace", () => {
       expect(new Uint8Array(written)).toEqual(PNG_BYTES);
     });
 
-    it("corrects a mislabelled mime on the inline block from the sniffed bytes", async () => {
-      // The file is named before it is sniffed, so its extension follows the
-      // DECLARED mime (as for resources); only the inline block, which a
-      // provider decodes by mime, needs the true one.
+    it("names, labels and points at a mislabelled image by its sniffed mime", async () => {
       const result: CallToolResult = {
         content: [{ type: "image", data: PNG_B64, mimeType: "image/jpeg" }],
       };
-      const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "img2" });
+      const events: Array<{ type: string; [k: string]: unknown }> = [];
+      const out = await spillResourcesToWorkspace(result, {
+        workspace,
+        toolCallId: "img2",
+        emit: (e) => events.push(e),
+      });
 
       expect(out.content[0]).toEqual({ type: "image", data: PNG_B64, mimeType: "image/png" });
       const pointer = out.content[1] as { type: "text"; text: string };
-      expect(pointer.text).toContain("resources/img2-image-0.jpg");
-      const written = await fs.readFile(path.join(workspace, "resources", "img2-image-0.jpg"));
+      expect(pointer.text).toContain("resources/img2-image-0.png");
+      expect(pointer.text).toContain("image/png");
+      expect(pointer.text).not.toContain("image/jpeg");
+      const written = await fs.readFile(path.join(workspace, "resources", "img2-image-0.png"));
       expect(new Uint8Array(written)).toEqual(PNG_BYTES);
+      expect(await fs.readdir(path.join(workspace, "resources"))).toEqual(["img2-image-0.png"]);
+      expect(events.map((e) => e.path)).toEqual(["resources/img2-image-0.png"]);
+    });
+
+    it("writes an animated PNG but points at it only — Pi's read does not take APNG", async () => {
+      // The 1x1 PNG with an `acTL` chunk inserted after IHDR (8 + 25 bytes).
+      const actl = Buffer.from([
+        0, 0, 0, 8, 0x61, 0x63, 0x54, 0x4c, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0,
+      ]);
+      const apng = Buffer.concat([
+        Buffer.from(PNG_BYTES.subarray(0, 33)),
+        actl,
+        Buffer.from(PNG_BYTES.subarray(33)),
+      ]);
+      const result: CallToolResult = {
+        content: [{ type: "image", data: apng.toString("base64"), mimeType: "image/png" }],
+      };
+      const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "img7" });
+
+      expect(out.content).toHaveLength(1);
+      const pointer = out.content[0] as { type: "text"; text: string };
+      expect(pointer.text).toContain("resources/img7-image-0.png");
+      expect(pointer.text).toContain("can't be shown inline");
+      const written = await fs.readFile(path.join(workspace, "resources", "img7-image-0.png"));
+      expect(new Uint8Array(written)).toEqual(new Uint8Array(apng));
+    });
+
+    it("turns an empty image into a 0-byte file and a pointer, never an empty inline image", async () => {
+      // An empty inline image would reach the provider as an undecodable image
+      // and fail the conversation; the pointer keeps the call's trace instead.
+      const result: CallToolResult = {
+        content: [{ type: "image", data: "", mimeType: "image/png" }],
+      };
+      const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "img8" });
+
+      expect(out.content).toHaveLength(1);
+      const pointer = out.content[0] as { type: "text"; text: string };
+      expect(pointer.text).toContain("resources/img8-image-0.png");
+      expect(pointer.text).toContain("0 bytes");
+      expect(pointer.text).toContain("can't be shown inline");
+      const written = await fs.readFile(path.join(workspace, "resources", "img8-image-0.png"));
+      expect(written.byteLength).toBe(0);
     });
 
     it("spills an SVG as a pointer only — Pi cannot show it inline", async () => {

@@ -28,12 +28,17 @@
  * Always spills (no size threshold): the whole point is to keep file bytes
  * out of the LLM context, so even small resources are written out.
  *
- * `image` blocks are spilled too, but KEPT inline: an MCP `ImageContent` is
- * meant to be seen, while the written copy lets the agent reuse the exact bytes
- * through its tools (`fromFile`, commit, convert). The inline copy survives
- * only when Pi's own sniffer — the predicate its `read` tool uses — recognises
- * the file, so "shown inline" and "readable as an image" agree. No resizing
- * here: Pi already downsizes tool-result images (`normalizeToolResultImages`).
+ * `image` blocks are written too, so the agent can reuse the exact bytes
+ * through its tools (`fromFile`, commit, convert). The block stays inline iff
+ * the sniffer Pi's `read` tool uses recognises the bytes (PNG, JPEG, GIF, WebP,
+ * BMP; not animated PNG); the file is then named, and the block labelled, by
+ * the sniffed mime. Anything else — including TIFF, ICO and APNG, which Pi's
+ * tool-result normalizer might have converted — is pointer-only, on purpose:
+ * inline and `read` follow one rule, and a format the provider rejects fails
+ * the whole conversation. No resizing here: Pi downsizes tool-result images
+ * itself (`normalizeToolResultImages`). Like binary `api_call` bodies, every
+ * image is written with no cap, so screenshot-heavy tools grow `resources/`
+ * on the workspace tmpfs.
  */
 
 import { promises as fs } from "node:fs";
@@ -124,23 +129,32 @@ export async function spillResourcesToWorkspace(
         out.push(block);
         continue;
       }
-      const base = ensureExtension(`image-${index}`, block.mimeType);
-      const written = await writeSpill(base, bytes, undefined, opts);
+      const n = index;
+      const written = await writeSpill(ensureExtension(`image-${n}`, block.mimeType), bytes, opts);
       if (!written) {
         out.push(block);
         continue;
       }
       index++;
+      let rel = written.rel;
       const sniffed = await sniffImageMime(written.abs);
+      if (sniffed && extensionForMime(sniffed) !== extensionForMime(block.mimeType)) {
+        // Mislabelled bytes: the file takes the extension of what it really is.
+        const sniffedRel = spillRel(ensureExtension(`image-${n}`, sniffed), opts);
+        try {
+          await fs.rename(written.abs, await resolveSafePath(opts.workspace, sniffedRel));
+          rel = sniffedRel;
+        } catch {
+          // Keep the declared name — the bytes are on disk either way.
+        }
+      }
+      emitSpilled(undefined, rel, bytes, opts);
       if (sniffed) out.push({ ...block, mimeType: sniffed });
-      const text = pointerText(
-        "image",
-        written.rel,
-        bytes,
-        block.mimeType,
-        sniffed ? "" : " — this image format can't be shown inline",
-        sniffed ? "read it to view it again" : undefined,
-      );
+      const text = sniffed
+        ? pointerText("image", rel, bytes, sniffed, { readHint: "read it to view it again" })
+        : pointerText("image", rel, bytes, block.mimeType, {
+            note: " — this image format can't be shown inline",
+          });
       out.push({ type: "text", text });
       continue;
     }
@@ -199,8 +213,9 @@ async function writeAndPointer(
   opts: ResourceSpillOptions,
 ): Promise<{ type: "text"; text: string } | null> {
   const base = ensureExtension(basenameFromUri(inner.uri, index), inner.mimeType);
-  const written = await writeSpill(base, bytes, inner.uri, opts);
+  const written = await writeSpill(base, bytes, opts);
   if (!written) return null;
+  emitSpilled(inner.uri, written.rel, bytes, opts);
   let preview = "";
   if (typeof inner.text === "string") {
     const firstLine = inner.text.split("\n", 1)[0]!.slice(0, 120);
@@ -208,44 +223,53 @@ async function writeAndPointer(
   }
   return {
     type: "text",
-    text: pointerText(
-      `resource ${inner.uri ?? "(no uri)"}`,
-      written.rel,
-      bytes,
-      inner.mimeType,
-      preview,
-    ),
+    text: pointerText(`resource ${inner.uri ?? "(no uri)"}`, written.rel, bytes, inner.mimeType, {
+      note: preview,
+    }),
   };
 }
 
+/** Workspace-relative path of a spilled file: `resources/<toolCallId>-<base>`. */
+function spillRel(base: string, opts: ResourceSpillOptions): string {
+  return `${SPILL_DIR}/${sanitizeSegment(opts.toolCallId)}-${base}`;
+}
+
 /**
- * Write `bytes` to `resources/<toolCallId>-<base>` and emit `resource.spilled`.
- * Returns the workspace-relative and absolute paths, or `null` on any failure.
+ * Write `bytes` to {@link spillRel}. Returns the workspace-relative and
+ * absolute paths, or `null` on any failure.
  */
 async function writeSpill(
   base: string,
   bytes: Uint8Array,
-  uri: string | undefined,
   opts: ResourceSpillOptions,
 ): Promise<{ rel: string; abs: string } | null> {
-  const rel = `${SPILL_DIR}/${sanitizeSegment(opts.toolCallId)}-${base}`;
+  const rel = spillRel(base, opts);
   try {
     const abs = await resolveSafePath(opts.workspace, rel);
     await fs.mkdir(path.dirname(abs), { recursive: true });
     await fs.writeFile(abs, bytes);
-    opts.emit?.({
-      type: "resource.spilled",
-      runId: opts.runId,
-      toolCallId: opts.toolCallId,
-      uri,
-      path: rel,
-      bytes: bytes.byteLength,
-      timestamp: Date.now(),
-    });
     return { rel, abs };
   } catch {
     return null;
   }
+}
+
+/** Emit `resource.spilled` for a file at its final workspace path. */
+function emitSpilled(
+  uri: string | undefined,
+  rel: string,
+  bytes: Uint8Array,
+  opts: ResourceSpillOptions,
+): void {
+  opts.emit?.({
+    type: "resource.spilled",
+    runId: opts.runId,
+    toolCallId: opts.toolCallId,
+    uri,
+    path: rel,
+    bytes: bytes.byteLength,
+    timestamp: Date.now(),
+  });
 }
 
 /** Pi's own image sniffer on the written file; a sniff failure counts as unknown. */
@@ -326,8 +350,7 @@ function pointerText(
   rel: string,
   bytes: Uint8Array,
   mimeType: string | undefined,
-  note: string,
-  readHint = "read it directly",
+  { note = "", readHint = "read it directly" }: { note?: string; readHint?: string } = {},
 ): string {
   const parts = [`${bytes.byteLength} bytes`];
   if (mimeType) parts.push(mimeType);
