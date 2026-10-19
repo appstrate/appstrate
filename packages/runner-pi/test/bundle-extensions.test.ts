@@ -174,6 +174,34 @@ describe("prepareBundleForPi — integrations/ install", () => {
     expect(written.some((file) => file.endsWith("INTEGRATION.md"))).toBe(true);
   });
 
+  it("writes no file of an integration's server/ subtree, and keeps a skill's", async () => {
+    const root = makeBundlePackage("@acme/agent", "1.0.0", "agent");
+    const integration = makeIntegration("@acme/local", {
+      "INTEGRATION.md": "# local",
+      "server/manifest.json": "{}",
+      "server/index.js": "console.log(1)",
+      "servers.md": "not the server dir",
+    });
+    const skill = makeBundlePackage("@acme/writing", "1.0.0", "skill", {
+      "SKILL.md": "# w",
+      "server/notes.md": "skill notes",
+    });
+    await prepareBundleForPi(makeTestBundle(root, [integration, skill]), {
+      workspaceDir: workspace,
+    });
+
+    const dir = path.join(workspace, ".pi", "integrations", "@acme", "local");
+    expect(await fs.readFile(path.join(dir, "INTEGRATION.md"), "utf8")).toBe("# local");
+    expect(await fs.readFile(path.join(dir, "servers.md"), "utf8")).toBe("not the server dir");
+    expect(await exists(path.join(dir, "server"))).toBe(false);
+    expect(
+      await fs.readFile(
+        path.join(workspace, ".pi", "skills", "@acme", "writing", "server", "notes.md"),
+        "utf8",
+      ),
+    ).toBe("skill notes");
+  });
+
   it("keeps skills and integrations in their own trees in a mixed bundle", async () => {
     const root = makeBundlePackage("@acme/agent", "1.0.0", "agent");
     const skill = makeBundlePackage("@acme/writing", "1.0.0", "skill", { "SKILL.md": "# w" });

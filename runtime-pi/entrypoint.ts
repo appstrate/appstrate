@@ -34,7 +34,6 @@
 
 import * as fs from "node:fs/promises";
 import { writeSync } from "node:fs";
-import * as path from "node:path";
 import type { ExtensionFactory, Api, Model } from "./pi-sdk.ts";
 import {
   bundleMemberDir,
@@ -71,7 +70,13 @@ import {
   drainAndEmitInto,
   type RuntimeEventDrainer,
 } from "@appstrate/core/runtime-event-drain";
-import { provisionWorkspace, provisionFiles, type ProvisionDeps } from "./provision.ts";
+import {
+  agentPackagePath,
+  provisionWorkspace,
+  provisionFiles,
+  removeAgentPackage,
+  type ProvisionDeps,
+} from "./provision.ts";
 import { createRunFileUploader, sweepOutputs, summarizeArtifacts } from "./publish.ts";
 import type { SweepResult } from "./publish.ts";
 import { formatLogLine } from "@appstrate/core/log-line";
@@ -393,7 +398,7 @@ await Promise.all([provisionWorkspace(provisionDeps), provisionFiles(provisionDe
 // therefore a genuine defect — a truncated or corrupt upload — and gets the same
 // fail-loud treatment as a missing one, with a breadcrumb naming the cause
 // rather than an unhandled rejection.
-const packagePath = path.join(WORKSPACE, "agent-package.afps");
+const packagePath = agentPackagePath(WORKSPACE);
 
 const [, bundle] = await Promise.all([
   initGitWorkspace(),
@@ -435,11 +440,10 @@ try {
 }
 
 // Remove the original AFPS before the agent starts, on success and failure
-// alike: it holds every member's manifest, which carries connection data the
-// agent must not hold, and the run reads the bundle from memory from here on.
-// Awaited so the file is gone before the session opens; a failure stays
-// non-fatal.
-await fs.unlink(packagePath).catch(() => {});
+// alike: the run reads the bundle from memory from here on, and the file
+// carries connection data the agent must not hold. A file that cannot be
+// removed fails the run.
+await removeAgentPackage({ workspace: WORKSPACE, die });
 
 phaseTimings.bundlePrepareMs = Math.round(performance.now() - bundlePrepareStart);
 // No extension count here: `extensionFactories` is still empty at this point —

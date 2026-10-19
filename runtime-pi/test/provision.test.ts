@@ -20,13 +20,15 @@
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, jest } from "bun:test";
-import { mkdtemp, readFile, rm, access } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, access, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { verify } from "@appstrate/afps-runtime/events";
 import {
+  agentPackagePath,
   provisionWorkspace,
   provisionFiles,
+  removeAgentPackage,
   signedGetWithRetry,
   type ProvisionDeps,
 } from "../provision.ts";
@@ -589,5 +591,53 @@ describe("signedGetWithRetry — per-attempt headers deadline", () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+});
+
+describe("removeAgentPackage", () => {
+  let workspace: string;
+  const dying = () => {
+    const messages: string[] = [];
+    const die = async (message: string): Promise<never> => {
+      messages.push(message);
+      throw new Error(message);
+    };
+    return { die, messages };
+  };
+  const gone = (p: string) =>
+    access(p).then(
+      () => false,
+      () => true,
+    );
+
+  beforeEach(async () => {
+    workspace = await mkdtemp(path.join(tmpdir(), "remove-agent-package-"));
+  });
+  afterEach(async () => {
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("removes the provisioned bundle", async () => {
+    await writeFile(agentPackagePath(workspace), "bundle");
+    const { die, messages } = dying();
+    await removeAgentPackage({ workspace, die });
+    expect(await gone(agentPackagePath(workspace))).toBe(true);
+    expect(messages).toEqual([]);
+  });
+
+  it("accepts a bundle already gone", async () => {
+    const { die, messages } = dying();
+    await removeAgentPackage({ workspace, die });
+    expect(messages).toEqual([]);
+  });
+
+  it("fails the run when the bundle cannot be removed", async () => {
+    // A non-empty directory under the bundle's name: `rm` without `recursive` refuses it.
+    await mkdir(path.join(agentPackagePath(workspace), "inner"), { recursive: true });
+    const { die, messages } = dying();
+    await expect(removeAgentPackage({ workspace, die })).rejects.toThrow(
+      /Failed to remove the provisioned agent package/,
+    );
+    expect(messages).toHaveLength(1);
   });
 });
