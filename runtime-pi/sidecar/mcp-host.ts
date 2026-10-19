@@ -52,6 +52,11 @@ import {
 } from "@appstrate/mcp-transport";
 import type { Progress } from "@modelcontextprotocol/sdk/types.js";
 import { logger } from "./logger.ts";
+import {
+  boundUpstreamError,
+  budgetMcpToolResult,
+  type ToolOutputBudgetDeps,
+} from "./tool-output-spill.ts";
 
 /** Cap on a relayed progress `message`: upstream-controlled text bound for the agent. */
 const RELAYED_PROGRESS_MESSAGE_MAX_CHARS = 1024;
@@ -194,6 +199,11 @@ interface McpHostUpstream {
 interface McpHostOptions {
   /** Sink for `notifications/message` from third-party servers. */
   onLog?: (event: { source: string; level: string; data: unknown }) => void;
+  /**
+   * Run-scoped budget applied to untrusted upstream results. Trusted
+   * upstreams (the in-process `api_call` server) budget their own output.
+   */
+  outputBudget?: ToolOutputBudgetDeps;
 }
 
 /** Reserved: a tool that declares it cannot sit in a namespace served by several connections. */
@@ -210,6 +220,7 @@ interface ToolRoute {
   client: AppstrateMcpClient;
   accountId: string | null;
   originalName: string;
+  trusted: boolean;
 }
 
 function siblingKey(trusted: boolean, originalName: string): string {
@@ -610,6 +621,7 @@ export class McpHost {
       client: upstream.client,
       accountId: upstream.connection?.accountId ?? null,
       originalName,
+      trusted: upstream.trusted === true,
     };
   }
 
@@ -680,8 +692,10 @@ export class McpHost {
         extra: AppstrateRequestExtra,
       ): Promise<CallToolResult> => {
         const relay = relayProgress(extra);
+        const budget = route.trusted ? undefined : this.options.outputBudget;
+        let result: CallToolResult;
         try {
-          return stripForgedRuntimeEvents(
+          result = stripForgedRuntimeEvents(
             await route.client.callTool(
               { name: route.originalName, arguments: args },
               {
@@ -690,9 +704,13 @@ export class McpHost {
               },
             ),
           );
+        } catch (err) {
+          // A JSON-RPC error message (or an HTTP body a transport echoes) is tool text too.
+          throw budget ? boundUpstreamError(err, budget.tokenBudget, extra.signal) : err;
         } finally {
           relay?.close();
         }
+        return budget ? budgetMcpToolResult(result, budget, desc.name) : result;
       };
       // One connection: the upstream descriptor as is. Several: every tool of the
       // slot names its connection, so a call always states the account it acts on.

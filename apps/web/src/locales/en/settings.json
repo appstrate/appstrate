@@ -253,6 +253,7 @@
   "file.addFile": "+ Add file",
   "file.uploading": "Uploading…",
   "file.uploadsDisabled": "File uploads are not configured for this form.",
+  "date.unusualYear": "Unusual year ({{year}}): check the entry.",
   "orgSettings.pendingInvitations": "Pending invitations",
   "orgSettings.cancelInvitation": "Cancel invitation",
   "orgSettings.invitationCanceled": "Invitation canceled.",

@@ -591,7 +591,7 @@ describe("POST /mcp — bounded response read", () => {
     };
     // The token-budget gate must have triggered the blob spill.
     expect(result.content[0]!.type).toBe("resource_link");
-    expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/api-response\//);
+    expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/tool-output\//);
   });
 });
 

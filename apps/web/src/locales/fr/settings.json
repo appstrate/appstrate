@@ -253,6 +253,7 @@
   "file.addFile": "+ Ajouter un fichier",
   "file.uploading": "Téléversement…",
   "file.uploadsDisabled": "L'envoi de fichiers n'est pas configuré pour ce formulaire.",
+  "date.unusualYear": "Année inhabituelle ({{year}}) : vérifiez la saisie.",
   "orgSettings.pendingInvitations": "Invitations en attente",
   "orgSettings.cancelInvitation": "Annuler l’invitation",
   "orgSettings.invitationCanceled": "Invitation annulée.",

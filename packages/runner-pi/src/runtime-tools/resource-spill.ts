@@ -322,7 +322,7 @@ function decodeUriComponentSafe(s: string): string {
 /**
  * Append a mime-derived extension when the basename has none, so the agent's
  * `jq` / `grep` / editor tooling recognises the file type. Blob URIs like
- * `appstrate://api-response/{runId}/{ulid}` have an extensionless ULID
+ * `appstrate://tool-output/{runId}/{ulid}` have an extensionless ULID
  * tail, so without this an `application/json` response would land as a bare
  * `<ulid>` file.
  */

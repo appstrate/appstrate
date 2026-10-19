@@ -21,7 +21,8 @@ export async function buildApiCallHost(
   integs: ApiCallIntegrationConfig[],
   deps: ApiCallToolDeps,
 ): Promise<McpHost> {
-  const host = new McpHost();
+  // Production also hands the host the api_call budget for third-party results.
+  const host = new McpHost({ outputBudget: deps });
   // Production (`bootIntegrations`) registers each auth of one integration as
   // its own in-process server but merges them into the namespace allocated to
   // the first, so multi-auth tools never split into `drive` / `drive_2`.
