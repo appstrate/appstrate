@@ -13,7 +13,7 @@
  */
 
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import type { Implementation } from "@modelcontextprotocol/sdk/types.js";
+import { ListToolsRequestSchema, type Implementation } from "@modelcontextprotocol/sdk/types.js";
 export { forgetProtocolEras } from "./client.ts";
 import { parseMcpPost, serveStatelessPost } from "./streamable-post.ts";
 import {
@@ -33,6 +33,8 @@ const HEADER_MISMATCH = -32020;
 
 export interface FakeServerOptions {
   tools?: AppstrateToolDefinition[];
+  /** Tools per `tools/list` page; omitted = one page. */
+  pageSize?: number;
   serverInfo?: Implementation;
   instructions?: string;
 }
@@ -47,14 +49,32 @@ export interface LegacyServerOptions extends FakeServerOptions {
   sse?: boolean;
 }
 
+/** The `tools/list` page a cursor (the index of its first tool) names. */
+function toolPage(tools: AppstrateToolDefinition[], cursor: unknown, pageSize: number | undefined) {
+  const start = Number(cursor ?? 0);
+  const end = start + (pageSize ?? Math.max(tools.length, 1));
+  return {
+    tools: tools.slice(start, end).map((tool) => tool.descriptor),
+    ...(end < tools.length ? { nextCursor: String(end) } : {}),
+  };
+}
+
 /** A 2025-era server on the v1 SDK: a modern request is a 400 to it. */
 export function legacyMcpHandler(opts: LegacyServerOptions = {}): McpHandler {
-  const build = () =>
-    createMcpServer(
-      opts.tools ?? [],
+  const tools = opts.tools ?? [];
+  const build = () => {
+    const server = createMcpServer(
+      tools,
       opts.serverInfo ?? { name: "fake-legacy", version: "1.0.0" },
       opts.instructions ? { instructions: opts.instructions } : {},
     );
+    if (opts.pageSize !== undefined) {
+      server.setRequestHandler(ListToolsRequestSchema, async (request) =>
+        toolPage(tools, request.params?.cursor, opts.pageSize),
+      );
+    }
+    return server;
+  };
   if (opts.stateful) {
     const server = build();
     const transport = new WebStandardStreamableHTTPServerTransport({
@@ -85,8 +105,6 @@ export function legacyMcpHandler(opts: LegacyServerOptions = {}): McpHandler {
 }
 
 export interface ModernServerOptions extends FakeServerOptions {
-  /** Tools per `tools/list` page; omitted = one page. */
-  pageSize?: number;
   /**
    * Answers every non-modern request (`initialize`, a POST without the modern headers, a GET):
    * a dual-era server. Omitted = modern only.
@@ -118,7 +136,6 @@ const rpcError = (status: number, id: unknown, code: number, message: string, da
 /** A 2026-07-28 server, modern only unless `legacy` is given. */
 export function modernMcpHandler(opts: ModernServerOptions = {}): McpHandler {
   const tools = opts.tools ?? [];
-  const pageSize = opts.pageSize ?? Math.max(tools.length, 1);
   const serverInfo = opts.serverInfo ?? { name: "fake-modern", version: "1.0.0" };
   let refusals = opts.refuseFirst ?? 0;
   const supported = opts.legacy
@@ -198,15 +215,8 @@ export function modernMcpHandler(opts: ModernServerOptions = {}): McpHandler {
           _meta: { [SERVER_INFO_KEY]: serverInfo },
           ...(opts.instructions ? { instructions: opts.instructions } : {}),
         });
-      case "tools/list": {
-        const start = Number(message.params?.cursor ?? 0);
-        const end = start + pageSize;
-        return result({
-          ...cacheable,
-          tools: tools.slice(start, end).map((tool) => tool.descriptor),
-          ...(end < tools.length ? { nextCursor: String(end) } : {}),
-        });
-      }
+      case "tools/list":
+        return result({ ...cacheable, ...toolPage(tools, message.params?.cursor, opts.pageSize) });
       case "tools/call": {
         const name = message.params?.name;
         if (request.headers.get("mcp-name") !== name) {

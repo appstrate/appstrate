@@ -6,17 +6,11 @@
  * `instructions`, a required bearer, and values a hostile server would have its client echo (a
  * session id, a cursor prefix); records every request. Its protocol era is `legacy` (the
  * `initialize` handshake, the default), `modern` (MCP 2026-07-28 only) or `dual`.
- * Lifted from `mountStandalone` in `packages/mcp-transport/test/client.test.ts`.
+ * Served by the fake handlers of `@appstrate/mcp-transport/testing`.
  */
 
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import {
-  ListToolsRequestSchema,
-  type Implementation,
-  type ToolAnnotations,
-} from "@modelcontextprotocol/sdk/types.js";
-import { modernMcpHandler } from "@appstrate/mcp-transport/testing";
+import type { Implementation, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
+import { legacyMcpHandler, modernMcpHandler } from "@appstrate/mcp-transport/testing";
 
 /** A name alone gets the description `Tool <name>` and no annotations. */
 export type FakeMcpTool =
@@ -51,54 +45,28 @@ export interface FakeMcpServer {
 
 export function startFakeMcpServer(opts: FakeMcpServerOptions = {}): FakeMcpServer {
   const tools = (opts.tools ?? []).map((tool) => ({
-    ...(typeof tool === "string" ? { name: tool, description: `Tool ${tool}` } : tool),
-    inputSchema: { type: "object" as const, properties: {} },
+    descriptor: {
+      ...(typeof tool === "string" ? { name: tool, description: `Tool ${tool}` } : tool),
+      inputSchema: { type: "object" as const, properties: {} },
+    },
+    handler: async () => ({ content: [] }),
   }));
-  const pageSize = opts.pageSize ?? Math.max(tools.length, 1);
+  const served = {
+    tools,
+    ...(opts.pageSize !== undefined ? { pageSize: opts.pageSize } : {}),
+    ...(opts.serverInfo ? { serverInfo: opts.serverInfo } : {}),
+    ...(opts.instructions ? { instructions: opts.instructions } : {}),
+  };
   const authorizations: (string | null)[] = [];
   const methods: string[] = [];
   const requests: { headers: Headers; body: string }[] = [];
 
-  const handleLegacy = async (request: Request): Promise<Response> => {
-    const server = new Server(opts.serverInfo ?? { name: "fake-mcp", version: "1.0.0" }, {
-      capabilities: { tools: {} },
-      ...(opts.instructions ? { instructions: opts.instructions } : {}),
-    });
-    server.setRequestHandler(ListToolsRequestSchema, async (req) => {
-      const start = Number(req.params?.cursor ?? 0);
-      const end = start + pageSize;
-      return {
-        tools: tools.slice(start, end),
-        ...(end < tools.length ? { nextCursor: String(end) } : {}),
-      };
-    });
-    const transport = new WebStandardStreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: true,
-    });
-    try {
-      await server.connect(transport);
-      return await transport.handleRequest(request);
-    } finally {
-      await transport.close();
-      await server.close();
-    }
-  };
-
   const era = opts.era ?? "legacy";
+  const legacy = legacyMcpHandler(served);
   const handle =
     era === "legacy"
-      ? handleLegacy
-      : modernMcpHandler({
-          tools: tools.map((descriptor) => ({
-            descriptor,
-            handler: async () => ({ content: [] }),
-          })),
-          pageSize,
-          ...(opts.serverInfo ? { serverInfo: opts.serverInfo } : {}),
-          ...(opts.instructions ? { instructions: opts.instructions } : {}),
-          ...(era === "dual" ? { legacy: handleLegacy } : {}),
-        });
+      ? legacy
+      : modernMcpHandler({ ...served, ...(era === "dual" ? { legacy } : {}) });
 
   const http = Bun.serve({
     hostname: "127.0.0.1",

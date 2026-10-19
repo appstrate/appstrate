@@ -104,33 +104,59 @@ first-party tools where subprocess overhead is unjustifiable.
 ### `createMcpHttpClient(url, options?)`
 
 A connected `AppstrateMcpClient` over Streamable HTTP, on the v2 client SDK
-(`@modelcontextprotocol/client`), speaking **both protocol eras**: it probes
-with `server/discover` (MCP 2026-07-28 — stateless, version and identity in
-each request's `_meta` and `MCP-Protocol-Version` header), retries once on an
-`UnsupportedProtocolVersion` (-32022) listing a shared version, and falls back
-to the 2025 `initialize` handshake when the server gives no modern evidence.
-A probe answered 5xx or unanswered within 10 s falls back to `initialize`
-once. A legacy verdict is remembered per origin (15 min) so later connects
-skip the probe; any non-auth failure of such a connect re-probes once.
-`era: "legacy"` skips the probe for a first-party v1 server.
-`getProtocol()` says which era was negotiated. `tools/list` pages are sent as
-requests of their own, and on a modern connection a tool with an invalid
-`x-mcp-header` is excluded and reported through `onWarning`.
+(`@modelcontextprotocol/client`). This section is the reference for how it
+picks a **protocol era**; other documents link here rather than restate it.
+
+- **Negotiation** is the SDK's `'auto'` mode: a `server/discover` probe in the
+  MCP 2026-07-28 shape (stateless; version and identity in each request's
+  `_meta` and `MCP-Protocol-Version` header). A result, or an
+  `UnsupportedProtocolVersion` (-32022) listing a version both sides speak
+  (retried with it), keeps the connection modern. Anything else falls back to
+  the 2025 `initialize` handshake.
+- **Inconclusive probe**: a probe answered 5xx, or unanswered within 10 s (or
+  the caller's `defaultTimeoutMs`, when lower), is no era evidence. The client
+  tries `initialize` once. If that fails too, its error is surfaced when it
+  says more than the probe did (an auth refusal, a fault of the injected
+  `fetch`, a 5xx); otherwise the probe's is, so a transient 5xx stays
+  retryable.
+- **Legacy verdict cache**: an origin found legacy, by the probe or by that
+  fallback, is remembered for 15 minutes. Its next connects skip the probe.
+  The verdict is never renewed by those connects, so a server that upgrades is
+  re-probed when it expires. A remembered origin that refuses `initialize`
+  with a 4xx other than 401/403 is re-probed at once; an outage (refused
+  connection, timeout, 5xx) keeps the verdict and surfaces its own error.
+- **`era: "legacy"`** skips the probe, for a first-party server legacy by
+  construction (the sidecar's `/mcp`, the platform MCP module).
+
+`getProtocol()` says which era was negotiated.
+
+**Tools.** `tools/list` pages are raw requests, never the SDK's `listTools()`
+(which answers `[]` to a server advertising no `tools` capability).
+`listTools()` walks every page, up to 64, and throws past that. On a modern
+connection a tool with an invalid `x-mcp-header` is excluded and reported
+through `onWarning`. The listed definitions are handed to each `callTool`:
+the SDK validates the output against the tool's `outputSchema` in both eras.
+On a modern connection it also mirrors `x-mcp-header` parameters. A
+`HeaderMismatch` (-32020) on a modern call refreshes the list and resends the
+call once. On a legacy connection -32020 is the server's own error and is
+never resent.
 
 Credentials and egress belong to the injected `fetch` (the credential proxy):
 the SDK is never given an auth provider and leaves redirects to it. A fault
 the injected fetch throws during the connect comes back as itself.
 
 `wrapClient(client, transport)` gives the same surface over a connected v1
-SDK `Client` — in-process pairs, stdio subprocesses, the HTTP+SSE transport.
+SDK `Client`: in-process pairs, stdio subprocesses, the HTTP+SSE transport.
+Their servers are 2025-era by construction. `listTools()` walks the pages
+there too, and the v1 client validates outputs against every page's tools.
 
 ### `@appstrate/mcp-transport/testing`
 
 Fake servers of each era as `Request → Response` handlers, for consumer
 tests: `legacyMcpHandler` (v1 SDK, stateless), `modernMcpHandler` (written
 from the 2026-07-28 spec; `legacy` makes it dual-era, `refuseFirst` answers
--32022 first), `handlerFetch`, and `forgetProtocolEras()` to reset the
-per-origin era cache between tests.
+-32022 first), both paginating by `pageSize`, `handlerFetch`, and
+`forgetProtocolEras()` to reset the per-origin era cache between tests.
 
 ### Re-exports from the SDK
 
