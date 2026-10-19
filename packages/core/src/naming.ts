@@ -268,7 +268,7 @@ export function decodeFilenameHeader(raw: string): string | null {
 }
 
 /**
- * Canonical MIME → filename-extension table for the text-shaped and common
+ * Canonical MIME → filename-extension table for the text-shaped, image and common
  * file formats the platform names files after. Values carry no leading dot.
  *
  * ONE table because the same question is asked on both sides of the run
@@ -290,6 +290,12 @@ const MIME_EXTENSIONS: ReadonlyMap<string, string> = new Map([
   ["application/x-yaml", "yaml"],
   ["application/yaml", "yaml"],
   ["application/pdf", "pdf"],
+  ["image/png", "png"],
+  ["image/jpeg", "jpg"],
+  ["image/gif", "gif"],
+  ["image/webp", "webp"],
+  ["image/bmp", "bmp"],
+  ["image/svg+xml", "svg"],
 ]);
 
 /**

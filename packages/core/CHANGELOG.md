@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Image MIME types in `extensionForMime`** (`@appstrate/core/naming`): `image/png`, `image/jpeg` (`jpg`), `image/gif`, `image/webp`, `image/bmp` and `image/svg+xml` (`svg`, ahead of the `+xml` suffix rule) now resolve to an extension, so spilled images and unnamed inline `data:` inputs are no longer extensionless (or `.xml` for SVG). (#2120)
 - **Unauthenticated integrations** (`@appstrate/core/integration`, AFPS §7.2):
   **`isUnauthenticatedIntegration(manifest)`** — the manifest omits `auths`, so it binds no
   connection; **`findConnectionlessVariables`**, a write-path refusal of `variables` on such an
