@@ -2923,7 +2923,10 @@ describe("executeApiCall — the integration's own MCP endpoint", () => {
   let deps = makeDeps();
   const reset = () => {
     fetchFn = mock(async () => new Response("{}", { status: 200 }));
-    deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch, mcpEndpoint: MCP_ENDPOINT });
+    deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      mcpEndpoint: { url: MCP_ENDPOINT, transport: "streamable-http" },
+    });
   };
 
   for (const target of [
@@ -2960,11 +2963,68 @@ describe("executeApiCall — the integration's own MCP endpoint", () => {
     }
     expect(fetchFn).toHaveBeenCalledTimes(3);
   });
+
+  for (const status of [301, 302, 307, 308]) {
+    it(`refuses a ${status} redirect onto the endpoint before sending anything there`, async () => {
+      const sent: { path: string; authorization: string | null }[] = [];
+      const transport = mock(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        sent.push({
+          path: url.pathname,
+          authorization: new Headers(init?.headers).get("authorization"),
+        });
+        if (url.pathname === "/start") {
+          return new Response(null, { status, headers: { location: "/mcp/s3cr3t-token" } });
+        }
+        return new Response("{}", { status: 200 });
+      });
+      deps = makeDeps({
+        fetchFn: transport as unknown as typeof fetch,
+        mcpEndpoint: { url: MCP_ENDPOINT, transport: "streamable-http" },
+      });
+      const result = await call("https://api.example.com/start");
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.code).toBe("unauthorized_target");
+        expect(result.error).toBe("its MCP endpoint is reached through its tools, not api_call");
+      }
+      expect(sent).toEqual([{ path: "/start", authorization: "Bearer tok-123" }]);
+    });
+  }
+
+  it("refuses every path of the origin of an SSE endpoint, and keeps other hosts", async () => {
+    fetchFn = mock(async () => new Response("{}", { status: 200 }));
+    deps = makeDeps({
+      fetchFn: fetchFn as unknown as typeof fetch,
+      mcpEndpoint: { url: "https://api.example.com/sse", transport: "sse" },
+      declaredUris: ["https://api.example.com/**", "https://files.example.com/**"],
+      fetchCredentials: mock(async (): Promise<CredentialsResponse> => ({
+        credentials: { access_token: "tok-123" },
+        authorizedUris: ["https://api.example.com/**", "https://files.example.com/**"],
+        allowAllUris: false,
+        credentialHeaderName: "Authorization",
+        credentialHeaderPrefix: "Bearer ",
+        credentialFieldName: "access_token",
+      })),
+    });
+    for (const target of [
+      "https://api.example.com/sse",
+      "https://api.example.com/messages?sessionId=1",
+      "https://api.example.com/v1/items",
+    ]) {
+      const result = await call(target);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.code).toBe("unauthorized_target");
+    }
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect((await call("https://files.example.com/v1/items", "GET")).ok).toBe(true);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("targetsMcpEndpoint", () => {
   it("matches the endpoint path and below it, on the same origin only", () => {
-    const endpoint = "https://mcp.example.com/v1/mcp";
+    const endpoint = { url: "https://mcp.example.com/v1/mcp", transport: "streamable-http" };
     expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcp", endpoint)).toBe(true);
     expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcp/?x=1#f", endpoint)).toBe(true);
     expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcp/sse", endpoint)).toBe(true);
@@ -2976,9 +3036,17 @@ describe("targetsMcpEndpoint", () => {
   });
 
   it("matches only the root path for an endpoint at the origin root", () => {
-    const endpoint = "https://mcp.example.com/";
+    const endpoint = { url: "https://mcp.example.com/" };
     expect(targetsMcpEndpoint("https://mcp.example.com", endpoint)).toBe(true);
     expect(targetsMcpEndpoint("https://mcp.example.com/?a=b", endpoint)).toBe(true);
     expect(targetsMcpEndpoint("https://mcp.example.com/v1/items", endpoint)).toBe(false);
+  });
+
+  it("matches every path of the origin for an SSE endpoint, and that origin only", () => {
+    const endpoint = { url: "https://mcp.example.com/v1/sse", transport: "sse" };
+    expect(targetsMcpEndpoint("https://mcp.example.com/messages?sessionId=1", endpoint)).toBe(true);
+    expect(targetsMcpEndpoint("https://mcp.example.com/", endpoint)).toBe(true);
+    expect(targetsMcpEndpoint("https://other.example.com/messages", endpoint)).toBe(false);
+    expect(targetsMcpEndpoint("http://mcp.example.com/messages", endpoint)).toBe(false);
   });
 });
