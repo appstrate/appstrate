@@ -134,9 +134,13 @@ picks a **protocol era**; other documents link here rather than restate it.
 (which answers `[]` to a server advertising no `tools` capability).
 `listTools()` walks every page, up to 64, and throws past that. On a modern
 connection a tool with an invalid `x-mcp-header` is excluded and reported
-through `onWarning`. The listed definitions are handed to each `callTool`:
-the SDK validates the output against the tool's `outputSchema` in both eras.
-On a modern connection it also mirrors `x-mcp-header` parameters. A
+through `onWarning`. A server repeating its cursor throws too, never a
+partial list. The definitions of the session's last listing are handed to
+each `callTool`: the SDK validates the output against the tool's
+`outputSchema` in both eras, and on a modern connection mirrors `x-mcp-header`
+parameters. A modern call made before any listing gets both only through the
+SDK's own recovery, so list first (current consumers do). A tool whose
+`outputSchema` cannot compile is refused before the call is sent. A
 `HeaderMismatch` (-32020) on a modern call refreshes the list and resends the
 call once. On a legacy connection -32020 is the server's own error and is
 never resent.

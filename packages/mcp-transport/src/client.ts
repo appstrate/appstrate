@@ -123,13 +123,21 @@ export interface AppstrateMcpClient {
   getServerVersion(): Implementation | undefined;
   getInstructions(): string | undefined;
   getProtocol(): McpProtocol | undefined;
-  /** Every `tools/list` page; throws on a server still paginating past {@link MAX_TOOL_PAGES}. */
+  /**
+   * Every `tools/list` page; throws, with no partial list, on a server repeating its cursor or
+   * still paginating past {@link MAX_TOOL_PAGES}.
+   */
   listTools(options?: { signal?: AbortSignal }): Promise<{ tools: Tool[] }>;
   /** One `tools/list` page: the first without `cursor`, else the page `cursor` names. */
   listToolsPage(options?: {
     cursor?: string;
     signal?: AbortSignal;
   }): Promise<{ tools: Tool[]; nextCursor?: string }>;
+  /**
+   * The output is validated against the tool's definition from this session's last listing; a
+   * modern call made before any listing is validated and mirrored only through the SDK's own
+   * recovery. A listed tool whose `outputSchema` cannot compile is refused before the call.
+   */
   callTool(
     args: { name: string; arguments?: Record<string, unknown> },
     options?: {
@@ -170,8 +178,9 @@ export async function createMcpHttpClient(
 
 /**
  * One connect, era included. An origin remembered legacy connects with `initialize`; only a 4xx
- * other than an auth refusal (the server stopped speaking it) drops the verdict and probes again.
- * An outage keeps the verdict and surfaces its own error: a re-probe would only wait it out twice.
+ * that refuses the request itself (the server stopped speaking it) drops the verdict and probes
+ * again. An auth refusal, an outage or a retryable 408/429 keeps the verdict and surfaces its own
+ * error: none says anything of the era, and a re-probe would only wait it out twice.
  */
 async function connectOnce(
   targetUrl: URL,
@@ -185,7 +194,8 @@ async function connectOnce(
       return await connectAttempt(targetUrl, headers, options, "legacy");
     } catch (err) {
       const status = httpStatusOf(err);
-      const refused = status !== undefined && status >= 400 && status < 500;
+      const refused =
+        status !== undefined && status >= 400 && status < 500 && !RETRYABLE_4XX.has(status);
       if (options.signal?.aborted || !refused || isAuthRefusal(err)) throw err;
       forgetLegacy(origin);
     }
@@ -484,6 +494,9 @@ const RETRYABLE_CODES = new Set([
   "DNSTimeout",
 ]);
 
+/** The 4xx a server answers when it is busy, not refusing: retried, and no sign of its era. */
+const RETRYABLE_4XX = new Set([408, 429]);
+
 /** Whether a connect error is permanent (no retry); an unknown shape is, rather than spin. */
 function isFatalConnectError(err: unknown): boolean {
   if (err instanceof DOMException && err.name === "AbortError") return true;
@@ -494,7 +507,7 @@ function isFatalConnectError(err: unknown): boolean {
 
   const status = httpStatusOf(err);
   if (status !== undefined) {
-    if (status === 408 || status === 429) return false;
+    if (RETRYABLE_4XX.has(status)) return false;
     if (status >= 400 && status < 500) return true;
     if (status >= 500) return false;
   }
@@ -559,9 +572,12 @@ async function walkTools(
   for (let n = 0; n < MAX_TOOL_PAGES; n++) {
     const page = await session.listToolsPage(cursor, options);
     tools.push(...page.tools);
-    if (page.nextCursor === undefined || page.nextCursor === cursor) {
+    if (page.nextCursor === undefined) {
       session.replaceTools(tools);
       return { tools };
+    }
+    if (page.nextCursor === cursor) {
+      throw new Error(`tools/list repeated its cursor '${cursor}': the listing would never end`);
     }
     cursor = page.nextCursor;
   }

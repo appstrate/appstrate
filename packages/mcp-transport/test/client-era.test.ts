@@ -288,24 +288,26 @@ describe("createMcpHttpClient — inconclusive probes and the era cache", () => 
     }
   });
 
-  it("keeps a remembered legacy verdict through a 5xx, surfacing it without a probe", async () => {
-    const url = freshUrl();
-    let handler: McpHandler = legacyMcpHandler({ tools: [echo] });
-    const { fetch, seen } = recorded((request) => handler(request));
-    await (await createMcpHttpClient(url, { fetch })).close();
-    const legacy = handler;
-    handler = async () => new Response("down", { status: 500 });
-    seen.length = 0;
-    const caught = await createMcpHttpClient(url, { fetch }).catch((err: unknown) => err);
-    expect(httpStatusOf(caught)).toBe(500);
-    expect(methods(seen)).toEqual(["initialize"]);
-    // The outage did not drop the verdict: once back, the origin still skips the probe.
-    handler = legacy;
-    seen.length = 0;
-    await (await createMcpHttpClient(url, { fetch })).close();
-    expect(methods(seen)[0]).toBe("initialize");
-    expect(methods(seen)).not.toContain("server/discover");
-  });
+  for (const status of [500, 429, 408]) {
+    it(`keeps a remembered legacy verdict through a ${status}, surfacing it without a probe`, async () => {
+      const url = freshUrl();
+      let handler: McpHandler = legacyMcpHandler({ tools: [echo] });
+      const { fetch, seen } = recorded((request) => handler(request));
+      await (await createMcpHttpClient(url, { fetch })).close();
+      const legacy = handler;
+      handler = async () => new Response("busy", { status });
+      seen.length = 0;
+      const caught = await createMcpHttpClient(url, { fetch }).catch((err: unknown) => err);
+      expect(httpStatusOf(caught)).toBe(status);
+      expect(methods(seen)).toEqual(["initialize"]);
+      // The verdict survived: once back, the origin still skips the probe.
+      handler = legacy;
+      seen.length = 0;
+      await (await createMcpHttpClient(url, { fetch })).close();
+      expect(methods(seen)[0]).toBe("initialize");
+      expect(methods(seen)).not.toContain("server/discover");
+    });
+  }
 
   for (const [what, fault] of [
     ["refuses connections", "ConnectionRefused"],
@@ -946,6 +948,37 @@ describe("tools/list pagination on every SDK line", () => {
           /does not match the tool's output schema/,
         );
       }
+    } finally {
+      await client.close();
+    }
+  });
+
+  /** A v1 in-process server whose every page holds one tool and names `next(cursor)`. */
+  async function endlessPair(next: (cursor: string | undefined) => string) {
+    const server = createMcpServer(paged(1));
+    server.setRequestHandler(ListToolsRequestSchema, async (request) => ({
+      tools: paged(1).map((d) => d.descriptor),
+      nextCursor: next(request.params?.cursor),
+    }));
+    const client = new Client({ name: "endless-test", version: "0.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+    return wrapClient(client, { close: () => server.close() });
+  }
+
+  it("refuses a server repeating its cursor, with no partial list", async () => {
+    const client = await endlessPair(() => "same");
+    try {
+      await expect(client.listTools()).rejects.toThrow("tools/list repeated its cursor 'same'");
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("refuses a server still paginating past 64 pages, with no partial list", async () => {
+    const client = await endlessPair((cursor) => String(Number(cursor ?? 0) + 1));
+    try {
+      await expect(client.listTools()).rejects.toThrow("tools/list did not end within 64 pages");
     } finally {
       await client.close();
     }
