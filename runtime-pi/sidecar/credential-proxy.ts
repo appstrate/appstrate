@@ -166,6 +166,12 @@ export interface ApiCallDeps extends ApiCallBaseDeps {
    * cookies or can skip the SSRF gate, so a connection-supplied host never does.
    */
   declaredUris: readonly string[];
+  /**
+   * The integration's own remote MCP endpoint (`server.url`), when it has one. `api_call` refuses
+   * it ({@link targetsMcpEndpoint}): that server is reached through its tools, under the agent's
+   * tool selection.
+   */
+  mcpEndpoint?: string;
   fetchCredentials: (integrationId: string) => Promise<CredentialsResponse>;
   /**
    * Force a refresh on a mid-run 401. Resolves to the fresh credentials when
@@ -201,6 +207,38 @@ function* jsonStringLeaves(value: unknown): Generator<string> {
   else if (value && typeof value === "object") {
     for (const v of Object.values(value)) yield* jsonStringLeaves(v);
   }
+}
+
+/** Lower-cased, percent-decoded path with repeated and trailing slashes collapsed. */
+function normalisedPath(url: URL): string {
+  let path = url.pathname;
+  try {
+    path = decodeURIComponent(path);
+  } catch {
+    // A malformed escape stays as written: the comparison is then on the raw path.
+  }
+  return path
+    .toLowerCase()
+    .replace(/\/{2,}/g, "/")
+    .replace(/\/+$/, "");
+}
+
+/**
+ * Whether `target` falls on the MCP endpoint `endpoint`: same origin (scheme, host without a
+ * trailing dot, port), and a path equal to the endpoint's or under it (`<path>/…`), compared
+ * case-insensitively after percent-decoding, with repeated and trailing slashes collapsed; query
+ * and fragment are ignored. An endpoint at the origin root matches the root path only, so the
+ * other paths of that host stay reachable.
+ */
+export function targetsMcpEndpoint(target: string, endpoint: string): boolean {
+  if (!URL.canParse(target) || !URL.canParse(endpoint)) return false;
+  const t = new URL(target);
+  const e = new URL(endpoint);
+  const host = (u: URL) => u.hostname.replace(/\.$/, "");
+  if (t.protocol !== e.protocol || host(t) !== host(e) || t.port !== e.port) return false;
+  const base = normalisedPath(e);
+  const path = normalisedPath(t);
+  return path === base || (base !== "" && path.startsWith(`${base}/`));
 }
 
 /** Exhaustiveness guard: a new body kind without a buildBody case fails to compile here. */
@@ -282,6 +320,13 @@ export async function executeApiCall(args: ApiCallArgs, deps: ApiCallDeps): Prom
     };
   }
   const resolvedUrl = prepared.request.url;
+  if (deps.mcpEndpoint && targetsMcpEndpoint(resolvedUrl, deps.mcpEndpoint)) {
+    return {
+      ok: false,
+      code: "unauthorized_target",
+      error: `Integration "${integrationId}": its MCP endpoint is reached through its tools, not api_call`,
+    };
+  }
 
   // 4. URL policy (docs/architecture/SIDECAR.md); the per-hop gate runs inside `fetchApiCall`.
   const authorizedUris = creds.authorizedUris ?? [];

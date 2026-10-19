@@ -10,7 +10,12 @@
 
 import { describe, it, expect, mock } from "bun:test";
 import { cookieScope, type ApiCallFailureCode } from "@appstrate/afps-runtime/resolvers";
-import { credentialScope, executeApiCall, type ApiCallDeps } from "../credential-proxy.ts";
+import {
+  credentialScope,
+  executeApiCall,
+  targetsMcpEndpoint,
+  type ApiCallDeps,
+} from "../credential-proxy.ts";
 import { _setLogSinkForTesting } from "../logger.ts";
 import type { CredentialsResponse } from "../helpers.ts";
 
@@ -2897,5 +2902,83 @@ describe("executeApiCall — a rendered target past its wildcard's registrable d
     const { result, seen } = await send("sts");
     expect(result.ok).toBe(true);
     expect(seen[0]!.get("authorization")).toBe("Bearer tok-123");
+  });
+});
+
+describe("executeApiCall — the integration's own MCP endpoint", () => {
+  const MCP_ENDPOINT = "https://api.example.com/mcp/s3cr3t-token";
+  const call = (targetUrl: string, method = "POST") =>
+    executeApiCall(
+      {
+        integrationId: "remote",
+        connectionId: "conn-1",
+        targetUrl,
+        method,
+        callerHeaders: {},
+        body: { kind: "none" },
+      },
+      deps,
+    );
+  let fetchFn = mock(async () => new Response("{}", { status: 200 }));
+  let deps = makeDeps();
+  const reset = () => {
+    fetchFn = mock(async () => new Response("{}", { status: 200 }));
+    deps = makeDeps({ fetchFn: fetchFn as unknown as typeof fetch, mcpEndpoint: MCP_ENDPOINT });
+  };
+
+  for (const target of [
+    MCP_ENDPOINT,
+    `${MCP_ENDPOINT}/`,
+    `${MCP_ENDPOINT}?session=1`,
+    `${MCP_ENDPOINT}/messages`,
+    "https://API.example.com./MCP//s3cr3t-token",
+    "https://api.example.com:443/mcp/%73%33cr3t-token",
+  ]) {
+    it(`refuses ${target} without sending it`, async () => {
+      reset();
+      const result = await call(target);
+      expect(result.ok).toBe(false);
+      if (!result.ok) {
+        expect(result.code).toBe("unauthorized_target");
+        expect(result.error).toBe(
+          'Integration "remote": its MCP endpoint is reached through its tools, not api_call',
+        );
+        expect(result.error).not.toContain("s3cr3t-token");
+      }
+      expect(fetchFn).not.toHaveBeenCalled();
+    });
+  }
+
+  it("still sends an ordinary REST path of the same host", async () => {
+    reset();
+    for (const target of [
+      "https://api.example.com/v1/items",
+      "https://api.example.com/mcp/s3cr3t-tokenish",
+      "https://api.example.com/mcp",
+    ]) {
+      expect((await call(target, "GET")).ok).toBe(true);
+    }
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("targetsMcpEndpoint", () => {
+  it("matches the endpoint path and below it, on the same origin only", () => {
+    const endpoint = "https://mcp.example.com/v1/mcp";
+    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcp", endpoint)).toBe(true);
+    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcp/?x=1#f", endpoint)).toBe(true);
+    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcp/sse", endpoint)).toBe(true);
+    expect(targetsMcpEndpoint("https://mcp.example.com/v1/mcpx", endpoint)).toBe(false);
+    expect(targetsMcpEndpoint("https://mcp.example.com/v1", endpoint)).toBe(false);
+    expect(targetsMcpEndpoint("http://mcp.example.com/v1/mcp", endpoint)).toBe(false);
+    expect(targetsMcpEndpoint("https://mcp.example.com:8443/v1/mcp", endpoint)).toBe(false);
+    expect(targetsMcpEndpoint("https://other.example.com/v1/mcp", endpoint)).toBe(false);
+  });
+
+  it("matches only the root path for an endpoint at the origin root", () => {
+    const endpoint = "https://mcp.example.com/";
+    expect(targetsMcpEndpoint("https://mcp.example.com", endpoint)).toBe(true);
+    expect(targetsMcpEndpoint("https://mcp.example.com/?a=b", endpoint)).toBe(true);
+    expect(targetsMcpEndpoint("https://mcp.example.com/v1/items", endpoint)).toBe(false);
   });
 });

@@ -134,6 +134,11 @@ function safeUrlForLog(url: string): string {
   }
 }
 
+/** A URL's origin for log surfaces, or `undefined` when absent or unparseable. */
+function originForLog(url: string | undefined): string | undefined {
+  return url && URL.canParse(url) ? new URL(url).origin : undefined;
+}
+
 function decodeWorkspaceHandle(): WorkspaceHandle | null {
   const raw = process.env.WORKSPACE_HANDLE_JSON;
   if (!raw) return null;
@@ -520,7 +525,8 @@ export async function connectRemoteHttpIntegration(
             if (url.origin !== origin) return;
             if (!authorizedUris.some((pattern) => matchesAuthorizedUriSpec(pattern, url.href))) {
               throw new Error(
-                `integration ${spec.integrationId}: ${url.href} is outside the authorized URIs of its connection; the credential is not sent`,
+                // The origin only: the endpoint's path may itself be a capability.
+                `integration ${spec.integrationId}: ${url.origin} is outside the authorized URIs of its connection; the credential is not sent`,
               );
             }
           };
@@ -1649,6 +1655,7 @@ export async function bootIntegrations(
         connectionId: connection.id,
         toolName: apiCall.toolName,
         declaredUris: apiCall.authorizedUris,
+        ...(spec.manifest.server?.url ? { mcpEndpoint: spec.manifest.server.url } : {}),
         fetchCredentials: credAdapter.fetchCredentials,
         refreshCredentials: credAdapter.refreshCredentials,
         reportUpstreamSuccess: credAdapter.reportUpstreamSuccess,
@@ -1767,7 +1774,8 @@ export async function bootIntegrations(
           integrationId: spec.integrationId,
           ...connectionLabelOf(spec),
           namespace: spec.namespace,
-          serverUrl: spec.manifest.server?.url,
+          // The origin only: the endpoint's path may itself be a capability.
+          serverOrigin: originForLog(spec.manifest.server?.url),
           // AFPS §7.1 — surface the actual transport the sidecar
           // dispatched to so operators can audit which path executed.
           transport: spec.manifest.server?.transport,

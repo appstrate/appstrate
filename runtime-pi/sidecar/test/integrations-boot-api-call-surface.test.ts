@@ -425,6 +425,50 @@ describe("bootIntegrations — synthetic api_call surface", () => {
     }
   });
 
+  it("refuses an api_call aimed at the integration's own MCP endpoint", async () => {
+    const sent: string[] = [];
+    const upstream = (async (url: string | URL) => {
+      sent.push(String(url));
+      return new Response("ok", { status: 200 });
+    }) as unknown as typeof fetch;
+    const deps: ApiCallToolDeps = {
+      ...apiCallDeps,
+      proxyDeps: {
+        ...apiCallDeps.proxyDeps,
+        cookieJar: new Map(),
+        reportedAuthFailures: new Set(),
+        fetchFn: upstream,
+        resolveHost: async () => ["203.0.113.7"],
+      },
+    };
+    const apiCalls = [
+      {
+        authKey: "primary",
+        toolName: "api_call",
+        authorizedUris: ["https://www.googleapis.com/**"],
+      },
+    ];
+    const spec = serverlessSpec(apiCalls);
+    spec.manifest = {
+      ...spec.manifest,
+      server: { url: "https://www.googleapis.com/mcp/v1", transport: "streamable-http" },
+    };
+    const result = await bootWith(deps, [spec]);
+    try {
+      const call = (target: string) =>
+        result.tools[0]!.handler({ target, method: "POST" }, {} as never);
+      const refused = await call("https://www.googleapis.com/mcp/v1/");
+      expect(refused.isError).toBe(true);
+      expect(JSON.stringify(refused.content)).toContain(
+        "its MCP endpoint is reached through its tools, not api_call",
+      );
+      await call("https://www.googleapis.com/drive/v3/files");
+      expect(sent).toEqual(["https://www.googleapis.com/drive/v3/files"]);
+    } finally {
+      await result.shutdown();
+    }
+  });
+
   it("keeps each connection's upstream session cookie to that connection", async () => {
     const cookiesSeen: (string | null)[] = [];
     const upstream = (async (_url: string | URL, init?: RequestInit) => {
