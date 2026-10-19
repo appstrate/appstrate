@@ -1270,9 +1270,10 @@ interface ResponseToToolResultOptions {
  *   `client.readResource({ uri })` only if needed.
  * - Binary content → always spilled regardless of size (binary in the
  *   agent's context window is never useful).
- * - No BlobStore configured → binary rejected; text that should spill is
- *   forced inline and recorded against the token budget with a distinct
- *   reason. Production always supplies a BlobStore + TokenBudget via
+ * - No BlobStore configured, or the store refuses the bytes → binary
+ *   rejected; text that should spill is cut to the inline cap (head + tail
+ *   around a marker) and what is delivered is recorded against the token
+ *   budget. Production always supplies a BlobStore + TokenBudget via
  *   `mountMcp`.
  *
  */
@@ -1409,11 +1410,11 @@ async function responseToToolResult(
   const text = await readBodyBounded(res, readCap);
 
   // Token-aware spill decision, shared with third-party MCP tool results.
-  const link = spillTextIfOverBudget(text, options, {
+  const replacement = spillTextIfOverBudget(text, options, {
     mimeType: ct || "text/plain",
     ...(options.source !== undefined ? { source: options.source } : {}),
   });
-  const content: Result["content"] = [link ?? { type: "text", text }];
+  const content: Result["content"] = [replacement ?? { type: "text", text }];
   return withMeta(res.ok ? { content } : { content, isError: true });
 }
 

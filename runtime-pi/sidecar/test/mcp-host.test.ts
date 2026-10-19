@@ -1669,6 +1669,22 @@ describe("McpHost — tool output budget", () => {
   };
   const LINK = { type: "resource_link" as const, uri: "file:///b.txt", name: "b.txt" };
 
+  /** `text` is `original`'s head and tail around the cut marker, sized to the inline cap. */
+  function expectCut(text: string, original: string, reason: string, tokenBudget: TokenBudget) {
+    const marker = /\n\n\[… output cut: (\d+) characters removed \((.+)\) …\]\n\n/.exec(text);
+    expect(marker).not.toBeNull();
+    const keptHead = text.slice(0, marker!.index);
+    const keptTail = text.slice(marker!.index + marker![0].length);
+    expect(marker![2]).toBe(reason);
+    expect(original.startsWith(keptHead)).toBe(true);
+    expect(original.endsWith(keptTail)).toBe(true);
+    expect(keptHead.length).toBeGreaterThan(0);
+    expect(Number(marker![1])).toBe(original.length - keptHead.length - keptTail.length);
+    expect(tokenBudget.estimate(keptHead + keptTail)).toBeLessThanOrEqual(
+      tokenBudget.inlineCapTokens,
+    );
+  }
+
   async function callDump(
     result: Awaited<ReturnType<AppstrateToolDefinition["handler"]>>,
     outputBudget?: ToolOutputBudgetDeps,
@@ -1799,16 +1815,7 @@ describe("McpHost — tool output budget", () => {
     expect(blobStore.list()).toHaveLength(0);
     expect(result.content.map((b) => b.type)).toEqual(["text", "image"]);
     const text = (result.content[0] as { text: string }).text;
-    const match = /^(H+)\n\n\[… (\d+) characters of this error output removed …\]\n\n(T+)$/.exec(
-      text,
-    );
-    expect(match).not.toBeNull();
-    const [, keptHead, removed, keptTail] = match!;
-    expect(Number(removed)).toBe(error.length - keptHead!.length - keptTail!.length);
-    // Head + tail together hold what the inline cap allows.
-    expect(tokenBudget.estimate(keptHead! + keptTail!)).toBeLessThanOrEqual(
-      tokenBudget.inlineCapTokens,
-    );
+    expectCut(text, error, "error output over the inline cap", tokenBudget);
   });
 
   it("keeps a small error untouched", async () => {
@@ -1818,12 +1825,41 @@ describe("McpHost — tool output budget", () => {
     expect(result.isError).toBe(true);
   });
 
-  it("without a blob store forces the oversized text inline and records it", async () => {
-    const big = "y".repeat(2000);
+  it("without a blob store cuts the oversized text to the inline cap", async () => {
+    const big = `${"H".repeat(1000)}${"y".repeat(2000)}${"T".repeat(1000)}`;
     const tokenBudget = newBudget();
-    const result = await callDump({ content: [{ type: "text", text: big }] }, { tokenBudget });
-    expect(result.content).toEqual([{ type: "text", text: big }]);
-    expect(tokenBudget.consumedTokens()).toBe(tokenBudget.estimate(big));
+    const result = await callDump(
+      { content: [IMAGE, { type: "text", text: big }, { type: "text", text: "more" }] },
+      { tokenBudget },
+    );
+    expect(result.content.map((b) => b.type)).toEqual(["image", "text"]);
+    const text = (result.content[1] as { text: string }).text;
+    expectCut(text, `${big}\nmore`, "spill unavailable: no blob store", tokenBudget);
+    expect(tokenBudget.consumedTokens()).toBe(tokenBudget.estimate(text));
+  });
+
+  it("with the blob store full cuts the oversized text to the inline cap", async () => {
+    const big = `${"H".repeat(1000)}${"y".repeat(2000)}${"T".repeat(1000)}`;
+    const tokenBudget = newBudget();
+    const blobStore = new BlobStore("run-test", { maxTotalBytes: 100 });
+    const result = await callDump(
+      { content: [{ type: "text", text: big }] },
+      {
+        tokenBudget,
+        blobStore,
+      },
+    );
+    const text = (result.content[0] as { text: string }).text;
+    expectCut(text, big, "spill unavailable: blob store full", tokenBudget);
+    expect(tokenBudget.consumedTokens()).toBe(tokenBudget.estimate(text));
+  });
+
+  it("without a blob store delivers a cap-sized text whole once the run budget is spent", async () => {
+    const tokenBudget = new TokenBudget({ inlineCapTokens: 100, runBudgetTokens: 100 });
+    tokenBudget.record(90);
+    const fits = "w".repeat(300); // 86 tokens: under the cap, over what the run has left
+    const result = await callDump({ content: [{ type: "text", text: fits }] }, { tokenBudget });
+    expect(result.content).toEqual([{ type: "text", text: fits }]);
   });
 
   it("leaves a trusted (first-party) upstream to budget its own output", async () => {

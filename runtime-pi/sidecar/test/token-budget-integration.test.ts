@@ -175,7 +175,7 @@ describe("token-aware spill — dense JSON (issue #390 primary)", () => {
     });
     const result = res.json.result as CallToolResult;
     expect(result.content[0]!.type).toBe("resource_link");
-    expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/api-response\//);
+    expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/tool-output\//);
 
     // Spilled because this single body exceeds the per-call inline cap,
     // not because the run budget was under pressure.
@@ -527,7 +527,7 @@ describe("token-aware spill — env-var configuration via createApp", () => {
 });
 
 describe("token-aware spill — fallback when blob store is full", () => {
-  it("falls back to inline and records the tokens when the blob store is full", async () => {
+  it("cuts the body to the inline cap and records what it delivers when the store is full", async () => {
     // Blob store with cumulative cap of 100 bytes; first put exhausts.
     const blobStore = new BlobStore("run-test", { maxTotalBytes: 100 });
     blobStore.put(new Uint8Array(95)); // leave only 5 bytes
@@ -558,12 +558,14 @@ describe("token-aware spill — fallback when blob store is full", () => {
       },
     });
     const result = res.json.result as CallToolResult;
-    // Spill failed → forced inline.
-    expect(result.content[0]!.type).toBe("text");
-    // The forced-inline tokens ARE recorded against the budget — the
-    // agent paid the context cost. This is what separates a failed spill
-    // from a successful one, which records nothing.
-    expect(tokenBudget.consumedTokens()).toBe(estimateTokens(payload));
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toHaveLength(1);
+    const text = result.content[0]!.text!;
+    expect(text).toContain("characters removed (spill unavailable: blob store full)");
+    expect(payload.startsWith(text.slice(0, text.indexOf("\n\n[… output cut")))).toBe(true);
+    expect(estimateTokens(text)).toBeLessThan(4_100);
+    // What reached the context is recorded, not the whole body.
+    expect(tokenBudget.consumedTokens()).toBe(estimateTokens(text));
   });
 });
 

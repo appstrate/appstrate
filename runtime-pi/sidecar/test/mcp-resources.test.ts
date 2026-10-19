@@ -131,7 +131,7 @@ describe("POST /mcp — api_call resource spillover", () => {
     expect(result.content).toHaveLength(1);
     expect(result.content[0]!.type).toBe("resource_link");
     expect(result.content[0]!.mimeType).toBe("application/pdf");
-    expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/api-response\/run-test\/[A-Z0-9]{26}$/);
+    expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/tool-output\/run-test\/[A-Z0-9]{26}$/);
   });
 
   it("treats OOXML media types as binary even though their subtype contains xml", async () => {
@@ -521,7 +521,7 @@ describe("POST /mcp — resources/list + resources/read", () => {
     });
     const callResult = callRes.json.result as { content: Array<{ uri: string }> };
     const uri = callResult.content[0]!.uri;
-    expect(uri).toMatch(/^appstrate:\/\/api-response\/run-test\//);
+    expect(uri).toMatch(/^appstrate:\/\/tool-output\/run-test\//);
 
     // 2. Read the resource and verify the bytes round-trip.
     const readRes = await rpc(app, {
@@ -578,7 +578,7 @@ describe("POST /mcp — resources/list + resources/read", () => {
     const app = createTestApp(makeDeps());
     const res = await rpc(app, {
       method: "resources/read",
-      params: { uri: "appstrate://api-response/run-test/01HZX0Q3ABCDEFGHJKMNPQRSTV" },
+      params: { uri: "appstrate://tool-output/run-test/01HZX0Q3ABCDEFGHJKMNPQRSTV" },
     });
     expect(res.json.error).toBeDefined();
     expect(res.json.error!.code).toBe(-32602);
@@ -589,7 +589,7 @@ describe("POST /mcp — resources/list + resources/read", () => {
     const app = createTestApp(makeDeps()); // runId = run-test
     const res = await rpc(app, {
       method: "resources/read",
-      params: { uri: "appstrate://api-response/run-other/01HZX0Q3ABCDEFGHJKMNPQRSTV" },
+      params: { uri: "appstrate://tool-output/run-other/01HZX0Q3ABCDEFGHJKMNPQRSTV" },
     });
     expect(res.json.error).toBeDefined();
     expect(res.json.error!.code).toBe(-32602);

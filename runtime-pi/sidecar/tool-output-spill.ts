@@ -19,7 +19,7 @@ import type { TokenBudget } from "./token-budget.ts";
 /** Run-scoped deps of the spill decision. */
 export interface ToolOutputBudgetDeps {
   tokenBudget: TokenBudget;
-  /** Absent: text that should spill is forced inline and recorded against the budget. */
+  /** Absent: text that should spill is cut to the inline cap instead. */
   blobStore?: BlobStore;
 }
 
@@ -30,17 +30,24 @@ interface ResourceLinkBlock {
   mimeType?: string;
 }
 
+interface TextContent {
+  type: "text";
+  text: string;
+}
+
 /**
  * Reserve `text` inline, or stash it in the blob store and return the
- * `resource_link` that replaces it. `null` means "deliver inline": the
- * tokens are already recorded, including on the two forced-inline
- * fallbacks (no blob store, blob store refused the bytes).
+ * `resource_link` that replaces it. `null` means "deliver `text` as is"
+ * (its tokens are recorded). When the budget says spill but the blob
+ * store is absent or refuses the bytes, the text is cut to the inline cap
+ * and returned as a replacement `text` block: delivering it whole is how
+ * an oversized output overflows the model request.
  */
 export function spillTextIfOverBudget(
   text: string,
   deps: ToolOutputBudgetDeps,
   meta: { mimeType: string; source?: string },
-): ResourceLinkBlock | null {
+): ResourceLinkBlock | TextContent | null {
   const { tokenBudget, blobStore } = deps;
   const estimatedTokens = tokenBudget.estimate(text);
   // Atomic decide + record: an interleaved concurrent call cannot observe a stale `consumed`.
@@ -54,13 +61,13 @@ export function spillTextIfOverBudget(
   if (decision.decision === "inline") return null;
 
   if (!blobStore) {
-    tokenBudget.record(estimatedTokens);
-    logger.warn("token-budget: no blob store configured, forced inline", {
+    const cut = fitToInlineCap(text, tokenBudget, "spill unavailable: no blob store");
+    logger.warn("token-budget: no blob store configured, cut to inline cap", {
       source: meta.source,
       estimatedTokens,
       consumedTokens: tokenBudget.consumedTokens(),
     });
-    return null;
+    return { type: "text", text: cut };
   }
   let record;
   try {
@@ -69,14 +76,14 @@ export function spillTextIfOverBudget(
       ...(meta.source !== undefined ? { source: meta.source } : {}),
     });
   } catch (err) {
-    tokenBudget.record(estimatedTokens);
-    logger.warn("token-budget: blob store full, forced inline", {
+    const cut = fitToInlineCap(text, tokenBudget, "spill unavailable: blob store full");
+    logger.warn("token-budget: blob store full, cut to inline cap", {
       source: meta.source,
       estimatedTokens,
       consumedTokens: tokenBudget.consumedTokens(),
       error: getErrorMessage(err),
     });
-    return null;
+    return { type: "text", text: cut };
   }
   logger.info("token-budget: spilled to blob store", {
     source: meta.source,
@@ -92,6 +99,33 @@ export function spillTextIfOverBudget(
   };
 }
 
+/**
+ * `text` when it fits the inline cap, else its head and tail (together
+ * sized to the cap) around a marker naming how much was cut and why.
+ * Records the tokens of what it returns: that is what reaches the model.
+ */
+function fitToInlineCap(text: string, tokenBudget: TokenBudget, reason: string): string {
+  const estimated = tokenBudget.estimate(text);
+  let delivered = text;
+  if (estimated > tokenBudget.inlineCapTokens) {
+    // The share of characters that fits under the cap, whatever the estimator.
+    const half = Math.floor((text.length * tokenBudget.inlineCapTokens) / estimated / 2);
+    const head = text.slice(0, codePointBoundary(text, half));
+    const tail = text.slice(codePointBoundary(text, text.length - half));
+    const removed = text.length - head.length - tail.length;
+    delivered = `${head}\n\n[… output cut: ${removed} characters removed (${reason}) …]\n\n${tail}`;
+  }
+  const deliveredTokens = tokenBudget.estimate(delivered);
+  if (deliveredTokens > 0) tokenBudget.record(deliveredTokens);
+  return delivered;
+}
+
+/** Moves `index` off the low half of a surrogate pair, so no cut splits a code point. */
+function codePointBoundary(text: string, index: number): number {
+  const code = text.charCodeAt(index);
+  return code >= 0xdc00 && code <= 0xdfff ? index + 1 : index;
+}
+
 type ContentBlock = CallToolResult["content"][number];
 type TextBlock = Extract<ContentBlock, { type: "text" }>;
 
@@ -103,9 +137,10 @@ const isTextBlock = (block: ContentBlock): block is TextBlock => block.type === 
  *
  * - Fits → returned untouched.
  * - Over budget → the joined text goes to the blob store and ONE
- *   `resource_link` takes the place of the first text block; every other
- *   block keeps its position. The agent runtime materialises the link as
- *   a workspace file.
+ *   `resource_link` takes the place of the first text block (one cut
+ *   `text` block when the store cannot take it); every other block keeps
+ *   its position. The agent runtime materialises the link as a workspace
+ *   file.
  * - `isError` → never spilled (the model must read its failure); text over
  *   the inline cap keeps a head and a tail around an explicit marker.
  *
@@ -124,8 +159,11 @@ export function budgetMcpToolResult(
 
   if (result.isError) return truncateErrorResult(result, joined, deps.tokenBudget);
 
-  const link = spillTextIfOverBudget(joined, deps, { mimeType: textMimeType(joined), source });
-  return link ? replaceTextBlocks(result, link) : result;
+  const replacement = spillTextIfOverBudget(joined, deps, {
+    mimeType: textMimeType(joined),
+    source,
+  });
+  return replacement ? replaceTextBlocks(result, replacement) : result;
 }
 
 /** Swap every text block for `replacement`, placed where the first one was. */
@@ -161,23 +199,8 @@ function truncateErrorResult(
   joined: string,
   tokenBudget: TokenBudget,
 ): CallToolResult {
-  const estimated = tokenBudget.estimate(joined);
-  if (estimated <= tokenBudget.inlineCapTokens) {
-    tokenBudget.record(estimated);
-    return result;
-  }
-  // The share of characters that fits under the cap, whatever the estimator.
-  const half = Math.floor((joined.length * tokenBudget.inlineCapTokens) / estimated / 2);
-  const head = joined.slice(0, codePointBoundary(joined, half));
-  const tail = joined.slice(codePointBoundary(joined, joined.length - half));
-  const removed = joined.length - head.length - tail.length;
-  const text = `${head}\n\n[… ${removed} characters of this error output removed …]\n\n${tail}`;
-  tokenBudget.record(tokenBudget.estimate(text));
-  return replaceTextBlocks(result, { type: "text", text });
-}
-
-/** Moves `index` off the low half of a surrogate pair, so no cut splits a code point. */
-function codePointBoundary(text: string, index: number): number {
-  const code = text.charCodeAt(index);
-  return code >= 0xdc00 && code <= 0xdfff ? index + 1 : index;
+  const delivered = fitToInlineCap(joined, tokenBudget, "error output over the inline cap");
+  return delivered === joined
+    ? result
+    : replaceTextBlocks(result, { type: "text", text: delivered });
 }
