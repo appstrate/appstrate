@@ -48,31 +48,31 @@ describe("parseBlobUri", () => {
   });
 
   it("rejects path traversal sequences", () => {
-    expect(parseBlobUri("appstrate://api-response/../etc/passwd/abc")).toBeNull();
-    expect(parseBlobUri("appstrate://api-response/run-1/../../foo")).toBeNull();
-    expect(parseBlobUri("appstrate://api-response//run-1/abc")).toBeNull();
+    expect(parseBlobUri("appstrate://tool-output/../etc/passwd/abc")).toBeNull();
+    expect(parseBlobUri("appstrate://tool-output/run-1/../../foo")).toBeNull();
+    expect(parseBlobUri("appstrate://tool-output//run-1/abc")).toBeNull();
   });
 
   it("rejects percent-encoded traversal vectors", () => {
-    expect(parseBlobUri("appstrate://api-response/run-1%2Fabc")).toBeNull();
-    expect(parseBlobUri("appstrate://api-response/run%2E%2E/abc")).toBeNull();
-    expect(parseBlobUri("appstrate://api-response/run\\1/abc")).toBeNull();
+    expect(parseBlobUri("appstrate://tool-output/run-1%2Fabc")).toBeNull();
+    expect(parseBlobUri("appstrate://tool-output/run%2E%2E/abc")).toBeNull();
+    expect(parseBlobUri("appstrate://tool-output/run\\1/abc")).toBeNull();
   });
 
   it("rejects URIs with query string or fragment", () => {
-    expect(parseBlobUri("appstrate://api-response/run-1/abc?x=1")).toBeNull();
-    expect(parseBlobUri("appstrate://api-response/run-1/abc#frag")).toBeNull();
+    expect(parseBlobUri("appstrate://tool-output/run-1/abc?x=1")).toBeNull();
+    expect(parseBlobUri("appstrate://tool-output/run-1/abc#frag")).toBeNull();
   });
 
   it("rejects URIs without exactly two path components", () => {
-    expect(parseBlobUri("appstrate://api-response/run-1")).toBeNull();
-    expect(parseBlobUri("appstrate://api-response/a/b/c")).toBeNull();
-    expect(parseBlobUri("appstrate://api-response/")).toBeNull();
+    expect(parseBlobUri("appstrate://tool-output/run-1")).toBeNull();
+    expect(parseBlobUri("appstrate://tool-output/a/b/c")).toBeNull();
+    expect(parseBlobUri("appstrate://tool-output/")).toBeNull();
   });
 
   it("rejects illegal characters in the run id", () => {
-    expect(parseBlobUri("appstrate://api-response/run with spaces/abc")).toBeNull();
-    expect(parseBlobUri("appstrate://api-response/run$/abc")).toBeNull();
+    expect(parseBlobUri("appstrate://tool-output/run with spaces/abc")).toBeNull();
+    expect(parseBlobUri("appstrate://tool-output/run$/abc")).toBeNull();
   });
 });
 
@@ -80,7 +80,7 @@ describe("BlobStore", () => {
   it("stores bytes and returns the URI in the expected shape", () => {
     const store = new BlobStore("run-1", NO_EVICTION);
     const record = store.put(new TextEncoder().encode("hello"));
-    expect(record.uri).toMatch(/^appstrate:\/\/api-response\/run-1\/[A-Z0-9]{26}$/);
+    expect(record.uri).toMatch(/^appstrate:\/\/tool-output\/run-1\/[A-Z0-9]{26}$/);
     expect(record.mimeType).toBe("application/octet-stream");
     expect(record.bytes).toEqual(new TextEncoder().encode("hello"));
   });
@@ -104,12 +104,12 @@ describe("BlobStore", () => {
   it("returns null for malformed URIs", () => {
     const store = new BlobStore("run-1", NO_EVICTION);
     expect(store.read("file:///etc/passwd")).toBeNull();
-    expect(store.read("appstrate://api-response/run-1/../foo")).toBeNull();
+    expect(store.read("appstrate://tool-output/run-1/../foo")).toBeNull();
   });
 
   it("returns null for unknown ids in this run", () => {
     const store = new BlobStore("run-1", NO_EVICTION);
-    expect(store.read("appstrate://api-response/run-1/01HZX0Q3ABCDEFGHJKMNPQRSTV")).toBeNull();
+    expect(store.read("appstrate://tool-output/run-1/01HZX0Q3ABCDEFGHJKMNPQRSTV")).toBeNull();
   });
 
   it("throws when a single blob alone exceeds the cap", () => {

@@ -1339,6 +1339,7 @@ export async function bootIntegrations(
    * per run by `server.ts` and shared with `createApp` (same blob store).
    * When omitted (tests / api_call-less runs) the in-process api_call
    * server is skipped — a spec that declares `apiCall` is logged + dropped.
+   * Its token budget and blob store also bound third-party MCP tool results.
    */
   apiCallDeps?: ApiCallToolDeps,
   /** Called once the adapter is prepared, before any runner spawns. */
@@ -1351,6 +1352,8 @@ export async function bootIntegrations(
         level: event.level,
         data: event.data,
       }),
+    // Same budget and blob store as api_call: one inline cap, one run budget.
+    ...(apiCallDeps ? { outputBudget: apiCallDeps } : {}),
   });
   const spawned: BootIntegrationsResult["spawned"] = [];
   const failed: BootIntegrationsResult["failed"] = [];

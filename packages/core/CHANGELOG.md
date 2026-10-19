@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`createAjv`** (`@appstrate/core/ajv`) no longer registers ajv-formats' `formatMinimum` /
+  `formatMaximum` / `formatExclusive*` keywords: they are not JSON Schema 2020-12 and threw a
+  `TypeError` at validation time. All formats stay.
+
 ### Added
+
+- **`AJV_FORMATS_OPTIONS`** (`@appstrate/core/ajv`): the ajv-formats options `createAjv` uses, so
+  the RJSF validator registers the same formats and client and server agree.
 
 - **Unauthenticated integrations** (`@appstrate/core/integration`, AFPS §7.2):
   **`isUnauthenticatedIntegration(manifest)`** — the manifest omits `auths`, so it binds no
