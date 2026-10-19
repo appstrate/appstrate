@@ -40,8 +40,80 @@ describe("integration JSON Schema ⇄ Zod parity", () => {
       remote: { url: "https://mcp.example.com/mcp", transport: "streamable-http" },
     },
   };
+  const oauth2 = {
+    type: "oauth2",
+    authorization_endpoint: "https://auth.example.com/authorize",
+    token_endpoint: "https://auth.example.com/token",
+    default_scopes: ["read"],
+    scope_catalog: [
+      { value: "read", label: "Read" },
+      { value: "write", label: "Write" },
+    ],
+    authorized_uris: ["https://api.example.com/**"],
+    delivery: {
+      http: {
+        in: "header",
+        name: "Authorization",
+        prefix: "Bearer ",
+        value: "{$credential.access_token}",
+      },
+    },
+    _meta: { "dev.appstrate/oauth": { scope_separator: " " } },
+  };
   const corpus: { label: string; manifest: Record<string, unknown>; valid: boolean }[] = [
     { label: "a public integration", manifest: base, valid: true },
+    {
+      label: "a public local-source integration",
+      manifest: {
+        ...base,
+        source: { kind: "local", server: { name: "@acme/open-server", version: "^1.0.0" } },
+      },
+      valid: true,
+    },
+    {
+      label: "a none source with an oauth2 auth, per-tool scopes and Appstrate _meta",
+      manifest: {
+        ...base,
+        source: { kind: "none" },
+        auths: { primary: oauth2 },
+        default_tools: ["api_call"],
+        tools_policy: { api_call: { required_scopes: { primary: ["write"] } } },
+        _meta: { "dev.appstrate/api": { auths: { primary: { upload_protocols: ["tus"] } } } },
+      },
+      valid: true,
+    },
+    {
+      label: "a remote URL and an api_key auth templated on a connection variable",
+      manifest: {
+        ...base,
+        source: {
+          kind: "remote",
+          remote: { url: "{$variable.base_url}/mcp", transport: "streamable-http" },
+        },
+        variables: {
+          schema: {
+            type: "object",
+            properties: { base_url: { type: "string", format: "uri" } },
+            required: ["base_url"],
+          },
+        },
+        auths: {
+          key: {
+            type: "api_key",
+            credentials: {
+              schema: {
+                type: "object",
+                properties: { api_key: { type: "string", writeOnly: true } },
+                required: ["api_key"],
+              },
+            },
+            authorized_uris: ["{$variable.base_url}/**"],
+            delivery: { http: { in: "header", name: "X-Api-Key", value: "{$credential.api_key}" } },
+          },
+        },
+      },
+      valid: true,
+    },
     { label: "an empty auths map", manifest: { ...base, auths: {} }, valid: false },
     {
       label: "a none source without auths",

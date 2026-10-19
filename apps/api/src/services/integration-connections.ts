@@ -2263,43 +2263,30 @@ export async function persistCredentialBundle(
 
 /**
  * One connection's decrypted credential fields (`null`: gone or unreadable). Keyed by id alone: the
- * caller must have established that the actor owns it.
+ * caller must have established that the actor owns it. `mintedBy` also requires the connection to
+ * have been minted through that OAuth client.
  */
 export async function getIntegrationConnectionCredentialFields(
   connectionId: string,
+  filter: { mintedBy?: string } = {},
 ): Promise<Record<string, string> | null> {
-  const [row] = await db
-    .select({ credentialsEncrypted: integrationConnections.credentialsEncrypted })
-    .from(integrationConnections)
-    .where(eq(integrationConnections.id, connectionId))
-    .limit(1);
-  if (!row?.credentialsEncrypted) return null;
-  const fields = decryptForDisplay(() => decryptCredentialsToStringMap(row.credentialsEncrypted), {
-    connectionId,
-  });
-  return fields === KEY_UNAVAILABLE ? null : fields;
-}
-
-/** The stored refresh token when `clientRef` minted it: one is bound to its client (RFC 6749 §6). */
-export async function refreshTokenMintedBy(
-  connectionId: string,
-  clientRef: string,
-): Promise<string | undefined> {
   const [row] = await db
     .select({ credentialsEncrypted: integrationConnections.credentialsEncrypted })
     .from(integrationConnections)
     .where(
       and(
         eq(integrationConnections.id, connectionId),
-        eq(integrationConnections.clientRef, clientRef),
+        filter.mintedBy === undefined
+          ? undefined
+          : eq(integrationConnections.clientRef, filter.mintedBy),
       ),
     )
     .limit(1);
-  if (!row?.credentialsEncrypted) return undefined;
+  if (!row?.credentialsEncrypted) return null;
   const fields = decryptForDisplay(() => decryptCredentialsToStringMap(row.credentialsEncrypted), {
     connectionId,
   });
-  return fields === KEY_UNAVAILABLE ? undefined : fields?.refresh_token || undefined;
+  return fields === KEY_UNAVAILABLE ? null : fields;
 }
 
 /** The only `needs_reconnection = true` write keeping the credentials; no-op once the row is gone. */

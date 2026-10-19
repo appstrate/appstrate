@@ -40,8 +40,8 @@ import {
 import {
   assertRequiredIdentityClaims,
   extractIdentity,
+  getIntegrationConnectionCredentialFields,
   readIntegrationAuth,
-  refreshTokenMintedBy,
   resolveConnectClient,
   saveIntegrationConnection,
   type IntegrationConnectionSummary,
@@ -416,11 +416,15 @@ export class OAuth2Strategy implements IntegrationConnectStrategy {
     assertRequiredIdentityClaims(manifest, result.authKey, identityClaims);
 
     // An IdP may omit `refresh_token` on re-consent (Google without `prompt=consent`): a reconnect
-    // keeps the stored one, but only through the client it was issued to.
+    // keeps the stored one, but only through the client it was issued to (RFC 6749 §6).
     const refreshToken =
       result.refreshToken ||
       (result.connectionId
-        ? await refreshTokenMintedBy(result.connectionId, result.clientRef)
+        ? (
+            await getIntegrationConnectionCredentialFields(result.connectionId, {
+              mintedBy: result.clientRef,
+            })
+          )?.refresh_token || undefined
         : undefined);
 
     // A short-lived token without `refresh_token` is a misconfiguration (missing offline access)

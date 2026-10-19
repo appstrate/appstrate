@@ -822,14 +822,17 @@ async function resolveAgentIntegrationPick(args: {
   // fetched (buildRequirement returned null, `includeInert` notwithstanding):
   // no verdict to report, so both fields stay null rather than guessed.
   const err = resolution.errors.find((e) => e.integrationId === integrationId) ?? null;
+  const warningItem = args.runWarnings.find((w) => w.integrationId === integrationId);
+  const warning = warningItem ? translateResolutionError(warningItem) : null;
 
   // AFPS §7.2: binds no connection, so no candidate, pin or default applies — not even one left
-  // over from an authenticated version. Only the agent's own `auth_key` can be in error.
+  // over from an authenticated version. Only the agent's own `auth_key` can be in error, and only
+  // the space switching it off can warn.
   if (manifest && isUnauthenticatedIntegration(manifest)) {
     return {
       source: null,
       error_code: err?.code ?? null,
-      warning: null,
+      warning,
       resolved_connection_ids: [],
       resolved_missing_scopes: [],
       admin_pinned_connection_ids: null,
@@ -888,12 +891,11 @@ async function resolveAgentIntegrationPick(args: {
 
   // `[]` (bound to none, or switched off here) has no member to name a source.
   const resolved = resolution.resolved[integrationId] ?? null;
-  const warning = args.runWarnings.find((w) => w.integrationId === integrationId) ?? null;
 
   return {
     source: resolved?.[0]?.source ?? err?.source ?? null,
     error_code: err?.code ?? null,
-    warning: warning ? translateResolutionError(warning) : null,
+    warning,
     // A set that failed its health check is still the set the layer binds.
     resolved_connection_ids: resolved
       ? resolved.map((r) => r.connectionId)
