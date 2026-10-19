@@ -443,35 +443,22 @@ export function getVariablesSchema(manifest: IntegrationManifest): JSONSchemaObj
 }
 
 /**
- * The authorization server an oauth2 auth's manifest fixes, as data a bound issuer is compared
- * with: its declared `issuer`, else the origin of its remote URL; `null` when chosen per connection.
+ * Whether `issuer` is the authorization server an oauth2 auth's manifest fixes: its declared
+ * `issuer`, else an issuer of its remote URL's origin; none when chosen per connection.
  */
-export interface FixedAuthorizationServer {
-  issuer?: string;
-  remoteUrl?: string;
-}
-
-export function fixedAuthorizationServer(
-  manifest: IntegrationManifest,
-  auth: Pick<AfpsManifestAuth, "type" | "issuer">,
-): FixedAuthorizationServer | null {
-  if (hasPerConnectionAuthServer(manifest, auth)) return null;
-  const remoteUrl = getRemoteSource(manifest)?.url;
-  return { ...(auth.issuer ? { issuer: auth.issuer } : {}), ...(remoteUrl ? { remoteUrl } : {}) };
-}
-
-/** Whether `issuer` is the server `fixed` names (an issuer of the remote URL's origin, without one). */
 export function isFixedAuthorizationServer(
   issuer: string,
-  fixed: FixedAuthorizationServer | null,
+  manifest: IntegrationManifest,
+  auth: Pick<AfpsManifestAuth, "type" | "issuer">,
 ): boolean {
-  if (!fixed) return false;
-  if (fixed.issuer) return stripTrailingSlashes(fixed.issuer) === stripTrailingSlashes(issuer);
+  if (hasPerConnectionAuthServer(manifest, auth)) return false;
+  if (auth.issuer) return stripTrailingSlashes(auth.issuer) === stripTrailingSlashes(issuer);
+  const remoteUrl = getRemoteSource(manifest)?.url;
   return (
-    fixed.remoteUrl !== undefined &&
+    remoteUrl !== undefined &&
     URL.canParse(issuer) &&
-    URL.canParse(fixed.remoteUrl) &&
-    new URL(issuer).origin === new URL(fixed.remoteUrl).origin
+    URL.canParse(remoteUrl) &&
+    new URL(issuer).origin === new URL(remoteUrl).origin
   );
 }
 
@@ -482,6 +469,23 @@ export function hasPerConnectionAuthServer(
 ): boolean {
   if (auth.type !== "oauth2") return false;
   return isVariableTemplate(auth.issuer) || isVariableTemplate(getRemoteSource(manifest)?.url);
+}
+
+/**
+ * Whether an auth's OAuth client is provisioned at connect time (a metadata document, else RFC 7591
+ * registration) rather than registered by an admin. A provisioned client is public (`none` + PKCE),
+ * so a remote auth declaring a confidential method (the GitHub/Gmail MCP connectors) stays a
+ * pre-registered client; whether its server accepts either is the runtime gate.
+ */
+export function usesAutoProvisionedClient(
+  manifest: IntegrationManifest,
+  auth: AfpsManifestAuth,
+): boolean {
+  return (
+    auth.type === "oauth2" &&
+    auth.token_endpoint_auth_method === "none" &&
+    (getRemoteSource(manifest) !== null || hasPerConnectionAuthServer(manifest, auth))
+  );
 }
 
 /** Read the Appstrate orchestrated-tool extension off a connect block. */

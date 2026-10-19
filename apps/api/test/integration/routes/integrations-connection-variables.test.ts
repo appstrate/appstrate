@@ -23,7 +23,7 @@ import { _setSystemPackagesForTesting } from "../../../src/services/system-packa
 import { buildIntegrationOAuthRefreshContext } from "../../../src/services/integration-token-refresh.ts";
 import { authorizationServerTag } from "../../../src/lib/integration-callback-url.ts";
 import {
-  fixedAuthorizationServer,
+  isFixedAuthorizationServer,
   type AfpsManifestAuth,
 } from "../../../src/services/integration-manifest-helpers.ts";
 
@@ -497,9 +497,10 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     const refresh = await buildIntegrationOAuthRefreshContext(
       "@myorg/forge",
       "oauth",
+      forgeManifest("@myorg/forge"),
       auth,
       ctx.defaultSpaceId,
-      { ...conn!, fixedServer: null },
+      conn!,
     );
     expect(refresh!.resource).toBe(`${base}/api/v4/mcp`);
   });
@@ -718,9 +719,10 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
       const refresh = await buildIntegrationOAuthRefreshContext(
         "@myorg/forge",
         "oauth",
+        forgeManifest("@myorg/forge"),
         auth,
         ctx.defaultSpaceId,
-        { ...conn!, fixedServer: null },
+        conn!,
       );
       expect(refresh).toMatchObject({
         tokenEndpoint: `${base}/oauth/token`,
@@ -751,9 +753,10 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     const refresh = await buildIntegrationOAuthRefreshContext(
       "@myorg/forge",
       "oauth",
+      forgeManifest("@myorg/forge"),
       auth,
       ctx.defaultSpaceId,
-      { clientRef: client!.id, oauthResource: null, fixedServer: null },
+      { clientRef: client!.id, oauthResource: null },
     );
     expect(refresh!.tokenEndpoint).toBe(`${otherBase}/oauth/token`);
     expect(refresh!.clientId).toBe(client!.clientId);
@@ -766,9 +769,10 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
       buildIntegrationOAuthRefreshContext(
         "@myorg/forge",
         "oauth",
+        forgeManifest("@myorg/forge"),
         auth,
         ctx.defaultSpaceId,
-        { clientRef: client!.id, oauthResource: null, fixedServer: null },
+        { clientRef: client!.id, oauthResource: null },
         async () => ({ tokenEndpoint }),
       );
     expect(await refreshAt("http://forge.example.com/oauth/token")).toBeNull();
@@ -779,13 +783,23 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
     });
 
     // A server the manifest fixes is judged as connect judged it: plain http is not refused there.
+    const fixedAuth = { ...auth, issuer: otherBase };
+    const fixed = {
+      ...forgeManifest("@myorg/forge"),
+      source: {
+        kind: "remote",
+        remote: { url: `${otherBase}/api/v4/mcp`, transport: "streamable-http" },
+      },
+      auths: { oauth: fixedAuth },
+    } as unknown as IntegrationManifest;
     const fixedAt = (tokenEndpoint: string) =>
       buildIntegrationOAuthRefreshContext(
         "@myorg/forge",
         "oauth",
-        auth,
+        fixed,
+        fixedAuth,
         ctx.defaultSpaceId,
-        { clientRef: client!.id, oauthResource: null, fixedServer: { issuer: otherBase } },
+        { clientRef: client!.id, oauthResource: null },
         async () => ({ tokenEndpoint }),
       );
     expect((await fixedAt("http://93.184.215.14/oauth/token"))!.tokenEndpoint).toBe(
@@ -803,22 +817,19 @@ describe("authorization server chosen per connection (AFPS §7.3)", () => {
       },
       auths: { oauth: { ...auth, issuer: "https://forge.example.com" } },
     } as unknown as IntegrationManifest;
-    const fixedServer = fixedAuthorizationServer(
-      republished,
-      republished.auths!.oauth as AfpsManifestAuth,
-    );
-    expect(fixedServer).toEqual({
-      issuer: "https://forge.example.com",
-      remoteUrl: "https://forge.example.com/api/v4/mcp",
-    });
+    const republishedAuth = republished.auths!.oauth as AfpsManifestAuth;
+    expect(
+      isFixedAuthorizationServer("https://forge.example.com", republished, republishedAuth),
+    ).toBe(true);
     const before = forge.tokenRequests.length;
     expect(
       await buildIntegrationOAuthRefreshContext(
         "@myorg/forge",
         "oauth",
-        auth,
+        republished,
+        republishedAuth,
         ctx.defaultSpaceId,
-        { clientRef: client!.id, oauthResource: null, fixedServer },
+        { clientRef: client!.id, oauthResource: null },
         async () => ({ tokenEndpoint: "http://93.184.215.14/oauth/token" }),
       ),
     ).toBeNull();

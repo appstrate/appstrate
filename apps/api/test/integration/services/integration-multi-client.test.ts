@@ -27,10 +27,10 @@ import {
   listIntegrationClients,
   resolveIntegrationClientById,
   resolveConnectClient,
-  ensureIntegrationOAuthClient,
   setDefaultIntegrationClient,
   type ResolvedOAuthConnect,
 } from "../../../src/services/integration-connections.ts";
+import { ensureIntegrationOAuthClient } from "../../../src/services/integration-oauth-provisioning.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { buildIntegrationOAuthRefreshContext } from "../../../src/services/integration-token-refresh.ts";
 import {
@@ -55,6 +55,10 @@ const PUBLIC_AUTH: AfpsManifestAuth = {
   token_endpoint: "https://oauth2.googleapis.com/token",
   token_endpoint_auth_method: "none",
 } as AfpsManifestAuth;
+
+const LOCAL_MANIFEST = {
+  source: { kind: "local", server: { name: `${INTEGRATION}-server`, version: "^0.1.0" } },
+} as unknown as IntegrationManifest;
 
 describe("integration multi-client", () => {
   let ctx: TestContext;
@@ -360,9 +364,10 @@ describe("integration multi-client", () => {
       const ctxOut = await buildIntegrationOAuthRefreshContext(
         INTEGRATION,
         AUTH_KEY,
+        LOCAL_MANIFEST,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
-        { clientRef: SYSTEM_ID, oauthResource: null, fixedServer: {} },
+        { clientRef: SYSTEM_ID, oauthResource: null },
       );
       expect(ctxOut).not.toBeNull();
       expect(ctxOut!.clientId).toBe("sys-client.apps.googleusercontent.com");
@@ -374,9 +379,10 @@ describe("integration multi-client", () => {
       const ctxOut = await buildIntegrationOAuthRefreshContext(
         INTEGRATION,
         AUTH_KEY,
+        LOCAL_MANIFEST,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
-        { clientRef: customId, oauthResource: null, fixedServer: {} },
+        { clientRef: customId, oauthResource: null },
       );
       expect(ctxOut).not.toBeNull();
       expect(ctxOut!.clientId).toBe("custom-client-id");
@@ -387,9 +393,10 @@ describe("integration multi-client", () => {
       const ctxOut = await buildIntegrationOAuthRefreshContext(
         INTEGRATION,
         AUTH_KEY,
+        LOCAL_MANIFEST,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
-        { clientRef: "removed-id", oauthResource: null, fixedServer: {} },
+        { clientRef: "removed-id", oauthResource: null },
       );
       expect(ctxOut).toBeNull();
     });
@@ -401,9 +408,10 @@ describe("integration multi-client", () => {
       const ctxOut = await buildIntegrationOAuthRefreshContext(
         INTEGRATION,
         AUTH_KEY,
+        LOCAL_MANIFEST,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
-        { clientRef: null, oauthResource: null, fixedServer: {} },
+        { clientRef: null, oauthResource: null },
       );
       expect(ctxOut).toBeNull();
     });
@@ -413,9 +421,10 @@ describe("integration multi-client", () => {
       const ctxOut = await buildIntegrationOAuthRefreshContext(
         INTEGRATION,
         AUTH_KEY,
+        LOCAL_MANIFEST,
         PUBLIC_AUTH,
         ctx.defaultSpaceId,
-        { clientRef: SYSTEM_ID, oauthResource: null, fixedServer: {} },
+        { clientRef: SYSTEM_ID, oauthResource: null },
       );
       expect(ctxOut).not.toBeNull();
       expect(ctxOut!.clientSecret).toBe("");
@@ -431,9 +440,10 @@ describe("integration multi-client", () => {
       const ctxOut = await buildIntegrationOAuthRefreshContext(
         INTEGRATION,
         AUTH_KEY,
+        LOCAL_MANIFEST,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
-        { clientRef: pinned, oauthResource: null, fixedServer: {} },
+        { clientRef: pinned, oauthResource: null },
       );
       expect(ctxOut!.clientSecret).toBe("rt-secret");
     });
@@ -528,10 +538,6 @@ describe("integration multi-client", () => {
   });
 
   describe("resolveConnectClient honours the default flag", () => {
-    const LOCAL_MANIFEST = {
-      source: { kind: "local", server: { name: `${INTEGRATION}-server`, version: "^0.1.0" } },
-    } as unknown as IntegrationManifest;
-
     function customClient(isDefault: boolean): ResolvedOAuthConnect {
       return {
         spaceClients: [

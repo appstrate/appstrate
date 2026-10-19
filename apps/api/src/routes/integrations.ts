@@ -127,7 +127,6 @@ import {
   setDefaultIntegrationClient,
   toPublicClient,
   updateIntegrationOAuthClient,
-  usesAutoProvisionedClient,
   type IntegrationConnectionSummary,
   type ReconnectTarget,
   type WidenedConnection,
@@ -152,6 +151,7 @@ import {
   CLIENT_SECRET_REQUIRED_MESSAGE,
   PUBLIC_CLIENT_WITH_SECRET_MESSAGE,
   getVariablesSchema,
+  usesAutoProvisionedClient,
 } from "../services/integration-manifest-helpers.ts";
 import {
   acquiresByConnectLogin,

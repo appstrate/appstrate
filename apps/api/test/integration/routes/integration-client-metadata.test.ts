@@ -41,13 +41,13 @@ import {
 import { refreshConnectionCredential } from "../../../src/services/integration-token-refresh.ts";
 import {
   createIntegrationOAuthClient,
-  ensureIntegrationOAuthClient,
   readCredentialRevision,
   readIntegrationAuth,
   resolveConnectClient,
   resolveIntegrationClientById,
   saveIntegrationConnection,
 } from "../../../src/services/integration-connections.ts";
+import { ensureIntegrationOAuthClient } from "../../../src/services/integration-oauth-provisioning.ts";
 import { oauthStateStore } from "../../../src/services/connect/oauth-state-store.ts";
 import { initiateIntegrationOAuth } from "@appstrate/connect";
 import {
