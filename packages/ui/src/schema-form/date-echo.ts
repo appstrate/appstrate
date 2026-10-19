@@ -5,7 +5,8 @@
 // typed segment by segment (`26` → `0026`) or swapped fields show at a glance.
 
 const DATE = /^(\d{4,6})-(\d{2})-(\d{2})$/;
-const DATE_TIME = /^(\d{4,6})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/;
+// No zone designator: a `Z` or an offset would make the local reading wrong, so it gets no echo.
+const DATE_TIME = /^(\d{4,6})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/;
 
 export interface DateEcho {
   /** Weekday, day, month name and full year (plus time for a date-time), in the UI locale. */

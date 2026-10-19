@@ -4,6 +4,8 @@
 import { describe, it, expect, afterEach } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { SchemaForm } from "../src/schema-form/index.tsx";
+import { DateHints } from "../src/schema-form/templates.tsx";
+import { describeDateValue } from "../src/schema-form/date-echo.ts";
 
 const originalTz = process.env.TZ;
 afterEach(() => {
@@ -56,7 +58,9 @@ describe("date echo", () => {
   it("warns, without blocking, on a year below 1000", () => {
     const html = render("date", "0026-09-01");
     expect(html).toContain("Année inhabituelle (0026) : vérifiez la saisie.");
-    expect(html).toContain("26");
+    expect(/<p id="root_field-echo"[^>]*>([^<]*)</.exec(html)?.[1]).toMatch(/ 26$/);
+    expect(html).toContain('aria-describedby="root_field-echo root_field-year-warning"');
+    expect(html).toContain('id="root_field-year-warning"');
   });
 
   it("warns on a date-time whose year is below 1000", () => {
@@ -74,5 +78,23 @@ describe("date echo", () => {
   it("shows nothing under a time input", () => {
     const html = render("time", "10:30");
     expect(html).not.toContain("root_field-echo");
+  });
+
+  it("hides the warning, and its description link, while the input is focused", () => {
+    const echo = describeDateValue("0026-09-01", "date", "fr-FR")!;
+    const hints = (showWarning: boolean) =>
+      renderToStaticMarkup(
+        <DateHints id="x" echo={echo} showWarning={showWarning} labels={labels as never} />,
+      );
+    expect(hints(true)).toContain("Année inhabituelle (0026)");
+    expect(hints(false)).not.toContain("Année inhabituelle");
+    expect(hints(false)).toContain('id="x-echo"');
+  });
+
+  it("gives no echo to a date-time carrying a zone designator", () => {
+    for (const value of ["2026-09-01T10:00Z", "2026-09-01T10:00:00+02:00"]) {
+      expect(describeDateValue(value, "date-time", "fr-FR")).toBeNull();
+    }
+    expect(describeDateValue("2026-09-01T10:00:30.500", "date-time", "fr-FR")).not.toBeNull();
   });
 });

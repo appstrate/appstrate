@@ -8,7 +8,7 @@ import { schemaFormValidator } from "../src/schema-form/validator.ts";
 
 function verdicts(schema: object, data: Record<string, unknown>) {
   return {
-    client: schemaFormValidator.isValid(schema as RJSFSchema, data, data),
+    client: schemaFormValidator.isValid(schema as RJSFSchema, data, schema as RJSFSchema),
     server: validateAgainstSchema(data, schema as never).valid,
   };
 }
