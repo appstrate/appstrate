@@ -7,7 +7,7 @@ import { PendingButton } from "@/components/app-ui/pending-button";
 import { ApiError } from "../../api/errors";
 import { FormField } from "../form-field";
 import { PackageIcon } from "../package-icon";
-import { DiscoveryBadge } from "../integration-editor/discovery-badge";
+import { DiscoveryBadge } from "./discovery-badge";
 import { DiscoveryWarnings } from "../integration-editor/discovery-warnings";
 import { errorMessage } from "../../lib/mutation-error";
 import { packageDetailPath } from "../../lib/package-paths";

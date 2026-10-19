@@ -338,7 +338,7 @@ describe("AgentIntegrationsBlock — an integration declaring no auths (AFPS §7
       connectionRequired: false,
     });
     expect(html).toContain('data-testid="integration-no-connection"');
-    expect(html).toContain(label("connectionsTable.noConnectionNeeded"));
+    expect(html).toContain(i18n.t("settings:integration.auth.none"));
     expect(html).toContain(label("connectionsTable.ready"));
     expect(html).not.toContain(`member-picker-${GMAIL}`);
   });

@@ -10,6 +10,7 @@ import { Button } from "@appstrate/ui/components/button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
 import { DisabledReasonTooltip } from "../disabled-reason-tooltip";
+import { refusalMessage } from "../../lib/mutation-error";
 
 /** The warning tone of a picker line (the constant keeps the name its callers import). */
 export const AMBER_TEXT = "text-warning";
@@ -116,8 +117,14 @@ export function FailedPicker({ integrationId }: { integrationId: string }) {
   );
 }
 
-/** A disabled button saying the agent's configuration must change. */
-export function ReconfigurePicker({ integrationId }: { integrationId: string }) {
+/** A disabled button saying the agent's configuration must change, and why (`code`). */
+export function ReconfigurePicker({
+  integrationId,
+  code,
+}: {
+  integrationId: string;
+  code: string;
+}) {
   const { t } = useTranslation(["agents", "settings"]);
   return (
     <StatusPicker
@@ -126,7 +133,7 @@ export function ReconfigurePicker({ integrationId }: { integrationId: string }) 
       icon={<AlertTriangle />}
       tone={AMBER_TEXT}
       label={t("detail.integrationMemberPicker.reconfigureLabel")}
-      reason={t("error.authKeyServesNoSelectedTool")}
+      reason={refusalMessage({ code }) ?? undefined}
     />
   );
 }

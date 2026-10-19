@@ -182,6 +182,7 @@ export function refusalReasonKey(choice: ConnectionRefusal): string {
 const STRUCTURAL_CODES: ReadonlySet<MissingIntegrationConnectionCode> = new Set([
   "integration_not_active",
   "auth_key_serves_no_selected_tool",
+  "auth_key_on_unauthenticated_integration",
   ...INTEGRATION_MANIFEST_FAILURE_CODES,
 ]);
 

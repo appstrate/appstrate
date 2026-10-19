@@ -48,6 +48,7 @@ const RESOLUTION_ERROR_KEYS = {
   auth_key_mismatch: "error.authKeyMismatch",
   auth_serves_no_selected_tool: "error.authServesNoSelectedTool",
   auth_key_serves_no_selected_tool: "error.authKeyServesNoSelectedTool",
+  auth_key_on_unauthenticated_integration: "error.authKeyOnUnauthenticatedIntegration",
   override_outranked: "error.overrideOutranked",
   connection_set_too_large: "error.connectionSetTooLarge",
   required_integration_unbound: "error.requiredIntegrationUnbound",

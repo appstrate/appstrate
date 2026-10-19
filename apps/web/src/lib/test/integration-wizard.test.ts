@@ -9,15 +9,12 @@ import {
   catalogConnectionsKey,
   catalogSourceKey,
   connectBlocker,
-  draftChangesBeyondWizard,
-  isStalePublish,
   sameAuths,
   syncConnectionRemedy,
   docsChoice,
   initialToolSelection,
   integrationCreationManifest,
   integrationWizardStep,
-  isCurrentAnalysis,
   isRemoteSource,
   needsWizardFinish,
   proposalEdits,
@@ -79,22 +76,15 @@ describe("integrationCreationManifest", () => {
     ).toBe("data:x");
   });
 
-  it("is created by the wizard as a draft only, the manifest as its content", () => {
+  it("is created by the wizard as a draft only, the manifest sent once", () => {
     const manifest = integrationCreationManifest(defaults, proposal, proposalEdits(proposal));
-    expect(wizardCreateBody(manifest, "guided")).toEqual({
-      manifest,
-      content: JSON.stringify(manifest, null, 2),
-      publish: false,
-    });
+    expect(wizardCreateBody(manifest, "guided")).toEqual({ manifest, publish: false });
     expect(wizardCreateBody(manifest, "guided").manifest.version).toBe("1.0.0");
   });
 
   it("is created the manual way as the creation dialog creates it, published by the gate", () => {
     const manifest = integrationCreationManifest(defaults, proposal, proposalEdits(proposal));
-    expect(wizardCreateBody(manifest, "manual")).toEqual({
-      manifest,
-      content: JSON.stringify(manifest, null, 2),
-    });
+    expect(wizardCreateBody(manifest, "manual")).toEqual({ manifest });
   });
 });
 
@@ -282,6 +272,21 @@ describe("catalogSourceKey", () => {
     ).not.toBe(key);
   });
 
+  it("changes with what the proxy injects, a delivery header included", () => {
+    const bearer = {
+      type: "api_key",
+      credential_schema: { type: "object", properties: { api_key: { type: "string" } } },
+      authorized_uris: ["https://mcp.acme.test/**"],
+      delivery: { http: { headers: { Authorization: "Bearer {$credential.api_key}" } } },
+    };
+    const key = catalogSourceKey({ ...draft, auths: { primary: bearer } });
+    const header = {
+      ...bearer,
+      delivery: { http: { headers: { "X-Api-Key": "{$credential.api_key}" } } },
+    };
+    expect(catalogSourceKey({ ...draft, auths: { primary: header } })).not.toBe(key);
+  });
+
   it("stays the same across edits the read does not depend on, auth order included", () => {
     const key = catalogSourceKey({ ...draft, auths: { a: oauth, b: { type: "api_key" } } });
     expect(
@@ -299,13 +304,6 @@ describe("isRemoteSource", () => {
     expect(isRemoteSource({ source: proposal.source })).toBe(true);
     expect(isRemoteSource({ source: { kind: "local", server: { name: "@org/x" } } })).toBe(false);
     expect(isRemoteSource({ source: { kind: "none" } })).toBe(false);
-  });
-});
-
-describe("isCurrentAnalysis", () => {
-  it("drops an answer for an address the input no longer holds", () => {
-    expect(isCurrentAnalysis(" https://a.test/mcp ", "https://a.test/mcp")).toBe(true);
-    expect(isCurrentAnalysis("https://b.test/mcp", "https://a.test/mcp")).toBe(false);
   });
 });
 
@@ -335,14 +333,6 @@ describe("toolsPublishVersion — never lower", () => {
     expect(toolsPublishVersion({ ...facts, draftVersion: "1.0.5" })).toBe("1.1.0");
     // A draft version that is not semver never wins.
     expect(toolsPublishVersion({ ...facts, draftVersion: "next" })).toBe("1.1.0");
-  });
-});
-
-describe("isStalePublish", () => {
-  it("re-saves only on a publish refused because the draft moved (412)", () => {
-    expect(isStalePublish(new ApiError("precondition_failed", "moved", 412))).toBe(true);
-    expect(isStalePublish(new ApiError("version_exists", "taken", 409))).toBe(false);
-    expect(isStalePublish(new Error("network"))).toBe(false);
   });
 });
 
@@ -382,82 +372,6 @@ describe("sameAuths", () => {
     expect(
       sameAuths({ auths: { oauth: { ...oauth, type: "api_key" } } }, { auths: { oauth } }),
     ).toBe(false);
-  });
-});
-
-describe("draftChangesBeyondWizard", () => {
-  const published = {
-    name: "@org/acme",
-    version: "1.0.0",
-    display_name: "Acme",
-    description: "",
-    source: proposal.source,
-    auths: { oauth },
-    tools_policy: { search: { required_scopes: { oauth: ["read"] } } },
-    default_tools: ["search"],
-  };
-  /** The server lists `search` and `fetch`, complete or cut. */
-  const sync = (truncated = false) =>
-    ({
-      manifest: {
-        default_tools: ["search"],
-        tools_policy: { search: {}, fetch: {} },
-        description: "From the server",
-        homepage: "https://acme.example/",
-      },
-      warnings: truncated ? [{ code: "tools_truncated", message: "…" }] : [],
-    }) as unknown as Pick<ServerSyncProposal, "manifest" | "warnings">;
-  const check = (draft: Record<string, unknown>, unarchivedAtMount = false, truncated = false) =>
-    draftChangesBeyondWizard({ draft, published, proposal: sync(truncated), unarchivedAtMount });
-  /** What the wizard's save leaves: tools merged, selection and version set, empty identity filled. */
-  const savedByWizard = {
-    ...published,
-    version: "1.1.0",
-    description: "From the server",
-    homepage: "https://acme.example/",
-    tools_policy: { search: { required_scopes: { oauth: ["read"] } }, fetch: {} },
-    default_tools: ["search", "fetch"],
-    // Same values, another key order.
-    auths: { oauth: Object.fromEntries(Object.entries(oauth).reverse()) },
-  };
-
-  it("says nothing about what the wizard itself writes (a reload after its failed publish)", () => {
-    expect(check(savedByWizard)).toBe(false);
-    // The draft holding changes at mount is the wizard's own save: it declares the listed tools.
-    expect(check(savedByWizard, true)).toBe(false);
-    // Before any save, an untouched draft ships nothing else either.
-    expect(check(published)).toBe(false);
-  });
-
-  it("says nothing about an edit to a tool the server no longer lists: the save drops it", () => {
-    const gone = {
-      ...savedByWizard,
-      tools_policy: { ...savedByWizard.tools_policy, old: { required_scopes: { oauth: ["x"] } } },
-    };
-    expect(check(gone)).toBe(false);
-    // Cut list: the save keeps that entry, so it ships.
-    expect(check(gone, false, true)).toBe(true);
-  });
-
-  it("warns on every other manifest change", () => {
-    const changes: Record<string, unknown>[] = [
-      { hidden_tools: ["fetch"] },
-      { allow_undeclared_tools: true },
-      { variables: { schema: { type: "object", properties: {} } } },
-      { tools_policy: { search: { required_scopes: { oauth: ["write"] } }, fetch: {} } },
-      { tools_policy: { ...savedByWizard.tools_policy, fetch: { description: "edited" } } },
-      // An identity field already set is not the sync's to fill.
-      { display_name: "Acme renamed" },
-      { source: { kind: "remote", remote: { url: "https://b.test/mcp" } } },
-      { auths: { oauth: { ...oauth, default_scopes: ["x"] } } },
-    ];
-    for (const change of changes) expect(check({ ...savedByWizard, ...change })).toBe(true);
-  });
-
-  it("warns on unarchived changes at mount the wizard did not save (files it cannot see)", () => {
-    // The tools are not declared yet: no save of this step explains the changes.
-    expect(check(published, true)).toBe(true);
-    expect(check(published, false)).toBe(false);
   });
 });
 

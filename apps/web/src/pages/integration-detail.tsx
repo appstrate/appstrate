@@ -62,7 +62,7 @@ import { AccessRulesSection } from "../components/integration-detail/access-rule
 import { ConnectionsTable } from "../components/integration-detail/connections-table";
 import { usePermissions, useHomeSpaceName } from "../hooks/use-permissions";
 import { readIntegrationSource } from "../lib/package-manifest";
-import { serverSyncBody } from "../lib/integration-server-sync";
+import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { usePackageDetail, usePackageDownload, type Versioned } from "../hooks/use-packages";
 import { useIntegrationDetail, type IntegrationDetailWire } from "../hooks/use-integrations";
@@ -127,7 +127,9 @@ function IntegrationSettings({
     draftSource?.kind === "remote" &&
     draftSource.transport !== "sse" &&
     !isVariableTemplate(draftSource.url) &&
-    can("credential-proxy:call-own") &&
+    // A draft declaring no auths (AFPS §7.2) is read without the credential proxy.
+    (isUnauthenticatedIntegration(definition?.manifest ?? {}) ||
+      can("credential-proxy:call-own")) &&
     // An integration declaring no auths (AFPS §7.2) is read without a connection.
     (detail.auths.length === 0 || detail.auths.some((auth) => auth.connections.length > 0));
   const resolve = (requested: string | null): IntegrationSettingsSection =>
@@ -209,7 +211,7 @@ function IntegrationSettings({
               detail={definition}
               section={definitionSection}
               toolCatalog={detail.tool_catalog ?? []}
-              syncBody={syncable ? serverSyncBody() : undefined}
+              canSync={syncable}
             />
           </Suspense>
         ) : isPackageCommonSection(active) ? (

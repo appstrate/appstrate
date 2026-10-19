@@ -54,7 +54,7 @@ export function newPackageBody(type: NewPackageType, input: NewPackageInput) {
     case "integration": {
       const base = { ...defaultIntegrationManifest(input.scope, input.email), ...identity };
       const manifest = setSource(base, { ...getSource(base), remoteUrl: input.url.trim() });
-      return { manifest, content: JSON.stringify(manifest, null, 2) };
+      return { manifest };
     }
   }
 }

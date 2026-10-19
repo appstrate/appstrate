@@ -11,11 +11,16 @@ import { installFakeStorage } from "../../test/fake-storage.ts";
 import type { DiscoveryResult } from "../../lib/integration-wizard.ts";
 import type { ServerSyncProposal } from "../../lib/integration-server-sync.ts";
 
-installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
+installFakeStorage({
+  __APP_CONFIG__: { features: {}, trustedOrigins: [] },
+  location: { origin: "https://app.example.test" },
+});
 
 const { CreationHandoffChoices } = await import("../creation-handoff-modal.tsx");
 const { ReviewStep } = await import("../integration-wizard/review-step.tsx");
-const { ToolsChoice } = await import("../integration-wizard/tools-step.tsx");
+const { ToolsChoice, ToolsStep } = await import("../integration-wizard/tools-step.tsx");
+const { catalogConnectionsKey, catalogSourceKey } = await import("../../lib/integration-wizard.ts");
+const { QueryClient } = await import("@tanstack/react-query");
 const { render } = await import("../../test/render.tsx");
 const i18nModule = await import("../../i18n.ts");
 const settingsFr = (await import("../../locales/fr/settings.json")).default;
@@ -98,8 +103,8 @@ describe("the review", () => {
     const html = review();
     expect(html).toContain(agentsFr["integrationWizard.review.auth.oauthAuto"]);
     expect(html).toContain(agentsFr["integrationWizard.review.effect"]);
-    expect(html).toContain(agentsFr["integrationEditor.discover.detected"]);
-    expect(html).toContain(agentsFr["integrationEditor.discover.guessed"]);
+    expect(html).toContain(agentsFr["integrationWizard.review.detected"]);
+    expect(html).toContain(agentsFr["integrationWizard.review.guessed"]);
     expect(html).not.toContain("streamable-http");
   });
 
@@ -123,9 +128,9 @@ describe("the review", () => {
         onManual={noop}
       />,
     );
-    expect(html).not.toContain(agentsFr["integrationEditor.discover.guessed"]);
+    expect(html).not.toContain(agentsFr["integrationWizard.review.guessed"]);
     // The auth line keeps its own badge.
-    expect(html).toContain(agentsFr["integrationEditor.discover.detected"]);
+    expect(html).toContain(agentsFr["integrationWizard.review.detected"]);
   });
 
   it("says a server answering without authentication needs no connection, and how its address is kept", () => {
@@ -269,5 +274,67 @@ describe("the tools step", () => {
     expect(html).toContain(agentsFr["integrationWizard.tools.retry"]);
     expect(html).toContain('href="/integrations/@org/acme"');
     expect(html).not.toContain("integration-wizard-publish");
+  });
+});
+
+describe("the tools step, resumed", () => {
+  // An open server (AFPS §7.2): the step reads it without the proxy permission.
+  const source = {
+    kind: "remote",
+    remote: { url: "https://mcp.acme.test/mcp", transport: "streamable-http" },
+  };
+  const published = { name: "@org/acme", version: "1.0.0", display_name: "Acme", source };
+  const detail = { manifest: published, auths: [] } as unknown as Parameters<
+    typeof ToolsStep
+  >[0]["detail"];
+  const step = (draft: Record<string, unknown>, hasUnarchivedChanges: boolean) => {
+    const qc = new QueryClient();
+    // The server read, as the step keys it (no org or space selected in this harness).
+    qc.setQueryData(
+      [
+        "integration-server-catalog",
+        null,
+        null,
+        "@org/acme",
+        catalogSourceKey(draft),
+        catalogConnectionsKey(detail),
+        null,
+      ],
+      catalog,
+    );
+    return render(
+      <ToolsStep
+        packageId="@org/acme"
+        draft={
+          {
+            id: "@org/acme",
+            manifest: draft,
+            home_writable: true,
+            has_unarchived_changes: hasUnarchivedChanges,
+            etag: '"3"',
+          } as unknown as Parameters<typeof ToolsStep>[0]["draft"]
+        }
+        detail={detail}
+        version="1.1.0"
+        published
+      />,
+      { queryClient: qc },
+    );
+  };
+
+  it("warns when the draft holds changes at mount, though it declares the listed tools", () => {
+    // Published without tools; the wizard saved them, the publish failed; another file of the
+    // draft changed since; the step reopens.
+    const savedByWizard = {
+      ...published,
+      version: "1.1.0",
+      tools_policy: { search: {}, delete_page: {} },
+      default_tools: ["search"],
+    };
+    expect(step(savedByWizard, true)).toContain("integration-wizard-draft-changes");
+    const clean = step(savedByWizard, false);
+    // The catalogue rendered: the absence below is the step's verdict, not a loading state.
+    expect(clean).toContain("integration-wizard-publish");
+    expect(clean).not.toContain("integration-wizard-draft-changes");
   });
 });

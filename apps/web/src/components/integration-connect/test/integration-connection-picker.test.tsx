@@ -567,6 +567,18 @@ describe("IntegrationConnectionPicker — the verdict's precise cause", () => {
     expect(html).not.toContain(EDIT);
     expect(html).not.toContain(LOCKED);
   });
+
+  it("says why the configuration must change, per auth_key refusal", () => {
+    const reason = (
+      error_code: "auth_key_serves_no_selected_tool" | "auth_key_on_unauthenticated_integration",
+    ) => renderPicker(resolution({ source: null, error_code, candidates: [] }), true);
+    const noTool = reason("auth_key_serves_no_selected_tool");
+    const noAuth = reason("auth_key_on_unauthenticated_integration");
+    expect(noAuth).toContain(`member-pick-reconfigure-${INTEGRATION}`);
+    expect(noTool).toContain(i18n.t("agents:error.authKeyServesNoSelectedTool"));
+    expect(noAuth).toContain(i18n.t("agents:error.authKeyOnUnauthenticatedIntegration"));
+    expect(noAuth).not.toContain(i18n.t("agents:error.authKeyServesNoSelectedTool"));
+  });
 });
 
 describe("IntegrationConnectionPicker — what the modal writes", () => {

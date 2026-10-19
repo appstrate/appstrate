@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { ChevronDown } from "lucide-react";
 import type { OrgPackageItemDetail } from "@appstrate/shared-types";
+import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Badge } from "@appstrate/ui/components/badge";
 import { Button } from "@appstrate/ui/components/button";
@@ -17,6 +18,7 @@ import {
 import { CheckboxField } from "@/components/app-ui/checkbox-field";
 import { PendingButton } from "@/components/app-ui/pending-button";
 import { client } from "../../api/client";
+import { ApiError } from "../../api/errors";
 import { TextSkeleton } from "../loading-skeletons";
 import { RoleLimitNotice } from "../role-limit-notice";
 import { DiscoveryWarnings } from "../integration-editor/discovery-warnings";
@@ -38,13 +40,12 @@ import {
   catalogConnectionsKey,
   catalogSourceKey,
   docsChoice,
-  draftChangesBeyondWizard,
-  isStalePublish,
   sameAuths,
   syncConnectionRemedy,
   initialToolSelection,
   toolsUpdateBody,
 } from "../../lib/integration-wizard";
+import { ConnectStep } from "./connect-step";
 import { WizardSection } from "./wizard-section";
 import type { IntegrationDetailWire } from "../../hooks/use-integrations";
 import { packageKeys } from "../../lib/query-keys";
@@ -57,7 +58,6 @@ export function ToolsStep({
   packageId,
   draft,
   detail,
-  connect,
   version,
   published,
 }: {
@@ -66,8 +66,6 @@ export function ToolsStep({
   draft: Versioned<OrgPackageItemDetail>;
   /** The integration detail: its published manifest and connections. */
   detail: IntegrationDetailWire;
-  /** The connect step, shown when the server read needs an account first (the page's own). */
-  connect: ReactNode;
   /** The version the tools are published as. */
   version: string;
   /** A version is already published: the draft's other changes ship with this one. */
@@ -75,6 +73,8 @@ export function ToolsStep({
 }) {
   const { t } = useTranslation("agents");
   const { can } = usePermissions();
+  // A draft declaring no auths (AFPS §7.2) is read without the credential proxy.
+  const readsWithoutProxy = isUnauthenticatedIntegration(draft.manifest ?? {});
   return (
     <WizardSection
       title={t("integrationWizard.tools.title")}
@@ -83,14 +83,13 @@ export function ToolsStep({
       {/* The save is a write in the package's home space, the server's verdict on the draft. */}
       {!draft.home_writable ? (
         <RoleLimitNotice>{t("integrationWizard.tools.notWritable")}</RoleLimitNotice>
-      ) : !can("credential-proxy:call-own") ? (
+      ) : !readsWithoutProxy && !can("credential-proxy:call-own") ? (
         <RoleLimitNotice>{t("integrationWizard.tools.noPermission")}</RoleLimitNotice>
       ) : (
         <ServerCatalog
           packageId={packageId}
           draft={draft}
           detail={detail}
-          connect={connect}
           version={version}
           published={published}
         />
@@ -103,14 +102,12 @@ function ServerCatalog({
   packageId,
   draft,
   detail,
-  connect,
   version,
   published,
 }: {
   packageId: string;
   draft: Versioned<OrgPackageItemDetail>;
   detail: IntegrationDetailWire;
-  connect: ReactNode;
   version: string;
   published: boolean;
 }) {
@@ -203,7 +200,7 @@ function ServerCatalog({
   if (remedy === "connect") {
     return (
       <div className="flex flex-col items-start gap-3">
-        {connect}
+        <ConnectStep packageId={packageId} detail={detail} />
         <Button type="button" variant="outline" onClick={() => void catalog.refetch()}>
           {t("integrationWizard.tools.retry")}
         </Button>
@@ -237,15 +234,9 @@ function ServerCatalog({
   }
 
   const proposal = catalog.data;
-  // Before the first publish the whole draft IS what is published: there is nothing to warn about.
-  const otherDraftChanges =
-    published &&
-    draftChangesBeyondWizard({
-      draft: draft.manifest ?? {},
-      published: detail.manifest,
-      proposal,
-      unarchivedAtMount,
-    });
+  // Changes held at mount may be files the step cannot see, or an earlier save of its own: the
+  // whole draft is published, so the step warns.
+  const otherDraftChanges = published && unarchivedAtMount;
   const selected = selection ?? initialToolSelection(draft.manifest ?? {}, proposal);
   const submit = async () => {
     try {
@@ -273,11 +264,10 @@ function ServerCatalog({
       try {
         await publish.mutateAsync({ version, etag });
       } catch (err) {
-        if (isStalePublish(err)) {
-          // That save is not the draft any more: re-read it and save again on the next submit.
+        // That save is not the draft any more (the hook re-reads it): save again on the next submit.
+        if (err instanceof ApiError && err.code === "precondition_failed") {
           setSaved(undefined);
           setDraftMoved(true);
-          await qc.invalidateQueries({ queryKey: packageKeys.all });
         }
         throw err;
       }
@@ -393,28 +383,26 @@ export function ToolsChoice({
         </p>
         <p className="text-muted-foreground">{t("integrationWizard.tools.selectionHint")}</p>
       </div>
-      {names.length > 0 && (
-        <div className="flex gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={pending}
-            onClick={() => onSelectedChange(new Set(names))}
-          >
-            {t("integrationWizard.tools.selectAll")}
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={pending}
-            onClick={() => onSelectedChange(new Set())}
-          >
-            {t("integrationWizard.tools.selectNone")}
-          </Button>
-        </div>
-      )}
+      <div className="flex gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={pending}
+          onClick={() => onSelectedChange(new Set(names))}
+        >
+          {t("integrationWizard.tools.selectAll")}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={pending}
+          onClick={() => onSelectedChange(new Set())}
+        >
+          {t("integrationWizard.tools.selectNone")}
+        </Button>
+      </div>
       <div
         role="group"
         aria-label={t("integrationWizard.tools.listLabel")}

@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// The guided addition of an integration from an MCP server URL: the manifests it writes, the
-// manifest it hands to the manual editor, and the step a package is at. Nothing of the wizard is
-// stored: its step is read from the package.
+// The guided addition of an integration from an MCP server URL. Nothing of the wizard is stored:
+// its step is read from the package.
 
 import {
   getDeclaredToolNames,
@@ -14,6 +13,7 @@ import { getSource } from "../components/integration-editor/utils";
 import { ApiError } from "../api/errors";
 import type { paths } from "../api/schema";
 import {
+  INTEGRATION_DOC,
   isToolsTruncated,
   mergeServerSync,
   type ServerSyncProposal,
@@ -24,7 +24,9 @@ export type DiscoveryResult =
   paths["/api/integrations/discover"]["post"]["responses"][200]["content"]["application/json"];
 type DiscoveredManifest = DiscoveryResult["manifest"];
 
-/** What the review lets the user change before creating. */
+/** Whether a field of the proposal was read from the server or inferred. */
+export type Provenance = "detected" | "guessed";
+
 export interface WizardEdits {
   display_name: string;
   name: string;
@@ -34,11 +36,7 @@ export function proposalEdits(manifest: DiscoveredManifest): WizardEdits {
   return { display_name: manifest.display_name, name: manifest.name };
 }
 
-/**
- * The manifest the wizard creates (or hands to the manual editor): the editor's defaults, the
- * proposal over them — its `auths` replace the default API key auth, they are not merged, and a
- * proposal without any (an open server, AFPS §7.2) drops it — then the user's edits and the icon.
- */
+/** The proposal's `auths` replace the defaults' API key auth; none (AFPS §7.2) drops it. */
 export function integrationCreationManifest(
   defaults: Record<string, unknown>,
   proposal: DiscoveredManifest,
@@ -55,7 +53,6 @@ export function integrationCreationManifest(
   };
 }
 
-/** How the user connects an account, in the review's words. */
 export type WizardAuthKind = "oauthAuto" | "oauthAdmin" | "apiKey" | "other";
 
 export function wizardAuthKind(auth: unknown): WizardAuthKind {
@@ -66,7 +63,6 @@ export function wizardAuthKind(auth: unknown): WizardAuthKind {
   return token_endpoint_auth_method === "none" ? "oauthAuto" : "oauthAdmin";
 }
 
-/** For a remote source the declared catalog is `tools_policy`'s keys (`getDeclaredToolNames`). */
 export function declaredToolNames(manifest: Record<string, unknown>): string[] {
   return getDeclaredToolNames(manifest as IntegrationManifest);
 }
@@ -80,14 +76,10 @@ export function defaultToolCount(manifest: Record<string, unknown>): number {
 
 export type IntegrationWizardStep = "notRemote" | "inactive" | "connect" | "tools" | "ready";
 
-/** What a credential-proxy call outside a run would bind for the caller here (the detail's verdict). */
 export type ProxyConnectionStatus =
   paths["/api/integrations/{packageId}"]["get"]["responses"][200]["content"]["application/json"]["proxy_connection"]["status"];
 
-/**
- * The governed verdicts the tools step proceeds on: `must_choose` gets its choice there, and an
- * unauthenticated integration (`not_required`, AFPS §7.2) has nothing to connect.
- */
+/** `must_choose` gets its choice at the tools step; `not_required` (AFPS §7.2) has nothing to connect. */
 function connectionProceeds(status: ProxyConnectionStatus): boolean {
   return status === "ready" || status === "must_choose" || status === "not_required";
 }
@@ -104,9 +96,8 @@ export type ConnectBlocker =
   | "unusableImposed";
 
 /**
- * The connect step's reading of the verdict. Connecting is offered only where a connection of the
- * caller's own can change it: never under an imposed connection, nor past an org default that
- * binds before any personal connection, nor without the proxy permission it lacks.
+ * Connecting is offered only where a connection of the caller's own can change the verdict: never
+ * under an imposed connection, past an org default that binds first, or without the permission.
  */
 export function connectBlocker(verdict: { status: ProxyConnectionStatus; imposed: boolean }): {
   blocker: ConnectBlocker;
@@ -122,8 +113,6 @@ export function connectBlocker(verdict: { status: ProxyConnectionStatus; imposed
         ? { blocker: "unusableImposed", offerConnect: false }
         : { blocker: "unusable", offerConnect: true };
     case "not_permitted":
-      // Imposed: `call-own` is refused by the enforced default. Not imposed: the caller holds no
-      // proxy permission at all, and `call-own` is the one reading the server's tools needs.
       return {
         blocker: verdict.imposed ? "notPermittedImposed" : "notPermitted",
         offerConnect: false,
@@ -136,22 +125,17 @@ export function connectBlocker(verdict: { status: ProxyConnectionStatus; imposed
 }
 
 interface IntegrationWizardFacts {
-  /** The integration is served by a remote MCP server, the only source this wizard handles. */
   remote: boolean;
-  /** The integration is switched on in this space (the detail's `active`): no call reaches it else. */
   active: boolean;
-  /** The package has a published version. */
   published: boolean;
-  /** `proxy_connection.status`: the space's governance applied, for this caller. */
   connection: ProxyConnectionStatus;
-  /** The manifest the detail reads declares tools: the published version, else the draft. */
+  /** The manifest the detail reads (the published version, else the draft) declares tools. */
   toolsDeclared: boolean;
 }
 
 /**
- * Where an integration being added stands, read from the package alone. Ready only once a
- * published version declares tools: before the first publish, a draft that already declares them
- * (a save whose publish failed) is still at the tools step.
+ * Ready only once a PUBLISHED version declares tools: a draft declaring them before the first
+ * publish (a save whose publish failed) is still at the tools step.
  */
 export function integrationWizardStep(facts: IntegrationWizardFacts): IntegrationWizardStep {
   if (!facts.remote) return "notRemote";
@@ -164,21 +148,10 @@ export function isRemoteSource(manifest: Record<string, unknown>): boolean {
   return getSource(manifest).kind === "remote";
 }
 
-/** An analysis answers the input only while the input still holds the address it was asked for. */
-export function isCurrentAnalysis(latestInput: string, requested: string): boolean {
-  return latestInput.trim() === requested;
-}
-
-/**
- * Whether the integration page offers to resume the wizard: a remote server whose manifest
- * declares no tool — the published version's, or the draft's while nothing is published — for a
- * caller who may both write the package's home and open the wizard's route in this space.
- */
+/** A remote server declaring no tool, for a caller who may write its home and open the wizard. */
 export function needsWizardFinish(facts: {
   manifest: Record<string, unknown>;
-  /** `home_writable`: the save and the publish are writes in the package's home. */
   homeWritable: boolean;
-  /** The wizard's route is reachable in the CURRENT space (`integrations:write` here). */
   canOpenWizard: boolean;
 }): boolean {
   return (
@@ -189,15 +162,11 @@ export function needsWizardFinish(facts: {
   );
 }
 
-/** The wizard's resume address for a package. */
 export function wizardResumePath(packageId: string): string {
   return `/integrations/new/mcp?${new URLSearchParams({ package: packageId })}`;
 }
 
-/**
- * The version the tools are published as: the draft's own (its first version, `1.0.0` from the
- * wizard) while nothing is published, else the next minor of the published one.
- */
+/** The draft's own version until a publish, then the next minor — never below the draft's. */
 export function toolsPublishVersion(facts: {
   published: boolean;
   publishedVersion: unknown;
@@ -212,7 +181,6 @@ export function toolsPublishVersion(facts: {
     typeof facts.publishedVersion === "string"
       ? bumpVersion(facts.publishedVersion, "minor")
       : null;
-  // Never below the draft's own version: a draft already set past the next minor keeps it.
   if (!next) return null;
   return draft && compareVersionsDesc(draft, next) < 0 ? draft : next;
 }
@@ -230,78 +198,15 @@ function canonicalJson(value: unknown): string {
   );
 }
 
-const isEmptyValue = (v: unknown) =>
-  v === undefined ||
-  v === null ||
-  v === "" ||
-  (Array.isArray(v) && v.length === 0) ||
-  (typeof v === "object" && v !== null && Object.keys(v).length === 0);
-
-/** Identity fields the server sync fills only when the draft's are empty (`mergeServerSync`). */
-const SYNC_FILLED_IDENTITY = ["display_name", "description", "homepage", "icon"] as const;
-
-/** What the comparison sets aside: the wizard's own writes, the identity only where it fills it. */
-function setAsideWizardWrites(
-  manifest: Record<string, unknown>,
-  published: Record<string, unknown>,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...manifest };
-  delete out.default_tools;
-  delete out.version;
-  for (const key of SYNC_FILLED_IDENTITY) if (isEmptyValue(published[key])) delete out[key];
-  return out;
-}
-
-/**
- * Whether the tools step's publish would ship draft changes the wizard does not write: what the
- * save ships, `mergeServerSync(draft, proposal)`, against the same sync merged into the published
- * version — so the tools the server lists, added or dropped, count on both sides alike — with
- * `default_tools`, `version` and the identity fields the sync fills where the published version
- * leaves them empty set aside; key order ignored. Files are not visible here, hence a heuristic for
- * them: the draft had unarchived changes when the step opened (`has_unarchived_changes`) while it
- * does not yet declare the tools the server lists — no save of this step, in this session or an
- * earlier one, explains them.
- */
-export function draftChangesBeyondWizard(facts: {
-  draft: Record<string, unknown>;
-  published: Record<string, unknown>;
-  proposal: Pick<ServerSyncProposal, "manifest" | "warnings">;
-  /** `has_unarchived_changes` when the step opened. */
-  unarchivedAtMount: boolean;
-}): boolean {
-  const { draft, published, proposal } = facts;
-  const shipped = setAsideWizardWrites(mergeServerSync(draft, proposal), published);
-  const baseline = setAsideWizardWrites(mergeServerSync(published, proposal), published);
-  if (canonicalJson(shipped) !== canonicalJson(baseline)) return true;
-  const declared = new Set(declaredToolNames(draft));
-  const listed = Object.keys(proposal.manifest.tools_policy);
-  const wizardSaved = listed.length > 0 && listed.every((name) => declared.has(name));
-  return facts.unarchivedAtMount && !wizardSaved;
-}
-
 /** Whether the draft's `auths` are the published version's, key order aside. */
 export function sameAuths(draft: Record<string, unknown>, published: Record<string, unknown>) {
   return canonicalJson(draft.auths ?? null) === canonicalJson(published.auths ?? null);
 }
 
-/** A publish refused because the draft moved since its save (`412`): the next submit saves again. */
-export function isStalePublish(error: unknown): boolean {
-  return (
-    error instanceof ApiError && (error.status === 412 || error.code === "precondition_failed")
-  );
-}
-
 /**
- * What a server sync refused for want of an account (`integration_not_connected`) or for one to
- * reconnect (`needs_reconnection`) calls for. The sync reads the DRAFT's auths, while the connect
- * flow and the detail's verdict read the PUBLISHED manifest once a version exists:
- *
- *   - `connect` — nothing is published (the detail serves the draft, so connecting reaches the
- *     sync's auths), or the published auths are the draft's (a connection really gone).
- *   - `unpublishedAuths` — a version is published and the draft changes its authentication:
- *     connecting reaches the published auths and cannot clear the refusal. The draft's changes
- *     are published or reverted from the integration page.
- *   - `null` — any other error.
+ * What a sync refused for want of an account calls for. The sync reads the DRAFT's auths, while
+ * connecting reaches the PUBLISHED ones once a version exists: when the draft changes them
+ * (`unpublishedAuths`), no connect can clear the refusal.
  */
 export function syncConnectionRemedy(
   error: unknown,
@@ -316,37 +221,23 @@ export function syncConnectionRemedy(
   return !facts.published || facts.authsMatch ? "connect" : "unpublishedAuths";
 }
 
-/**
- * The create body of an accepted proposal. The wizard creates the draft alone (`publish: false`),
- * activated here and published with its tools; the manual way creates it as every creation dialog
- * does, published when the publish gate accepts it.
- */
+/** The wizard publishes the draft with its tools; the manual way creates as every dialog does. */
 export function wizardCreateBody(manifest: Record<string, unknown>, way: "guided" | "manual") {
-  const body = { manifest, content: JSON.stringify(manifest, null, 2) };
-  return way === "guided" ? { ...body, publish: false as const } : body;
+  return way === "guided" ? { manifest, publish: false as const } : { manifest };
 }
 
-/**
- * What a read of the server's catalogue was read FROM: the draft's source and the auths the
- * proxy authorizes the call with. A change to either is another read, never a cached answer.
- */
+/** A change to the source or the auths a catalogue read went through is another read. */
 export function catalogSourceKey(draft: Record<string, unknown>): string {
   const source = getSource(draft);
-  const auths = Object.entries(
-    (draft.auths && typeof draft.auths === "object" ? draft.auths : {}) as Record<string, unknown>,
-  )
-    .map(([key, auth]) => {
-      const { type, authorized_uris } = (auth ?? {}) as Record<string, unknown>;
-      return [key, type ?? null, authorized_uris ?? null] as const;
-    })
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return JSON.stringify([source.kind, source.remoteUrl, source.remoteTransport, auths]);
+  return JSON.stringify([
+    source.kind,
+    source.remoteUrl,
+    source.remoteTransport,
+    canonicalJson(draft.auths ?? null),
+  ]);
 }
 
-/**
- * The connections a read of the catalogue went through, as its cache key: one added or
- * reconnected since is a reason to read the server again.
- */
+/** A connection added or reconnected since a read is a reason to read the server again. */
 export function catalogConnectionsKey(detail: {
   auths: readonly { connections: readonly { id: string; needs_reconnection: boolean }[] }[];
 }): string {
@@ -358,9 +249,8 @@ export function catalogConnectionsKey(detail: {
 }
 
 /**
- * The tools checked when the step opens: the draft's own `default_tools` once it declares tools
- * (a save of this step, an explicit `[]` included), restricted to the tools the server lists;
- * otherwise the server's read-only pre-selection.
+ * The draft's own `default_tools` once it declares tools (an explicit `[]` included), restricted
+ * to the listed tools; otherwise the server's read-only pre-selection.
  */
 export function initialToolSelection(
   draft: Record<string, unknown>,
@@ -373,22 +263,17 @@ export function initialToolSelection(
       : undefined;
   if (saved === "*") return new Set(listed);
   if (Array.isArray(saved)) return new Set(listed.filter((name) => saved.includes(name)));
-  // The server already leaves destructive tools out; a destructive hint is never pre-checked.
   const destructive = new Set(proposal.tools.filter((tool) => tool.destructive).map((t) => t.name));
   return new Set(proposal.manifest.default_tools.filter((name) => !destructive.has(name)));
 }
 
-const INTEGRATION_DOC = "INTEGRATION.md";
-
 /**
- * What a save does with `INTEGRATION.md`: write the server's instructions when accepted, delete
- * the file only when THIS session wrote it and the user has since declined it, else nothing — a
- * documentation the wizard did not write is never touched. `written` is the next save's input.
+ * A documentation the wizard did not write is never touched: the file is deleted only when THIS
+ * session wrote it and the user has since declined it. `written` is the next save's input.
  */
 export function docsChoice(state: {
   include: boolean;
   instructions: string | null;
-  /** This session's last save wrote the file. */
   written: boolean;
 }): { instructions: string | null; removeDocs: boolean; written: boolean } {
   const instructions = state.include ? state.instructions : null;
@@ -398,9 +283,8 @@ export function docsChoice(state: {
 }
 
 /**
- * The saved `default_tools`: the user's choice among the listed tools. A truncated list leaves the
- * draft's other declared tools in `tools_policy` ({@link mergeServerSync}), so the selection keeps
- * those of them it already held; a name the merged policy does not declare is never added.
+ * The user's choice among the listed tools. A truncated list leaves the draft's other declared
+ * tools in `tools_policy`, so the selection keeps those of them it already held.
  */
 function toolsSelection(
   merged: Record<string, unknown>,
@@ -410,7 +294,6 @@ function toolsSelection(
   if (!isToolsTruncated(proposal)) return [...selected];
   const listed = new Set(Object.keys(proposal.manifest.tools_policy));
   const declared = new Set(declaredToolNames(merged));
-  // `*` selected every declared tool, the unlisted ones included.
   const held: unknown[] =
     merged.default_tools === "*"
       ? [...declared]
@@ -423,10 +306,7 @@ function toolsSelection(
   return [...kept, ...selected.filter((name) => declared.has(name))];
 }
 
-/**
- * The draft save that declares the server's tools: the sync merged into the draft, the selection
- * as `default_tools`, the version to publish, and `INTEGRATION.md` as {@link docsChoice} decides.
- */
+/** The draft save declaring the server's tools, their selection, the version and the docs. */
 export function toolsUpdateBody(
   draft: Record<string, unknown>,
   proposal: Pick<ServerSyncProposal, "manifest" | "warnings">,
