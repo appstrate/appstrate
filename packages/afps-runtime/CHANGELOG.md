@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `truncateToolResult` summarises image blocks
+
+- Every image block (`{ type: "image", data }`, at any depth) is logged as
+  `{ type: "image", mimeType, bytes }` instead of its base64, which used to fill
+  the 2 KB preview and hide the text after it (the spill pointer). (#2123)
+
 ### Changed — `@afps-spec/schema` `^0.12.0`
 
 - An integration manifest may omit `auths` (AFPS §7.2, unauthenticated integrations). (#2075)
