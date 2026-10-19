@@ -134,7 +134,8 @@ test.describe("file reader page", () => {
 
     await page.goto("/files");
     const sidebar = new Sidebar(page);
-    await expect(sidebar.switcherButton).toBeVisible();
+    // The space label renders once the spaces query lands: capture the switcher only then.
+    await expect(sidebar.switcherButton).toContainText("Default");
     const switcherBefore = (await sidebar.switcherButton.textContent()) ?? "";
     const stores = () =>
       page.evaluate(() => ({
