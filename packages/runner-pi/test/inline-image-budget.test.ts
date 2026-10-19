@@ -59,6 +59,24 @@ describe("dropOldInlineImages", () => {
     expect(out[2]!.content[0]!.type).toBe("image");
   });
 
+  it("keeps the later image of two in one tool result and drops the earlier", () => {
+    const out = dropOldInlineImages([toolResult(image(6, "a"), image(6, "b"))], 10)!;
+    expect(isOmitted(out[0]!.content[0])).toBe(true);
+    expect(out[0]!.content[1]).toEqual(image(6, "b"));
+  });
+
+  it("never brings back an image dropped on an earlier turn", () => {
+    const messages = [toolResult(image(3)), toolResult(image(7)), toolResult(image(9))];
+    const first = dropOldInlineImages(messages, 10)!;
+    const second = dropOldInlineImages([...messages, toolResult(image(2))], 10)!;
+    first.forEach((message, i) =>
+      message.content.forEach((block, j) => {
+        if (isOmitted(block)) expect(isOmitted(second[i]!.content[j])).toBe(true);
+      }),
+    );
+    expect(first.flatMap((m) => m.content).filter(isOmitted)).toHaveLength(2);
+  });
+
   it("keeps the newest image even when it alone exceeds the budget", () => {
     expect(dropOldInlineImages([toolResult(image(50))], 10)).toBeUndefined();
   });
