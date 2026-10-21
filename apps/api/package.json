@@ -36,7 +36,7 @@
     "@hono/swagger-ui": "^0.6.1",
     "@modelcontextprotocol/sdk": "^1.31.0",
     "ajv": "^8.20.0",
-    "better-auth": "1.7.7",
+    "better-auth": "1.7.10",
     "bullmq": "^6.3.12",
     "cron-parser": "^5.10.2",
     "drizzle-orm": "^0.45.4",
