@@ -64,11 +64,11 @@
     "@afps-spec/schema": "^0.12.0",
     "@afps-spec/types": "^0.1.0",
     "@appstrate/afps-shared": "workspace:*",
-    "file-type": "^22.1.1",
+    "file-type": "^22.2.0",
     "fflate": "^0.8.3",
     "mustache": "^4.2.0",
     "semver": "^7.8.4",
-    "zod": "^4.6.6"
+    "zod": "^4.6.7"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "1.1.0",
