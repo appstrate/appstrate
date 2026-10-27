@@ -712,7 +712,7 @@ describe("package-versions service", () => {
         userId,
         version: "1.0.1",
       });
-      expect(bumped).toEqual({ error: "no_changes" });
+      expect(bumped).toEqual({ ok: false, error: "no_changes" });
       // The refusal settles the marker, so nothing keeps offering this publish.
       const [settled] = await db
         .select({ updatedAt: packages.updatedAt })
@@ -807,7 +807,7 @@ describe("package-versions service", () => {
 
       // Unchanged draft → still the dedup answer.
       const unchanged = await createVersionFromDraft({ packageId: pkg.id, orgId, userId });
-      expect(unchanged).toEqual({ error: "no_changes" });
+      expect(unchanged).toEqual({ ok: false, error: "no_changes" });
 
       // Changed content, same version → refuse loudly instead of the old
       // silent 201 that corrupted the stored artifact.
@@ -816,7 +816,7 @@ describe("package-versions service", () => {
         .set({ draftContent: "v2 prompt — changed" })
         .where(eq(packages.id, pkg.id));
       const republished = await createVersionFromDraft({ packageId: pkg.id, orgId, userId });
-      expect(republished).toEqual({ error: "version_exists" });
+      expect(republished).toEqual({ ok: false, error: "version_exists" });
 
       // Published artifact still matches its recorded integrity.
       const [row] = await db

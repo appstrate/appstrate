@@ -35,7 +35,7 @@ interface RunCommandOptions {
    * Kill the child after this many ms and resolve with `ok: false`
    * (exitCode `-1`, stderr `"timeout"`). Intended for probes that must
    * not block the UI — e.g. `docker info` when the daemon is starting
-   * up can hang for 10–30 s. Undefined = no timeout (legacy behaviour).
+   * up can hang for 10–30 s. Undefined = no timeout.
    */
   timeoutMs?: number;
 }

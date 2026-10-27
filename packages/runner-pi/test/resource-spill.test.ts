@@ -125,7 +125,7 @@ describe("spillResourcesToWorkspace", () => {
       content: [
         {
           type: "resource_link",
-          uri: "appstrate://api-response/run_x/ULID",
+          uri: "appstrate://tool-output/run_x/ULID",
           mimeType: "application/json",
         },
       ],
@@ -136,7 +136,7 @@ describe("spillResourcesToWorkspace", () => {
 
   it("fetches a resource_link, spills it to a file with a mime-derived extension", async () => {
     const json = JSON.stringify({ user: "Pierre", id: 1045141849 });
-    const uri = "appstrate://api-response/run_x/06F5AZ8FKDQK7CFJVCCYE2Y858";
+    const uri = "appstrate://tool-output/run_x/06F5AZ8FKDQK7CFJVCCYE2Y858";
     const result = {
       content: [{ type: "resource_link", uri, name: "response", mimeType: "application/json" }],
     } as unknown as CallToolResult;
@@ -168,7 +168,7 @@ describe("spillResourcesToWorkspace", () => {
       content: [
         {
           type: "resource_link",
-          uri: "appstrate://api-response/run_x/Z",
+          uri: "appstrate://tool-output/run_x/Z",
           mimeType: "text/html",
         },
       ],
@@ -181,5 +181,295 @@ describe("spillResourcesToWorkspace", () => {
       },
     });
     expect(out.content[0]).toEqual(result.content[0]!);
+  });
+
+  describe("image blocks", () => {
+    // A valid 1x1 PNG — real bytes, so Pi's own sniffer actually runs.
+    const PNG_B64 =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    const PNG_BYTES = new Uint8Array(Buffer.from(PNG_B64, "base64"));
+    const SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>';
+
+    it("writes a PNG byte-exact and keeps it inline, followed by a pointer", async () => {
+      const result: CallToolResult = {
+        content: [{ type: "image", data: PNG_B64, mimeType: "image/png" }],
+      };
+      const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "img1" });
+
+      expect(out.content).toHaveLength(2);
+      expect(out.content[0]).toEqual({ type: "image", data: PNG_B64, mimeType: "image/png" });
+      const pointer = out.content[1] as { type: "text"; text: string };
+      expect(pointer.type).toBe("text");
+      expect(pointer.text).toContain("resources/img1-image-0.png");
+      expect(pointer.text).toContain("image/png");
+      expect(pointer.text).toContain(`${PNG_BYTES.byteLength} bytes`);
+      expect(pointer.text).toContain("fromFile");
+
+      const written = await fs.readFile(path.join(workspace, "resources", "img1-image-0.png"));
+      expect(new Uint8Array(written)).toEqual(PNG_BYTES);
+    });
+
+    it("names, labels and points at a mislabelled image by its sniffed mime", async () => {
+      const result: CallToolResult = {
+        content: [{ type: "image", data: PNG_B64, mimeType: "image/jpeg" }],
+      };
+      const events: Array<{ type: string; [k: string]: unknown }> = [];
+      const out = await spillResourcesToWorkspace(result, {
+        workspace,
+        toolCallId: "img2",
+        emit: (e) => events.push(e),
+      });
+
+      expect(out.content[0]).toEqual({ type: "image", data: PNG_B64, mimeType: "image/png" });
+      const pointer = out.content[1] as { type: "text"; text: string };
+      expect(pointer.text).toContain("resources/img2-image-0.png");
+      expect(pointer.text).toContain("image/png");
+      expect(pointer.text).not.toContain("image/jpeg");
+      const written = await fs.readFile(path.join(workspace, "resources", "img2-image-0.png"));
+      expect(new Uint8Array(written)).toEqual(PNG_BYTES);
+      expect(await fs.readdir(path.join(workspace, "resources"))).toEqual(["img2-image-0.png"]);
+      expect(events.map((e) => e.path)).toEqual(["resources/img2-image-0.png"]);
+    });
+
+    it("writes an animated PNG but points at it only — Pi's read does not take APNG", async () => {
+      // The 1x1 PNG with an `acTL` chunk inserted after IHDR (8 + 25 bytes).
+      const actl = Buffer.from([
+        0, 0, 0, 8, 0x61, 0x63, 0x54, 0x4c, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0,
+      ]);
+      const apng = Buffer.concat([
+        Buffer.from(PNG_BYTES.subarray(0, 33)),
+        actl,
+        Buffer.from(PNG_BYTES.subarray(33)),
+      ]);
+      const result: CallToolResult = {
+        content: [{ type: "image", data: apng.toString("base64"), mimeType: "image/png" }],
+      };
+      const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "img7" });
+
+      expect(out.content).toHaveLength(1);
+      const pointer = out.content[0] as { type: "text"; text: string };
+      expect(pointer.text).toContain("resources/img7-image-0.png");
+      expect(pointer.text).toContain("can't be shown inline");
+      const written = await fs.readFile(path.join(workspace, "resources", "img7-image-0.png"));
+      expect(new Uint8Array(written)).toEqual(new Uint8Array(apng));
+    });
+
+    it("turns an empty image into a 0-byte file and a pointer, never an empty inline image", async () => {
+      // An empty inline image would reach the provider as an undecodable image
+      // and fail the conversation; the pointer keeps the call's trace instead.
+      const result: CallToolResult = {
+        content: [{ type: "image", data: "", mimeType: "image/png" }],
+      };
+      const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "img8" });
+
+      expect(out.content).toHaveLength(1);
+      const pointer = out.content[0] as { type: "text"; text: string };
+      expect(pointer.text).toContain("resources/img8-image-0.png");
+      expect(pointer.text).toContain("0 bytes");
+      expect(pointer.text).toContain("can't be shown inline");
+      const written = await fs.readFile(path.join(workspace, "resources", "img8-image-0.png"));
+      expect(written.byteLength).toBe(0);
+    });
+
+    it("spills an SVG as a pointer only — Pi cannot show it inline", async () => {
+      const result: CallToolResult = {
+        content: [
+          { type: "image", data: Buffer.from(SVG).toString("base64"), mimeType: "image/svg+xml" },
+        ],
+      };
+      const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "img3" });
+
+      expect(out.content).toHaveLength(1);
+      const pointer = out.content[0] as { type: "text"; text: string };
+      expect(pointer.type).toBe("text");
+      expect(pointer.text).toContain("resources/img3-image-0.svg");
+      expect(pointer.text).toContain("can't be shown inline");
+      const written = await fs.readFile(
+        path.join(workspace, "resources", "img3-image-0.svg"),
+        "utf-8",
+      );
+      expect(written).toBe(SVG);
+    });
+
+    it("keeps block order in a mixed result, with non-colliding fallback names", async () => {
+      const result = {
+        content: [
+          { type: "text", text: "before" },
+          { type: "image", data: PNG_B64, mimeType: "image/png" },
+          { type: "resource", resource: { text: "payload", mimeType: "text/plain" } },
+          { type: "text", text: "after" },
+        ],
+      } as unknown as CallToolResult;
+      const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "img4" });
+
+      expect(out.content.map((c) => c.type)).toEqual(["text", "image", "text", "text", "text"]);
+      expect(out.content[0]).toEqual({ type: "text", text: "before" });
+      expect((out.content[2] as { text: string }).text).toContain("resources/img4-image-0.png");
+      expect((out.content[3] as { text: string }).text).toContain("resources/img4-resource-1.txt");
+      expect(out.content[4]).toEqual({ type: "text", text: "after" });
+      expect(
+        await fs.readFile(path.join(workspace, "resources", "img4-resource-1.txt"), "utf-8"),
+      ).toBe("payload");
+    });
+
+    it("leaves the image block untouched when the write fails", async () => {
+      // A regular file as the workspace root: nothing can be created under it.
+      const notADir = path.join(workspace, "file");
+      await fs.writeFile(notADir, "x");
+      const result: CallToolResult = {
+        content: [{ type: "image", data: PNG_B64, mimeType: "image/png" }],
+      };
+      const out = await spillResourcesToWorkspace(result, {
+        workspace: notADir,
+        toolCallId: "img5",
+      });
+      expect(out.content).toEqual(result.content);
+    });
+
+    it("emits a resource.spilled event for the image", async () => {
+      const events: Array<{ type: string; [k: string]: unknown }> = [];
+      const result: CallToolResult = {
+        content: [{ type: "image", data: PNG_B64, mimeType: "image/png" }],
+      };
+      await spillResourcesToWorkspace(result, {
+        workspace,
+        toolCallId: "img6",
+        runId: "run_x",
+        emit: (e) => events.push(e),
+      });
+      expect(events).toHaveLength(1);
+      expect(events[0]!.type).toBe("resource.spilled");
+      expect(events[0]!.path).toBe("resources/img6-image-0.png");
+      expect(events[0]!.bytes).toBe(PNG_BYTES.byteLength);
+    });
+
+    describe("one workspace path per spilled block", () => {
+      const pointers = (out: CallToolResult) =>
+        out.content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text);
+      const read = (name: string) => fs.readFile(path.join(workspace, "resources", name));
+      const replacing = {
+        type: "resource",
+        resource: { uri: "file:///image-0.png", mimeType: "image/png", text: "REPLACED" },
+      };
+
+      it("keeps an image and a resource named like it apart, image first", async () => {
+        const result = {
+          content: [{ type: "image", data: PNG_B64, mimeType: "image/png" }, replacing],
+        } as unknown as CallToolResult;
+        const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "c1" });
+
+        const [imagePointer, resourcePointer] = pointers(out);
+        expect(imagePointer).toContain("resources/c1-image-0.png (70 bytes");
+        expect(resourcePointer).toContain("resources/c1-image-0-2.png (8 bytes");
+        expect(new Uint8Array(await read("c1-image-0.png"))).toEqual(PNG_BYTES);
+        expect(await read("c1-image-0-2.png").then(String)).toBe("REPLACED");
+      });
+
+      it("keeps a resource and an image named like it apart, resource first", async () => {
+        const result = {
+          content: [
+            { ...replacing, resource: { ...replacing.resource, uri: "file:///image-1.png" } },
+            { type: "image", data: PNG_B64, mimeType: "image/png" },
+          ],
+        } as unknown as CallToolResult;
+        const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "c2" });
+
+        const [resourcePointer, imagePointer] = pointers(out);
+        expect(resourcePointer).toContain("resources/c2-image-1.png (8 bytes");
+        expect(imagePointer).toContain("resources/c2-image-1-2.png (70 bytes");
+        expect(await read("c2-image-1.png").then(String)).toBe("REPLACED");
+        expect(new Uint8Array(await read("c2-image-1-2.png"))).toEqual(PNG_BYTES);
+      });
+
+      it("keeps an image and a fetched resource_link named like it apart", async () => {
+        const result = {
+          content: [
+            { type: "image", data: PNG_B64, mimeType: "image/png" },
+            { type: "resource_link", uri: "file:///image-0.png", mimeType: "image/png" },
+          ],
+        } as unknown as CallToolResult;
+        const out = await spillResourcesToWorkspace(result, {
+          workspace,
+          toolCallId: "c3",
+          readResource: async (uri) => ({
+            contents: [{ uri, mimeType: "image/png", text: "REPLACED" }],
+          }),
+        });
+
+        const [imagePointer, linkPointer] = pointers(out);
+        expect(imagePointer).toContain("resources/c3-image-0.png (70 bytes");
+        expect(linkPointer).toContain("resources/c3-image-0-2.png (8 bytes");
+        expect(new Uint8Array(await read("c3-image-0.png"))).toEqual(PNG_BYTES);
+        expect(await read("c3-image-0-2.png").then(String)).toBe("REPLACED");
+      });
+
+      it("keeps names that differ only by case apart, in both orders", async () => {
+        // A case-insensitive FS (macOS) would fold `image-0.png` and
+        // `image-0.PNG` into one file; the paths must differ once lowercased.
+        const upper = {
+          ...replacing,
+          resource: { ...replacing.resource, uri: "file:///image-0.PNG" },
+        };
+        const image = { type: "image", data: PNG_B64, mimeType: "image/png" };
+        const spilledPath = (text: string) => /resources\/(\S+)/.exec(text)![1]!;
+
+        for (const [id, content, imageFirst] of [
+          ["k1", [image, upper], true],
+          [
+            "k2",
+            [{ ...upper, resource: { ...upper.resource, uri: "file:///image-1.PNG" } }, image],
+            false,
+          ],
+        ] as const) {
+          const out = await spillResourcesToWorkspace({ content } as unknown as CallToolResult, {
+            workspace,
+            toolCallId: id,
+          });
+          const [first, second] = pointers(out).map(spilledPath);
+          expect(first!.toLowerCase()).not.toBe(second!.toLowerCase());
+          const [imageFile, resourceFile] = imageFirst ? [first!, second!] : [second!, first!];
+          expect(new Uint8Array(await read(imageFile))).toEqual(PNG_BYTES);
+          expect(await read(resourceFile).then(String)).toBe("REPLACED");
+        }
+      });
+
+      it("keeps two resources with the same URI basename apart", async () => {
+        const result = {
+          content: [
+            { type: "resource", resource: { uri: "repo://a/README.md", text: "first" } },
+            { type: "resource", resource: { uri: "repo://b/README.md", text: "second" } },
+          ],
+        } as unknown as CallToolResult;
+        const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "c4" });
+
+        const [first, second] = pointers(out);
+        expect(first).toContain("resources/c4-README.md");
+        expect(second).toContain("resources/c4-README-2.md");
+        expect(await read("c4-README.md").then(String)).toBe("first");
+        expect(await read("c4-README-2.md").then(String)).toBe("second");
+      });
+
+      it("does not rename a mislabelled image onto a name already taken", async () => {
+        // The resource takes `image-1.png`; the jpeg-labelled PNG at index 1 is
+        // written as `image-1.jpg`, and its sniffed rename must not clobber it.
+        const result = {
+          content: [
+            { ...replacing, resource: { ...replacing.resource, uri: "file:///image-1.png" } },
+            { type: "image", data: PNG_B64, mimeType: "image/jpeg" },
+          ],
+        } as unknown as CallToolResult;
+        const out = await spillResourcesToWorkspace(result, { workspace, toolCallId: "c5" });
+
+        const [resourcePointer, imagePointer] = pointers(out);
+        expect(resourcePointer).toContain("resources/c5-image-1.png (8 bytes");
+        expect(imagePointer).toContain("resources/c5-image-1-2.png (70 bytes, image/png");
+        expect(await read("c5-image-1.png").then(String)).toBe("REPLACED");
+        expect(new Uint8Array(await read("c5-image-1-2.png"))).toEqual(PNG_BYTES);
+        expect((await fs.readdir(path.join(workspace, "resources"))).sort()).toEqual([
+          "c5-image-1-2.png",
+          "c5-image-1.png",
+        ]);
+      });
+    });
   });
 });

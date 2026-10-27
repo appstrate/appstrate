@@ -3,14 +3,11 @@
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { ApiError, forbidden, invalidRequest, notFound } from "../lib/errors.ts";
-import { assertSpaceId } from "../lib/ids.ts";
 import {
-  defaultSpaceForOrg,
   validateSpaceInOrg,
   type SpaceAccessSnapshot,
   type SpaceContextRow,
 } from "../lib/space-lookup.ts";
-import { isInternalDispatch } from "../lib/internal-dispatch.ts";
 import { setSpaceContextApplier } from "@appstrate/core/permissions";
 import {
   callerOrgRole,
@@ -162,8 +159,7 @@ async function admitSpace(
  *
  * Resolution order (transport-agnostic, symmetric with `requireOrgContext`):
  * 1. spaceId already pinned by an auth strategy (API key, OIDC JWT, …)
- * 2. X-Space-Id header (session auth — dashboard users)
- * 3. the org's default space
+ * 2. X-Space-Id header (session auth, and every in-process re-entry)
  *
  * If a strategy already pinned a space and the request also carries
  * an `X-Space-Id` header, the header MUST match the pinned value. Otherwise
@@ -172,15 +168,9 @@ async function admitSpace(
  * pin a space, so their header is still honoured as the primary
  * signal.
  *
- * The default-space fallback exists SOLELY for the in-process MCP sub-dispatch: a
- * per-org MCP Bearer token pins the org but reaches a space-scoped route via an
- * in-process re-entry carrying NO `X-Space-Id`, so it resolves to the
- * org's default space. That re-entry is identified by the trusted
- * internal-dispatch marker (an unguessable per-process secret, stripped from
- * any client-supplied copy), so the fallback is gated on it. A direct caller —
- * session/SPA or CLI — that omits `X-Space-Id` still gets a 400, NOT a
- * silent fallback to the default space (which would weaken space isolation and is
- * exactly the contract `org-isolation` asserts).
+ * There is no default-space fallback: a caller that names no space gets a 400,
+ * never a silent landing on the default space. The in-process re-entries (MCP
+ * dispatch, chat loopback) forward the space they entered.
  * Validates that the space belongs to the current org. Sets
  * c.set("spaceId"), and the admission sets c.set("space"), on success.
  */
@@ -193,37 +183,16 @@ export function requireSpaceContext() {
       throw forbidden("X-Space-Id does not match authenticated space");
     }
 
-    const orgId = c.get("orgId");
     const explicitSpace = pinned ?? headerSpace;
-
-    if (explicitSpace) {
-      await enterSpaceById(c, explicitSpace, orgId);
-      c.set("spaceId", explicitSpace);
-      return next();
+    if (!explicitSpace) {
+      throw invalidRequest(
+        "Space context required. Provide X-Space-Id header or use an API key.",
+        "X-Space-Id",
+      );
     }
-
-    // Header-less caller. The org's default-space fallback is reserved
-    // for the trusted in-process MCP re-entry (marker present); every other
-    // header-less caller must supply an explicit space.
-    if (isInternalDispatch(c.req.raw.headers)) {
-      const active = await defaultSpaceForOrg(orgId);
-      if (active) {
-        // A default-space fallback never passes through `validateSpaceInOrg`
-        // (see its note): the id comes straight off the row, so this is where
-        // an un-migrated `spaces` table would otherwise slip in unnoticed.
-        assertSpaceId(active.id);
-        c.set("spaceId", active.id);
-        // The token subject's membership in the default space decides what it
-        // reaches — a `guest` without a row is refused (spec §7.3).
-        await applySpacePermissions(c, active);
-        return next();
-      }
-    }
-
-    throw invalidRequest(
-      "Space context required. Provide X-Space-Id header or use an API key.",
-      "X-Space-Id",
-    );
+    await enterSpaceById(c, explicitSpace, c.get("orgId"));
+    c.set("spaceId", explicitSpace);
+    return next();
   };
 }
 
@@ -236,10 +205,9 @@ setSpaceContextApplier(async (c, spaceId) => {
   const ctx = c as Context<AppEnv>;
   const orgId = ctx.get("orgId");
   const explicit = spaceId ?? ctx.get("spaceId") ?? ctx.req.header("X-Space-Id");
-  // Same rule as `requireSpaceContext`: the default space answers a header-less
-  // caller ONLY for the trusted in-process MCP re-entry; a module route is not
-  // a weaker door than a core one (`SPACES.md` §Resolving).
-  if (!explicit && !isInternalDispatch(ctx.req.raw.headers)) {
+  // Same rule as `requireSpaceContext`: a module route is not a weaker door
+  // than a core one (`SPACES.md` §Resolving).
+  if (!explicit) {
     throw invalidRequest(
       "Space context required. Provide X-Space-Id header or use an API key.",
       "X-Space-Id",
@@ -248,10 +216,5 @@ setSpaceContextApplier(async (c, spaceId) => {
   // Deliberately does NOT write `spaceId`: that key is the CREDENTIAL's space
   // for an API key and a module must not be able to rewrite it (the webhooks
   // module compares the two to refuse a key reaching a sibling space).
-  if (explicit) return enterSpaceById(ctx, explicit, orgId);
-  const space = await defaultSpaceForOrg(orgId);
-  if (!space) throw spaceNotFound("(default)");
-  // The default-space fallback reads the id off the row: same guard as the other two.
-  assertSpaceId(space.id);
-  await applySpacePermissions(ctx, space);
+  return enterSpaceById(ctx, explicit, orgId);
 });

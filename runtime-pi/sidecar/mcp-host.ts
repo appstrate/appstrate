@@ -52,6 +52,11 @@ import {
 } from "@appstrate/mcp-transport";
 import type { Progress } from "@modelcontextprotocol/sdk/types.js";
 import { logger } from "./logger.ts";
+import {
+  boundUpstreamError,
+  budgetMcpToolResult,
+  type ToolOutputBudgetDeps,
+} from "./tool-output-spill.ts";
 
 /** Cap on a relayed progress `message`: upstream-controlled text bound for the agent. */
 const RELAYED_PROGRESS_MESSAGE_MAX_CHARS = 1024;
@@ -149,14 +154,13 @@ interface McpHostUpstream {
   /** The bound connection this upstream serves; its label is the selector value. */
   connection?: Pick<NonNullable<IntegrationSpawnSpec["connection"]>, "label" | "accountId">;
   /**
-   * Niveau 2 Phase 3 — agent-declared MCP tool allowlist. When set, only
+   * Agent-declared MCP tool allowlist. When set, only
    * tools whose ORIGINAL name (as advertised by the upstream's
    * `tools/list`) appears here are registered with the host; excluded
    * tools are silently dropped (with an audit log) so the agent's LLM
    * never sees a tool it isn't authorised to call.
    *
-   * `undefined` (default) preserves the legacy "all tools allowed"
-   * behaviour. Empty `[]` is a valid explicit "register nothing".
+   * `undefined` (default) allows every tool. Empty `[]` is a valid explicit "register nothing".
    */
   allowedTools?: readonly string[];
   /**
@@ -195,6 +199,11 @@ interface McpHostUpstream {
 interface McpHostOptions {
   /** Sink for `notifications/message` from third-party servers. */
   onLog?: (event: { source: string; level: string; data: unknown }) => void;
+  /**
+   * Run-scoped budget applied to untrusted upstream results. Trusted
+   * upstreams (the in-process `api_call` server) budget their own output.
+   */
+  outputBudget?: ToolOutputBudgetDeps;
 }
 
 /** Reserved: a tool that declares it cannot sit in a namespace served by several connections. */
@@ -211,6 +220,7 @@ interface ToolRoute {
   client: AppstrateMcpClient;
   accountId: string | null;
   originalName: string;
+  trusted: boolean;
 }
 
 function siblingKey(trusted: boolean, originalName: string): string {
@@ -370,7 +380,7 @@ export class McpHost {
       });
     }
 
-    // Capture the upstream's MCP `initialize` snapshot so operator
+    // Capture the upstream's MCP identity snapshot (`server/discover` or `initialize`) so operator
     // dashboards can audit which third-party server version is actually
     // wired (versions on disk drift from versions on the wire), and so
     // we can skip `tools/list` against a server that didn't advertise
@@ -384,6 +394,8 @@ export class McpHost {
       data: {
         event: "upstream_registered",
         serverInfo: serverVersion ?? null,
+        // `modern` (2026-07-28, stateless) or `legacy` (`initialize`), and the revision.
+        protocol: effectiveUpstream.client.getProtocol() ?? null,
         capabilities: capabilities ?? null,
       },
     });
@@ -394,7 +406,7 @@ export class McpHost {
     }
 
     const { tools } = await effectiveUpstream.client.listTools();
-    // Niveau 2 Phase 3 — pre-filter against the agent-declared allowlist
+    // Pre-filter against the agent-declared allowlist
     // before any sanitisation / registration. The check uses the
     // ORIGINAL upstream tool name; namespacing happens downstream and
     // wouldn't survive a Set lookup against the agent's declared names.
@@ -609,6 +621,7 @@ export class McpHost {
       client: upstream.client,
       accountId: upstream.connection?.accountId ?? null,
       originalName,
+      trusted: upstream.trusted === true,
     };
   }
 
@@ -679,8 +692,10 @@ export class McpHost {
         extra: AppstrateRequestExtra,
       ): Promise<CallToolResult> => {
         const relay = relayProgress(extra);
+        const budget = route.trusted ? undefined : this.options.outputBudget;
+        let result: CallToolResult;
         try {
-          return stripForgedRuntimeEvents(
+          result = stripForgedRuntimeEvents(
             await route.client.callTool(
               { name: route.originalName, arguments: args },
               {
@@ -689,9 +704,13 @@ export class McpHost {
               },
             ),
           );
+        } catch (err) {
+          // A JSON-RPC error message (or an HTTP body a transport echoes) is tool text too.
+          throw budget ? boundUpstreamError(err, budget.tokenBudget, extra.signal) : err;
         } finally {
           relay?.close();
         }
+        return budget ? budgetMcpToolResult(result, budget, desc.name) : result;
       };
       // One connection: the upstream descriptor as is. Several: every tool of the
       // slot names its connection, so a call always states the account it acts on.

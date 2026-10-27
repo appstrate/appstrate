@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ResourceEntry } from "./types";
-import type { EditorState } from "../../hooks/use-editor-state";
 import type { MetadataState } from "./metadata-section";
-import type { SchemaField } from "./schema-section";
+import type { SchemaField } from "./types";
 import {
   getOrderedKeys,
   isFileField,
@@ -11,7 +10,6 @@ import {
   type JSONSchemaObject,
   type JSONSchema7,
   type JSONSchema7TypeName,
-  type JSONSchema7Type,
   type FileConstraint,
   type UIHint,
   type SchemaWrapper,
@@ -30,38 +28,30 @@ import {
 
 // ─── Version ranges ─────────────────────────────────────────
 
-/**
- * Range form stored in agent manifests. Mirrors `npm install foo` (no
- * `--save-exact`), which writes `^X.Y.Z` — auto-receive non-breaking
- * fixes within the current major, opt-in major bumps. For exact pinning,
- * the user can hand-edit the raw manifest; the backend resolver
- * (`resolveVersionFromCatalog`) accepts every semver range form.
- */
+/** Range stored in agent manifests, as `npm install foo` writes it. Exact pins are a raw-manifest edit. */
 export function caretRange(version: string): string {
   return `^${version}`;
 }
 
-// ─── Default state ──────────────────────────────────────────
+// ─── Default manifests ──────────────────────────────────────
 
-export function defaultEditorState(orgSlug?: string, userEmail?: string): EditorState {
+export function defaultAgentManifest(
+  orgSlug?: string,
+  userEmail?: string,
+): Record<string, unknown> {
   return {
-    manifest: {
-      $schema: AFPS_SCHEMA_URLS.agent,
-      schema_version: AFPS_SCHEMA_VERSION,
-      type: "agent",
-      name: orgSlug ? `@${orgSlug}/` : "",
-      version: "1.0.0",
-      display_name: "",
-      description: "",
-      author: userEmail ?? "",
-      timeout: 300,
-      dependencies: {},
-    },
-    operations: [{ op: "write", path: "prompt.md", text: "" }],
+    $schema: AFPS_SCHEMA_URLS.agent,
+    schema_version: AFPS_SCHEMA_VERSION,
+    type: "agent",
+    name: orgSlug ? `@${orgSlug}/` : "",
+    version: "1.0.0",
+    display_name: "",
+    description: "",
+    author: userEmail ?? "",
+    timeout: 300,
+    dependencies: {},
   };
 }
-
-// ─── Default manifests for skill/tool ───────────────────────
 
 export function defaultSkillManifest(
   orgSlug?: string,
@@ -79,19 +69,9 @@ export function defaultSkillManifest(
   };
 }
 
-/** Deliberately not yet valid: a new skill has no package id to prefill `name` from. */
-export const DEFAULT_SKILL_CONTENT = "---\nname: \ndescription: \n---\n\n";
-
 // ─── Default manifest for integration ───────────────────────
 
-/**
- * Minimal valid AFPS integration skeleton for the "new" editor. Uses a
- * `remote` Streamable-HTTP source (no mcp-server bundle dependency, authorable
- * end-to-end via the editor) + a single api_key auth that injects the key as a
- * Bearer header. The author edits the URL, auth, and tools from here — the raw
- * JSON tab exposes the full manifest for the fields the structured form doesn't
- * cover yet.
- */
+/** Minimal valid integration skeleton: a `remote` Streamable-HTTP source and one api_key auth sent as a Bearer header. */
 export function defaultIntegrationManifest(
   orgSlug?: string,
   userEmail?: string,
@@ -118,7 +98,7 @@ export function defaultIntegrationManifest(
             type: "object",
             required: ["api_key"],
             properties: {
-              api_key: { type: "string", description: "API key for this integration." },
+              api_key: { type: "string" },
             },
           },
         },
@@ -137,66 +117,38 @@ export function defaultIntegrationManifest(
 
 // ─── Runtime tools (manifest.runtime_tools) ──────────────────
 
-/**
- * Read the agent manifest's top-level `runtime_tools: string[]` (AFPS) —
- * the built-in runtime tools the agent author opted into (all opt-in,
- * `output` included). Tolerates a missing or malformed field by returning an
- * empty array. Ids the platform no longer offers (a retired tool such as the
- * removed `report`, or a hand-typed mistake in the raw-JSON tab) are dropped
- * so they can never render as a phantom checkbox nor block a later save.
- */
+/** The manifest's `runtime_tools`; tolerates a missing or malformed field and drops ids the platform no longer offers. */
 export function getRuntimeTools(m: Record<string, unknown>): string[] {
   const raw = m.runtime_tools;
   return Array.isArray(raw) ? raw.filter(isSelectableRuntimeTool) : [];
 }
 
 /**
- * Return the manifest with every piece of vocabulary the platform retired
- * removed, applied ONCE when an existing agent is loaded into the editor:
- *
- *   - `runtime_tools` reduced to the ids the platform still offers, so a
- *     retired id persisted long ago (e.g. `report`) silently disappears on the
- *     next save instead of round-tripping forever;
- *   - the retired AFPS 1.x `dependencies` keys (`tools` → `mcp_servers`,
- *     `providers` → `integrations`) dropped, for the same reason — a draft can
- *     acquire one by importing a bundle assembled from a legacy published
- *     version, and the author-direction save rejects it (#1021).
- *
- * In both cases the user would otherwise be shown an error for a field the
- * editor cannot even display, with no way to clear it. Typing either into the
- * raw-JSON tab still surfaces the rejection — this normalises on LOAD only.
- *
- * Both halves delegate to `@appstrate/core` — `dropRetiredRuntimeTools` is the
- * SAME function the publish path runs (`services/package-versions.ts`). The
- * editor used to reimplement it and the two drifted on the empty case, so an
- * agent whose only tool was retired serialised differently depending on which
- * path saved it. One implementation, one byte sequence. Core is type-gated
- * (`type: "agent"`), which is exactly this call site: `package-editor.tsx`
- * invokes it only in the agent branch.
- *
- * One function rather than a chain the call site composes, so a future
- * retirement is added here and cannot be forgotten at the call site.
- *
- * Returns the same reference when there is nothing to drop.
+ * Strips retired vocabulary (retired `runtime_tools` ids, AFPS 1.x `dependencies` keys) once, when an
+ * existing agent is loaded — otherwise the user sees an error for a field the editor cannot display.
+ * Delegates to core, the same code the publish path runs, so both serialise identically; core is
+ * agent-gated and `package-editor.tsx` calls this only in its agent branch.
  */
 export function withNormalizedManifest(m: Record<string, unknown>): Record<string, unknown> {
   return dropRetiredDependencyKeys(dropRetiredRuntimeTools(m).manifest);
 }
 
-/**
- * Write the selected runtime tool ids back into the manifest. An empty
- * selection drops the field entirely so the manifest stays minimal — the same
- * empty-case convention `dropRetiredRuntimeTools` follows, so a manifest is
- * byte-identical whichever of the two last touched it. Neither writer ever
- * mints `runtime_tools: []`; core deliberately preserves that spelling when an
- * author supplied it, but no platform path produces it.
- */
+/** An empty selection drops the field (never mints `runtime_tools: []`), matching `dropRetiredRuntimeTools` so the manifest bytes are the same either way. */
 export function setRuntimeTools(m: Record<string, unknown>, tools: string[]): void {
   if (tools.length > 0) {
     m.runtime_tools = tools;
   } else {
     delete m.runtime_tools;
   }
+}
+
+/** The server refuses an output schema without the `output` runtime tool; declaring a schema turns it on. */
+export function withOutputTool(m: Record<string, unknown>): Record<string, unknown> {
+  const tools = getRuntimeTools(m);
+  if (tools.includes("output")) return m;
+  const next = { ...m };
+  setRuntimeTools(next, [...tools, "output"]);
+  return next;
 }
 
 // ─── Manifest accessors ─────────────────────────────────────
@@ -207,16 +159,9 @@ export function getManifestName(m: Record<string, unknown>): { scope: string; id
   return match ? { scope: match[1]!, id: match[2]! } : { scope: "", id: raw };
 }
 
-/** Extract MetadataState from a manifest object — the fields common to every
- * package type. Editor-specific manifest fields (e.g. the agent `timeout`)
- * are bound directly to manifest state by their editor and rendered through
- * MetadataSection's children slot.
- *
- * `author` accepts both the AFPS §3.1 bare-string form and the structured
- * `{ name, email?, url? }` object form: the editor's metadata UI is a single
- * text input, so the object form is rendered as its `name` field. Saving
- * collapses the object to a string — round-tripping the object shape
- * end-to-end would require an editor UI change.
+/**
+ * `author` accepts the bare-string and the `{ name, email?, url? }` forms (AFPS §3.1); the single
+ * text input shows the object's `name`, and saving collapses it to a string.
  */
 export function manifestToMetadata(m: Record<string, unknown>): MetadataState {
   const { scope, id } = getManifestName(m);
@@ -238,10 +183,7 @@ export function manifestToMetadata(m: Record<string, unknown>): MetadataState {
   };
 }
 
-/** Apply MetadataState changes back into a manifest patch.
- *
- * Emits canonical AFPS snake_case (`display_name`).
- */
+/** Emits canonical AFPS snake_case (`display_name`). */
 export function metadataToManifestPatch(m: MetadataState): Record<string, unknown> {
   return {
     name: m.scope ? `@${m.scope}/${m.id}` : m.id,
@@ -274,8 +216,6 @@ export function setResourceEntries(
   type: "skills" | "integrations",
   entries: ResourceEntry[],
 ): void {
-  if (!m.dependencies) m.dependencies = {};
-  const deps = m.dependencies as Record<string, unknown>;
   if (type === "integrations") {
     writeManifestIntegrations(
       m,
@@ -288,65 +228,235 @@ export function setResourceEntries(
     if (e.id) record[e.id] = e.version ?? "*";
   }
   if (Object.keys(record).length > 0) {
-    deps[type] = record;
-  } else {
-    delete deps[type];
+    if (!m.dependencies) m.dependencies = {};
+    (m.dependencies as Record<string, unknown>)[type] = record;
+  } else if (m.dependencies) {
+    // An empty group writes nothing: a manifest that declares no
+    // `dependencies` stays that way, so the editor does not read as dirty.
+    delete (m.dependencies as Record<string, unknown>)[type];
   }
 }
 
-// ─── Resource entry helper ──────────────────────────────────
-
-export function toResourceEntry(r: {
-  id: string;
-  version?: string;
-  name?: string;
-  description?: string;
-}): ResourceEntry {
-  return { id: r.id, version: r.version ?? "*", name: r.name, description: r.description };
-}
-
 // ─── Manifest → SchemaFields (used by AgentEditorInner) ─────
+
+type ManifestSchemaWrapper = {
+  schema?: JSONSchemaObject;
+  file_constraints?: Record<string, FileConstraint>;
+  ui_hints?: Record<string, UIHint>;
+  property_order?: string[];
+};
+
+/** Narrow `manifest[key]` (`input` | `output`) to its schema wrapper. */
+export function manifestSchemaWrapper(
+  manifest: Record<string, unknown>,
+  key: "input" | "output",
+): ManifestSchemaWrapper | undefined {
+  const raw = manifest[key] as ManifestSchemaWrapper | undefined;
+  if (!raw) return undefined;
+  return raw;
+}
 
 /** Convert the manifest input/output wrappers into SchemaField arrays for the form. */
 export function manifestToSchemaFields(
   manifest: Record<string, unknown>,
 ): Record<string, SchemaField[]> {
-  type ManifestWrapper = {
-    schema?: JSONSchemaObject;
-    file_constraints?: Record<string, FileConstraint>;
-    ui_hints?: Record<string, { placeholder?: string }>;
-    property_order?: string[];
-  };
-  const wrapperFor = (key: string) => {
-    const raw = manifest[key] as ManifestWrapper | undefined;
-    if (!raw) return undefined;
-    return {
-      schema: raw.schema,
-      file_constraints: raw.file_constraints,
-      ui_hints: raw.ui_hints,
-      property_order: raw.property_order,
-    };
-  };
+  const input = manifestSchemaWrapper(manifest, "input");
+  const output = manifestSchemaWrapper(manifest, "output");
   return {
-    input: schemaToFields(wrapperFor("input")?.schema, "input", wrapperFor("input")),
-    output: schemaToFields(wrapperFor("output")?.schema, "output", wrapperFor("output")),
+    input: schemaToFields(input?.schema, "input", input),
+    output: schemaToFields(output?.schema, "output", output),
   };
 }
 
-// ─── Schema field conversion (used by SchemaSection) ────────
+// ─── Schema fields (used by SchemaSection) ──────────────────
+//
+// A field IS its JSON-Schema property (`SchemaField.prop`): every keyword lives
+// there and nowhere else, so loading and saving a schema is lossless by
+// construction. Only AFPS wrapper data (file constraints, placeholder) is kept
+// beside it. Edits are the pure, immutable keyword operations below.
 
-function convertDefaultValue(value: string, type: string): unknown {
-  if (!value) return undefined;
-  if (type === "number" || type === "integer") {
-    const n = Number(value);
-    if (isNaN(n)) return value;
-    return type === "integer" ? Math.round(n) : n;
-  }
-  if (type === "boolean") return value === "true";
-  return value;
+type Scalar = string | number | boolean;
+
+type FileKind = "none" | "single" | "multiple";
+
+/** A keyword value as shown in a text input; `locked` = it cannot be edited as text (shown as JSON). */
+export interface TextValue {
+  text: string;
+  locked: boolean;
 }
 
-export function schemaToFields(
+const fileItem = (): JSONSchema7 => ({
+  type: "string",
+  format: "uri",
+  contentMediaType: "application/octet-stream",
+});
+
+function itemsOf(prop: JSONSchema7): JSONSchema7 | undefined {
+  return prop.items && typeof prop.items === "object" && !Array.isArray(prop.items)
+    ? prop.items
+    : undefined;
+}
+
+/** Editor type of a property: the `type`, or the first non-"null" entry of a type array. */
+function primaryType(prop: JSONSchema7): string {
+  const t = Array.isArray(prop.type) ? prop.type.find((x) => x !== "null") : prop.type;
+  return t ?? "string";
+}
+
+/** Type of the array's `items` (what its enum values are typed as). */
+export function itemType(prop: JSONSchema7): string {
+  const items = itemsOf(prop);
+  return items ? primaryType(items) : "string";
+}
+
+export function fileKind(prop: JSONSchema7, mode: "input" | "output"): FileKind {
+  if (mode !== "input" || !isFileField(prop)) return "none";
+  return isMultipleFileField(prop) ? "multiple" : "single";
+}
+
+/** Type shown by the editor: file fields are strings (the file toggle carries the rest). */
+export function fieldType(prop: JSONSchema7, mode: "input" | "output"): string {
+  return fileKind(prop, mode) === "none" ? primaryType(prop) : "string";
+}
+
+/** Types whose `default`/`enum` values can be typed as text. */
+export function isTextType(type: string): boolean {
+  return type === "string" || type === "number" || type === "integer" || type === "boolean";
+}
+
+// ─── Keyword operations ─────────────────────────────────────
+
+/** Copy of `prop` with one keyword set, or removed when `value` is undefined. */
+export function setKeyword<K extends keyof JSONSchema7>(
+  prop: JSONSchema7,
+  key: K,
+  value: JSONSchema7[K] | undefined,
+): JSONSchema7 {
+  const next = { ...prop };
+  if (value === undefined) delete next[key];
+  else next[key] = value;
+  return next;
+}
+
+const ANNOTATIONS = ["description", "title", "$comment", "deprecated", "readOnly", "writeOnly"];
+
+/** A fresh shape keeping only the type-agnostic annotations (not default/enum/examples/const). */
+function freshShape(prop: JSONSchema7, shape: JSONSchema7): JSONSchema7 {
+  const kept = Object.entries(prop).filter(([k]) => ANNOTATIONS.includes(k) || k.startsWith("x-"));
+  return { ...shape, ...Object.fromEntries(kept) };
+}
+
+/** A fresh property of another type: keywords of the old type would be invalid. */
+export function changeType(prop: JSONSchema7, type: JSONSchema7TypeName): JSONSchema7 {
+  return freshShape(prop, { type });
+}
+
+/** Turn the file shape on/off. Always a fresh property. */
+export function setFileKind(prop: JSONSchema7, kind: FileKind): JSONSchema7 {
+  const shape: JSONSchema7 =
+    kind === "none"
+      ? { type: "string" }
+      : kind === "single"
+        ? fileItem()
+        : { type: "array", items: fileItem() };
+  return freshShape(prop, shape);
+}
+
+/** Set (or clear, when empty) `items.enum`, keeping the other `items` keywords and its type. */
+export function setItemsEnum(prop: JSONSchema7, values: Scalar[]): JSONSchema7 {
+  if (prop.items !== undefined && !itemsOf(prop)) return prop; // tuple/boolean items: not ours to rewrite
+  const items = itemsOf(prop);
+  if (values.length > 0) {
+    return setKeyword(prop, "items", { ...(items ? items : { type: "string" }), enum: values });
+  }
+  if (!items) return prop;
+  const { enum: _removed, ...rest } = items;
+  return setKeyword(prop, "items", Object.keys(rest).length > 0 ? rest : undefined);
+}
+
+/** Numeric input → number, or undefined when empty or not a number. */
+function parseNumber(text: string): number | undefined {
+  if (!text.trim()) return undefined;
+  const n = Number(text);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+// ─── Text adapters (default, enum, items.enum) ──────────────
+
+export type NumericKeyword =
+  "minimum" | "maximum" | "multipleOf" | "minLength" | "maxLength" | "maxItems";
+
+const NON_NEGATIVE_INTEGER: string[] = ["minLength", "maxLength", "maxItems", "maxSize"];
+
+/** Numeric keyword (or file `maxSize`) input → number; undefined (removed) when empty or invalid for it. */
+export function toKeywordNumber(
+  keyword: NumericKeyword | "maxSize",
+  text: string,
+): number | undefined {
+  const n = parseNumber(text);
+  if (n === undefined) return undefined;
+  if (NON_NEGATIVE_INTEGER.includes(keyword)) return Number.isInteger(n) && n >= 0 ? n : undefined;
+  if (keyword === "multipleOf") return n > 0 ? n : undefined;
+  return n;
+}
+
+/** Text → typed value for `type`; undefined when empty or not a valid number. */
+export function textToValue(text: string, type: string): Scalar | undefined {
+  if (type === "string") return text || undefined;
+  if (!text.trim()) return undefined;
+  if (type === "number" || type === "integer") {
+    const n = parseNumber(text);
+    return n !== undefined && type === "integer" ? Math.round(n) : n;
+  }
+  if (type === "boolean") {
+    const word = text.trim();
+    return word === "true" ? true : word === "false" ? false : undefined;
+  }
+  return text;
+}
+
+/** Comma-separated text → typed values (items trimmed, empty ones dropped). */
+export function textToList(text: string, type: string): Scalar[] {
+  const out: Scalar[] = [];
+  for (const raw of text.split(",")) {
+    const v = textToValue(raw.trim(), type);
+    if (v !== undefined) out.push(v);
+  }
+  return out;
+}
+
+const locked = (value: unknown): TextValue => ({ text: JSON.stringify(value), locked: true });
+
+/** Editable as text only if reading the text back yields the exact same value. */
+export function valueToText(value: unknown, type: string): TextValue {
+  if (value === undefined) return { text: "", locked: false };
+  const scalar =
+    typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+  if (!scalar || !isTextType(type)) return locked(value);
+  const text = String(value);
+  return text !== "" && textToValue(text, type) === value ? { text, locked: false } : locked(value);
+}
+
+/** List variant: every item must round-trip and survive the comma split untouched. */
+export function listToText(value: unknown, type: string): TextValue {
+  if (value === undefined) return { text: "", locked: false };
+  const texts =
+    Array.isArray(value) && value.length > 0 ? value.map((v) => valueToText(v, type)) : [];
+  const editable =
+    texts.length > 0 &&
+    texts.every((t) => !t.locked && t.text === t.text.trim() && !t.text.includes(","));
+  return editable ? { text: texts.map((t) => t.text).join(", "), locked: false } : locked(value);
+}
+
+/** `items.enum` as text; locked JSON of `items` when they are a tuple/boolean we cannot edit. */
+export function itemsEnumText(prop: JSONSchema7): TextValue {
+  if (prop.items !== undefined && !itemsOf(prop)) return locked(prop.items);
+  return listToText(itemsOf(prop)?.enum, itemType(prop));
+}
+
+// ─── Manifest wrapper ⇄ fields ──────────────────────────────
+
+function schemaToFields(
   schema: JSONSchemaObject | undefined,
   mode: "input" | "output",
   wrapper?: {
@@ -357,88 +467,29 @@ export function schemaToFields(
 ): SchemaField[] {
   if (!schema?.properties) return [];
   const requiredSet = new Set(schema.required || []);
-  const keys = getOrderedKeys(schema, wrapper?.property_order);
-  return keys.map((key) => {
+  return getOrderedKeys(schema, wrapper?.property_order).map((key) => {
     const prop = schema.properties[key]!;
-    const fileField = isFileField(prop);
-    const isInputFile = mode === "input" && fileField;
-    const constraints = wrapper?.file_constraints?.[key];
-    const hint = wrapper?.ui_hints?.[key];
-    const type = isInputFile ? "string" : typeof prop.type === "string" ? prop.type : "string";
-
-    // Extract array enum items
-    let arrayEnumItems = "";
-    if (
-      type === "array" &&
-      prop.items &&
-      typeof prop.items === "object" &&
-      !Array.isArray(prop.items)
-    ) {
-      const items = prop.items;
-      if (Array.isArray(items.enum)) {
-        arrayEnumItems = items.enum.join(", ");
-      }
+    const base = { key, required: requiredSet.has(key), prop };
+    if (mode !== "input") return base;
+    if (isFileField(prop)) {
+      const constraint = wrapper?.file_constraints?.[key];
+      return {
+        ...base,
+        ...(constraint?.accept ? { accept: constraint.accept } : {}),
+        ...(constraint?.max_size != null ? { maxSize: constraint.max_size } : {}), // canonical-casing-exempt: SchemaField TS-internal field (carve-out); manifest write is via fieldsToSchema's snake_case `max_size`.
+      };
     }
-
-    return {
-      _id: crypto.randomUUID(),
-      key,
-      type,
-      description: prop.description || "",
-      required: requiredSet.has(key),
-      ...(isInputFile
-        ? {
-            isFile: true,
-            accept: constraints?.accept || "",
-            maxSize: constraints?.max_size != null ? String(constraints.max_size) : "", // canonical-casing-exempt: SchemaField TS-internal field (carve-out); manifest write is via fieldsToSchema's snake_case `max_size`.
-            multiple: isMultipleFileField(prop),
-            maxFiles: prop.maxItems != null ? String(prop.maxItems) : "",
-          }
-        : {}),
-      ...(mode === "input" && !fileField
-        ? {
-            placeholder: hint?.placeholder || "",
-            default: prop.default != null ? String(prop.default) : "",
-            enumValues: Array.isArray(prop.enum) ? prop.enum.join(", ") : "",
-          }
-        : {}),
-      // String format
-      ...(type === "string" && prop.format ? { format: prop.format } : {}),
-      // String constraints
-      ...(type === "string" && prop.minLength != null ? { minLength: String(prop.minLength) } : {}),
-      ...(type === "string" && prop.maxLength != null ? { maxLength: String(prop.maxLength) } : {}),
-      ...(type === "string" && prop.pattern ? { pattern: prop.pattern } : {}),
-      // Number/integer constraints
-      ...((type === "number" || type === "integer") && prop.minimum != null
-        ? { minimum: String(prop.minimum) }
-        : {}),
-      ...((type === "number" || type === "integer") && prop.maximum != null
-        ? { maximum: String(prop.maximum) }
-        : {}),
-      ...((type === "number" || type === "integer") && prop.multipleOf != null
-        ? { step: String(prop.multipleOf) }
-        : {}),
-      // Array enum items
-      ...(arrayEnumItems ? { arrayEnumItems } : {}),
-    };
+    const placeholder = wrapper?.ui_hints?.[key]?.placeholder;
+    return placeholder ? { ...base, placeholder } : base;
   });
 }
 
-/**
- * Build a fresh AFPS canonical `SchemaWrapper` from editor field state.
- *
- * Emits only canonical snake_case keys (`schema`, `file_constraints`,
- * `ui_hints`, `property_order`). Every per-property entry is constructed
- * from scratch, so non-canonical camelCase siblings (`fileConstraints`,
- * `uiHints`, `propertyOrder`, per-property `maxSize`) cannot leak through.
- * The caller replaces the wrapper wholesale (`updateManifest({ input:
- * wrapper })`); the shallow-merge semantics drop any pre-existing camelCase
- * keys carried by the previous wrapper value. Idempotent against
- * already-canonical manifests.
- */
+/** Emits only canonical snake_case keys; the caller replaces the wrapper wholesale, dropping non-canonical ones. */
 export function fieldsToSchema(
   fields: SchemaField[],
   mode: "input" | "output",
+  /** Current root schema: its keys other than `properties`/`required` (`$defs`, `title`, …) are kept. */
+  base?: JSONSchemaObject,
 ): SchemaWrapper | null {
   const filtered = fields.filter((f) => f.key.trim());
   if (filtered.length === 0) return null;
@@ -448,101 +499,23 @@ export function fieldsToSchema(
   const ui_hints: Record<string, UIHint> = {};
   for (const f of filtered) {
     const key = f.key.trim();
-    if (mode === "input" && f.isFile) {
-      // Generate standard JSON Schema for file fields
-      const fileItemProp: JSONSchema7 = {
-        type: "string",
-        format: "uri",
-        contentMediaType: "application/octet-stream",
-      };
-      if (f.multiple) {
-        const prop: JSONSchema7 = { type: "array", items: fileItemProp };
-        if (f.description) prop.description = f.description;
-        if (f.maxFiles) {
-          const n = Number(f.maxFiles);
-          if (!isNaN(n)) prop.maxItems = n;
-        }
-        properties[key] = prop;
-      } else {
-        const prop: JSONSchema7 = { ...fileItemProp };
-        if (f.description) prop.description = f.description;
-        properties[key] = prop;
-      }
-      // Build file_constraints (canonical AFPS snake_case)
+    properties[key] = f.prop;
+    if (f.required) required.push(key);
+    if (mode !== "input") continue;
+    if (isFileField(f.prop)) {
       const constraint: FileConstraint = {};
       if (f.accept) constraint.accept = f.accept;
-      if (f.maxSize) {
-        const n = Number(f.maxSize);
-        if (!isNaN(n)) constraint.max_size = n;
-      }
+      if (f.maxSize !== undefined) constraint.max_size = f.maxSize;
       if (Object.keys(constraint).length > 0) file_constraints[key] = constraint;
-    } else {
-      const prop: JSONSchema7 = { type: f.type as JSONSchema7TypeName };
-      if (f.description) prop.description = f.description;
-      if (mode === "input") {
-        const def = convertDefaultValue(f.default || "", f.type);
-        if (def != null) prop.default = def as JSONSchema7Type;
-        const enumVals = f.enumValues
-          ?.split(",")
-          .map((v) => v.trim())
-          .filter(Boolean);
-        if (enumVals && enumVals.length > 0) prop.enum = enumVals;
-      }
-      // String format
-      if (f.type === "string" && f.format && f.format !== "__none") {
-        prop.format = f.format;
-      }
-      // String constraints
-      if (f.type === "string") {
-        if (f.minLength) {
-          const n = Number(f.minLength);
-          if (!isNaN(n)) prop.minLength = n;
-        }
-        if (f.maxLength) {
-          const n = Number(f.maxLength);
-          if (!isNaN(n)) prop.maxLength = n;
-        }
-        if (f.pattern) prop.pattern = f.pattern;
-      }
-      // Number/integer constraints
-      if (f.type === "number" || f.type === "integer") {
-        if (f.minimum) {
-          const n = Number(f.minimum);
-          if (!isNaN(n)) prop.minimum = n;
-        }
-        if (f.maximum) {
-          const n = Number(f.maximum);
-          if (!isNaN(n)) prop.maximum = n;
-        }
-        if (f.step) {
-          const n = Number(f.step);
-          if (!isNaN(n)) prop.multipleOf = n;
-        }
-      }
-      // Array with enum items → multiselect schema
-      if (f.type === "array" && f.arrayEnumItems) {
-        const items = f.arrayEnumItems
-          .split(",")
-          .map((v) => v.trim())
-          .filter(Boolean);
-        if (items.length > 0) {
-          prop.items = { type: "string", enum: items };
-        }
-      }
-      properties[key] = prop;
-      // Build ui_hints for placeholder (canonical AFPS snake_case)
-      if (mode === "input" && f.placeholder) {
-        ui_hints[key] = { placeholder: f.placeholder };
-      }
+    } else if (f.placeholder) {
+      ui_hints[key] = { placeholder: f.placeholder };
     }
-    if (f.required) required.push(key);
   }
+  const rootSchema: JSONSchemaObject = { ...base, type: "object", properties };
+  if (required.length > 0) rootSchema.required = required;
+  else delete rootSchema.required;
   return {
-    schema: {
-      type: "object",
-      properties,
-      ...(required.length > 0 ? { required } : {}),
-    },
+    schema: rootSchema,
     ...(Object.keys(file_constraints).length > 0 ? { file_constraints } : {}),
     ...(Object.keys(ui_hints).length > 0 ? { ui_hints } : {}),
     property_order: filtered.map((f) => f.key.trim()),

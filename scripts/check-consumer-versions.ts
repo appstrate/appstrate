@@ -27,20 +27,13 @@ interface Consumer {
  * Every repo outside this monorepo that resolves `@appstrate/core` from npm.
  *
  * A repo missing from this list is invisible to the gate and drifts silently.
- * That is not a hypothetical — it is why the list exists: `connect-helper` and
- * the then-standalone `appstrate/module-claude-code` were both absent, and
- * `module-claude-code` sat on `^2.19.0` — three majors behind — still
- * declaring `ModelProviderDefinition.oauthWireFormat`, a field core had
- * removed in 3.0.0. Nobody noticed until someone read its `package.json` by
- * hand.
+ * A consumer that sits majors behind keeps declaring fields core has removed,
+ * and nobody notices until someone reads its `package.json` by hand.
  *
- * That anecdote is now history: PR #460 (2026-05-14) moved the module in-tree
- * as `packages/module-claude-code`, and the standalone repo is dead. It is
- * therefore NOT in the list below, per rule 3. `registry` and `portal` left the
- * list the same way and for the same reason — not absorbed, retired. So did
- * `appstrate/cloud`, on the #460 precedent: it is now `packages/module-ee`,
- * resolving core as `workspace:*`, which leaves `connect-helper` as the only
- * repo this gate has left to read.
+ * In-tree packages (`packages/module-claude-code`, `packages/module-ee`)
+ * resolve core as `workspace:*` and are NOT in the list below, per rule 3;
+ * neither is a retired repo. `connect-helper` is the only repo this gate
+ * reads.
  *
  * The rule, in three parts:
  *
@@ -136,7 +129,7 @@ export function assessDrift(
     // unpublished version. So at an X.0.0 release, "exactly one major behind"
     // is the only state a consumer can possibly be in, and failing it made
     // every major publish impossible without disabling the whole gate via
-    // CONSUMER_DRIFT_POLICY (issue #1028). Tolerated here and only here: the
+    // CONSUMER_DRIFT_POLICY. Tolerated here and only here: the
     // next release of that major is not itself a major, so an unbumped
     // consumer fails hard the very next time core publishes.
     if (isMajorRelease && oneMajorBehind) {

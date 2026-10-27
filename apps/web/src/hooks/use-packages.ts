@@ -9,15 +9,26 @@ import { stripScope } from "@appstrate/core/naming";
 import { PACKAGE_TYPE_ROUTE_SEGMENT } from "@appstrate/core/package-files";
 import { asJSONSchemaObject } from "@appstrate/core/form";
 import { client, type components } from "../api/client";
-import { triggerBlobDownload } from "../lib/blob-download";
+import { downloadOrToast } from "../lib/blob-download";
 import { splitPackageRef } from "../lib/package-paths";
+import { keepPreviousWithin, versionKeyPackage } from "../lib/query-state";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { usePermissions } from "./use-permissions";
+import { invalidateLibraries } from "./use-library";
+import { invalidateIntegrationQueries } from "./use-integrations";
 import { packagePermission, packageSightPermissions } from "@appstrate/core/permissions";
 import { ApiError } from "../api/errors";
-import { packageKeys, agentsKeys, invalidatePackageFiles } from "../lib/query-keys";
+import {
+  packageKeys,
+  agentsKeys,
+  versionKeys,
+  invalidatePackageCaches,
+  invalidatePaths,
+  invalidateVersionCaches,
+} from "../lib/query-keys";
 import type {
+  IntegrationIndexItem,
   OrgPackageItem,
   OrgPackageItemDetail,
   AgentListItem,
@@ -27,16 +38,10 @@ import type {
   VersionDetailResponse,
 } from "@appstrate/shared-types";
 
-// NOTE on query keys: these hooks keep their LEGACY React Query keys
-// (["packages", ...], ["agents", ...], ["version-*", ...]) instead of the
-// openapi-react-query [method, path, init] keys. The keys are cache-coupled
-// across files: use-editor-state / use-library / use-models / use-proxies
-// invalidate them after writes, and use-current-space resets them on
-// space switch. Only the fetch layer is migrated to the typed client.
+// These hooks keep LEGACY query keys (["packages", ...], ["agents", ...], ["version-*", ...]):
+// they are cache-coupled to other hooks' invalidations and to the space-switch reset.
 
-// Each read gates ITSELF on the permission its route guards (#1556): a custom
-// space role may omit any of them, and a surface that shows a package family
-// only incidentally must not fire a request the server is bound to refuse.
+// Each read gates ITSELF on its route's permission: a custom role may omit it, and the server would refuse.
 function useCanReadPackages(type: PackageType): boolean {
   const { can } = usePermissions();
   return can(packagePermission(type, "read"));
@@ -48,9 +53,7 @@ function useCanSeePackage(type: PackageType): boolean {
 }
 
 // --- Packages — one factory over the four types ---
-//
-// `PACKAGE_TYPE_ROUTE_SEGMENT` is `as const`, so the template paths below stay
-// literal and the typed client still resolves each one to its operation.
+// `PACKAGE_TYPE_ROUTE_SEGMENT` is `as const`, so the template paths stay literal for the typed client.
 
 /** A detail plus the response's `ETag` (sent back as `If-Match`); `null` when absent. */
 export type Versioned<T> = T & { etag: string | null };
@@ -62,16 +65,11 @@ type PackageDetailMap = {
   integration: Versioned<OrgPackageItemDetail>;
 };
 
-/**
- * Normalize a spec AgentDetail (most fields optional on the wire) to the
- * asserted, non-optional shape consumers use. Every dependency group is mapped
- * explicitly — the spec fully declares the response, so no spread is needed to
- * carry "undeclared" fields.
- */
+/** Normalizes a spec AgentDetail (most fields optional on the wire) to the non-optional shape consumers use. */
 function normalizeAgentDetail(d: components["schemas"]["AgentDetail"]): AgentDetail {
   return {
     ...d,
-    // display_name is optional (agent editor no longer forces it, issue #825);
+    // display_name is optional (agent editor does not force it);
     // fall back to the package id so labels never render blank.
     display_name: d.display_name || d.id,
     description: d.description ?? "",
@@ -91,12 +89,7 @@ function normalizeAgentDetail(d: components["schemas"]["AgentDetail"]): AgentDet
   };
 }
 
-/**
- * Normalize a spec OrgPackageItemDetail to the asserted detail shape.
- * `scope` / `created_by_name` / `used_by_agents` are not returned by the
- * detail endpoints (and never were) — defaulted like the legacy blind cast
- * left them, but with explicit values.
- */
+/** Normalizes a spec OrgPackageItemDetail; `scope` / `created_by_name` / `used_by_agents` are not returned by the detail endpoints, so they are defaulted. */
 function normalizePackageItemDetail(
   d: components["schemas"]["OrgPackageItemDetail"],
 ): OrgPackageItemDetail {
@@ -120,21 +113,23 @@ function fetchPackageDetail<T extends PackageType>(
   type: T,
   packageId: string,
   version?: string,
+  spaceId?: string,
 ): Promise<PackageDetailMap[T]>;
 async function fetchPackageDetail(
   type: PackageType,
   packageId: string,
   version?: string,
+  /** The space to read FROM when not the current one (a package is readable only where placed); the middleware leaves a caller-set header alone. */
+  spaceId?: string,
 ): Promise<Versioned<AgentDetail | OrgPackageItemDetail>> {
   const path = splitPackageRef(packageId);
-  // Omitted lets the server pick the definition this caller may see — their
-  // draft when they may write the package, the latest published version
-  // otherwise. An explicit `draft` is an author's read, and every type answers
-  // it the same way (`403 draft_not_writable` for anybody else).
+  // Omitted: the server picks the draft for a writer, else the latest version. An explicit `draft` is an author's read (`403 draft_not_writable` for others).
   const query = version ? { query: { version } } : {};
+  const headers = spaceId ? { headers: { "X-Space-Id": spaceId } } : {};
   if (type === "agent") {
     const { data, response } = await client.GET("/api/packages/agents/{scope}/{name}", {
       params: { path, ...query },
+      ...headers,
     });
     return { ...normalizeAgentDetail(data!), etag: response.headers.get("ETag") };
   }
@@ -142,39 +137,35 @@ async function fetchPackageDetail(
     `/api/packages/${PACKAGE_TYPE_ROUTE_SEGMENT[type]}/{scope}/{name}`,
     {
       params: { path, ...query },
+      ...headers,
     },
   );
   return { ...normalizePackageItemDetail(data!), etag: response.headers.get("ETag") };
 }
 
-/**
- * One type's INDEX for the current space: what runs here, and nothing else.
- *
- * `GET /api/packages/{type}` answers the active set — placed in this space and
- * switched on — which is the same rule every launch route checks, so a row on
- * this list is a row that can be used. What is placed here but switched off, and
- * what has merely been offered, lives in the space library (`/space/packages`),
- * the one management view. There is no selector: a narrower and a wider list
- * would be two answers to one question.
- */
-function usePackageList(type: PackageType) {
+/** The integration index adds the `source` facts its page splits by. */
+type PackageIndexItem<T extends PackageType> = T extends "integration"
+  ? IntegrationIndexItem
+  : OrgPackageItem;
+
+/** One type's INDEX for the current space: the active set (placed and switched on, the launch routes' rule). Packages placed here but switched off (or never switched on) live in the catalogue's per-space view (`/catalogue/:type?view=spaces`). */
+function usePackageList<T extends PackageType>(type: T) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
-  const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
+  const segment: (typeof PACKAGE_TYPE_ROUTE_SEGMENT)[PackageType] =
+    PACKAGE_TYPE_ROUTE_SEGMENT[type];
   const canRead = useCanReadPackages(type);
   return useQuery({
     queryKey: packageKeys.list(segment, orgId, spaceId),
-    queryFn: async (): Promise<OrgPackageItem[]> => {
+    queryFn: async (): Promise<PackageIndexItem<T>[]> => {
       const { data } = await client.GET(`/api/packages/${segment}`);
-      // The spec marks most item fields optional — normalize to the
-      // non-optional shape consumers have always used. `scope` is not
-      // returned by the list endpoints.
+      // Normalize the optional spec fields; `scope` is not returned by list endpoints. The spread
+      // carries an integration row's own fields; `segment` is a union, so the cast ties them to `T`.
       return data!.data.map((item) => ({
         ...item,
         name: item.name,
         description: item.description,
-        // Manifest-derived, emitted by every type's list mapper: the index
-        // pages draw their cards and run their search off this row alone.
+        // Manifest-derived: index pages draw cards and search off this row alone.
         icon: item.icon,
         keywords: item.keywords,
         scope: null,
@@ -184,7 +175,7 @@ function usePackageList(type: PackageType) {
         created_by_name: item.created_by_name ?? null,
         used_by_agents: item.used_by_agents,
         auto_installed: item.auto_installed,
-      }));
+      })) as PackageIndexItem<T>[];
     },
     enabled: canRead && !!orgId && !!spaceId,
   });
@@ -198,8 +189,7 @@ export function packageDetailQueryOptions<T extends PackageType>(
   version?: string,
 ) {
   return {
-    // The server's default projection and an explicit `draft` are two different
-    // answers and must never share a cache entry.
+    // The default projection and an explicit `draft` are different answers: never one cache entry.
     queryKey: packageKeys.detail(
       PACKAGE_TYPE_ROUTE_SEGMENT[type],
       scope.orgId,
@@ -226,33 +216,6 @@ function usePackageDetail<T extends PackageType>(
   });
 }
 
-function useUploadPackage(type: PackageType) {
-  const qc = useQueryClient();
-  const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
-  return useMutation({
-    mutationFn: async (file: File): Promise<{ id: string; version: string | null }> => {
-      const fd = new FormData();
-      fd.append("file", file);
-      // Single-package ZIP import goes through the canonical multipart import
-      // endpoint, which type-detects the package from the archive. The per-type
-      // create endpoints are JSON-only (except mcp-server), so POSTing a ZIP to
-      // `/api/packages/{type}` fails server-side — `/import` is the correct
-      // route for every type. Concrete path → the multipart `file` body is
-      // typed (Blob), so no cast is needed.
-      const { data } = await client.POST("/api/packages/import", {
-        body: { file },
-        bodySerializer: () => fd,
-      });
-      // 201 → { packageId, type, version? }. `version` is the manifest version
-      // of the imported draft (omitted when the manifest carries none).
-      return { id: data!.packageId, version: data!.version ?? null };
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: packageKeys.family(segment) });
-    },
-  });
-}
-
 function useDeletePackage(type: PackageType) {
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -265,24 +228,19 @@ function useDeletePackage(type: PackageType) {
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: packageKeys.family(segment) });
+      // Stale, not refetched: the deleted package's own detail is still mounted until the navigation below.
+      qc.invalidateQueries({ queryKey: packageKeys.family(segment), refetchType: "none" });
+      if (type === "agent") qc.invalidateQueries({ queryKey: agentsKeys.all });
+      if (type === "integration") void invalidateIntegrationQueries(qc);
       toast.success(t("packages.deleted"));
       navigate("/");
     },
   });
 }
 
-/**
- * Move a package to another home space — `PUT /api/packages/{scope}/{name}/home`.
- *
- * The home is what authorizes every later edit (`packages.home_space_id`, RBAC
- * spec §6.9), and it is also a read grant: the destination gains sight of the
- * package and the old home may lose it. So this invalidates the family (detail
- * + lists), the agent catalog and the library, not just the one detail row.
- */
+/** `PUT /api/packages/{scope}/{name}/home`. The home authorizes later edits (RBAC §6.9) and is a read grant, so this invalidates the family, the agent catalog and the library, not just the detail row. */
 function useMovePackageHome(type: PackageType) {
   const qc = useQueryClient();
-  const segment = PACKAGE_TYPE_ROUTE_SEGMENT[type];
   return useMutation({
     mutationFn: async ({
       id,
@@ -300,22 +258,21 @@ function useMovePackageHome(type: PackageType) {
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: packageKeys.family(segment) });
-      qc.invalidateQueries({ queryKey: agentsKeys.all });
-      void qc.invalidateQueries({ queryKey: ["get", "/api/library"] });
-      // The space being left may have lost the package (`keepInPreviousHome:
-      // false` drops its offer AND its placement row), so its own package
-      // listing is stale too — not just this type's family.
-      void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{spaceId}/packages"] });
+      invalidatePackageCaches(qc);
+      void invalidateLibraries(qc);
+      // `keepInPreviousHome: false` withdraws the old space's placement, so its own listing is stale too.
+      void invalidatePaths(qc, ["/api/spaces/{spaceId}/packages"]);
+      if (type === "integration") void invalidateIntegrationQueries(qc);
     },
   });
 }
 
 // Re-export factory hooks for direct use
 export {
+  // The imperative read, for a handler that has to KNOW before it writes.
+  fetchPackageDetail,
   usePackageList,
   usePackageDetail,
-  useUploadPackage,
   useDeletePackage,
   useMovePackageHome,
   type PackageType,
@@ -323,13 +280,7 @@ export {
 
 // --- Agents ---
 
-/**
- * The agent index for the current space — the ACTIVE set, like every other
- * index ({@link usePackageList}). Every consumer (the index page, the dashboard,
- * the nav, the run list, the schedule pickers, the notification bell) reads it
- * as it comes: a listed agent is a runnable agent, so no surface has to gate a
- * launch control on an activation fact the row no longer carries.
- */
+/** The agent index for the current space: the ACTIVE set ({@link usePackageList}), so a listed agent is a runnable one. */
 export function useAgents() {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
@@ -342,7 +293,7 @@ export function useAgents() {
       // list shape. `forked_from` is not returned by the list endpoint.
       return data!.data.map((a) => ({
         ...a,
-        // Fall back to the package id when display_name is empty (issue #825).
+        // Fall back to the package id when display_name is empty.
         display_name: a.display_name || a.id,
         description: a.description ?? "",
         schema_version: a.schema_version ?? "",
@@ -362,47 +313,37 @@ export function useAgents() {
 // --- Package download ---
 
 export function usePackageDownload(scope: string | undefined, name: string | undefined) {
-  const { t } = useTranslation("common");
   return useCallback(
     async (version: string) => {
       if (!scope || !name) return;
-      try {
-        const { data } = await client.GET("/api/packages/{scope}/{name}/{version}/download", {
-          params: { path: { scope, name, version } },
-          parseAs: "blob",
-        });
-        triggerBlobDownload(data, `${stripScope(scope)}-${name}-${version}.afps`);
-      } catch {
-        toast.error(t("error.downloadFailed"));
-      }
+      await downloadOrToast(
+        () =>
+          client.GET("/api/packages/{scope}/{name}/{version}/download", {
+            params: { path: { scope, name, version } },
+            parseAs: "blob",
+          }),
+        `${stripScope(scope)}-${name}-${version}.afps`,
+      );
     },
-    [scope, name, t],
+    [scope, name],
   );
 }
 
-/**
- * Export an agent as a multi-package `.afps-bundle` (its transitive
- * dependency graph in one self-contained archive). Triggers a browser
- * download via the shared `triggerBlobDownload`. Optional `version` pins the
- * export to a specific release; defaults to the version resolved in the
- * current space.
- */
+/** Exports an agent as a multi-package `.afps-bundle` via `downloadOrToast`; `version` pins a release, defaulting to the one resolved in the current space. */
 export function useAgentBundleExport(scope: string | undefined, name: string | undefined) {
-  const { t } = useTranslation("common");
   return useCallback(
     async (version?: string) => {
       if (!scope || !name) return;
-      try {
-        const { data } = await client.GET("/api/agents/{scope}/{name}/bundle", {
-          params: { path: { scope, name }, query: { version } },
-          parseAs: "blob",
-        });
-        triggerBlobDownload(data, `${stripScope(scope)}-${name}.afps-bundle`);
-      } catch {
-        toast.error(t("error.downloadFailed"));
-      }
+      await downloadOrToast(
+        () =>
+          client.GET("/api/agents/{scope}/{name}/bundle", {
+            params: { path: { scope, name }, query: { version } },
+            parseAs: "blob",
+          }),
+        `${stripScope(scope)}-${name}.afps-bundle`,
+      );
     },
-    [scope, name, t],
+    [scope, name],
   );
 }
 
@@ -417,7 +358,7 @@ export function useVersionDetail(
   const spaceId = useCurrentSpaceId();
   const canRead = useCanReadPackages(type);
   return useQuery({
-    queryKey: ["version-detail", orgId, spaceId, type, packageId, version],
+    queryKey: versionKeys.detail(orgId, spaceId, type, packageId, version),
     queryFn: async (): Promise<VersionDetailResponse> => {
       const { data } = await client.GET(
         `/api/packages/${PACKAGE_TYPE_ROUTE_SEGMENT[type]}/{scope}/{name}/versions/{version}`,
@@ -426,6 +367,11 @@ export function useVersionDetail(
       return data!;
     },
     enabled: canRead && !!orgId && !!spaceId && !!packageId && !!version,
+    // Another version of the same package keeps the page drawn while it loads.
+    placeholderData: keepPreviousWithin(
+      packageId && version ? `${type}/${packageId}` : undefined,
+      versionKeyPackage,
+    ),
   });
 }
 
@@ -434,7 +380,7 @@ export function usePackageVersions(type: PackageType, packageId: string | undefi
   const spaceId = useCurrentSpaceId();
   const canRead = useCanReadPackages(type);
   return useQuery({
-    queryKey: ["package-versions", orgId, spaceId, type, packageId],
+    queryKey: versionKeys.list(orgId, spaceId, type, packageId),
     queryFn: async (): Promise<VersionListItem[]> => {
       const { data } = await client.GET(
         `/api/packages/${PACKAGE_TYPE_ROUTE_SEGMENT[type]}/{scope}/{name}/versions`,
@@ -461,7 +407,7 @@ export function useCreateVersion(type: PackageType, packageId: string) {
       id: number;
       version: string;
     }> => {
-      // 201 → the created version resource, bare (issue #657).
+      // 201 → the created version resource, bare.
       const { data } = await client.POST(`/api/packages/${segment}/{scope}/{name}/versions`, {
         params: {
           path: splitPackageRef(packageId),
@@ -472,14 +418,7 @@ export function useCreateVersion(type: PackageType, packageId: string) {
       return { id: data!.id, version: data!.version };
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["package-versions"] });
-      qc.invalidateQueries({ queryKey: ["version-detail"] });
-      qc.invalidateQueries({ queryKey: ["version-info"] });
-      qc.invalidateQueries({ queryKey: agentsKeys.all });
-      qc.invalidateQueries({ queryKey: packageKeys.all });
-      // A published artifact appeared or vanished: a pinned Files tab and any
-      // dist-tag-resolved read of it are now wrong.
-      invalidatePackageFiles(qc);
+      invalidateVersionCaches(qc);
     },
     // A refusal that moved or settled the draft (`precondition_failed`: someone
     // wrote it; `no_changes`: the server cleared its dirty marker) leaves the page stale.
@@ -488,9 +427,8 @@ export function useCreateVersion(type: PackageType, packageId: string) {
         err instanceof ApiError &&
         (err.code === "precondition_failed" || err.code === "no_changes")
       ) {
-        qc.invalidateQueries({ queryKey: ["version-info"] });
-        qc.invalidateQueries({ queryKey: agentsKeys.all });
-        qc.invalidateQueries({ queryKey: packageKeys.all });
+        qc.invalidateQueries({ queryKey: versionKeys.infoAll });
+        invalidatePackageCaches(qc);
       }
     },
   });
@@ -506,14 +444,7 @@ export function useDeleteVersion(type: PackageType, packageId: string) {
       });
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["package-versions"] });
-      qc.invalidateQueries({ queryKey: ["version-detail"] });
-      qc.invalidateQueries({ queryKey: ["version-info"] });
-      qc.invalidateQueries({ queryKey: agentsKeys.all });
-      qc.invalidateQueries({ queryKey: packageKeys.all });
-      // A published artifact appeared or vanished: a pinned Files tab and any
-      // dist-tag-resolved read of it are now wrong.
-      invalidatePackageFiles(qc);
+      invalidateVersionCaches(qc);
     },
   });
 }
@@ -525,7 +456,7 @@ export function useRestoreVersion(type: PackageType, packageId: string) {
     mutationFn: async (
       version: string,
     ): Promise<{ id: string; version: string | null; etag: string | null }> => {
-      // 200 → the updated PACKAGE resource, bare (issue #657): the restore is
+      // 200 → the updated PACKAGE resource, bare: the restore is
       // reflected in `version`/`manifest`/`content`; its `ETag` is the new draft version.
       const { data, response } = await client.POST(
         `/api/packages/${segment}/{scope}/{name}/versions/{version}/restore`,
@@ -538,10 +469,8 @@ export function useRestoreVersion(type: PackageType, packageId: string) {
       };
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: agentsKeys.all });
-      qc.invalidateQueries({ queryKey: packageKeys.all });
       // A restore overwrites the DRAFT artifact wholesale.
-      invalidatePackageFiles(qc);
+      invalidatePackageCaches(qc);
     },
   });
 }
@@ -551,7 +480,7 @@ export function useVersionInfo(type: PackageType, packageId: string | undefined)
   const spaceId = useCurrentSpaceId();
   const canRead = useCanReadPackages(type);
   return useQuery({
-    queryKey: ["version-info", orgId, spaceId, type, packageId],
+    queryKey: versionKeys.info(orgId, spaceId, type, packageId),
     queryFn: async (): Promise<{
       latest_published_version: string | null;
       active_version: string | null;
@@ -576,7 +505,7 @@ export function useForkPackage() {
   return useMutation({
     meta: { errorHandledByCaller: true },
     mutationFn: async ({ packageId, name }: { packageId: string; name?: string }) => {
-      // 201 → the forked package resource, bare (issue #657): `id` is the new
+      // 201 → the forked package resource, bare: `id` is the new
       // package ID under org scope, `forked_from` the source package ID.
       const { data } = await client.POST("/api/packages/{scope}/{name}/fork", {
         params: { path: splitPackageRef(packageId) },
@@ -585,8 +514,9 @@ export function useForkPackage() {
       return { id: data!.id, forked_from: data!.forked_from ?? null };
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: agentsKeys.all });
-      qc.invalidateQueries({ queryKey: packageKeys.all });
+      invalidatePackageCaches(qc);
+      // The copy may be an integration, whose list is keyed apart from the package family.
+      void invalidateIntegrationQueries(qc);
     },
   });
 }

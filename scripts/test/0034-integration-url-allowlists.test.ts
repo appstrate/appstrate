@@ -30,6 +30,7 @@ async function seedConnection(integrationId: string, outputs: Record<string, unk
       authKey: "primary",
       accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
       label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs }),

@@ -1,30 +1,31 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unit tests for the pure `resolveConnections()` function — the cascade
- * that decides which connectionS a run binds per integration. Every layer
- * yields a SET; each chosen row carries its own `authKey`, OAuth and
+ * Unit tests for the pure `resolveConnections()` function — which connectionS a run binds per
+ * integration. Every layer yields a SET; each chosen row carries its own `authKey`, OAuth and
  * api_key are interchangeable.
  *
  * Pure function, no DB. All inputs are arrays + plain objects.
  *
- * Cascade order (highest → lowest):
- *   1. integration_pins (user_id IS NULL)        → admin force, per-agent
- *   2. integration_org_defaults (enforce)        → org-wide force
- *   3. launch override                           → the run's or the schedule's picks
- *   4. integration_pins (user_id = actor.id)     → member preference
- *   5. integration_org_defaults (soft)           → org-wide default (binds whole or fails, like 1-4)
- *   6. fallback: own + shared accessible
- *      → exactly one OWN = auto, two or more = must_choose (one known account:
- *        the least-privileged that covers the agent); no own row =
- *        not_connected / must_choose when `required`, else bound to none + warning
+ * effective = floor ∪ selection, selection ⊆ ceiling:
+ *   - governed by an admin pin (user_id IS NULL), else an enforced org default: the floor is that
+ *     set, bound whole; the selection is the launch override, else the member pin when the admin
+ *     pin opens additions (and no enforced default closes them), else nothing. Closed, an
+ *     override adding an id is `override_outranked`; an override naming floor ids or `[]` adds
+ *     nothing. No soft default, no fallback.
+ *   - ungoverned, the cascade: launch override → member pin → soft org default → fallback (exactly
+ *     one OWN = auto, must_choose under `noFallback`; two or more = must_choose; no own row =
+ *     not_connected / must_choose when `required`, else bound to none + warning).
  *
- * A layer set to `[]` is "none": it wins, binding none (or failing when `required`).
+ * Ungoverned, a layer set to `[]` is "none": it wins, binding none (or failing when `required`).
  * An integration switched off in the space is not resolved (a warning, or an error when `required`).
  */
 
 import { describe, it, expect } from "bun:test";
 import {
+  proxyRequirement,
+  rankByLeastPrivilege,
+  requirementOf,
   resolveConnections as resolveConnectionsPure,
   servingCandidates,
   translateResolutionError,
@@ -33,6 +34,7 @@ import {
 import { connectOfferTarget } from "../../../src/services/connect/preflight-connect-offer.ts";
 import {
   CONNECTION_RESOLUTION_WARNING_CODES,
+  MAX_CONNECTIONS_PER_INTEGRATION,
   type ConnectionResolutionSource,
   type ConnectionResolutionWarningCode,
   type IntegrationManifest,
@@ -45,6 +47,7 @@ import type {
 // ─────────────────────────── Fixtures ─────────────────────────────────────────
 
 const INTEG = "@vendor/test-integ";
+const ORG_ID = "org_test";
 const SPACE_ID = "spc_test";
 const USER_ID = "user_alice";
 const AGENT_ID = "@vendor/test-agent";
@@ -109,7 +112,9 @@ function conn(input: Partial<ConnectionRow> & { authKey?: string }): ConnectionR
     integrationId: INTEG,
     authKey: input.authKey ?? "oauth",
     accountId: "acc_x",
+    orgId: ORG_ID,
     spaceId: SPACE_ID,
+    originSpaceId: null,
     userId: USER_ID,
     endUserId: null,
     credentialsEncrypted: "ciphertext",
@@ -120,7 +125,7 @@ function conn(input: Partial<ConnectionRow> & { authKey?: string }): ConnectionR
     // NOT NULL in `integration_connections`: the sidecar keys its `connection`
     // tool parameter on this value, so a nameless row is unaddressable.
     label: `conn-${connId}`,
-    sharedWithOrg: false,
+    sharedSpaceIds: [],
     createdAt: new Date(),
     updatedAt: new Date(),
     ...input,
@@ -128,8 +133,11 @@ function conn(input: Partial<ConnectionRow> & { authKey?: string }): ConnectionR
 }
 
 let pinSeq = 0;
-/** One pin row — the whole bound set of its (agent, integration, scope). */
-function pin(connectionIds: string | string[], opts?: { userId?: string | null }): PinRow {
+/** One pin row — the whole bound set of its (agent, integration, scope); additions closed. */
+function pin(
+  connectionIds: string | string[],
+  opts?: { userId?: string | null; allowAdditions?: boolean },
+): PinRow {
   pinSeq += 1;
   return {
     id: `pin_${pinSeq}`,
@@ -138,10 +146,15 @@ function pin(connectionIds: string | string[], opts?: { userId?: string | null }
     integrationId: INTEG,
     userId: opts?.userId ?? null,
     connectionIds: typeof connectionIds === "string" ? [connectionIds] : connectionIds,
-    createdBy: null,
+    allowAdditionalConnections: opts?.allowAdditions ?? false,
     createdAt: new Date(),
     updatedAt: new Date(),
   };
+}
+
+/** Sugar — an admin pin that lets a selection add connections to its set. */
+function openPin(connectionIds: string | string[]): PinRow {
+  return pin(connectionIds, { allowAdditions: true });
 }
 
 /** Sugar — the launch-override layer, as a run and as a schedule fire feed it. */
@@ -253,7 +266,7 @@ describe("resolveConnections — admin pin (cascade layer 1)", () => {
     expect(result.errors[0]!.source).toBe("schedule_override");
   });
 
-  it("an override naming a subset of the pin binds exactly that subset", () => {
+  it("an override naming a subset of the pin adds nothing: the whole pin binds", () => {
     const a = conn({});
     const b = conn({});
     const result = resolveConnections({
@@ -264,7 +277,8 @@ describe("resolveConnections — admin pin (cascade layer 1)", () => {
     });
     expect(result.errors).toEqual([]);
     expect(result.resolved[INTEG]!.map((r) => [r.connectionId, r.source])).toEqual([
-      [b.id, "run_override"],
+      [a.id, "admin_pin"],
+      [b.id, "admin_pin"],
     ]);
   });
 
@@ -431,16 +445,21 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
   const END_USER = "eu_1";
   const own = (over: Partial<ConnectionRow> = {}) => conn(over);
   const shared = (over: Partial<ConnectionRow> = {}) =>
-    conn({ userId: COLLEAGUE, sharedWithOrg: true, ...over });
+    conn({ userId: COLLEAGUE, sharedSpaceIds: [SPACE_ID], ...over });
   const DEAD = { needsReconnection: true };
 
   /**
-   * Bind `rows[bind]`, raise `error` — on `rows[on]` when the error names a connection — or
-   * bind none with a warning offering `rows[unbound]`, coded as the required verdict's error.
+   * Bind `rows[bind]`, raise `error` — on `rows[on]` when it names a connection, listing
+   * `rows[candidates]` in that order when it offers a choice — or bind none with a warning
+   * offering `rows[unbound]`, coded as the required verdict's error.
    */
   type Verdict =
     | { bind: number }
-    | { error: "not_connected" | "must_choose_connection" | "needs_reconnection"; on?: number }
+    | {
+        error: "not_connected" | "must_choose_connection" | "needs_reconnection";
+        on?: number;
+        candidates?: number[];
+      }
     | { unbound: number[] };
 
   /** `verdict` holds for a required integration; `optional`, when set, for a non-required one. */
@@ -459,41 +478,51 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
     {
       name: "own 0, shared 1 (a colleague's account is never picked for you)",
       rows: () => [shared()],
-      verdict: { error: "must_choose_connection" },
+      verdict: { error: "must_choose_connection", candidates: [0] },
       optional: { unbound: [0] },
     },
     {
       name: "own 0, shared 2",
       rows: () => [shared(), shared({ authKey: "pat" })],
-      verdict: { error: "must_choose_connection" },
+      verdict: { error: "must_choose_connection", candidates: [0, 1] },
       optional: { unbound: [0, 1] },
     },
-    { name: "own 1", rows: () => [own()], verdict: { bind: 0 } },
-    { name: "own 1 + shared 1 (the own one)", rows: () => [shared(), own()], verdict: { bind: 1 } },
+    { name: "own 1, shared 0", rows: () => [own()], verdict: { bind: 0 } },
+    { name: "own 1, shared 1 (the own one)", rows: () => [shared(), own()], verdict: { bind: 1 } },
     {
       name: "own 1 dead",
       rows: () => [own(DEAD)],
       verdict: { error: "needs_reconnection", on: 0 },
     },
     {
-      name: "own 1 dead + shared 1 live (no switch)",
+      name: "own 1 dead, shared 1 live (no switch)",
       rows: () => [shared(), own(DEAD)],
       verdict: { error: "needs_reconnection", on: 1 },
     },
     {
-      name: "own 2 (any auth shape)",
+      name: "own 2, shared 0 (any auth shape)",
       rows: () => [own(), own({ authKey: "pat" })],
-      verdict: { error: "must_choose_connection" },
+      verdict: { error: "must_choose_connection", candidates: [0, 1] },
     },
     {
-      name: "own 2, one dead (the dead one counts)",
+      name: "own 2 of one account and auth",
+      rows: () => [own(), own()],
+      verdict: { error: "must_choose_connection", candidates: [0, 1] },
+    },
+    {
+      name: "own 2, shared 2 (every serving row is a candidate)",
+      rows: () => [own(), shared(), own({ authKey: "pat" }), shared()],
+      verdict: { error: "must_choose_connection", candidates: [0, 1, 2, 3] },
+    },
+    {
+      name: "own 2, one dead (a choice, never a switch to the live one: the dead one is listed last)",
       rows: () => [own(DEAD), own({ authKey: "pat" })],
-      verdict: { error: "must_choose_connection" },
+      verdict: { error: "must_choose_connection", candidates: [1, 0] },
     },
     {
       name: "own 2, both dead",
       rows: () => [own(DEAD), own({ authKey: "pat", ...DEAD })],
-      verdict: { error: "must_choose_connection" },
+      verdict: { error: "must_choose_connection", candidates: [0, 1] },
     },
   ];
 
@@ -539,6 +568,10 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
           expect(result.resolved[INTEG]).toBeUndefined();
           expect(result.warnings).toEqual([]);
           expect(result.errors.map((e) => e.code)).toEqual([verdict.error]);
+          const candidates = result.errors[0]!.candidateConnections;
+          expect(candidates?.map((c) => [c.id, c.needsReconnection])).toEqual(
+            verdict.candidates?.map((i) => [rows[i]!.id, rows[i]!.needsReconnection]),
+          );
           if (verdict.on !== undefined) {
             expect(result.errors[0]!.connectionId).toBe(rows[verdict.on]!.id);
             expect(result.errors[0]!.source).toBe("fallback_auto");
@@ -551,40 +584,44 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
     }
   }
 
-  it("a colleague sharing a connection does not move a run that auto-bound my own", () => {
-    const mine = own();
-    const before = resolveConnections({
-      requirements: [req(oauth2Manifest())],
-      accessibleConnections: [mine],
-      pins: [],
-    });
-    const after = resolveConnections({
-      requirements: [req(oauth2Manifest())],
-      accessibleConnections: [shared(), mine],
-      pins: [],
-    });
-    expect(before.resolved[INTEG]!.map((r) => r.connectionId)).toEqual([mine.id]);
-    expect(after.errors).toEqual([]);
-    expect(after.resolved[INTEG]!.map((r) => r.connectionId)).toEqual([mine.id]);
-    expect(after.resolved[INTEG]![0]!.source).toBe("fallback_auto");
-  });
-
-  it("my second account expiring is a choice, never a silent switch to the first", () => {
-    const first = own({ label: "Boulot" });
-    const second = own({ authKey: "pat", label: "Perso", ...DEAD });
+  it("a proxy call ranks its candidates narrowest first, none missing a scope: no agent selects any", () => {
+    const broad = own({ label: "écriture", scopesGranted: ["read", "write"] });
+    const narrow = own({ label: "lecture", scopesGranted: ["read"] });
     const result = resolveConnections({
-      requirements: [req(oauth2Manifest())],
-      accessibleConnections: [first, second],
+      requirements: [proxyRequirement(INTEG, oauth2Manifest())],
+      accessibleConnections: [broad, narrow],
       pins: [],
     });
     expect(result.resolved[INTEG]).toBeUndefined();
+    expect(result.errors.map((e) => e.code)).toEqual(["must_choose_connection"]);
+    expect(result.errors[0]!.candidateConnections!.map((c) => [c.id, c.missingScopes])).toEqual([
+      [narrow.id, []],
+      [broad.id, []],
+    ]);
+  });
+
+  it("lists the serving rows as candidates, least privilege first", () => {
+    const [broad, theirs, dead, pat, short, orphaned] = [
+      own({ scopesGranted: ["read", "write"] }),
+      shared({ scopesGranted: ["read"] }),
+      own({ scopesGranted: ["read"], ...DEAD }),
+      own({ authKey: "pat" }),
+      own({ scopesGranted: [] }),
+      own({ authKey: "gone" }),
+    ];
+    const result = resolveConnections({
+      requirements: [req(oauth2Manifest(), [], ["read"])],
+      accessibleConnections: [broad, theirs, dead, pat, short, orphaned],
+      pins: [],
+    });
     expect(result.errors[0]!.code).toBe("must_choose_connection");
-    expect(result.errors[0]!.candidateConnections!.map((c) => [c.id, c.needsReconnection])).toEqual(
-      [
-        [first.id, false],
-        [second.id, true],
-      ],
-    );
+    expect(result.errors[0]!.candidateConnections!.map((c) => c.id)).toEqual([
+      pat.id,
+      theirs.id,
+      dead.id,
+      broad.id,
+      short.id,
+    ]);
   });
 
   it("an end-user with only a member's shared connection must choose — never bound to it", () => {
@@ -606,6 +643,8 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
         accountId: "acc_x",
         ownedByActor: false,
         needsReconnection: false,
+        scopesGranted: [],
+        missingScopes: [],
       },
     ]);
   });
@@ -629,6 +668,8 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
         accountId: "acc_x",
         ownedByActor: false,
         needsReconnection: false,
+        scopesGranted: [],
+        missingScopes: [],
       },
     ]);
   });
@@ -646,7 +687,7 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
     expect(result.resolved[INTEG]!.map((r) => r.connectionId)).toEqual([mine.id]);
   });
 
-  it("must_choose lists every serving row — own and shared, live and dead — flagged", () => {
+  it("must_choose lists every serving row — own and shared, live before dead — flagged", () => {
     // What tells the candidates apart rides on each one, so a caller with no
     // picker (API, MCP) chooses from the error alone and can skip the dead ones.
     const mineLive = own({ label: "web", accountId: "root@web-01" });
@@ -667,13 +708,8 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
         accountId: "root@web-01",
         ownedByActor: true,
         needsReconnection: false,
-      },
-      {
-        id: mineDead.id,
-        label: "db",
-        accountId: "root@db-01",
-        ownedByActor: true,
-        needsReconnection: true,
+        scopesGranted: [],
+        missingScopes: [],
       },
       {
         id: theirsLive.id,
@@ -681,6 +717,17 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
         accountId: "ops@corp",
         ownedByActor: false,
         needsReconnection: false,
+        scopesGranted: [],
+        missingScopes: [],
+      },
+      {
+        id: mineDead.id,
+        label: "db",
+        accountId: "root@db-01",
+        ownedByActor: true,
+        needsReconnection: true,
+        scopesGranted: [],
+        missingScopes: [],
       },
       {
         id: theirsDead.id,
@@ -688,6 +735,8 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
         accountId: "ci@corp",
         ownedByActor: false,
         needsReconnection: true,
+        scopesGranted: [],
+        missingScopes: [],
       },
     ]);
     // …and the snake_case projection the 409 envelope carries.
@@ -703,18 +752,18 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
           needs_reconnection: false,
         },
         {
-          id: mineDead.id,
-          label: "db",
-          account_id: "root@db-01",
-          owned_by_actor: true,
-          needs_reconnection: true,
-        },
-        {
           id: theirsLive.id,
           label: "ops",
           account_id: "ops@corp",
           owned_by_actor: false,
           needs_reconnection: false,
+        },
+        {
+          id: mineDead.id,
+          label: "db",
+          account_id: "root@db-01",
+          owned_by_actor: true,
+          needs_reconnection: true,
         },
         {
           id: theirsDead.id,
@@ -725,6 +774,95 @@ describe("resolveConnections — fallback (cascade layer 6)", () => {
         },
       ],
     });
+  });
+
+  describe("`noFallback` — an own connection is a choice, one included", () => {
+    type Input = Parameters<typeof resolveConnectionsPure>[0];
+    const requirementsOf = (required: boolean) => [{ ...req(oauth2Manifest()), required }];
+    const resolve = (rows: ConnectionRow[], over: Partial<Input> = {}) =>
+      resolveConnections({
+        requirements: requirementsOf(false),
+        accessibleConnections: rows,
+        pins: [],
+        noFallback: true,
+        ...over,
+      });
+
+    for (const required of [true, false]) {
+      it(`${required ? "required" : "non-required"}: own 1 → must_choose_connection listing it, bound to none`, () => {
+        for (const rows of [[own()], [shared(), own()], [own(DEAD)]]) {
+          const result = resolve(rows, { requirements: requirementsOf(required) });
+          expect(result.resolved[INTEG]).toBeUndefined();
+          expect(result.warnings).toEqual([]);
+          expect(result.errors.map((e) => [e.code, e.source])).toEqual([
+            ["must_choose_connection", undefined],
+          ]);
+          expect(result.errors[0]!.candidateConnections!.map((c) => c.id)).toEqual(
+            rows.map((row) => row.id),
+          );
+        }
+      });
+    }
+
+    it("answers own N and own 0 as the fallback does", () => {
+      const others: [rows: ConnectionRow[], code: ConnectionResolutionWarningCode][] = [
+        [[own(), own({ authKey: "pat" })], "must_choose_connection"],
+        [[own(), shared(), own()], "must_choose_connection"],
+        [[shared()], "must_choose_connection"],
+        [[], "not_connected"],
+      ];
+      for (const [rows, code] of others) {
+        for (const required of [true, false]) {
+          const requirements = requirementsOf(required);
+          const result = resolve(rows, { requirements });
+          expect(result).toEqual(
+            resolveConnections({ requirements, accessibleConnections: rows, pins: [] }),
+          );
+          expect([...result.errors, ...result.warnings].map((item) => item.code)).toEqual([code]);
+        }
+      }
+    });
+  });
+});
+
+describe("resolveConnections — labels of a bound set", () => {
+  const COLLEAGUE = "user_colleague";
+  const labelsOf = (ids: string[], rows: ConnectionRow[]) =>
+    resolveConnections({
+      requirements: [req(oauth2Manifest())],
+      accessibleConnections: rows,
+      pins: [pin(ids)],
+    }).resolved[INTEG]!.map((r) => [r.connectionId, r.label]);
+
+  it("suffixes two owners' equal labels in set order, so every member is addressable", () => {
+    const mine = conn({ label: "Work", sharedSpaceIds: [SPACE_ID] });
+    const theirs = conn({ userId: COLLEAGUE, label: "Work", sharedSpaceIds: [SPACE_ID] });
+    expect(labelsOf([mine.id, theirs.id], [mine, theirs])).toEqual([
+      [mine.id, "Work"],
+      [theirs.id, "Work (2)"],
+    ]);
+    expect(labelsOf([theirs.id, mine.id], [mine, theirs])).toEqual([
+      [theirs.id, "Work"],
+      [mine.id, "Work (2)"],
+    ]);
+  });
+
+  it("skips a suffix another member already holds", () => {
+    const a = conn({ label: "Work", sharedSpaceIds: [SPACE_ID] });
+    const b = conn({ userId: COLLEAGUE, label: "Work", sharedSpaceIds: [SPACE_ID] });
+    const c = conn({ userId: "user_third", label: "Work (2)", sharedSpaceIds: [SPACE_ID] });
+    const labels = labelsOf([a.id, b.id, c.id], [a, b, c]).map(([, label]) => label);
+    expect(labels).toEqual(["Work", "Work (2)", "Work (2) (2)"]);
+    expect(new Set(labels).size).toBe(3);
+  });
+
+  it("leaves distinct labels as stored", () => {
+    const a = conn({ label: "Work" });
+    const b = conn({ label: "Perso", authKey: "pat" });
+    expect(labelsOf([a.id, b.id], [a, b])).toEqual([
+      [a.id, "Work"],
+      [b.id, "Perso"],
+    ]);
   });
 });
 
@@ -921,188 +1059,275 @@ describe("resolveConnections — empty requirements / inert integrations", () =>
   });
 });
 
-// #1871: a new connection for least privilege must not break the fallback of the actor's other
-// agents. Own connections of ONE known account differ by scopes only: no account is chosen.
-describe("resolveConnections — fallback among own connections of one account", () => {
-  const narrow = () => conn({ label: "lecture", scopesGranted: ["read"] });
-  const broad = () => conn({ label: "écriture", scopesGranted: ["read", "write"] });
-  const fallback = (rows: ConnectionRow[], agentScopes: string[]) =>
-    resolveConnections({
-      requirements: [req(oauth2Manifest(), [], agentScopes)],
-      accessibleConnections: rows,
-      pins: [],
-    });
-
-  it("binds the narrow one when it covers the agent", () => {
-    const [n, b] = [narrow(), broad()];
-    const result = fallback([b, n], ["read"]);
-    expect(result.errors).toEqual([]);
-    expect(result.resolved[INTEG]).toMatchObject([{ connectionId: n.id, source: "fallback_auto" }]);
-  });
-
-  it("binds the broad one when only it covers the agent", () => {
-    const [n, b] = [narrow(), broad()];
-    const result = fallback([n, b], ["write"]);
-    expect(result.errors).toEqual([]);
-    expect(result.resolved[INTEG]).toMatchObject([{ connectionId: b.id }]);
-  });
-
-  it("binds the closest when none covers, which then answers insufficient_scopes", () => {
-    const [n, b] = [narrow(), broad()];
-    const result = fallback([n, b], ["read", "write", "admin"]);
-    expect(result.resolved[INTEG]).toBeUndefined();
-    expect(result.errors[0]).toMatchObject({
-      code: "insufficient_scopes",
-      connectionId: b.id,
-      missingScopes: ["admin"],
-      source: "fallback_auto",
-    });
-  });
-
-  /** `oauth2Manifest()` whose oauth auth carries `defaults` and, optionally, a catalog. */
-  function withDefaults(defaults: string[], catalog?: object[]): IntegrationManifest {
+describe("rankByLeastPrivilege", () => {
+  function catalogManifest(): IntegrationManifest {
     const m = oauth2Manifest() as unknown as { auths: { oauth: Record<string, unknown> } };
-    m.auths.oauth.default_scopes = defaults;
-    if (catalog) m.auths.oauth.scope_catalog = catalog;
-    return m as unknown as IntegrationManifest;
-  }
-  const bind = (manifest: IntegrationManifest, rows: ConnectionRow[], agentScopes: string[]) =>
-    resolveConnections({
-      requirements: [req(manifest, [], agentScopes)],
-      accessibleConnections: rows,
-      pins: [],
-    });
-
-  it("judges an agent declaring no scope on the auth's default_scopes", () => {
-    // Without the defaults the narrower `lacking` row would win on breadth.
-    const lacking = conn({ scopesGranted: ["read"] });
-    const baseline = conn({ scopesGranted: ["base", "read"] });
-    const result = bind(withDefaults(["base"]), [lacking, baseline], []);
-    expect(result.errors).toEqual([]);
-    expect(result.resolved[INTEG]).toMatchObject([{ connectionId: baseline.id }]);
-  });
-
-  it("never trades a narrow row short of a newer default for a write-capable one", () => {
-    const narrowRow = conn({ scopesGranted: ["read"] });
-    const writeRow = conn({ scopesGranted: ["base", "read", "write"] });
-    for (const rows of [
-      [narrowRow, writeRow],
-      [writeRow, narrowRow],
-    ]) {
-      const result = bind(withDefaults(["base"]), rows, ["read"]);
-      expect(result.resolved[INTEG]).toMatchObject([{ connectionId: narrowRow.id }]);
-    }
-  });
-
-  it("prefers covering the agent over covering the defaults", () => {
-    const missesAgent = conn({ scopesGranted: ["base", "read"] });
-    const missesDefault = conn({ scopesGranted: ["write"] });
-    const result = bind(withDefaults(["base"]), [missesAgent, missesDefault], ["write"]);
-    expect(result.resolved[INTEG]).toMatchObject([{ connectionId: missesDefault.id }]);
-  });
-
-  // #1871: an expiry must not elevate a read-only agent onto the write-capable row.
-  it("binds a dead narrow row over a live broad one, which answers needs_reconnection", () => {
-    const deadNarrow = conn({ scopesGranted: ["read"], needsReconnection: true });
-    const liveBroad = conn({ scopesGranted: ["read", "write"] });
-    for (const rows of [
-      [deadNarrow, liveBroad],
-      [liveBroad, deadNarrow],
-    ]) {
-      const result = fallback(rows, ["read"]);
-      expect(result.errors[0]).toMatchObject({
-        code: "needs_reconnection",
-        connectionId: deadNarrow.id,
-      });
-    }
-  });
-
-  it("expands `implies` when judging breadth: an umbrella is never narrower", () => {
-    const manifest = withDefaults(
-      [],
-      [
-        { value: "public_repo", label: "Public repos" },
-        { value: "repo", label: "Repos", implies: ["public_repo"] },
-      ],
-    );
-    // Older, so it would win a raw-count tie.
-    const umbrella = conn({ scopesGranted: ["repo"], createdAt: new Date(1) });
-    const exact = conn({ scopesGranted: ["public_repo"], createdAt: new Date(2) });
-    const result = bind(manifest, [umbrella, exact], ["public_repo"]);
-    expect(result.resolved[INTEG]).toMatchObject([{ connectionId: exact.id }]);
-  });
-
-  it("still asks without an agent selection (a credential-proxy call)", () => {
-    const result = resolveConnections({
-      requirements: [{ ...req(oauth2Manifest()), noAgentSelection: true }],
-      accessibleConnections: [narrow(), broad()],
-      pins: [],
-    });
-    expect(result.errors[0]!.code).toBe("must_choose_connection");
-  });
-
-  it("still asks across auths of one account", () => {
-    const result = fallback([narrow(), conn({ authKey: "pat" })], ["read"]);
-    expect(result.errors[0]!.code).toBe("must_choose_connection");
-  });
-
-  it("still asks across instances of one account (connection variables)", () => {
-    const result = fallback(
-      [
-        conn({ scopesGranted: ["read"], variables: { host: "gitlab.com" } }),
-        conn({ scopesGranted: ["read"], variables: { host: "gitlab.corp" } }),
-      ],
-      ["read"],
-    );
-    expect(result.errors[0]!.code).toBe("must_choose_connection");
-  });
-
-  it("judges breadth on catalog scopes, not on the IdP's echoed ones", () => {
-    const manifest = oauth2Manifest() as unknown as {
-      auths: { oauth: Record<string, unknown> };
-    };
-    manifest.auths.oauth.scope_catalog = [
+    m.auths.oauth.scope_catalog = [
       { value: "read", label: "Read" },
       { value: "write", label: "Write" },
     ];
-    const echoed = conn({ scopesGranted: ["read", "openid", "profile", "email"] });
-    const wide = conn({ scopesGranted: ["read", "write"] });
-    const result = resolveConnections({
-      requirements: [req(manifest as unknown as IntegrationManifest, [], ["read"])],
-      accessibleConnections: [wide, echoed],
-      pins: [],
-    });
-    expect(result.resolved[INTEG]).toMatchObject([{ connectionId: echoed.id }]);
+    return m as unknown as IntegrationManifest;
+  }
+  const selection = { manifest: catalogManifest(), agentTools: [], agentScopes: ["read"] };
+
+  it("orders exact, unjudged, broader, missing, and names each row's fit and gap", () => {
+    const missing = conn({ scopesGranted: [] });
+    const broader = conn({ scopesGranted: ["read", "write"] });
+    const unjudged = conn({ authKey: "pat" });
+    const exact = conn({ scopesGranted: ["read"] });
+
+    const ranked = rankByLeastPrivilege(selection, [missing, broader, unjudged, exact]);
+
+    expect(ranked.map((r) => [r.row.id, r.scopeFit, r.missingScopes])).toEqual([
+      [exact.id, "exact", []],
+      [unjudged.id, "unjudged", []],
+      [broader.id, "broader", []],
+      [missing.id, "missing", ["read"]],
+    ]);
   });
 
-  it("breaks a tie on the live row, whatever the input order", () => {
+  describe("the fit of one grant", () => {
+    const [READ, SEND, MODIFY, LABELS] = ["mail.read", "mail.send", "mail.modify", "mail.labels"];
+    const manifest = {
+      ...oauth2Manifest(),
+      auths: {
+        oauth: {
+          type: "oauth2",
+          default_scopes: ["openid", READ],
+          scope_catalog: [
+            { value: "openid", label: "Identity" },
+            { value: READ, label: "Read" },
+            { value: SEND, label: "Send" },
+            { value: MODIFY, label: "Read & write", implies: [READ, SEND] },
+            { value: LABELS, label: "Labels" },
+          ],
+        },
+        key: { type: "api_key" },
+        bare: { type: "oauth2", default_scopes: ["read"] },
+      },
+    } as unknown as IntegrationManifest;
+    const fit = (scopesGranted: string[], agentScopes: string[], authKey = "oauth") =>
+      rankByLeastPrivilege({ manifest, agentTools: [], agentScopes }, [
+        conn({ authKey, scopesGranted }),
+      ])[0]!.scopeFit;
+
+    it("is missing when the grant does not cover the agent", () => {
+      expect(fit(["openid", READ], [READ, SEND])).toBe("missing");
+    });
+
+    it("is exact within the agent's scopes and the defaults, an empty grant included", () => {
+      expect(fit(["openid", READ, SEND], [SEND])).toBe("exact");
+      expect(fit(["openid", READ], [])).toBe("exact");
+      expect(fit([], [])).toBe("exact");
+    });
+
+    it("counts what a required scope implies as asked for", () => {
+      expect(fit(["openid", MODIFY, SEND], [MODIFY])).toBe("exact");
+    });
+
+    it("ignores what the catalog does not declare: the IdP's echo grants nothing", () => {
+      expect(fit(["openid", "profile", "email", READ], [READ])).toBe("exact");
+    });
+
+    it("is broader beyond the agent's scopes and the defaults, a covering parent included", () => {
+      expect(fit(["openid", READ, LABELS], [READ])).toBe("broader");
+      // `modify` covers `send` but also writes.
+      expect(fit(["openid", MODIFY], [SEND])).toBe("broader");
+    });
+
+    it("passes no breadth judgement off oauth2, or on an oauth2 auth with no catalog", () => {
+      expect(fit([], [], "key")).toBe("unjudged");
+      expect(fit(["read", "write"], [], "bare")).toBe("unjudged");
+    });
+  });
+
+  it("puts a live row before a dead one of the same standing, else keeps the given order", () => {
     const dead = conn({ scopesGranted: ["read"], needsReconnection: true });
-    const live = conn({ scopesGranted: ["read"] });
-    for (const rows of [
-      [dead, live],
-      [live, dead],
-    ]) {
-      expect(fallback(rows, ["read"]).resolved[INTEG]).toMatchObject([{ connectionId: live.id }]);
+    const first = conn({ scopesGranted: ["read"] });
+    const second = conn({ scopesGranted: ["read"] });
+
+    const ranked = rankByLeastPrivilege(selection, [dead, first, second]);
+
+    expect(ranked.map((r) => r.row.id)).toEqual([first.id, second.id, dead.id]);
+  });
+
+  describe("the order of two grants, whatever the given order", () => {
+    /** `oauth2Manifest()` whose oauth auth carries `defaults` and, optionally, a catalog. */
+    function withDefaults(defaults: string[], catalog?: object[]): IntegrationManifest {
+      const m = oauth2Manifest() as unknown as { auths: { oauth: Record<string, unknown> } };
+      m.auths.oauth.default_scopes = defaults;
+      if (catalog) m.auths.oauth.scope_catalog = catalog;
+      return m as unknown as IntegrationManifest;
+    }
+    const cases: {
+      name: string;
+      manifest?: IntegrationManifest;
+      agentScopes: string[];
+      first: Partial<ConnectionRow>;
+      then: Partial<ConnectionRow>;
+    }[] = [
+      {
+        name: "the narrow one covering the agent, then a broader one",
+        agentScopes: ["read"],
+        first: { scopesGranted: ["read"] },
+        then: { scopesGranted: ["read", "write"] },
+      },
+      {
+        name: "the one covering the agent, then a narrower one that does not",
+        agentScopes: ["write"],
+        first: { scopesGranted: ["read", "write"] },
+        then: { scopesGranted: ["read"] },
+      },
+      {
+        name: "the one missing fewer when neither covers",
+        agentScopes: ["read", "write", "admin"],
+        first: { scopesGranted: ["read", "write"] },
+        then: { scopesGranted: ["read"] },
+      },
+      {
+        name: "the one covering `default_scopes`, for an agent declaring no scope",
+        manifest: withDefaults(["base"]),
+        agentScopes: [],
+        first: { scopesGranted: ["base", "read"] },
+        then: { scopesGranted: ["read"] },
+      },
+      {
+        name: "a narrow one short of a default, then a write-capable one",
+        manifest: withDefaults(["base"]),
+        agentScopes: ["read"],
+        first: { scopesGranted: ["read"] },
+        then: { scopesGranted: ["base", "read", "write"] },
+      },
+      {
+        name: "the one covering the agent, then the one covering the defaults",
+        manifest: withDefaults(["base"]),
+        agentScopes: ["write"],
+        first: { scopesGranted: ["write"] },
+        then: { scopesGranted: ["base", "read"] },
+      },
+      {
+        name: "a dead narrow one, then a live broad one",
+        agentScopes: ["read"],
+        first: { scopesGranted: ["read"], needsReconnection: true },
+        then: { scopesGranted: ["read", "write"] },
+      },
+      {
+        name: "the exact one, then an umbrella implying it",
+        manifest: withDefaults(
+          [],
+          [
+            { value: "public_repo", label: "Public repos" },
+            { value: "repo", label: "Repos", implies: ["public_repo"] },
+          ],
+        ),
+        agentScopes: ["public_repo"],
+        first: { scopesGranted: ["public_repo"] },
+        then: { scopesGranted: ["repo"] },
+      },
+      {
+        name: "the one whose extra scopes are the IdP's echo, then one broader in the catalog",
+        manifest: catalogManifest(),
+        agentScopes: ["read"],
+        first: { scopesGranted: ["read", "openid", "profile", "email"] },
+        then: { scopesGranted: ["read", "write"] },
+      },
+    ];
+
+    for (const { name, manifest = oauth2Manifest(), agentScopes, ...grants } of cases) {
+      it(name, () => {
+        const [first, then] = [conn(grants.first), conn(grants.then)];
+        for (const rows of [
+          [first, then],
+          [then, first],
+        ]) {
+          const ranked = rankByLeastPrivilege({ manifest, agentTools: [], agentScopes }, rows);
+          expect(ranked.map((r) => r.row.id)).toEqual([first.id, then.id]);
+        }
+      });
     }
   });
+});
 
-  it("still asks across two accounts", () => {
-    const result = fallback(
-      [narrow(), conn({ accountId: "acc_y", scopesGranted: ["read"] })],
-      ["read"],
-    );
-    expect(result.errors[0]!.code).toBe("must_choose_connection");
+describe("resolveConnections — must_choose candidates carry their scopes", () => {
+  it("lists what each candidate grants and what the agent still misses on it", () => {
+    const narrow = conn({ accountId: "acc_a", scopesGranted: ["read"] });
+    const wide = conn({ accountId: "acc_b", scopesGranted: ["read", "write"] });
+    const result = resolveConnections({
+      requirements: [requiredReq(oauth2Manifest(), [], ["read", "write"])],
+      accessibleConnections: [narrow, wide],
+      pins: [],
+    });
+
+    const err = result.errors[0]!;
+    expect(err.code).toBe("must_choose_connection");
+    expect(translateResolutionError(err).candidate_connections).toEqual([
+      {
+        id: wide.id,
+        label: wide.label,
+        account_id: "acc_b",
+        owned_by_actor: true,
+        needs_reconnection: false,
+        scopes_granted: ["read", "write"],
+        missing_scopes: [],
+      },
+      {
+        id: narrow.id,
+        label: narrow.label,
+        account_id: "acc_a",
+        owned_by_actor: true,
+        needs_reconnection: false,
+        scopes_granted: ["read"],
+        missing_scopes: ["write"],
+      },
+    ]);
+  });
+});
+
+describe("resolveConnections — insufficient_scopes names its remedy", () => {
+  const underScoped = (input: Partial<ConnectionRow> = {}) => conn({ scopesGranted: [], ...input });
+  const foreign = () => underScoped({ userId: "user_someone_else", sharedSpaceIds: [SPACE_ID] });
+  const remedyOf = (input: Partial<Parameters<typeof resolveConnections>[0]>) => {
+    const result = resolveConnections({
+      requirements: [requiredReq(oauth2Manifest(), [], ["read"])],
+      accessibleConnections: [],
+      pins: [],
+      ...input,
+    });
+    const err = result.errors[0]!;
+    expect(err.code).toBe("insufficient_scopes");
+    return translateResolutionError(err).remedy;
+  };
+
+  it("an own connection no governing layer binds: upgrade it or connect a new one", () => {
+    expect(remedyOf({ accessibleConnections: [underScoped()] })).toBe("upgrade_or_new");
   });
 
-  it("still asks when an identity is unknown", () => {
-    const result = fallback(
-      [
-        conn({ accountId: "default", scopesGranted: ["read"] }),
-        conn({ accountId: "default", scopesGranted: ["read", "write"] }),
-      ],
-      ["read"],
+  it("another member's connection: connect a new one", () => {
+    const c = foreign();
+    expect(remedyOf({ accessibleConnections: [c], pins: [memberPin(c.id)] })).toBe(
+      "new_connection",
     );
-    expect(result.errors[0]!.code).toBe("must_choose_connection");
+  });
+
+  it("an admin pin or an enforced org default: an admin rebinds, whoever owns the row", () => {
+    const c = underScoped();
+    expect(remedyOf({ accessibleConnections: [c], pins: [pin(c.id)] })).toBe("rebind_by_admin");
+    expect(
+      remedyOf({
+        accessibleConnections: [c],
+        orgDefaults: { [INTEG]: { connectionIds: [c.id], enforce: true } },
+      }),
+    ).toBe("rebind_by_admin");
+  });
+
+  it("a schedule's override: its owner rebinds", () => {
+    const c = underScoped();
+    expect(
+      remedyOf({
+        accessibleConnections: [c],
+        launchOverrides: scheduleOverride({ [INTEG]: [c.id] }),
+      }),
+    ).toBe("rebind_by_schedule_owner");
   });
 });
 
@@ -1167,7 +1392,11 @@ describe("resolveConnections — insufficient scopes on resolved connection", ()
   });
 
   it("flags ownedByActor=false when the under-scoped connection belongs to someone else", () => {
-    const foreign = conn({ userId: "user_someone_else", sharedWithOrg: true, scopesGranted: [] });
+    const foreign = conn({
+      userId: "user_someone_else",
+      sharedSpaceIds: [SPACE_ID],
+      scopesGranted: [],
+    });
     const result = resolveConnections({
       requirements: [req(scopedManifest(), ["t1"])],
       accessibleConnections: [foreign],
@@ -1180,6 +1409,100 @@ describe("resolveConnections — insufficient scopes on resolved connection", ()
   });
 });
 
+// `"*"` is the wildcard form for scopes whether the agent writes it or inherits it from
+// `default_tools`; inherited tool NAMES contribute no scope.
+describe("requirementOf — the selection scopes are inferred from", () => {
+  /** `t1` requires `repo` on an auth whose `default_scopes` is `base`. */
+  function manifestWith(defaultTools?: string[] | "*"): IntegrationManifest {
+    return {
+      type: "integration",
+      schema_version: "0.1",
+      name: INTEG,
+      version: "1.0.0",
+      display_name: "Test",
+      source: { kind: "local", server: { name: "@vendor/test-server", version: "^1.0.0" } },
+      allow_undeclared_tools: true,
+      ...(defaultTools !== undefined ? { default_tools: defaultTools } : {}),
+      auths: {
+        oauth: {
+          type: "oauth2",
+          authorization_endpoint: "https://idp/auth",
+          token_endpoint: "https://idp/token",
+          default_scopes: ["base"],
+          scope_catalog: [
+            { value: "base", label: "Base" },
+            { value: "repo", label: "Repo" },
+            { value: "extra", label: "Extra" },
+          ],
+          authorized_uris: ["https://api.example.com/**"],
+          delivery: {
+            http: {
+              in: "header",
+              name: "Authorization",
+              prefix: "Bearer ",
+              value: "{$credential.access_token}",
+            },
+          },
+        },
+      },
+      tools_policy: { t1: { required_scopes: { oauth: ["repo"] } } },
+    } as unknown as IntegrationManifest;
+  }
+
+  /** The verdict on the actor's own connection granted nothing: its scope gap, or `"bound"`. */
+  function verdictOf(
+    manifest: IntegrationManifest,
+    config: { tools?: string[] | "*"; scopes?: string[] } = {},
+  ) {
+    const c = conn({ scopesGranted: [] });
+    const result = resolveConnections({
+      requirements: [requirementOf({ id: INTEG, version: "^1.0.0", ...config }, manifest)],
+      accessibleConnections: [c],
+      pins: [],
+    });
+    const err = result.errors[0];
+    if (!err) {
+      expect(result.resolved[INTEG]?.map((r) => r.connectionId)).toEqual([c.id]);
+      return "bound";
+    }
+    return { code: err.code, missing: err.missingScopes, required: err.requiredScopes };
+  }
+
+  const defaultScopes = {
+    code: "insufficient_scopes" as const,
+    missing: ["base"],
+    required: ["base"],
+  };
+
+  it('a written `"*"` requires the auth\'s `default_scopes`', () => {
+    expect(verdictOf(manifestWith(), { tools: "*" })).toEqual(defaultScopes);
+  });
+
+  it('an inherited `"*"` requires them too, as the written form does', () => {
+    expect(verdictOf(manifestWith("*"))).toEqual(defaultScopes);
+    expect(verdictOf(manifestWith("*"), { scopes: ["extra"] })).toEqual({
+      code: "insufficient_scopes",
+      missing: ["base", "extra"],
+      required: ["base", "extra"],
+    });
+  });
+
+  it("an inherited array requires nothing beyond the agent's explicit scopes", () => {
+    expect(verdictOf(manifestWith(["t1"]))).toBe("bound");
+    expect(verdictOf(manifestWith(["t1"]), { scopes: ["extra"] })).toEqual({
+      code: "insufficient_scopes",
+      missing: ["extra"],
+      required: ["extra"],
+    });
+  });
+
+  it("a written array requires its tools' scopes, whatever the integration defaults to", () => {
+    const repo = { code: "insufficient_scopes" as const, missing: ["repo"], required: ["repo"] };
+    expect(verdictOf(manifestWith(), { tools: ["t1"] })).toEqual(repo);
+    expect(verdictOf(manifestWith("*"), { tools: ["t1"] })).toEqual(repo);
+  });
+});
+
 // ─────────────────────────── Org default (layers 2 & 5) ───────────────────────
 
 describe("resolveConnections — org default", () => {
@@ -1187,7 +1510,7 @@ describe("resolveConnections — org default", () => {
   const SOFT = (...ids: string[]) => ({ [INTEG]: { connectionIds: ids, enforce: false } });
 
   it("ENFORCE default refuses a launch override outside it with override_outranked", () => {
-    const def = conn({ sharedWithOrg: true });
+    const def = conn({ sharedSpaceIds: [SPACE_ID] });
     const other = conn({});
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
@@ -1202,7 +1525,7 @@ describe("resolveConnections — org default", () => {
   });
 
   it("a SOFT default never outranks a launch override", () => {
-    const def = conn({ sharedWithOrg: true });
+    const def = conn({ sharedSpaceIds: [SPACE_ID] });
     const other = conn({});
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
@@ -1215,7 +1538,7 @@ describe("resolveConnections — org default", () => {
   });
 
   it("ENFORCE default wins over the member pin", () => {
-    const def = conn({ sharedWithOrg: true });
+    const def = conn({ sharedSpaceIds: [SPACE_ID] });
     const other = conn({});
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
@@ -1236,7 +1559,7 @@ describe("resolveConnections — org default", () => {
 
   it("per-agent admin pin beats the ENFORCE org default (agent-specific exception)", () => {
     const pinned = conn({});
-    const def = conn({ sharedWithOrg: true });
+    const def = conn({ sharedSpaceIds: [SPACE_ID] });
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [pinned, def],
@@ -1260,7 +1583,7 @@ describe("resolveConnections — org default", () => {
   });
 
   it("SOFT default kills must_choose: used when N candidates and no pin/override", () => {
-    const def = conn({ sharedWithOrg: true });
+    const def = conn({ sharedSpaceIds: [SPACE_ID] });
     const otherA = conn({});
     const otherB = conn({});
     const result = resolveConnections({
@@ -1282,7 +1605,7 @@ describe("resolveConnections — org default", () => {
   });
 
   it("member pin beats the SOFT default (explicit preference wins)", () => {
-    const def = conn({ sharedWithOrg: true });
+    const def = conn({ sharedSpaceIds: [SPACE_ID] });
     const mine = conn({});
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
@@ -1297,7 +1620,7 @@ describe("resolveConnections — org default", () => {
 
   it("SOFT default with an unreachable member fails loud — it never falls through to the fallback", () => {
     const onlyOne = conn({});
-    const live = conn({ sharedWithOrg: true });
+    const live = conn({ sharedSpaceIds: [SPACE_ID] });
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [onlyOne, live],
@@ -1352,7 +1675,7 @@ describe("resolveConnections — org default", () => {
       },
       tools_policy: { t1: { required_scopes: { oauth: ["repo"] } } },
     } as unknown as IntegrationManifest;
-    const def = conn({ sharedWithOrg: true, scopesGranted: [] });
+    const def = conn({ sharedSpaceIds: [SPACE_ID], scopesGranted: [] });
     const result = resolveConnections({
       requirements: [req(manifest, ["t1"])],
       accessibleConnections: [def],
@@ -2007,9 +2330,9 @@ describe("resolveConnections — connection sets", () => {
     ]);
   });
 
-  it("an ENFORCE org default of 2 is narrowed by an override naming one of its members", () => {
-    const defA = conn({ label: "web-1", sharedWithOrg: true });
-    const defB = conn({ authKey: "pat", label: "db", sharedWithOrg: true });
+  it("an ENFORCE org default of 2 binds whole under an override naming one of its members", () => {
+    const defA = conn({ label: "web-1", sharedSpaceIds: [SPACE_ID] });
+    const defB = conn({ authKey: "pat", label: "db", sharedSpaceIds: [SPACE_ID] });
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [defA, defB],
@@ -2017,8 +2340,10 @@ describe("resolveConnections — connection sets", () => {
       orgDefaults: { [INTEG]: { connectionIds: [defA.id, defB.id], enforce: true } },
       launchOverrides: runOverride({ [INTEG]: [defB.id] }),
     });
+    expect(result.errors).toEqual([]);
     expect(result.resolved[INTEG]!.map((r) => [r.connectionId, r.source])).toEqual([
-      [defB.id, "run_override"],
+      [defA.id, "org_default_enforced"],
+      [defB.id, "org_default_enforced"],
     ]);
   });
 
@@ -2068,7 +2393,7 @@ describe("resolveConnections — connection sets", () => {
   });
 
   it("an ENFORCE default with a gone member fails loud, naming it", () => {
-    const live = conn({ label: "web-1", sharedWithOrg: true });
+    const live = conn({ label: "web-1", sharedSpaceIds: [SPACE_ID] });
     const result = resolveConnections({
       requirements: [req(oauth2Manifest())],
       accessibleConnections: [live],
@@ -2327,9 +2652,9 @@ describe("resolveConnections — auth_serves_no_selected_tool", () => {
   });
 });
 
-// ─────────────────── Explicit none (`[]`) vs an absent layer ───────────────────
+// ─────────────── A layer absent, set to `[]`, or naming a set ───────────────
 
-describe("resolveConnections — explicit none (`[]`) vs an absent layer", () => {
+describe("resolveConnections — a layer absent, set to `[]`, or naming a set", () => {
   type Input = Parameters<typeof resolveConnections>[0];
   type Layer = {
     name: string;
@@ -2386,6 +2711,25 @@ describe("resolveConnections — explicit none (`[]`) vs an absent layer", () =>
   }
 
   for (const layer of layers) {
+    for (const noFallback of [false, true]) {
+      it(`${layer.name} naming a set → binds it, however many own connections exist (noFallback ${noFallback})`, () => {
+        for (const ownCount of [0, 1, 3]) {
+          const named = conn({ userId: "user_colleague", sharedSpaceIds: [SPACE_ID] });
+          const result = resolveConnections({
+            requirements: [requiredReq(oauth2Manifest())],
+            accessibleConnections: [named, ...Array.from({ length: ownCount }, () => conn({}))],
+            pins: [],
+            noFallback,
+            ...layer.input([named.id]),
+          });
+          expect(result.errors).toEqual([]);
+          expect(result.resolved[INTEG]!.map((r) => [r.connectionId, r.source])).toEqual([
+            [named.id, layer.source],
+          ]);
+        }
+      });
+    }
+
     it(`${layer.name} absent → the next layer decides (fallback binds the own row)`, () => {
       for (const required of [true, false]) {
         const { mine, result } = resolveWith(layer.input(null), required);
@@ -2463,38 +2807,23 @@ describe("resolveConnections — explicit none (`[]`) vs an absent layer", () =>
 
     for (const launch of [runOverride, scheduleOverride]) {
       const source = launch({}).source;
-      it(`${source} \`[]\`: none is a subset — non-required binds none`, () => {
-        const c = conn({});
-        for (const g of governed(c)) {
-          const result = resolveConnections({
-            requirements: [req(oauth2Manifest())],
-            accessibleConnections: [c],
-            pins: [],
-            ...g.input,
-            launchOverrides: launch({ [INTEG]: [] }),
-          });
-          expect(result.errors).toEqual([]);
-          expect(result.resolved).toEqual({ [INTEG]: [] });
-        }
-      });
-
-      it(`${source} \`[]\`: required → required_integration_unbound, not override_outranked`, () => {
-        const c = conn({});
-        for (const g of governed(c)) {
-          const result = resolveConnections({
-            requirements: [requiredReq(oauth2Manifest())],
-            accessibleConnections: [c],
-            pins: [],
-            ...g.input,
-            launchOverrides: launch({ [INTEG]: [] }),
-          });
-          expect(result.errors).toHaveLength(1);
-          expect(result.errors[0]).toMatchObject({
-            code: "required_integration_unbound",
-            source,
-          });
-        }
-      });
+      for (const required of [false, true]) {
+        it(`${source} \`[]\` adds nothing — the imposed set binds whole (required ${required})`, () => {
+          const c = conn({});
+          for (const g of governed(c)) {
+            const result = resolveConnections({
+              requirements: [{ ...req(oauth2Manifest()), required }],
+              accessibleConnections: [c],
+              pins: [],
+              ...g.input,
+              launchOverrides: launch({ [INTEG]: [] }),
+            });
+            expect(result.errors).toEqual([]);
+            expect(result.warnings).toEqual([]);
+            expect(result.resolved[INTEG]).toMatchObject([{ connectionId: c.id }]);
+          }
+        });
+      }
     }
 
     it("an admin pin of `[]` outranks any override that names a connection", () => {
@@ -2516,6 +2845,360 @@ describe("resolveConnections — explicit none (`[]`) vs an absent layer", () =>
       pins: [pin([])],
     });
     expect(result).toEqual({ resolved: {}, errors: [], warnings: [] });
+  });
+});
+
+describe("resolveConnections — an imposed set and its additions (floor ∪ selection)", () => {
+  const ENFORCE = (...ids: string[]) => ({ [INTEG]: { connectionIds: ids, enforce: true } });
+  const SOFT = (...ids: string[]) => ({ [INTEG]: { connectionIds: ids, enforce: false } });
+  const bound = (result: ReturnType<typeof resolveConnections>) =>
+    result.resolved[INTEG]?.map((r) => [r.connectionId, r.source]);
+  const shared = (over: Partial<ConnectionRow> = {}) =>
+    conn({ userId: "user_colleague", sharedSpaceIds: [SPACE_ID], ...over });
+
+  describe("additions closed", () => {
+    it("an override naming a subset of the floor binds the whole floor", () => {
+      const a = conn({});
+      const b = conn({});
+      for (const launch of [runOverride, scheduleOverride]) {
+        const result = resolveConnections({
+          requirements: [req(oauth2Manifest())],
+          accessibleConnections: [a, b],
+          pins: [pin([a.id, b.id])],
+          launchOverrides: launch({ [INTEG]: [a.id] }),
+        });
+        expect(result.errors).toEqual([]);
+        expect(bound(result)).toEqual([
+          [a.id, "admin_pin"],
+          [b.id, "admin_pin"],
+        ]);
+      }
+    });
+
+    it("an override of `[]` binds the whole floor", () => {
+      const a = conn({});
+      const b = conn({});
+      const result = resolveConnections({
+        requirements: [requiredReq(oauth2Manifest())],
+        accessibleConnections: [a, b],
+        pins: [pin([a.id, b.id])],
+        launchOverrides: runOverride({ [INTEG]: [] }),
+      });
+      expect(result.errors).toEqual([]);
+      expect(bound(result)).toEqual([
+        [a.id, "admin_pin"],
+        [b.id, "admin_pin"],
+      ]);
+    });
+
+    it("an override adding an id outside the floor is override_outranked, the message saying so", () => {
+      const a = conn({});
+      const outside = conn({});
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [a, outside],
+        pins: [pin(a.id)],
+        launchOverrides: runOverride({ [INTEG]: [a.id, outside.id] }),
+      });
+      expect(result.resolved[INTEG]).toBeUndefined();
+      expect(result.errors[0]).toMatchObject({
+        code: "override_outranked",
+        source: "run_override",
+      });
+      expect(result.errors[0]!.message).toContain("the set an admin pin imposes");
+      expect(result.errors[0]!.message).toContain("allows no addition");
+    });
+
+    it("a member pin adds nothing to a closed floor (masked, never outranked)", () => {
+      const a = conn({});
+      const mine = conn({});
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [a, mine],
+        pins: [pin(a.id), memberPin(mine.id)],
+      });
+      expect(result.errors).toEqual([]);
+      expect(bound(result)).toEqual([[a.id, "admin_pin"]]);
+    });
+
+    it("an enforced default + an override naming a subset binds the whole default", () => {
+      const a = shared();
+      const b = shared();
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [a, b],
+        pins: [],
+        orgDefaults: ENFORCE(a.id, b.id),
+        launchOverrides: scheduleOverride({ [INTEG]: [b.id] }),
+      });
+      expect(result.errors).toEqual([]);
+      expect(bound(result)).toEqual([
+        [a.id, "org_default_enforced"],
+        [b.id, "org_default_enforced"],
+      ]);
+    });
+
+    it("an enforced default is always closed: an addition is override_outranked", () => {
+      const a = shared();
+      const mine = conn({});
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [a, mine],
+        pins: [],
+        orgDefaults: ENFORCE(a.id),
+        launchOverrides: runOverride({ [INTEG]: [mine.id] }),
+      });
+      expect(result.errors[0]).toMatchObject({
+        code: "override_outranked",
+        source: "run_override",
+      });
+      expect(result.errors[0]!.message).toContain("the set an enforced org default imposes");
+    });
+  });
+
+  describe("additions open", () => {
+    it("binds floor ∪ member pin, floor first, each row carrying its own source", () => {
+      const team = shared({ label: "team" });
+      const mine = conn({ label: "mine" });
+      const other = shared({ label: "other" });
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [mine, other, team],
+        pins: [openPin(team.id), memberPin([other.id, mine.id])],
+      });
+      expect(result.errors).toEqual([]);
+      expect(bound(result)).toEqual([
+        [team.id, "admin_pin"],
+        [other.id, "member_pin"],
+        [mine.id, "member_pin"],
+      ]);
+    });
+
+    it("a launch override is the selection, beating the member pin", () => {
+      const team = shared();
+      const pinned = conn({});
+      const picked = conn({});
+      for (const launch of [runOverride, scheduleOverride]) {
+        const result = resolveConnections({
+          requirements: [req(oauth2Manifest())],
+          accessibleConnections: [team, pinned, picked],
+          pins: [openPin(team.id), memberPin(pinned.id)],
+          launchOverrides: launch({ [INTEG]: [picked.id] }),
+        });
+        expect(result.errors).toEqual([]);
+        expect(bound(result)).toEqual([
+          [team.id, "admin_pin"],
+          [picked.id, launch({}).source],
+        ]);
+      }
+    });
+
+    it("an override of `[]` binds the floor only, the member pin aside", () => {
+      const team = shared();
+      const pinned = conn({});
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [team, pinned],
+        pins: [openPin(team.id), memberPin(pinned.id)],
+        launchOverrides: runOverride({ [INTEG]: [] }),
+      });
+      expect(result.errors).toEqual([]);
+      expect(bound(result)).toEqual([[team.id, "admin_pin"]]);
+    });
+
+    it("dedupes a selection repeating a floor id or itself, keeping the first place", () => {
+      const a = shared();
+      const b = shared();
+      const mine = conn({});
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [a, b, mine],
+        pins: [openPin([a.id, b.id])],
+        launchOverrides: runOverride({ [INTEG]: [mine.id, b.id, mine.id, a.id] }),
+      });
+      expect(result.errors).toEqual([]);
+      expect(bound(result)).toEqual([
+        [a.id, "admin_pin"],
+        [b.id, "admin_pin"],
+        [mine.id, "run_override"],
+      ]);
+    });
+
+    it("with no selection binds the floor only: no soft default, no fallback", () => {
+      const team = shared();
+      const mine = conn({});
+      for (const noFallback of [false, true]) {
+        const result = resolveConnections({
+          requirements: [req(oauth2Manifest())],
+          accessibleConnections: [team, mine],
+          pins: [openPin(team.id)],
+          orgDefaults: SOFT(mine.id),
+          noFallback,
+        });
+        expect(result.errors).toEqual([]);
+        expect(bound(result)).toEqual([[team.id, "admin_pin"]]);
+      }
+    });
+
+    it("an enforced default closes an open admin pin", () => {
+      const team = shared();
+      const def = shared();
+      const mine = conn({});
+      const masked = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [team, def, mine],
+        pins: [openPin(team.id), memberPin(mine.id)],
+        orgDefaults: ENFORCE(def.id),
+      });
+      expect(masked.errors).toEqual([]);
+      expect(bound(masked)).toEqual([[team.id, "admin_pin"]]);
+
+      const refused = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [team, def, mine],
+        pins: [openPin(team.id)],
+        orgDefaults: ENFORCE(def.id),
+        launchOverrides: runOverride({ [INTEG]: [mine.id] }),
+      });
+      expect(refused.errors[0]).toMatchObject({ code: "override_outranked" });
+      expect(refused.errors[0]!.message).toContain("the set an admin pin imposes");
+    });
+
+    it("an unavailable addition fails on the addition's layer, never dropped", () => {
+      const team = shared();
+      const viaOverride = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [team],
+        pins: [openPin(team.id)],
+        launchOverrides: scheduleOverride({ [INTEG]: ["conn_ghost"] }),
+      });
+      expect(viaOverride.resolved[INTEG]).toBeUndefined();
+      expect(viaOverride.errors[0]).toMatchObject({
+        code: "override_connection_unavailable",
+        source: "schedule_override",
+      });
+
+      const viaPin = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [team],
+        pins: [openPin(team.id), memberPin("conn_ghost")],
+      });
+      expect(viaPin.errors[0]).toMatchObject({
+        code: "pinned_connection_unavailable",
+        source: "member_pin",
+      });
+      expect(viaPin.errors[0]!.message).toContain("Your pinned connection 'conn_ghost'");
+    });
+
+    it("a floor member needing reconnection fails the union on the floor's layer, no substitution", () => {
+      const dead = shared({ needsReconnection: true });
+      const mine = conn({});
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [dead, mine],
+        pins: [openPin(dead.id), memberPin(mine.id)],
+      });
+      expect(result.resolved[INTEG]).toBeUndefined();
+      expect(result.errors[0]).toMatchObject({
+        code: "needs_reconnection",
+        source: "admin_pin",
+        connectionId: dead.id,
+        boundConnectionIds: [dead.id, mine.id],
+      });
+    });
+
+    it("an unavailable floor member fails on the floor's layer before any addition", () => {
+      const mine = conn({});
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [mine],
+        pins: [openPin("conn_ghost"), memberPin(mine.id)],
+      });
+      expect(result.errors[0]).toMatchObject({
+        code: "pinned_connection_unavailable",
+        source: "admin_pin",
+      });
+    });
+
+    it(`a union past ${MAX_CONNECTIONS_PER_INTEGRATION} is connection_set_too_large, naming the adding layer`, () => {
+      const floor = Array.from({ length: 5 }, () => shared());
+      const extra = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION - 4 }, () => conn({}));
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [...floor, ...extra],
+        pins: [openPin(floor.map((c) => c.id))],
+        launchOverrides: scheduleOverride({ [INTEG]: [floor[0]!.id, ...extra.map((c) => c.id)] }),
+      });
+      expect(result.resolved[INTEG]).toBeUndefined();
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toMatchObject({
+        code: "connection_set_too_large",
+        source: "schedule_override",
+        boundConnectionIds: [...floor, ...extra].map((c) => c.id),
+      });
+      expect(translateResolutionError(result.errors[0]!)).toMatchObject({
+        code: "connection_set_too_large",
+        title: "Connection Set Too Large",
+        source: "schedule_override",
+      });
+
+      // Control: one fewer addition reaches the cap exactly and binds.
+      const atCap = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [...floor, ...extra],
+        pins: [openPin(floor.map((c) => c.id))],
+        launchOverrides: runOverride({ [INTEG]: extra.slice(1).map((c) => c.id) }),
+      });
+      expect(atCap.errors).toEqual([]);
+      expect(atCap.resolved[INTEG]).toHaveLength(MAX_CONNECTIONS_PER_INTEGRATION);
+    });
+
+    it("a floor grown past what a stored member pin fits is connection_set_too_large on the member pin", () => {
+      const mine = conn({});
+      // The member pin was written under a floor of 19; the admin then grew the floor to 20.
+      const floor = Array.from({ length: MAX_CONNECTIONS_PER_INTEGRATION }, () => shared());
+      const result = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [...floor, mine],
+        pins: [openPin(floor.map((c) => c.id)), memberPin([floor[1]!.id, mine.id])],
+      });
+      expect(result.resolved[INTEG]).toBeUndefined();
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toMatchObject({
+        code: "connection_set_too_large",
+        source: "member_pin",
+        boundConnectionIds: [...floor, mine].map((c) => c.id),
+      });
+
+      // Control: the floor it was written under binds it.
+      const fits = resolveConnections({
+        requirements: [req(oauth2Manifest())],
+        accessibleConnections: [...floor, mine],
+        pins: [openPin(floor.slice(1).map((c) => c.id)), memberPin([floor[1]!.id, mine.id])],
+      });
+      expect(fits.errors).toEqual([]);
+      expect(fits.resolved[INTEG]).toHaveLength(MAX_CONNECTIONS_PER_INTEGRATION);
+    });
+
+    it("an under-scoped addition names its own layer's remedy", () => {
+      const scoped = {
+        ...oauth2Manifest(),
+        tools_policy: { t1: { required_scopes: { oauth: ["repo"] } } },
+      } as unknown as IntegrationManifest;
+      const team = shared({ scopesGranted: ["repo"] });
+      const mine = conn({ scopesGranted: [] });
+      const result = resolveConnections({
+        requirements: [req(scoped, ["t1"])],
+        accessibleConnections: [team, mine],
+        pins: [openPin(team.id), memberPin(mine.id)],
+      });
+      expect(result.errors[0]).toMatchObject({
+        code: "insufficient_scopes",
+        source: "member_pin",
+        connectionId: mine.id,
+      });
+      expect(translateResolutionError(result.errors[0]!).remedy).toBe("upgrade_or_new");
+    });
   });
 });
 
@@ -2603,7 +3286,7 @@ describe("resolveConnections — a warning carries the code its state raises on 
       code: "must_choose_connection",
       requirement: req(oauth2Manifest()),
       input: () => ({
-        accessibleConnections: [conn({ userId: "user_colleague", sharedWithOrg: true })],
+        accessibleConnections: [conn({ userId: "user_colleague", sharedSpaceIds: [SPACE_ID] })],
       }),
     },
     {
@@ -2647,5 +3330,60 @@ describe("resolveConnections — a warning carries the code its state raises on 
     expect(states.map((s) => s.code).sort()).toEqual(
       CONNECTION_RESOLUTION_WARNING_CODES.filter((c) => c !== "integration_unbound").sort(),
     );
+  });
+});
+
+describe("resolveConnections — unauthenticated integration (AFPS §7.2)", () => {
+  /** An integration that OMITS `auths`. */
+  const unauthenticated = {
+    type: "integration",
+    schema_version: "0.3",
+    name: INTEG,
+    version: "1.0.0",
+    display_name: "Open server",
+    source: { kind: "remote", remote: { url: "https://mcp.example.com/mcp" } },
+  } as unknown as IntegrationManifest;
+
+  for (const required of [false, true]) {
+    it(`required: ${required} → no entry, no warning, no error`, () => {
+      const result = resolveConnections({
+        requirements: [{ ...req(unauthenticated, ["search"]), required }],
+        accessibleConnections: [],
+        pins: [],
+      });
+      expect(result).toEqual({ resolved: {}, warnings: [], errors: [] });
+    });
+  }
+
+  it("does not disturb the verdict of an authenticated sibling in the same call", () => {
+    const sibling = "@vendor/other";
+    const result = resolveConnections({
+      requirements: [
+        { ...req(unauthenticated), required: true },
+        { ...req(oauth2Manifest()), integrationId: sibling, required: true },
+      ],
+      accessibleConnections: [conn({ integrationId: sibling })],
+      pins: [],
+    });
+    expect(result.errors).toEqual([]);
+    expect(Object.keys(result.resolved)).toEqual([sibling]);
+  });
+
+  // AFPS §4.4 MUST: the integration may have lost its auths after the agent was saved.
+  it("refuses an auth_key, even on an inert requirement", () => {
+    const inert = { ...req(unauthenticated), hasSelectedTools: false, requiredAuthKey: "oauth" };
+    const result = resolveConnections({
+      requirements: [inert],
+      accessibleConnections: [],
+      pins: [],
+    });
+    expect(result.resolved).toEqual({});
+    expect(result.errors).toEqual([
+      expect.objectContaining({
+        integrationId: INTEG,
+        code: "auth_key_on_unauthenticated_integration",
+        requiredAuthKey: "oauth",
+      }),
+    ]);
   });
 });

@@ -169,12 +169,12 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
     // identically to a cookie session so every downstream hook
     // (`requirePlatformRealm`, org membership, etc.) sees the correct
     // identity. The Appstrate CLI does not use this path — it presents
-    // a JWT obtained from `/cli/token` (issue #165) verified through
+    // a JWT obtained from `/cli/token` verified through
     // the `oidc-jwt` strategy — but BA's bearer surface is kept
     // available for any third-party caller carrying a raw BA session
     // token (e.g. legacy integrations).
     bearer(),
-    // CLI token plugin (issue #165) — exposes `/api/auth/cli/token` and
+    // CLI token plugin — exposes `/api/auth/cli/token` and
     // `/api/auth/cli/revoke` for the 2.x appstrate CLI. Runs ALONGSIDE
     // BA's default `deviceAuthorization()` plugin below; the device-flow
     // `/device/code`, `/device/approve`, `/device/deny` endpoints are
@@ -268,7 +268,7 @@ export function oidcBetterAuthPlugins(opts: OidcBetterAuthPluginsOptions = {}): 
       // Default and ceiling are ONE array, so they cannot drift: the provider
       // unions them, and a default outside the ceiling would widen it silently.
       //
-      // A registration `scope` is ADVISORY (issue #1351). The provider validates
+      // A registration `scope` is ADVISORY. The provider validates
       // it against the union above and then persists that union verbatim
       // (`persistOAuthClientRegistration`), so a client declaring `openid` may
       // still ask for `mcp:invoke` at `/authorize`. Upstream documents this: the

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Card } from "@appstrate/ui/components/card";
+import type { ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -7,13 +9,14 @@ import {
   useOnboardingGuard,
   useOnboardingNav,
 } from "../../components/onboarding-layout";
-import { useOrg } from "../../hooks/use-org";
+import { useOrg, useOrgDetail } from "../../hooks/use-org";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { useModels } from "../../hooks/use-models";
 import { useBilling } from "../../hooks/use-billing";
-import { $api } from "../../api/client";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
 import { CheckCircle2 } from "lucide-react";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { TextSkeleton } from "../../components/loading-skeletons";
 
 export function OnboardingDoneStep() {
   const { t } = useTranslation(["settings", "common"]);
@@ -23,14 +26,11 @@ export function OnboardingDoneStep() {
   const { features } = useAppConfig();
   const { prevRoute } = useOnboardingNav("complete");
 
-  const { data: models } = useModels();
-  const { data: billing } = useBilling({ enabled: features.billing && !!orgId });
-  const { data: orgData } = $api.useQuery(
-    "get",
-    "/api/orgs/{orgId}",
-    { params: { path: { orgId: orgId ?? "" } } },
-    { enabled: !!orgId },
-  );
+  const { data: models, isLoading: modelsLoading } = useModels();
+  const { data: billing, isLoading: billingLoading } = useBilling({
+    enabled: features.billing && !!orgId,
+  });
+  const { data: orgData, isLoading: orgLoading } = useOrgDetail();
 
   const defaultModel = models?.find((m) => m.is_default);
   // A default whose credential is dead is not a completed step — it is named
@@ -38,7 +38,16 @@ export function OnboardingDoneStep() {
   const modelReady = !!defaultModel && !defaultModel.needs_reconnection;
   const invitationCount = orgData?.invitations?.length ?? 0;
 
-  if (!orgId) return null;
+  if (!orgId)
+    return (
+      <OnboardingLayout
+        step="complete"
+        title={t("onboarding.doneTitle")}
+        subtitle={t("onboarding.doneSubtitle")}
+      >
+        <TextSkeleton lines={4} className="py-4" />
+      </OnboardingLayout>
+    );
 
   return (
     <OnboardingLayout
@@ -50,64 +59,75 @@ export function OnboardingDoneStep() {
       nextLabel={t("onboarding.goToDashboard")}
     >
       <div className="flex flex-col gap-4">
-        {/* Summary cards */}
-        <div className="border-border bg-card rounded-lg border p-4">
-          <div className="flex items-center gap-3">
-            <CheckCircle2 size={20} className="shrink-0 text-green-500" />
-            <div className="flex-1">
-              <h3 className="text-sm font-semibold">{t("onboarding.summaryOrg")}</h3>
-              <span className="text-muted-foreground text-sm">{currentOrg?.name}</span>
-            </div>
-          </div>
-        </div>
+        <SummaryCard title={t("source.org")} value={currentOrg?.name} done />
 
-        {features.billing && billing && (
-          <div className="border-border bg-card rounded-lg border p-4">
-            <div className="flex items-center gap-3">
-              <CheckCircle2 size={20} className="shrink-0 text-green-500" />
-              <div className="flex-1">
-                <h3 className="text-sm font-semibold">{t("onboarding.summaryPlan")}</h3>
-                <span className="text-muted-foreground text-sm">{billing.plan.name}</span>
-              </div>
-            </div>
-          </div>
+        {/* The plan slot is held while billing loads so the cards below do not drop. */}
+        {features.billing && (billing || billingLoading) && (
+          <SummaryCard
+            title={t("onboarding.summaryPlan")}
+            value={billing?.plan.name}
+            done={!!billing}
+          />
         )}
 
-        <div className="border-border bg-card rounded-lg border p-4">
-          <div className="flex items-center gap-3">
-            <CheckCircle2
-              size={20}
-              className={modelReady ? "shrink-0 text-green-500" : "text-muted-foreground shrink-0"}
-            />
-            <div className="flex-1">
-              <h3 className="text-sm font-semibold">{t("onboarding.summaryModel")}</h3>
-              <span className="text-muted-foreground text-sm">
-                {defaultModel ? defaultModel.label : t("onboarding.summaryModelNone")}
-              </span>
-            </div>
-            {defaultModel?.needs_reconnection && <ModelUnavailableBadge className="shrink-0" />}
-          </div>
-        </div>
+        <SummaryCard
+          title={t("onboarding.summaryModel")}
+          value={
+            modelsLoading
+              ? undefined
+              : defaultModel
+                ? defaultModel.label
+                : t("onboarding.summaryModelNone")
+          }
+          done={modelReady}
+          aside={defaultModel?.needs_reconnection && <ModelUnavailableBadge className="shrink-0" />}
+        />
 
-        <div className="border-border bg-card rounded-lg border p-4">
-          <div className="flex items-center gap-3">
-            <CheckCircle2
-              size={20}
-              className={
-                invitationCount > 0 ? "shrink-0 text-green-500" : "text-muted-foreground shrink-0"
-              }
-            />
-            <div className="flex-1">
-              <h3 className="text-sm font-semibold">{t("onboarding.summaryMembers")}</h3>
-              <span className="text-muted-foreground text-sm">
-                {invitationCount > 0
-                  ? t("onboarding.summaryMembersCount", { count: invitationCount })
-                  : t("onboarding.summaryMembersNone")}
-              </span>
-            </div>
-          </div>
-        </div>
+        <SummaryCard
+          title={t("onboarding.summaryMembers")}
+          value={
+            orgLoading
+              ? undefined
+              : invitationCount > 0
+                ? t("onboarding.summaryMembersCount", { count: invitationCount })
+                : t("onboarding.summaryMembersNone")
+          }
+          done={invitationCount > 0}
+        />
       </div>
     </OnboardingLayout>
+  );
+}
+
+/** One recap line: green check once the step is done, a muted one while it is not. An undefined `value` is a read on its way. */
+function SummaryCard({
+  title,
+  value,
+  done,
+  aside,
+}: {
+  title: string;
+  value: ReactNode | undefined;
+  done: boolean;
+  aside?: ReactNode;
+}) {
+  return (
+    <Card className="p-4">
+      <div className="flex items-center gap-3">
+        <CheckCircle2
+          size={20}
+          className={done ? "text-success shrink-0" : "text-muted-foreground shrink-0"}
+        />
+        <div className="flex-1">
+          <h3 className="text-sm font-semibold">{title}</h3>
+          {value === undefined ? (
+            <Skeleton className="mt-1 h-4 w-32" />
+          ) : (
+            <span className="text-muted-foreground text-sm">{value}</span>
+          )}
+        </div>
+        {aside}
+      </div>
+    </Card>
   );
 }

@@ -69,12 +69,25 @@ function page(
 </script></body></html>`;
 }
 
-/** Success: signal the opener/channel, then close (popup) or confirm (tab). */
-export function popupHtmlClose(detail: OAuthCallbackDetail = {}): string {
+/** Success: signal the opener/channel, then close (popup) or confirm (tab); `scopesDenied` is shown long enough to be read. */
+export function popupHtmlClose(
+  detail: OAuthCallbackDetail = {},
+  scopesDenied: readonly string[] = [],
+): string {
+  const partial = scopesDenied.length > 0;
   return page(
-    { ok: true, state: detail.state, packageId: detail.packageId },
-    `<p class="ok">&#10003; Intégration connectée.</p><p>Vous pouvez fermer cet onglet et revenir à la conversation.</p>`,
-    300,
+    {
+      ok: true,
+      state: detail.state,
+      packageId: detail.packageId,
+      ...(partial ? { scopesDenied: [...scopesDenied] } : {}),
+    },
+    `<p class="ok">&#10003; Intégration connectée.</p>${
+      partial
+        ? `<p>Autorisations demandées mais non accordées : ${escapeHtml(scopesDenied.join(", "))}.</p>`
+        : ""
+    }<p>Vous pouvez fermer cet onglet et revenir à la conversation.</p>`,
+    partial ? 5000 : 300,
   );
 }
 

@@ -603,6 +603,125 @@
       "when": 1791487381484,
       "tag": "0085_runs_integrations_unbound",
       "breakpoints": true
+    },
+    {
+      "idx": 86,
+      "version": "7",
+      "when": 1791565379798,
+      "tag": "0086_connection_org_scope",
+      "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "7",
+      "when": 1791581301597,
+      "tag": "0087_personal_model_credentials",
+      "breakpoints": true
+    },
+    {
+      "idx": 88,
+      "version": "7",
+      "when": 1791667701597,
+      "tag": "0088_model_payer",
+      "breakpoints": true
+    },
+    {
+      "idx": 89,
+      "version": "7",
+      "when": 1791668000000,
+      "tag": "0089_connection_shares",
+      "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1791787704716,
+      "tag": "0090_llm_usage_payer_check",
+      "breakpoints": true
+    },
+    {
+      "idx": 91,
+      "version": "7",
+      "when": 1791874791513,
+      "tag": "0091_connection_share_invariants",
+      "breakpoints": true
+    },
+    {
+      "idx": 92,
+      "version": "7",
+      "when": 1791883605327,
+      "tag": "0092_connection_calls",
+      "breakpoints": true
+    },
+    {
+      "idx": 93,
+      "version": "7",
+      "when": 1791891037351,
+      "tag": "0093_schedule_disabled_reason_connection_set_unnamed",
+      "breakpoints": true
+    },
+    {
+      "idx": 94,
+      "version": "7",
+      "when": 1791900141138,
+      "tag": "0094_schedule_disabled_reason_connection_choice_invalid",
+      "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1791914788339,
+      "tag": "0095_pairing_owner_and_failure",
+      "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1791914848339,
+      "tag": "0096_connection_calls_and_model_invariants",
+      "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1791978176918,
+      "tag": "0097_org_logo",
+      "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1792046443974,
+      "tag": "0098_run_model_error",
+      "breakpoints": true
+    },
+    {
+      "idx": 99,
+      "version": "7",
+      "when": 1792150175832,
+      "tag": "0099_connection_share_all_spaces",
+      "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1792160000000,
+      "tag": "0100_space_packages_shared_by",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1792160060000,
+      "tag": "0101_identity_appearance",
+      "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1792240060000,
+      "tag": "0102_integration_pin_additions",
+      "breakpoints": true
     }
   ]
 }

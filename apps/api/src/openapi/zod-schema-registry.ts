@@ -27,6 +27,7 @@ import { createEndUserSchema, updateEndUserSchema } from "../routes/end-users.ts
 
 // --- Model schemas (routes/models.ts) ---
 import {
+  applyModelChoiceSchema,
   createModelSchema,
   seedModelsSchema,
   updateModelSchema,
@@ -130,9 +131,12 @@ import {
   oauthClientCreateSchema,
   oauthClientUpdateSchema,
   updateConnectionSchema,
+  connectionShareAllSpacesSchema,
   connectSessionSchema,
   connectSubmitSchema,
   setDefaultClientSchema,
+  discoverIntegrationSchema,
+  syncFromServerSchema,
 } from "../routes/integrations.ts";
 
 // ---------------------------------------------------------------------------
@@ -184,6 +188,12 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     description: "Update model",
   },
   {
+    method: "POST",
+    path: "/api/models/apply",
+    jsonSchema: toJsonSchema(applyModelChoiceSchema),
+    description: "Apply a model-provider choice",
+  },
+  {
     method: "PUT",
     path: "/api/models/default",
     jsonSchema: toJsonSchema(modelsSetDefaultSchema),
@@ -204,7 +214,7 @@ const coreSchemas: OpenApiSchemaEntry[] = [
 
   // ─── Runs ───────────────────────────────────────────────────────────────
   //
-  // The launch surfaces are `.strict()` (#1187), so every field they honour
+  // The launch surfaces are `.strict()`, so every field they honour
   // must be documented: an entry here is what turns "accepted by Zod but absent
   // from the spec" into a failing check instead of a field callers cannot
   // discover. The two inline surfaces are NOT registered: their schema is a
@@ -567,6 +577,18 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   // ─── Integrations ───────────────────────────────────────────────────────
   {
     method: "POST",
+    path: "/api/integrations/discover",
+    jsonSchema: toJsonSchema(discoverIntegrationSchema),
+    description: "Propose an integration manifest from a remote MCP server URL",
+  },
+  {
+    method: "POST",
+    path: "/api/integrations/{packageId}/discover",
+    jsonSchema: toJsonSchema(syncFromServerSchema),
+    description: "Propose manifest fields from the integration's connected MCP server",
+  },
+  {
+    method: "POST",
     path: "/api/integrations/{packageId}/auths/{authKey}/oauth-clients",
     jsonSchema: toJsonSchema(oauthClientCreateSchema),
     description: "Register a custom integration OAuth client",
@@ -611,7 +633,25 @@ const coreSchemas: OpenApiSchemaEntry[] = [
     method: "PATCH",
     path: "/api/integrations/{packageId}/connections/{connectionId}",
     jsonSchema: toJsonSchema(updateConnectionSchema),
-    description: "Update integration connection metadata",
+    description: "Rename a connection",
+  },
+  {
+    method: "PATCH",
+    path: "/api/me/connections/{connectionId}",
+    jsonSchema: toJsonSchema(updateConnectionSchema),
+    description: "Rename one of the caller's connections",
+  },
+  {
+    method: "PUT",
+    path: "/api/integrations/{packageId}/connections/{connectionId}/shares",
+    jsonSchema: toJsonSchema(connectionShareAllSpacesSchema),
+    description: "Share with current and future team spaces",
+  },
+  {
+    method: "PUT",
+    path: "/api/me/connections/{connectionId}/shares",
+    jsonSchema: toJsonSchema(connectionShareAllSpacesSchema),
+    description: "Share an owned connection with current and future team spaces",
   },
   {
     method: "POST",
@@ -745,6 +785,8 @@ export const EXEMPT_REQUEST_BODIES: Record<string, string> = {
   // JSON-RPC 2.0 envelope dispatched by the MCP server; the method-level
   // params are validated per tool, not by one body schema.
   "POST /api/mcp/o/{org}":
+    "JSON-RPC 2.0 envelope; params are validated per MCP method, not by a single body schema",
+  "POST /api/mcp/o/{org}/s/{space}":
     "JSON-RPC 2.0 envelope; params are validated per MCP method, not by a single body schema",
 
   // ─── Module-owned surfaces with no single comparable body ───────────────

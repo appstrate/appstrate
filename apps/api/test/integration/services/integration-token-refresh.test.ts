@@ -13,7 +13,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import {
@@ -188,12 +188,11 @@ function refreshOf(
   target: Target,
   trigger: RefreshTrigger = REJECTED,
 ) {
-  const manifest = gmailManifest(token.url);
   return refreshConnectionCredential({
     connection: { ...target, authKey: "primary" },
     integrationId: PACKAGE_ID,
-    manifest,
-    authDef: manifest.auths!.primary as AfpsManifestAuth,
+    manifest: gmailManifest(token.url),
+    authDef: gmailManifest(token.url).auths!.primary as AfpsManifestAuth,
     scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
     actor: { type: "user", id: ctx.user.id },
     trigger,
@@ -242,13 +241,18 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
     token.stop();
   });
 
-  async function seedConnection(initialScopes: string[], expiresAt?: Date): Promise<string> {
+  async function seedConnection(
+    initialScopes: string[],
+    expiresAt?: Date,
+    extraOutputs: Record<string, string> = {},
+  ): Promise<string> {
     const ciphertext = encryptCredentialEnvelope({
       outputs: {
         access_token: "old-access",
         accessToken: "old-access",
         refresh_token: "rt-1",
         refreshToken: "rt-1",
+        ...extraOutputs,
       },
     });
     const [row] = await db
@@ -258,6 +262,7 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
         authKey: "primary",
         accountId: "acct-1",
         label: "acct-1",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: ciphertext,
@@ -277,8 +282,44 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
     token.setResponse({ access_token: "new-access", expires_in: 3600 });
 
     expect(refreshedFields(await refresh(connId)).access_token).toBe("new-access");
-    // Untouched — `scope` was absent on the wire so the high-water-mark stays.
+    // Untouched — `scope` was absent on the wire so the stored grant stays.
     expect(await storedScopes(connId)).toEqual(["read", "send"]);
+  });
+
+  it("refreshes an org-scoped connection from a space other than the one it was made in", async () => {
+    const [orgClient] = await db
+      .insert(integrationOauthClients)
+      .values({
+        orgId: ctx.orgId,
+        spaceId: null,
+        integrationId: PACKAGE_ID,
+        authKey: "primary",
+        clientId: "org-cid",
+        clientSecretEncrypted: encryptCredentials({ client_secret: "org-csec" }),
+      })
+      .returning({ id: integrationOauthClients.id });
+    const connId = await seedConnection(["read"]);
+    await db
+      .update(integrationConnections)
+      .set({ spaceId: null, originSpaceId: ctx.defaultSpaceId, clientRef: orgClient!.id })
+      .where(eq(integrationConnections.id, connId));
+    const other = await seedSpace({ orgId: ctx.orgId, name: "Other" });
+    token.setResponse({ access_token: "org-access", expires_in: 3600 });
+
+    const outcome = await refreshConnectionCredential({
+      connection: { ...(await readTarget(connId)), authKey: "primary" },
+      integrationId: PACKAGE_ID,
+      manifest: gmailManifest(token.url),
+      authDef: gmailManifest(token.url).auths!.primary as AfpsManifestAuth,
+      scope: { orgId: ctx.orgId, spaceId: other.id },
+      actor: { type: "user", id: ctx.user.id },
+      trigger: REJECTED,
+    });
+
+    expect(refreshedFields(outcome).access_token).toBe("org-access");
+    expect(token.requests()).toBe(1);
+    const stored = decryptCredentialsToStringMap((await fetchEncrypted(connId))!);
+    expect(stored.access_token).toBe("org-access");
   });
 
   it("keeps the outputs a refresh response does not send again, and takes those it does", async () => {
@@ -334,7 +375,7 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
     expect(await storedScopes(connId)).toEqual(["read", "send"]);
   });
 
-  it("persists a narrowed grant, and leaves the connection usable when no agent needs the lost scope", async () => {
+  it("persists a narrowed grant and leaves the connection unflagged", async () => {
     const connId = await seedConnection(["read", "send", "delete"]);
     // User went to their Google account and revoked `delete`.
     token.setResponse({ access_token: "new-access", expires_in: 3600, scope: "read send" });
@@ -348,7 +389,23 @@ describe("refreshConnectionCredential — the refresh and its write-back", () =>
     expect(row!.needsReconnection).toBe(false);
   });
 
-  it("persists a widened grant (scope creep): the high-water-mark moves up", async () => {
+  it("keeps a held offline_access the refresh response's `scope` leaves out", async () => {
+    const connId = await seedConnection(["Mail.Read", "offline_access"]);
+    token.setResponse({ access_token: "new-access", expires_in: 3600, scope: "Mail.Read" });
+
+    refreshedFields(await refresh(connId));
+    expect(await storedScopes(connId)).toEqual(["Mail.Read", "offline_access"]);
+  });
+
+  it("keeps a held openid when the refresh sends no new id_token, the stored one proving it", async () => {
+    const connId = await seedConnection(["Mail.Read", "openid"], undefined, { id_token: "a.b.c" });
+    token.setResponse({ access_token: "new-access", expires_in: 3600, scope: "Mail.Read" });
+
+    refreshedFields(await refresh(connId));
+    expect(await storedScopes(connId)).toEqual(["Mail.Read", "openid"]);
+  });
+
+  it("persists a widened grant (scope creep)", async () => {
     const connId = await seedConnection(["read"]);
     token.setResponse({ access_token: "new-access", expires_in: 3600, scope: "read send" });
 
@@ -544,6 +601,7 @@ describe("integration refresh-failure escalation", () => {
         authKey: "primary",
         accountId: "acct-1",
         label: "acct-1",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: ciphertext,

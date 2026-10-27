@@ -29,7 +29,7 @@
  *     (see the deliberate gap documented below).
  */
 
-import type { ResolvedModel } from "./org-models.ts";
+import type { BoundModel } from "./org-models.ts";
 import { getRunningRunCountForOrg, refuseReservedForDeletion } from "./state/runs.ts";
 import { callHook, hasHook } from "../lib/modules/module-loader.ts";
 import { ApiError } from "../lib/errors.ts";
@@ -53,7 +53,7 @@ type SystemProxyUsageContext =
 
 export async function enforceSystemProxyAdmission(args: {
   orgId: string;
-  resolved: ResolvedModel;
+  resolved: BoundModel;
   usageContext: SystemProxyUsageContext;
 }): Promise<void> {
   // Ahead of the hook check: a reserved organization admits no new work whether
@@ -68,7 +68,7 @@ export async function enforceSystemProxyAdmission(args: {
   // Whose credential this call spends. A FACT reported onward, never a filter:
   // a BYOK call is dispatched too, and it is the module that decides whether it
   // costs anything.
-  const credentialSource = args.resolved.isSystemModel ? ("system" as const) : ("org" as const);
+  const credentialSource = args.resolved.credentialSource;
 
   if (!args.usageContext) {
     // A platform-paid raw proxy call must belong to a validated product surface:

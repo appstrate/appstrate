@@ -1,67 +1,50 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
-import { Button } from "@appstrate/ui/components/button";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
-import { Label } from "@appstrate/ui/components/label";
+import { OptionSelect } from "@/components/app-ui/option-select";
+import { CheckboxField } from "@/components/app-ui/checkbox-field";
+import { FormItem } from "@/components/app-ui/form-item";
 import type { PackageType } from "@appstrate/core/validation";
-import { Modal } from "../modal";
-import { Spinner } from "../spinner";
+import { FormModal } from "../form-modal";
+import { spaceLabel } from "../../lib/space-label";
 import { useSpaces } from "../../hooks/use-spaces";
 import { useMovePackageHome } from "../../hooks/use-packages";
 import { writableDestinations } from "../../lib/package-home";
 
-/**
- * Move a package's home space — the counterpart of `PUT
- * /api/packages/{scope}/{name}/home`, and the only way out of the 409 a space
- * deletion answers when it still homes packages.
- */
+/** `PUT /api/packages/{scope}/{name}/home`; the only way out of the 409 a space deletion answers while it homes packages. */
 export function MoveHomeSpaceDialog({
-  open,
   onClose,
   packageId,
   type,
   homeSpaceId,
 }: {
-  open: boolean;
   onClose: () => void;
   packageId: string;
   type: PackageType;
   homeSpaceId: string | null | undefined;
 }) {
   const { t } = useTranslation(["settings", "common"]);
-  const { data: spaces } = useSpaces(open);
+  const { data: spaces } = useSpaces();
   const move = useMovePackageHome(type);
   const [target, setTarget] = useState("");
-  // Checked by default: that is what the move has always done, so opening this
-  // dialog and pressing Move changes nothing about what the space being left
-  // runs. Unchecking is the deliberate act, not the default one.
+  // Checked by default: pressing Move alone changes nothing about what the space being left runs.
   const [keepInPreviousHome, setKeepInPreviousHome] = useState(true);
 
   const writable = writableDestinations(spaces, type, homeSpaceId);
-  // The space being LEFT, named so the checkbox can say which one it is about.
-  // `home_space_id` is null when the caller cannot reach that space — but the
-  // move requires `<type>:write` THERE, so a caller who got this far can.
+  // The space being LEFT; `home_space_id` is null only when unreachable, which the move's `<type>:write` there rules out.
   const previousHome = spaces?.find((space) => space.id === homeSpaceId);
 
-  // The dialog stays mounted between openings, so the selection is cleared on
-  // the way OUT — every exit goes through here (cancel, Esc, overlay, success).
+  // The dialog stays mounted between openings, so every exit clears the selection.
   const close = () => {
     setTarget("");
     setKeepInPreviousHome(true);
     onClose();
   };
 
-  const submit = () => {
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
     const destination = writable.find((space) => space.id === target);
     if (!destination) return;
     move.mutate(
@@ -76,66 +59,41 @@ export function MoveHomeSpaceDialog({
   };
 
   return (
-    <Modal
-      open={open}
+    <FormModal
       onClose={close}
+      onSubmit={submit}
       title={t("packages.moveHomeTitle")}
-      actions={
-        <>
-          <Button variant="outline" type="button" onClick={close}>
-            {t("btn.cancel", { ns: "common" })}
-          </Button>
-          <Button type="button" onClick={submit} disabled={!target || move.isPending}>
-            {move.isPending ? <Spinner /> : t("packages.moveHomeSubmit")}
-          </Button>
-        </>
-      }
+      isPending={move.isPending}
+      submitLabel={t("packages.moveHomeSubmit")}
+      submitDisabled={!target}
     >
-      <div className="space-y-2">
-        <Label htmlFor="move-home-space">{t("packages.moveHomeLabel")}</Label>
-        <Select value={target || undefined} onValueChange={setTarget}>
-          <SelectTrigger id="move-home-space" className="w-full">
-            <SelectValue placeholder={t("packages.moveHomePlaceholder")} />
-          </SelectTrigger>
-          <SelectContent>
-            {writable.map((space) => (
-              <SelectItem key={space.id} value={space.id}>
-                {space.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-muted-foreground text-sm">
-          {writable.length === 0 ? t("packages.moveHomeEmpty") : t("packages.moveHomeHint")}
-        </p>
-      </div>
-      {/*
-        The half of the act the word "move" does not carry: the space being
-        LEFT keeps the package unless this is unchecked. Rendered whether or
-        not that space currently runs it, because the answer is the same either
-        way — a dialog that appeared only for an activated package would put
-        the old asymmetry back where the user cannot see it.
-      */}
+      <FormItem
+        id="move-home-space"
+        label={t("packages.moveHomeLabel")}
+        hint={writable.length === 0 ? t("packages.moveHomeEmpty") : t("packages.moveHomeHint")}
+      >
+        <OptionSelect
+          value={target || undefined}
+          onValueChange={setTarget}
+          placeholder={t("packages.moveHomePlaceholder")}
+          className="w-full"
+          options={writable.map((space) => ({ value: space.id, label: space.name }))}
+        />
+      </FormItem>
       {previousHome ? (
-        <div className="mt-4 flex gap-3">
-          <Checkbox
-            id="move-home-keep"
-            className="mt-0.5"
-            checked={keepInPreviousHome}
-            onCheckedChange={(checked) => setKeepInPreviousHome(checked === true)}
-          />
-          <div className="space-y-1">
-            <Label htmlFor="move-home-keep" className="font-normal">
-              {t("packages.moveHomeKeep", { space: previousHome.name })}
-            </Label>
-            <p className="text-muted-foreground text-sm">
-              {keepInPreviousHome
-                ? t("packages.moveHomeKeepHint", { space: previousHome.name })
-                : t("packages.moveHomeReleaseHint", { space: previousHome.name })}
-            </p>
-          </div>
-        </div>
+        <CheckboxField
+          id="move-home-keep"
+          className="mt-4"
+          label={t("packages.moveHomeKeep", { space: spaceLabel(previousHome, t) })}
+          description={
+            keepInPreviousHome
+              ? t("packages.moveHomeKeepHint", { space: spaceLabel(previousHome, t) })
+              : t("packages.moveHomeReleaseHint", { space: spaceLabel(previousHome, t) })
+          }
+          checked={keepInPreviousHome}
+          onCheckedChange={(checked) => setKeepInPreviousHome(checked === true)}
+        />
       ) : null}
-    </Modal>
+    </FormModal>
   );
 }

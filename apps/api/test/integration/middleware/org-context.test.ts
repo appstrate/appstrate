@@ -65,6 +65,18 @@ describe("org-context middleware", () => {
     expect(res.status).toBe(403);
   });
 
+  it("answers a non-UUID X-Org-Id exactly as an unknown org (#1969)", async () => {
+    const problem = async (orgId: string) => {
+      const res = await app.request("/api/agents", {
+        headers: { Cookie: ctx.cookie, "X-Org-Id": orgId },
+      });
+      expect(res.status).toBe(403);
+      const { code, detail, title } = (await res.json()) as Record<string, unknown>;
+      return { code, detail, title };
+    };
+    expect(await problem("members")).toEqual(await problem(crypto.randomUUID()));
+  });
+
   it("skips org context for org management routes", async () => {
     // GET /api/orgs should work without X-Org-Id
     const res = await app.request("/api/orgs", {

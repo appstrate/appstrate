@@ -4,7 +4,13 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
-import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import {
+  addOrgMember,
+  createTestContext,
+  createTestUser,
+  authHeaders,
+  type TestContext,
+} from "../../helpers/auth.ts";
 import {
   seedApiKey,
   seedSpace,
@@ -17,7 +23,15 @@ import {
 } from "../../helpers/seed.ts";
 import { TEST_OAUTH_MODEL_ID, TEST_OAUTH_PROVIDER_ID } from "../../helpers/test-oauth-provider.ts";
 import { assertDbHas, assertDbMissing, expectProblem, getDbRow } from "../../helpers/assertions.ts";
-import { spaces, spacePackages, auditEvents, packages, runs } from "@appstrate/db/schema";
+import {
+  spaces,
+  spacePackages,
+  auditEvents,
+  packages,
+  runs,
+  integrationConnections,
+} from "@appstrate/db/schema";
+import { seedShares } from "../../helpers/connection-shares.ts";
 import { insertShadowPackage } from "../../../src/services/inline-run.ts";
 import type { AgentManifest } from "../../../src/types/index.ts";
 
@@ -191,8 +205,156 @@ describe("Spaces API", () => {
         name: "Audited Renamed",
         defaultRole: "viewer",
         settings: { allowedRedirectDomains: ["example.com"] },
-        unsharedConnectionIds: [],
       });
+    });
+  });
+
+  describe("PATCH /api/spaces/:id — default space visibility", () => {
+    const patchVisibility = (visibility: string) =>
+      app.request(`/api/spaces/${ctx.defaultSpaceId}`, {
+        method: "PATCH",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({ visibility }),
+      });
+    const readVisibility = async () => {
+      const res = await app.request(`/api/spaces/${ctx.defaultSpaceId}`, {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { visibility: string }).visibility;
+    };
+
+    it("refuses any visibility other than open on the default space (400 on visibility)", async () => {
+      expect(await readVisibility()).toBe("open");
+
+      for (const visibility of ["closed", "private"]) {
+        const res = await patchVisibility(visibility);
+        const body = await expectProblem(res, 400, {
+          code: "invalid_request",
+          param: "visibility",
+        });
+        expect(body.detail, visibility).toBe(
+          "The default space must stay open — every org member lands there.",
+        );
+        expect(await readVisibility(), visibility).toBe("open");
+      }
+    });
+
+    it("accepts open on the default space", async () => {
+      const res = await patchVisibility("open");
+      expect(res.status).toBe(200);
+      expect(await readVisibility()).toBe("open");
+    });
+  });
+
+  describe("PATCH /api/spaces/:id — icon and color", () => {
+    const patchSpace = (headers: Record<string, string>, spaceId: string, body: unknown) =>
+      app.request(`/api/spaces/${spaceId}`, {
+        method: "PATCH",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const stored = async (spaceId: string) => {
+      const [row] = await db
+        .select({ icon: spaces.icon, color: spaces.color })
+        .from(spaces)
+        .where(eq(spaces.id, spaceId));
+      return row;
+    };
+
+    it("writes a lucide or emoji icon and a colour, read back on GET and the listing", async () => {
+      const space = await seedSpace({ orgId: ctx.orgId, name: "Branded" });
+      for (const icon of ["lucide:rocket", "emoji:🚀"]) {
+        const res = await patchSpace(authHeaders(ctx), space.id, { icon, color: "amber" });
+        expect(res.status, await res.clone().text()).toBe(200);
+        expect(await res.json()).toMatchObject({ icon, color: "amber" });
+
+        const detail = await app.request(`/api/spaces/${space.id}`, { headers: authHeaders(ctx) });
+        expect(await detail.json()).toMatchObject({ icon, color: "amber" });
+
+        const listed = (await (
+          await app.request("/api/spaces", { headers: authHeaders(ctx) })
+        ).json()) as { data: Array<Record<string, unknown>> };
+        expect(listed.data.find((s) => s.id === space.id)).toMatchObject({ icon, color: "amber" });
+      }
+    });
+
+    it("emits a null icon and colour on every space that has none", async () => {
+      const listed = (await (
+        await app.request("/api/spaces", { headers: authHeaders(ctx) })
+      ).json()) as { data: Array<Record<string, unknown>> };
+      expect(listed.data.length).toBeGreaterThan(0);
+      for (const space of listed.data) {
+        expect(space).toMatchObject({ icon: null, color: null });
+      }
+    });
+
+    it("leaves an absent field unchanged, clears a null one, and audits both", async () => {
+      const space = await seedSpace({ orgId: ctx.orgId, name: "Clearable" });
+      await patchSpace(authHeaders(ctx), space.id, { icon: "emoji:🧠", color: "neutral" });
+
+      expect((await patchSpace(authHeaders(ctx), space.id, { name: "Renamed" })).status).toBe(200);
+      expect(await stored(space.id)).toEqual({ icon: "emoji:🧠", color: "neutral" });
+
+      const cleared = await patchSpace(authHeaders(ctx), space.id, { icon: null, color: null });
+      expect(await cleared.json()).toMatchObject({ icon: null, color: null });
+      expect(await stored(space.id)).toEqual({ icon: null, color: null });
+
+      const rows = await db
+        .select({ after: auditEvents.after })
+        .from(auditEvents)
+        .where(and(eq(auditEvents.resourceId, space.id), eq(auditEvents.action, "space.updated")));
+      expect(rows.map((r) => r.after)).toContainEqual({ icon: "emoji:🧠", color: "neutral" });
+      expect(rows.map((r) => r.after)).toContainEqual({ icon: null, color: null });
+    });
+
+    it("refuses an image icon and anything outside the grammar (400)", async () => {
+      const space = await seedSpace({ orgId: ctx.orgId, name: "Strict" });
+      // A valid 64×64 VP8X WebP: an organization would take it, a space does not.
+      const vp8x = [82, 73, 70, 70, 22, 0, 0, 0, 87, 69, 66, 80, 86, 80, 56, 88, 10, 0, 0, 0];
+      const image = `data:image/webp;base64,${btoa(String.fromCharCode(...vp8x, 0, 0, 0, 0, 63, 0, 0, 63, 0, 0))}`;
+      for (const body of [
+        { icon: image },
+        { icon: "emoji:🧠🚀" },
+        { icon: "logos:slack-icon" },
+        { icon: "rocket" },
+        { color: "#ff0000" },
+        { color: "teal" },
+      ]) {
+        const res = await patchSpace(authHeaders(ctx), space.id, body);
+        expect(res.status, JSON.stringify(body).slice(0, 60)).toBe(400);
+      }
+      expect(await stored(space.id)).toEqual({ icon: null, color: null });
+    });
+
+    it("refuses an icon or colour on a personal space (409 personal_space_immutable)", async () => {
+      const listed = (await (
+        await app.request("/api/spaces", { headers: authHeaders(ctx) })
+      ).json()) as { data: Array<{ id: string; personal: boolean }> };
+      const personal = listed.data.find((s) => s.personal);
+      expect(personal).toBeDefined();
+
+      for (const body of [{ icon: "emoji:🧠" }, { color: "rose" }, { icon: null }]) {
+        await expectProblem(await patchSpace(authHeaders(ctx), personal!.id, body), 409, {
+          code: "personal_space_immutable",
+        });
+      }
+      expect(await stored(personal!.id)).toEqual({ icon: null, color: null });
+      // Its name stays editable.
+      expect((await patchSpace(authHeaders(ctx), personal!.id, { name: "Mine" })).status).toBe(200);
+    });
+
+    it("403s a caller without space-settings:write in that space", async () => {
+      const space = await seedSpace({ orgId: ctx.orgId, name: "Guarded" });
+      const member = await createTestUser();
+      await addOrgMember(ctx.orgId, member.id, "member");
+
+      const res = await patchSpace({ Cookie: member.cookie, "X-Org-Id": ctx.orgId }, space.id, {
+        icon: "emoji:🚀",
+        color: "rose",
+      });
+      expect(res.status).toBe(403);
+      expect(await stored(space.id)).toEqual({ icon: null, color: null });
     });
   });
 
@@ -220,6 +382,47 @@ describe("Spaces API", () => {
       const listBody = (await listRes.json()) as any;
       const found = listBody.data.find((a: { id: string }) => a.id === created.id);
       expect(found).toBeUndefined();
+    });
+
+    it("withdraws the shares into the space, each recorded as share_removed with reason space_deleted", async () => {
+      const space = await seedSpace({ orgId: ctx.orgId, name: "Shared into" });
+      const integrationId = "@spacedel/svc";
+      await seedPackage({
+        id: integrationId,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+      });
+      const [conn] = await db
+        .insert(integrationConnections)
+        .values({
+          integrationId,
+          authKey: "primary",
+          accountId: "acct-shared",
+          label: "Partagée",
+          orgId: ctx.orgId,
+          spaceId: null,
+          userId: ctx.user.id,
+          credentialsEncrypted: "x",
+          scopesGranted: [],
+        })
+        .returning({ id: integrationConnections.id });
+      await seedShares(conn!.id, [space.id]);
+
+      const res = await app.request(`/api/spaces/${space.id}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(204);
+
+      const event = await getDbRow(
+        auditEvents,
+        and(
+          eq(auditEvents.action, "integration.connection.share_removed"),
+          eq(auditEvents.resourceId, conn!.id),
+        )!,
+      );
+      expect(event.after).toEqual({ spaceId: space.id, reason: "space_deleted" });
     });
 
     it("refuses the default space with a named 409, like every other undeletable space", async () => {
@@ -492,55 +695,39 @@ describe("Spaces API", () => {
       expect(body.object).toBe("space_package");
     });
 
-    /**
-     * An ORPHAN row — `space_packages` with neither a home nor a share behind
-     * it — is the inherited residue `scripts/migration/0016` repairs, and the
-     * placement rule reads it as absent everywhere. The UPDATE used to test
-     * for a ROW instead, so it landed on the orphan and the route's follow-up
-     * `getSpacePackage` (placement-joined) then found nothing: a 200 whose
-     * whole body was `{"object":"space_package"}`.
-     *
-     * The message "is not placed in this space" is now literally true.
-     */
-    it("404s on an ORPHAN row, writes nothing, and succeeds once a share PLACES the package", async () => {
-      const ORPHAN = "@testorg/orphan-row";
+    it("404s a package placed elsewhere only, and succeeds once a row PLACES it here", async () => {
+      const ELSEWHERE = "@testorg/placed-elsewhere";
       // Homed in ANOTHER team space of the org: the owner reaches it, so the
-      // route's gate passes and the refusal read below is the placement
-      // conjunct rather than an authorization refusal standing in for it.
+      // route's gate passes and the refusal read below is the placement rule
+      // rather than an authorization refusal standing in for it.
       const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
-      await seedPackage({ id: ORPHAN, orgId: ctx.orgId, homeSpaceId: elsewhere.id });
-      // The row, and ONLY the row: no home here, no offer here.
-      await seedSpacePackage(ctx.defaultSpaceId, ORPHAN, { proxyId: "prx_before" });
+      await seedPackage({ id: ELSEWHERE, orgId: ctx.orgId, homeSpaceId: elsewhere.id });
 
-      const refused = await putPackage(ORPHAN, { proxyId: "prx_after" });
+      const refused = await putPackage(ELSEWHERE, { proxyId: "prx_after" });
       expect(refused.status, await refused.clone().text()).toBe(404);
       expect(await refused.json()).toMatchObject({
         code: "not_found",
-        detail: `Package '${ORPHAN}' is not placed in this space`,
+        detail: `Package '${ELSEWHERE}' is not placed in this space`,
       });
-      // The write did not land on the orphan.
-      const [untouched] = await db
-        .select({ proxyId: spacePackages.proxyId })
-        .from(spacePackages)
-        .where(placementRowWhere(ORPHAN));
-      expect(untouched?.proxyId).toBe("prx_before");
+      // Configuring never creates the row.
+      expect(
+        await db.select().from(spacePackages).where(placementRowWhere(ELSEWHERE)),
+      ).toHaveLength(0);
 
-      // The discriminating control: same row, same request, one offer apart.
-      await seedPackageShare(ctx.defaultSpaceId, ORPHAN);
+      // The discriminating control: same request, one row apart.
+      await seedPackageShare(ctx.defaultSpaceId, ELSEWHERE);
 
-      const ok = await putPackage(ORPHAN, { proxyId: "prx_after" });
+      const ok = await putPackage(ELSEWHERE, { proxyId: "prx_after" });
       expect(ok.status, await ok.clone().text()).toBe(200);
-      // The FULL body — pre-fix the orphan path answered 200 with nothing but
-      // `object`, because the follow-up read applies the placement rule.
       expect((await ok.json()) as { packageId?: string }).toMatchObject({
         object: "space_package",
-        packageId: ORPHAN,
+        packageId: ELSEWHERE,
       });
       const [written] = await db
-        .select({ proxyId: spacePackages.proxyId })
+        .select({ proxyId: spacePackages.proxyId, enabled: spacePackages.enabled })
         .from(spacePackages)
-        .where(placementRowWhere(ORPHAN));
-      expect(written?.proxyId).toBe("prx_after");
+        .where(placementRowWhere(ELSEWHERE));
+      expect(written).toEqual({ proxyId: "prx_after", enabled: false });
     });
 
     it("audits each moved setting once, before and after, and a no-op write not at all", async () => {

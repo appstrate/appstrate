@@ -94,6 +94,22 @@ const OUTPUT_SCHEMA: JSONSchemaObject = {
 // =====================================================
 
 describe("validateManifest", () => {
+  it("gives the output-tool rule its own issue code, every other rule none", () => {
+    const noOutputTool = validateManifest({ ...VALID_MANIFEST, runtime_tools: [] });
+    expect(noOutputTool.valid).toBe(false);
+    expect(noOutputTool.valid ? [] : noOutputTool.issues).toEqual([
+      expect.objectContaining({ path: "runtime_tools", code: "output_tool_required" }),
+    ]);
+
+    const badVersion = validateManifest({ ...VALID_MANIFEST, version: 12 });
+    expect(badVersion.valid).toBe(false);
+    if (badVersion.valid) return;
+    expect(badVersion.issues).toEqual([expect.objectContaining({ path: "version" })]);
+    expect(badVersion.issues![0]).not.toHaveProperty("code");
+    // The strings still say the same failures.
+    expect(badVersion.errors).toEqual(["version: " + badVersion.issues![0]!.message]);
+  });
+
   it("accepts a valid manifest with JSON Schema format", () => {
     const result = validateManifest(VALID_MANIFEST);
     expect(result.valid).toBe(true);

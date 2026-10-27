@@ -21,7 +21,7 @@ import {
   type MeteredForwardContext,
   type RecordUsageInputs,
 } from "../../src/services/llm-proxy/metering.ts";
-import type { ResolvedModel } from "../../src/services/org-models.ts";
+import type { BoundModel } from "../../src/services/org-models.ts";
 
 const REAL = "gpt-5.1-2025-11-13";
 
@@ -117,7 +117,11 @@ function makeCtx(): MeteredForwardContext {
     runId: null,
     chatSessionId: null,
     presetId: "preset",
-    resolved: { modelId: REAL, apiShape: "openai-responses" } as unknown as ResolvedModel,
+    resolved: {
+      modelId: REAL,
+      apiShape: "openai-responses",
+      credentialSource: "system",
+    } as unknown as BoundModel,
     started: 0,
     requestId: "req_test",
   };

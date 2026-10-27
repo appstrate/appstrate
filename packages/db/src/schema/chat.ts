@@ -111,9 +111,8 @@ export const chatSessions = pgTable(
  *
  * The PARENT MESSAGE ID ITSELF is still computed, and still load-bearing — it
  * is one third of the material `deterministicMessageId` hashes for a UIMessage
- * that arrives without an id (`persistence.ts`). Dropping the column changed
- * nothing about that hash: the value is read from `lastMessageId` and passed
- * down exactly as before, it is simply no longer stored. Do not "simplify" that
+ * that arrives without an id (`persistence.ts`). No column stores it: the value is
+ * read from `lastMessageId` and passed down. Do not "simplify" that
  * argument away — every `gen_…` id already persisted was derived with it.
  */
 /** An AI SDK `UIMessage` without its `id`, declared structurally (no `ai` dep here). */

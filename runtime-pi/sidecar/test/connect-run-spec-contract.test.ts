@@ -3,7 +3,7 @@
 /**
  * `runConnectOnce` — the sidecar entry point every orchestrated `connect.tool`
  * / `runAt: "link"` login goes through — had no test at all. The gap let a
- * live regression ship: `spawnAndConnectLocalIntegration` hard-fails a
+ * live regression ship: `startLocalIntegration` hard-fails a
  * `sourceKind: "local"` spec that names no `server.packageId` (correct — the
  * old fallback fetched the INTEGRATION's own bundle into a code-execution
  * position), while the platform-side spec builder emitted only

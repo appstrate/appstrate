@@ -40,7 +40,7 @@ interface ForwardProxyDeps {
    * the trusted platform host keeps its name-based connect.
    */
   resolveHostFn?: HostResolver;
-  /** Keeps integration runners from bypassing their own egress allowlist here (#1458). */
+  /** Keeps integration runners from bypassing their own egress allowlist here. */
   isPeerAllowed: PeerCheck;
 }
 
@@ -303,6 +303,10 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
         }
       };
       proxySocket.on("data", onData);
+      // Half-open allowed: an upstream proxy that hangs up without answering must still fail.
+      proxySocket.once("end", () => {
+        if (!established) proxySocket.destroy(new Error("upstream proxy closed before answering"));
+      });
       proxySocket.on("error", (err) => {
         logger.error("CONNECT upstream error", { target, error: err.message });
         if (!established && !clientSocket.destroyed) {
@@ -350,7 +354,7 @@ export function createForwardProxy(deps: ForwardProxyDeps): ForwardProxyResult {
 
   // Peer gate on BOTH paths, before any upstream work. A refusal is logged
   // with the same `peer-not-allowed` reason the integration listeners emit, so
-  // a runner reaching for the agent's proxy shows up in the sidecar log (#1548).
+  // a runner reaching for the agent's proxy shows up in the sidecar log.
   const refusePeer = (kind: "request-refused" | "tunnel-refused", target: string, socket: Socket) =>
     logger.warn("forward proxy event", {
       kind,

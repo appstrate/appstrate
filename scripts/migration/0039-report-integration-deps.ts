@@ -17,6 +17,7 @@
 import { SQL } from "bun";
 import { parseManifestIntegrations } from "@appstrate/core/dependencies";
 import { resolveVersionFromCatalog } from "@appstrate/core/semver";
+import { table } from "./lib/report-table.ts";
 
 interface AgentManifestRow {
   org: string;
@@ -156,16 +157,6 @@ function integrationsOf(manifest: string | null): string[] {
   return parseManifestIntegrations(parsed as Record<string, unknown>).map(
     (entry) => `${entry.id} (${entry.required === true ? "required" : "optional"})`,
   );
-}
-
-function table(header: string[], rows: string[][]): string[] {
-  const widths = header.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i]!.length)));
-  const line = (cells: string[]) =>
-    cells
-      .map((c, i) => c.padEnd(widths[i]!))
-      .join("  ")
-      .trimEnd();
-  return [line(header), widths.map((w) => "-".repeat(w)).join("  "), ...rows.map(line)];
 }
 
 export function report({

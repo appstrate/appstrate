@@ -9,49 +9,12 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  substituteVars,
   buildInjectedCredentialHeader,
   applyInjectedCredentialHeader,
   applyInjectedCredentialHeaderToHeaders,
   credentialCarryingHeader,
 } from "../src/proxy-primitives.ts";
 import { InvalidHeaderValueError } from "@appstrate/afps-shared/delivery-http";
-
-describe("substituteVars", () => {
-  it("replaces known placeholders", () => {
-    expect(substituteVars("Bearer {{token}}", { token: "abc" })).toBe("Bearer abc");
-  });
-
-  it("tolerates whitespace inside braces", () => {
-    expect(substituteVars("X: {{ token }}", { token: "abc" })).toBe("X: abc");
-  });
-
-  it("leaves unknown placeholders intact (fail-closed friendly)", () => {
-    expect(substituteVars("{{unknown}}", {})).toBe("{{unknown}}");
-  });
-
-  it("handles multiple placeholders in one string", () => {
-    expect(substituteVars("{{a}}/{{b}}", { a: "1", b: "2" })).toBe("1/2");
-  });
-
-  it("returns input unchanged when no placeholders are present", () => {
-    expect(substituteVars("plain text", { x: "y" })).toBe("plain text");
-  });
-
-  it("does not replace partial matches", () => {
-    // Single braces, missing closing, etc. — untouched
-    expect(substituteVars("{token}", { token: "abc" })).toBe("{token}");
-    expect(substituteVars("{{token", { token: "abc" })).toBe("{{token");
-  });
-
-  it("handles empty string input", () => {
-    expect(substituteVars("", { x: "y" })).toBe("");
-  });
-
-  it("permits empty-string credential values", () => {
-    expect(substituteVars("X={{empty}}", { empty: "" })).toBe("X=");
-  });
-});
 
 describe("buildInjectedCredentialHeader", () => {
   it("builds `Bearer <token>` when prefix is set", () => {

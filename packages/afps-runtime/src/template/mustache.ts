@@ -2,6 +2,25 @@
 // Copyright 2026 Appstrate
 
 import Mustache from "mustache";
+import { jsonText } from "@appstrate/afps-shared/json-text";
+
+/** `{{{x}}}` / `{{&x}}` go through `unescapedValue`, bypassing `escape`, so both hooks are overridden. */
+class PromptWriter extends Mustache.Writer {
+  override escapedValue(token: string[], context: Mustache.Context): string {
+    return interpolate(token, context);
+  }
+
+  override unescapedValue(token: string[], context: Mustache.Context): string {
+    return interpolate(token, context);
+  }
+}
+
+function interpolate(token: string[], context: Mustache.Context): string {
+  const value = context.lookup(token[1]!);
+  return value == null ? "" : jsonText(value);
+}
+
+const writer = new PromptWriter();
 
 /**
  * Render a Mustache template against a context view.
@@ -13,7 +32,9 @@ import Mustache from "mustache";
  * `AFPS_EXTENSION_ARCHITECTURE.md` §3.2 "pure template / impure context").
  *
  * Escaping is disabled: prompts are treated as plain-text / Markdown,
- * not HTML. `{{var}}` and `{{{var}}}` therefore behave identically.
+ * not HTML. `{{var}}`, `{{{var}}}` and `{{&var}}` therefore behave
+ * identically. Strings interpolate as-is; objects and arrays interpolate as
+ * JSON (never `[object Object]`). Sections still iterate real arrays/objects.
  *
  * The view is stripped of functions (Mustache "lambdas") before
  * rendering — they would otherwise execute during interpolation and
@@ -29,13 +50,7 @@ import Mustache from "mustache";
  */
 export function renderTemplate(template: string, view: unknown): string {
   const sanitized = sanitizeView(view);
-  const previousEscape = Mustache.escape;
-  Mustache.escape = (text) => text;
-  try {
-    return Mustache.render(template, sanitized as Record<string, unknown>);
-  } finally {
-    Mustache.escape = previousEscape;
-  }
+  return writer.render(template, sanitized as Record<string, unknown>);
 }
 
 /**

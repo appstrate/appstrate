@@ -64,6 +64,10 @@ describe("persona-sensitive call sites", () => {
           "two membership-existence gates; the who-manages-whom policy reads `callerOrgRole`",
         ],
         [
+          "apps/api/src/routes/integrations.ts",
+          "the real role a connection list's share targets are judged under; `orgHalfFor` applies the persona",
+        ],
+        [
           "packages/module-chat/src/chat-stream.ts",
           "the fallback under the persona's role, which is what the turn is answered as",
         ],
@@ -117,6 +121,14 @@ describe("persona-sensitive call sites", () => {
         [
           "apps/api/src/modules/oidc/auth/claims.ts",
           "mints a token's scope CEILING from the subject's role; a preview narrows per request, under it",
+        ],
+        [
+          "apps/api/src/routes/org-roles.ts",
+          "describes each role's grants, not the caller: a persona has nothing to narrow",
+        ],
+        [
+          "apps/api/src/services/model-providers/credentials.ts",
+          "the pairing redeem carries no request principal, hence no persona: it judges the minter's live role",
         ],
       ],
     },

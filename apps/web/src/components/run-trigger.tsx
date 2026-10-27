@@ -1,13 +1,47 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { User, Calendar, Key, UserCircle, Terminal, Workflow, Globe } from "lucide-react";
+import {
+  User,
+  Calendar,
+  Key,
+  UserCircle,
+  Terminal,
+  Workflow,
+  Globe,
+  type LucideIcon,
+} from "lucide-react";
 import type { EnrichedRun } from "@appstrate/shared-types";
+import { getRunTriggerType } from "../lib/run-trigger";
 
-function RunnerIcon({ kind }: { kind: string | null | undefined }) {
-  if (kind === "cli") return <Terminal size={12} className="shrink-0" />;
-  if (kind === "github-action") return <Workflow size={12} className="shrink-0" />;
-  return <Globe size={12} className="shrink-0" />;
+function runnerIcon(kind: string | null | undefined): LucideIcon {
+  if (kind === "cli") return Terminal;
+  if (kind === "github-action") return Workflow;
+  return Globe;
+}
+
+function TriggerLine({
+  icon: Icon,
+  label,
+  title,
+  children,
+}: {
+  icon: LucideIcon;
+  label: string;
+  title?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <span
+      className="text-muted-foreground inline-flex min-w-0 items-center gap-1 text-xs"
+      title={title}
+    >
+      <Icon size={12} className="shrink-0" />
+      <span className="truncate">{label}</span>
+      {children}
+    </span>
+  );
 }
 
 /**
@@ -22,38 +56,18 @@ function RunnerIcon({ kind }: { kind: string | null | undefined }) {
 export function RunTrigger({ run }: { run: EnrichedRun }) {
   const { t } = useTranslation("agents");
   if (run.scheduleId) {
-    return (
-      <span className="text-muted-foreground inline-flex min-w-0 items-center gap-1 text-xs">
-        <Calendar size={12} className="shrink-0" />
-        <span className="truncate">{run.schedule_name || t("schedule.unnamed")}</span>
-      </span>
-    );
+    return <TriggerLine icon={Calendar} label={run.schedule_name || t("schedule.unnamed")} />;
   }
-  if (run.end_user_name) {
-    return (
-      <span className="text-muted-foreground inline-flex min-w-0 items-center gap-1 text-xs">
-        <UserCircle size={12} className="shrink-0" />
-        <span className="truncate">{run.end_user_name}</span>
-      </span>
-    );
-  }
-  if (run.api_key_name) {
-    return (
-      <span className="text-muted-foreground inline-flex min-w-0 items-center gap-1 text-xs">
-        <Key size={12} className="shrink-0" />
-        <span className="truncate">{run.api_key_name}</span>
-      </span>
-    );
-  }
+  if (run.end_user_name) return <TriggerLine icon={UserCircle} label={run.end_user_name} />;
+  if (run.api_key_name) return <TriggerLine icon={Key} label={run.api_key_name} />;
   if (run.runner_name) {
     const tooltip = run.runner_kind ? `${run.runner_name} (${run.runner_kind})` : run.runner_name;
     return (
-      <span
-        className="text-muted-foreground inline-flex min-w-0 items-center gap-1 text-xs"
+      <TriggerLine
+        icon={runnerIcon(run.runner_kind)}
+        label={run.runner_name}
         title={run.user_name ? `${tooltip} · ${run.user_name}` : tooltip}
       >
-        <RunnerIcon kind={run.runner_kind} />
-        <span className="truncate">{run.runner_name}</span>
         {run.user_name ? (
           <>
             <span className="shrink-0">·</span>
@@ -61,16 +75,13 @@ export function RunTrigger({ run }: { run: EnrichedRun }) {
             <span className="truncate">{run.user_name}</span>
           </>
         ) : null}
-      </span>
+      </TriggerLine>
     );
   }
-  if (run.user_name) {
-    return (
-      <span className="text-muted-foreground inline-flex min-w-0 items-center gap-1 text-xs">
-        <User size={12} className="shrink-0" />
-        <span className="truncate">{run.user_name}</span>
-      </span>
-    );
-  }
-  return null;
+  if (run.user_name) return <TriggerLine icon={User} label={run.user_name} />;
+  // Nothing names who launched it (a deleted member or key, a runner with no label): say the
+  // kind of launch when the run records one, a dash when it does not.
+  const type = getRunTriggerType(run);
+  if (type === "manual") return <span className="text-muted-foreground/50">—</span>;
+  return <span className="text-muted-foreground text-xs">{t(`run.triggerType.${type}`)}</span>;
 }

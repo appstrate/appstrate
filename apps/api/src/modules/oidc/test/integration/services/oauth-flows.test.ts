@@ -51,7 +51,12 @@ import {
   snapshotProtectedResources,
   restoreProtectedResources,
 } from "../../../../../lib/protected-resources.ts";
-import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "../../../../../lib/audiences.ts";
+import {
+  MCP_RESOURCE_PREFIX,
+  deriveMcpResourceUri,
+  getMcpOrgResourceUri,
+  parseMcpResourceUri,
+} from "../../../../../lib/audiences.ts";
 import { encodeBasicCredentials } from "better-auth/oauth2";
 import { decodeJwt } from "jose";
 
@@ -650,14 +655,9 @@ describe("OAuth 2.1 Authorization Code + PKCE end-to-end", () => {
     // family + writes the row at boot in production — do both inline here so
     // this single test does not perturb the shared beforeEach.
     registerProtectedResourceFamily({
-      prefix: "/api/mcp/o",
-      deriveUri: (path) => {
-        const prefix = "/api/mcp/o/";
-        if (!path.startsWith(prefix)) return undefined;
-        const orgId = path.slice(prefix.length).split("/")[0] ?? "";
-        return orgId.length === 0 ? undefined : getMcpOrgResourceUri(orgId);
-      },
-      ownsUri: (uri) => orgIdFromMcpAudience(uri) !== undefined,
+      prefix: MCP_RESOURCE_PREFIX,
+      deriveUri: deriveMcpResourceUri,
+      ownsUri: (uri) => parseMcpResourceUri(uri) !== undefined,
     });
     const mcpResourceUri = getMcpOrgResourceUri(ctx.orgId);
     await db.insert(oauthResource).values({

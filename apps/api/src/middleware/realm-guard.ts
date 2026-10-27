@@ -15,13 +15,14 @@
  * This guard runs after the auth pipeline has resolved a BA cookie session
  * and placed its `realm` on `c.sessionRealm`. If the realm is anything
  * other than `"platform"`, the request is rejected with 403 unless it
- * targets an audience-agnostic surface:
+ * targets an audience-agnostic surface: `/api/auth/*`, Better Auth's own
+ * endpoints (sign-out, email change, magic-link verify) — the user must be
+ * able to manage their BA identity regardless of realm.
  *
- *   - `/api/oauth/*`  — OIDC entry pages + admin endpoints; end-user
- *     sessions legitimately hit login/consent/magic-link here.
- *   - `/api/auth/*`   — Better Auth endpoints (sign-out, email change,
- *     magic-link verify) — the user must be able to manage their BA
- *     identity regardless of realm.
+ * The OIDC entry pages under `/api/oauth/*` (login, consent, magic-link…) are
+ * public paths and never reach this guard. What does reach it there is the
+ * OAuth client administration (`/api/oauth/clients*`, `/api/oauth/scopes`),
+ * which is a platform route like any other.
  *
  * Non-session auth methods (Bearer API key, OIDC JWT via auth strategies)
  * are untouched: API keys carry their own `spaceId` scope and JWTs
@@ -33,15 +34,9 @@ import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { forbidden } from "../lib/errors.ts";
 
-/**
- * Paths where a non-platform BA cookie session is legitimately allowed —
- * OIDC entry surfaces (the end-user is logging in / consenting) and BA's
- * own endpoints (sign-out, email change, etc.).
- */
+/** Better Auth's own endpoints, where a non-platform cookie session is legitimate. */
 function isRealmAgnosticPath(path: string): boolean {
-  if (path.startsWith("/api/oauth/")) return true;
-  if (path.startsWith("/api/auth/")) return true;
-  return false;
+  return path.startsWith("/api/auth/");
 }
 
 export function requirePlatformRealm() {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
+import { runStatusValues } from "@appstrate/core/run-status";
 
 /**
  * Reusable OpenAPI parameter definitions.
@@ -10,8 +11,30 @@ export const parameters = {
     name: "offset",
     in: "query" as const,
     required: false,
-    description: "Number of items to skip before the first returned item.",
+    description:
+      "Number of items to skip before the first returned item. A value that is not a non-negative integer is refused with 400 (`param: offset`).",
     schema: { type: "integer", minimum: 0, default: 0 },
+  },
+  RunStatusFilter: {
+    name: "status",
+    in: "query" as const,
+    required: false,
+    description: `Filter runs by lifecycle status: one or several of ${runStatusValues.map((s) => `\`${s}\``).join(", ")}, comma-separated on the wire (\`status=failed,timeout\` returns both). Omit (or send an empty value) for every status. Any value outside the set is rejected with \`400\` — for the whole list, never by dropping the offending member, so a filtered response is never silently widened.`,
+    style: "form" as const,
+    explode: false,
+    schema: {
+      type: "array",
+      items: { type: "string", enum: [...runStatusValues] },
+      example: ["failed", "timeout"],
+    },
+  },
+  RunSearch: {
+    name: "q",
+    in: "query" as const,
+    required: false,
+    description:
+      "Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`.",
+    schema: { type: "string", maxLength: 200 },
   },
   IfMatch: {
     name: "If-Match",
@@ -84,9 +107,12 @@ export const parameters = {
     required: false,
     description:
       "Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Scoped to the " +
-      "organization and space, and only a request that executed — a 2xx — is stored, for 24 hours. A repeat with the same " +
-      "method, URL and body re-serves that response with `Idempotent-Replayed: true`: current permissions are checked again, " +
-      "a run is re-read under current visibility, and its `warnings` items carry no bearer connect link (`connect_url`, " +
+      "organization, the space and the authenticated caller — the member or end-user, the API key or OAuth client, the auth " +
+      "method — so the same key sent by another caller is a new request, never a replay. Only a request that executed — a " +
+      "2xx — is stored, for 24 hours. A repeat by the same caller with the same method, URL and body re-serves that " +
+      "response with " +
+      "`Idempotent-Replayed: true`: current permissions are checked again, a run is re-read under current visibility, " +
+      "and its `warnings` items carry no bearer connect link (`connect_url`, " +
       "`expiresAt`, `packageId`). A refusal (4xx) or failure (5xx) is never stored: the key is released and a retry is judged " +
       "again, so a `409 missing_integration_connection` retried after connecting launches the run. While a response is stored, " +
       "the same key with a different method, URL or body is `422 idempotency_conflict`; a concurrent duplicate is " +

@@ -17,6 +17,7 @@ import type { ModelApiShape } from "@appstrate/core/sidecar-types";
 const base: OrgModelInfo = {
   id: "appstrate-medium",
   label: "Appstrate Medium",
+  binding: "managed",
   apiShape: "openai-completions",
   providerId: "openai-compatible",
   provider_name: "OpenAI-compatible (custom)",
@@ -52,6 +53,7 @@ const base: OrgModelInfo = {
   iconUrl: null,
   source: "built-in",
   credentialId: "deepseek-prod",
+  billed_to: "org",
   created_by: null,
   createdAt: "2026-01-10T08:00:00Z",
   updatedAt: "2026-01-10T08:00:00Z",

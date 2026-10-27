@@ -137,16 +137,17 @@ export function drainAudits(timeoutMs: number): Promise<{ pending: number; drain
  * A route acting on a resource in another space re-enters that space before it
  * writes, so the space read here is already the resource's. A module route
  * enters through `enterSpaceContext`, which sets `space` but leaves `spaceId`
- * (the credential's) alone — hence `space` first. No per-call override.
+ * (the credential's) alone — hence `space` first. `spaceIdOverride` is for an
+ * event about a space the request never entered (a connection shared into it).
  *
  * Under a role preview the persona goes into `after.viewAs`; the actor stays
  * the administrator, which is who they were.
  */
 export async function recordAuditFromContext(
   c: Context<AppEnv>,
-  input: ContextAuditInput & { orgIdOverride?: string },
+  input: ContextAuditInput & { orgIdOverride?: string; spaceIdOverride?: string },
 ): Promise<void> {
-  const { orgIdOverride, ...auditInput } = input;
+  const { orgIdOverride, spaceIdOverride, ...auditInput } = input;
   const orgId = orgIdOverride ?? c.get("orgId");
   if (!orgId) return;
 
@@ -172,7 +173,7 @@ export async function recordAuditFromContext(
     ...auditInput,
     ...(persona ? { after: { ...(auditInput.after ?? {}), viewAs: viewAsAudit(persona) } } : {}),
     orgId,
-    spaceId: c.get("space")?.id ?? c.get("spaceId") ?? null,
+    spaceId: spaceIdOverride ?? c.get("space")?.id ?? c.get("spaceId") ?? null,
     actorType,
     actorId,
     ...requestAuditMeta(c),

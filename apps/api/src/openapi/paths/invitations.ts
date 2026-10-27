@@ -125,6 +125,8 @@ export const invitationsPaths = {
                 id: "550e8400-e29b-41d4-a716-446655440000",
                 name: "Acme Corp",
                 slug: "acme-corp",
+                icon: null,
+                color: null,
                 role: "member",
                 permissions: ["org:read", "spaces:read"],
                 createdAt: "2026-01-10T08:00:00Z",
@@ -136,7 +138,8 @@ export const invitationsPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
-          description: "Invitation email does not match the authenticated session",
+          description:
+            "`email_mismatch` — the invitation is for another address than the session's. `not_a_platform_account` — the session's account belongs to a space's application (`end_user:<space>` realm) and cannot join an organization.",
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },

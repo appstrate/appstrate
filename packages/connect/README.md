@@ -12,7 +12,7 @@ OAuth2/PKCE, token refresh, credential-proxy primitives, and encrypted credentia
 | `initiateIntegrationOAuth` / `handleIntegrationOAuthCallback` | OAuth2 + PKCE connect flow for integration auths            |
 | `performRefreshTokenExchange`                                 | OAuth2 refresh-token exchange (`RefreshError` on failure)   |
 | `resolveHttpDelivery` / `buildProxyCredentialsPayload`        | Multi-auth credential resolution + `delivery.http` planning |
-| `substituteVars` / …                                          | Credential-proxy primitives (shared route ⇄ sidecar)        |
+| `buildInjectedCredentialHeader` / …                           | Credential-proxy primitives (shared route ⇄ sidecar)        |
 | `planMitmAction`                                              | Pure per-integration MITM strip/inject/retry planner        |
 | `planCaBundle`                                                | CA-cert planner for the HTTPS credential proxy              |
 

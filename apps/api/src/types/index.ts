@@ -20,7 +20,7 @@ export type { AgentManifest };
  * Do not add derived projections (resolved skills, spawned integrations…)
  * here: version resolution swaps `manifest`/`prompt` between draft and
  * published snapshots, and anything derived would silently keep describing
- * the other definition (#878). Derive at the point of use from the effective
+ * the other definition. Derive at the point of use from the effective
  * manifest — see `resolveDeclaredSkills` in `services/package-catalog.ts`.
  */
 export interface LoadedPackage {
@@ -89,6 +89,8 @@ export type AppEnv = {
     principalKind: import("@appstrate/core/module").PrincipalKind;
     apiKeyId: string | null;
     spaceId: string; // from API key auth or resolved by space-context middleware (X-Space-Id)
+    /** The space the credential itself pins (API key, strategy); `X-Space-Id` never sets it. */
+    credentialSpaceId?: string;
     /**
      * Resolved space row (id/orgId/isDefault) set by
      * `requireSpaceContext()` alongside `spaceId`. Services called from

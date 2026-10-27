@@ -6,6 +6,10 @@
  * comes back, so the field is required on every save, configured or not — the
  * browser then blocks an empty submit — and a configured section says the
  * secret has to be entered again.
+ *
+ * The form is seeded only from what the server answered: a failed read shows
+ * the error, never « Non configuré » over a savable empty form whose Save
+ * would overwrite a row that may exist; a read in flight shows neither.
  */
 
 import { describe, it, expect, spyOn } from "bun:test";
@@ -55,20 +59,33 @@ const GOOGLE: SocialProviderView = {
   updatedAt: STAMP,
 };
 
-/** The tab's three sections, in page order, with the rows the cache holds. */
-function renderSections(rows: { smtp: SmtpConfigView | null; google: SocialProviderView | null }): {
+/** What the cache holds for one read: the row, `null` (no row), a failure, or nothing yet. */
+type Read<T> = T | null | Error | "pending";
+
+/** The tab's three sections, in page order, with the reads the cache holds. */
+function renderSections(rows: {
+  smtp: Read<SmtpConfigView>;
+  google: Read<SocialProviderView>;
+  github?: Read<SocialProviderView>;
+}): {
   smtp: string;
   google: string;
   github: string;
 } {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } });
-  queryClient.setQueryData(
-    ["get", "/api/spaces/{id}/smtp-config", { params: { path: { id: SPACE_ID } } }],
-    rows.smtp,
-  );
-  const social = { google: rows.google, github: null };
+  const seed = (queryKey: readonly unknown[], read: Read<unknown>) => {
+    if (read === "pending") return;
+    if (read instanceof Error) {
+      const query = queryClient.getQueryCache().build(queryClient, { queryKey });
+      query.setState({ ...query.state, status: "error", error: read, fetchStatus: "idle" });
+      return;
+    }
+    queryClient.setQueryData(queryKey, read);
+  };
+  seed(["get", "/api/spaces/{id}/smtp-config", { params: { path: { id: SPACE_ID } } }], rows.smtp);
+  const social = { google: rows.google, github: rows.github ?? null };
   for (const provider of ["google", "github"] as const) {
-    queryClient.setQueryData(
+    seed(
       [
         "get",
         "/api/spaces/{id}/social-providers/{provider}",
@@ -145,5 +162,45 @@ describe("an unconfigured section", () => {
     expect(github).toContain("Non configuré");
     expect(secretInput(github)).toContain('required=""');
     expect(github).not.toContain(SOCIAL_HINT);
+  });
+});
+
+describe("a section whose read fails", () => {
+  it("shows the error, with no « Non configuré » and no form to save", () => {
+    const { smtp, google, github } = renderSections({
+      smtp: new Error("smtp read failed"),
+      google: new Error("google read failed"),
+      github: new Error("github read failed"),
+    });
+    for (const [section, message] of [
+      [smtp, "smtp read failed"],
+      [google, "google read failed"],
+      [github, "github read failed"],
+    ] as const) {
+      expect(section).toContain(message);
+      expect(section).not.toContain("Non configuré");
+      expect(section).not.toContain("<form");
+    }
+  });
+
+  it("leaves the sections that answered their form", () => {
+    const { smtp, google, github } = renderSections({
+      smtp: new Error("smtp read failed"),
+      google: null,
+    });
+    expect(smtp).not.toContain("<form");
+    expect(google).toContain("Non configuré");
+    expect(google).toContain("<form");
+    expect(github).toContain("<form");
+  });
+});
+
+describe("a section whose read is in flight", () => {
+  it("shows neither a badge nor a form", () => {
+    const { smtp, google } = renderSections({ smtp: "pending", google: "pending" });
+    for (const section of [smtp, google]) {
+      expect(section).not.toContain("Configuré");
+      expect(section).not.toContain("<form");
+    }
   });
 });

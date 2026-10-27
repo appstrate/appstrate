@@ -58,8 +58,8 @@ function extractPathParams(pathTemplate: string): string[] {
 /**
  * Names of `in: header` parameters declared by an operation. Lets
  * invoke_operation route a value the model supplied (in any bag) to a real
- * request header — required by e.g. the Credential Proxy family, which keys
- * off `X-Integration-Id`. Auth-context headers are never sourced from here.
+ * request header — e.g. a conditional read's `If-None-Match`. Auth-context
+ * headers are never sourced from here.
  */
 function extractHeaderParams(node: OperationNode): string[] {
   const params = node.parameters;
@@ -74,17 +74,22 @@ function extractHeaderParams(node: OperationNode): string[] {
   return names;
 }
 
+/** The credential proxy's route: kept out of the catalog, dispatched to by `api_call` alone. */
+export const CREDENTIAL_PROXY_PATH = "/api/credential-proxy/proxy";
+
 /**
  * Kept out of the catalog: the MCP transport and its RFC 9728 well-known (no
- * recursive self-invocation), and the spec document and its viewer, which
- * `describe_operation` already serves piecewise.
+ * recursive self-invocation), the spec document and its viewer, which
+ * `describe_operation` already serves piecewise, and the credential proxy,
+ * which the `api_call` tool alone reaches (`connection-tools.ts`).
  */
 function isExcludedPath(pathTemplate: string): boolean {
   return (
     pathTemplate.startsWith("/api/mcp/o") ||
     pathTemplate.startsWith("/.well-known/oauth-protected-resource") ||
     pathTemplate === "/api/openapi.json" ||
-    pathTemplate === "/api/docs"
+    pathTemplate === "/api/docs" ||
+    pathTemplate === CREDENTIAL_PROXY_PATH
   );
 }
 
@@ -155,20 +160,48 @@ export function buildOperationIndex(
   ceiling: ReadonlySet<string> | undefined,
 ): string {
   const { operations } = getCatalog();
-  const byTag = new Map<string, string[]>();
+  return indexByTag(
+    [...operations.values()].filter((op) => operationGranted(op, permissions, ceiling)),
+  );
+}
+
+/**
+ * The index of an org-wide connection, ranked by tag exactly as
+ * {@link buildOperationIndex}: one grouping, whatever the spaces. An operation
+ * granted in only some reachable spaces carries their IDs after its id
+ * (`createAgent [spc_a, spc_b]`); one granted everywhere carries nothing, so the
+ * index is the pinned one when the roles agree.
+ */
+export function buildOrgWideOperationIndex(
+  spaces: ReadonlyArray<{ id: string; permissions: ReadonlySet<string> }>,
+  ceiling: ReadonlySet<string> | undefined,
+): string {
+  const { operations } = getCatalog();
+  const where = new Map<string, string[]>();
   for (const op of operations.values()) {
-    if (!operationGranted(op, permissions, ceiling)) continue;
+    const ids = spaces.filter((s) => operationGranted(op, s.permissions, ceiling)).map((s) => s.id);
+    if (ids.length > 0) where.set(op.operationId, ids);
+  }
+  return indexByTag(
+    [...operations.values()].filter((op) => where.has(op.operationId)),
+    (id) => {
+      const ids = where.get(id)!;
+      return ids.length === spaces.length ? id : `${id} [${ids.join(", ")}]`;
+    },
+  );
+}
+
+function indexByTag(ops: CatalogOperation[], label: (id: string) => string = (id) => id): string {
+  const byTag = new Map<string, string[]>();
+  for (const op of ops) {
     const tag = op.tags[0] ?? "Other";
     // operationId only: summaries would cost several KB on every uncached turn.
     (byTag.get(tag) ?? byTag.set(tag, []).get(tag)!).push(op.operationId);
   }
-
-  const sections = [...byTag.keys()].sort().map((tag) => {
-    const ids = byTag.get(tag)!.sort();
-    return `## ${tag}\n${ids.join(", ")}`;
-  });
-
-  return sections.join("\n\n");
+  return [...byTag.keys()]
+    .sort()
+    .map((tag) => `## ${tag}\n${byTag.get(tag)!.sort().map(label).join(", ")}`)
+    .join("\n\n");
 }
 
 const SCHEMA_REF_PREFIX = "#/components/schemas/";

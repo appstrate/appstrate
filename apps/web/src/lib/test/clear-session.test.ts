@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * What ends with a session: the signed-in user, every cached answer, and the
- * org/space scope the next requests would carry. What does not: the space each
- * account last chose, which is keyed by user and only ever a candidate.
+ * What ends with a session: the signed-in user, every cached answer, the
+ * org/space scope the next requests would carry, and the pairings in flight
+ * with their commands. What does not: the space each account last chose, which
+ * is keyed by user and only ever a candidate.
  */
 
 import { afterAll, describe, expect, it } from "bun:test";
@@ -16,6 +17,8 @@ const { queryClient } = await import("../query-client.ts");
 const { authStore } = await import("../../stores/auth-store.ts");
 const { orgStore } = await import("../../stores/org-store.ts");
 const { spaceStore } = await import("../../stores/space-store.ts");
+const { pairingStore, addPendingPairing, readPersistedPairings, resumablePairing } =
+  await import("../../stores/pairing-store.ts");
 
 describe("clearSession", () => {
   const before = {
@@ -53,5 +56,23 @@ describe("clearSession", () => {
     expect(orgStore.getState().id).toBeNull();
     expect(spaceStore.getState().id).toBeNull();
     expect(spaceStore.getState().remembered).toEqual(remembered);
+  });
+
+  it("forgets a pairing in flight, so the next session is never handed its command", () => {
+    const pairing = {
+      id: "pair_1",
+      providerId: "codex",
+      target: { ownerType: "org" },
+      expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
+      orgId: "org_a",
+    } as const;
+    addPendingPairing(pairing, "npx @appstrate/connect-helper pairing-token");
+    expect(resumablePairing(pairing)).not.toBeNull();
+
+    clearSession();
+
+    expect(pairingStore.getState().pairings).toEqual([]);
+    expect(readPersistedPairings()).toEqual([]);
+    expect(resumablePairing(pairing)).toBeNull();
   });
 });

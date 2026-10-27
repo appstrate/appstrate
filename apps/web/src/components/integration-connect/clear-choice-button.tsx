@@ -8,7 +8,7 @@ export function ClearChoiceButton({ onClick, testId }: { onClick: () => void; te
   const { t } = useTranslation(["agents"]);
   return (
     <Button type="button" variant="outline" size="sm" onClick={onClick} data-testid={testId}>
-      {t("schedule.connectionOverrides.clearChoice")}
+      {t("connectionOverrides.clearChoice")}
     </Button>
   );
 }

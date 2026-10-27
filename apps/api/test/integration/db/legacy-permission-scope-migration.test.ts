@@ -407,6 +407,7 @@ describe("migration 0046 — documents:* → files:* in every stored scope colum
         authKey: "primary",
         accountId: "acct-1",
         label: "acct-1",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "cipher",

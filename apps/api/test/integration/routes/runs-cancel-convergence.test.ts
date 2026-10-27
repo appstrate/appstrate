@@ -11,10 +11,11 @@
  * the terminal broadcast with a fake module — if a future refactor
  * reintroduces the bypass, the spy stops being called and the suite fails.
  */
+import type { ModelPayer } from "@appstrate/core/model-payer";
 import { describe, it, expect, beforeEach, afterAll } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs, llmUsage, type CredentialSource } from "@appstrate/db/schema";
+import { runs, llmUsage } from "@appstrate/db/schema";
 import { encrypt } from "@appstrate/connect";
 import { sign } from "@appstrate/afps-runtime/events";
 import { getTestApp } from "../../helpers/app.ts";
@@ -46,7 +47,7 @@ async function seedCancellableRun(
   packageId: string,
   overrides: {
     status?: "pending" | "running";
-    modelSource?: CredentialSource | null;
+    modelSource?: ModelPayer | null;
   } = {},
 ): Promise<string> {
   const runId = `run_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;

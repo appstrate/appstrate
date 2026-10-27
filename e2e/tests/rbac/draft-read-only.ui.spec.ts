@@ -72,14 +72,13 @@ test("a never-published agent opens read-only for an operator, and becomes launc
 
   // The list shows it — creating a package activates it at its home, and the
   // index is the active set — so the detail must answer, and answer 200. The
-  // card is a clickable div, not an anchor, so its heading is what there is to
-  // click; clicking it is what a reader does, and the promise it makes is
-  // exactly what this test is about.
+  // agent's name is the row's link; following it is what a reader does, and the
+  // promise it makes is exactly what this test is about.
   await page.goto("/agents");
   const detailResponse = page.waitForResponse((response) =>
     response.url().includes(`/api/packages/agents/${scope}/${name}`),
   );
-  await page.getByRole("heading", { name: `Test Agent ${name}`, exact: true }).click();
+  await page.getByRole("link", { name: `Test Agent ${name}`, exact: true }).click();
   expect((await detailResponse).status()).toBe(200);
   await expect(page).toHaveURL(new RegExp(`/agents/${scope}/${name}$`));
 

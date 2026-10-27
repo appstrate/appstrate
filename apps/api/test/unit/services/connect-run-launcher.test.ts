@@ -33,6 +33,7 @@ import type {
   SidecarLaunchSpec,
 } from "@appstrate/core/platform-types";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import { toCredentialStringMap } from "@appstrate/connect/integration-credentials";
 import {
   createConnectRunExecutor,
   buildConnectLoginSpec,
@@ -277,6 +278,32 @@ describe("buildConnectLoginSpec", () => {
     });
   });
 
+  it("hands the login tool non-string inputs by the rule the re-bootstrap reads them back with (#1897)", async () => {
+    const ex = execution();
+    ex.inputs = {
+      email: "a@b.c",
+      password: "pw",
+      port: 5432,
+      remember: false,
+      hosts: ["a", "b"],
+      opts: { tls: true },
+      otp: null,
+    };
+    const spec = await buildConnectLoginSpec(ex, fakeMcpResolver);
+    const expected = {
+      email: "a@b.c",
+      password: "pw",
+      port: "5432",
+      remember: "false",
+      hosts: '["a","b"]',
+      opts: '{"tls":true}',
+    };
+    expect(spec.connectLogin!.inputs).toEqual(expected);
+    // The run-start re-bootstrap decrypts the persisted inputs through this same
+    // function: both readers of one login input agree on it.
+    expect(toCredentialStringMap(ex.inputs)).toEqual(expected);
+  });
+
   it("carries allow_all_uris onto egress", async () => {
     const ex = execution();
     const allowAll = JSON.parse(JSON.stringify(MANIFEST)) as IntegrationManifest;
@@ -374,11 +401,17 @@ describe("parseConnectResult", () => {
     expect(err).toBeInstanceOf(ApiError);
     const api = err as ApiError;
     expect(api.status).toBe(400);
+    expect(api.code).toBe("login_rejected");
     expect(api.param).toBe("credentials");
     // Cause…
     expect(api.message).toContain("Invalid password for user a@b.c");
     // …and remedy.
     expect(api.message).toContain("Check the credentials you submitted");
+    // The tool's own words, for a client to show beside its own sentence.
+    expect(api.extensions).toEqual({
+      login_refusal: "integration",
+      integration_diagnostic: "Invalid password for user a@b.c.",
+    });
   });
 
   it("falls back to a neutral diagnostic when the login tool reported no text", () => {
@@ -391,6 +424,7 @@ describe("parseConnectResult", () => {
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).status).toBe(400);
     expect((err as ApiError).message).toContain("rejected the submitted credentials");
+    expect((err as ApiError).extensions).toBeUndefined();
   });
 
   it("clips a runaway integration-authored diagnostic", () => {

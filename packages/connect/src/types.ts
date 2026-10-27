@@ -62,6 +62,8 @@ export interface OAuthStateRecord {
      * INSERT.
      */
     connectionId?: string;
+    /** Started by a delegated credential: the row it writes or reconnects is scoped to `spaceId`. */
+    delegated?: true;
     /** The validated metadata's `issuer` (RFC 8414): a response's `iss` must name it (RFC 9207). */
     issuer?: string;
     issParameterSupported?: boolean;

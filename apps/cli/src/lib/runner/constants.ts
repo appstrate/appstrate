@@ -37,6 +37,11 @@ export const RUNNER_UNIT_PATH = "/etc/systemd/system/appstrate-runner.service";
 /** Config directory + EnvironmentFile (0600 — carries the bearer token). */
 export const RUNNER_ETC_DIR = "/etc/appstrate-runner";
 export const RUNNER_ENV_PATH = "/etc/appstrate-runner/env";
+/**
+ * Verbatim copy of the previous env file, written (0600) only when a
+ * re-install drops keys it does not manage, so their values stay recoverable.
+ */
+export const RUNNER_ENV_PREVIOUS_PATH = "/etc/appstrate-runner/env.previous";
 
 /**
  * Env var used to hand the pairing token to an elevated `runner install`

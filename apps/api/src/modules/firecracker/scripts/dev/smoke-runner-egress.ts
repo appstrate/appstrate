@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Fourth smoke VM (#1547) — integration runner egress on the real guest kernel.
+ * Fourth smoke VM — integration runner egress on the real guest kernel.
  *
  * The REAL in-guest sidecar boots three local integrations (specs through the
  * ordinary `SidecarLaunchSpec.integrations` → INTEGRATIONS_TO_SPAWN_JSON path,
@@ -141,7 +141,7 @@ const UDP_CONTROL_PAYLOAD = "runner-egress-1547 host-control";
 const UDP_TABLE = "smoke1547";
 /**
  * Reporter ids, in spawn order (the sidecar boots specs sequentially):
- *   r1   plain-CONNECT runner allowed https://example.com (the #1458 probes)
+ *   r1   plain-CONNECT runner allowed https://example.com (the allowlist probes)
  *   r2   plain-CONNECT runner allowed https://example.org only, opted into the
  *        workspace — the cross-runner attribution probe, the per-runner plane
  *        policy probe, and the positive `workspace` control
@@ -411,8 +411,9 @@ async function openUdpCounter(aliasIp: string, fail: Fail): Promise<UdpCounter> 
     "}",
     "",
   ].join("\n");
-  // A host-side sink bound on the destination: Bun (1.3.14) crashes at process
-  // exit when a UDP socket's datagram draws an ICMP port-unreachable.
+  // A host-side sink bound on the destination: with no listener there, the
+  // control datagram draws an ICMP port-unreachable, which Bun raises on the
+  // sending socket as an unhandled ECONNREFUSED and the smoke exits 1.
   const sink = await Bun.udpSocket({ hostname: aliasIp, port: UDP_PORT }).catch((err: unknown) =>
     fail(`could not bind the UDP sink on ${aliasIp}:${UDP_PORT}: ${String(err)}`),
   );
@@ -1160,8 +1161,7 @@ async function runRunnerEgressVm(
         line.includes("mitm") ||
         line.includes("MITM") ||
         line.includes("Integration") ||
-        line.includes("integration runtime") ||
-        line.includes("boot wait")
+        line.includes("integration runtime")
       ) {
         console.log(line);
       }

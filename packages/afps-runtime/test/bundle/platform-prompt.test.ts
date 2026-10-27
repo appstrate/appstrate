@@ -214,59 +214,77 @@ describe("renderPlatformPrompt", () => {
     expect(out).not.toContain("hard container limits");
   });
 
-  it("lists skills (tools come from MCP tools/list, never the prompt)", () => {
-    const out = renderPlatformPrompt({
-      template: "T",
-      context: ctx(),
-      availableSkills: [{ id: "@x/skill", name: "x-skill" }],
-    });
-    expect(out).not.toContain("### Tools");
-    expect(out).toContain("### Skills");
-    expect(out).toContain("**x-skill**");
-  });
-
-  it("omits the API Documentation subsection when an integration has no INTEGRATION.md", () => {
+  it("renders the integrations catalog with name, description and location", () => {
     const out = renderPlatformPrompt({
       template: "T",
       context: ctx(),
       integrations: [
         {
-          id: "@org/github-mcp",
-          description: "GitHub integration",
+          id: "@appstrate/vapi",
+          description: "Voice calls",
+          location: ".pi/integrations/@appstrate/vapi/INTEGRATION.md",
         },
       ],
     });
-    expect(out).toContain("## Integration: @org/github-mcp");
-    expect(out).toContain("GitHub integration");
-    expect(out).not.toContain("### API Documentation");
+    expect(out).toContain(
+      [
+        "### Integrations",
+        "The following integrations are available in this run. Their tools are listed with your other tools, prefixed by the integration's namespace.",
+        "When an integration lists a `<location>`, read that file with your file-read tool before your first call to that integration's tools. The path is relative to your working directory.",
+        "",
+        "<available_integrations>",
+        "  <integration>",
+        "    <name>@appstrate/vapi</name>",
+        "    <description>Voice calls</description>",
+        "    <location>.pi/integrations/@appstrate/vapi/INTEGRATION.md</location>",
+        "  </integration>",
+        "</available_integrations>",
+        "",
+      ].join("\n"),
+    );
   });
 
-  it("inlines INTEGRATION.md content under an API Documentation subsection when present", () => {
+  it("omits description and location when an entry carries neither", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      integrations: [{ id: "@org/github-mcp" }],
+    });
+    expect(out).toContain("  <integration>\n    <name>@org/github-mcp</name>\n  </integration>");
+    expect(out).not.toContain("    <description>");
+    expect(out).not.toContain("    <location>");
+  });
+
+  it("places the integrations catalog before the unavailable integrations", () => {
+    const out = renderPlatformPrompt({
+      template: "T",
+      context: ctx(),
+      integrations: [{ id: "@org/github-mcp" }],
+      unavailableIntegrations: [{ id: "@org/gmail", reason: "it is switched off" }],
+    });
+    const integrations = out.indexOf("### Integrations");
+    expect(integrations).toBeGreaterThan(-1);
+    expect(out.indexOf("## Unavailable Integrations")).toBeGreaterThan(integrations);
+    expect(out).not.toContain("### Skills");
+  });
+
+  it("XML-escapes name, description and location", () => {
     const out = renderPlatformPrompt({
       template: "T",
       context: ctx(),
       integrations: [
         {
-          id: "@org/github-mcp",
-          description: "GitHub integration",
-          doc: "## GitHub API\n\nCall `list_issues` to fetch issues.",
+          id: "@o/a&b",
+          description: `</description><x attr="1">'`,
+          location: ".pi/integrations/@o/<a>/INTEGRATION.md",
         },
       ],
     });
-    expect(out).toContain("## Integration: @org/github-mcp");
-    expect(out).toContain("### API Documentation");
-    expect(out).toContain("## GitHub API");
-    expect(out).toContain("Call `list_issues` to fetch issues.");
-  });
-
-  it("treats whitespace-only INTEGRATION.md as absent (no API Documentation subsection)", () => {
-    const out = renderPlatformPrompt({
-      template: "T",
-      context: ctx(),
-      integrations: [{ id: "@org/github-mcp", doc: "   \n\n  " }],
-    });
-    expect(out).toContain("## Integration: @org/github-mcp");
-    expect(out).not.toContain("### API Documentation");
+    expect(out).toContain("<name>@o/a&amp;b</name>");
+    expect(out).toContain(
+      "<description>&lt;/description&gt;&lt;x attr=&quot;1&quot;&gt;&apos;</description>",
+    );
+    expect(out).toContain("<location>.pi/integrations/@o/&lt;a&gt;/INTEGRATION.md</location>");
   });
 
   it("lists unavailable integrations with their reason and forbids claiming results from them", () => {
@@ -284,7 +302,7 @@ describe("renderPlatformPrompt", () => {
       "- **@org/drive**: connection 'work': its credentials cannot be delivered",
     );
     expect(out).toContain("Never present data or results as coming from these integrations.");
-    expect(out).not.toContain("## Integration: @org/gmail");
+    expect(out).not.toContain("<available_integrations>");
   });
 
   it("omits the Unavailable Integrations section when nothing is unavailable", () => {
@@ -296,10 +314,12 @@ describe("renderPlatformPrompt", () => {
     expect(out).not.toContain("## Unavailable Integrations");
   });
 
-  it("omits every integration section when none are passed in", () => {
-    const out = renderPlatformPrompt({ template: "T", context: ctx() });
-    expect(out).not.toContain("## Integration:");
-    expect(out).not.toContain("### API Documentation");
+  it("omits the integrations catalog when the list is absent or empty", () => {
+    for (const integrations of [undefined, []]) {
+      const out = renderPlatformPrompt({ template: "T", context: ctx(), integrations });
+      expect(out).not.toContain("### Integrations");
+      expect(out).not.toContain("<available_integrations>");
+    }
   });
 
   it("never emits a Connected Providers section or provider_call instructions", () => {
@@ -761,6 +781,85 @@ describe("renderPlatformPrompt", () => {
       expect(out).toContain("## Output Format");
       expect(out).not.toContain("### Required shape");
       expect(out).toContain("### Full JSON Schema");
+    });
+  });
+
+  describe("User Input value rendering", () => {
+    const cases: Array<[string, unknown, string]> = [
+      ["object", { a: 1 }, '{"a":1}'],
+      ["array of primitives", ["x,y", 2], '["x,y",2]'],
+      ["array of objects", [{ id: 1 }, { id: 2 }], '[{"id":1},{"id":2}]'],
+      ["nested value", { a: { b: [1, { c: null }] } }, '{"a":{"b":[1,{"c":null}]}}'],
+      ["null", null, "null"],
+    ];
+
+    for (const [label, value, text] of cases) {
+      it(`renders ${label} as JSON without a schema`, () => {
+        const out = renderPlatformPrompt({ template: "T", context: ctx({ input: { v: value } }) });
+        expect(out).toContain(`- **v**: ${text}\n`);
+      });
+
+      it(`renders ${label} as JSON in a code span with a schema`, () => {
+        const out = renderPlatformPrompt({
+          template: "T",
+          context: ctx({ input: { v: value } }),
+          inputSchema: { properties: { v: { type: "object", description: "D" } } },
+        });
+        expect(out).toContain(`- **v** (object, optional): D — \`${text}\`\n`);
+      });
+    }
+
+    it("renders an object for a schema property declared without `properties`", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({ input: { v: { k: "x" } } }),
+        inputSchema: { properties: { v: { type: "object" } } },
+      });
+      expect(out).toContain('- **v** (object, optional):  — `{"k":"x"}`\n');
+    });
+
+    it("renders a string unchanged without a schema, even with backticks", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({ input: { v: "run `ls`" } }),
+      });
+      expect(out).toContain("- **v**: run `ls`\n");
+    });
+
+    it("builds a valid code span around a string containing a backtick", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({ input: { v: "run `ls`" } }),
+        inputSchema: { properties: { v: { type: "string", description: "D" } } },
+      });
+      expect(out).toContain("- **v** (string, optional): D — `` run `ls` ``\n");
+    });
+
+    it("does not pad when the text neither starts nor ends with a backtick", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({ input: { v: "a `b` c" } }),
+        inputSchema: { properties: { v: { type: "string", description: "D" } } },
+      });
+      expect(out).toContain("- **v** (string, optional): D — ``a `b` c``\n");
+    });
+
+    it("uses a longer fence than the longest backtick run", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({ input: { v: "a ``b`` c" } }),
+        inputSchema: { properties: { v: { type: "string", description: "D" } } },
+      });
+      expect(out).toContain("- **v** (string, optional): D — ```a ``b`` c```\n");
+    });
+
+    it("omits an undefined input value when no input schema is given", () => {
+      const out = renderPlatformPrompt({
+        template: "T",
+        context: ctx({ input: { gone: undefined, kept: "x" } }),
+      });
+      expect(out).not.toContain("gone");
+      expect(out).toContain("- **kept**: x\n");
     });
   });
 });

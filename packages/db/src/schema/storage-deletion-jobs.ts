@@ -39,11 +39,6 @@ export const storageDeletionJobs = pgTable(
      * `run_workspace_deleted`, `version_deleted`, `upload_expired`,
      * `materialization_failed`.
      *
-     * The two `file_*` labels were spelled `document_*` until the #1177 rename
-     * was finished at the physical layer; migration `0044_finish_file_rename`
-     * rewrote the stored values, so an operator grouping by `reason` sees one
-     * spelling per class of event rather than two.
-     *
      * Free text (audit/metric label), not a constrained enum.
      */
     reason: text("reason").notNull(),

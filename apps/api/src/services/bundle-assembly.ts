@@ -3,10 +3,9 @@
 /**
  * Platform-side bundle assembly helpers.
  *
- * These are thin wrappers over the runtime primitives — the only
- * platform-specific concern is plumbing {@link DbPackageCatalog} through
- * the right composition for each entry point (classic run, import, export
- * endpoint).
+ * Thin wrappers over the runtime primitives. The export delegates to
+ * {@link assembleAgentBundle}, the assembly the run bundle uses; only the
+ * import plumbs a catalog of its own.
  *
  * Runtime primitives are in `@appstrate/afps-runtime/bundle`:
  *   - `buildBundleFromCatalog` — transitive walk
@@ -16,14 +15,17 @@
 
 import {
   buildBundleFromAfps,
-  buildBundleFromCatalog,
   extractRootFromAfps,
   type Bundle,
   type BundleMetadata,
   type BundlePackage,
 } from "@appstrate/afps-runtime/bundle";
 import { DbPackageCatalog } from "./run-launcher/db-package-catalog.ts";
-import { downloadVersionZip } from "./package-storage.ts";
+import { assembleAgentBundle, downloadVersionZip } from "./package-storage.ts";
+import {
+  assertIntegrationVersionsResolved,
+  resolveRunIntegrationVersions,
+} from "./integration-service.ts";
 import { resolveVersion, versionArtifactUnavailable } from "./package-versions.ts";
 import { db } from "@appstrate/db/client";
 import { packageVersions } from "@appstrate/db/schema";
@@ -38,16 +40,31 @@ export interface BundleAssemblyScope {
 }
 
 /**
- * Build a Bundle for a classic run — the root agent was resolved from
- * the DB and its transitive deps come from the org registry.
+ * Assemble the export bundle for `root` — the same members a run of that
+ * manifest gets ({@link assembleAgentBundle}), with integration versions
+ * frozen exactly as a run freezes them (no overrides), and no signature
+ * policy: an export hands bytes over, it does not execute them.
+ *
+ * An unsatisfiable integration pin fails like a run does, as
+ * `DEPENDENCY_UNRESOLVED` carrying `details.missing` (422 dependency_unresolved).
  */
-export async function buildBundleFromDb(
+async function buildExportBundle(
   root: BundlePackage,
   scope: BundleAssemblyScope,
   metadata?: BundleMetadata,
 ): Promise<Bundle> {
-  const catalog = new DbPackageCatalog({ orgId: scope.orgId });
-  return buildBundleFromCatalog(root, catalog, { metadata, depTypes: ["skills"] });
+  const integrationVersions = assertIntegrationVersionsResolved(
+    await resolveRunIntegrationVersions({
+      agentManifest: root.manifest as Record<string, unknown>,
+      orgId: scope.orgId,
+    }),
+  );
+  return assembleAgentBundle(root, {
+    orgId: scope.orgId,
+    integrationVersions,
+    forExecution: false,
+    ...(metadata ? { metadata } : {}),
+  });
 }
 
 /**
@@ -72,7 +89,7 @@ export async function buildBundleFromUploadedAfps(
 /**
  * Resolve the version of a package that should be exported.
  *
- * Resolution order — TWO steps, the same two a run has (#636):
+ * Resolution order — TWO steps, the same two a run has:
  *   1. Explicit `versionSpec` (exact / dist-tag / semver range) — 404 if
  *      unresolvable.
  *   2. The `"latest"` dist-tag of the package.
@@ -124,7 +141,7 @@ export async function resolveExportVersion(
  *
  * Downloads the AFPS ZIP for `(packageId, version)` from storage, runs it
  * through the same extraction primitive as ingestion (`extractRootFromAfps`),
- * and walks transitive dependencies via {@link DbPackageCatalog}. The result
+ * and assembles its members via {@link buildExportBundle}. The result
  * is a canonical multi-package Bundle that can be serialised to bytes via
  * {@link writeBundleToBuffer} and streamed to the caller.
  */
@@ -137,19 +154,20 @@ export async function buildBundleForAgentExport(
   const zip = await downloadVersionZip(packageId, version);
   if (!zip) throw versionArtifactUnavailable(packageId, version);
   const root = extractRootFromAfps(new Uint8Array(zip));
-  return buildBundleFromDb(root, scope, opts.metadata);
+  return buildExportBundle(root, scope, opts.metadata);
 }
 
 /**
  * Build a Bundle whose ROOT is the agent's DRAFT state (the
  * `packages.draftManifest` + `packages.draftContent` columns) and whose
- * dependencies are the PUBLISHED versions its manifest pins select.
+ * dependencies are the PUBLISHED versions its manifest pins select (skills and
+ * integrations alike — see {@link buildExportBundle}).
  *
  * The draft is the root and only the root. `?source=draft` is the export of a
  * `version=draft` run, so it must hand the CLI the bytes that run executes —
  * and a server-side `version=draft` run without `dependency_overrides` resolves
  * `dependencies.skills` against published versions
- * (`RunPackageCatalog`, the #666 rule). Walking the closure against draft
+ * (`RunPackageCatalog`). Walking the closure against draft
  * state instead would ship the working copy of a skill the caller may not even
  * write, which the run route refuses with `403 draft_not_writable` — one
  * selector cannot mean two sets of bytes depending on which door asked. A
@@ -188,5 +206,5 @@ export async function buildBundleFromAgentDraft(
     files: rootFiles,
     integrity: "",
   };
-  return buildBundleFromDb(root, scope, metadata);
+  return buildExportBundle(root, scope, metadata);
 }

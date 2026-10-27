@@ -12,8 +12,8 @@
 
 import { ifMatch } from "../../helpers/etag.ts";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
-import { and, eq } from "drizzle-orm";
-import { auditEvents, packages, packageShares, spacePackages, spaces } from "@appstrate/db/schema";
+import { and, eq, ne } from "drizzle-orm";
+import { auditEvents, packages, spacePackages, spaces } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { expectProblem, getDbRow } from "../../helpers/assertions.ts";
@@ -163,24 +163,22 @@ beforeEach(async () => {
     draftContent: CONTENT,
   });
   await seedSpacePackage(alphaId, ID);
-  // Beta is a SECOND PLACEMENT — offered, then installed, which is the only
-  // shape a non-home installation can have (RBAC spec §6.9, and what
-  // `scripts/migration/0016` writes for the ones that predate the rule). What
+  // Beta is a SECOND PLACEMENT — a row outside the home (RBAC spec §6.9). What
   // this file pins is that a placement is not authority: Beta's builder reads
   // the package and still may not write it.
-  await seedPackageShare(betaId, ID);
   await seedSpacePackage(betaId, ID);
 
   alpha = await builderIn(alphaId);
   beta = await builderIn(betaId);
 });
 
-/** Every space the package is OFFERED to — the placement rule's second half. */
+/** Every space holding a row for the package outside its CURRENT home. */
 async function sharedSpaceIds(): Promise<string[]> {
   const rows = await db
-    .select({ spaceId: packageShares.spaceId })
-    .from(packageShares)
-    .where(eq(packageShares.packageId, ID));
+    .select({ spaceId: spacePackages.spaceId })
+    .from(spacePackages)
+    .innerJoin(packages, eq(packages.id, spacePackages.packageId))
+    .where(and(eq(spacePackages.packageId, ID), ne(spacePackages.spaceId, packages.homeSpaceId)));
   return rows.map((row) => row.spaceId);
 }
 
@@ -574,14 +572,10 @@ describe("PUT /api/packages/{scope}/{name}/home", () => {
     expect((await editSkill(beta)).status).toBe(200);
   });
 
-  it("re-places the installations the move would orphan", async () => {
-    // THE invariant of the placement rule: no `space_packages` row outside the
-    // package's home without a `package_shares` row behind it. Moving the home
-    // out of Alpha — where the package is still installed — is the one act that
-    // can break it, leaving an installation still running for a schedule and
-    // invisible on every page of the space running it. So the move writes the
-    // share that now places Alpha, and drops the destination's own (a package
-    // is not offered to the space it lives in).
+  it("keeps the old home's installation placing the package there", async () => {
+    // Moving the home out of Alpha — where the package is still installed —
+    // leaves Alpha's row, which is now a placement outside the home: Alpha
+    // keeps reading and running it. Beta's row is now the home's own.
     expect((await sharedSpaceIds()).sort()).toEqual([betaId]);
 
     expect((await move(owner(), betaId)).status).toBe(200);
@@ -721,8 +715,8 @@ describe("PUT /api/packages/{scope}/{name}/home", () => {
       code: "home_move_into_personal_space",
     });
 
-    // Refused whole: the home stands, no offer was written for the personal
-    // space (Beta's fixture share is the only one), and the trail records no
+    // Refused whole: the home stands, nothing was placed in the personal
+    // space (Beta's fixture row is the only one), and the trail records no
     // move.
     expect(await homeOf()).toBe(alphaId);
     expect((await sharedSpaceIds()).sort()).toEqual([betaId]);
@@ -1107,18 +1101,10 @@ describe("what becomes of the space the move LEAVES", () => {
    * The half of the act the word "move" does not carry.
    *
    * A package born in a space is homed AND activated there, so the space it is
-   * moved OUT of holds a `space_packages` row — and the reconciliation gives
-   * that row the offer that now places it, which is why the package goes on
-   * appearing on that space's pages after a "move". That is deliberate
-   * (nothing it had scheduled stops) but it is not what the word promises, and
-   * until `keep_in_previous_home` there was no way to say otherwise.
-   *
-   * Two properties are asserted together on the `false` branch, and the second
-   * is the one that makes this more than a UI flag: the offer and the
-   * placement ROW go together. Dropping only the offer would leave a row
-   * nothing places — the orphan `scripts/migration/0016` repairs, which no
-   * page shows and no execution door honours while it goes on carrying the
-   * space's model, proxy and stored input values.
+   * moved OUT of holds a `space_packages` row — which places it there from now
+   * on, why the package goes on appearing on that space's pages after a
+   * "move". That is deliberate (nothing it had scheduled stops) but it is not
+   * what the word promises; `keep_in_previous_home: false` removes the row.
    */
   it("keeps the package in the old home by default — the field omitted entirely", async () => {
     expect((await move(owner(), betaId)).status).toBe(200);
@@ -1135,15 +1121,13 @@ describe("what becomes of the space the move LEAVES", () => {
     expect(await skillIndexIds(alpha)).toContain(ID);
   });
 
-  it("on `false`, withdraws the offer AND the placement row together", async () => {
+  it("on `false`, withdraws the old home's placement row", async () => {
     expect((await move(owner(), betaId, false)).status).toBe(200);
 
-    // No offer for Alpha — and no row either, which is the half that keeps an
-    // orphan out of the table rather than merely out of a page.
     expect(await sharedSpaceIds()).toEqual([]);
     expect(await rowSpaceIds()).toEqual([betaId]);
     expect(await skillIndexIds(alpha)).not.toContain(ID);
-    // Alpha cannot read it any more: it holds neither of the two placements.
+    // Alpha cannot read it any more: it is neither the home nor holds a row.
     await expectProblem(await detailOf(alpha), 404);
     // …while the destination has it, homed and running.
     expect(await homeOf()).toBe(betaId);
@@ -1151,11 +1135,9 @@ describe("what becomes of the space the move LEAVES", () => {
   });
 
   it("leaves an old home that was NOT running it, whatever the flag says", async () => {
-    // `keep` rescues what was RUNNING; it does not widen. A space that had
-    // switched the package off holds no row, so there is nothing to carry over
-    // and no offer is written — on `true` exactly as on `false`. Making the
-    // two cases uniform would have handed that space a placement it did not
-    // have before the move, on an act nobody asked to share anything.
+    // `keep` keeps a row; it does not widen. An old home holding no row has
+    // nothing to keep, on `true` exactly as on `false`: writing it one would
+    // hand that space a placement on an act nobody asked to share anything.
     await db
       .delete(spacePackages)
       .where(and(eq(spacePackages.packageId, ID), eq(spacePackages.spaceId, alphaId)));

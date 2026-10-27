@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 1 — import-time validation that an agent's
+ * Import-time validation that an agent's
  * `integrations_configuration[id]` selections (tools / scopes, §4.4)
  * are consistent with the catalog declared on each referenced
  * integration's manifest.
@@ -21,8 +21,8 @@
  *    (`agent-readiness.ts`) is the authority on "integration must be
  *    active in the space", not us.
  *  - Integration declares no `tools_policy` block or no `scope_catalog`
- *    catalog → the corresponding subset check is skipped (matches the
- *    Phase 0 schema semantics).
+ *    catalog → the corresponding subset check is skipped (an absent
+ *    catalog means "unknown", not "none").
  *
  * `requireCallableTools` adds two freeze-point rules that are NOT subset checks —
  * `no_tools_selected` and `auth_key_serves_no_selected_tool` — opt-in per call
@@ -43,6 +43,7 @@ import { resolveVersionFromCatalog } from "@appstrate/core/semver";
 import type { ManifestIntegrationEntry } from "@appstrate/core/dependencies";
 import { planCreateVersionOutcome } from "@appstrate/core/version-policy";
 import {
+  findUnexposedDefaultTools,
   resolveEffectiveToolSelection,
   resolveIntegrationToolCatalog,
   validateAgentIntegrationScopes,
@@ -57,11 +58,16 @@ import { and, eq, isNull, or } from "drizzle-orm";
 import {
   getOrgWideIntegrationManifest,
   fetchMcpServerManifest,
+  readMcpServerTools,
   resolveMcpServerForSpawn,
   resolveRunIntegrationVersions,
   type IntegrationManifestCache,
 } from "./integration-service.ts";
-import { authKeyServingNoSelectedTool, getLocalServerRef } from "./integration-manifest-helpers.ts";
+import {
+  authKeyOnUnauthenticatedIntegration,
+  authKeyServingNoSelectedTool,
+  getLocalServerRef,
+} from "./integration-manifest-helpers.ts";
 
 /** One version of one package carried inside an incoming bundle. */
 export interface CarriedVersion {
@@ -241,7 +247,7 @@ function selectsNoCallableTool(
   // enumerates nothing in its manifest discovers its tools at connect time, so
   // an empty catalog means "unknown", not "none" — intersecting would refuse a
   // perfectly good publish. Same reason `validateAgentIntegrationScopes` skips
-  // its own subset check on an empty catalog (Phase 0 semantics).
+  // its own subset check on an empty catalog.
   //
   // A DECLARED surface that `hidden_tools` empties is the opposite case and must
   // refuse: the integration told us its tools and then hid all of them, so the
@@ -353,10 +359,13 @@ export async function validateAgentIntegrationSelections(
   );
 
   // The declared-but-empty gate is precisely about the entries the subset
-  // filter above DROPS, so it needs the full declared list.
-  const inspected = requireCallableTools ? integrations : configuredEntries;
-  if (inspected.length === 0) return [];
+  // filter above DROPS, so it needs the full declared list. An `auth_key` alone
+  // is a configuration too (AFPS §4.4), judged on every path.
   const configuredIds = new Set(configuredEntries.map((e) => e.id));
+  const inspected = requireCallableTools
+    ? integrations
+    : integrations.filter((e) => configuredIds.has(e.id) || e.auth_key !== undefined);
+  if (inspected.length === 0) return [];
 
   // Two ways to reach the pinned versions: a freeze point resolves them itself,
   // and a run kickoff hands over the memo it already seeded. Either way the
@@ -414,12 +423,21 @@ export async function validateAgentIntegrationSelections(
       : pinnedManifests?.get(entry.id);
     const judgedManifest = pinnedManifest ?? catalogManifest;
 
+    if (authKeyOnUnauthenticatedIntegration(judgedManifest, entry.auth_key)) {
+      errors.push({
+        field: `integrations_configuration.${entry.id}.auth_key`,
+        code: "auth_key_on_unauthenticated_integration",
+        title: "Integration declares no auth method",
+        message: `integrations_configuration.${entry.id}.auth_key names auth '${entry.auth_key}', but ${entry.id} declares no auth method (AFPS §4.4). Remove auth_key.`,
+      });
+    }
+    if (!requireCallableTools && !configuredIds.has(entry.id)) continue;
+
     // For local-source integrations the catalog comes from the referenced
     // mcp-server's MCPB tools. Fetched BEFORE both checks: the emptiness gate
     // needs it too, because "non-empty selection" and "callable selection" are
     // different properties and only the second one is the boot contract.
     let mcpServerTools: ReadonlyArray<{ name: string; description?: string }> | undefined;
-    let mcpServerCatalogKnown = false;
     const localRef = getLocalServerRef(judgedManifest);
     if (localRef) {
       // Same rule as the integration manifest above, one level deeper: at a
@@ -429,36 +447,14 @@ export async function validateAgentIntegrationSelections(
       // reads `packages.draft_manifest`, which the runtime never does, so a tool
       // present only in the mcp-server author's draft used to pass publish and
       // then register nothing at boot.
-      // Same post-import union one level deeper: `source.server.version` is
-      // resolved against the carried + existing mcp-server versions.
-      const carriedServerVersions = extraManifests?.get(localRef.name);
-      const postImportServer = carriedServerVersions
-        ? await resolvePostImportManifest(
-            localRef.name,
-            localRef.version,
-            orgId,
-            carriedServerVersions,
-          )
-        : null;
-      const mcpServer = postImportServer
-        ? (postImportServer as unknown as McpServerManifest)
-        : judgesPinnedVersions
+      const mcpServer =
+        (await resolvePostImportServer(localRef, orgId, extraManifests)) ??
+        (judgesPinnedVersions
           ? await resolveMcpServerForSpawn(localRef.name, orgId, localRef.version).then((r) =>
               r.ok ? r.manifest : null,
             )
-          : await fetchMcpServerManifest(localRef.name);
-      if (mcpServer) {
-        const t = (mcpServer as { tools?: Array<{ name?: unknown; description?: unknown }> }).tools;
-        if (Array.isArray(t)) {
-          mcpServerCatalogKnown = true;
-          mcpServerTools = t
-            .filter((e): e is { name: string; description?: string } => typeof e?.name === "string")
-            .map((e) => ({
-              name: e.name,
-              description: typeof e.description === "string" ? e.description : undefined,
-            }));
-        }
-      }
+          : await fetchMcpServerManifest(localRef.name));
+      if (mcpServer) mcpServerTools = readMcpServerTools(mcpServer);
     }
     // ONE catalog, both checks. `resolveIntegrationToolCatalog` already
     // subtracts `hidden_tools` and appends the synthetic api_call/api_upload
@@ -472,7 +468,7 @@ export async function validateAgentIntegrationSelections(
     // or when the referenced mcp-server resolved and enumerated tools. Absent
     // both, the surface is discovered at runtime and must not be second-guessed.
     const surfaceIsKnown =
-      mcpServerCatalogKnown ||
+      mcpServerTools !== undefined ||
       Object.keys((judgedManifest as { tools_policy?: Record<string, unknown> }).tools_policy ?? {})
         .length > 0;
 
@@ -519,10 +515,45 @@ export async function validateAgentIntegrationSelections(
             ? "Unknown integration tool"
             : issue.code === "wildcard_not_authorized"
               ? "Wildcard tools not permitted by integration"
-              : "Scope outside integration catalog",
+              : issue.code === "invalid_format"
+                ? "Scope is not one OAuth scope token"
+                : "Scope outside integration catalog",
         message: issue.message,
       });
     }
   }
   return errors;
+}
+
+/** {@link resolvePostImportManifest} for `source.server`; `null` when the bundle carries none. */
+async function resolvePostImportServer(
+  localRef: { name: string; version: string },
+  orgId: string,
+  extraManifests: ValidateAgentIntegrationSelectionsInput["extraManifests"],
+): Promise<McpServerManifest | null> {
+  const carried = extraManifests?.get(localRef.name);
+  if (!carried) return null;
+  const server = await resolvePostImportManifest(localRef.name, localRef.version, orgId, carried);
+  return server as unknown as McpServerManifest | null;
+}
+
+/**
+ * {@link findUnexposedDefaultTools} for a `local` integration, against the `tools[]` of the
+ * mcp-server a run spawns, once the bundle carrying `extraManifests` is imported when given.
+ */
+export async function findUnexposedLocalDefaultTools(
+  manifest: Record<string, unknown>,
+  orgId: string,
+  extraManifests?: ValidateAgentIntegrationSelectionsInput["extraManifests"],
+): Promise<{ path: (string | number)[]; message: string }[]> {
+  if (manifest.type !== "integration" || !Array.isArray(manifest.default_tools)) return [];
+  const localRef = getLocalServerRef(manifest as unknown as IntegrationManifest);
+  if (!localRef) return [];
+  const server =
+    (await resolvePostImportServer(localRef, orgId, extraManifests)) ??
+    (await resolveMcpServerForSpawn(localRef.name, orgId, localRef.version).then((r) =>
+      r.ok ? r.manifest : null,
+    ));
+  const tools = server ? readMcpServerTools(server) : undefined;
+  return tools ? findUnexposedDefaultTools(manifest, tools) : [];
 }

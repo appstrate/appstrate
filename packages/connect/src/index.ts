@@ -30,15 +30,15 @@ export { OAuthCallbackError } from "./oauth.ts";
 // apps/api's OAuth2 strategy so every secret-bearing OAuth request is fail-closed.
 export { oauthEgressFetch, isAllowedInternalIdpHost, SsrfBlockedError } from "./oauth-egress.ts";
 
-// Token refresh
-export { RefreshError, performRefreshTokenExchange } from "./token-refresh.ts";
+// Token requests (refresh, and a `connect.login` grant on an oauth2 auth)
+export { RefreshError, performRefreshTokenExchange, performTokenRequest } from "./token-refresh.ts";
 export type { RefreshExchangeResult } from "./token-refresh.ts";
 
-// The one token-endpoint symbol that crosses the package boundary: apps/api's
-// integration refresh classifies on it. `parseTokenResponse`, the request
+// The token-endpoint symbols that cross the package boundary: apps/api's
+// integration refresh classifies on the first and reads its grant with the second. `parseTokenResponse`, the request
 // builders and the error classifier stay internal — `token-exchange.ts` /
 // `token-refresh.ts` are the only callers and they import the concrete module.
-export { ClientAuthInvariantError } from "./token-utils.ts";
+export { ClientAuthInvariantError, withOfflineAccess, withProvenScopes } from "./token-utils.ts";
 
 // Credential-proxy primitives, in the shape the /api/credential-proxy/proxy
 // route's service layer consumes them. The in-container sidecar runs the same
@@ -47,7 +47,7 @@ export { ClientAuthInvariantError } from "./token-utils.ts";
 // `@appstrate/db`) — see `runtime-pi/sidecar/helpers.ts`. Only what a barrel
 // consumer actually imports is re-exported here; `applyInjectedCredentialHeader`
 // and `buildInjectedCredentialHeader` are reached through the subpath.
-export { substituteVars, applyInjectedCredentialHeaderToHeaders } from "./proxy-primitives.ts";
+export { applyInjectedCredentialHeaderToHeaders } from "./proxy-primitives.ts";
 export type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
 
 // ─── AFPS integration manifest ─────────────────────────────────────────
@@ -75,7 +75,7 @@ export { planCaBundle } from "./proxy-ca-planner.ts";
 export type { RefreshContext } from "./token-refresh.ts";
 
 // Connect-session tokens — short-lived HMAC capability tokens that gate the
-// unified hosted-connect-portal flow (issue #769). Stateless mint/verify;
+// unified hosted-connect-portal flow. Stateless mint/verify;
 // the secret (`CONNECT_SESSION_SECRET`) and single-use `jti` enforcement are
 // the caller's responsibility.
 export { mintConnectSession, verifyConnectSession } from "./connect-session-token.ts";
@@ -101,20 +101,29 @@ export {
 export {
   initiateIntegrationOAuth,
   handleIntegrationOAuthCallback,
+  CLIENT_METADATA_REDIRECT_TAG_PREFIX,
+  isClientMetadataRedirectTag,
   OAUTH_STATE_TTL_SECONDS,
 } from "./integration-oauth.ts";
 // Only the callback-result type crosses the package boundary (apps/api's
 // integrations route + connect strategy). The initiate-side input/result
 // shapes stay internal — callers build the argument inline and read the
 // result via inference.
-export type { IntegrationOAuthCallbackResult } from "./integration-oauth.ts";
+export type {
+  AuthorizationServerBinding,
+  IntegrationOAuthCallbackResult,
+} from "./integration-oauth.ts";
 
 // MCP-spec auto-DCR primitives (RFC 9728 protected-resource discovery + RFC 7591
 // dynamic client registration). The apps/api orchestrator chains these to
 // self-register an OAuth client when an integration opts into dynamic
 // registration and no client is pre-registered.
-// Only the two orchestrating entry points cross the boundary; callers build
-// the argument inline and read the result via inference, so neither module's
-// input/output types are re-exported here.
-export { discoverProtectedResourceMetadata } from "./mcp-oauth-discovery.ts";
+// The challenge parsers serve integration discovery (reading a server's 401).
+// Callers build the arguments inline and read the results via inference, so
+// neither module's input/output types are re-exported here.
+export {
+  discoverProtectedResourceMetadata,
+  parseResourceMetadataChallenge,
+  parseScopeChallenge,
+} from "./mcp-oauth-discovery.ts";
 export { registerDynamicClient, DynamicClientRegistrationError } from "./dcr.ts";

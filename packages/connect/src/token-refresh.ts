@@ -39,7 +39,7 @@ export interface RefreshContext {
 }
 
 /**
- * Error thrown by performRefreshTokenExchange when the OAuth token refresh call fails.
+ * Error thrown by {@link performTokenRequest} when the token endpoint call fails.
  *
  * `kind` discriminates between three cases that callers MUST treat differently:
  *
@@ -81,7 +81,7 @@ export class RefreshError extends Error {
   }
 }
 
-/** Success payload from {@link performRefreshTokenExchange}. */
+/** Success payload from {@link performTokenRequest}. */
 export interface RefreshExchangeResult {
   /** Normalised token response (access/refresh token, expiry, scopes). */
   parsed: ParsedTokenResponse;
@@ -90,38 +90,55 @@ export interface RefreshExchangeResult {
 }
 
 /**
- * Perform the OAuth2 `grant_type=refresh_token` HTTP exchange for the
- * integration (`integration_connections`) refresh path: build the request,
- * POST it, classify failures into {@link RefreshError} (`revoked` vs
- * `transient`), and parse the success body. Table-specific concerns — which
- * row to write back, scope-shrink detection, `needsReconnection` flips —
- * stay in the caller so the wire mechanics stay isolated and reusable.
+ * Parameters the platform owns in a token request: client authentication
+ * (RFC 6749 §2.3, RFC 7523 §2.2) and the RFC 8707 `resource`. A grant never carries them.
  */
-export async function performRefreshTokenExchange(
+const PLATFORM_OWNED_PARAMS = [
+  "client_id",
+  "client_secret",
+  "client_assertion",
+  "client_assertion_type",
+  "resource",
+] as const;
+
+/**
+ * Perform an OAuth2 token request (RFC 6749 §3.2) carrying `grant`: add the
+ * `resource` and the client authentication, POST it, classify failures into
+ * {@link RefreshError} (`revoked` / `client_rejected` / `transient`), and parse
+ * the success body. `keepRefreshToken` is the token kept when the response omits
+ * one. Table-specific concerns — which row to write back, `needsReconnection`
+ * flips — stay in the caller so the wire mechanics stay isolated and reusable.
+ */
+export async function performTokenRequest(
   ctx: RefreshContext,
-  refreshToken: string,
-  opts: { label: string },
+  grant: Readonly<Record<string, string>>,
+  opts: { label: string; keepRefreshToken?: string },
 ): Promise<RefreshExchangeResult> {
+  // A malformed grant is a configuration fault, never a `RefreshError`: nothing is sent.
+  if (!grant.grant_type) throw new Error(`${opts.label}: the grant carries no grant_type`);
+  const owned = PLATFORM_OWNED_PARAMS.filter((name) => Object.hasOwn(grant, name));
+  if (owned.length > 0) {
+    throw new Error(`${opts.label}: the grant carries platform-owned ${owned.join(", ")}`);
+  }
   // AFPS default for `token_endpoint_auth_method` is
   // `client_secret_basic` (RFC 8414 §2 / RFC 7591 §2). When the manifest
   // omits the field, fall through to Basic auth instead of body auth so the
-  // refresh wire matches the wider OAuth 2.1 ecosystem (Anthropic, Google,
+  // wire matches the wider OAuth 2.1 ecosystem (Anthropic, Google,
   // GitHub, Slack all accept Basic; some IdPs require it).
   //
-  // Per-method body shape (RFC 6749 §6 + RFC 7591 §2):
-  //   - client_secret_basic: only grant_type + refresh_token in body; client
+  // Per-method body shape (RFC 6749 §2.3 + RFC 7591 §2):
+  //   - client_secret_basic: only the grant in body; client
   //     credentials travel in the Authorization: Basic header.
   //   - client_secret_post:  client_id + client_secret in body, no Basic header.
   //   - none (public client): client_id in body, NO client_secret, NO Basic
-  //     header. RFC 6749 §6 + §3.2.1: a public client MUST authenticate
-  //     itself by including its client_id in the request.
+  //     header. RFC 6749 §3.2.1: a public client identifies itself by its
+  //     client_id in the request — identification, not authentication.
   const tokenAuthMethod = ctx.tokenEndpointAuthMethod ?? "client_secret_basic";
   // Same invariant as the initial exchange: the caller hands us a method and a
   // secret that belong together, or nothing is sent at all.
   assertClientAuthCoherent(tokenAuthMethod, ctx.clientSecret, opts.label);
   const bodyParams: Record<string, string> = {
-    grant_type: "refresh_token",
-    refresh_token: refreshToken,
+    ...grant,
     ...(ctx.resource ? { resource: ctx.resource } : {}),
   };
   if (tokenAuthMethod === "client_secret_post") {
@@ -132,12 +149,12 @@ export async function performRefreshTokenExchange(
     bodyParams.client_id = ctx.clientId;
   }
   // tokenAuthMethod === "client_secret_basic" → headers carry credentials,
-  // body stays minimal (grant_type + refresh_token).
+  // body stays the grant.
   const body = buildTokenBody(bodyParams);
 
   let response: Response;
   try {
-    // SSRF-guarded: this POST carries refresh_token + client_secret. A blocked
+    // SSRF-guarded: this POST carries the grant + client_secret. A blocked
     // host throws SsrfBlockedError (caught below → `transient`; the message
     // carries only the guard's host/reason, never the secret body).
     const doFetch = ctx.fetchImpl ?? oauthEgressFetch;
@@ -148,12 +165,19 @@ export async function performRefreshTokenExchange(
       signal: AbortSignal.timeout(30_000),
     });
   } catch (err) {
-    throw new RefreshError(`${opts.label} network error: ${getErrorMessage(err)}`, "transient");
+    // The cause tells a request never sent (`SsrfBlockedError`) from one that may have arrived.
+    throw new RefreshError(
+      `${opts.label} network error: ${getErrorMessage(err)}`,
+      "transient",
+      undefined,
+      undefined,
+      { cause: err },
+    );
   }
 
-  // A 2xx without `access_token` is a FAILED refresh, never a success with the
-  // caller's current token substituted: that would persist the very token the
-  // refresh exists to replace and reset `needsReconnection` / the failure
+  // A 2xx without `access_token` is a FAILED request, never a success with the
+  // caller's current token substituted: on a refresh that would persist the very
+  // token it exists to replace and reset `needsReconnection` / the failure
   // streak on a dead credential.
   const read = await readTokenResponse(response);
   if (!read.ok) {
@@ -166,9 +190,26 @@ export async function performRefreshTokenExchange(
     );
   }
 
-  // `refreshToken` as the third argument is a DIFFERENT case: RFC 6749 §6 lets
-  // the server omit `refresh_token` to mean "keep the one you have", so
-  // non-rotating providers (Google, Slack, GitHub) depend on it.
-  const parsed = parseTokenResponse(read.raw, refreshToken);
+  // `keepRefreshToken` is a DIFFERENT case: RFC 6749 §6 lets the server omit
+  // `refresh_token` to mean "keep the one you have", so non-rotating providers
+  // (Google, Slack, GitHub) depend on it.
+  const parsed = parseTokenResponse(read.raw, opts.keepRefreshToken);
   return { parsed, raw: read.raw };
+}
+
+/**
+ * The `grant_type=refresh_token` exchange (RFC 6749 §6) of the integration
+ * (`integration_connections`) refresh path; keeps `refreshToken` when the
+ * server does not rotate it.
+ */
+export function performRefreshTokenExchange(
+  ctx: RefreshContext,
+  refreshToken: string,
+  opts: { label: string },
+): Promise<RefreshExchangeResult> {
+  return performTokenRequest(
+    ctx,
+    { grant_type: "refresh_token", refresh_token: refreshToken },
+    { label: opts.label, keepRefreshToken: refreshToken },
+  );
 }

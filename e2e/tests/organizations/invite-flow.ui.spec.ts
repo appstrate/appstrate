@@ -15,10 +15,25 @@
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { registerUser } from "../../helpers/seed.ts";
-import type { Browser } from "@playwright/test";
+import type { Browser, Page } from "@playwright/test";
 
 function uid() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+}
+
+const INVITE = /^(Inviter un membre|Invite a member)$/;
+const STANDARD_ROLE = /^(Membre|Member)\b/;
+
+/**
+ * Settings › Users: the page's Actions menu offers « Inviter un membre », which
+ * opens the invitation modal over the settings overlay (a second dialog).
+ */
+async function openInviteDialog(page: Page) {
+  await page.getByRole("button", { name: "Actions", exact: true }).click();
+  await page.getByRole("menuitem", { name: INVITE }).click();
+  const dialog = page.getByRole("dialog", { name: INVITE });
+  await expect(dialog).toBeVisible();
+  return dialog;
 }
 
 /** A browser context carrying only the given Better Auth session cookie. */
@@ -214,7 +229,7 @@ test("onboarding offers organization roles and submits a standard invitation", a
   const email = `onboarding-member-${uid()}@test.com`;
   await page.getByRole("textbox", { name: /Adresse e-mail|Email address/ }).fill(email);
   await expect(page.getByRole("radio", { name: /Invité|Guest/ })).toHaveCount(0);
-  await page.getByRole("radio", { name: /Utilisateur standard|Standard user/ }).check();
+  await page.getByRole("radio", { name: STANDARD_ROLE }).check();
   const submitted = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
@@ -233,8 +248,7 @@ test("mobile organization invitations keep email usable and submit with Enter", 
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/org-settings/members");
-  await page.getByTestId("invite-org-user-button").click();
-  const dialog = page.getByRole("dialog");
+  const dialog = await openInviteDialog(page);
   const email = dialog.getByRole("textbox", {
     name: /Adresse e-mail|Email address/,
   });
@@ -253,7 +267,7 @@ test("mobile organization invitations keep email usable and submit with Enter", 
   expect((await submitted).status()).toBe(201);
   await expect(page.getByText(address, { exact: true })).toBeVisible();
   await expect(dialog).toHaveCount(0);
-  await page.getByTestId("invite-org-user-button").click();
+  await openInviteDialog(page);
   await expect(email).toHaveValue("");
 });
 
@@ -272,7 +286,7 @@ test("invitation space catalogue failures are visible and recover through retry"
     }),
   );
   await page.goto("/org-settings/members");
-  await page.getByTestId("invite-org-user-button").click();
+  await openInviteDialog(page);
   const alert = page.getByRole("alert").filter({ hasText: "Role catalog unavailable" });
   await expect(alert).toBeVisible();
   await expect(
@@ -303,12 +317,14 @@ test("a pending standard invitation can become a guest invitation with a space a
   expect(created.status()).toBe(201);
   const invitation = await created.json();
   await page.goto("/org-settings/members");
-  // Scoped to this invitation's card: the page carries one edit button per row.
+  // A click on the row opens its edit modal (`?invitation=<id>`); the row's
+  // accessible name carries the address, so it is this invitation's.
   await page
-    .locator(`[data-invitation-id="${invitation.id}"]`)
-    .getByRole("button", { name: /^(Modifier|Edit)$/ })
+    .getByRole("button", {
+      name: new RegExp(`(Modifier l.invitation de|Edit the invitation of) ${email}`),
+    })
     .click();
-  const dialog = page.getByRole("dialog");
+  const dialog = page.getByRole("dialog", { name: /Modifier l.invitation|Edit invitation/ });
   await dialog.getByRole("radio", { name: /Invité|Guest/ }).check();
   await dialog
     .getByRole("combobox", {
@@ -344,8 +360,7 @@ test("admin invitations explain all-space access while preserving an optional as
   browserCtx,
 }) => {
   await page.goto("/org-settings/members");
-  await page.getByTestId("invite-org-user-button").click();
-  const dialog = page.getByRole("dialog");
+  const dialog = await openInviteDialog(page);
   const pickRole = (name: RegExp) => dialog.getByRole("radio", { name }).check();
   await dialog
     .getByRole("textbox", { name: /Adresse e-mail|Email address/ })
@@ -363,7 +378,7 @@ test("admin invitations explain all-space access while preserving an optional as
   await expect(
     dialog.getByText(/Administre l’organisation|Manages the organization/i).last(),
   ).toBeVisible();
-  await pickRole(/Utilisateur standard|Standard user/);
+  await pickRole(STANDARD_ROLE);
   await expect(assignmentRole).toBeEnabled();
   await expect(assignmentRole).toContainText(/Lecteur|Viewer/);
   await pickRole(/^(Administrateur|Admin)\b/);

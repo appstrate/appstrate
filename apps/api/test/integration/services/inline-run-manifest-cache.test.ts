@@ -89,6 +89,7 @@ describe("inline run — one manifest memo across preflight and kickoff", () => 
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         actor: { type: "user", id: ctx.user.id },
+        payerUserId: ctx.user.id,
         runId: `run_${crypto.randomUUID()}`,
         preflight: result,
         parsed: {},

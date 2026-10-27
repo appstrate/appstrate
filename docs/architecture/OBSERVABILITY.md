@@ -1,7 +1,7 @@
 # Observability (OpenTelemetry)
 
 Production observability for the platform API, built on **OpenTelemetry** with
-**OTLP/HTTP** export. Addresses issue #616 item 1.
+**OTLP/HTTP** export.
 
 > **Disabled by default — twice over.** The OTel implementation lives in the
 > opt-in workspace module `@appstrate/module-observability`
@@ -43,7 +43,7 @@ stays a no-op; without the module, the env vars are inert.
 The four `OTEL_*` vars above are **module-owned**: they are read directly from
 `process.env` by the module (`packages/module-observability/src/env.ts`) with
 the platform's usual parse semantics (`"true"`/`"1"` case-insensitive for
-booleans; an empty endpoint counts as unset) — they are no longer part of the
+booleans; an empty endpoint counts as unset) — they are not part of the
 `@appstrate/env` Zod schema, and are annotated as module vars in `docs/ENV.md`.
 
 The metric export cadence is fixed at 60s (no custom knob).
@@ -262,11 +262,11 @@ them.)
   observability cosmetics, not propagation, and is unchanged.)
 
   The gate covers the **run-execution trace tree too**, not just the SERVER
-  span. Previously the run path (`runs.ts` → pipeline → `executeAgentInBackground`
-  → container) seeded itself from the raw inbound header (`c.get("traceparent")`)
-  — a **cross-process** link that bypassed the trust check, so an attacker could
-  still splice the run + container spans into a chosen `trace_id`. The run routes
-  now resolve the seed via `runTraceparent(c)`: inbound header when trusted,
+  span. A run path (`runs.ts` → pipeline → `executeAgentInBackground` → container)
+  seeded from the raw inbound header (`c.get("traceparent")`) would be a
+  **cross-process** link that bypasses the trust check, letting an attacker
+  splice the run + container spans into a chosen `trace_id`. The run routes
+  resolve the seed via `runTraceparent(c)`: inbound header when trusted,
   otherwise the in-process SERVER span via `currentTraceparent()` (or a fresh
   root when telemetry is off). With trust off the run trace is genuinely
   in-process, eliminating both the spoof vector and the SERVER-vs-run trace

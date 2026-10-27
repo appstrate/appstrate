@@ -33,12 +33,13 @@ describe("loadModel — catalog fallback", () => {
     const model = await seedOrgModel({
       orgId: ctx.orgId,
       credentialId: cred.id,
+      providerId: cred.providerId,
       label: "GPT-4o preset",
       modelId: "gpt-4o",
       enabled: true,
       cost: null,
     });
-    const resolved = await loadModel(ctx.orgId, model.id);
+    const resolved = await loadModel(ctx.orgId, model.id, null);
     expect(resolved).not.toBeNull();
     expect(resolved!.cost).not.toBeNull();
     // Sanity check the canonical numbers — the catalog ships gpt-4o at
@@ -58,13 +59,14 @@ describe("loadModel — catalog fallback", () => {
     const model = await seedOrgModel({
       orgId: ctx.orgId,
       credentialId: cred.id,
+      providerId: cred.providerId,
       label: "GPT-4o with org discount",
       modelId: "gpt-4o",
       enabled: true,
       // Hypothetical enterprise discount — half the public list price.
       cost: { input: 1.25, output: 5, cacheRead: 0, cacheWrite: 0 },
     });
-    const resolved = await loadModel(ctx.orgId, model.id);
+    const resolved = await loadModel(ctx.orgId, model.id, null);
     expect(resolved!.cost!.input).toBeCloseTo(1.25, 4);
     expect(resolved!.cost!.output).toBeCloseTo(5, 4);
   });
@@ -81,12 +83,13 @@ describe("loadModel — catalog fallback", () => {
     const model = await seedOrgModel({
       orgId: ctx.orgId,
       credentialId: cred.id,
+      providerId: cred.providerId,
       label: "Custom fine-tune",
       modelId: "ft:gpt-4o:my-org:custom:xyz123",
       enabled: true,
       cost: null,
     });
-    const resolved = await loadModel(ctx.orgId, model.id);
+    const resolved = await loadModel(ctx.orgId, model.id, null);
     expect(resolved).not.toBeNull();
     expect(resolved!.cost).toBeNull();
   });
@@ -105,6 +108,7 @@ describe("loadModel — catalog fallback", () => {
     const model = await seedOrgModel({
       orgId: ctx.orgId,
       credentialId: cred.id,
+      providerId: cred.providerId,
       label: "GPT-4o catalog",
       modelId: "gpt-4o",
       enabled: true,
@@ -112,7 +116,7 @@ describe("loadModel — catalog fallback", () => {
       // Drizzle column is nullable — leave the four catalog-derivable
       // fields out so the resolver picks them up live from the catalog.
     });
-    const resolved = await loadModel(ctx.orgId, model.id);
+    const resolved = await loadModel(ctx.orgId, model.id, null);
     expect(resolved).not.toBeNull();
     expect(resolved!.contextWindow).toBeGreaterThan(0);
     expect(resolved!.input).toContain("text");
@@ -127,8 +131,13 @@ describe("loadModel — catalog fallback", () => {
         apiShape: "openai-completions",
         apiKey: "sk-test",
       });
-      const model = await seedOrgModel({ orgId: ctx.orgId, credentialId: cred.id, modelId });
-      return (await loadModel(ctx.orgId, model.id))!.piProvider;
+      const model = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId: cred.id,
+        providerId: cred.providerId,
+        modelId,
+      });
+      return (await loadModel(ctx.orgId, model.id, null))!.piProvider;
     };
     expect(await piProviderOf("moonshot", "kimi-k2.6")).toBe("moonshotai");
     expect(await piProviderOf("openai-compatible", "my-model")).toBeNull();
@@ -152,14 +161,15 @@ describe("loadModel — catalog fallback", () => {
       const model = await seedOrgModel({
         orgId: ctx.orgId,
         credentialId: cred.id,
+        providerId: cred.providerId,
         modelId,
         reasoning,
       });
-      const resolved = (await loadModel(ctx.orgId, model.id))!;
+      const resolved = (await loadModel(ctx.orgId, model.id, null))!;
       if (baseUrl) expect(resolved.baseUrl).toBe(baseUrl);
       const generation = resolved.generation?.reasoning;
-      const listed = (await listOrgModels(ctx.orgId)).find((m) => m.id === model.id)!.generation
-        ?.reasoning;
+      const listed = (await listOrgModels(ctx.orgId, null)).find((m) => m.id === model.id)!
+        .generation?.reasoning;
       expect(listed).toEqual(generation!);
       return generation;
     };
@@ -182,7 +192,7 @@ describe("loadModel — catalog fallback", () => {
   // `invalid input syntax for type uuid`, surfacing as a 500. loadModel now
   // swallows the cast failure and resolves null ("not found").
   it("returns null (no throw) for a non-UUID modelDbId", async () => {
-    const resolved = await loadModel(ctx.orgId, "gpt-5.5");
+    const resolved = await loadModel(ctx.orgId, "gpt-5.5", null);
     expect(resolved).toBeNull();
   });
 });

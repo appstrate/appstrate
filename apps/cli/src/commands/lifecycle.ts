@@ -12,7 +12,7 @@
  * the containers their original install registered.
  *
  * The Compose CLI surface for `up / stop / restart / logs / ps / down`
- * has been stable for years — see #343 for the tradeoff analysis. We
+ * has been stable for years. We
  * pin `--project-name` on every invocation so an unrelated host that
  * happens to have a similarly-named running project never collides
  * with our stack.

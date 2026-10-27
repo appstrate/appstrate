@@ -161,6 +161,23 @@ describe("skill SKILL.md frontmatter gate (AFPS §3.3)", () => {
       });
     }
 
+    it("says where a YAML syntax error sits, in SKILL.md's own lines", async () => {
+      // Line 3 of the file (the block's line 2): the flow sequence is never closed.
+      const res = await createSkill(ctx, "---\nname: gate-skill\ndescription: [a\n---\nBody.");
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as ProblemBody & {
+        errors?: { line?: number; column?: number }[];
+      };
+      expect(body.errors?.[0]).toMatchObject({
+        code: "skill_invalid_frontmatter",
+        line: 3,
+        column: 16,
+      });
+      // A rule with no position carries none.
+      const unnamed = (await (await createSkill(ctx, "# Just a body")).json()) as ProblemBody;
+      expect(unnamed.errors?.[0]).not.toHaveProperty("line");
+    });
+
     it("names the rule it broke in the message", async () => {
       const res = await createSkill(ctx, "---\nname: gate-skill\n---\nBody.");
       const body = (await res.json()) as ProblemBody;

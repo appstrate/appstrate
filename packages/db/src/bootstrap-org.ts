@@ -15,7 +15,7 @@
 // inserting anything.
 
 import { and, eq } from "drizzle-orm";
-import { toSlug } from "@appstrate/core/naming";
+import { isReservedScope, toSlug } from "@appstrate/core/naming";
 import { db } from "./client.ts";
 import { organizations, organizationMembers } from "./schema/organizations.ts";
 import { provisionOrg } from "./provision-org.ts";
@@ -49,6 +49,9 @@ export type CreateBootstrapOrgResult =
  *   bootstrap never fails halfway through signup. After 5 attempts, the
  *   final insert is allowed to surface the unique-constraint error to the
  *   caller — at that point the operator's slug strategy is unrecoverable.
+ *   A platform-reserved slug (`isReservedScope`) counts as a collision: the
+ *   root org of an instance named "Appstrate" becomes `appstrate-2`, never
+ *   the scope of the system packages.
  *
  * `slugOverride`, when truthy, takes precedence over the name-derived slug.
  */
@@ -75,12 +78,16 @@ export async function createBootstrapOrg(
   const baseSlug = (slugOverride && slugOverride.trim()) || toSlug(orgName, 50) || "default";
   let slug = baseSlug;
   for (let attempt = 0; attempt < 5; attempt++) {
-    const [collision] = await db
-      .select({ id: organizations.id })
-      .from(organizations)
-      .where(eq(organizations.slug, slug))
-      .limit(1);
-    if (!collision) break;
+    const taken =
+      isReservedScope(slug) ||
+      (
+        await db
+          .select({ id: organizations.id })
+          .from(organizations)
+          .where(eq(organizations.slug, slug))
+          .limit(1)
+      ).length > 0;
+    if (!taken) break;
     slug = `${baseSlug}-${attempt + 2}`;
   }
 

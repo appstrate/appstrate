@@ -19,7 +19,7 @@
 #
 # All paths below are relative to the repo root.
 
-ARG BUN_IMAGE=oven/bun:1.3.14-alpine
+ARG BUN_IMAGE=oven/bun:1.4.2-alpine
 
 # ── Stage 1 — dependency install ──────────────────────────────────
 # Produces a runtime-pi-scoped `node_modules` tree (filter-installed
@@ -51,6 +51,7 @@ COPY --parents */package.json */*/package.json ./
 # would be a no-op for what's installed here — we omit it.
 RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
     bun install \
+        --frozen-lockfile \
         --filter=appstrate-pi-runtime \
         --no-progress
 
@@ -137,7 +138,7 @@ ENV NODE_ENV=production
 # rooted in the venv's own site-packages (always present), and the path
 # self-aligns with whatever python3 ships in the base image.
 #
-# Common data libraries are baked into the venv (#628, #316 items 2-3):
+# Common data libraries are baked into the venv:
 #   - openpyxl   Excel read/write — concrete demand from office-automation
 #                skills (edi-order-parser, orgabusiness-export-compta)
 #   - pandas     tabular data wrangling (CSV/Excel pipelines)
@@ -234,7 +235,7 @@ RUN mkdir -p node_modules/@earendil-works \
 # injection; nothing more, and nothing should be built on top of it.
 COPY --from=deps /build/runtime-pi/dist/entrypoint.js /build/runtime-pi/dist/launcher.js ./dist/
 
-# Pre-warmed Bun transpiler cache (issue #835). Bun re-parses every JS file
+# Pre-warmed Bun transpiler cache. Bun re-parses every JS file
 # >50 KB on each process start — for the ~1.6 MB bundled entrypoint plus the
 # external Pi SDK dist files that is a large share of the per-run cold start,
 # and on the firecracker adapter (VM-per-run, empty guest page cache) it is

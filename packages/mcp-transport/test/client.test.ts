@@ -13,6 +13,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
@@ -250,16 +251,14 @@ describe("createMcpHttpClient — connect cancellation", () => {
 
 /**
  * `client-connect-residual` — the documented gap in {@link connectWithSignal}'s
- * bound, pinned so the docstring cannot drift back into claiming the signal
- * covers the whole connect. `Client.connect` awaits a
+ * bound, pinned so the docstring cannot drift. `Client.connect` awaits a
  * `notifications/initialized` POST AFTER the options-bounded `initialize`, and
- * the SDK gives that call no options, hence no signal.
- *
- * This asserts CURRENT behaviour, not a fix: it passes before and after. Delete
- * it only together with the residual paragraph it guards.
+ * the SDK gives that call no signal: an abort landing there fails the connect
+ * (its client would be dead, the transport closed), but only once that POST
+ * returns. Delete it only together with the residual paragraph it guards.
  */
 describe("createMcpHttpClient — client-connect-residual", () => {
-  it("does not honour an abort landing after initialize settles", async () => {
+  it("fails the connect on an abort landing after initialize, once the POST returns", async () => {
     const NOTIFY_DELAY_MS = 200;
     const { fetch: base, url } = mountStandalone([echoTool()]);
     const ac = new AbortController();
@@ -275,10 +274,41 @@ describe("createMcpHttpClient — client-connect-residual", () => {
     }) as typeof fetch;
 
     const started = Date.now();
-    const client = await createMcpHttpClient(url, { fetch: fetcher, signal: ac.signal });
-    // Resolved despite the abort, and only after the POST came back.
-    expect(Date.now() - started).toBeGreaterThanOrEqual(NOTIFY_DELAY_MS);
-    await client.close();
+    const caught = await createMcpHttpClient(url, {
+      fetch: fetcher,
+      signal: ac.signal,
+      era: "legacy",
+    }).catch((err: unknown) => err);
+    expect((caught as Error).message).toBe("caller gave up");
+    // Not at once: only after the unbounded POST came back.
+    expect(Date.now() - started).toBeGreaterThanOrEqual(NOTIFY_DELAY_MS - 5);
+  }, 5_000);
+
+  it("never resolves a dead client when the fetch ignores the abort", async () => {
+    const { fetch: base, url } = mountStandalone([echoTool()]);
+    const ac = new AbortController();
+    // Deaf to its signal: answers the handshake after the caller gave up.
+    const deaf: typeof fetch = (async (req: Request | string | URL, init?: RequestInit) => {
+      const request = req instanceof Request ? req : new Request(req as string, init);
+      const body = await request.clone().text();
+      if (body.includes('"initialize"')) {
+        ac.abort(new Error("caller gave up"));
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      return base(
+        new Request(request.url, {
+          method: request.method,
+          headers: request.headers,
+          ...(body ? { body } : {}),
+        }),
+      );
+    }) as typeof fetch;
+    const caught = await createMcpHttpClient(url, {
+      fetch: deaf,
+      signal: ac.signal,
+      era: "legacy",
+    }).catch((err: unknown) => err);
+    expect((caught as Error).message).toBe("caller gave up");
   }, 5_000);
 });
 
@@ -377,6 +407,66 @@ describe("wrapClient — progress", () => {
     try {
       await expect(wrapped.callTool({ name: "reporting" })).rejects.toThrow();
       expect(seen.token).toBeUndefined();
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("with onProgress: the total is capped by maxTotalMs and the server is told it was cancelled", async () => {
+    let aborted = false;
+    const pair = await createInProcessPair([
+      {
+        descriptor: { name: "reporting", inputSchema: { type: "object" } },
+        handler: async (_args, extra) => {
+          const progressToken = extra._meta?.progressToken;
+          if (progressToken === undefined) throw new Error("the call carries no progressToken");
+          extra.signal.addEventListener("abort", () => {
+            aborted = true;
+          });
+          while (!aborted) {
+            await new Promise((r) => setTimeout(r, STEP_MS));
+            await extra.sendNotification({
+              method: "notifications/progress",
+              params: { progressToken, progress: 1 },
+            });
+          }
+          return { content: [{ type: "text", text: "cancelled" }] };
+        },
+      },
+    ]);
+    const wrapped = wrapClient(pair.client, { close: () => Promise.resolve() }, TIMEOUT_MS, 150);
+    try {
+      const error = await wrapped.callTool({ name: "reporting" }, { onProgress: () => {} }).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(McpError);
+      expect((error as McpError).code).toBe(ErrorCode.RequestTimeout);
+      expect((error as McpError).message).toContain("Maximum total timeout exceeded");
+      const deadline = Date.now() + 200;
+      while (!aborted && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 5));
+      }
+      expect(aborted).toBe(true);
+    } finally {
+      await pair.close();
+    }
+  });
+
+  it("without onProgress: no total cap applies, even when maxTotalMs is shorter than the call", async () => {
+    const pair = await createInProcessPair([
+      {
+        descriptor: { name: "quick", inputSchema: { type: "object" } },
+        handler: async () => {
+          await new Promise((r) => setTimeout(r, 50));
+          return { content: [{ type: "text", text: "done" }] };
+        },
+      },
+    ]);
+    const wrapped = wrapClient(pair.client, { close: () => Promise.resolve() }, undefined, 10);
+    try {
+      const res = await wrapped.callTool({ name: "quick" });
+      expect(res.content).toEqual([{ type: "text", text: "done" }]);
     } finally {
       await pair.close();
     }

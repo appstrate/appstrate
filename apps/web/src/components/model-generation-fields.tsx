@@ -13,11 +13,13 @@ export function ModelGenerationFields({
   model,
   onChange,
   disabled,
+  inheritLabels,
 }: {
   value: ModelGenerationSettings;
   model?: { generation?: ModelGenerationCapabilities | null } | null;
   onChange: (value: ModelGenerationSettings) => void;
   disabled?: boolean;
+  inheritLabels?: { temperature?: string; reasoning?: string };
 }) {
   const { t } = useTranslation(["settings"]);
   const capabilities = model?.generation;
@@ -28,7 +30,11 @@ export function ModelGenerationFields({
       capabilities={capabilities}
       onChange={onChange}
       disabled={disabled}
-      labels={buildGenerationLabels(t, capabilities)}
+      labels={{
+        ...buildGenerationLabels(t, capabilities),
+        ...(inheritLabels?.temperature ? { inherit: inheritLabels.temperature } : {}),
+        ...(inheritLabels?.reasoning ? { reasoningInherit: inheritLabels.reasoning } : {}),
+      }}
     />
   );
 }

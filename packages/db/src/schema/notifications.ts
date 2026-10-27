@@ -23,7 +23,7 @@ import { runs } from "./runs.ts";
  * Replaces the previous design where read-state lived on the `runs` row
  * itself (`runs.notifiedAt` / `runs.readAt`), which made the read flag
  * global: marking a notification read flipped it for every viewer, and a
- * non-owner's mark-as-read silently matched zero rows (issue #667).
+ * non-owner's mark-as-read silently matched zero rows.
  *
  * The recipient is modelled as a single polymorphic pair
  * (`recipientType` + `recipientId`) — the same shape as the `Actor`
@@ -107,11 +107,10 @@ export const notifications = pgTable(
     // composite seek — no bitmap-OR.
     //
     // A non-partial twin would only serve the `unread=false` (full-history)
-    // list, which has no consumer today (the bell never reads read rows). That
-    // index was dropped to cut maintenance on the fan-out write path; re-add it
-    // (and pair it with a retention policy) when a paged full-history feed
-    // ships. Until then the rare `unread=false` call seq-scans + sorts — fine
-    // at a recipient's row counts.
+    // list, which has no consumer today (the bell never reads read rows), and
+    // it would cost maintenance on the fan-out write path. A paged full-history
+    // feed needs it, paired with a retention policy. The rare `unread=false`
+    // call seq-scans + sorts — fine at a recipient's row counts.
     index("idx_notifications_unread")
       .on(
         table.orgId,

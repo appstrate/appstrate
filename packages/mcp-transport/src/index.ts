@@ -23,7 +23,7 @@
  * - `createInProcessPair(tools, info?)` — convenience helper that returns a
  *   `Server` and `Client` already connected via `InMemoryTransport`. The
  *   default surface for first-party tools where subprocess overhead is
- *   unjustifiable (one of the explicit drivers behind issue #276).
+ *   unjustifiable.
  *
  * What it deliberately does *not* re-export: JSON-RPC envelope types, error
  * codes, transport implementations. Callers depend on the SDK directly for
@@ -139,9 +139,9 @@ function validateDescriptor(descriptor: Tool): void {
  *   sees ephemeral `resource_link` blocks here per spec, so blob caches
  *   typically return `[]` and rely on `resource_link` from tool results.
  * - `read(uri, extra)` is called for `resources/read`. Return one or
- *   more `contents` blocks. Throw an `McpError(ErrorCode.InvalidParams)`
- *   for not-found (so the SDK serialises a clean -32602) — never
- *   silently return empty.
+ *   more `contents` blocks — never silently empty. Throw an `McpError`
+ *   with `-32002` for an unknown resource (MCP 2025-11-25) and
+ *   `ErrorCode.InvalidParams` (-32602) for a malformed URI.
  */
 export interface AppstrateResourceProvider {
   list?: (extra: AppstrateRequestExtra) => Promise<Resource[]> | Resource[];
@@ -333,10 +333,15 @@ export type {
   Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 
-// MCP client factories. The agent connects to the sidecar's `/mcp`
-// over Streamable HTTP; the CLI uses the in-process pair already
-// exported above.
-export { createMcpHttpClient, wrapClient, type AppstrateMcpClient } from "./client.ts";
+// MCP client factories. Every HTTP client speaks both protocol eras
+// (2026-07-28 stateless, and the 2025 `initialize` handshake); the
+// in-process pair above stays on the v1 SDK.
+export {
+  createMcpHttpClient,
+  httpStatusOf,
+  wrapClient,
+  type AppstrateMcpClient,
+} from "./client.ts";
 
 export { parseMcpPost, serveStatelessPost, type McpPost } from "./streamable-post.ts";
 

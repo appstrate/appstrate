@@ -39,7 +39,17 @@ import {
 } from "./test-oauth-provider.ts";
 import { getDiscoveredModules } from "./test-modules.ts";
 
-export function seedTestModelProviders(): void {
+export interface SeedTestModelProvidersOptions {
+  /**
+   * Module provider ids that keep their production `baseUrlOverridable`
+   * value instead of the harness default. Tests that exercise the unbound
+   * refusal on a fixed-endpoint provider (`openai`, `anthropic`) list them
+   * here so the refusal path is reachable.
+   */
+  readonly fixedEndpoint?: readonly string[];
+}
+
+export function seedTestModelProviders(options: SeedTestModelProvidersOptions = {}): void {
   resetModelProviders();
   _resetTestOAuthProviderRegistration();
   registerTestOAuthProvider();
@@ -48,14 +58,13 @@ export function seedTestModelProviders(): void {
   // Module-contributed providers are registered with `baseUrlOverridable: true`
   // so the integration harness can point any provider at a mock endpoint
   // (`api.openai.test`, `api.anthropic.test`, …) without each test having to
-  // monkey-patch the registry. In production, `core-providers` ships these
-  // entries with `baseUrlOverridable: false` (only the explicit
-  // custom-endpoint entries, `openai-compatible` and `anthropic-compatible`,
-  // are overridable) — flipping the flag in tests is strictly a fixture
-  // flexibility, the prod registry is untouched.
+  // monkey-patch the registry. Providers listed in `fixedEndpoint` keep the
+  // production value (`core-providers` ships them `baseUrlOverridable: false`,
+  // only `openai-compatible` and `anthropic-compatible` are overridable).
+  const fixedEndpoint = new Set(options.fixedEndpoint ?? []);
   const moduleContributions = getDiscoveredModules()
     .map((m) => m.modelProviders?.() ?? [])
     .flat()
-    .map((p) => ({ ...p, baseUrlOverridable: true }));
+    .map((p) => (fixedEndpoint.has(p.providerId) ? p : { ...p, baseUrlOverridable: true }));
   registerModelProviders(moduleContributions);
 }

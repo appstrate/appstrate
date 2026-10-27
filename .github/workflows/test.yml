@@ -49,7 +49,7 @@ jobs:
           restore-keys: bun-cache-${{ runner.os }}-
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       # Unit tests need PostgreSQL + Redis because bunfig.toml preload starts
       # docker-compose unconditionally. Services start fast with tmpfs + fsync=off.
@@ -221,7 +221,7 @@ jobs:
     # `integration` (opt-in pre-merge). Without the main-branch arm,
     # code could land on main via a never-labeled PR and reach production
     # without the integration suite ever having been exercised in CI —
-    # the e2e job below is label-OR-main for the same reason, keeping
+    # the e2e job below is label-or-paths-OR-main for the same reason, keeping
     # both jobs aligned on post-merge validation.
     if: contains(github.event.pull_request.labels.*.name, 'integration') || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -275,7 +275,7 @@ jobs:
           restore-keys: bun-cache-${{ runner.os }}-
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Start test infrastructure
         run: docker compose -f test/setup/docker-compose.test.yml up -d --wait
@@ -376,7 +376,7 @@ jobs:
       # the default MODULES set off the env schema rather than restating it, and
       # `packages/env` imports zod.
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       # Same image, same compose topology, booted with @appstrate/module-ee on
       # top of the schema's default MODULES — so the single image is proven to
@@ -435,7 +435,7 @@ jobs:
           restore-keys: bun-cache-${{ runner.os }}-
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       # Build the agent runtime image the e2e launches, on the runner's native
       # platform — the test gates on the image matching the engine's platform
@@ -458,9 +458,52 @@ jobs:
       - name: Run runtime container e2e suites
         run: bun test --timeout=15000 runtime-pi/test/provision-container.e2e.test.ts runtime-pi/test/inference-container.e2e.test.ts runtime-pi/test/runtime-secrets-container.e2e.test.ts
 
+  # Decides whether a PR touches what the Playwright suite exercises. `E2E tests`
+  # is a required check, and a job skipped by its own `if:` satisfies it, so the
+  # job must exist on every PR and be gated — a workflow-level `paths:` filter
+  # would leave the check unreported instead. The `e2e` label stays an opt-in
+  # for changes elsewhere (API, runtime) that the paths below do not cover.
+  #
+  # The PR checkout is the merge commit of the head into the base tip, so its
+  # first parent is the base: `HEAD^1..HEAD` is exactly what the PR adds.
+  # Detection failing must not silently skip the suite — the `e2e` job runs
+  # whenever this one did not succeed.
+  e2e-changes:
+    name: Detect E2E-relevant changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      relevant: ${{ steps.detect.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+
+      - name: Diff against the base
+        id: detect
+        run: |
+          changed=$(git diff --name-only HEAD^1 HEAD)
+          printf 'Changed files:\n%s\n' "$changed"
+          if grep -qE '^(apps/web/|packages/ui/|packages/module-chat/src/ui/|e2e/|package\.json$|bun\.lock$|\.github/workflows/test\.yml$)' <<< "$changed"; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
   e2e:
     name: E2E tests
-    if: contains(github.event.pull_request.labels.*.name, 'e2e') || github.ref == 'refs/heads/main'
+    needs: e2e-changes
+    # Label-OR-main like the other heavy jobs, plus every PR touching the web
+    # app, shared/chat UI, their dependencies or the specs themselves (a UI change broke 16 specs on
+    # main while this ran on the label alone). `!cancelled()` so the job still
+    # evaluates when `e2e-changes` is skipped (push) or failed (run anyway).
+    if: >-
+      ${{ !cancelled() && (
+      github.ref == 'refs/heads/main'
+      || contains(github.event.pull_request.labels.*.name, 'e2e')
+      || needs.e2e-changes.result != 'success'
+      || needs.e2e-changes.outputs.relevant == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -481,7 +524,7 @@ jobs:
           restore-keys: bun-cache-${{ runner.os }}-
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Build frontend
         run: cd apps/web && bun run build
@@ -489,8 +532,15 @@ jobs:
       - name: Install Playwright browsers
         run: cd e2e && npx playwright install chromium --with-deps
 
-      - name: Prepare data directory for PGlite
-        run: mkdir -p data/pglite data/storage
+      # When Bun's crash report has no stack trace (#1710), a core dump is the
+      # only stack data. Ubuntu's default core_pattern pipes cores to apport;
+      # write them as files next to the server log instead. The bun binary is
+      # not uploaded: it is the version pinned in bun-setup, re-downloadable
+      # from Bun's GitHub releases.
+      - name: Write core dumps to data/e2e/cores
+        run: |
+          mkdir -p data/e2e/cores
+          sudo sysctl -w kernel.core_pattern="$GITHUB_WORKSPACE/data/e2e/cores/%e.%p"
 
       - name: Run E2E tests
         run: bun run test:e2e
@@ -526,10 +576,31 @@ jobs:
           # called because RUN_ADAPTER=process doesn't actually hit the LLM.
           SYSTEM_PROVIDER_KEYS: '[{"id":"e2e","label":"E2E","providerId":"anthropic","apiKey":"e2e-dummy","models":[{"modelId":"claude-sonnet-4-5","label":"E2E Default","isDefault":true}]}]'
 
+      # `cancelled()` too: a hang that never aborts ends at `timeout-minutes`.
       - name: Upload test report
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playwright-report
           path: e2e/playwright-report/
+          retention-days: 7
+
+      # Cores are sparse (GBs apparent, MBs on disk); upload-artifact would read
+      # the holes as zeros, so pack them with GNU tar's hole detection first.
+      - name: Pack core dumps
+        if: failure() || cancelled()
+        run: |
+          if [ -n "$(ls -A data/e2e/cores 2>/dev/null)" ]; then
+            tar -cSzf data/e2e/cores.tar.gz -C data/e2e cores
+          fi
+
+      # Server output (see `webServer` in e2e/playwright.config.ts) plus any cores.
+      - name: Upload API server log and cores
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-server-log
+          path: |
+            data/e2e/server.log
+            data/e2e/cores.tar.gz
           retention-days: 7

@@ -21,7 +21,7 @@ import { db } from "./db.ts";
 import { integrationConnections, runs } from "@appstrate/db/schema";
 import { TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
-import { seedPackage, seedPackageVersion } from "./seed.ts";
+import { seedPackage, seedPublishedVersion } from "./seed.ts";
 import { localIntegrationManifest, httpHeaderDelivery } from "./integration-manifests.ts";
 import type { TestContext } from "./auth.ts";
 import { activatePackage } from "../../src/services/space-packages.ts";
@@ -146,9 +146,10 @@ function connectionTestIntegrationManifest(id: string) {
 /**
  * Seed the integration package + a PUBLISHED 1.0.0 version + install it in the
  * context's default space. The published version is what the run's
- * dependency freeze resolves the agent's `^1.0.0` pin against — without it
- * kickoff aborts with 422 `dependency_unresolved` long before the connection
- * snapshot.
+ * dependency freeze resolves the agent's `^1.0.0` pin against, and its
+ * stored archive is what the run bundle fetches at that frozen version —
+ * without either, kickoff aborts with 422 `dependency_unresolved` long before
+ * the connection snapshot.
  */
 export async function seedConnectionTestIntegration(ctx: TestContext, id: string): Promise<void> {
   await seedPackage({
@@ -162,9 +163,7 @@ export async function seedConnectionTestIntegration(ctx: TestContext, id: string
     source: "local",
     draftManifest: connectionTestIntegrationManifest(id),
   });
-  await seedPackageVersion({
-    packageId: id,
-    version: "1.0.0",
+  await seedPublishedVersion(id, "1.0.0", {
     manifest: connectionTestIntegrationManifest(id) as unknown as Record<string, unknown>,
   });
   await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, id);
@@ -172,13 +171,13 @@ export async function seedConnectionTestIntegration(ctx: TestContext, id: string
 
 /**
  * Add one connection on the integration's `primary` auth, owned by the ctx
- * user. `label` is NOT NULL and unique per (space, integration), so it and
+ * user, or by `endUserId` when given. `label` is NOT NULL and unique per owner, so it and
  * `accountId` default here to generated names. Pass them when the test asserts on them.
  */
 export async function seedIntegrationConnection(
   ctx: TestContext,
   integrationId: string,
-  opts: { label?: string; accountId?: string } = {},
+  opts: { label?: string; accountId?: string; endUserId?: string } = {},
 ): Promise<string> {
   const [row] = await db
     .insert(integrationConnections)
@@ -186,9 +185,10 @@ export async function seedIntegrationConnection(
       integrationId,
       authKey: "primary",
       accountId: opts.accountId ?? `acct-${crypto.randomUUID().slice(0, 8)}`,
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
-      userId: ctx.user.id,
-      endUserId: null,
+      userId: opts.endUserId ? null : ctx.user.id,
+      endUserId: opts.endUserId ?? null,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret-value" } }),
       scopesGranted: [],
       label: opts.label ?? `Connexion ${crypto.randomUUID().slice(0, 8)}`,
@@ -202,6 +202,7 @@ export async function seedDefaultOrgModel(ctx: TestContext): Promise<void> {
   const credentialId = await createApiKeyCredential({
     orgId: ctx.orgId,
     userId: ctx.user.id,
+    ownerUserId: null,
     label: "Connection fixture credential",
     providerId: "openai",
     apiKey: "sk-test-not-a-real-key",
@@ -211,7 +212,7 @@ export async function seedDefaultOrgModel(ctx: TestContext): Promise<void> {
     "Connection Fixture GPT",
     "gpt-5.5",
     ctx.user.id,
-    credentialId,
+    { credentialId },
   );
   await setDefaultModel(ctx.orgId, modelDbId);
 }

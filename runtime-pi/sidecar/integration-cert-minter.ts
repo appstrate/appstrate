@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 1.2d — per-SNI leaf cert minter backed by the run CA.
+ * Per-SNI leaf cert minter backed by the run CA.
  *
  * The MITM listener accepts a `CONNECT host:port` from the integration
  * MCP subprocess, then needs to present a TLS certificate to the inner
@@ -9,7 +9,7 @@
  * single leaf cert {@link createOpensslCertGenerator} produces (its SAN
  * is bound to the CN — typically `localhost`) because TLS clients
  * verify SAN against the SNI hostname. So we mint a fresh leaf for
- * every new SNI host, signed by the run CA produced in Phase 1.2c, and
+ * every new SNI host, signed by the run CA (`ca-cert-openssl.ts`), and
  * cache it for the rest of the run.
  *
  * Crypto invariants (same as {@link createOpensslCertGenerator}):

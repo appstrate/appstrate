@@ -47,7 +47,7 @@ export const setPasswordSchema = z
 const profileRouter = new Hono<AppEnv>();
 
 // Single profile serializer — shared by GET and PATCH so both return the
-// exact same resource shape (issue #657). Intentionally joins `profiles`
+// exact same resource shape. Intentionally joins `profiles`
 // with `user` so the response carries the authoritative (BA-owned) email —
 // the CLI's `whoami` surfaces this as the "current identity" check,
 // catching cases where the locally cached email is stale after a
@@ -70,7 +70,7 @@ async function getProfileResource(userId: string) {
   return row ? { ...row, can_create_org: mayCreateOrganization(row.email) } : null;
 }
 
-// Issue #172 (extension) — `/api/profile` is the dashboard user's own
+// `/api/profile` is the dashboard user's own
 // identity record (Better Auth-owned `user.name` is mutated by PATCH), so it
 // answers to the person's own credential only: a delegate (the API key)
 // carries their authority, not their identity. A customer integration must
@@ -117,7 +117,7 @@ profileRouter.patch("/profile", async (c) => {
     throw internalError();
   }
 
-  // Bare updated resource — same serializer as GET /api/profile (issue #657).
+  // Bare updated resource — same serializer as GET /api/profile.
   const profile = await getProfileResource(user.id);
   if (!profile) {
     throw notFound("Profile not found");

@@ -26,6 +26,7 @@ import * as nodePath from "node:path";
 
 import { z } from "zod";
 import { isTextShapedMime, normalizeMime } from "@appstrate/afps-shared/mime";
+import { PLACEHOLDER } from "@appstrate/afps-shared/request-template";
 import type { JSONSchema, Tool, ToolContext, ToolResult } from "@afps-spec/types";
 import { ResolverError } from "../errors.ts";
 
@@ -121,9 +122,7 @@ export const MAX_REQUEST_BODY_SIZE = readRequestBodyCapEnv();
  * of being read into memory first — applied by {@link resolveBodyForFetch}
  * when the caller opts into streaming.
  *
- * Sole source, read before touching: the sidecar declared a same-named
- * constant until it was deleted as unused (`runtime-pi/sidecar/helpers.ts`
- * records the deletion). Nothing mirrors this value any more; it is not a
+ * Sole source: nothing mirrors this value; it is not a
  * sidecar knob and not settable, so changing it is a code change here.
  */
 export const STREAMING_THRESHOLD = 1 * 1024 * 1024;
@@ -144,6 +143,17 @@ export const MAX_STREAMED_BODY_SIZE = 100 * 1024 * 1024;
 // Single source of truth: derive the JSON schema surfaced to the LLM and the
 // runtime validation in execute() from these definitions. Aligned with `apps/api/AGENTS.md`
 // § "Validation (Zod)": every JSON body is read through a schema, never cast.
+
+/**
+ * The request-body rule both `api_call` surfaces state in their `body`
+ * description (this file and `runtime-pi/sidecar/mcp.ts`): a model that
+ * re-types a long generated string into tool arguments truncates it, and the
+ * upstream accepts the truncated value.
+ */
+export const API_CALL_BODY_FROM_FILE_RULE =
+  "Never re-type file contents or base64 into the body: retyped long strings get silently " +
+  "corrupted. Write the complete request body to a workspace file and pass { fromFile } (set " +
+  "Content-Type in headers) — also for a JSON body embedding a file's base64.";
 
 const fromFileBodySchema = z.object({
   fromFile: z.string().describe("Workspace-relative path to a file to send as the request body"),
@@ -171,7 +181,7 @@ const fromBytesBodySchema = z.object({
   fromBytes: z
     .string()
     .describe(
-      `Base64-encoded body bytes (for inline binary uploads up to ${MAX_REQUEST_BODY_DISPLAY}). ` +
+      `Base64-encoded body bytes (small inline payloads only; hard cap ${MAX_REQUEST_BODY_DISPLAY}). ` +
         "Standard base64 (RFC 4648 §4, alphabet `+/`) only. " +
         "URL-safe base64 (`-_`) and MIME-folded base64 (with whitespace/newlines) are not accepted.",
     ),
@@ -280,9 +290,16 @@ const responseModeSchema = z
   })
   .optional();
 
-const httpUrl = z.url({ protocol: /^https?$/ });
-/** A URL-valued credential field, then nothing or a path: `{{site_url}}/wp-json/…` (#1627). */
-const URL_FIELD_TARGET = /^\{\{\s*\w+\s*\}\}(?:\/.*)?$/;
+/**
+ * An absolute http(s) URL, `{{field}}`s allowed after the scheme. A pattern, not `z.url()`:
+ * its `format: "uri"` refuses `{` and `}` in the validator the agent's tool call meets first.
+ * A backslash is refused in the authority: WHATWG reads it as a path delimiter.
+ * Pattern flags do not reach the JSON schema, hence the spelled-out case.
+ * Pattern only, so every validator applies the same rule; the rendered URL is parsed at send time.
+ */
+const httpUrl = z.string().regex(/^[Hh][Tt][Tt][Pp][Ss]?:\/\/[^\s/?#\\]+(?:[/?#].*)?$/);
+/** A URL-valued credential field, then nothing, `/`, `?` or `#`: `{{site_url}}/wp-json/…`. */
+const URL_FIELD_TARGET = new RegExp(`^${PLACEHOLDER.source}(?:[/?#].*)?$`);
 
 /** Zod schema for `api_call` arguments — validated at runtime in execute(). */
 export const apiCallRequestSchema = z.object({
@@ -295,7 +312,7 @@ export const apiCallRequestSchema = z.object({
       error: "target must be an absolute http(s) URL or start with a {{field}} holding one",
     })
     .describe(
-      "Absolute URL of the upstream endpoint, or a {{field}} holding the base URL followed by a path",
+      "Absolute URL of the upstream endpoint, or a {{field}} holding the base URL followed by a path or query. Any other {{field}} is percent-encoded as one URL component: write the URL's own `/`, `?` and `&` in the target",
     ),
   headers: z
     .record(z.string(), z.string())
@@ -304,15 +321,15 @@ export const apiCallRequestSchema = z.object({
   body: requestBodySchema
     .optional()
     .describe(
-      "Request body. Use { fromFile: 'path' } (workspace-relative) for binary file uploads, " +
-        `{ fromBytes, encoding: 'base64' } for inline binary payloads up to ${MAX_REQUEST_BODY_DISPLAY} (standard base64 RFC 4648 §4 only — alphabet \`+/\`, no URL-safe \`-_\` or MIME line-folding), ` +
+      `Request body. ${API_CALL_BODY_FROM_FILE_RULE} Use { fromFile: 'path' } (workspace-relative) for a body in a file, ` +
+        `{ fromBytes, encoding: 'base64' } for small inline binary payloads (hard cap ${MAX_REQUEST_BODY_DISPLAY}; standard base64 RFC 4648 §4 only — alphabet \`+/\`, no URL-safe \`-_\` or MIME line-folding), ` +
         "or { multipart: [...] } to compose a multipart/form-data body mixing text fields and workspace files.",
     ),
   substituteBody: z
     .boolean()
     .optional()
     .describe(
-      "When true, the sidecar substitutes `{{credential}}` placeholders inside the request body before forwarding upstream. Off by default to avoid accidental token leaks into payloads. Requires a text body (string) — incompatible with { fromBytes } / { fromFile } / { multipart }.",
+      "When true, the sidecar substitutes `{{credential}}` placeholders inside the request body before forwarding upstream, each value escaped for the body's Content-Type: JSON, form, XML, multipart or text/plain (as is). Under any other Content-Type, or none, a body holding a placeholder is refused. Off by default to avoid accidental token leaks into payloads. Requires a text body (string) — incompatible with { fromBytes } / { fromFile } / { multipart }.",
     ),
   responseMode: responseModeSchema,
 });
@@ -372,8 +389,7 @@ export type ApiCallRequest = Omit<z.infer<typeof apiCallRequestSchema>, "body"> 
  *   - `file`   — large or `responseMode.toFile`-routed bodies materialized on disk
  *
  * The encoding is explicit on `inline` (always `base64`) so consumers
- * never have to guess. The legacy `{ inline; inlineEncoding } | { file }`
- * shape was lossy for binary data — see issues #149 / #151.
+ * never have to guess.
  *
  * `truncated` signals that the sidecar capped the upstream response at
  * `MAX_RESPONSE_SIZE` (or the agent-requested `maxInlineBytes`). When
@@ -927,7 +943,6 @@ export async function resolveWorkspaceFile(
 
 export interface ResolveBodyStreamOptions {
   allowFromFile?: boolean;
-  transformString?: (input: string) => string;
   /**
    * Workspace root used to resolve `{ fromFile }` references. Required
    * when `allowFromFile` is true — the resolver refuses references that
@@ -1150,10 +1165,7 @@ export async function resolveBodyForFetch(
     return { kind: "bytes", bytes: undefined };
   }
   if (typeof body === "string") {
-    return {
-      kind: "bytes",
-      bytes: opts.transformString ? opts.transformString(body) : body,
-    };
+    return { kind: "bytes", bytes: body };
   }
   if (body instanceof Uint8Array) {
     return { kind: "bytes", bytes: toArrayBufferUint8(body) };
@@ -1252,8 +1264,7 @@ function toArrayBufferUint8(source: Uint8Array): Uint8Array<ArrayBuffer> {
 
 /**
  * Whitelist of MIME types we are willing to decode as UTF-8 text. Every
- * other Content-Type is treated as binary and base64-encoded — this is
- * the bug fix at the heart of issues #149 / #151. `application/octet-stream`
+ * other Content-Type is treated as binary and base64-encoded. `application/octet-stream`
  * with a body that happens to be ASCII MUST come back as inline bytes,
  * not text.
  *
@@ -1519,10 +1530,8 @@ export interface SerializeFetchResponseContext {
  * {@link ApiCallResponse} every resolver returns to the LLM.
  *
  * Read once via `arrayBuffer()` (NEVER `text()`) so binary bytes are
- * preserved end-to-end — the regression fixed by issues #149 / #151 in
- * the sidecar resurfaced when the runtime moved from `curl` to typed
- * `{ns}__api_call` tools, because the client-side serializer still
- * stringified bytes as UTF-8. Decoding now follows a strict media-type
+ * preserved end-to-end: a serializer that stringifies bytes as UTF-8
+ * corrupts them. Decoding follows a strict media-type
  * whitelist (text/*, application/json, application/xml, +json/+xml/+yaml
  * suffixes — see {@link isTextLikeMimeType}); a `; charset=...` parameter is
  * NOT a whitelist entry, only a fallback consulted when the base type is

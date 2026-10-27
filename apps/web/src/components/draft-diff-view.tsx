@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { MonacoDiffEditor as DiffEditor } from "./monaco";
-import { useTheme } from "../stores/theme-store";
+import { CodeDiff } from "./monaco";
 
 interface DraftDiffViewProps {
   original: string;
@@ -18,7 +17,6 @@ export function DraftDiffView({
   originalLabel,
   modifiedLabel,
 }: DraftDiffViewProps) {
-  const { resolvedTheme } = useTheme();
   return (
     <div>
       {(originalLabel || modifiedLabel) && (
@@ -31,21 +29,7 @@ export function DraftDiffView({
           </div>
         </div>
       )}
-      <DiffEditor
-        height="400px"
-        theme={resolvedTheme === "dark" ? "vs-dark" : "vs"}
-        language={language}
-        original={original}
-        modified={modified}
-        options={{
-          readOnly: true,
-          minimap: { enabled: false },
-          fontSize: 13,
-          fontFamily: "'SF Mono', 'Fira Code', monospace",
-          renderSideBySide: true,
-          scrollBeyondLastLine: false,
-        }}
-      />
+      <CodeDiff height="400px" language={language} original={original} modified={modified} />
     </div>
   );
 }

@@ -33,8 +33,7 @@ export function fileChunkSink(path: string): ChunkSink {
  * Throws if the signal aborts mid-stream (reason preserved as cause).
  *
  * Unified for both the inline `-o`-less stdout/stderr path and the
- * file-output path — previously duplicated with subtly different
- * metric handling.
+ * file-output path, so both handle metrics the same way.
  */
 export async function consumeResponseStream(
   res: Response,

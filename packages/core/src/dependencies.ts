@@ -322,7 +322,7 @@ export function parseManifestIntegrations(
  * `dependency_overrides` — bundled **skills** (`buildAgentPackage`) and spawned
  * **integrations** (`resolveRunIntegrationVersions`). The single source of truth
  * for the run-path override KEY gate, so skills and integrations are never
- * enumerated independently at the call site (#666/#686).
+ * enumerated independently at the call site.
  *
  * Intentionally LENIENT (mirrors the two underlying readers): skills come from
  * `dependencies.skills` keys verbatim, integrations from

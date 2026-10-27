@@ -25,6 +25,10 @@ export async function verifyRunToken(c: Context): Promise<{
     spaceId: string;
     status: string;
     modelCredentialId: string | null;
+    /** The triggering API key (`runs.api_key_id`); null for session, schedule and end-user runs. */
+    apiKeyId: string | null;
+    /** The member whose own credential pays the run (`runs.payer_user_id`); null when none does. */
+    payerUserId: string | null;
     /** The model the run launched with — see `runs.model_id`. */
     modelId: string | null;
     /** Who serves the run's inference — see `runs.inference_route`. */
@@ -32,19 +36,19 @@ export async function verifyRunToken(c: Context): Promise<{
     runOrigin: "platform" | "remote";
     /**
      * The agent definition the run executes — `"draft"` or a concrete semver
-     * stamped at kickoff (#636). The dependency guards read the manifest AT
+     * stamped at kickoff. The dependency guards read the manifest AT
      * this ref so a post-kickoff draft edit cannot retroactively change a
      * pinned run's authorization set.
      */
     versionRef: string | null;
     /**
-     * Snapshot of the connection resolver output frozen at run kickoff
-     * (#199): the set bound per integration, which authorises a `connection_id`.
+     * Snapshot of the connection resolver output frozen at run kickoff:
+     * the set bound per integration, which authorises a `connection_id`.
      */
     resolvedConnections: RunConnectionSnapshot;
     /**
      * Snapshot of each declared integration's resolved manifest version frozen
-     * at run kickoff (#686). The credentials resolver reads the integration
+     * at run kickoff. The credentials resolver reads the integration
      * manifest AT this version so a mid-run MITM refresh sees the same
      * delivery/auth plan the spawn used.
      */
@@ -81,6 +85,8 @@ export async function verifyRunToken(c: Context): Promise<{
       spaceId: runs.spaceId,
       status: runs.status,
       modelCredentialId: runs.modelCredentialId,
+      apiKeyId: runs.apiKeyId,
+      payerUserId: runs.payerUserId,
       modelId: runs.modelId,
       inferenceRoute: runs.inferenceRoute,
       runOrigin: runs.runOrigin,
@@ -115,6 +121,8 @@ export async function verifyRunToken(c: Context): Promise<{
       spaceId: run.spaceId,
       status: run.status,
       modelCredentialId: run.modelCredentialId ?? null,
+      apiKeyId: run.apiKeyId ?? null,
+      payerUserId: run.payerUserId ?? null,
       modelId: run.modelId,
       inferenceRoute: run.inferenceRoute,
       runOrigin: run.runOrigin,

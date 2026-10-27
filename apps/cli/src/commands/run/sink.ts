@@ -34,8 +34,7 @@
  * interceptor and breaks the loop. `writeStderr` has no such bridge to
  * dodge — stderr is not intercepted — but it closes the seam so tests
  * can observe the error channel without swapping the *global*
- * `process.stderr.write`. Global-stream capture is what issue #1180 is
- * about: `bun test` runs every package in one process, so a buffer
+ * `process.stderr.write`. Global-stream capture is unsafe: `bun test` runs every package in one process, so a buffer
  * installed on a global stream collects writes from concurrent suites
  * and `expect(captured).toBe("")` becomes a coin flip that blames an
  * innocent test.

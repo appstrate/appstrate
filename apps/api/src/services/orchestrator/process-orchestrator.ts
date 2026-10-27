@@ -7,18 +7,18 @@
  * ⚠️ No container isolation: agents can access the local filesystem and network.
  *    Use only with trusted agent code.
  *
- * Stdout workaround (Bun ≤1.3.9): `Bun.spawn({ stdout: "pipe" })` returns a
- * ReadableStream that signals EOF prematurely when the event loop services
- * concurrent I/O (e.g. incoming HTTP requests while an agent run is in-flight).
- * The subprocess keeps running but the platform sees an empty stream → 0 tokens
- * → false "could not reach the LLM API" failure. Reproducible by opening any
- * page while a run is active. Agent stdout is therefore redirected to a file via
- * `Bun.file()` and tailed with a sequential read handle. Docker mode is unaffected
- * (logs are read via the Docker HTTP API, not a Bun pipe).
- * Re-test with `stdout: "pipe"` after upgrading Bun to check if the fix is still needed.
+ * Agent stdout is redirected to a file via `Bun.file()` and tailed with a
+ * sequential read handle, not read from `Bun.spawn({ stdout: "pipe" })`: a
+ * piped stream was seen to signal EOF while the agent kept running whenever
+ * the event loop served concurrent HTTP traffic (opening any page during a
+ * run), so the platform read an empty stream → 0 tokens → a false "could not
+ * reach the LLM API" failure. A spawned writer under concurrent `Bun.serve`
+ * load does not reproduce it on Linux, but the original trigger was never
+ * isolated, so the file stays. Docker mode is unaffected (logs are read via
+ * the Docker HTTP API, not a Bun pipe).
  */
 
-import { mkdir, rm, readdir, stat } from "node:fs/promises";
+import { chmod, mkdir, rm, readdir, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { getEnv } from "@appstrate/env";
@@ -78,13 +78,48 @@ function workspaceDirFor(runId: string): string {
 }
 
 /**
+ * The workloads of a run, each with a `TMPDIR` of its own and that directory's
+ * mode. Both are SIGKILLed at teardown and remove nothing themselves, so what
+ * they leave under `os.tmpdir()` goes with these directories.
+ *
+ * The sidecar's is searchable by other uids: where an operator supplies a setuid
+ * runner wrapper (without one this mode refuses local runners), its integration
+ * runners read their bundle and the run CA in place below it, each on a uid of
+ * its own. The entries inside keep their own modes.
+ */
+const WORKLOAD_TMP_DIRS = [
+  { role: "sidecar", mode: 0o711 },
+  { role: "agent", mode: 0o700 },
+] as const;
+
+type WorkloadRole = (typeof WORKLOAD_TMP_DIRS)[number]["role"];
+
+/**
+ * Compute the host path for a workload's `TMPDIR`. Named by a hash rather than
+ * the run id: the sidecar binds unix sockets below its own
+ * (`<dir>/mitm-XXXXXX/<n>.sock`), and `sun_path` holds 104 bytes on macOS, where
+ * `os.tmpdir()` alone takes 48 of them.
+ */
+function tmpDirFor(runId: string, role: WorkloadRole): string {
+  const tag = new Bun.CryptoHasher("sha256").update(`${role}:${runId}`).digest("hex").slice(0, 12);
+  return join(tmpdir(), `appstrate-tmp-${tag}`);
+}
+
+/** Start removing every workload `TMPDIR` of a run: one promise per directory. */
+function removeTmpDirs(runId: string): Promise<void>[] {
+  return WORKLOAD_TMP_DIRS.map(({ role }) =>
+    rm(tmpDirFor(runId, role), { recursive: true, force: true }),
+  );
+}
+
+/**
  * Name of the ownership marker written into every run workspace.
  *
  * Holds the pid of the platform process that created the run. It is the
  * ONLY thing that lets a boot-time sweep tell "residue of my own crashed
  * self" apart from "a live sibling instance's run" — the `appstrate-ws-*`
  * naming convention and the uid say nothing about which instance owns a
- * directory, and two `bun run dev` sessions on one host share both (#1130).
+ * directory, and two `bun run dev` sessions on one host share both.
  *
  * A pid is deliberately enough: pids are global, so `kill(pid, 0)` answers
  * the ownership question from any working directory, which matters because
@@ -126,7 +161,9 @@ async function ownerIsAlive(runId: string): Promise<boolean> {
 
 /**
  * Scan `os.tmpdir()` for orphaned per-run workspace directories
- * (`appstrate-ws-*`) owned by THIS process's uid and remove them.
+ * (`appstrate-ws-*`) owned by THIS process's uid and remove them, each with
+ * its run's workload `TMPDIR`s: the workspace name is what carries the run id
+ * those are named from, whatever the working directory.
  * Boot-time recovery only. Returns the count of dirs reclaimed for the
  * {@link CleanupReport}.
  *
@@ -135,7 +172,7 @@ async function ownerIsAlive(runId: string): Promise<boolean> {
  * regardless of working directory, so this sweep sees the live runs of
  * sibling instances — including ones started from another worktree, which
  * the cwd-relative dataDir sweep cannot even see. Deleting those wiped a
- * running agent's `/workspace` mid-run (#1130).
+ * running agent's `/workspace` mid-run.
  *
  * The uid filter avoids two problems on shared hosts:
  *   - Reaping a workspace owned by another platform instance (running
@@ -162,10 +199,13 @@ async function reapOrphanWorkspaceDirs(): Promise<number> {
         const st = await stat(path);
         if (st.uid !== myUid) continue;
       }
-      if (await ownerIsAlive(name.slice(WORKSPACE_DIR_PREFIX.length))) {
+      const runId = name.slice(WORKSPACE_DIR_PREFIX.length);
+      if (await ownerIsAlive(runId)) {
         logger.info("Preserved workspace of a live sibling instance", { workspace: name });
         continue;
       }
+      // Before the workspace: once it is gone nothing names the run any more.
+      await Promise.allSettled(removeTmpDirs(runId));
       await rm(path, { recursive: true, force: true });
       count++;
     } catch {
@@ -342,7 +382,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
       // owning platform process is still alive belongs to a sibling instance
       // started from this same working directory (two `bun run dev`, or a
       // redeploy overlapping the old process). SIGKILLing its workloads and
-      // deleting its boundary killed live runs at every sibling boot (#1130).
+      // deleting its boundary killed live runs at every sibling boot.
       // Our own residue always fails this check: a crashed platform's pid is
       // dead, which is exactly what makes its runs reclaimable.
       if (await ownerIsAlive(name)) {
@@ -411,6 +451,16 @@ export class ProcessOrchestrator implements RunOrchestrator {
       mkdir(workspacePath, { recursive: true, mode: 0o700 }).then(() =>
         Bun.write(ownerMarkerPathFor(runId), String(process.pid)),
       ),
+      // Not recursive: a path that already exists, a planted symlink included,
+      // fails the launch instead of becoming a workload's `TMPDIR`.
+      // `mkdir` applies the umask to its mode; `chmod` does not.
+      Promise.all(
+        WORKLOAD_TMP_DIRS.map(async ({ role, mode }) => {
+          const tmp = tmpDirFor(runId, role);
+          await mkdir(tmp, { mode });
+          await chmod(tmp, mode);
+        }),
+      ),
     ]);
     this.sidecarPorts.set(runId, ports);
     return {
@@ -432,15 +482,24 @@ export class ProcessOrchestrator implements RunOrchestrator {
     // doesn't leak one map entry per run.
     const runId = boundary.name.replace(/^process-/, "");
     this.sidecarPorts.delete(runId);
-    // Race boundary teardown and workspace teardown — independent
-    // paths, errors swallowed individually so a stuck workspace can't
-    // block the pidfile dir cleanup.
-    await Promise.allSettled([
+    // Race the removals — independent paths, so a stuck one blocks none of the
+    // others. Each failure is reported: the boot sweep finds a run's `TMPDIR`s
+    // through its workspace, so one left behind here is not found again.
+    const removals = await Promise.allSettled([
       rm(boundary.id, { recursive: true, force: true }),
       boundary.workspace.kind === "directory"
         ? rm(boundary.workspace.path, { recursive: true, force: true })
         : Promise.resolve(),
+      ...removeTmpDirs(runId),
     ]);
+    for (const removal of removals) {
+      if (removal.status === "rejected") {
+        logger.warn("Failed to remove a run directory", {
+          runId,
+          error: getErrorMessage(removal.reason),
+        });
+      }
+    }
   }
 
   async createSidecar(
@@ -473,6 +532,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
     // The agent reaches the sidecar over loopback, and nothing else may: on the host every
     // interface is reachable, and the forward proxy has no runner peers to tell apart here.
     env.LISTEN_HOST = LOOPBACK;
+    env.TMPDIR = tmpDirFor(runId, "sidecar");
 
     // Sidecar stdout goes to a FILE, not a drained pipe, for two reasons:
     //   - connect-runs capture the credential bundle by tailing it via
@@ -493,9 +553,8 @@ export class ProcessOrchestrator implements RunOrchestrator {
 
     // No /health gate — the agent's MCP client retries its handshake against
     // the sidecar's /mcp with AWS full-jitter backoff (50ms→1s, 30s deadline)
-    // until the listener is up. Docker mode adopted the same contract in
-    // issue #406; process mode now mirrors it. Removes the unconditional
-    // ~200-500ms warm-path wait (5s on cold starts) from the run hot path.
+    // until the listener is up, as in Docker mode. That keeps an unconditional
+    // ~200-500ms warm-path wait (5s on cold starts) off the run hot path.
     logger.info("Sidecar spawned", { runId, ports, pid: proc.pid });
 
     return { id, runId, role: "sidecar" };
@@ -507,12 +566,11 @@ export class ProcessOrchestrator implements RunOrchestrator {
     // (which receive WORKSPACE_DIR via the sidecar) read and write the
     // exact same filesystem surface as the agent.
     //
-    // This used to fall back to a "legacy per-boundary subdirectory" for
-    // non-agent roles. No non-agent role reaches this method: sidecars come
-    // from `createSidecar` (which hardcodes `role: "sidecar"`), and the sole
-    // production caller passes the literal `"agent"`. The fallback only ever
-    // meant "agent and runners disagree about where the workspace is", so it
-    // is gone — a non-directory workspace now fails loudly instead. (`kind`
+    // No non-agent role reaches this method: sidecars come from
+    // `createSidecar` (which hardcodes `role: "sidecar"`), and the sole
+    // production caller passes the literal `"agent"`. A non-directory
+    // workspace fails loudly: a fallback subdirectory would mean "agent and
+    // runners disagree about where the workspace is". (`kind`
     // is a discriminant of the shape this backend itself created, so a
     // mismatch means the boundary came from a different orchestrator.)
     if (boundary.workspace.kind !== "directory") {
@@ -527,7 +585,7 @@ export class ProcessOrchestrator implements RunOrchestrator {
 
     // Sidecar-relative URLs (SIDECAR_URL, MODEL_BASE_URL, HTTP(S)_PROXY,
     // NO_PROXY) arrive in spec.env — pi.ts builds them from the boundary's
-    // sidecarEndpoints, so this orchestrator no longer patches them in.
+    // sidecarEndpoints, so this orchestrator does not patch them in.
     //
     // SECURITY (§6.2): the workload — an AFPS *agent* runs untrusted code here —
     // gets only a NON-SECRET system baseline plus its explicit spec.env, so it
@@ -536,6 +594,8 @@ export class ProcessOrchestrator implements RunOrchestrator {
     // spread would. This matches the Docker path, which passes only spec.env.
     const env: Record<string, string> = { ...systemBaselineEnv(), ...spec.env };
     env.WORKSPACE_DIR = resolve(workDir);
+    // Set after `spec.env`, like the workspace: the orchestrator owns both paths.
+    env.TMPDIR = tmpDirFor(spec.runId, "agent");
 
     this.pendingSpecs.set(id, { entrypoint: AGENT_ENTRY, workDir, env });
     this.processes.set(id, { proc: null, role: spec.role, runId: spec.runId, workDir });

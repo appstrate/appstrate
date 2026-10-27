@@ -306,7 +306,7 @@ const KEEP_RECENT_FRACTION = 0.1;
  * | `keepRecentTokens` | `max(20000, 10% × contextWindow)`      | Preserves the ratio across model sizes: 20k on Claude 200k, ~100k on GPT-4.1 1M, ~200k on Gemini 2M. The floor stops small windows from over-compacting away recent context.    |
  *
  * `enabled: false` turns compaction off entirely — useful when stacking
- * external compaction middleware (appstrate#445).
+ * external compaction middleware.
  *
  * Returns TWO members, and the split is load-bearing. `compaction` is exactly
  * the Pi SDK's `CompactionSettings` and is what gets handed to it. `contextWindow`
@@ -583,7 +583,7 @@ export class PiRunner {
     // clean final assistant turn → undefined → success. Read from the
     // bridge (not `session.state.messages`) so trailing non-assistant
     // entries — toolResults, compaction summaries appended after an
-    // overflow error (#464) — cannot mask the real terminal turn. This
+    // overflow error — cannot mask the real terminal turn. This
     // makes the runner the single source of truth for the run's outcome
     // instead of having the platform reconstruct it from the `run_logs`
     // adapter-error trail post-hoc (issue: run_fd977eb6).
@@ -749,7 +749,7 @@ export class PiRunner {
       ? <T>(promise: Promise<T>): Promise<T> => Promise.race([promise, abortPromise])
       : <T>(promise: Promise<T>): Promise<T> => promise;
 
-    // Mid-run wall-clock steering (#1029). The agent has no clock: the budget is
+    // Mid-run wall-clock steering. The agent has no clock: the budget is
     // stated once in the turn-1 system prompt and never again, so it over-explores
     // and the watchdog kills it at 100% with nothing delivered.
     //
@@ -793,7 +793,7 @@ export class PiRunner {
       race: raceAbort,
     });
 
-    // #464 — Pi SDK's auto-compaction recovery is fire-and-forget: an
+    // Pi SDK's auto-compaction recovery is fire-and-forget: an
     // `agent_end` event with overflow status triggers a background
     // `_runAutoCompaction(...)` that `session.prompt()` does NOT await.
     // Without this wait, the entrypoint can `process.exit(0)` before
@@ -985,7 +985,7 @@ export async function maybeRepromptForOutput(opts: {
  * `allToolNames = ["read","bash","edit","write","grep","find","ls"]`) but
  * `createAgentSession` activates only the first four (`core/sdk.js` →
  * `defaultActiveToolNames`). With no `grep`/`find`/`ls` on the surface the model
- * reaches for `bash` for every lookup: in the run that motivated #1029, 101 of
+ * reaches for `bash` for every lookup: in one measured run, 101 of
  * 135 tool calls were `bash`, overwhelmingly `grep -rn …` and `sed -n 'A,Bp'`.
  * Each of those pays a shell round-trip and returns unstructured output the
  * model then has to parse.
@@ -1147,8 +1147,8 @@ export interface SessionBridgeHandle {
    * stop, or a transient error the agent recovered from before a later
    * clean turn). Tracked from the `message_end` event stream — NOT read
    * from `session.state.messages` — so trailing non-assistant entries
-   * (toolResults, compaction summaries appended after an overflow error,
-   * #464) cannot mask the real terminal turn. `run()` reads this to stamp
+   * (toolResults, compaction summaries appended after an overflow error)
+   * cannot mask the real terminal turn. `run()` reads this to stamp
    * `RunResult.status`.
    */
   getTerminalError(): RunError | undefined;
@@ -1593,8 +1593,8 @@ export function installSessionBridge(
         // terminal `aborted` turn — or an `error` turn the SDK left without
         // an `errorMessage` — still lands a `run_logs` row, not just a
         // bare `runs.error`. A transient error turn the agent later
-        // recovers from also logs here (harmless — the trail no longer
-        // drives status).
+        // recovers from also logs here (harmless — the trail does not
+        // drive status).
         // Suppress the verdict for the abort we raced ourselves after a
         // terminal tool completed — the run is already semantically done
         // (mirrored in `getTerminalError()` so log trail and stamped

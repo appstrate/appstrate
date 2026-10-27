@@ -4,14 +4,14 @@
  * The `warn | fail | off` knob shared by the architecture gates
  * (`verify-module-isolation.ts`, `verify-module-contract.ts`).
  *
- * It exists because the value was previously read with a CAST:
+ * The value is parsed, not CAST:
  *
  *   const POLICY = (process.env.X ?? "fail") as "warn" | "fail" | "off";
  *
- * A cast asserts; it does not check. Both gates then exit with
- * `if (problems.length > 0 && POLICY === "fail") process.exit(1)`, so ANY value
- * that is not exactly `fail` — `FAIL`, `faill`, `1`, a trailing space — turned
- * the gate into a printer: it still listed every `❌` and still exited 0. The
+ * A cast asserts; it does not check. Both gates exit with
+ * `if (problems.length > 0 && POLICY === "fail") process.exit(1)`, so under a
+ * cast ANY value that is not exactly `fail` — `FAIL`, `faill`, `1`, a trailing
+ * space — turns the gate into a printer: it lists every `❌` and exits 0. The
  * failure is silent in the worst way, because the operator sees the findings
  * scroll past and the pipeline go green, and nothing in between says the two
  * disagree.
@@ -31,7 +31,7 @@ const POLICIES = ["warn", "fail", "off"] as const;
 /**
  * Is this process running under CI?
  *
- * `if (process.env["CI"])` was JS truthiness on a string, so `CI=false` — which
+ * `if (process.env["CI"])` is JS truthiness on a string, so `CI=false` — which
  * some runners export precisely to say "not CI", and which a developer can
  * export locally for the same reason — read as CI and pinned the policy to
  * `fail`. Every other boolean env var in this repo goes through `boolEnv` in
@@ -40,7 +40,7 @@ const POLICIES = ["warn", "fail", "off"] as const;
  * not export the helper, and because a gate script must not need the platform's
  * env schema to boot. If `boolEnv` ever changes, change this with it.
  *
- * Unset stays false, which is the same answer truthiness gave.
+ * Unset stays false.
  */
 function isCi(): boolean {
   const raw = process.env["CI"];

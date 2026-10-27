@@ -3,13 +3,17 @@
 import { eq, and, or, ne, desc, sql } from "drizzle-orm";
 import { unionAll } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
-import { spacePackages, packages, packageShares } from "@appstrate/db/schema";
+import { spacePackages, packages } from "@appstrate/db/schema";
 import type { Package } from "@appstrate/db/schema";
 import { type PackageTypeConfig } from "./config.ts";
 import { buildStoredManifest } from "./manifest.ts";
 import { enqueueStorageDeletion } from "../storage-deletion.ts";
 import { packageStorageDeletionJobs } from "../package-storage-deletion.ts";
 import { asRecord } from "@appstrate/core/safe-json";
+import { ApiError } from "@appstrate/core/api-errors";
+import { isReservedScope, parseScopedName } from "@appstrate/core/naming";
+import type { IntegrationManifest } from "@appstrate/core/integration";
+import { getIntegrationSourceKind, getLocalServerRef } from "../integration-manifest-helpers.ts";
 import {
   orgOrSystemFilter,
   getPackageDisplayName,
@@ -19,7 +23,7 @@ import { parseDraftManifest } from "../../lib/manifest-utils.ts";
 import { toISORequired } from "../../lib/date-helpers.ts";
 import { scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
 import { activeHereSql } from "../package-activation.ts";
-import { placementRowJoin, placementShareJoin } from "../package-placement.ts";
+import { placementRowJoin } from "../package-placement.ts";
 
 export class PackageAlreadyExistsError extends Error {
   constructor(public packageId: string) {
@@ -157,6 +161,27 @@ export interface CreateItemInput {
 }
 
 /**
+ * Refuse an organization package under a scope the platform owns
+ * (`isReservedScope`): `@appstrate/*` is the system packages' namespace, and
+ * `@inline/*` the inline runs' shadow packages, which every reader of that
+ * prefix takes for an ephemeral shadow. A package id is caller-chosen on the
+ * JSON create, the ZIP/GitHub imports and the bundle import, so the org slug
+ * being unreserved is not enough. Asked by {@link createOrgItem} and by the
+ * bundle import's own insert — the two writers of an organization package row.
+ */
+export function assertPackageScopeNotReserved(packageId: string): void {
+  const scope = parseScopedName(packageId)?.scope;
+  if (scope === undefined || !isReservedScope(scope)) return;
+  throw new ApiError({
+    status: 400,
+    code: "scope_reserved",
+    title: "Bad Request",
+    detail: `'${packageId}' uses the reserved scope '@${scope}', which the platform owns`,
+    param: "manifest.name",
+  });
+}
+
+/**
  * Insert a new package item. `item.id` must be the fully-scoped packageId (e.g. `@scope/name`).
  *
  * `manifest` is REQUIRED — every caller has a real one (author input already
@@ -164,7 +189,7 @@ export interface CreateItemInput {
  * out of a ZIP/bundle). It used to be optional, and the `{version, name}` stub
  * synthesized in its absence was persisted as the draft and then snapshotted
  * verbatim into the immutable `package_versions.manifest` row, where no AFPS
- * schema had ever accepted it (issue #987).
+ * schema had ever accepted it.
  *
  * `manifest.type` MUST equal `cfg.type` — see {@link buildStoredManifest},
  * which stamps the stored copy and throws on divergence.
@@ -179,6 +204,7 @@ export async function createOrgItem(
 ): Promise<Package> {
   const now = new Date();
   const packageId = item.id;
+  assertPackageScopeNotReserved(packageId);
 
   const finalManifest = buildStoredManifest(manifest, cfg, item);
 
@@ -241,27 +267,25 @@ export async function updateOrgItem(
   return rows[0] ?? null;
 }
 
+/**
+ * What the integration index draws beyond the common row: how the integration
+ * reaches its service (`source.kind`) and, for a local one, the server package
+ * the sandbox runs. A source that is neither `local` nor `remote` has no MCP
+ * backing, which is what `none` states and what the runtime does with it.
+ */
+function integrationIndexFields(manifest: IntegrationManifest) {
+  const server = getLocalServerRef(manifest);
+  return {
+    source_kind: getIntegrationSourceKind(manifest) ?? "none",
+    server: server ? { name: server.name, version: server.version } : null,
+  };
+}
+
 /** List the items of a type this space RUNS — the activation rule, per type. */
 export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, spaceId: string) {
-  // The index page of a type answers ONE question — "what can I launch here?"
-  // — so it renders the ACTIVE set and nothing else ({@link activeHereSql}:
-  // the placement row's verdict where the package is placed, the deployment's
-  // default where there is no row). "What is PLACED here, and in what state?"
-  // is the other question, and it has its own page: the space library
-  // (`GET /api/spaces/{id}/library`), which is where an offer is taken up and
-  // a switched-off package is switched back on.
-  //
-  // One rule rather than two views of the same list: the caller-context hints
-  // the model is given, the run gate and this page agree by construction, so
-  // the editor's integration picker cannot offer what a run would refuse, and
-  // a page cannot show a launch control that 404s on click. NOT a bare
-  // row-and-enabled predicate: that hides every system package the space runs
-  // without a row, and then the integrations listing needs a correction pass
-  // to put them back.
-  //
-  // `draftContent` (the whole SKILL.md / prompt.md body) is deliberately NOT
-  // projected: the list mapper never reads it, and it is by far the largest
-  // column on the row.
+  // The index lists the active set only ({@link activeHereSql}, shared with the
+  // hints and the run gate); placed-but-off packages live in the space library.
+  // `draftContent` is not projected: the mapper never reads it.
   const dataQuery = db
     .select({
       id: packages.id,
@@ -279,13 +303,12 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, spaceI
     })
     .from(packages)
     .leftJoin(spacePackages, placementRowJoin(packages.id, spaceId))
-    .leftJoin(packageShares, placementShareJoin(packages.id, spaceId))
     .where(
       and(
         orgOrSystemFilter(orgId),
         eq(packages.type, cfg.type),
         notEphemeralFilter(),
-        activeHereSql(spaceId),
+        activeHereSql(),
       ),
     )
     .orderBy(
@@ -323,6 +346,7 @@ export async function listOrgItems(orgId: string, cfg: PackageTypeConfig, spaceI
       version: typeof m.version === "string" ? m.version : null,
       auto_installed: row.autoInstalled,
       forked_from: row.forkedFrom ?? null,
+      ...(cfg.type === "integration" ? integrationIndexFields(m as IntegrationManifest) : {}),
       // camelCase, and NOT on the wire: the route projects the pair
       // `home_space_id` / `home_writable` through `homeWireForCaller`, which
       // needs the caller's reach and so cannot live in a service.
@@ -389,10 +413,10 @@ export async function deleteOrgItem(
   await db.transaction(async (tx) => {
     // Enumerate BEFORE the delete: `ON DELETE CASCADE` on `package_versions`
     // makes every published artifact's key unrecoverable the moment the
-    // `packages` row goes. This previously ran as a bare delete followed by a
-    // best-effort `deletePackageFiles`, which removed only the
-    // `library-packages` object and orphaned every `agent-packages` version ZIP
-    // of the item outright — a permanent leak on an ordinary user action.
+    // `packages` row goes. A bare delete followed by a best-effort
+    // `deletePackageFiles` would remove only the `library-packages` object and
+    // orphan every `agent-packages` version ZIP of the item — a permanent leak
+    // on an ordinary user action.
     const jobs = await packageStorageDeletionJobs(tx, orgId, itemId, "package_deleted");
 
     // Scope delete to non-ephemeral rows only: deleting a shadow package

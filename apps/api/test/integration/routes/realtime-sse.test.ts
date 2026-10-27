@@ -223,6 +223,22 @@ describe("realtime SSE routes (integration)", () => {
       expect(res.status).toBe(401);
     });
 
+    it("refuses a non-UUID orgId exactly as an unknown one (#1969)", async () => {
+      const stream = (orgId: string) =>
+        app.request(`/api/realtime/runs/${run.id}?orgId=${orgId}&spaceId=${ctx.defaultSpaceId}`, {
+          headers: { Cookie: ctx.cookie, Accept: "text/event-stream" },
+        });
+      const unknown = await stream(crypto.randomUUID());
+      const malformed = await stream("not-a-uuid");
+      expect(unknown.status).toBe(401);
+      expect(malformed.status).toBe(401);
+      const problem = async (res: Response) => {
+        const { code, detail, title } = (await res.json()) as Record<string, unknown>;
+        return { code, detail, title };
+      };
+      expect(await problem(malformed)).toEqual(await problem(unknown));
+    });
+
     it("returns 401 without spaceId query param", async () => {
       const res = await app.request(`/api/realtime/runs/${run.id}?orgId=${ctx.orgId}`, {
         headers: { Cookie: ctx.cookie },
@@ -885,7 +901,9 @@ describe("realtime SSE routes (integration)", () => {
         auth_key: "primary",
         user_id: ctx.user.id,
         end_user_id: null,
+        org_id: ctx.orgId,
         space_id: ctx.defaultSpaceId,
+        origin_space_id: null,
         needs_reconnection: true,
         deleted: false,
       });
@@ -1024,7 +1042,9 @@ describe("realtime SSE routes (integration)", () => {
         auth_key: "primary",
         user_id: member.id,
         end_user_id: null,
+        org_id: ctx.orgId,
         space_id: spaceId,
+        origin_space_id: null,
         needs_reconnection: true,
         deleted: false,
       });
@@ -1085,7 +1105,9 @@ describe("realtime SSE routes (integration)", () => {
         auth_key: "primary",
         user_id: other.id,
         end_user_id: null,
+        org_id: ctx.orgId,
         space_id: spaceId,
+        origin_space_id: null,
         needs_reconnection: true,
         deleted: false,
       });
@@ -1143,7 +1165,9 @@ describe("realtime SSE routes (integration)", () => {
         auth_key: "primary",
         user_id: ctx.user.id,
         end_user_id: null,
+        org_id: ctx.orgId,
         space_id: ctx.defaultSpaceId,
+        origin_space_id: null,
         needs_reconnection: true,
         deleted: false,
       });
@@ -1293,6 +1317,7 @@ describe("realtime SSE routes (integration)", () => {
           'space_id', ${ctx.defaultSpaceId}::text,
           'schedule_id', NULL,
           'error', NULL,
+          'model_error', NULL,
           'started_at', NULL,
           'completed_at', NULL,
           'duration', NULL
@@ -1334,6 +1359,7 @@ describe("realtime SSE routes (integration)", () => {
           'space_id', ${ctx.defaultSpaceId}::text,
           'schedule_id', NULL,
           'error', NULL,
+          'model_error', NULL,
           'started_at', NULL,
           'completed_at', NULL,
           'duration', NULL

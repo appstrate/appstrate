@@ -10,9 +10,10 @@
  * email). The server still validates — this is purely UX.
  */
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { z } from "zod";
 import { client, ApiError, type components } from "@/api/client";
+import { useInvalidatePaths } from "@/hooks/use-invalidate-paths";
 import { useCurrentOrgId } from "@/hooks/use-org";
 import { useCurrentSpaceId } from "@/hooks/use-current-space";
 
@@ -41,6 +42,16 @@ const upsertSocialSchema = z.object({
 
 type UpsertSocialInput = z.infer<typeof upsertSocialSchema>;
 
+/** 404 = not configured yet: the form renders empty. */
+async function nullOn404<T>(read: () => Promise<T | undefined>): Promise<T | null> {
+  try {
+    return (await read()) ?? null;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+}
+
 export function useSmtpConfig() {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
@@ -54,22 +65,18 @@ export function useSmtpConfig() {
     ] as const,
     enabled: !!orgId && !!spaceId,
     queryFn: async (): Promise<SmtpConfigView | null> => {
-      try {
+      return nullOn404(async () => {
         const { data } = await client.GET("/api/spaces/{id}/smtp-config", {
           params: { path: { id: spaceId! } },
         });
-        return data ?? null;
-      } catch (err) {
-        // 404 = not configured yet — render the empty form.
-        if (err instanceof ApiError && err.status === 404) return null;
-        throw err;
-      }
+        return data;
+      });
     },
   });
 }
 
 export function useUpsertSmtpConfig() {
-  const qc = useQueryClient();
+  const invalidate = useInvalidatePaths("/api/spaces/{id}/smtp-config");
   const spaceId = useCurrentSpaceId();
   return useMutation({
     mutationFn: async (data: UpsertSmtpInput) => {
@@ -82,14 +89,12 @@ export function useUpsertSmtpConfig() {
       if (!saved) throw new Error("empty response");
       return saved;
     },
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}/smtp-config"] });
-    },
+    onSuccess: invalidate,
   });
 }
 
 export function useDeleteSmtpConfig() {
-  const qc = useQueryClient();
+  const invalidate = useInvalidatePaths("/api/spaces/{id}/smtp-config");
   const spaceId = useCurrentSpaceId();
   return useMutation({
     mutationFn: async () => {
@@ -97,9 +102,7 @@ export function useDeleteSmtpConfig() {
         params: { path: { id: spaceId! } },
       });
     },
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}/smtp-config"] });
-    },
+    onSuccess: invalidate,
   });
 }
 
@@ -132,22 +135,18 @@ export function useSocialProvider(provider: SocialProviderId) {
     ] as const,
     enabled: !!orgId && !!spaceId,
     queryFn: async (): Promise<SocialProviderView | null> => {
-      try {
+      return nullOn404(async () => {
         const { data } = await client.GET("/api/spaces/{id}/social-providers/{provider}", {
           params: { path: { id: spaceId!, provider } },
         });
-        return data ?? null;
-      } catch (err) {
-        // 404 = not configured yet — render the empty form.
-        if (err instanceof ApiError && err.status === 404) return null;
-        throw err;
-      }
+        return data;
+      });
     },
   });
 }
 
 export function useUpsertSocialProvider(provider: SocialProviderId) {
-  const qc = useQueryClient();
+  const invalidate = useInvalidatePaths("/api/spaces/{id}/social-providers/{provider}");
   const spaceId = useCurrentSpaceId();
   return useMutation({
     mutationFn: async (data: UpsertSocialInput) => {
@@ -160,16 +159,12 @@ export function useUpsertSocialProvider(provider: SocialProviderId) {
       if (!saved) throw new Error("empty response");
       return saved;
     },
-    onSuccess: () => {
-      void qc.invalidateQueries({
-        queryKey: ["get", "/api/spaces/{id}/social-providers/{provider}"],
-      });
-    },
+    onSuccess: invalidate,
   });
 }
 
 export function useDeleteSocialProvider(provider: SocialProviderId) {
-  const qc = useQueryClient();
+  const invalidate = useInvalidatePaths("/api/spaces/{id}/social-providers/{provider}");
   const spaceId = useCurrentSpaceId();
   return useMutation({
     mutationFn: async () => {
@@ -177,10 +172,6 @@ export function useDeleteSocialProvider(provider: SocialProviderId) {
         params: { path: { id: spaceId!, provider } },
       });
     },
-    onSuccess: () => {
-      void qc.invalidateQueries({
-        queryKey: ["get", "/api/spaces/{id}/social-providers/{provider}"],
-      });
-    },
+    onSuccess: invalidate,
   });
 }

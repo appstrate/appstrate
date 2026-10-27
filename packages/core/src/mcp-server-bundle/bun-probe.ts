@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Bun compatibility probe (D31, proposal §5.3 Phase 1.05).
+ * Bun compatibility probe.
  *
  * After vendoring an `npx` integration, the bundler optionally spawns
  * the resulting `./server/<entryPoint>` under Bun and performs a

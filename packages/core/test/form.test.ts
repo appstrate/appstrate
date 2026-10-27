@@ -10,12 +10,22 @@ import {
   getOrderedKeys,
   isFileField,
   isMultipleFileField,
+  isSecretField,
   mapAfpsToRjsf,
   authorDefaults,
   type JSONSchema7,
   type JSONSchemaObject,
   type SchemaWrapper,
 } from "../src/form.ts";
+
+describe("isSecretField", () => {
+  it("is what the schema marks `writeOnly` or `format: password`, whatever its name", () => {
+    expect(isSecretField({ type: "string", writeOnly: true })).toBe(true);
+    expect(isSecretField({ type: "string", format: "password" })).toBe(true);
+    expect(isSecretField({ type: "string" })).toBe(false);
+    expect(isSecretField({ type: "string", writeOnly: false, format: "uri" })).toBe(false);
+  });
+});
 
 describe("isFileField / isMultipleFileField", () => {
   it("detects a single-file field", () => {

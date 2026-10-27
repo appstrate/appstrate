@@ -4,6 +4,8 @@ The compose that runs `app.appstrate.com`. **No product code lives here**: `dock
 
 The billing module is `packages/module-ee`, and it ships inside `ghcr.io/appstrate/appstrate` itself, inert until `MODULES` names it. One image, one tag, nothing to build — which is why the deployment is one file in the monorepo rather than a repository of its own.
 
+Staging deploys this same file, from `main`, on every merge: `docs/deployment/STAGING.md`.
+
 ## Layout
 
 |                      |                                                             |
@@ -25,12 +27,22 @@ Coolify's `docker_compose_domains` maps **these** service names to `app.appstrat
 
 ## Upgrading
 
-1. Set `APPSTRATE_VERSION` to the release tag **without the `v`** (`1.0.0-beta.66`, not `v1.0.0-beta.66`).
+1. Set `APPSTRATE_VERSION` to the release tag **without the `v`** (`1.0.0-beta.68`, not `v1.0.0-beta.68`).
 2. Redeploy.
 
 `appstrate-migrate` runs the platform's schema migrations before the application starts (`depends_on: service_completed_successfully`), and `@appstrate/module-ee` migrates its own `ee_*` tables at `init()`. A release that needs more than that says so in `CHANGELOG.md`, and the procedure lives in **`scripts/migration/README.md`** — read it before changing the version, not after.
 
 **A release is not always an image swap.** Migrations that cannot be replayed, one-off data scripts, and environment variables that must land at a particular moment are all real. The runbook is the authority; this file is not a substitute for it.
+
+**A redeploy migrates and starts in one step**, so it cannot carry a release that runs data scripts between the two. For such a release, stop the application container, run the migrations and then the scripts from the new image (it ships `scripts/migration/`) against the resource's database, then set the version and redeploy: the migrate service then finds nothing pending. Never with a bare `docker compose` from a checkout of this directory: `name:` is inert under Coolify (below), so that run creates an empty `appstrate-prod_pgdata`, migrates it, succeeds, and the scripts never touch production. Run the image in the network namespace of the resource's database container (labelled `com.docker.compose.project=<resource-uuid>` and `com.docker.compose.service=appstrate-postgres`), with the stopped application container's environment: a script validates the platform's whole environment schema when it opens the database, so `DATABASE_URL` alone fails before connecting. That `DATABASE_URL` must name that postgres.
+
+```sh
+docker run --rm --network container:<postgres container> \
+  --env-file <(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' <app container>) \
+  ghcr.io/appstrate/appstrate:<version> bun scripts/migration/<script>.ts
+```
+
+The migrations are `bun packages/db/src/migrate.ts` the same way. Which scripts a release needs, and in what order, is in `scripts/migration/README.md`; the exact commands are in the release runbook.
 
 ## Production
 
@@ -61,6 +73,8 @@ Facts worth writing down, because each one is easy to break:
   docker run --rm -v <uuid>_miniodata:/data --user 0 --entrypoint chown \
     cgr.dev/chainguard/minio@sha256:bd014394a80898e68c149f2311fdf8d5a2c2f3bb2c33b9327ae6d02b4b065ae1 -R 65532:65532 /data
   ```
+
+- **`APP_URL` must be fetchable from the internet, and its origin must not move casually.** Integration authorization servers fetch an instance document under it, and changing its origin forces some integration connections to be reconnected. Behind an access proxy, IP allow-list or split DNS, set `INTEGRATION_OAUTH_CIMD=off`; see `docs/ENV.md`.
 
 - **`watch_paths` is set to this directory.** Without it, a push anywhere in the monorepo would redeploy production — and a deploy is not free: it re-pulls every image and restarts the whole stack. If you change `docker_compose_location`, change `watch_paths` in the same edit.
 

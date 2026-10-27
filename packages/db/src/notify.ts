@@ -122,6 +122,13 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
         -- is ample for a surfaced error message; the full text lives in
         -- run_logs. Every other value here is an id, an enum or a timestamp.
         'error', notify_text_budget(NEW.error, 2000),
+        -- The classified model failure (the run's model_error); its sentence is
+        -- bounded like error above, the rest is an enum and an integer.
+        'model_error', CASE WHEN NEW.model_error_category IS NULL THEN NULL ELSE json_build_object(
+          'category', NEW.model_error_category,
+          'status', NEW.model_error_status,
+          'message', notify_text_budget(NEW.model_error_message, 1000)
+        ) END,
         'started_at', to_char(NEW.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
         'completed_at', to_char(NEW.completed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
         'duration', NEW.duration
@@ -261,11 +268,8 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
   // integration detail, status cards). Without this, the badge only
   // refreshes on window-focus refetch and stays stale across tabs.
   //
-  // Tenant scope: the payload carries `space_id` only — the table
-  // has no `org_id` column (org is enforced via the `spaces` row).
-  // The realtime subscriber filter relies on the SSE auth gate
-  // (`validateSSEAuth`) having proven `spaceId ∈ orgId`, so this
-  // payload-side scope is sufficient.
+  // Tenant scope: `org_id` always, `space_id` NULL for an org-scoped
+  // connection, which reaches every space of its org.
   //
   // DELETE branch carries the OLD row's identifiers so the frontend can
   // invalidate the right cache; `needs_reconnection` is NULL on delete
@@ -286,6 +290,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
           'auth_key', OLD.auth_key,
           'user_id', OLD.user_id,
           'end_user_id', OLD.end_user_id,
+          'org_id', OLD.org_id,
           'space_id', OLD.space_id,
           'needs_reconnection', NULL,
           'deleted', TRUE
@@ -299,6 +304,7 @@ export async function createNotifyTriggers(db: Db): Promise<void> {
           'auth_key', NEW.auth_key,
           'user_id', NEW.user_id,
           'end_user_id', NEW.end_user_id,
+          'org_id', NEW.org_id,
           'space_id', NEW.space_id,
           'needs_reconnection', NEW.needs_reconnection,
           'deleted', FALSE

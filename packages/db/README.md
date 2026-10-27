@@ -45,7 +45,7 @@ bun run db:migrate    # Apply pending migrations
 
 `drizzle/0000_init.sql` is a squash, and any database created before it — production — never ran
 it. Anything the squash introduced therefore exists in the schema and in every fresh database while
-being absent there (issue #1182 found two indexes). Before any `DROP INDEX`, verify the surviving
+being absent there (two indexes, for instance). Before any `DROP INDEX`, verify the surviving
 index against the **live** database; the TS schema and `0000_init.sql` are not evidence.
 
 ```sh
@@ -77,7 +77,7 @@ under the same name; catching that is out of scope here.
 **Columns** are compared by name and by `NOT NULL`; their **types** are not compared, because the
 normalisation that would make a type comparison honest is where the false positives live. A missing
 column is louder than a missing index — a Postgres `42703` on the first statement naming it — and
-nothing else in the repo can see it on a live database (issue #1349). The Better Auth drizzle
+nothing else in the repo can see it on a live database. The Better Auth drizzle
 adapter looks like it does and does not: `findDrizzleSchemaProblems` diffs the plugin's expectations
 against the **Drizzle TS object**, never against `information_schema`, so a database missing a
 declared column boots perfectly clean. `apps/api/test/unit/migration-schema-parity.test.ts` covers

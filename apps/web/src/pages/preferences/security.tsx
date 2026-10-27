@@ -1,26 +1,28 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Card } from "@appstrate/ui/components/card";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useWatch } from "react-hook-form";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Mail } from "lucide-react";
 import { useAppForm } from "../../hooks/use-app-form";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
-import { cn } from "@appstrate/ui/cn";
+import { FieldError } from "@appstrate/ui/components/field";
+import { FormItem } from "@/components/app-ui/form-item";
 import { useAuth } from "../../hooks/use-auth";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { client } from "../../api/client";
 import { GoogleIcon, GitHubIcon } from "../../components/icons";
+import { NewPasswordFields } from "../../components/auth-fields";
 import { ReauthModal } from "../../components/reauth-modal";
 import { SessionNotFreshError } from "../../lib/auth-errors";
 import { availableReauthMethods } from "../../lib/reauth-methods";
-import { MIN_PASSWORD_LENGTH } from "@appstrate/shared-types";
 import { errorMessage, toastError } from "../../lib/mutation-error";
 import { ApiError } from "../../api/errors";
+import { SettingsSkeleton } from "../../components/loading-skeletons";
+import { ErrorState } from "../../components/page-states";
 
 // Shape as `listAccounts()` returns it. `id` is Better Auth's `account` row
 // primary key — the value `unlinkAccount()` takes. `accountId` is the id AT
@@ -73,7 +75,7 @@ function LinkedAccountsSection({
             icon: GitHubIcon,
             account: githubAccount,
             link: linkGithub,
-            linkingKey: "preferences.linkingGithub" as const,
+            linkingKey: "preferences.linkingGoogle" as const,
             linkKey: "preferences.linkGithub" as const,
           },
         ]
@@ -88,94 +90,94 @@ function LinkedAccountsSection({
       <p className="text-muted-foreground mb-4 text-sm">
         {t("preferences.linkedAccountsDescription")}
       </p>
-      <div className="space-y-3">
-        {credentialAccount && (
-          <div className="border-border bg-card flex items-center justify-between rounded-lg border p-4">
-            <div className="flex items-center gap-3">
-              <div className="bg-muted flex h-8 w-8 items-center justify-center rounded-full">
-                <Mail size={16} />
-              </div>
-              <span className="text-sm font-medium">{t("preferences.emailPassword")}</span>
-            </div>
-            <span className="text-muted-foreground text-xs">
-              {t("preferences.linkedVia", { provider: "Email" })}
-            </span>
-          </div>
-        )}
-        {socialProviders.map((provider) => {
-          const Icon = provider.icon;
-          // Bound to a local so the narrowing survives into the click handlers.
-          const account = provider.account;
-          return account ? (
-            <div
-              key={provider.id}
-              className="border-border bg-card flex items-center justify-between rounded-lg border p-4"
-            >
+      {accounts === undefined ? (
+        <SettingsSkeleton rows={2} />
+      ) : (
+        <div className="flex flex-col gap-3">
+          {credentialAccount && (
+            <Card className="flex items-center justify-between p-4">
               <div className="flex items-center gap-3">
-                <Icon className="h-5 w-5" />
-                <div>
-                  <span className="text-sm font-medium">{provider.name}</span>
-                  <div className="text-muted-foreground text-xs">{account.accountId}</div>
+                <div className="bg-muted flex size-8 items-center justify-center rounded-full">
+                  <Mail size={16} />
                 </div>
+                <span className="text-sm font-medium">{t("preferences.emailPassword")}</span>
               </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={!canUnlink || unlinking === provider.id}
-                title={!canUnlink ? t("preferences.cannotUnlinkLast") : undefined}
-                onClick={async () => {
-                  setUnlinking(provider.id);
-                  try {
-                    await unlinkAccount(account.id);
-                    await refetch();
-                  } catch (err: unknown) {
-                    if (err instanceof SessionNotFreshError) {
-                      // Session too old for a sensitive action — walk the user
-                      // through a step-up re-login, then retry the unlink.
-                      setPendingUnlink(account.id);
-                    } else {
-                      // Surface the failure — previously a rejection here was
-                      // silently swallowed and the button just stopped spinning.
-                      toastError(err);
+              <span className="text-muted-foreground text-xs">
+                {t("preferences.linkedVia", { provider: "Email" })}
+              </span>
+            </Card>
+          )}
+          {socialProviders.map((provider) => {
+            const Icon = provider.icon;
+            // Bound to a local so the narrowing survives into the click handlers.
+            const account = provider.account;
+            return account ? (
+              <Card key={provider.id} className="flex items-center justify-between p-4">
+                <div className="flex items-center gap-3">
+                  <Icon className="size-5" />
+                  <div>
+                    <span className="text-sm font-medium">{provider.name}</span>
+                    <div className="text-muted-foreground text-xs">{account.accountId}</div>
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!canUnlink || unlinking === provider.id}
+                  title={!canUnlink ? t("preferences.cannotUnlinkLast") : undefined}
+                  onClick={async () => {
+                    setUnlinking(provider.id);
+                    try {
+                      await unlinkAccount(account.id);
+                      await refetch();
+                    } catch (err: unknown) {
+                      if (err instanceof SessionNotFreshError) {
+                        // Session too old for a sensitive action — walk the user
+                        // through a step-up re-login, then retry the unlink.
+                        setPendingUnlink(account.id);
+                      } else {
+                        // Surface the failure: swallowed, the button just stops spinning.
+                        toastError(err);
+                      }
+                    } finally {
+                      setUnlinking(false);
                     }
-                  } finally {
-                    setUnlinking(false);
-                  }
-                }}
+                  }}
+                >
+                  {unlinking === provider.id
+                    ? t("preferences.unlinking")
+                    : t("preferences.unlinkGoogle")}
+                </Button>
+              </Card>
+            ) : (
+              <Card
+                key={provider.id}
+                className="flex items-center justify-between border-dashed p-4"
               >
-                {unlinking === provider.id
-                  ? t("preferences.unlinking")
-                  : t("preferences.unlinkGoogle")}
-              </Button>
-            </div>
-          ) : (
-            <div
-              key={provider.id}
-              className="border-border bg-card flex items-center justify-between rounded-lg border border-dashed p-4"
-            >
-              <div className="flex items-center gap-3">
-                <Icon className="h-5 w-5" />
-                <span className="text-muted-foreground text-sm font-medium">{provider.name}</span>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={linking === provider.id}
-                onClick={async () => {
-                  setLinking(provider.id);
-                  try {
-                    await provider.link();
-                  } finally {
-                    setLinking(false);
-                  }
-                }}
-              >
-                {linking === provider.id ? t(provider.linkingKey) : t(provider.linkKey)}
-              </Button>
-            </div>
-          );
-        })}
-      </div>
+                <div className="flex items-center gap-3">
+                  <Icon className="size-5" />
+                  <span className="text-muted-foreground text-sm font-medium">{provider.name}</span>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={linking === provider.id}
+                  onClick={async () => {
+                    setLinking(provider.id);
+                    try {
+                      await provider.link();
+                    } finally {
+                      setLinking(false);
+                    }
+                  }}
+                >
+                  {linking === provider.id ? t(provider.linkingKey) : t(provider.linkKey)}
+                </Button>
+              </Card>
+            );
+          })}
+        </div>
+      )}
       <ReauthModal
         open={pendingUnlink !== null}
         methods={availableReauthMethods(accounts, features)}
@@ -207,19 +209,17 @@ function PasswordChangeForm() {
   const { updatePassword } = useAuth();
   const [success, setSuccess] = useState("");
 
+  const form = useAppForm<PasswordFormData>({
+    defaultValues: { currentPassword: "", newPassword: "", confirmPassword: "" },
+  });
   const {
     register,
     handleSubmit,
     setError,
     reset,
-    control,
     showError,
     formState: { errors, isSubmitting },
-  } = useAppForm<PasswordFormData>({
-    defaultValues: { currentPassword: "", newPassword: "", confirmPassword: "" },
-  });
-
-  const newPasswordValue = useWatch({ control, name: "newPassword" });
+  } = form;
 
   const onSubmit = async (data: PasswordFormData) => {
     setSuccess("");
@@ -237,68 +237,29 @@ function PasswordChangeForm() {
   };
 
   return (
-    <div className="border-border bg-card mb-4 rounded-lg border p-5">
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-1">
-        <div className="space-y-2">
-          <Label>{t("preferences.currentPassword")}</Label>
+    <Card className="mb-4 p-5">
+      <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4 py-1">
+        <FormItem
+          id="current-password"
+          label={t("preferences.currentPassword")}
+          error={showError("currentPassword") ? errors.currentPassword?.message : undefined}
+        >
           <Input
             type="password"
             {...register("currentPassword", {
               required: t("validation.required", { ns: "common" }),
             })}
             autoComplete="current-password"
-            aria-invalid={showError("currentPassword") ? true : undefined}
-            className={cn(showError("currentPassword") && "border-destructive")}
           />
-          {showError("currentPassword") && (
-            <div className="text-destructive text-sm">{errors.currentPassword?.message}</div>
-          )}
-        </div>
-        <div className="space-y-2">
-          <Label>{t("preferences.newPassword")}</Label>
-          <Input
-            type="password"
-            {...register("newPassword", {
-              required: t("validation.required", { ns: "common" }),
-              // Better Auth's own minimum, imported rather than restated.
-              minLength: {
-                value: MIN_PASSWORD_LENGTH,
-                message: t("validation.minLength", { ns: "common", min: MIN_PASSWORD_LENGTH }),
-              },
-            })}
-            minLength={MIN_PASSWORD_LENGTH}
-            autoComplete="new-password"
-            aria-invalid={showError("newPassword") ? true : undefined}
-            className={cn(showError("newPassword") && "border-destructive")}
-          />
-          {showError("newPassword") && (
-            <div className="text-destructive text-sm">{errors.newPassword?.message}</div>
-          )}
-        </div>
-        <div className="space-y-2">
-          <Label>{t("preferences.confirmPassword")}</Label>
-          <Input
-            type="password"
-            {...register("confirmPassword", {
-              required: t("validation.required", { ns: "common" }),
-              validate: (v) =>
-                v === newPasswordValue || t("validation.passwordMismatch", { ns: "common" }),
-            })}
-            autoComplete="new-password"
-            aria-invalid={showError("confirmPassword") ? true : undefined}
-            className={cn(showError("confirmPassword") && "border-destructive")}
-          />
-          {showError("confirmPassword") && (
-            <div className="text-destructive text-sm">{errors.confirmPassword?.message}</div>
-          )}
-        </div>
-        {errors.root && <div className="text-destructive text-sm">{errors.root.message}</div>}
+        </FormItem>
+        <NewPasswordFields form={form} />
+        {errors.root && <FieldError>{errors.root.message}</FieldError>}
         {success && <div className="text-success text-sm">{success}</div>}
-        <Button type="submit" disabled={isSubmitting}>
+        <Button type="submit" className="self-start" disabled={isSubmitting}>
           {isSubmitting ? t("preferences.changingPassword") : t("preferences.changePassword")}
         </Button>
       </form>
-    </div>
+    </Card>
   );
 }
 
@@ -317,19 +278,15 @@ function PasswordSetForm({ onPasswordSet }: { onPasswordSet: () => Promise<unkno
   const { user, requestPasswordReset } = useAuth();
   const [resetEmailState, setResetEmailState] = useState<"idle" | "sending" | "sent">("idle");
 
+  const form = useAppForm<SetPasswordFormData>({
+    defaultValues: { newPassword: "", confirmPassword: "" },
+  });
   const {
-    register,
     handleSubmit,
     setError,
     reset,
-    control,
-    showError,
     formState: { errors, isSubmitting },
-  } = useAppForm<SetPasswordFormData>({
-    defaultValues: { newPassword: "", confirmPassword: "" },
-  });
-
-  const newPasswordValue = useWatch({ control, name: "newPassword" });
+  } = form;
 
   const onSubmit = async (data: SetPasswordFormData) => {
     try {
@@ -360,51 +317,14 @@ function PasswordSetForm({ onPasswordSet }: { onPasswordSet: () => Promise<unkno
   };
 
   return (
-    <div className="border-border bg-card mb-4 rounded-lg border p-5">
+    <Card className="mb-4 p-5">
       <p className="text-muted-foreground mb-4 text-sm">
         {t("preferences.setPasswordDescription")}
       </p>
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 py-1">
-        <div className="space-y-2">
-          <Label>{t("preferences.newPassword")}</Label>
-          <Input
-            type="password"
-            {...register("newPassword", {
-              required: t("validation.required", { ns: "common" }),
-              // Better Auth's own minimum, imported rather than restated.
-              minLength: {
-                value: MIN_PASSWORD_LENGTH,
-                message: t("validation.minLength", { ns: "common", min: MIN_PASSWORD_LENGTH }),
-              },
-            })}
-            minLength={MIN_PASSWORD_LENGTH}
-            autoComplete="new-password"
-            aria-invalid={showError("newPassword") ? true : undefined}
-            className={cn(showError("newPassword") && "border-destructive")}
-          />
-          {showError("newPassword") && (
-            <div className="text-destructive text-sm">{errors.newPassword?.message}</div>
-          )}
-        </div>
-        <div className="space-y-2">
-          <Label>{t("preferences.confirmPassword")}</Label>
-          <Input
-            type="password"
-            {...register("confirmPassword", {
-              required: t("validation.required", { ns: "common" }),
-              validate: (v) =>
-                v === newPasswordValue || t("validation.passwordMismatch", { ns: "common" }),
-            })}
-            autoComplete="new-password"
-            aria-invalid={showError("confirmPassword") ? true : undefined}
-            className={cn(showError("confirmPassword") && "border-destructive")}
-          />
-          {showError("confirmPassword") && (
-            <div className="text-destructive text-sm">{errors.confirmPassword?.message}</div>
-          )}
-        </div>
-        {errors.root && <div className="text-destructive text-sm">{errors.root.message}</div>}
-        <Button type="submit" disabled={isSubmitting}>
+      <form onSubmit={handleSubmit(onSubmit)} className="flex flex-col gap-4 py-1">
+        <NewPasswordFields form={form} />
+        {errors.root && <FieldError>{errors.root.message}</FieldError>}
+        <Button type="submit" className="self-start" disabled={isSubmitting}>
           {isSubmitting ? t("preferences.settingPassword") : t("preferences.setPassword")}
         </Button>
       </form>
@@ -425,7 +345,7 @@ function PasswordSetForm({ onPasswordSet }: { onPasswordSet: () => Promise<unkno
           )}
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -433,7 +353,11 @@ export function PreferencesSecurityPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { listLinkedAccounts } = useAuth();
 
-  const { data: accounts, refetch } = useQuery({
+  const {
+    data: accounts,
+    refetch,
+    error: accountsError,
+  } = useQuery({
     queryKey: ["linked-accounts"],
     queryFn: () => listLinkedAccounts(),
   });
@@ -444,8 +368,14 @@ export function PreferencesSecurityPage() {
 
   return (
     <>
-      <LinkedAccountsSection accounts={accounts} refetch={refetch} />
-      {accounts !== undefined && (
+      {accountsError ? (
+        <ErrorState error={accountsError} />
+      ) : (
+        <LinkedAccountsSection accounts={accounts} refetch={refetch} />
+      )}
+      {accountsError ? null : accounts === undefined ? (
+        <SettingsSkeleton rows={2} />
+      ) : (
         <>
           <div className="text-muted-foreground mb-4 text-sm font-medium">
             {t(hasCredential ? "preferences.changePassword" : "preferences.setPassword")}

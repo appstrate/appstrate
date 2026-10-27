@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The shared context derivation (#1046) — the single source both the run-header
- * gauge and the Exécution pane's per-turn table (`run-execution-tab.tsx`) read
+ * The shared context derivation (#1046) — the single source both the Usage
+ * card's gauge and the per-turn table (`run-detail/run-turns-detail.tsx`) read
  * from. Pure, so it needs no DOM.
  */
 
@@ -18,7 +18,7 @@ import {
 const WINDOW = 200_000;
 
 /**
- * A turn as the runner emits it today: it states the window it is running
+ * A turn as the runner emits it: it states the window it is running
  * against, on the same payload as the token counts.
  */
 function turn(index: number, contextTokens: number, over: Partial<RunTurnRow> = {}): RunTurnRow {
@@ -112,10 +112,8 @@ describe("readRunContext — nothing truthful to render", () => {
   });
 
   it("returns null when no turn states a window, even with real counts", () => {
-    // A raw 128 430 with nothing to divide it by informs nobody — the header
-    // drops it rather than showing an uninterpretable number. There is no
-    // second source to fall back on any more: the run row no longer carries a
-    // window, so a series that states none leaves the reading unbuildable.
+    // A raw 128 430 with nothing to divide it by says nothing about headroom,
+    // and the run row carries no window to fall back on.
     expect(readRunContext([windowlessTurn(0, 128_430)])).toBeNull();
     expect(readRunContext([windowlessTurn(0, 40_000), windowlessTurn(1, 128_430)])).toBeNull();
   });
@@ -205,7 +203,7 @@ describe("formatCompactTokens", () => {
   });
 
   it("promotes at the ROUNDING boundary, never emitting the `1000k` it rejects", () => {
-    // On a 1 048 576-token window a run at 999 600 used to render
+    // On a 1 048 576-token window a run at 999 600 would otherwise render
     // `1000k / 1.0M` — two magnitudes side by side, and the exact string the
     // function's own docstring calls unreadable.
     expect(formatCompactTokens(999_400)).toBe("999k");

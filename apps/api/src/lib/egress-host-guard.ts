@@ -158,3 +158,26 @@ export function egressGuardedFetch(
 ): Promise<Response> {
   return guardedFetch(input, init, { ...opts, allowHost: isAllowedInternalIdpHost });
 }
+
+/**
+ * {@link egressGuardedFetch} shaped as `typeof fetch`, for the `fetchImpl` seams
+ * of `@appstrate/connect` (RFC 9728 / RFC 8414 discovery, DCR) whose URLs are
+ * manifest-, user- or server-derived: every hop guarded, allowlist-aware.
+ */
+export function egressFetchImpl(opts?: Omit<GuardedFetchOptions, "allowHost">): typeof fetch {
+  return ((input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+    egressGuardedFetch(
+      typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
+      init,
+      opts,
+    )) as typeof fetch;
+}
+
+/** `fetchImpl` whose every request also ends with `signal` (a whole operation's deadline). */
+export function fetchWithin(fetchImpl: typeof fetch, signal: AbortSignal): typeof fetch {
+  return ((input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+    fetchImpl(input, {
+      ...init,
+      signal: init?.signal ? AbortSignal.any([init.signal, signal]) : signal,
+    })) as typeof fetch;
+}

@@ -7,27 +7,23 @@ import {
   organizationMembers,
   packageDistTags,
   packages,
-  packageShares,
   spacePackages,
   user,
 } from "@appstrate/db/schema";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import { asRecord } from "@appstrate/core/safe-json";
-import { packagePermission } from "@appstrate/core/permissions";
+import { packagePermission, spacePackagePermission } from "@appstrate/core/permissions";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { isActiveHere } from "./package-activation.ts";
 import { isPublished, latestTagJoin } from "./space-packages.ts";
 import { sharerView } from "./package-shares.ts";
 import type { PackageType } from "@appstrate/core/validation";
 import type { AppEnv } from "../types/index.ts";
+import { callerPersonalOwnerId } from "../lib/view-as.ts";
 
 const PACKAGE_TYPES = ["agent", "skill", "mcp-server", "integration"] as const;
 
-/**
- * How a package reaches a space. The two placements of the rule
- * (`placementGrantsRead`, RBAC spec §6.9) plus the system escape — nothing
- * else puts a package on this list.
- */
+/** How a package reaches a space: its home, a row outside it (`shared`), or `system` (RBAC spec §6.9). */
 type PlacementVia = "home" | "shared" | "system";
 
 /** Whether the space RUNS what it was placed. */
@@ -40,12 +36,23 @@ interface Placement {
   state: PlacementState;
   /** Whether this space enforces the skill in its chat; `false` with no row. */
   chat_enforced: boolean;
-  /**
-   * Who offered it — on `shared` placements only, and `null` there when the
-   * offer came from a home MOVE rather than from a person (`shared_by` is NULL
-   * on those rows) or when that account is gone.
-   */
+  /** Who placed it (`shared` only); `null` for a row a home move left or a gone account. */
   shared_by: { user_id: string; name: string } | null;
+}
+
+/**
+ * Whether the caller may switch a package on/off in one space, as the
+ * `…/packages` routes judge it: `not_shareable` = not placed there and no
+ * `<type>:share` in its home; `forbidden` = the `activate`/`deactivate` grant is
+ * missing (a personal space's owner needs none).
+ */
+type ActivationVerdict = "allowed" | "not_shareable" | "forbidden";
+
+/** The two verdicts of one (package, space) pair, for every space the library lists. */
+interface ActivationCell {
+  spaceId: string;
+  activate: ActivationVerdict;
+  deactivate: ActivationVerdict;
 }
 
 interface LibraryPackage {
@@ -61,41 +68,48 @@ interface LibraryPackage {
   /** A `latest` published version exists (or a system package) — what enforcing a skill needs. */
   published: boolean;
   placements: Placement[];
+  activation: ActivationCell[];
 }
 
 /**
- * The library — a map of PLACEMENTS, in its two shapes.
- *
- * A package sits in ONE home and reaches other spaces through `package_shares`;
- * `space_packages` says whether the space that holds it actually runs it. The
- * library projects exactly those three axes, one row per package and one
- * `placements` entry per space the package is placed in and the caller reads:
- *
- *   - `via` — WHY the package is there: its `home`, an offer (`shared`), or
- *     because it is a `system` package, readable everywhere by construction.
- *   - `state` — whether the space RUNS it: `active` (a placement row saying
- *     `enabled`), `inactive` (a row saying `false`), `none` (no row at all,
- *     i.e. an offer nobody has taken up yet).
- *
- * A pending offer is therefore not a section of its own: it is a placement with
- * `state: "none"`, behind the same switch as every other space. A separate
- * section would put one activation behind two buttons.
- *
- * `GET /api/library` (owners and admins) returns every space the caller reads;
- * `GET /api/spaces/{id}/library` narrows to the requested space, which is what
- * makes it a space's own page rather than an organization map. A package with
- * NO placement there is still listed when the caller could PLACE it — a system
- * package, or one whose home grants them `<type>:share` — since
- * `POST /api/spaces/{id}/packages` would create the offer with the activation.
- * Never into a PERSONAL destination: an offer into somebody's own space is
- * somebody else's act.
+ * The library: a map of placements, one row per package and one `placements`
+ * entry per readable space it is placed in. `via` says why it is there, `state`
+ * whether the space runs it (`active`, `inactive` = row off, `none` = no row and
+ * default off). `GET /api/library` spans every readable space;
+ * `GET /api/spaces/{id}/library` narrows to one. A package with no placement is
+ * still listed when the caller could place it (`<type>:share` in its home), but
+ * never into a personal destination.
  */
 export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
   const orgId = c.get("orgId");
 
   const accessible = await packageAccessSpaces(c);
+  // The caller's own personal space takes no activation grant: ownership authorizes
+  // (`coarseSpacePackageGate`, `routes/spaces.ts`).
+  const personalOwnerId = callerPersonalOwnerId(c);
+  const activationVerdict = (
+    type: PackageType,
+    space: (typeof accessible)[number],
+    placed: boolean,
+    shareable: boolean,
+    next: boolean,
+  ): ActivationVerdict => {
+    if (!placed && !shareable) return "not_shareable";
+    const ownSpace = space.ownerUserId !== null && space.ownerUserId === personalOwnerId;
+    if (ownSpace) return "allowed";
+    return space.permissions.has(spacePackagePermission(type, next ? "activate" : "deactivate"))
+      ? "allowed"
+      : "forbidden";
+  };
   const target = spaceId ? accessible.find((space) => space.id === spaceId) : undefined;
-  const visibleSpaces = spaceId ? accessible.filter((space) => space.id === spaceId) : accessible;
+  // The spaces whose library this caller reads: those it reaches AND holds
+  // `spaces:read` in — the per-space route's own guard, so the organization
+  // form is exactly the union of the space forms (an owner or admin holds it
+  // everywhere). The space form's route has already checked it for its space.
+  const visibleSpaces = spaceId
+    ? accessible.filter((space) => space.id === spaceId)
+    : accessible.filter((space) => space.permissions.has("spaces:read"));
+  const visibleIds = new Set(visibleSpaces.map((space) => space.id));
   const accessibleIds = accessible.map((space) => space.id);
   const orgSpaces = visibleSpaces
     .sort((a, b) => Number(b.isDefault) - Number(a.isDefault))
@@ -121,7 +135,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
           .filter(
             (space) =>
               (!target?.ownerUserId || space.id === target.id) &&
-              (!spaceId || space.id === spaceId) &&
+              visibleIds.has(space.id) &&
               space.permissions.has(packagePermission(type, "read")),
           )
           .map((space) => space.id),
@@ -129,78 +143,64 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
     ]),
   );
 
-  // TWO reads for the whole map: the catalogue joined to its placement rows,
-  // and the offers joined to the names behind them. Two queries rather than one
-  // with a second LEFT JOIN, because a package placed in two spaces and offered
-  // to three would fan out into six rows and every state read off them would be
-  // ambiguous.
-  const [rows, shareRows] = await Promise.all([
-    db
-      .select({
-        id: packages.id,
-        type: packages.type,
-        source: packages.source,
-        homeSpaceId: packages.homeSpaceId,
-        draftManifest: packages.draftManifest,
-        latestVersionId: packageDistTags.versionId,
-        spaceId: spacePackages.spaceId,
-        enabled: spacePackages.enabled,
-        chatEnforced: spacePackages.chatEnforced,
-      })
-      .from(packages)
-      .leftJoin(
-        spacePackages,
-        and(
-          eq(spacePackages.packageId, packages.id),
-          // Scope to org spaces only — never leak placement state from another org.
-          inArray(spacePackages.spaceId, accessibleIds),
-        ),
-      )
-      .leftJoin(packageDistTags, latestTagJoin(packages.id))
-      .where(and(orgOrSystemFilter(orgId), notEphemeralFilter()))
-      .orderBy(packages.id),
-    // The sharer is named only while they are still a MEMBER of this
-    // organization. `package_shares.shared_by` is `ON DELETE SET NULL` on
-    // `user`, so deleting the ACCOUNT clears it — but leaving the ORG clears
-    // nothing, and this map is served to every owner and admin, on every row.
-    // The membership join is therefore the filter, not a post-pass: a former
-    // member's name never leaves the database. The projection off these columns
-    // is `sharerView` (`services/package-shares.ts`), shared with
-    // `GET …/shares` so the rule has one statement and not two.
-    db
-      .select({
-        packageId: packageShares.packageId,
-        spaceId: packageShares.spaceId,
-        sharedBy: packageShares.sharedBy,
-        sharerName: user.name,
-      })
-      .from(packageShares)
-      .leftJoin(
-        organizationMembers,
-        and(
-          eq(organizationMembers.userId, packageShares.sharedBy),
-          eq(organizationMembers.orgId, orgId),
-        ),
-      )
-      .leftJoin(user, eq(user.id, organizationMembers.userId))
-      .where(inArray(packageShares.spaceId, accessibleIds)),
-  ]);
-
-  /** packageId → spaceId → the sharer, when the offer names one. */
-  const offers = new Map<string, Map<string, { user_id: string; name: string } | null>>();
-  for (const row of shareRows) {
-    let bySpace = offers.get(row.packageId);
-    if (!bySpace) offers.set(row.packageId, (bySpace = new Map()));
-    bySpace.set(row.spaceId, sharerView(row));
-  }
+  // One read for the map. The sharer is named only while still an org member:
+  // the membership join is the filter (see `sharerView`).
+  const rows = await db
+    .select({
+      id: packages.id,
+      type: packages.type,
+      source: packages.source,
+      homeSpaceId: packages.homeSpaceId,
+      draftManifest: packages.draftManifest,
+      latestVersionId: packageDistTags.versionId,
+      spaceId: spacePackages.spaceId,
+      enabled: spacePackages.enabled,
+      chatEnforced: spacePackages.chatEnforced,
+      sharedBy: spacePackages.sharedBy,
+      sharerName: user.name,
+    })
+    .from(packages)
+    .leftJoin(
+      spacePackages,
+      and(
+        eq(spacePackages.packageId, packages.id),
+        // Scope to org spaces only — never leak placement state from another org.
+        inArray(spacePackages.spaceId, accessibleIds),
+      ),
+    )
+    .leftJoin(
+      organizationMembers,
+      and(
+        eq(organizationMembers.userId, spacePackages.sharedBy),
+        eq(organizationMembers.orgId, orgId),
+      ),
+    )
+    .leftJoin(user, eq(user.id, organizationMembers.userId))
+    .leftJoin(packageDistTags, latestTagJoin(packages.id))
+    .where(and(orgOrSystemFilter(orgId), notEphemeralFilter()))
+    .orderBy(packages.id);
 
   /** packageId → spaceId → the row's switches, for the rows the caller's spaces hold. */
-  const placementRows = new Map<string, Map<string, { enabled: boolean; chatEnforced: boolean }>>();
+  const placementRows = new Map<
+    string,
+    Map<
+      string,
+      {
+        enabled: boolean;
+        chatEnforced: boolean;
+        sharedBy: { user_id: string; name: string } | null;
+      }
+    >
+  >();
   for (const row of rows) {
     if (!row.spaceId) continue;
     let bySpace = placementRows.get(row.id);
     if (!bySpace) placementRows.set(row.id, (bySpace = new Map()));
-    bySpace.set(row.spaceId, { enabled: row.enabled!, chatEnforced: row.chatEnforced! });
+    bySpace.set(row.spaceId, {
+      enabled: row.enabled!,
+      chatEnforced: row.chatEnforced!,
+      sharedBy: sharerView(row),
+    });
   }
 
   // One row per package: the join above repeats a package once per placement
@@ -220,7 +220,6 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
     const readable = readableSpaceIds.get(type);
     if (!readable?.size) continue;
     const home = homeWireForCaller(row, accessible);
-    const offeredIn = offers.get(row.id);
     const rowsBySpace = placementRows.get(row.id);
 
     const placements: Placement[] = [];
@@ -245,7 +244,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
           ? "system"
           : row.homeSpaceId === space
             ? "home"
-            : offeredIn?.has(space)
+            : placementRow
               ? "shared"
               : null;
       if (via === null) continue;
@@ -254,24 +253,28 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
         via,
         state: placementState({ id: row.id, type, source: row.source }, placementRow?.enabled),
         chat_enforced: placementRow?.chatEnforced ?? false,
-        // Only an OFFER names an author. A home places the package by owning
-        // it, and a system package by being shipped.
-        shared_by: via === "shared" ? (offeredIn?.get(space) ?? null) : null,
+        shared_by: via === "shared" ? (placementRow?.sharedBy ?? null) : null,
       });
     }
     placements.sort((a, b) => a.space_id.localeCompare(b.space_id));
 
-    // A package with no placement the caller reads is listed in ONE case, and
-    // only in the SPACE form: it is a candidate the caller could put there in
-    // one click — a package whose home grants them `<type>:share`, since
-    // `POST /api/spaces/{id}/packages` creates the offer with the activation —
-    // and never for a PERSONAL destination, where an offer is somebody else's
-    // act. Nothing else earns a row: every package of the organization is
-    // homed in one of its spaces (`packages_org_package_has_home`), so a
-    // package with no placement here is one placed in spaces this caller does
-    // not read, and the ORGANIZATION map is the page that shows it.
-    if (placements.length === 0 && !(!!spaceId && !target?.ownerUserId && home.home_shareable))
-      continue;
+    // Unplaced packages are listed only as candidates the caller could place
+    // (`<type>:share` in the home), never into a personal destination alone.
+    const proposable = [...readable].some((space) => !personalSpaceIds.has(space));
+    if (placements.length === 0 && !(proposable && home.home_shareable)) continue;
+
+    const placedIn = new Set(placements.map((placement) => placement.space_id));
+    const activation = visibleSpaces.map((space): ActivationCell => ({
+      spaceId: space.id,
+      activate: activationVerdict(type, space, placedIn.has(space.id), home.home_shareable, true),
+      deactivate: activationVerdict(
+        type,
+        space,
+        placedIn.has(space.id),
+        home.home_shareable,
+        false,
+      ),
+    }));
 
     const m = asRecord(row.draftManifest);
     grouped[row.type]?.push({
@@ -286,6 +289,7 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
       description: typeof m.description === "string" ? m.description : "",
       published: isPublished(row),
       placements,
+      activation,
     });
   }
 
@@ -302,16 +306,12 @@ export async function getPackageLibrary(c: Context<AppEnv>, spaceId?: string) {
  * it: that rule answers `active`, and the other two labels only say why it
  * answered no — `inactive` a row saying `false` (a system package included,
  * because a switch that changes nothing is worse than no switch), `none` no row
- * at all, which the library renders as a pending offer. Folding them together
- * would lose the difference between "nobody has taken this up" and "somebody
- * switched this off". PLACEMENT is settled by the caller — a `Placement` exists
- * only once `via` resolved — so an ORPHAN row never reaches here to be rendered
- * `inactive`, and `placed` is `true` by construction.
+ * at all.
  */
 function placementState(
   pkg: { id: string; type: PackageType; source: string },
   enabled: boolean | undefined,
 ): PlacementState {
   const row = enabled === undefined ? undefined : { enabled };
-  return isActiveHere(pkg, row, true) ? "active" : row ? "inactive" : "none";
+  return isActiveHere(pkg, row) ? "active" : row ? "inactive" : "none";
 }

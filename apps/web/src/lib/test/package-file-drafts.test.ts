@@ -5,9 +5,9 @@ import {
   stageFileOperations,
   packageUpdateBody,
   uploadedFileOperation,
-  packageCreateBody,
-  newPackageContent,
+  importRefusal,
 } from "../package-file-drafts";
+import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
 import type { PackageFileEntry } from "../package-file-tree";
 const entries: PackageFileEntry[] = [
   { path: "SKILL.md", size: 4, media_kind: "text", inline: "body" },
@@ -15,56 +15,6 @@ const entries: PackageFileEntry[] = [
 ];
 
 describe("package draft operations", () => {
-  it("creates from the final primary buffer and preserves ancillary operations", async () => {
-    const binary = await uploadedFileOperation(
-      "asset.bin",
-      new Blob([new Uint8Array([0, 255, 128])]),
-    );
-    const state = {
-      manifest: { name: "@org/new" },
-      operations: stageFileOperations(
-        [],
-        [
-          { op: "write", path: "prompt.md", text: "old" },
-          { op: "write", path: "notes.md", text: "notes" },
-          { op: "move", from: "notes.md", to: "README.md" },
-          { op: "write", path: "prompt.md", text: "final prompt" },
-          binary,
-        ],
-      ),
-    };
-    expect(packageCreateBody(state, "agent")).toEqual({
-      manifest: state.manifest,
-      content: "final prompt",
-      operations: [
-        { op: "write", path: "notes.md", text: "notes" },
-        { op: "move", from: "notes.md", to: "README.md" },
-        binary,
-      ],
-    });
-    expect(newPackageContent("agent", state.operations)).toBe("final prompt");
-  });
-  it("reads an uploaded UTF-8 skill without losing its BOM", async () => {
-    const op = await uploadedFileOperation("SKILL.md", new Blob(["\uFEFFbody"]));
-    expect(packageCreateBody({ manifest: {}, operations: [op] }, "skill")).toEqual({
-      manifest: {},
-      content: "\uFEFFbody",
-    });
-    expect(
-      newPackageContent("skill", [{ op: "write", path: "SKILL.md", bytes_base64: "/w==" }]),
-    ).toBe("");
-  });
-  it("keeps optional integration documentation in the file tree", () => {
-    const state = {
-      manifest: { type: "integration" },
-      operations: [{ op: "write" as const, path: "INTEGRATION.md", text: "docs" }],
-    };
-    expect(packageCreateBody(state, "integration")).toEqual({
-      manifest: state.manifest,
-      content: JSON.stringify(state.manifest, null, 2),
-      operations: state.operations,
-    });
-  });
   it("coalesces typing without crossing a rename", () => {
     const operations = stageFileOperations(
       [],
@@ -136,5 +86,36 @@ describe("package draft operations", () => {
         "integration",
       ),
     ).toEqual([]);
+  });
+});
+
+describe("importRefusal", () => {
+  const file = (name: string, size = 1) => ({ name, size });
+  it("accepts new names and a replacement of an existing path", () => {
+    expect(importRefusal(entries, [file("a.md"), file("b.md")], false)).toBeNull();
+    expect(importRefusal(entries, [file("notes.md")], true)).toBeNull();
+  });
+  it("refuses any file over the inline limit, replacement included", () => {
+    const big = file("big.bin", PACKAGE_FILE_INLINE_MAX_BYTES + 1);
+    expect(importRefusal(entries, [file("a.md"), big], false)).toEqual({
+      key: "files.errorTooLarge",
+    });
+    expect(importRefusal(entries, [big], true)).toEqual({ key: "files.errorTooLarge" });
+  });
+  it("names the file that collides, with the tree or with the selection itself", () => {
+    expect(importRefusal(entries, [file("notes.md")], false)).toEqual({
+      key: "files.errorImportConflict",
+      path: "notes.md",
+    });
+    expect(importRefusal(entries, [file("x.md"), file("x.md")], false)).toEqual({
+      key: "files.errorImportConflict",
+      path: "x.md",
+    });
+  });
+  it("refuses the manifest's name with its own message", () => {
+    expect(importRefusal(entries, [file("manifest.json")], false)).toEqual({
+      key: "files.errorReserved",
+      path: "manifest.json",
+    });
   });
 });

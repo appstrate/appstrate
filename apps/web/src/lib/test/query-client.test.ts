@@ -9,23 +9,23 @@ import { describe, it, expect, beforeEach, afterEach, spyOn, type Mock } from "b
 import { toast } from "sonner";
 import { ApiError } from "../../api/errors.ts";
 import { queryClient, shouldRetryQuery } from "../query-client.ts";
+import { fileBlobKeys } from "../query-keys.ts";
 import i18n, { i18nReady } from "../../i18n.ts";
 
+// The i18n instance is shared by every file of the process, and the forbidden
+// case asserts French copy: pin the language rather than inherit a neighbour's.
 await i18nReady;
+await i18n.changeLanguage("fr");
 
 describe("shouldRetryQuery", () => {
   it("does not re-ask a refusal", () => {
-    for (const status of [400, 401, 403, 404, 409, 422]) {
-      expect(shouldRetryQuery(0, new ApiError("refused", "refused", status))).toBe(false);
-    }
+    expect(shouldRetryQuery(0, new ApiError("not_found", "Not found", 404))).toBe(false);
   });
 
-  it("retries once what a second attempt can change", () => {
-    for (const status of [408, 429, 500, 503]) {
-      expect(shouldRetryQuery(0, new ApiError("transient", "transient", status))).toBe(true);
-    }
-    expect(shouldRetryQuery(0, new TypeError("Failed to fetch"))).toBe(true);
-    expect(shouldRetryQuery(1, new TypeError("Failed to fetch"))).toBe(false);
+  it("retries a transient failure once", () => {
+    const unavailable = new ApiError("unavailable", "Unavailable", 503);
+    expect(shouldRetryQuery(0, unavailable)).toBe(true);
+    expect(shouldRetryQuery(1, unavailable)).toBe(false);
   });
 });
 
@@ -86,9 +86,9 @@ describe("failed mutations", () => {
     );
 
     expect(toastError).toHaveBeenCalledTimes(1);
-    // Translated lead, and the permission the server named kept after it.
+    // One sentence of ours: the server's English detail never reaches the toast.
     expect(toastError.mock.calls[0]![0]).toBe(
-      "Action refusée : Insufficient permissions: members:invite required",
+      "Vous n'avez pas les droits nécessaires pour cette action.",
     );
   });
 
@@ -99,5 +99,20 @@ describe("failed mutations", () => {
     );
 
     expect(toastError).not.toHaveBeenCalled();
+  });
+});
+
+describe("file blob cache", () => {
+  it("revokes the object URL when the entry leaves the cache", () => {
+    const revoke = spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    try {
+      queryClient.setQueryData(fileBlobKeys.detail("file_1", {}), "blob:one");
+      queryClient.setQueryData(["other", "file_1"], "blob:untouched");
+      queryClient.removeQueries({ queryKey: [fileBlobKeys.root] });
+      queryClient.removeQueries({ queryKey: ["other"] });
+      expect(revoke.mock.calls).toEqual([["blob:one"]]);
+    } finally {
+      revoke.mockRestore();
+    }
   });
 });

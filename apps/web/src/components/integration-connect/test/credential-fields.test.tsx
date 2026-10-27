@@ -6,10 +6,12 @@
  */
 
 import { describe, it, expect } from "bun:test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import i18n, { i18nReady } from "../../../i18n.ts";
 import { render } from "../../../test/render.tsx";
 import { CredentialFields } from "../credential-fields.tsx";
-import { initialCredentialValues } from "../credential-schema.ts";
+import { deriveFieldNames, initialCredentialValues } from "../credential-schema.ts";
 import type { IntegrationManifestAuth } from "../../../hooks/use-integrations.ts";
 
 await i18nReady;
@@ -58,6 +60,41 @@ describe("CredentialFields — the served schema, verbatim", () => {
     }
   });
 
+  it("orders required fields by `required`, whatever order `properties` arrives in", () => {
+    // jsonb hands `properties` back shortest key first: `auth_token` before `account_sid`.
+    const twilio = {
+      type: "api_key",
+      credentials: {
+        schema: {
+          type: "object",
+          required: ["account_sid", "auth_token"],
+          properties: { auth_token: { type: "string" }, account_sid: { type: "string" } },
+        },
+      },
+    } as unknown as IntegrationManifestAuth;
+    const markup = html(twilio);
+    expect(markup.indexOf("field-input-account_sid")).toBeGreaterThan(-1);
+    expect(markup.indexOf("field-input-account_sid")).toBeLessThan(
+      markup.indexOf("field-input-auth_token"),
+    );
+    // Optional fields follow the required ones.
+    const ssh = html(SSH_AUTH);
+    expect(ssh.indexOf("field-input-host_key")).toBeLessThan(ssh.indexOf("field-input-port"));
+  });
+
+  it("ignores a `required` entry naming no declared field, and a non-array `required`", () => {
+    const auth = (required: unknown) =>
+      ({
+        type: "custom",
+        credentials: {
+          schema: { type: "object", required, properties: { b: { type: "string" }, a: {} } },
+        },
+      }) as unknown as IntegrationManifestAuth;
+    expect(deriveFieldNames(auth(["a", "ghost"]))).toEqual(["a", "b"]);
+    expect(deriveFieldNames(auth("a"))).toEqual(["b", "a"]);
+    expect(deriveFieldNames(auth({ 0: "a" }))).toEqual(["b", "a"]);
+  });
+
   it("renders no input for an auth whose declared properties are empty", () => {
     // Every field minted server-side leaves `properties: {}` — not a cue to
     // fall back on the auth type's default fields.
@@ -94,6 +131,86 @@ describe("CredentialFields — values belong to the caller", () => {
   });
 });
 
+describe("CredentialFields — widget per field", () => {
+  type Widget = "password" | "textarea" | "text";
+  const SECRET = { type: "string", writeOnly: true };
+  const PLAIN = { type: "string" };
+  // Masking follows the manifest; a multi-line widget follows the name.
+  const FIELDS: Record<string, [schema: Record<string, unknown>, widget: Widget]> = {
+    api_key: [SECRET, "password"],
+    passcode: [SECRET, "password"],
+    pin: [{ type: "string", format: "password" }, "password"],
+    // A secret-sounding name the manifest does not mark stays readable.
+    secret_header_name: [PLAIN, "text"],
+    consumer_key: [PLAIN, "text"],
+    host_key: [PLAIN, "text"],
+    host: [PLAIN, "text"],
+    username: [PLAIN, "text"],
+    client_key: [SECRET, "textarea"],
+    private_key: [SECRET, "textarea"],
+    client_cert: [PLAIN, "textarea"],
+    certificate: [PLAIN, "textarea"],
+    key: [PLAIN, "textarea"],
+    ssh_public_key: [PLAIN, "textarea"],
+  };
+  const auth = {
+    type: "custom",
+    credentials: {
+      schema: {
+        type: "object",
+        properties: Object.fromEntries(Object.entries(FIELDS).map(([f, [schema]]) => [f, schema])),
+      },
+    },
+  } as unknown as IntegrationManifestAuth;
+
+  function expectWidget(markup: string, field: string, widget: Widget) {
+    const tag = inputTag(markup, field);
+    if (widget === "textarea") {
+      expect(tag).toStartWith("<textarea");
+    } else {
+      expect(tag).toStartWith("<input");
+      expect(tag).toContain(`type="${widget}"`);
+    }
+  }
+
+  for (const [field, [, widget]] of Object.entries(FIELDS)) {
+    it(`renders ${field} as ${widget}`, () => expectWidget(html(auth), field, widget));
+  }
+
+  it("masks the refresh token Garmin Connect's connect.login asks for", () => {
+    const manifest = JSON.parse(
+      readFileSync(
+        fileURLToPath(
+          new URL(
+            "../../../../../../scripts/system-packages/integration-garmin-connect-1.0.0/manifest.json",
+            import.meta.url,
+          ),
+        ),
+        "utf8",
+      ),
+    ) as { auths: Record<string, IntegrationManifestAuth> };
+    const [garmin] = Object.values(manifest.auths);
+    expectWidget(html(garmin!), "refresh_token", "password");
+  });
+
+  it("masks the secret of an api_key or basic auth with no declared schema", () => {
+    expectWidget(
+      html({ type: "api_key" } as unknown as IntegrationManifestAuth),
+      "api_key",
+      "password",
+    );
+    const basic = html({ type: "basic" } as unknown as IntegrationManifestAuth);
+    expectWidget(basic, "username", "text");
+    expectWidget(basic, "password", "password");
+  });
+
+  it("renders the PEM fields of an mtls auth with no declared schema as textareas", () => {
+    const markup = html({ type: "mtls" } as unknown as IntegrationManifestAuth);
+    expectWidget(markup, "client_key", "textarea");
+    expectWidget(markup, "client_cert", "textarea");
+  });
+});
+
 describe("initialCredentialValues", () => {
   it("seeds exactly the defaults the auth declares", () => {
     // A default the form displays but does not seed would be a value under the
@@ -101,5 +218,39 @@ describe("initialCredentialValues", () => {
     expect(initialCredentialValues(SSH_AUTH)).toEqual({
       port: "22",
     });
+  });
+});
+
+describe("CredentialFields — a conventional field without a title", () => {
+  it("labels `api_key` in the UI language, not by its raw name", () => {
+    const markup = html({
+      type: "api_key",
+      credentials: {
+        schema: {
+          type: "object",
+          required: ["api_key"],
+          properties: { api_key: { type: "string", writeOnly: true } },
+        },
+      },
+    } as unknown as IntegrationManifestAuth);
+    expect(markup).toContain(">Clé API</label>");
+    expect(markup).not.toContain(">api_key</label>");
+  });
+});
+
+describe("CredentialFields — a declared title wins", () => {
+  it("keeps the manifest's title over the conventional label", () => {
+    const markup = html({
+      type: "api_key",
+      credentials: {
+        schema: {
+          type: "object",
+          required: ["api_key"],
+          properties: { api_key: { type: "string", title: "Jeton du projet en lecture seule" } },
+        },
+      },
+    } as unknown as IntegrationManifestAuth);
+    expect(markup).toContain(">Jeton du projet en lecture seule</label>");
+    expect(markup).not.toContain(">Clé API</label>");
   });
 });

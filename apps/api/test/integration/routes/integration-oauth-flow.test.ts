@@ -28,7 +28,7 @@ import {
   orgOnlyHeaders,
   type TestContext,
 } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedApiKey, seedPackage, seedPublishedVersion } from "../../helpers/seed.ts";
 import { apiIntegrationManifest, httpHeaderDelivery } from "../../helpers/integration-manifests.ts";
 import {
   createStrictAuthorizationServer,
@@ -38,11 +38,13 @@ import {
 } from "../../helpers/strict-authorization-server.ts";
 import {
   auditEvents,
+  packages,
+  packageVersions,
   spacePackages,
   integrationConnections,
   integrationOauthClients,
 } from "@appstrate/db/schema";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { decryptCredentialsToStringMap } from "@appstrate/connect";
 import { refreshConnectionCredential } from "../../../src/services/integration-token-refresh.ts";
 import {
@@ -51,6 +53,7 @@ import {
 } from "../../../src/services/integration-connections.ts";
 import { getCache } from "../../../src/infra/index.ts";
 import type { AfpsManifestAuth } from "../../../src/services/integration-manifest-helpers.ts";
+import type { IntegrationManifest } from "@appstrate/core/integration";
 
 const app = getTestApp();
 const INTEGRATION = "@myorg/probe";
@@ -79,6 +82,8 @@ async function setup(
     authorizationParams?: Record<string, string>;
     refreshTokenIssuance?: "default" | "not_supported";
     resource?: string;
+    /** Declare `code_challenge_methods_supported: ["S256"]` (default true). */
+    declaresPkce?: boolean;
   },
   client: { clientId: string; clientSecret: string },
   tier: "space" | "org" = "space",
@@ -97,7 +102,7 @@ async function setup(
           tokenEndpoint: provider.tokenEndpoint,
           defaultScopes: SCOPES,
           tokenEndpointAuthMethod: manifest.tokenEndpointAuthMethod,
-          codeChallengeMethodsSupported: ["S256"],
+          ...(manifest.declaresPkce === false ? {} : { codeChallengeMethodsSupported: ["S256"] }),
           ...(manifest.authorizationParams
             ? { authorizationParams: manifest.authorizationParams }
             : {}),
@@ -114,7 +119,9 @@ async function setup(
       },
     }),
   });
-  await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId: INTEGRATION });
+  await db
+    .insert(spacePackages)
+    .values({ enabled: true, spaceId: ctx.defaultSpaceId, packageId: INTEGRATION });
 
   // A secret-less registration must DECLARE itself public: the route refuses a
   // missing/blank `client_secret` under any other method rather than inferring
@@ -177,6 +184,13 @@ async function consentAndCallback(authUrl: string): Promise<string> {
   return res.text();
 }
 
+/** The completion message the callback page posts to the surface that opened it. */
+function completionOf(html: string): Record<string, unknown> {
+  const literal = /var detail = (.*);\n/.exec(html);
+  expect(literal).not.toBeNull();
+  return JSON.parse(literal![1]!) as Record<string, unknown>;
+}
+
 /**
  * Refresh the connection the way the live resolvers do after an upstream 401: resolve the pinned
  * minting client from the DB, build the refresh context off the manifest, then POST the
@@ -196,7 +210,7 @@ async function refresh(ctx: TestContext, connectionId: string): Promise<void> {
   const outcome = await refreshConnectionCredential({
     connection: { ...row, credentialRevision: (await readCredentialRevision(connectionId))! },
     integrationId: INTEGRATION,
-    manifest,
+    manifest: manifest as IntegrationManifest,
     authDef: auth as AfpsManifestAuth,
     scope,
     actor: { type: "user", id: ctx.user.id },
@@ -269,6 +283,117 @@ describe("integration OAuth2 flow (conformant provider)", () => {
     const refreshed = await storedConnection();
     expect(decryptCredentialsToStringMap(refreshed!.credentialsEncrypted).access_token).toBe(
       provider.issuedAccessTokens[1]!,
+    );
+  });
+
+  // A draft changes with no version minted: once a version exists, the code, the verifier and
+  // the client secret go where that version says.
+  it("reads a published integration's endpoints from its latest version, not its draft", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post" },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+    await seedPublishedVersion(INTEGRATION, "1.0.0");
+
+    const other = createStrictAuthorizationServer({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    try {
+      const [pkg] = await db.select().from(packages).where(eq(packages.id, INTEGRATION)).limit(1);
+      const draft = structuredClone(pkg!.draftManifest) as {
+        auths: Record<string, Record<string, unknown>>;
+      };
+      draft.auths[AUTH_KEY]!.authorization_endpoint = other.authorizationEndpoint;
+      draft.auths[AUTH_KEY]!.token_endpoint = other.tokenEndpoint;
+      await db.update(packages).set({ draftManifest: draft }).where(eq(packages.id, INTEGRATION));
+
+      const authUrl = await beginConnect(ctx);
+      expect(authUrl.startsWith(provider.authorizationEndpoint)).toBe(true);
+      await consentAndCallback(authUrl);
+
+      expect(provider.tokenRequests.map((r) => r.status)).toEqual([200]);
+      expect(other.authorizeRequests).toHaveLength(0);
+      expect(other.tokenRequests).toHaveLength(0);
+      expect(await storedConnection()).not.toBeNull();
+    } finally {
+      other.stop();
+    }
+  });
+
+  it("answers 404 for an auth only the draft of a published integration declares", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post" },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+    await seedPublishedVersion(INTEGRATION, "1.0.0");
+    const [pkg] = await db.select().from(packages).where(eq(packages.id, INTEGRATION)).limit(1);
+    const draft = structuredClone(pkg!.draftManifest) as {
+      auths: Record<string, Record<string, unknown>>;
+    };
+    draft.auths.added = draft.auths[AUTH_KEY]!;
+    await db.update(packages).set({ draftManifest: draft }).where(eq(packages.id, INTEGRATION));
+
+    const res = await app.request(`/api/integrations/${INTEGRATION}/auths/added/connect/oauth2`, {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(404);
+
+    // What the space is shown as connectable is read from the same manifest.
+    const detail = await app.request(`/api/integrations/${INTEGRATION}`, {
+      headers: authHeaders(ctx),
+    });
+    expect(detail.status).toBe(200);
+    const { auths } = (await detail.json()) as { auths: Array<{ auth_key: string }> };
+    expect(auths.map((a) => a.auth_key)).toEqual([AUTH_KEY]);
+  });
+
+  it("names the cause when the published versions leave nothing to connect through", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post" },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+    const version = await seedPublishedVersion(INTEGRATION, "1.0.0");
+    await db
+      .update(packageVersions)
+      .set({ yanked: true })
+      .where(eq(packageVersions.id, version.id));
+
+    const res = await app.request(
+      `/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/connect/oauth2`,
+      {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      },
+    );
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as { detail: string }).detail).toContain(
+      "no usable published version",
     );
   });
 
@@ -346,7 +471,107 @@ describe("integration OAuth2 flow (conformant provider)", () => {
     expect(trail.map((r) => [r.action, r.actorType, r.actorId, r.orgId, r.spaceId])).toEqual([
       ["integration.connection.created", "user", ctx.user.id, ctx.orgId, ctx.defaultSpaceId],
     ]);
+    expect(trail[0]!.after).toMatchObject({ scopesGranted: SCOPES });
     expect(JSON.stringify(trail)).not.toContain(provider.issuedAccessTokens[0]!);
+  });
+
+  it("reports the scopes a partial consent left out, to the waiting surface and the audit", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+      declinedScopes: ["files.write"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post" },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+
+    const html = await consentAndCallback(await beginConnect(ctx, { scopes: ["files.write"] }));
+
+    // The connection exists, narrower than asked.
+    const connection = await storedConnection();
+    expect(connection!.scopesGranted).toEqual(SCOPES);
+    expect(completionOf(html)).toMatchObject({ ok: true, scopesDenied: ["files.write"] });
+    expect(html).toContain("files.write");
+    const trail = await db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.resourceId, connection!.id))
+      .orderBy(auditEvents.id);
+    expect(trail.map((r) => [r.action, r.after])).toEqual([
+      ["integration.connection.created", expect.objectContaining({ scopesGranted: SCOPES })],
+      [
+        "integration.connection.scopes_denied",
+        { scopesRequested: ["files.read", "files.write"], scopesDenied: ["files.write"] },
+      ],
+    ]);
+  });
+
+  it("reports no denied scope on a full consent", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post" },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+
+    const html = await consentAndCallback(await beginConnect(ctx));
+
+    expect(completionOf(html)).toEqual(expect.objectContaining({ ok: true }));
+    expect(completionOf(html)).not.toHaveProperty("scopesDenied");
+  });
+
+  it("a classic integration with static endpoints and no metadata still connects with S256", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post", declaresPkce: false },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+    const authUrl = new URL(await beginConnect(ctx));
+    expect(authUrl.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(completionOf(await consentAndCallback(authUrl.toString()))).toMatchObject({ ok: true });
+  });
+
+  it("never reports offline_access as denied: the server decides on refresh tokens", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "shh",
+      acceptedAuthMethods: ["client_secret_post"],
+      declinedScopes: ["offline_access"],
+      offlineParam: { name: "access_type", value: "offline" },
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post", refreshTokenIssuance: "not_supported" },
+      { clientId: "cid", clientSecret: "shh" },
+    );
+
+    const html = await consentAndCallback(await beginConnect(ctx, { scopes: ["offline_access"] }));
+
+    const connection = await storedConnection();
+    expect(connection!.scopesGranted).toEqual(SCOPES);
+    expect(completionOf(html)).not.toHaveProperty("scopesDenied");
+    expect(html).not.toContain("non accordées");
+    const trail = await db
+      .select({ action: auditEvents.action })
+      .from(auditEvents)
+      .where(eq(auditEvents.resourceId, connection!.id));
+    expect(trail.map((r) => r.action)).not.toContain("integration.connection.scopes_denied");
   });
 
   // #1871: scopes added in place reach every agent bound to the connection.
@@ -423,6 +648,140 @@ describe("integration OAuth2 flow (conformant provider)", () => {
     await consentAndCallback(authUrl);
     expect(await storedConnection()).not.toBeNull();
     expect(provider.tokenRequests[0]!.status).toBe(200);
+  });
+
+  it("scopes to its space a connection an API key began, through an org client", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "org-secret",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post" },
+      { clientId: "cid", clientSecret: "org-secret" },
+      "org",
+    );
+    const key = await seedApiKey({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      createdBy: ctx.user.id,
+      scopes: ["integrations:connect"],
+    });
+    const res = await app.request(
+      `/api/integrations/${INTEGRATION}/auths/${AUTH_KEY}/connect/oauth2`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${key.rawKey}`, "Content-Type": "application/json" },
+        body: "{}",
+      },
+    );
+    expect(res.status).toBe(200);
+    await consentAndCallback(((await res.json()) as { auth_url: string }).auth_url);
+    expect(await storedConnection()).toMatchObject({
+      spaceId: ctx.defaultSpaceId,
+      originSpaceId: null,
+      userId: ctx.user.id,
+    });
+
+    // The owner's session reconnecting that row through the same client widens it to the org.
+    const scoped = (await storedConnection())!;
+    await consentAndCallback(await beginConnect(ctx, { connection_id: scoped.id }));
+    expect(await storedConnection()).toMatchObject({
+      id: scoped.id,
+      spaceId: null,
+      originSpaceId: ctx.defaultSpaceId,
+    });
+    const widened = await db
+      .select()
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.resourceId, scoped.id),
+          eq(auditEvents.action, "integration.connection.scope_widened"),
+        ),
+      );
+    expect(widened).toEqual([
+      expect.objectContaining({
+        spaceId: ctx.defaultSpaceId,
+        actorType: "user",
+        actorId: ctx.user.id,
+        before: { spaceId: ctx.defaultSpaceId, label: scoped.label },
+        after: { originSpaceId: ctx.defaultSpaceId, label: scoped.label },
+      }),
+    ]);
+
+    // Control: the owner's session, through the same client, connects for the whole org.
+    await db.delete(integrationConnections);
+    await consentAndCallback(await beginConnect(ctx));
+    expect(await storedConnection()).toMatchObject({
+      spaceId: null,
+      originSpaceId: ctx.defaultSpaceId,
+    });
+  });
+
+  it("audits one scope_widened when a client promotion widens the row while its reconnect completes", async () => {
+    startProvider({
+      clientId: "cid",
+      clientSecret: "space-secret",
+      acceptedAuthMethods: ["client_secret_post"],
+    });
+    await setup(
+      ctx,
+      provider,
+      { tokenEndpointAuthMethod: "client_secret_post" },
+      { clientId: "cid", clientSecret: "space-secret" },
+    );
+    await consentAndCallback(await beginConnect(ctx));
+    const scoped = (await storedConnection())!;
+    expect(scoped.spaceId).toBe(ctx.defaultSpaceId);
+
+    // The callback fetches userinfo after it read its reconnect target and before it writes:
+    // the promotion lands in between.
+    let promotion: Response | undefined;
+    const userinfo = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      async fetch() {
+        promotion = await app.request(
+          `/api/integrations/${INTEGRATION}/oauth-clients/${scoped.clientRef}/promote`,
+          { method: "POST", headers: authHeaders(ctx) },
+        );
+        return Response.json({});
+      },
+    });
+    try {
+      const [pkg] = await db.select().from(packages).where(eq(packages.id, INTEGRATION));
+      const manifest = structuredClone(pkg!.draftManifest) as {
+        auths: Record<string, Record<string, unknown>>;
+      };
+      manifest.auths[AUTH_KEY]!.userinfo_endpoint = `http://127.0.0.1:${userinfo.port}/userinfo`;
+      await db
+        .update(packages)
+        .set({ draftManifest: manifest })
+        .where(eq(packages.id, INTEGRATION));
+
+      await consentAndCallback(await beginConnect(ctx, { connection_id: scoped.id }));
+    } finally {
+      await userinfo.stop(true);
+    }
+
+    expect(promotion?.status).toBe(200);
+    expect(await storedConnection()).toMatchObject({
+      id: scoped.id,
+      spaceId: null,
+      originSpaceId: ctx.defaultSpaceId,
+    });
+    const audits = await db
+      .select({ action: auditEvents.action })
+      .from(auditEvents)
+      .where(eq(auditEvents.resourceId, scoped.id));
+    expect(audits.map((audit) => audit.action).sort()).toEqual([
+      "integration.connection.created",
+      "integration.connection.reconnected",
+      "integration.connection.scope_widened",
+    ]);
   });
 
   it("connects with a manifest-declared public client (none)", async () => {

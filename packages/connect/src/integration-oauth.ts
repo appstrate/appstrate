@@ -15,8 +15,9 @@
  * Notable AFPS inputs:
  *   - `resource` (RFC 8707) is sent on both the authorize URL and the token
  *     request — some IdPs only honour it on one of the two.
- *   - `code_challenge_methods_supported`: `["S256"]` ⇒ PKCE-S256; absent/empty
- *     ⇒ no PKCE.
+ *   - `code_challenge_methods_supported`: manifest > discovered > `["S256"]`, S256
+ *     preferred over `plain`, `[]` disables PKCE — except on an MCP server with
+ *     metadata, which must advertise S256 (`OAuth2Strategy.begin`).
  *   - `issuer` (optional) enables discovery-first endpoint resolution
  *     (RFC 8414 / OIDC). Discovery is best-effort; explicit endpoints always
  *     override the discovered ones.
@@ -26,10 +27,12 @@
  * `grant_type=refresh_token` to the same `token_endpoint` (RFC 6749 §6).
  */
 
+import { jsonText } from "@appstrate/afps-shared/json-text";
 import type { Actor, OAuthClientResolver, OAuthStateRecord, OAuthStateStore } from "./types.ts";
 import { OAuthCallbackError } from "./oauth.ts";
 import { randomBase64Url, sha256Base64Url } from "./pkce.ts";
 import { exchangeAuthorizationCode } from "./token-exchange.ts";
+import { withProvenScopes } from "./token-utils.ts";
 import { resolveOAuthEndpoints, type OAuthEndpointResolution } from "./oauth-discovery.ts";
 
 /** How long an authorization request can still complete at the callback. */
@@ -97,7 +100,7 @@ interface InitiateIntegrationOAuthInput {
    * `access_type=offline` + `prompt=consent`). Merged last so a manifest
    * can override the dynamic `prompt`.
    */
-  authorizationParams?: Record<string, string>;
+  authorizationParams?: Record<string, unknown>;
   /** Platform redirect URI — same callback for all integration flows. */
   redirectUri: string;
   /** The registered client this flow uses; the callback re-resolves its credentials by it. */
@@ -121,7 +124,18 @@ interface InitiateIntegrationOAuthInput {
    */
   connectionId?: string;
   /** Carried to the callback: see {@link OAuthStateRecord}. */
+  delegated?: boolean;
+  /** Carried to the callback: see {@link OAuthStateRecord}. */
   redirectTag?: string;
+  /**
+   * The authorization server the caller chose its client for, from the validated metadata it read
+   * to decide (RFC 8414 `issuer`, RFC 9207 `authorization_response_iss_parameter_supported`).
+   * When set, the state's issuer is this one and its `iss` requirement holds whatever this call's
+   * discovery answers: a second discovery here — after a cache expiry, against a server free to
+   * answer differently — can add the requirement, never lower one the client choice relied on.
+   * Absent: both come from this call's discovery.
+   */
+  authorizationServer?: AuthorizationServerBinding;
   variables?: Record<string, string>;
   /**
    * Optional discovery hook injection (testing seam). Production callers omit
@@ -130,9 +144,29 @@ interface InitiateIntegrationOAuthInput {
   discover?: typeof resolveOAuthEndpoints;
 }
 
+/** An authorization server as a client choice was made for it: see `authorizationServer`. */
+export interface AuthorizationServerBinding {
+  issuer: string;
+  issParameterSupported: boolean;
+}
+
 interface InitiateIntegrationOAuthResult {
   authUrl: string;
   state: string;
+}
+
+/** The state's issuer (the caller's binding, else this call's discovery) and `iss` requirement. */
+function bindingOf(
+  decided: AuthorizationServerBinding | undefined,
+  discovered: OAuthEndpointResolution,
+): { issuer?: string; issParameterSupported?: true } {
+  const issuer = decided?.issuer ?? discovered.issuer;
+  if (issuer === undefined) return {};
+  // Either answer can only add the requirement, never remove it.
+  const required =
+    decided?.issParameterSupported === true ||
+    discovered.authorizationResponseIssParameterSupported === true;
+  return { issuer, ...(required ? { issParameterSupported: true as const } : {}) };
 }
 
 /**
@@ -216,10 +250,8 @@ export async function initiateIntegrationOAuth(
       resource: input.resource,
       clientRef: input.clientRef,
       ...(input.connectionId ? { connectionId: input.connectionId } : {}),
-      ...(endpoints.issuer ? { issuer: endpoints.issuer } : {}),
-      ...(endpoints.issuer && endpoints.authorizationResponseIssParameterSupported
-        ? { issParameterSupported: true }
-        : {}),
+      ...(input.delegated ? { delegated: true as const } : {}),
+      ...bindingOf(input.authorizationServer, endpoints),
       ...(input.redirectTag ? { redirectTag: input.redirectTag } : {}),
       ...(input.variables ? { variables: input.variables } : {}),
     },
@@ -238,11 +270,15 @@ export async function initiateIntegrationOAuth(
     // token request); harmless when accepted-but-ignored.
     ...(input.resource ? { resource: input.resource } : {}),
     ...(input.forceAccountSelect ? { prompt: "select_account" } : {}),
-    // Merged last: a manifest's authorization_params (e.g. Google's
-    // access_type=offline + prompt=consent) wins over the dynamic prompt
-    // so refresh-token issuance is never silently suppressed.
-    ...(input.authorizationParams ?? {}),
   });
+  // Set last: a manifest's authorization_params (e.g. Google's
+  // access_type=offline + prompt=consent) wins over the dynamic prompt
+  // so refresh-token issuance is never silently suppressed.
+  for (const [key, value] of Object.entries(input.authorizationParams ?? {})) {
+    if (value === undefined || value === null) continue;
+    // OIDC `claims` is JSON-in-a-parameter; JSON is the only unambiguous encoding of a non-string.
+    params.set(key, jsonText(value));
+  }
 
   const authUrl = `${endpoints.authorizationEndpoint}${endpoints.authorizationEndpoint.includes("?") ? "&" : "?"}${params.toString()}`;
   return { authUrl, state };
@@ -272,6 +308,8 @@ export interface IntegrationOAuthCallbackResult {
    * so the existing row is updated instead of a duplicate inserted.
    */
   connectionId?: string;
+  /** Pass-through: see {@link OAuthStateRecord}. */
+  delegated?: true;
   /**
    * Pass-through of the minting client id set at initiate time (system env id or
    * custom `integration_oauth_clients.id`). Stamped on the connection row so
@@ -282,6 +320,19 @@ export interface IntegrationOAuthCallbackResult {
   /** RFC 8707 `resource` of the authorize and token requests; refresh sends it again. */
   resource?: string;
   variables?: Record<string, string>;
+}
+
+/**
+ * The `redirectTag` prefix of a Client ID Metadata Document client's redirect URI
+ * (`…/callback/cimd/<tag>`). Any authorization server can fetch any document, so a response on
+ * that path is only trusted with `iss` naming the server the request went to: a state carrying
+ * such a tag without an issuer and the RFC 9207 requirement is refused outright.
+ */
+export const CLIENT_METADATA_REDIRECT_TAG_PREFIX = "cimd/";
+
+/** Whether a `redirectTag` is a metadata-document client's. */
+export function isClientMetadataRedirectTag(tag: string): boolean {
+  return tag.startsWith(CLIENT_METADATA_REDIRECT_TAG_PREFIX);
 }
 
 /** Where an authorization response arrived (`null` = `/callback`) and its RFC 9207 `iss`. */
@@ -300,6 +351,13 @@ function mixUpRefusal(
 ): string | null {
   if ((integration.redirectTag ?? null) !== response.redirectTag) {
     return "The authorization response arrived at the redirect URI of another authorization server";
+  }
+  if (
+    integration.redirectTag !== undefined &&
+    isClientMetadataRedirectTag(integration.redirectTag) &&
+    (integration.issuer === undefined || integration.issParameterSupported !== true)
+  ) {
+    return "The authorization response arrived at a client metadata document's redirect URI for a flow that does not require the authorization server's iss";
   }
   if (response.iss !== undefined) {
     if (integration.issuer !== undefined && response.iss !== integration.issuer) {
@@ -416,10 +474,16 @@ export async function handleIntegrationOAuthCallback(
     refreshToken: parsed.refreshToken,
     expiresAt: parsed.expiresAt,
     // RFC 6749 §5.1: an omitted `scope` is the requested one.
-    scopesGranted: parsed.scopesReturned ?? stateRow.scopesRequested,
+    scopesGranted: parsed.scopesReturned
+      ? withProvenScopes(parsed.scopesReturned, stateRow.scopesRequested, {
+          refreshToken: tokenData.refresh_token,
+          idToken: tokenData.id_token,
+        })
+      : stateRow.scopesRequested,
     scopesRequested: stateRow.scopesRequested,
     tokenResponse: tokenData,
     ...(integration.connectionId ? { connectionId: integration.connectionId } : {}),
+    ...(integration.delegated ? { delegated: true as const } : {}),
     clientRef: integration.clientRef,
     ...(integration.issuer ? { issuer: integration.issuer } : {}),
     ...(integration.resource ? { resource: integration.resource } : {}),

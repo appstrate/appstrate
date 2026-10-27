@@ -30,11 +30,19 @@ import {
   RESERVED_INTEGRATION_UPLOAD_PROTOCOLS,
   readDefaultTools,
   resolveEffectiveToolSelection,
+  resolveScopeToolSelection,
   resolveIntegrationToolCatalog,
   selectedApiCallConfigs,
   findNonSnakeCaseIdentityClaimKeys,
+  findCleartextInjectedCredentials,
   findUnboundedInjectedCredentials,
   findUnevaluableExpressions,
+  findUnexposedDefaultTools,
+  findInvalidScopeTokens,
+  scopeTokenSchema,
+  acquiresByConnectLogin,
+  isUnauthenticatedIntegration,
+  findConnectionlessVariables,
 } from "../src/integration.ts";
 import { validateManifest, metaSchema } from "../src/validation.ts";
 import { TOOL_NAME_MAX_LEN } from "../src/naming.ts";
@@ -194,6 +202,103 @@ describe("integrationManifestSchema — oauth2 discovery + manual", () => {
     auths.oauth!.identity_claims = { account_id: "$.sub", email: "$.email" };
     auths.oauth!.required_identity_claims = ["sub"];
     expect(integrationManifestSchema.safeParse(m).success).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────
+// OAuth2 — first token by `connect.login` (AFPS §7.7)
+// ─────────────────────────────────────────────
+
+const TOKEN_ENDPOINT = "https://idp.example.com/oauth/token";
+
+/** A none-source oauth2 auth acquiring its first token from a submitted refresh token. */
+function oauth2LoginManifest(login: Record<string, unknown> = {}): Record<string, unknown> {
+  return baseManifest({
+    source: { kind: "none" },
+    auths: {
+      oauth: {
+        type: "oauth2",
+        token_endpoint: TOKEN_ENDPOINT,
+        token_endpoint_auth_method: "none",
+        credentials: {
+          schema: {
+            type: "object",
+            properties: { refresh_token: { type: "string" } },
+            required: ["refresh_token"],
+          },
+        },
+        connect: {
+          login: {
+            request: {
+              method: "POST",
+              url: TOKEN_ENDPOINT,
+              content_type: "application/x-www-form-urlencoded",
+              body: "grant_type=refresh_token&refresh_token={{refresh_token}}",
+            },
+            ...login,
+          },
+        },
+        authorized_uris: ["https://api.example.com/**"],
+        delivery: {
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer ",
+            value: "{$credential.access_token}",
+          },
+        },
+      },
+    },
+  });
+}
+
+describe("integrationManifestSchema — oauth2 connect.login", () => {
+  it("accepts a token-request login without outputs, delivering the access token", () => {
+    expect(errorPaths(oauth2LoginManifest())).toEqual([]);
+  });
+
+  it("refuses a request url other than token_endpoint", () => {
+    const m = oauth2LoginManifest({
+      request: {
+        method: "POST",
+        url: "https://idp.example.com/other",
+        content_type: "application/x-www-form-urlencoded",
+        body: "grant_type=refresh_token&refresh_token={{refresh_token}}",
+      },
+    });
+    expect(errorPaths(m)).toEqual(["auths.oauth.connect.login.request.url"]);
+  });
+
+  it("refuses outputs on an oauth2 login", () => {
+    expect(errorPaths(oauth2LoginManifest({ outputs: { t: "$response.body#/t" } }))).toEqual([
+      "auths.oauth.connect.login.outputs",
+    ]);
+  });
+
+  it("still asks a custom connect.login for outputs", () => {
+    const m = oauth2LoginManifest();
+    const auth = (m.auths as Record<string, Record<string, unknown>>).oauth!;
+    auth.type = "custom";
+    delete auth.token_endpoint;
+    delete auth.token_endpoint_auth_method;
+    auth.delivery = { env: { TOKEN: { value: "{$credential.token}" } } };
+    expect(errorPaths(m)).toContain("auths.oauth.connect.login.outputs");
+  });
+});
+
+describe("acquiresByConnectLogin", () => {
+  const auths = (m: Record<string, unknown>) => m.auths as Record<string, Record<string, unknown>>;
+
+  it("is true for an oauth2 auth declaring connect.login", () => {
+    expect(acquiresByConnectLogin(auths(oauth2LoginManifest()).oauth!)).toBe(true);
+  });
+
+  it("is false for an oauth2 auth without connect.login, and for a custom login", () => {
+    expect(acquiresByConnectLogin(auths(baseManifest()).oauth!)).toBe(false);
+    expect(acquiresByConnectLogin({ type: "oauth2", connect: { tool: {} } })).toBe(false);
+    expect(acquiresByConnectLogin({ type: "custom", connect: { login: { request: {} } } })).toBe(
+      false,
+    );
   });
 });
 
@@ -849,6 +954,73 @@ describe("findNonSnakeCaseIdentityClaimKeys — write-path identity key casing",
   });
 });
 
+describe("scope tokens — RFC 6749 §3.3", () => {
+  it("accepts NQCHAR tokens and refuses a space, a quote, a backslash, a control or nothing", () => {
+    for (const ok of ["read", "https://www.googleapis.com/auth/gmail.readonly", "repo:status!"]) {
+      expect(scopeTokenSchema.safeParse(ok).success).toBe(true);
+    }
+    for (const bad of ["", "read write", 're"ad', "re\\ad", "read\n", "lecture é"]) {
+      expect(scopeTokenSchema.safeParse(bad).success).toBe(false);
+    }
+  });
+
+  it("locates every scope of a manifest that is not one token", () => {
+    const found = findInvalidScopeTokens({
+      auths: {
+        primary: {
+          type: "oauth2",
+          default_scopes: ["openid", "read write"],
+          scope_catalog: [{ value: "read" }, { value: 'adm"in' }],
+        },
+        key: { type: "api_key" },
+      },
+      tools_policy: { send: { required_scopes: { primary: ["mail.send", "a b"] } } },
+    });
+    expect(found.map((v) => v.path.join("."))).toEqual([
+      "auths.primary.default_scopes.1",
+      "auths.primary.scope_catalog.1.value",
+      "tools_policy.send.required_scopes.primary.1",
+    ]);
+    expect(findInvalidScopeTokens({ auths: { primary: { default_scopes: ["openid"] } } })).toEqual(
+      [],
+    );
+  });
+});
+
+describe("findCleartextInjectedCredentials — no plain-http entry for an injected credential", () => {
+  const HTTP = { http: { in: "header", name: "Authorization", value: "{$credential.token}" } };
+  const paths = (auth: Record<string, unknown>, trusted?: (host: string) => boolean) =>
+    findCleartextInjectedCredentials({ auths: { primary: auth } }, trusted).map((v) =>
+      v.path.join("."),
+    );
+
+  it("refuses each http:// entry of an injecting auth, and only those", () => {
+    const authorized_uris = [
+      "https://api.example.com/**",
+      "http://api.example.com/**",
+      "HTTP://legacy.example.com/v1/*",
+      "{$credential.site_url}/**",
+      "http://{$credential.host}/**",
+    ];
+    expect(paths({ type: "custom", authorized_uris, delivery: HTTP })).toEqual([
+      "auths.primary.authorized_uris.1",
+      "auths.primary.authorized_uris.2",
+      "auths.primary.authorized_uris.4",
+    ]);
+    expect(paths({ type: "api_key", authorized_uris: ["http://api.example.com/**"] })).toEqual([
+      "auths.primary.authorized_uris.0",
+    ]);
+  });
+
+  it("accepts http:// for a host the operator designated, and for an auth that injects nothing", () => {
+    const authorized_uris = ["http://vault.internal/**", "http://api.example.com/**"];
+    expect(
+      paths({ type: "custom", authorized_uris, delivery: HTTP }, (h) => h === "vault.internal"),
+    ).toEqual(["auths.primary.authorized_uris.1"]);
+    expect(paths({ type: "custom", authorized_uris })).toEqual([]);
+  });
+});
+
 describe("findUnboundedInjectedCredentials — write-path allowlist bound", () => {
   const HTTP = { http: { in: "header", name: "Authorization", value: "{$credential.token}" } };
   const withAuth = (auth: Record<string, unknown>) => ({ auths: { primary: auth } });
@@ -1182,7 +1354,12 @@ describe("integrationManifestSchema — connect.login", () => {
 describe("findUnevaluableExpressions — write-path expression rule (§7.6/§7.7)", () => {
   const login = (overrides: Record<string, unknown> = {}) => ({
     login: {
-      request: { method: "POST", url: "https://api.example.com/login", body: "p={{password}}" },
+      request: {
+        method: "POST",
+        url: "https://api.example.com/login",
+        content_type: "application/x-www-form-urlencoded",
+        body: "p={{password}}",
+      },
       outputs: { token: "$response.body#/token" },
       ...overrides,
     },
@@ -1787,6 +1964,11 @@ describe("expandScopesGranted", () => {
 });
 
 describe("scopesNotCovered", () => {
+  it("never counts offline_access as uncovered: the server decides on refresh tokens", () => {
+    const manifest = { auths: { oauth: { type: "oauth2" } } } as unknown as IntegrationManifest;
+    expect(scopesNotCovered(["read", "offline_access"], ["read"], manifest, "oauth")).toEqual([]);
+  });
+
   const USERINFO_EMAIL = "https://www.googleapis.com/auth/userinfo.email";
   const GMAIL_READONLY = "https://www.googleapis.com/auth/gmail.readonly";
   const m = baseManifest();
@@ -2206,6 +2388,20 @@ describe("validateAgentIntegrationScopes", () => {
     expect(validateAgentIntegrationScopes({ id: "@official/gmail" }, m)).toEqual([]);
   });
 
+  it("refuses a scope that is not one OAuth scope token, catalog or not", () => {
+    const noCatalog = { ...m, auths: { primary: { type: "api_key" } } } as unknown as typeof m;
+    for (const manifest of [m, noCatalog]) {
+      const errors = validateAgentIntegrationScopes(
+        { id: "@official/gmail", scopes: ["read write"] },
+        manifest,
+      );
+      expect(errors.map((e) => [e.field, e.code])).toContainEqual([
+        "integrations_configuration.@official/gmail.scopes",
+        "invalid_format",
+      ]);
+    }
+  });
+
   it("accepts a subset selection of declared tools and catalog scopes", () => {
     expect(
       validateAgentIntegrationScopes(
@@ -2340,26 +2536,26 @@ describe("_meta namespace key validation (delegated to upstream 0.1 schema)", ()
   });
 });
 
-describe("integrationManifestSchema — default_tools (AFPS §4.4)", () => {
-  // An api-only integration (source.kind "none") exposing `api_call` on `key`.
-  // For a "none" source the full tool catalog is knowable from this manifest
-  // alone, so array membership is validated.
-  function apiManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
-    return baseManifest({
-      source: { kind: "none" },
-      auths: {
-        key: {
-          type: "api_key",
-          credentials: { schema: { type: "object", properties: {} } },
-          authorized_uris: ["https://api/**"],
-          delivery: { env: { K: { value: "{$credential.k}" } } },
-        },
+// An api-only integration (source.kind "none") exposing `api_call` on `key`.
+// For a "none" source the full tool catalog is knowable from this manifest
+// alone, so array membership is validated.
+function apiManifest(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return baseManifest({
+    source: { kind: "none" },
+    auths: {
+      key: {
+        type: "api_key",
+        credentials: { schema: { type: "object", properties: {} } },
+        authorized_uris: ["https://api/**"],
+        delivery: { env: { K: { value: "{$credential.k}" } } },
       },
-      _meta: { "dev.appstrate/api": { auths: { key: {} } } },
-      ...overrides,
-    });
-  }
+    },
+    _meta: { "dev.appstrate/api": { auths: { key: {} } } },
+    ...overrides,
+  });
+}
 
+describe("integrationManifestSchema — default_tools (AFPS §4.4)", () => {
   it("accepts default_tools naming a real exposed tool (api_call) on an api-only source", () => {
     const r = integrationManifestSchema.safeParse(apiManifest({ default_tools: ["api_call"] }));
     expect(r.success).toBe(true);
@@ -2397,6 +2593,198 @@ describe("integrationManifestSchema — default_tools (AFPS §4.4)", () => {
       baseManifest({ default_tools: ["some_remote_tool"] }),
     );
     expect(r.success).toBe(true);
+  });
+});
+
+describe("findUnexposedDefaultTools — write-path default_tools policy", () => {
+  const REMOTE = baseManifest().source;
+  const LOCAL = { kind: "local", server: { name: "@official/gmail-server", version: "^1.0.0" } };
+  const SERVER_TOOLS = [{ name: "search" }, { name: "send" }];
+  const FOREIGN_META = { "dev.appstrate/api": { auths: { key: {} } }, "com.example/tools": {} };
+  const unexposed = (name: string) => ({
+    path: ["default_tools"],
+    message: `default_tools contains "${name}" which is not a tool this integration exposes`,
+  });
+  /** A remote integration declaring policy for `search` and `send`. */
+  const remote = (overrides: Record<string, unknown> = {}) =>
+    baseManifest({ tools_policy: { search: {}, send: {} }, ...overrides });
+  const local = (overrides: Record<string, unknown> = {}) =>
+    baseManifest({ source: LOCAL, ...overrides });
+  /** The schema reads the manifest and the policy finds nothing in it. */
+  function expectNothing(manifest: Record<string, unknown>, mcpServerTools?: { name: string }[]) {
+    expect(errorPaths(manifest)).toEqual([]);
+    expect(findUnexposedDefaultTools(manifest, mcpServerTools)).toEqual([]);
+  }
+  /** The policy refuses `names` in a manifest the schema still reads. */
+  function expectRefusedOnWrite(
+    manifest: Record<string, unknown>,
+    names: string[],
+    mcpServerTools?: { name: string }[],
+  ) {
+    expect(findUnexposedDefaultTools(manifest, mcpServerTools)).toEqual(names.map(unexposed));
+    expect(errorPaths(manifest)).toEqual([]);
+  }
+  /** The policy and the schema refuse `name` with the same issue. */
+  function expectRefusedBySchema(manifest: Record<string, unknown>, name: string) {
+    expect(findUnexposedDefaultTools(manifest)).toEqual([unexposed(name)]);
+    const r = integrationManifestSchema.safeParse(manifest);
+    expect(r.error?.issues.map(({ path, message }) => ({ path, message }))).toEqual([
+      unexposed(name),
+    ]);
+  }
+
+  describe("remote source", () => {
+    it("refuses a name outside a declared tools_policy, which the schema still reads", () => {
+      expectRefusedOnWrite(remote({ default_tools: ["search", "serach"] }), ["serach"]);
+      expectNothing(remote({ default_tools: ["search", "send"] }));
+    });
+
+    it("leaves a name unjudged when it declares no tools_policy", () => {
+      expectNothing(baseManifest({ default_tools: ["some_remote_tool"] }));
+      expectNothing(apiManifest({ source: REMOTE, default_tools: ["notion-search"] }));
+    });
+
+    it("refuses a name listed in hidden_tools, with and without a tools_policy", () => {
+      const hidden = { default_tools: ["search", "send"], hidden_tools: ["send"] };
+      expectRefusedOnWrite(remote(hidden), ["send"]);
+      expectRefusedOnWrite(baseManifest(hidden), ["send"]);
+    });
+
+    it("refuses every entry of a tools_policy that hidden_tools empties", () => {
+      const manifest = remote({ default_tools: ["search"], hidden_tools: ["search", "send"] });
+      expectRefusedOnWrite(manifest, ["search"]);
+    });
+
+    it("refuses a name a connect.tool references", () => {
+      const session = {
+        type: "custom",
+        credentials: { schema: { type: "object", properties: { token: { type: "string" } } } },
+        authorized_uris: ["https://api.example.com/**"],
+        connect: { tool: { name: "perform_login" } },
+        delivery: { env: { TOKEN: { value: "{$credential.token}" } } },
+      };
+      expectRefusedOnWrite(
+        baseManifest({ auths: { session }, default_tools: ["search", "perform_login"] }),
+        ["perform_login"],
+      );
+    });
+
+    it("refuses the upload companion of a hidden api_call", () => {
+      const manifest = apiManifest({
+        source: REMOTE,
+        _meta: { "dev.appstrate/api": { auths: { key: { upload_protocols: ["tus"] } } } },
+        default_tools: ["api_upload"],
+      });
+      expectNothing(manifest);
+      expectRefusedOnWrite({ ...manifest, hidden_tools: ["api_call"] }, ["api_upload"]);
+    });
+
+    it("accepts api_call beside a tools_policy only where _meta exposes it", () => {
+      const policed = { tools_policy: { search: {} }, default_tools: ["search", "api_call"] };
+      expectNothing(apiManifest({ source: REMOTE, ...policed }));
+      expectRefusedOnWrite(baseManifest(policed), ["api_call"]);
+    });
+
+    it("ignores mcpServerTools, which are a local source's catalog", () => {
+      expectRefusedOnWrite(remote({ default_tools: ["extra"] }), ["extra"], [{ name: "extra" }]);
+      expectNothing(baseManifest({ default_tools: ["nope"] }), SERVER_TOOLS);
+    });
+  });
+
+  describe("none source", () => {
+    it("refuses a name outside the api tools when every root _meta key is Appstrate's", () => {
+      expectNothing(apiManifest({ default_tools: ["api_call"] }));
+      expectRefusedBySchema(apiManifest({ default_tools: ["api_call", "nope"] }), "nope");
+      expect(
+        findUnexposedDefaultTools(apiManifest({ default_tools: ["nope"] }), [{ name: "nope" }]),
+      ).toEqual([unexposed("nope")]);
+    });
+
+    it("refuses any name when the manifest carries no _meta", () => {
+      expectRefusedBySchema(
+        apiManifest({ _meta: undefined, default_tools: ["api_call"] }),
+        "api_call",
+      );
+    });
+
+    it("leaves a name unjudged when another vendor's root _meta key may supply it", () => {
+      expectNothing(apiManifest({ _meta: FOREIGN_META, default_tools: ["api_call", "nope"] }));
+    });
+
+    it("reads another vendor's key in a _meta at any depth, not at the root alone", () => {
+      const withAuthMeta = (meta: Record<string, unknown>) => {
+        const manifest = apiManifest({ default_tools: ["api_call", "nope"] });
+        const auths = manifest.auths as { key: Record<string, unknown> };
+        return { ...manifest, auths: { key: { ...auths.key, _meta: meta } } };
+      };
+      expectNothing(withAuthMeta({ "com.example/tools": {} }));
+      expectRefusedBySchema(withAuthMeta({ "dev.appstrate/auth": { required: true } }), "nope");
+    });
+
+    it("still refuses a hidden name beside another vendor's root _meta key", () => {
+      expectRefusedBySchema(
+        apiManifest({ _meta: FOREIGN_META, default_tools: ["nope"], hidden_tools: ["nope"] }),
+        "nope",
+      );
+    });
+  });
+
+  describe("local source", () => {
+    it("leaves a name unjudged without the mcp-server's tools", () => {
+      expectNothing(local({ default_tools: ["nope"] }));
+      expectNothing(local({ default_tools: ["nope"], tools_policy: { search: {} } }));
+    });
+
+    it("refuses a name the mcp-server's tools do not hold", () => {
+      expectRefusedOnWrite(local({ default_tools: ["search", "nope"] }), ["nope"], SERVER_TOOLS);
+    });
+
+    it("finds nothing when the mcp-server's tools hold every name", () => {
+      expectNothing(local({ default_tools: ["search", "send"] }), SERVER_TOOLS);
+    });
+
+    it("accepts api_call beside the mcp-server's tools only where _meta exposes it", () => {
+      const defaultTools = ["search", API_CALL_TOOL_NAME];
+      expectNothing(apiManifest({ source: LOCAL, default_tools: defaultTools }), SERVER_TOOLS);
+      expectRefusedOnWrite(
+        local({ default_tools: defaultTools }),
+        [API_CALL_TOOL_NAME],
+        SERVER_TOOLS,
+      );
+    });
+
+    it("refuses a hidden name with and without the mcp-server's tools", () => {
+      const manifest = local({ default_tools: ["search", "send"], hidden_tools: ["send"] });
+      expectRefusedOnWrite(manifest, ["send"]);
+      expectRefusedOnWrite(manifest, ["send"], SERVER_TOOLS);
+    });
+  });
+
+  it("reports a name listed twice once", () => {
+    expectRefusedBySchema(apiManifest({ default_tools: ["nope", "api_call", "nope"] }), "nope");
+    const manifest = local({ default_tools: ["send", "send"], hidden_tools: ["send"] });
+    expectRefusedOnWrite(manifest, ["send"]);
+  });
+
+  it('finds nothing for the wildcard "*", an empty array or an absent default', () => {
+    expectNothing(
+      apiManifest({ default_tools: "*", allow_undeclared_tools: true, hidden_tools: ["api_call"] }),
+    );
+    expectNothing(local({ default_tools: [] }), SERVER_TOOLS);
+    expectNothing(local(), SERVER_TOOLS);
+  });
+
+  it("leaves a non-string entry to the schema", () => {
+    const manifest = local({ default_tools: [42] });
+    expect(findUnexposedDefaultTools(manifest, SERVER_TOOLS)).toEqual([]);
+    expect(errorPaths(manifest)).toContain("default_tools");
+  });
+
+  it("finds nothing in a manifest the structural schema refuses", () => {
+    expect(findUnexposedDefaultTools(null)).toEqual([]);
+    const hidden = { default_tools: ["send"], hidden_tools: ["send"] };
+    expect(findUnexposedDefaultTools(remote(hidden))).toEqual([unexposed("send")]);
+    expect(findUnexposedDefaultTools(remote({ ...hidden, auths: { oauth: null } }))).toEqual([]);
   });
 });
 
@@ -2439,6 +2827,34 @@ describe("resolveEffectiveToolSelection", () => {
   });
   it("an undefined selection with no declared default stays undefined", () => {
     expect(resolveEffectiveToolSelection(undefined, noDefault)).toBeUndefined();
+  });
+});
+
+describe("resolveScopeToolSelection", () => {
+  const withDefault = (d: unknown) => ({ default_tools: d }) as unknown as IntegrationManifest;
+  const noDefault = {} as IntegrationManifest;
+
+  it("a written wildcard is the wildcard", () => {
+    expect(resolveScopeToolSelection("*", noDefault)).toBe("*");
+    expect(resolveScopeToolSelection("*", withDefault(["search"]))).toBe("*");
+  });
+  it("an inherited wildcard is the wildcard too", () => {
+    expect(resolveScopeToolSelection(undefined, withDefault("*"))).toBe("*");
+  });
+  it("an inherited array contributes no tool", () => {
+    expect(resolveScopeToolSelection(undefined, withDefault(["search"]))).toEqual([]);
+  });
+  it("a written array is kept, over a wildcard default as over any other", () => {
+    expect(resolveScopeToolSelection(["search"], withDefault("*"))).toEqual(["search"]);
+    expect(resolveScopeToolSelection(["search"], withDefault(["other"]))).toEqual(["search"]);
+    expect(resolveScopeToolSelection(["search"], noDefault)).toEqual(["search"]);
+  });
+  it("a written empty array stays empty, over a wildcard default too", () => {
+    expect(resolveScopeToolSelection([], withDefault("*"))).toEqual([]);
+    expect(resolveScopeToolSelection([], withDefault(["search"]))).toEqual([]);
+  });
+  it("no selection and no default is empty", () => {
+    expect(resolveScopeToolSelection(undefined, noDefault)).toEqual([]);
   });
 });
 
@@ -2597,7 +3013,12 @@ describe("connection variables (§7.12) — rule (1g) and the write-path rules",
   it("findUnevaluableExpressions refuses a variable in a login request url", () => {
     const login = {
       login: {
-        request: { method: "POST", url: "{$variable.base_url}/login", body: "p={{password}}" },
+        request: {
+          method: "POST",
+          url: "{$variable.base_url}/login",
+          content_type: "application/x-www-form-urlencoded",
+          body: "p={{password}}",
+        },
         outputs: { token: "$response.body#/token" },
       },
     };
@@ -2606,5 +3027,40 @@ describe("connection variables (§7.12) — rule (1g) and the write-path rules",
         v.path.join("."),
       ),
     ).toEqual(["auths.session.connect.login.request.url"]);
+  });
+});
+
+describe("unauthenticated integrations (AFPS §7.2)", () => {
+  const { auths: _auths, ...unauthenticated } = baseManifest({ schema_version: "0.3" });
+
+  it("parses a remote integration without auths, and names it unauthenticated", () => {
+    expect(isUnauthenticatedIntegration(parse(unauthenticated))).toBe(true);
+    expect(isUnauthenticatedIntegration(parse(baseManifest()))).toBe(false);
+  });
+
+  it("refuses an empty auths map and a none source without auths", () => {
+    expect(errorPaths({ ...unauthenticated, auths: {} })).not.toEqual([]);
+    expect(errorPaths({ ...unauthenticated, source: { kind: "none" } })).not.toEqual([]);
+  });
+
+  it("refuses variables on the write path: no connection could hold their values", () => {
+    const withVariables = {
+      ...unauthenticated,
+      source: {
+        kind: "remote",
+        remote: { url: "{$variable.base_url}/mcp", transport: "streamable-http" },
+      },
+      variables: {
+        schema: {
+          type: "object",
+          properties: { base_url: { type: "string" } },
+          required: ["base_url"],
+        },
+      },
+    };
+    expect(findConnectionlessVariables(withVariables)).toEqual([
+      { path: ["variables"], message: expect.stringContaining("cannot declare variables") },
+    ]);
+    expect(findConnectionlessVariables(unauthenticated)).toEqual([]);
   });
 });

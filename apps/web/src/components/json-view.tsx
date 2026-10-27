@@ -3,10 +3,7 @@
 import { useMemo } from "react";
 import { JsonView as JsonViewLite, allExpanded, defaultStyles } from "react-json-view-lite";
 import "react-json-view-lite/dist/index.css";
-import { Copy, Check } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
-import { cn } from "@appstrate/ui/cn";
-import { useCopyToClipboard } from "../hooks/use-copy-to-clipboard";
+import { CopyButton } from "@appstrate/ui/components/copy-button";
 
 interface JsonViewProps {
   data: unknown;
@@ -33,29 +30,13 @@ const jsonStyles = {
   quotesForFieldNames: true,
 };
 
-function CopyButton({ text }: { text: string }) {
-  const { copied, copy } = useCopyToClipboard();
-  const handleCopy = () => void copy(text);
-
-  return (
-    <Button
-      variant="ghost"
-      size="icon"
-      className={cn("text-muted-foreground h-7 w-7", copied && "text-success")}
-      onClick={handleCopy}
-    >
-      {copied ? <Check size={14} /> : <Copy size={14} />}
-    </Button>
-  );
-}
-
 export function JsonView({ data }: JsonViewProps) {
   const jsonString = useMemo(() => JSON.stringify(data, null, 2), [data]);
 
   return (
     <div className="relative">
       <div className="absolute top-2 right-2 z-10">
-        <CopyButton text={jsonString} />
+        <CopyButton value={jsonString} />
       </div>
       <div className="max-h-[500px] overflow-auto font-mono text-sm">
         <JsonViewLite

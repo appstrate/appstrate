@@ -136,7 +136,8 @@ function redactCredentialValues(value: string, fields: Readonly<Record<string, s
   for (const [name, fieldValue] of Object.entries(fields)) {
     if (fieldValue.length === 0) continue;
     needles.push([fieldValue, name]);
-    const encoded = encodeURIComponent(fieldValue);
+    // `encodeURIComponent` throws on a lone surrogate.
+    const encoded = fieldValue.isWellFormed() ? encodeURIComponent(fieldValue) : fieldValue;
     if (encoded !== fieldValue) needles.push([encoded, name]);
   }
   needles.sort((a, b) => b[0].length - a[0].length);
@@ -211,6 +212,11 @@ export interface FetchApiCallOptions {
    * matches is always gated.
    */
   internalHost: (hostname: string) => boolean;
+  /**
+   * A target refused on every hop, the initial one included, before anything is sent to it,
+   * whatever the allowlist says. `message` is the refusal's text.
+   */
+  refusedTarget?: { matches: (url: URL) => boolean; message: string };
   /** The caller's cookie view; omitted = a jar living for this call's redirect chain only. */
   cookies?: CookieScope;
   integrationId: string;
@@ -264,13 +270,23 @@ export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFe
     if (streamed && opts.bodyLength !== undefined) {
       headers.set("content-length", String(opts.bodyLength));
     }
+    const { refusedTarget } = opts;
+    const refuseTarget = (url: URL, hop: number) => {
+      if (refusedTarget?.matches(url)) {
+        if (hop > 0)
+          warn("Redirect refused (refused target)", hop, redactCredentialHost(url.href, fields));
+        throw new ApiCallRefusedError("not_authorized", refusedTarget.message, hop > 0);
+      }
+    };
     return await guardedFetchChain(
       opts.url,
       { ...opts.init, headers, signal },
       {
+        ...(refusedTarget && !gated ? { validateHop: refuseTarget } : {}),
         ...(gated
           ? {
               validateHop: (url: URL, hop: number) => {
+                refuseTarget(url, hop);
                 if (inAllowlist(url)) return;
                 if (hop === 0) {
                   // The declared entries: a rendered one may be a secret (an exact webhook URL).

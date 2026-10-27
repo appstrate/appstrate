@@ -48,6 +48,11 @@ export interface SubscriptionChatModel {
   /** Modality flags (`["text","image"]`), or `null` (defaults to text-only). */
   input: ModelInputModality[] | null;
   /**
+   * The personal `model_provider_credentials` row this token belongs to — the
+   * ledger attributes the turn to it (`llm_usage.credential_id`).
+   */
+  credentialId: string;
+  /**
    * Fresh subscription access token — pi-ai emits the OAuth request shape
    * from it natively, including any account routing header (codex decodes
    * `chatgpt_account_id` from the token itself), so no separate account id
@@ -142,6 +147,8 @@ export interface ChatUsageRecord {
    * can't drift.
    */
   cost: ModelCost | null;
+  /** The credential that served the turn (`llm_usage.credential_id`), or null. */
+  credentialId: string | null;
   durationMs: number;
 }
 

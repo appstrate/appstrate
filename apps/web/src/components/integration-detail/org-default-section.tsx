@@ -1,142 +1,209 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { Alert } from "@appstrate/ui/components/alert";
+import { useSettingDraft } from "../../hooks/use-setting-draft";
+import { ManualSave } from "../settings/manual-save";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle } from "lucide-react";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Button } from "@appstrate/ui/components/button";
-import { Label } from "@appstrate/ui/components/label";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { AlertDescription } from "@appstrate/ui/components/alert";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { keepAvailable, unavailableConnectionIds } from "../../lib/connection-set";
 import {
   useIntegrationOrgDefault,
   useIntegrationConnections,
+  useIntegrationPins,
+  useAgentsConsumingIntegration,
   useUpsertIntegrationOrgDefault,
   useDeleteIntegrationOrgDefault,
 } from "../../hooks/use-integrations";
-import { ConnectionOptionLabel, ConnectionSetChecklist } from "./connection-set-checklist";
+import { ConnectionCheckboxList } from "./connection-checkbox-list";
 
 /**
- * Org-wide default connection for this integration — the cross-agent
+ * Org-wide default connections for this integration — the cross-agent
  * baseline every consuming agent uses unless a per-agent exception (pin)
  * overrides it. `enforce` locks members; otherwise it's a soft default a
  * member can still override with their own pick.
+ *
+ * The default is a SET (up to `MAX_CONNECTIONS_PER_INTEGRATION`), and
+ * the mode and set are saved together after explicit confirmation.
  */
 export function OrgDefaultSection({ packageId }: { packageId: string }) {
   const { t } = useTranslation("settings");
-  const { data: orgDefault } = useIntegrationOrgDefault(packageId);
-  const { data: connections } = useIntegrationConnections(packageId);
+  const { data: orgDefault, isLoading, isError, refetch } = useIntegrationOrgDefault(packageId);
+  const { data: connections, isLoading: connectionsLoading } = useIntegrationConnections(packageId);
+  const { data: pins } = useIntegrationPins(packageId);
+  const { data: consumingAgents } = useAgentsConsumingIntegration(packageId);
   const upsert = useUpsertIntegrationOrgDefault();
   const remove = useDeleteIntegrationOrgDefault();
 
-  const shared = (connections ?? []).filter((c) => c.shared_with_org === true);
-
-  const [connectionIds, setConnectionIds] = useState<string[]>([]);
-  const [enforce, setEnforce] = useState(false);
-
-  // Seeded with only what is still shared, so the form shows what a save writes; the stored
-  // members no longer shared are named apart — every run falling back on them is refused.
+  const shared = (connections ?? []).filter((c) => c.shared_here);
   const sharedIds = shared.map((c) => c.id);
-  const seedIds = keepAvailable(orgDefault?.connection_ids ?? [], sharedIds);
-  // Until the list loads, every stored member would read as unavailable.
-  const unavailableIds = connections
-    ? unavailableConnectionIds(orgDefault?.connection_ids ?? [], sharedIds)
-    : [];
-  // Sorted: a server reordering of the set must not read as a change and wipe the edit.
-  const seededFor = orgDefault ? [...seedIds].sort().join(",") : null;
-  const [seeded, setSeeded] = useState<string | null>(null);
-  if (seededFor !== seeded) {
-    setSeeded(seededFor);
-    setConnectionIds(seedIds);
-    setEnforce(orgDefault?.enforce ?? false);
-  }
+  const storedIds = orgDefault?.connection_ids ?? [];
+  // Stored members no longer shared are named apart: every run falling back on
+  // them is refused. Until the list loads, every member would read as unavailable.
+  const unavailableIds = connections ? unavailableConnectionIds(storedIds, sharedIds) : [];
 
-  const clearButton = orgDefault ? (
-    <Button
-      size="sm"
-      variant="ghost"
-      onClick={() => remove.mutate({ params: { path: { packageId } } })}
-      disabled={remove.isPending}
-      data-testid="org-default-clear"
-    >
-      {t("integration.admin.orgDefault.clear")}
-    </Button>
-  ) : null;
+  const draft = useSettingDraft({
+    connection_ids: storedIds,
+    mode: orgDefault ? (orgDefault.enforce ? "forced" : "default") : "choice",
+  });
+  const connectionIds = keepAvailable(draft.value.connection_ids, sharedIds);
+  const mode = draft.value.mode;
+  const pending = upsert.isPending || remove.isPending;
+  const modeLocked = !!orgDefault && connectionIds.length === 0;
+  // An enforced default accepts no addition: it cannot be set while an admin pin of this
+  // integration lets runs add to it (the server answers 409), so those agents are named. The
+  // server ignores the pins of agents inactive in the space (`agent_active`), so only active
+  // ones count; a name is the consuming agent's, else the package id.
+  const openPinAgents = (pins ?? [])
+    .filter((p) => p.allow_additional_connections && p.agent_active)
+    .map(
+      (p) =>
+        consumingAgents?.find((a) => a.agent_package_id === p.agent_package_id)?.display_name ??
+        p.agent_package_id,
+    );
+  const forcedLocked = openPinAgents.length > 0 && mode !== "forced";
+  const edit = (nextIds: string[], nextMode: string) =>
+    draft.set({ connection_ids: nextIds, mode: nextMode });
+  const save = async () => {
+    const sent = draft.value;
+    if (sent.mode !== "choice" && sent.connection_ids.length > 0) {
+      await upsert.mutateAsync({
+        params: { path: { packageId } },
+        body: { connection_ids: sent.connection_ids, enforce: sent.mode === "forced" },
+      });
+    } else {
+      await remove.mutateAsync({ params: { path: { packageId } } });
+    }
+    draft.accept(sent);
+    await refetch();
+  };
+  const connectionsLabel = t(
+    `integration.admin.orgDefault.connection.${mode === "forced" ? "forced" : "default"}`,
+  );
 
   return (
-    <div
-      className="border-border bg-muted/30 mb-6 rounded-md border p-4"
-      data-testid="org-default-section"
-    >
-      <div className="mb-3">
-        <h3 className="text-sm font-semibold">{t("integration.admin.orgDefault.title")}</h3>
-        <p className="text-muted-foreground mt-1 text-xs">
-          {t("integration.admin.orgDefault.help")}
-        </p>
-      </div>
-
+    <div className="flex flex-col gap-4" data-testid="org-default-section">
       {unavailableIds.length > 0 && (
-        <div
-          className="mb-3 flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[0.7rem] text-amber-700 dark:text-amber-300"
-          data-testid="org-default-unavailable-warning"
-        >
-          <AlertTriangle className="size-3 shrink-0" />
-          <span>
-            {t("integration.admin.orgDefault.unavailableWarning", {
-              count: unavailableIds.length,
-            })}
-          </span>
-        </div>
+        <Alert variant="warning" data-testid="org-default-unavailable-warning">
+          <AlertTriangle className="size-4" />
+          <AlertDescription className="flex flex-wrap items-start justify-between gap-3">
+            <span>
+              {t("integration.admin.orgDefault.unavailableWarning", {
+                count: unavailableIds.length,
+              })}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              className="-my-1.5"
+              disabled={pending}
+              onClick={() => edit(connectionIds, mode)}
+              data-testid="org-default-drop-unavailable"
+            >
+              {t("integration.admin.orgDefault.dropUnavailable", {
+                count: unavailableIds.length,
+              })}
+            </Button>
+          </AlertDescription>
+        </Alert>
       )}
-
-      {shared.length === 0 ? (
-        <div className="flex items-center gap-3">
-          <p className="text-muted-foreground text-xs italic">
-            {t("integration.admin.orgDefault.noPinnableConnections")}
-          </p>
-          {clearButton}
+      {isLoading || connectionsLoading ? (
+        // The two columns below: a usage select, and the connections it names.
+        <div className="grid items-start gap-6 md:grid-cols-2" aria-hidden>
+          {[0, 1].map((i) => (
+            <div key={i} className="min-w-0">
+              <div className="mb-3 flex h-5 items-center">
+                <Skeleton className="h-3.5 w-32" />
+              </div>
+              <Skeleton className="h-10 w-full" />
+            </div>
+          ))}
         </div>
       ) : (
-        <div className="border-border bg-background flex flex-wrap items-end gap-3 rounded-md border p-3">
-          <div className="min-w-[14rem] flex-1">
-            <Label className="text-muted-foreground mb-1 block text-[0.65rem]">
-              {t("integration.admin.orgDefault.connections")}
-            </Label>
-            <ConnectionSetChecklist
-              options={shared.map((c) => ({
-                id: c.id,
-                label: <ConnectionOptionLabel connection={c} />,
+        <div className="grid items-start gap-6 md:grid-cols-2">
+          <div className="min-w-0">
+            <div className="mb-3">
+              <p className="text-sm font-medium">{t("integration.admin.usage.title")}</p>
+            </div>
+
+            <OptionSelect
+              value={mode}
+              disabled={isLoading || isError || pending}
+              onValueChange={(value) => edit(value === "choice" ? [] : connectionIds, value)}
+              aria-label={t("integration.admin.usage.title")}
+              options={(["choice", "default", "forced"] as const).map((value) => ({
+                value,
+                label: t(`integration.admin.usage.${value}`),
+                disabled:
+                  (value !== "choice" && (shared.length === 0 || (modeLocked && value !== mode))) ||
+                  (value === "forced" && forcedLocked),
               }))}
-              value={connectionIds}
-              onChange={(next) => setConnectionIds(next ?? [])}
-              idPrefix="org-default-connection"
-              unavailableIds={unavailableIds}
             />
+            <p className="text-muted-foreground mt-2 text-sm">
+              {t(`integration.admin.usage.${mode}Help`)}
+            </p>
+            {(mode === "forced" || orgDefault?.enforce === true) && (
+              <p
+                className="text-muted-foreground mt-1 text-sm"
+                data-testid="org-default-clears-choices"
+              >
+                {t("integration.admin.orgDefault.clearsMemberChoices")}
+              </p>
+            )}
+            {shared.length === 0 ? (
+              <p className="text-muted-foreground text-xs italic">
+                {t("integration.admin.orgDefault.noPinnableConnections")}
+              </p>
+            ) : modeLocked ? (
+              <p className="text-muted-foreground text-xs" data-testid="org-default-mode-locked">
+                {t("integration.admin.orgDefault.pickBeforeMode")}
+              </p>
+            ) : null}
+            {shared.length > 0 && forcedLocked && (
+              <p className="text-muted-foreground text-xs" data-testid="org-default-forced-locked">
+                {t("integration.admin.orgDefault.forcedNeedsClosedPins", {
+                  agents: openPinAgents.join(", "),
+                })}
+              </p>
+            )}
           </div>
-          <div className="flex items-center gap-2 pb-1 text-xs">
-            <Checkbox
-              id="org-default-enforce"
-              checked={enforce}
-              onCheckedChange={(v) => setEnforce(v === true)}
-              data-testid="org-default-enforce"
-            />
-            <label htmlFor="org-default-enforce">{t("integration.admin.orgDefault.enforce")}</label>
-          </div>
-          <Button
-            size="sm"
-            onClick={() =>
-              upsert.mutate({
-                params: { path: { packageId } },
-                body: { connection_ids: connectionIds, enforce },
-              })
-            }
-            disabled={connectionIds.length === 0 || upsert.isPending}
-            data-testid="org-default-save"
-          >
-            {t("integration.admin.orgDefault.save")}
-          </Button>
-          {clearButton}
+          {shared.length > 0 && mode !== "choice" ? (
+            <div className="min-w-0">
+              <p id="org-default-connections-label" className="mb-3 text-sm font-medium">
+                {connectionsLabel}
+              </p>
+              <ConnectionCheckboxList
+                idPrefix="org-default-pick"
+                aria-labelledby="org-default-connections-label"
+                connections={shared}
+                value={connectionIds}
+                onChange={(next) => edit(next, mode)}
+                unavailableIds={unavailableIds}
+                disabled={isLoading || isError || pending}
+              />
+            </div>
+          ) : null}
         </div>
       )}
+      {mode !== "choice" && connectionIds.length === 0 && (
+        <p className="text-muted-foreground text-xs">
+          {t("integration.admin.orgDefault.pickBeforeMode")}
+        </p>
+      )}
+      <ManualSave
+        dirty={draft.dirty}
+        saveDisabled={
+          isLoading ||
+          isError ||
+          connectionsLoading ||
+          (mode !== "choice" && connectionIds.length === 0)
+        }
+        onSave={save}
+        onDiscard={draft.reset}
+      />
     </div>
   );
 }

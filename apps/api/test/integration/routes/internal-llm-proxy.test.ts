@@ -244,7 +244,11 @@ describe("POST /internal/llm-proxy — a run's own inference", () => {
       modelId: "org-upstream-model",
       enabled: true,
     });
-    const run = await seedSystemRun(ctx, { modelSource: "org", modelId: orgModel.id });
+    const run = await seedSystemRun(ctx, {
+      modelSource: "org",
+      modelId: orgModel.id,
+      modelCredentialId: providerKey.id,
+    });
     const res = await call(signRunToken(run.id), {
       model: SYSTEM_PRESET,
       messages: [{ role: "user", content: "hi" }],
@@ -338,7 +342,11 @@ describe("POST /internal/llm-proxy — a run's own inference", () => {
     });
     const runs = [
       await seedSystemRun(ctx),
-      await seedSystemRun(ctx, { modelSource: "org", modelId: orgModel.id }),
+      await seedSystemRun(ctx, {
+        modelSource: "org",
+        modelId: orgModel.id,
+        modelCredentialId: providerKey.id,
+      }),
     ];
     for (const run of runs) {
       const res = await call(signRunToken(run.id), {

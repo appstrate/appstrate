@@ -1,13 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The endpoint fields both forms share.
- *
- * The model form and the credential form describe the same thing — an endpoint
- * the operator supplies — so they render one component, under their own id
- * prefix. What is asserted here is what neither host can assert for the other:
- * that the arrangement is the same one, and that the base URL is presented as
- * belonging to the key whenever a key already carries it.
+ * The credential form's endpoint fields: API type and base URL where the provider lets the
+ * operator describe its endpoint, then the key to type. What is asserted here is the arrangement
+ * itself, and that the base URL is presented as pinned once a saved key carries it.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -16,10 +12,7 @@ import i18n, { i18nReady } from "../../../i18n.ts";
 import settingsFr from "../../../locales/fr/settings.json";
 import { render } from "../../../test/render.tsx";
 import { EndpointFields } from "../endpoint-fields.tsx";
-import type {
-  ModelProviderCredentialInfo,
-  ProviderRegistryEntry,
-} from "../../../hooks/use-model-provider-credentials.ts";
+import type { ProviderRegistryEntry } from "../../../hooks/use-model-provider-credentials.ts";
 
 await i18nReady;
 await i18n.changeLanguage("fr");
@@ -44,18 +37,17 @@ const OPENAI_COMPATIBLE: ProviderRegistryEntry = {
   featured: false,
   live_model_search: false,
   models: [],
+  personal_allowed: false,
 };
 
-const LOCAL_KEY: ModelProviderCredentialInfo = {
-  id: "cred_1",
-  label: "Ollama local",
-  apiShape: "openai-completions",
-  base_url: "http://localhost:11434/v1",
-  source: "custom",
-  authMode: "api_key",
-  created_by: null,
-  createdAt: "2026-07-01T10:00:00.000Z",
-  updatedAt: "2026-07-01T10:00:00.000Z",
+/** A provider that pins its own endpoint. */
+const DIRECT_PROVIDER: ProviderRegistryEntry = {
+  ...OPENAI_COMPATIBLE,
+  providerId: "openai",
+  displayName: "OpenAI",
+  defaultBaseUrl: "https://api.openai.com/v1",
+  baseUrlOverridable: false,
+  personal_allowed: true,
 };
 
 function fields(overrides: Partial<Parameters<typeof EndpointFields>[0]> = {}): string {
@@ -90,30 +82,22 @@ describe("EndpointFields", () => {
     expect(fields()).toContain(`placeholder="${OPENAI_COMPATIBLE.defaultBaseUrl}"`);
   });
 
-  it("renames its fields for the other host", () => {
-    const html = fields({ idPrefix: "mdl" });
-    expect(html).toContain('id="mdl-apiType"');
-    expect(html).toContain('id="mdl-baseUrl"');
-    expect(html).toContain('id="mdl-apiKey"');
+  it("pins the URL once the key carries it", () => {
+    const html = fields({ baseUrlLocked: true });
+    const at = html.indexOf('id="pk-baseUrl"');
+    expect(html.slice(html.lastIndexOf("<input", at), html.indexOf(">", at))).toContain("disabled");
+    expect(html).toContain(settingsFr["models.form.baseUrlPinnedHint"]);
   });
 
-  it("pins the URL to the key that carries it, and offers to unpick that key", () => {
-    const html = fields({
-      idPrefix: "mdl",
-      baseUrlLocked: true,
-      existingKeys: {
-        items: [LOCAL_KEY],
-        selected: LOCAL_KEY,
-        onSelect: () => {},
-        onClear: () => {},
-      },
-    });
-    const input = html.slice(html.indexOf('id="mdl-baseUrl"'));
-    expect(input.slice(0, input.indexOf(">"))).toContain("disabled");
-    expect(html).toContain(settingsFr["models.form.baseUrlPinnedHint"]);
-    expect(html).toContain(LOCAL_KEY.label);
-    // The key is selected, so there is nothing to type into.
-    expect(html).not.toContain('placeholder="sk-..."');
+  it("asks only for the key where the provider pins its own endpoint", () => {
+    const html = fields({ provider: DIRECT_PROVIDER, providers: [] });
+    expect(html).not.toContain('id="pk-apiType"');
+    expect(html).not.toContain('id="pk-baseUrl"');
+    expect(html).toContain('id="pk-apiKey"');
+  });
+
+  it("renders nothing until a provider is picked", () => {
+    expect(fields({ provider: undefined })).toBe("");
   });
 
   it("reports the errors its host resolved", () => {

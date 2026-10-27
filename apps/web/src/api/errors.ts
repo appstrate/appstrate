@@ -27,3 +27,9 @@ export class ApiError extends Error {
     this.name = "ApiError";
   }
 }
+
+/** Whether asking again can change the answer: a non-`ApiError` carries no answer from the API. */
+export function isTransientError(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return true;
+  return error.status >= 500 || error.status === 408 || error.status === 429;
+}

@@ -19,7 +19,7 @@
  * Routing delivery through a platform fetch (rather than seeding a shared run
  * volume) makes the workspace volume pure agent-local scratch, so its backing
  * (disk or tmpfs) is a free performance choice — a tmpfs-backed `local` volume
- * is NOT shared between the seed helper and the agent (see issue #549).
+ * is NOT shared between the seed helper and the agent.
  *
  * Everything for a run is keyed under its runId and deleted through the
  * transactional outbox on teardown. The manifest doubles as the deletion

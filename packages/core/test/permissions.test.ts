@@ -20,6 +20,7 @@ import {
   ORG_LEVEL_PERMISSIONS,
   PERMISSION_REQUIREMENT_MARKER,
   SPACE_LEVEL_PERMISSIONS,
+  withImpliedPermissions,
   type CoreResources,
   type RunLevel,
 } from "../src/permissions.ts";
@@ -271,6 +272,11 @@ describe("permission levels", () => {
     expect(ORG_LEVEL_PERMISSIONS.size + SPACE_LEVEL_PERMISSIONS.size).toBe(everyPermission.length);
   });
 
+  it("model-provider-credentials carries connect at org level", () => {
+    expect(CORE_RESOURCE_ACTIONS["model-provider-credentials"]).toContain("connect");
+    expect(CORE_RESOURCE_LEVELS["model-provider-credentials"]).toBe("org");
+  });
+
   it("api-keys is space-level and llm-proxy is org-level", () => {
     // The two resources whose level is not obvious from their name: keys are
     // bound to a space (`api_keys.space_id NOT NULL`), the LLM proxy is
@@ -304,6 +310,29 @@ describe("permission requirement stamp", () => {
   it("still carries the boolean guard marker other code reads", () => {
     expect(stampedMarker(requireCorePermission("agents", "write"))).toBe(true);
     expect(stampedMarker(makePermissionGuard("runs:read"))).toBe(true);
+  });
+});
+
+describe("withImpliedPermissions", () => {
+  const closed = (...held: string[]) => [...withImpliedPermissions(held)].sort();
+
+  it("adds what the wider grant of each tuple implies", () => {
+    expect(closed("runs:read-all")).toEqual(["runs:read", "runs:read-all"]);
+    expect(closed("credential-proxy:call")).toEqual([
+      "credential-proxy:call",
+      "credential-proxy:call-own",
+    ]);
+  });
+
+  it("never widens: a narrower grant implies nothing", () => {
+    expect(closed("runs:read", "credential-proxy:call-own")).toEqual([
+      "credential-proxy:call-own",
+      "runs:read",
+    ]);
+  });
+
+  it("passes every other string through, unknown ones included", () => {
+    expect(closed("agents:read", "not:a-permission")).toEqual(["agents:read", "not:a-permission"]);
   });
 });
 

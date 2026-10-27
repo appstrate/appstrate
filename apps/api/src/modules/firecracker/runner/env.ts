@@ -2,18 +2,19 @@
 
 /**
  * `appstrate-runner` daemon environment — validated here, NOT in
- * @appstrate/env. The daemon is a standalone process on the KVM host
- * (issue #819, phase 1): it owns its own configuration surface the same
+ * @appstrate/env. The daemon is a standalone process on the KVM host:
+ * it owns its own configuration surface the same
  * way the firecracker module owns FIRECRACKER_* (see ../env.ts). Parsed
  * once at daemon boot (fail-fast with Zod messages) and cached for the
  * process lifetime.
  */
 
 import { z } from "zod";
+import { parseEgressAllowInternalHosts } from "@appstrate/afps-shared/ssrf";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { parsePlatformApiUrl } from "./platform-url.ts";
 
-const runnerEnvSchema = z.object({
+export const runnerEnvSchema = z.object({
   // Shared bearer secret between the platform's firecracker backend (its
   // HTTP client) and this daemon. REQUIRED — there is deliberately no
   // default and no
@@ -27,7 +28,7 @@ const runnerEnvSchema = z.object({
   // interface or 127.0.0.1 behind a reverse proxy) and firewalling the
   // port: the bearer token is the only lock on this door.
   FIRECRACKER_RUNNER_HOST: z.string().default("0.0.0.0"),
-  // Unix-domain-socket listen path (issue #868). When set, the daemon
+  // Unix-domain-socket listen path. When set, the daemon
   // binds this socket INSTEAD of host:port — the recommended co-located
   // transport: a containerized platform bind-mounts the socket's
   // directory and the platform↔daemon wire (bearer token + per-run
@@ -64,6 +65,18 @@ const runnerEnvSchema = z.object({
       return z.NEVER;
     }
   }),
+  // Internal-host SSRF allowlist forwarded to every guest sidecar, read from
+  // THIS process's environment by `buildBaseSidecarEnv`. Same parser as the
+  // platform schema and the sidecar, so a refused entry stops the daemon at
+  // boot with one issue per entry.
+  EGRESS_ALLOW_INTERNAL_HOSTS: z
+    .string()
+    .optional()
+    .superRefine((raw, ctx) => {
+      for (const message of parseEgressAllowInternalHosts(raw).invalid) {
+        ctx.addIssue({ code: "custom", message });
+      }
+    }),
 });
 
 type RunnerEnv = z.infer<typeof runnerEnvSchema>;

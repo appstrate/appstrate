@@ -21,8 +21,9 @@
  *         title: <human-readable>,
  *         message: <human-readable>,
  *         // optional smuggles:
- *         candidate_connections?: { id, label, account_id, owned_by_actor, needs_reconnection }[],
- *         connection_id?, missing_scopes?, owned_by_actor?,
+ *         candidate_connections?: { id, label, account_id, owned_by_actor, needs_reconnection,
+ *                                   scopes_granted, missing_scopes }[],
+ *         connection_id?, missing_scopes?, remedy?, owned_by_actor?,
  *         auth_key?, required_scopes? }
  *     ] }
  *
@@ -71,6 +72,7 @@ import type {
   ModuleInitContext,
   RunConnectionMissingParams,
 } from "@appstrate/core/module";
+import { seedShares } from "../../helpers/connection-shares.ts";
 
 const app = getTestApp();
 
@@ -151,6 +153,8 @@ interface ValidationFieldError {
     account_id: string;
     owned_by_actor: boolean;
     needs_reconnection: boolean;
+    scopes_granted: string[];
+    missing_scopes: string[];
   }[];
   connection_id?: string;
   missing_scopes?: string[];
@@ -198,6 +202,7 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
         integrationId: integrationId,
         authKey: "primary",
         accountId: overrides?.accountId ?? `acct-${userId.slice(0, 6)}`,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId,
         endUserId: null,
@@ -403,6 +408,9 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
           account_id: "root@web-01",
           owned_by_actor: true,
           needs_reconnection: false,
+
+          scopes_granted: [],
+          missing_scopes: [],
         },
         {
           id: conn2,
@@ -410,6 +418,9 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
           account_id: "root@db-01",
           owned_by_actor: true,
           needs_reconnection: false,
+
+          scopes_granted: [],
+          missing_scopes: [],
         },
       ].sort((a, b) => a.id.localeCompare(b.id)),
     );
@@ -436,6 +447,7 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
         integrationId: INTEGRATION,
         authKey: "primary",
         accountId: `acct-${ctx.user.id.slice(0, 6)}`,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         endUserId: null,
@@ -1098,7 +1110,7 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
       /** A dead oauth2 connection, owned by `userId` and optionally shared. */
       async function seedDeadConnection(
         userId: string,
-        sharedWithOrg = false,
+        shared = false,
         scopesGranted = ["base", "search.read"],
       ): Promise<string> {
         const [row] = await db
@@ -1107,16 +1119,17 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
             integrationId: OAUTH_INTEGRATION,
             authKey: "primary",
             accountId: `acct-${userId.slice(0, 6)}`,
+            orgId: ctx.orgId,
             spaceId: ctx.defaultSpaceId,
             userId,
             endUserId: null,
             credentialsEncrypted: encryptCredentialEnvelope({ outputs: { access_token: "dead" } }),
             scopesGranted,
             needsReconnection: true,
-            sharedWithOrg,
             label: `Morte ${crypto.randomUUID().slice(0, 8)}`,
           })
           .returning({ id: integrationConnections.id });
+        await seedShares(row!.id, shared ? [ctx.defaultSpaceId] : []);
         return row!.id;
       }
 
@@ -1183,6 +1196,7 @@ describe("POST /api/agents/:scope/:name/run — 409 missing_integration_connecti
             integrationId: OAUTH_INTEGRATION,
             authKey: "primary",
             accountId: `acct-${userId.slice(0, 6)}`,
+            orgId: ctx.orgId,
             spaceId: ctx.defaultSpaceId,
             userId,
             endUserId: null,

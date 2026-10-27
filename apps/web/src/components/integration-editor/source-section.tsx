@@ -2,7 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { FormField } from "../form-field";
-import { SectionCard } from "../section-card";
+import { LocalServerField } from "./local-server-field";
 import { getSource, setSource, type SourceKind } from "./utils";
 
 interface SourceSectionProps {
@@ -17,7 +17,7 @@ export function SourceSection({ manifest, onChange }: SourceSectionProps) {
     onChange(setSource(manifest, { ...source, ...patch }));
 
   return (
-    <SectionCard title={t("integrationEditor.source.title")}>
+    <section className="flex max-w-2xl flex-col gap-5">
       <FormField
         id="int-source-kind"
         label={t("integrationEditor.source.kind")}
@@ -57,29 +57,16 @@ export function SourceSection({ manifest, onChange }: SourceSectionProps) {
       )}
 
       {source.kind === "local" && (
-        <>
-          <FormField
-            id="int-source-server-name"
-            label={t("integrationEditor.source.serverName")}
-            required
-            value={source.serverName}
-            onChange={(v) => update({ serverName: v })}
-            placeholder="@scope/my-mcp-server"
-            description={t("integrationEditor.source.serverNameDesc")}
-          />
-          <FormField
-            id="int-source-server-version"
-            label={t("integrationEditor.source.serverVersion")}
-            value={source.serverVersion}
-            onChange={(v) => update({ serverVersion: v })}
-            placeholder="^1.0.0"
-          />
-        </>
+        <LocalServerField
+          name={source.serverName}
+          version={source.serverVersion}
+          onChange={update}
+        />
       )}
 
       {source.kind === "none" && (
         <p className="text-muted-foreground text-sm">{t("integrationEditor.source.noneDesc")}</p>
       )}
-    </SectionCard>
+    </section>
   );
 }

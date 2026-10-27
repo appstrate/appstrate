@@ -1,120 +1,185 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The override half of a schedule write. The actor-change case is the one that
- * looped: the picks must travel as the form holds them, never be dropped behind
- * its back, or the server resets them and refuses the save again.
+ * The body of every schedule write. It carries the picks the user made, kept to the fired
+ * version's integrations, and never the connection a fallback binds: the server names that one
+ * (`withScheduleFallback`). A save that moves the actor or the version writes the connections of
+ * the state it moves to.
  */
 
 import { describe, it, expect } from "bun:test";
-import { sameActor, scheduleOverridePayload } from "../schedule-payload.ts";
-import { withDeclaredConnections } from "../connection-set.ts";
+import {
+  type ScheduleDraft,
+  sameActor,
+  savedScheduleOverrides,
+  scheduleCreatePayload,
+  scheduleExecutionPayload,
+  scheduleUpdatePayload,
+} from "../schedule-payload.ts";
 
 const ALICE = { userId: "usr_alice" };
 const BOB = { userId: "usr_bob" };
-const PICKS = { "@acme/gmail": ["conn_1"] };
+const GMAIL = "@acme/gmail";
+const SLACK = "@acme/slack";
+const PICKS = { [GMAIL]: ["conn_1"] };
 
-function edit(args: {
-  actor: { userId?: string; endUserId?: string } | undefined;
-  picks?: Record<string, string[]>;
-}) {
-  return scheduleOverridePayload({
-    isEdit: true,
-    overrides: args.picks ? { connection_overrides: args.picks } : {},
+const declared = [GMAIL, SLACK];
+
+type CreateState = Parameters<typeof scheduleCreatePayload>[0];
+
+/** A create that decides nothing: every test names what it changes. */
+function create(state: Partial<CreateState>) {
+  return scheduleCreatePayload({
+    name: "Daily",
+    cron_expression: "0 9 * * *",
+    timezone: "UTC",
+    input: {},
+    overrides: {},
+    declared: undefined,
     versionOverride: undefined,
-    versionOverrideChanged: false,
-    actor: args.actor,
-    currentActor: ALICE,
+    actor: undefined,
+    ...state,
   });
 }
 
-describe("scheduleOverridePayload — edit", () => {
-  it("actor unchanged: no actor key, the picks as they stand", () => {
-    const payload = edit({ actor: ALICE, picks: PICKS });
-    expect("actor" in payload).toBe(false);
-    expect(payload.connection_overrides).toEqual(PICKS);
+describe("scheduleCreatePayload", () => {
+  it("omits everything empty, including the actor (the caller by default)", () => {
+    expect(create({ name: "  " })).toEqual({
+      cron_expression: "0 9 * * *",
+      timezone: "UTC",
+      input: {},
+    });
   });
 
-  it("actor changed with picks: sends both, so the server keeps the new picks", () => {
-    const payload = edit({ actor: BOB, picks: PICKS });
-    expect(payload.actor).toEqual(BOB);
-    expect(payload.connection_overrides).toEqual(PICKS);
+  it("sends the picked actor, version, model and picks", () => {
+    expect(
+      create({
+        overrides: { connection_overrides: PICKS, model_id_override: "m1", proxy_id_override: "p" },
+        versionOverride: "draft",
+        actor: BOB,
+        input: { topic: "ai" },
+      }),
+    ).toEqual({
+      name: "Daily",
+      cron_expression: "0 9 * * *",
+      timezone: "UTC",
+      input: { topic: "ai" },
+      model_id_override: "m1",
+      proxy_id_override: "p",
+      connection_overrides: PICKS,
+      version_override: "draft",
+      actor: BOB,
+    });
   });
 
-  it("actor changed without picks: an explicit null, never an absent key", () => {
-    const payload = edit({ actor: BOB });
+  it("names no connection the user did not pick", () => {
+    expect("connection_overrides" in create({ declared })).toBe(false);
+  });
+});
+
+describe("scheduleUpdatePayload", () => {
+  const stored = { actor: ALICE, versionOverride: null, picks: PICKS };
+  const update = (
+    draft: ScheduleDraft,
+    over: Partial<Parameters<typeof scheduleUpdatePayload>[0]> = {},
+  ) => scheduleUpdatePayload({ stored, draft, declared, ...over });
+
+  it("sends nothing for an untouched draft", () => {
+    expect(update({})).toEqual({});
+  });
+
+  it("sends the changed keys only, the name trimmed", () => {
+    expect(update({ name: " Weekly ", cron: "0 8 * * 1", timezone: "Europe/Paris" })).toEqual({
+      name: "Weekly",
+      cron_expression: "0 8 * * 1",
+      timezone: "Europe/Paris",
+    });
+    expect(update({ name: "   " })).toEqual({});
+  });
+
+  it("actor moved without picks: an explicit null, never an absent key", () => {
+    const payload = update({ actor: BOB });
     expect(payload.actor).toEqual(BOB);
     expect("connection_overrides" in payload).toBe(true);
     expect(payload.connection_overrides).toBeNull();
   });
 
-  it("clears every override with null and sends version_override only on a change", () => {
-    const payload = edit({ actor: ALICE });
-    expect(payload).toEqual({
+  it("an actor equal to the stored one moves nothing", () => {
+    expect(update({ actor: ALICE })).toEqual({});
+  });
+
+  it("switching to the viewer sends no picks: the server names their fallback", () => {
+    const payload = update({ actor: ALICE }, { stored: { ...stored, actor: BOB } });
+    expect(payload).toEqual({ actor: ALICE, connection_overrides: null });
+  });
+
+  it("sends version_override only on a change, null when cleared", () => {
+    expect("version_override" in update({ versionOverride: null })).toBe(false);
+    expect(update({ versionOverride: "1.2.0" }).version_override).toBe("1.2.0");
+    const frozen = { ...stored, versionOverride: "1.2.0" };
+    expect(update({ versionOverride: null }, { stored: frozen }).version_override).toBeNull();
+  });
+
+  it("keeps the picks the NEW version declares", () => {
+    const picks = { [GMAIL]: ["conn_1"], [SLACK]: ["conn_2"] };
+    expect(
+      update({ versionOverride: "2.0.0" }, { stored: { ...stored, picks }, declared: [SLACK] }),
+    ).toEqual({ version_override: "2.0.0", connection_overrides: { [SLACK]: ["conn_2"] } });
+  });
+
+  it("with no declared integrations yet every pick is kept", () => {
+    expect(update({ versionOverride: "2.0.0" }, { declared: undefined })).toEqual({
+      version_override: "2.0.0",
+      connection_overrides: PICKS,
+    });
+  });
+
+  it("a pick replaces the whole map; none left is an explicit null", () => {
+    expect(update({ picks: { [SLACK]: ["conn_2"] } }).connection_overrides).toEqual({
+      [SLACK]: ["conn_2"],
+    });
+    expect(update({ picks: {} }).connection_overrides).toBeNull();
+  });
+
+  it("picks made for the new actor are the ones sent, the stored ones are dropped", () => {
+    expect(update({ actor: BOB, picks: { [SLACK]: ["conn_9"] } })).toEqual({
+      actor: BOB,
+      connection_overrides: { [SLACK]: ["conn_9"] },
+    });
+  });
+
+  it("an execution override clears with null, never an absent key", () => {
+    expect(update({ overrides: { model_id_override: "m1" } })).toEqual({
+      model_id_override: "m1",
+      generation_config_override: null,
+      proxy_id_override: null,
+    });
+  });
+
+  it("sends the input body as given", () => {
+    expect(update({ input: { topic: "ai" } })).toEqual({ input: { topic: "ai" } });
+  });
+});
+
+describe("scheduleExecutionPayload", () => {
+  it("sends every override, null when cleared", () => {
+    expect(scheduleExecutionPayload({})).toEqual({
       model_id_override: null,
       generation_config_override: null,
       proxy_id_override: null,
-      connection_overrides: null,
     });
-    const moved = scheduleOverridePayload({
-      isEdit: true,
-      overrides: {},
-      versionOverride: undefined,
-      versionOverrideChanged: true,
-      actor: ALICE,
-      currentActor: ALICE,
-    });
-    expect(moved.version_override).toBeNull();
-  });
-});
-
-describe("scheduleOverridePayload — edit after the agent dropped an integration", () => {
-  // The form holds the whole stored map; the picker shows only the fired version's integrations.
-  const stored = { ...PICKS, "@acme/retired": ["conn_9"] };
-  const save = (declared: string[]) =>
-    scheduleOverridePayload({
-      isEdit: true,
-      overrides: withDeclaredConnections({ connection_overrides: stored }, declared),
-      versionOverride: undefined,
-      versionOverrideChanged: false,
-      actor: ALICE,
-      currentActor: ALICE,
-    });
-
-  it("sends only the declared keys, so the stale one is cleared instead of refused", () => {
-    expect(save(["@acme/gmail"]).connection_overrides).toEqual(PICKS);
-  });
-
-  it("clears the map when none of its keys is declared any more", () => {
-    expect(save([]).connection_overrides).toBeNull();
-  });
-});
-
-describe("scheduleOverridePayload — create", () => {
-  it("omits everything empty, including the actor (the caller by default)", () => {
     expect(
-      scheduleOverridePayload({
-        isEdit: false,
-        overrides: {},
-        versionOverride: undefined,
-        versionOverrideChanged: false,
-        actor: undefined,
-        currentActor: undefined,
-      }),
-    ).toEqual({});
+      scheduleExecutionPayload({ model_id_override: "gpt", proxy_id_override: "prx_1" }),
+    ).toEqual({
+      model_id_override: "gpt",
+      generation_config_override: null,
+      proxy_id_override: "prx_1",
+    });
   });
 
-  it("sends the picked actor and picks", () => {
-    expect(
-      scheduleOverridePayload({
-        isEdit: false,
-        overrides: { connection_overrides: PICKS },
-        versionOverride: "1.2.0",
-        versionOverrideChanged: true,
-        actor: BOB,
-        currentActor: undefined,
-      }),
-    ).toEqual({ connection_overrides: PICKS, version_override: "1.2.0", actor: BOB });
+  it("never carries the connection picks", () => {
+    const payload = scheduleExecutionPayload({ connection_overrides: PICKS });
+    expect("connection_overrides" in payload).toBe(false);
   });
 });
 
@@ -124,5 +189,27 @@ describe("sameActor", () => {
     expect(sameActor({ userId: "u" }, { endUserId: "u" })).toBe(false);
     expect(sameActor(undefined, undefined)).toBe(true);
     expect(sameActor({ userId: "u" }, undefined)).toBe(false);
+  });
+});
+
+describe("savedScheduleOverrides", () => {
+  it("keeps only the integrations the fired version declares", () => {
+    const overrides = {
+      connection_overrides: { [SLACK]: ["conn_2"], "@acme/gone": ["conn_3"] },
+      model_id_override: "m1",
+    };
+    expect(savedScheduleOverrides({ overrides, declared })).toEqual({
+      connection_overrides: { [SLACK]: ["conn_2"] },
+      model_id_override: "m1",
+    });
+    expect(savedScheduleOverrides({ overrides, declared: [] })).toEqual({
+      model_id_override: "m1",
+    });
+  });
+
+  it("keeps every pick while the declared integrations load, and a pick to none", () => {
+    const overrides = { connection_overrides: { [GMAIL]: [] } };
+    expect(savedScheduleOverrides({ overrides, declared: undefined })).toEqual(overrides);
+    expect(savedScheduleOverrides({ overrides, declared })).toEqual(overrides);
   });
 });

@@ -1,71 +1,122 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button } from "@appstrate/ui/components/button";
-import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
+import { CheckCheck } from "lucide-react";
 import { useUnreadCount, useMarkAllRead } from "../hooks/use-notifications";
-import { usePermissions } from "../hooks/use-permissions";
 import { PageHeader } from "../components/page-header";
+import { NoMatchState } from "../components/page-states";
+import { ListToolbar, type FilterSpec } from "../components/list-toolbar";
+import { useSearchPlaceholder } from "../lib/search-placeholder";
+import { useListParams } from "../lib/list-params";
 import { RunList } from "../components/run-list";
+import { PageActionsMenu } from "../components/page-actions-menu";
 import type { RunKindFilter } from "../hooks/use-paginated-runs";
+import { usePermissions } from "../hooks/use-permissions";
+import { useRunStatusFilter } from "../hooks/use-run-status-filter";
 
-type UserTab = "all" | "me";
+/**
+ * Filters live in the URL (a filtered list is a link) and each takes SEVERAL
+ * values. Kind and scope are narrower on the wire: squaring that with the
+ * checkboxes is this file's job, so a tick means a tick on every menu.
+ */
+const KINDS = ["package", "inline"] as const;
+const SCOPES = ["me"] as const;
 
+/** The query parameters this screen filters on, and nothing else. */
+const FILTER_PARAMS = ["user", "kind", "status", "q"] as const;
+
+/** `?status=failed,timeout` — the wire shape the endpoint takes. */
 export function RunsPage() {
   const { t } = useTranslation(["agents", "common"]);
   const { data: unreadCount } = useUnreadCount();
   const markAllRead = useMarkAllRead();
+  const list = useListParams(FILTER_PARAMS);
+  const searchPlaceholder = useSearchPlaceholder(t("common:nav.runs"));
   const { can } = usePermissions();
-  // Without `runs:read-all` the list is already "mine" — the two tabs would
-  // answer the same set, so the choice is not offered.
+  // Without `runs:read-all` the list is already "mine": no scope filter.
   const canSeeEveryRun = can("runs:read-all");
-  const [userTab, setUserTab] = useState<UserTab>("all");
-  const [kindTab, setKindTab] = useState<RunKindFilter>("all");
+
+  const scopes = list.values("user", SCOPES);
+  const kinds = list.values("kind", KINDS);
+  const { statuses, filter: statusFilter } = useRunStatusFilter(list);
+  const search = list.search;
+
+  const filters: FilterSpec[] = [
+    ...(canSeeEveryRun
+      ? [
+          {
+            id: "user",
+            label: t("runs.filterScope"),
+            values: scopes,
+            options: [{ value: "me", label: t("runs.filterMine") }],
+            onChange: list.setValues("user"),
+          },
+        ]
+      : []),
+    {
+      id: "kind",
+      label: t("runs.filterKind"),
+      values: kinds,
+      options: [
+        { value: "package", label: t("common:nav.agents") },
+        { value: "inline", label: t("runs.inlineBadge") },
+      ],
+      onChange: list.setValues("kind"),
+    },
+    statusFilter,
+  ];
+
+  // The endpoint takes ONE kind, so "both ticked" is "no kind parameter" (same
+  // for scope); the ticks themselves stay as ticked.
+  const kind: RunKindFilter | undefined = kinds.length === 1 ? kinds[0] : undefined;
+  const user = canSeeEveryRun && scopes.includes("me") ? "me" : undefined;
 
   return (
-    <div className="p-6">
+    <div>
       <PageHeader
         title={t("runs.title")}
-        emoji="▶️"
-        breadcrumbs={[
-          { label: t("nav.orgSection", { ns: "common" }), href: "/" },
-          { label: t("runs.title") },
-        ]}
+        variant="collection"
+        breadcrumbs={[{ label: t("runs.title") }]}
         actions={
-          <Button
-            variant="outline"
-            onClick={() => markAllRead.mutate({})}
-            disabled={markAllRead.isPending || !unreadCount}
-          >
-            {t("runs.markAllRead")}
-          </Button>
+          <PageActionsMenu
+            actions={[
+              {
+                id: "mark-all-read",
+                label: t("common:notifications.markAllRead"),
+                icon: CheckCheck,
+                onSelect: () => markAllRead.mutate({}),
+                disabled: markAllRead.isPending || !unreadCount,
+              },
+            ]}
+          />
         }
-      >
-        <div className="mt-2 flex flex-wrap items-center gap-3">
-          {canSeeEveryRun && (
-            <Tabs value={userTab} onValueChange={(v) => setUserTab(v as UserTab)}>
-              <TabsList>
-                <TabsTrigger value="all">{t("runs.filterAll")}</TabsTrigger>
-                <TabsTrigger value="me">{t("runs.filterMine")}</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          )}
-          <Tabs value={kindTab} onValueChange={(v) => setKindTab(v as RunKindFilter)}>
-            <TabsList>
-              <TabsTrigger value="all">{t("runs.filterKindAll")}</TabsTrigger>
-              <TabsTrigger value="package">{t("runs.filterKindPackage")}</TabsTrigger>
-              <TabsTrigger value="inline">{t("runs.filterKindInline")}</TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
-      </PageHeader>
+      />
 
       <RunList
-        key={`${userTab}-${kindTab}`}
         pageSize={15}
-        user={userTab === "me" ? "me" : undefined}
-        kind={kindTab}
+        user={user}
+        kind={kind}
+        status={statuses}
+        search={search}
+        countLabel={(total) => t("runs.count", { count: total })}
+        toolbar={({ columns }) => (
+          <ListToolbar
+            search={{
+              value: search,
+              onChange: list.setSearch,
+              placeholder: searchPlaceholder,
+            }}
+            filters={filters}
+            onReset={list.reset}
+            columns={columns}
+          />
+        )}
+        // A filtered list that finds nothing ran out of matches: the way out is the filter.
+        emptyState={
+          search || filters.some((f) => f.values.length > 0) ? (
+            <NoMatchState message={t("runs.emptyFiltered")} onReset={list.reset} />
+          ) : undefined
+        }
       />
     </div>
   );

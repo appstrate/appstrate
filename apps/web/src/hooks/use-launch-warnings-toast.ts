@@ -7,7 +7,9 @@ import { authStore } from "../stores/auth-store";
 import { useIntegrationNames } from "./use-integrations";
 import { usePermissions } from "./use-permissions";
 import { useCanReach } from "./use-can-reach";
+import { agentConnectionsTabVisible } from "../lib/route-access";
 import { packageDetailPath } from "../lib/package-paths";
+import { agentSettingsHref } from "../lib/settings-section-href";
 import {
   isViewersLaunch,
   launchWarningsToast,
@@ -18,8 +20,8 @@ import {
 
 /**
  * Toasts which integrations a launch or schedule write starts without, once their names are
- * known (fire-and-forget). "Connecter" opens the Connexions tab, whose pickers hold the
- * VIEWER's connections: offered only when the run is theirs.
+ * known (fire-and-forget). "Connecter" opens the agent's Paramètres › Connexions, whose pickers
+ * hold the VIEWER's connections: offered only when the run is theirs.
  */
 export function useLaunchWarningsToast() {
   const navigate = useNavigate();
@@ -37,15 +39,15 @@ export function useLaunchWarningsToast() {
       const canConnect =
         content.connectable &&
         isViewersLaunch(target, authStore.getState().user?.id) &&
-        can("integrations:read") &&
-        canReach(agentPath);
+        canReach(agentPath) &&
+        agentConnectionsTabVisible(can);
       toast.warning(content.message, {
         description: content.description,
         ...(canConnect
           ? {
               action: {
                 label: i18n.t("detail.integrationConnect", { ns: "agents" }),
-                onClick: () => navigate(`${agentPath}#connections`),
+                onClick: () => navigate(agentSettingsHref(agentPath, "connections")),
               },
             }
           : {}),

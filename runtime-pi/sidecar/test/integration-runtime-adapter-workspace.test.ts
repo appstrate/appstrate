@@ -20,7 +20,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
-import { mkdtemp, mkdir, rm, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, stat, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -28,6 +28,7 @@ import { WORKSPACE_ENV_VAR } from "../integration-runtime-adapter.ts";
 import type { IntegrationSpawnSpec } from "../integrations-boot.ts";
 import { createHermeticProcessAdapter } from "./helpers/hermetic-process-adapter.ts";
 import {
+  FIXTURE_OWNED_ENV,
   FIXTURE_WORKSPACE_ENV,
   installPassthroughRunnerExec,
   type PassthroughRunnerExec,
@@ -127,6 +128,69 @@ describe("process adapter — workspace env propagation", () => {
     // The wrapper was asked for the `workspace` group that opens /workspace.
     expect(dump[FIXTURE_WORKSPACE_ENV]).toBe("1");
 
+    await spawned.transport.close().catch(() => {});
+    await adapter.shutdown();
+    await rm(bundleRoot, { recursive: true, force: true });
+    await rm(workspacePath, { recursive: true, force: true });
+  });
+
+  // The sidecar, the agent and the runners share this filesystem on different uids: a
+  // credential file is written owner-only, and the wrapper is asked to give it to the runner.
+  it("writes delivery.files owner-only and hands each one to the wrapper with --own", async () => {
+    const adapter = createHermeticProcessAdapter();
+    await adapter.prepare("run-files");
+    const envFile = join(bundleRoot, "env.dump");
+    await writeFile(
+      join(bundleRoot, "server.ts"),
+      `import {writeFileSync} from "node:fs"; writeFileSync(${JSON.stringify(envFile)}, JSON.stringify(process.env)); process.exit(0);\n`,
+    );
+    const keyPath = join(workspacePath, "secrets", "key.pem");
+    const certPath = join(workspacePath, "secrets", "cert.pem");
+    const content_b64 = Buffer.from("secret").toString("base64");
+
+    const spawned = await adapter.spawn({
+      runId: "run-files",
+      spec: baseSpec({
+        fileMounts: {
+          [keyPath]: { content_b64, mode: "0644" },
+          [certPath]: { content_b64, mode: "0444" },
+        },
+      }),
+      bundleRoot,
+      egress: null,
+      workspaceHandle: null,
+      onStderrLine: () => {},
+    });
+    await spawned.transport.start();
+    const dump = await readEnvDump(envFile);
+    expect(dump[FIXTURE_OWNED_ENV]).toBe(`${keyPath}:${certPath}`);
+    expect((await stat(keyPath)).mode & 0o777).toBe(0o600);
+    expect((await stat(certPath)).mode & 0o777).toBe(0o400);
+
+    await spawned.transport.close().catch(() => {});
+    await adapter.shutdown();
+    await rm(bundleRoot, { recursive: true, force: true });
+    await rm(workspacePath, { recursive: true, force: true });
+  });
+
+  it("hands the wrapper no --own for a spec without delivery.files", async () => {
+    const adapter = createHermeticProcessAdapter();
+    await adapter.prepare("run-nofiles");
+    const envFile = join(bundleRoot, "env.dump");
+    await writeFile(
+      join(bundleRoot, "server.ts"),
+      `import {writeFileSync} from "node:fs"; writeFileSync(${JSON.stringify(envFile)}, JSON.stringify(process.env)); process.exit(0);\n`,
+    );
+    const spawned = await adapter.spawn({
+      runId: "run-nofiles",
+      spec: baseSpec(),
+      bundleRoot,
+      egress: null,
+      workspaceHandle: null,
+      onStderrLine: () => {},
+    });
+    await spawned.transport.start();
+    expect((await readEnvDump(envFile))[FIXTURE_OWNED_ENV]).toBeUndefined();
     await spawned.transport.close().catch(() => {});
     await adapter.shutdown();
     await rm(bundleRoot, { recursive: true, force: true });

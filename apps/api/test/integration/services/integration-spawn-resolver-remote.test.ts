@@ -17,7 +17,7 @@ import { resolveIntegrationSpawns } from "../../../src/services/integration-spaw
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPlacedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage, seedPackageVersion } from "../../helpers/seed.ts";
 import {
   remoteIntegrationManifest,
   localIntegrationManifest,
@@ -72,7 +72,7 @@ describe("resolveIntegrationSpawns — remote source", () => {
       source: "local",
       draftManifest: manifest(withRemote),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     // An api_key connection so resolveDeliveries finds a row and the resolver
     // proceeds to the source-discriminant block.
     await db.insert(integrationConnections).values({
@@ -80,6 +80,7 @@ describe("resolveIntegrationSpawns — remote source", () => {
       authKey: "primary",
       accountId: "default",
       label: "default",
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,
@@ -175,6 +176,7 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
       authKey: "primary",
       accountId: "default",
       label: "default",
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,
@@ -201,7 +203,7 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
       source: "local",
       draftManifest: localManifest(MISSING_SERVER),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, LOCAL);
+    await seedSpacePackage(ctx.defaultSpaceId, LOCAL);
     await seedConnection();
 
     const { specs } = await resolveIntegrationSpawns({
@@ -240,7 +242,7 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
       draftManifest: serverManifest,
     });
     await seedPackageVersion({ packageId: SERVER, version: "0.1.0", manifest: serverManifest });
-    await seedPlacedPackage(ctx.defaultSpaceId, LOCAL);
+    await seedSpacePackage(ctx.defaultSpaceId, LOCAL);
     await seedConnection();
 
     const { specs } = await resolveIntegrationSpawns({
@@ -257,5 +259,69 @@ describe("resolveIntegrationSpawns — local source error guards", () => {
       packageId: SERVER,
       version: "0.1.0",
     });
+  });
+});
+
+describe("resolveIntegrationSpawns — unauthenticated integration (AFPS §7.2)", () => {
+  const OPEN = "@orga/open-mcp";
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "orga" });
+  });
+
+  it("yields exactly one connectionless spec, nothing injected", async () => {
+    await seedPackage({
+      id: OPEN,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: {
+        type: "integration",
+        schema_version: "0.3",
+        name: OPEN,
+        version: "0.1.0",
+        display_name: "Open",
+        source: {
+          kind: "remote",
+          remote: { url: "https://mcp.example.com/open/mcp", transport: "streamable-http" },
+        },
+        tools_policy: { search: {} },
+      } as never,
+    });
+    await seedSpacePackage(ctx.defaultSpaceId, OPEN);
+
+    // The cascade binds nothing for it: the snapshot has no key.
+    const { specs, dropped } = await resolveIntegrationSpawns({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      agentManifest: {
+        schema_version: "0.2",
+        type: "agent",
+        name: "@orga/agent",
+        version: "0.1.0",
+        display_name: "Agent",
+        dependencies: { integrations: { [OPEN]: "^0.1.0" } },
+        integrations_configuration: { [OPEN]: { tools: ["search"], required: true } },
+      },
+      resolvedConnections: {},
+    });
+    expect(dropped).toEqual([]);
+    expect(specs).toEqual([
+      {
+        integrationId: OPEN,
+        namespace: OPEN,
+        sourceKind: "remote",
+        manifest: {
+          name: OPEN,
+          version: "0.1.0",
+          server: { url: "https://mcp.example.com/open/mcp", transport: "streamable-http" },
+        },
+        spawnEnv: {},
+        toolAllowlist: ["search"],
+      },
+    ]);
   });
 });

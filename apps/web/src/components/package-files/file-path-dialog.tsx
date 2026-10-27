@@ -15,11 +15,11 @@
  * request lands.
  */
 
-import { useId, useState } from "react";
+import { useId, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal } from "../modal";
-import { Button } from "@appstrate/ui/components/button";
+import { FormModal } from "../form-modal";
 import { Input } from "@appstrate/ui/components/input";
+import { FormItem } from "@/components/app-ui/form-item";
 import {
   validateNewPath,
   NEW_PATH_ERROR_KEYS,
@@ -45,62 +45,42 @@ export function FilePathDialog({
   onClose,
   onSubmit,
 }: FilePathDialogProps) {
-  const { t } = useTranslation(["agents", "common"]);
+  const { t } = useTranslation("agents");
   const inputId = useId();
-  const errorId = `${inputId}-error`;
   const [path, setPath] = useState(initialPath);
 
   const rejection = path === "" ? null : validateNewPath(entries, path);
   const canSubmit = path !== "" && rejection === null && path !== initialPath;
 
-  const submit = () => {
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
     if (!canSubmit) return;
     onSubmit(path);
   };
 
   return (
-    <Modal
-      open
+    <FormModal
       onClose={onClose}
+      onSubmit={submit}
       title={title}
-      actions={
-        <>
-          <Button variant="outline" onClick={onClose}>
-            {t("btn.cancel", { ns: "common" })}
-          </Button>
-          <Button onClick={submit} disabled={!canSubmit}>
-            {confirmLabel}
-          </Button>
-        </>
-      }
+      submitLabel={confirmLabel}
+      submitDisabled={!canSubmit}
     >
-      <div className="space-y-2">
-        <label htmlFor={inputId} className="text-sm font-medium">
-          {t("files.pathLabel")}
-        </label>
+      <FormItem
+        id={inputId}
+        label={t("files.pathLabel")}
+        error={rejection ? t(NEW_PATH_ERROR_KEYS[rejection]) : undefined}
+      >
         <Input
-          id={inputId}
           value={path}
           autoFocus
           // A rename opens on the current path: typing replaces it.
           onFocus={(e) => e.currentTarget.select()}
           spellCheck={false}
           placeholder={t("files.pathPlaceholder")}
-          aria-invalid={rejection !== null}
-          aria-describedby={rejection ? errorId : undefined}
           onChange={(e) => setPath(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key !== "Enter") return;
-            e.preventDefault();
-            submit();
-          }}
         />
-        {rejection && (
-          <p id={errorId} role="alert" className="text-destructive text-sm">
-            {t(NEW_PATH_ERROR_KEYS[rejection])}
-          </p>
-        )}
-      </div>
-    </Modal>
+      </FormItem>
+    </FormModal>
   );
 }

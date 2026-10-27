@@ -4,13 +4,13 @@
  * Internal self-dispatch marker.
  *
  * When a module re-enters the platform in-process via `app.fetch()` (the MCP
- * server's `invoke_operation` is the only caller today — see
- * `modules/mcp/tools.ts`), the synthetic request carries the SAME bearer token
- * the external caller presented. That token may be audience-bound to a single
- * protected resource (e.g. `/api/mcp/o/:org`); the outbound half of
- * `enforceResourceAudience` (`protected-resources.ts`) rejects such a token on
- * any route OUTSIDE its resource so it cannot be lifted and replayed against the
- * rest of the API.
+ * server's tools do, each dispatching to the route it stands for — see
+ * `modules/mcp/tools.ts` and `modules/mcp/connection-tools.ts`), the synthetic
+ * request carries the SAME bearer token the external caller presented. That
+ * token may be audience-bound to a single protected resource (e.g.
+ * `/api/mcp/o/:org`); the outbound half of `enforceResourceAudience`
+ * (`protected-resources.ts`) rejects such a token on any route OUTSIDE its
+ * resource so it cannot be lifted and replayed against the rest of the API.
  *
  * The in-process dispatch is the one legitimate exception: it targets a
  * non-resource route (`/api/agents`, …) but has ALREADY cleared the resource

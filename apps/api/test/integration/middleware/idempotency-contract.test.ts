@@ -134,12 +134,14 @@ describe("Idempotency-Key contract (drift guard)", () => {
     expect([...mountedOperations(app)].sort()).toEqual([
       "post /api/agents/{scope}/{name}/run",
       "post /api/end-users",
+      "post /api/models/apply",
       "post /api/runs/inline",
       "post /api/runs/remote",
     ]);
     expect([...declaredOperations(buildSpecFor([]))].sort()).toEqual([
       "post /api/agents/{scope}/{name}/run",
       "post /api/end-users",
+      "post /api/models/apply",
       "post /api/runs/inline",
       "post /api/runs/remote",
     ]);

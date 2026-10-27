@@ -26,6 +26,7 @@ import type { FieldErrorCode } from "@appstrate/core/api-errors";
 import type { ModelGenerationErrorCode } from "@appstrate/core/model-generation";
 import type { PackageFileWriteErrorCode } from "@appstrate/core/package-file-operations";
 import { RUNTIME_TOOL_CATALOG } from "@appstrate/core/runtime-tools-catalog";
+import { OUTPUT_TOOL_REQUIRED } from "@appstrate/core/validation";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { toApiError } from "../../api/client.ts";
 import { ApiError } from "../../api/errors.ts";
@@ -52,7 +53,9 @@ const SOURCES = [
   "packages/connect/src/**/*.ts",
   "packages/module-*/src/**/*.ts",
 ];
-const NOT_A_SOURCE = /\/test\/|\.test\.ts$|\/openapi\/|\/openapi\.ts$|\/ui\//;
+// The MCP module's `code` literals are tool-result refusals read by the model, never a problem body.
+const NOT_A_SOURCE =
+  /\/test\/|\.test\.ts$|\/openapi\/|\/openapi\.ts$|\/ui\/|^apps\/api\/src\/modules\/mcp\//;
 
 /** Literal codes, wherever a problem can be raised. */
 const CODE_PATTERNS = [
@@ -145,13 +148,19 @@ const EMITTED_OUT_OF_SIGHT = [
   "missing_content",
   "invalid_content",
   // The per-connection authorization server's refusals (`refuse(code, …)` in
-  // `services/integration-connections.ts`), on a `variables.<name>` field.
+  // `services/integration-oauth-provisioning.ts`), on a `variables.<name>` field.
   "authorization_server_unavailable",
   "authorization_server_mismatch",
+  // The provisioning refusals, `code: problem` of `provisionabilityProblems`
+  // (`lib/integration-client-metadata.ts`, `services/integration-oauth-provisioning.ts`).
+  "authorization_server_pkce_unsupported",
+  "authorization_server_iss_unsupported",
   // An `authorized_uris` entry a credential field leaves unrenderable (`services/connect/fields-strategy.ts`).
   "unrenderable_authorized_uri",
   // Thrown as `CREDENTIAL_CHANGE_REVOCATION_FAILED` (`@appstrate/db/auth`).
   "credential_change_revocation_failed",
+  // A manifest rule's own item code, carried by its Zod issue (`@appstrate/core/validation`).
+  OUTPUT_TOOL_REQUIRED,
 ];
 
 /** Codes that never reach a sentence in the dashboard, by reason. */
@@ -201,6 +210,13 @@ const NOT_SURFACED = new Set([
   "signup_configuration_invalid",
   // A launch warning, never a refusal: `lib/launch-warnings.ts` words the toast.
   "integration_unbound",
+  // Warnings of integration discovery and server sync (`POST /api/integrations/discover`,
+  // `POST /api/integrations/{packageId}/discover`), never a refusal: `agents.json` words them
+  // under `integrationEditor.discover.warning.*`.
+  "manual_client_required",
+  "authorization_server_blocked",
+  "tools_truncated",
+  "instructions_truncated",
   // A refused role preview ends the preview with its own copy (`viewAs.stopped.<code>`).
   "invalid_view_as",
   "view_as_forbidden",
@@ -312,26 +328,58 @@ describe("errorMessage", () => {
     expect(errorMessage(err)).toBe(fr["apiError.slug_taken"]);
   });
 
-  it("keeps the server detail behind the lead of a catch-all code", async () => {
-    await i18n.changeLanguage("fr");
+  it("says a 403 in one sentence of ours, in both languages, without the server's English", async () => {
     const err = await problem({
       code: "forbidden",
       status: 403,
       detail: "Insufficient permissions: members:invite required",
     });
-    expect(errorMessage(err)).toBe(
-      "Action refusée : Insufficient permissions: members:invite required",
-    );
+    await i18n.changeLanguage("fr");
+    expect(errorMessage(err)).toBe("Vous n'avez pas les droits nécessaires pour cette action.");
+    await i18n.changeLanguage("en");
+    expect(errorMessage(err)).toBe("You do not have permission to do this.");
+    await i18n.changeLanguage("fr");
   });
 
   it("says what to change for an undeclared connection choice, not the server's English", async () => {
     await i18n.changeLanguage("fr");
-    const detail = '`connection_overrides["@acme/crm"]` is not a declared integration dependency';
-    const err = await problem({ code: "invalid_request", detail, param: "connection_overrides" });
+    const err = await problem({
+      code: "validation_failed",
+      detail: "connection_overrides.@acme/crm: …",
+      errors: [
+        {
+          field: "connection_overrides.@acme/crm",
+          code: "undeclared_connection_override",
+          message: "@acme/crm is not an integration this agent declares",
+        },
+      ],
+    });
     expect(errorMessage(err)).toBe(agentsFr["error.connectionOverridesRefused"]);
-    // Control: the same code blaming another member keeps the generic lead.
-    const other = await problem({ code: "invalid_request", detail, param: "input" });
-    expect(errorMessage(other)).toBe(`Requête refusée : ${detail}`);
+    expect(errorField(err)).toBe("connection_overrides.@acme/crm");
+    const dependency = await problem({
+      code: "validation_failed",
+      detail: "dependency_overrides.@acme/skill: …",
+      errors: [
+        {
+          field: "dependency_overrides.@acme/skill",
+          code: "undeclared_dependency_override",
+          message: "@acme/skill is not a skill or integration this agent declares",
+        },
+      ],
+    });
+    expect(errorMessage(dependency)).toBe(agentsFr["error.dependencyOverridesRefused"]);
+  });
+
+  it("tells an output schema without the output tool what to turn on", async () => {
+    await i18n.changeLanguage("fr");
+    const message =
+      "The 'output' runtime tool must be enabled when an output schema is defined — an agent must return its result.";
+    const err = await problem({
+      code: "validation_failed",
+      detail: `manifest.runtime_tools: ${message}`,
+      errors: [{ field: "manifest.runtime_tools", code: "output_tool_required", message }],
+    });
+    expect(errorMessage(err)).toBe(agentsFr["error.outputToolRequired"]);
   });
 
   it("words a 'no connection' override on a required integration as the pin's refusal", async () => {
@@ -402,7 +450,7 @@ describe("errorMessage", () => {
     expect(errorMessage(err)).toBe(detail);
   });
 
-  it("quotes the checker's rule for a SKILL.md refusal, wherever it surfaces", async () => {
+  it("says the rule of a SKILL.md refusal in French, never the checker's English", async () => {
     await i18n.changeLanguage("fr");
     const err = await problem({
       code: "validation_failed",
@@ -411,8 +459,11 @@ describe("errorMessage", () => {
         { field: "content", code: "skill_invalid_frontmatter", message: "Map keys must be unique" },
       ],
     });
-    expect(errorMessage(err)).toContain("Map keys must be unique");
-    expect(errorMessage(err)).not.toContain("{{detail}}");
+    // No position in the checker's sentence, none in ours.
+    expect(errorMessage(err)).toBe(
+      agentsFr["editor.errorSkillInvalidFrontmatter"].replace("{{position}}", ""),
+    );
+    expect(errorMessage(err)).not.toContain("Map keys must be unique");
   });
 
   it("reads Better Auth's upper-case codes from the same table", async () => {

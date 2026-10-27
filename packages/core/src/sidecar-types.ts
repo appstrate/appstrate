@@ -74,7 +74,7 @@ export interface SidecarConfig {
    * `modelContextWindow - modelMaxTokens` (reserve for the response) spills
    * to the blob store instead — preventing a parallel batch of large
    * tool_results from blowing past the upstream model's hard limit before
-   * Pi SDK's turn-boundary compaction has a chance to fire. See issue #464.
+   * Pi SDK's turn-boundary compaction has a chance to fire.
    */
   modelContextWindow?: number;
   /**
@@ -113,7 +113,7 @@ export interface SidecarLaunchSpec {
   /** See {@link SidecarConfig.modelMaxTokens}. */
   modelMaxTokens?: number;
   /**
-   * Integrations to bootstrap inside the sidecar (Phase 1.4). Each entry
+   * Integrations to bootstrap inside the sidecar. Each entry
    * declares an `type: integration` AFPS package the agent depends on —
    * the sidecar extracts the bundle, spawns the integration's MCP
    * server, and multiplexes its tools onto the agent-facing `/mcp`
@@ -253,7 +253,8 @@ export interface IntegrationSpawnSpec {
   namespace: string;
   /**
    * The bound connection this spec serves (N specs of one integration share the
-   * namespace); `label` is the `connection` selector value. Absent only on a connect run.
+   * namespace); `label` is the `connection` selector value. Absent on a connect run and for an
+   * unauthenticated integration (AFPS §7.2), which injects nothing.
    */
   connection?: { id: string; label: string; accountId: string | null };
   /**
@@ -328,24 +329,13 @@ export interface IntegrationSpawnSpec {
        * to `GET /internal/mcp-server-bundle/:scope/:name?version=…` so the
        * runnable BYTES come from the SAME version as the manifest the
        * spawn-resolver read — eliminating the manifest/bytes version skew and
-       * the "publish ≠ deploy" footgun (issue #588). Omitted for system
+       * the "publish ≠ deploy" footgun. Omitted for system
        * mcp-servers — the byte route serves those from the in-memory boot
        * registry by id alone — and for remote/serverless integrations.
        */
       version?: string;
       /**
-       * AFPS §7.1 — build-provenance flag. `true` means the referenced
-       * mcp-server's source is vendored into the integration's own bundle
-       * rather than fetched as an independent package (reproducibility +
-       * supply-chain audit). Propagated verbatim from
-       * `manifest.source.server.vendored` for local sources; omitted for
-       * remote and serverless integrations. Surfaced on the sidecar's
-       * `IntegrationBootReport.spawned[].vendored` so operators can audit
-       * "this run used a vendored foreign package".
-       */
-      vendored?: boolean;
-      /**
-       * Phase 7 — remote MCP endpoint URL. Required when
+       * Remote MCP endpoint URL. Required when
        * {@link IntegrationSpawnSpec.sourceKind} is `"remote"`. The sidecar
        * opens a Streamable HTTP MCP client against this URL instead of
        * spawning a runner. Mutually exclusive with `entry_point` (enforced
@@ -408,7 +398,7 @@ export interface IntegrationSpawnSpec {
    */
   fileMounts?: Record<string, { content_b64: string; mode: string }>;
   /**
-   * Phase 1.5 — per-auth `delivery.http` metadata. The sidecar starts a
+   * Per-auth `delivery.http` metadata. The sidecar starts a
    * per-connection MITM HTTPS proxy and uses these plans to apply the shared
    * header-prefix and caller-override policy on every upstream request whose
    * URL matches an `authorizedUris` pattern of the matching auth.
@@ -419,7 +409,7 @@ export interface IntegrationSpawnSpec {
    */
   httpDeliveryAuths?: Record<string, HttpDeliveryAuthSpec>;
   /**
-   * Local runner egress policy (#1458), enforced by the one listener (MITM or
+   * Local runner egress policy, enforced by the one listener (MITM or
    * CONNECT) the sidecar hands the runner as `HTTPS_PROXY`, its only way out.
    * Absent = no egress route; empty with `allowAllUris: false` = deny-all.
    * `declaredUris`: the manifest's own list; only a host it names literally skips the floor.
@@ -440,7 +430,7 @@ export interface IntegrationSpawnSpec {
    */
   hiddenTools?: readonly string[];
   /**
-   * Niveau 2 Phase 3 — agent-declared MCP tool allowlist. When
+   * Agent-declared MCP tool allowlist. When
    * non-undefined, restricts the set of tools the namespace advertises
    * via `tools/list`. Tools not in the allowlist are silently omitted
    * from `tools/list` and consequently unreachable via `tools/call`
@@ -556,8 +546,8 @@ export type LlmProxyConfig = LlmProxyOauthConfig | LlmProxyPlatformConfig;
  * Canonical wire-format identifier for every LLM model provider Appstrate
  * proxies to. Lives here (in core) so that the sidecar runtime, the
  * platform's model-provider registry, and the OAuth token cache all reference
- * a single source of truth — drift between the three previously caused 401s
- * to surface as "unknown apiShape" rather than a real auth failure.
+ * a single source of truth — drift between the three makes 401s
+ * surface as "unknown apiShape" rather than a real auth failure.
  *
  * `pi-messages` is pi-ai's own vendor-neutral protocol rather than a vendor's:
  * an aliased run's container speaks it, so no vendor-shaped request or response
@@ -792,19 +782,13 @@ export interface IntegrationBootReport {
   declaredConnections: number;
   /** Runtime adapter that ran the integrations (`"process"` | `"docker"` | `"none"`). */
   adapter: string;
-  /**
-   * Per-connection success — one entry per spawn spec.
-   * `vendored` mirrors the AFPS §7.1 `source.server.vendored` build-provenance
-   * signal forwarded from `IntegrationSpawnSpec.manifest.server.vendored` (set
-   * only for local sources; omitted otherwise).
-   */
+  /** Per-connection success — one entry per spawn spec. */
   spawned: Array<{
     integrationId: string;
     namespace: string;
     /** Tells apart N entries sharing `integrationId` + `namespace`. */
     connectionLabel?: string;
     toolCount: number;
-    vendored?: boolean;
   }>;
   /**
    * Per-connection failure — the error that prevented spawn/connect/register,

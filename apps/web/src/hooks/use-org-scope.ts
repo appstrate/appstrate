@@ -3,12 +3,7 @@
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 
-/**
- * Org/space context for queries. The headers are spec-declared params passed
- * explicitly (instead of relying on the client middleware alone) so they are
- * part of the React Query key — switching org or space refetches
- * instead of serving another scope's cached page.
- */
+/** Org/space context for queries. Headers are passed explicitly so they are part of the React Query key (a scope switch refetches). */
 export function useOrgScope() {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
@@ -21,12 +16,7 @@ export function useOrgScope() {
   };
 }
 
-/**
- * Org-only variant for org-level resources. The header is a spec-declared
- * param passed explicitly (instead of relying on the client middleware
- * alone) so it is part of the React Query key — switching org refetches
- * instead of serving another org's cached page.
- */
+/** Org-only variant for org-level resources; the header is in the key for the same reason. */
 export function useOrgOnlyScope() {
   const orgId = useCurrentOrgId();
   return { enabled: !!orgId, header: orgOnlyHeader(orgId) };

@@ -3,12 +3,13 @@
 /**
  * Skills in the chat, from the browser: the picker's mode and chosen skills
  * stay in the page — nothing is written, no conversation is created — until a
- * message carries them. A skill the space imposes is set from the space
- * library, behind a confirmation, and reaches the picker locked.
+ * message carries them. A skill the space imposes is set from its sheet
+ * in the catalogue, behind a confirmation, and reaches the picker locked.
  */
 
 import { test, expect } from "../../fixtures/browser.fixture.ts";
 import { createSkill } from "../../helpers/seed.ts";
+import { openRow } from "../../helpers/table.ts";
 
 test("carries the chosen mode and skills with the first message, and writes nothing before", async ({
   authedPage: page,
@@ -71,15 +72,17 @@ test("a skill imposed from the space library is locked in the picker, after a co
   await createSkill(apiClient, scope, name);
   const packageId = `${scope}/${name}`;
 
-  await page.goto("/space/packages#skills");
-  const row = page.getByRole("row").filter({ hasText: `Test Skill ${name}` });
-  const enforce = row.getByRole("checkbox", { name: /dans le chat|in the chat/ });
+  // The catalogue's « Par espace » view lists what is placed here; the skill's
+  // sheet carries one « Imposé dans le chat » switch per space.
+  await page.goto("/catalogue/skill?view=spaces");
+  await openRow(page, `Test Skill ${name}`);
+  const enforce = page.getByRole("switch", { name: /dans le chat|in the chat/ });
   await expect(enforce).not.toBeChecked();
   await enforce.click();
 
   // Imposing discloses the content to every member who chats here: the reader
   // is told so before anything is written.
-  const dialog = page.getByRole("dialog");
+  const dialog = page.getByRole("alertdialog", { name: /Imposer ce skill|Require this skill/ });
   await expect(dialog).toContainText(/quels que soient leurs droits|whatever their skill/);
   const patched = page.waitForResponse(
     (response) =>

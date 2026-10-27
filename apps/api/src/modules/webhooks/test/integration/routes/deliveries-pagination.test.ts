@@ -95,9 +95,8 @@ describe("GET /api/webhooks/:id/deliveries pagination", () => {
   it("caps the page at 100", async () => {
     await seedDeliveries(101);
     const res = await list("?limit=500");
-    const body = (await res.json()) as DeliveryPage;
-    // Out-of-range falls back to the default of 20 (parseListPagination idiom).
-    expect(body.data).toHaveLength(20);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { param?: string }).param).toBe("limit");
     const max = (await (await list("?limit=100")).json()) as DeliveryPage;
     expect(max.data).toHaveLength(100);
     expect(max.hasMore).toBe(true);

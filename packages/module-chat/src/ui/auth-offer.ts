@@ -8,14 +8,15 @@
  * tool output ({@link ../connect-offer.ts}) — the only place the live URLs
  * exist in a persisted result. The payload itself is never scraped; in the
  * model channel every connect URL is replaced by the redaction placeholder, and
- * scraping it rendered that placeholder as a relative href (issue #906).
+ * scraping it rendered that placeholder as a relative href.
  *
  * Kept React-free so it can be unit-tested without a DOM.
  */
 
 import type { IntegrationConnectCompletion } from "@appstrate/core/connect-handshake";
 import { readConnectOffers } from "../connect-offer.ts";
-import { asRecord, unwrapResult } from "./tool-result.ts";
+import { asRecordOrNull } from "@appstrate/core/safe-json";
+import { unwrapMcpResult } from "@appstrate/core/mcp-result";
 
 export interface AuthOffer {
   authUrl: string;
@@ -44,7 +45,7 @@ interface ResumeClaim {
  *  - PACKAGE. One completion signal reaches every mounted card, so two cards
  *    awaiting the same package (a retry after an abandoned attempt) would both
  *    append on the one broadcast.
- *  - TOOL CALL. A run-kickoff 409 renders one card per integration (#1207);
+ *  - TOOL CALL. A run-kickoff 409 renders one card per integration;
  *    those are different packages, so only this key covers them.
  *
  * The TTL only needs to outlive one burst while staying well under any
@@ -140,7 +141,7 @@ export function extractRunAndWaitAuthOffers(part: {
 
 /** A started run (it has an id), not a refused launch. */
 export function isStartedRunResult(result: unknown): boolean {
-  return typeof asRecord(unwrapResult(result))?.id === "string";
+  return typeof asRecordOrNull(unwrapMcpResult(result))?.id === "string";
 }
 
 /** The resume turn's instruction: a run that started anyway is re-run only if the user asks. */

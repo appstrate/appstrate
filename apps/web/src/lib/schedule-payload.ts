@@ -1,95 +1,145 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
+import type { paths } from "../api/schema";
+import { withDeclaredConnections } from "./connection-set";
 
-/**
- * An execution identity. Exactly one field is set; `undefined` means no
- * selection. Mirrors the platform `actor` wire shape (user XOR end-user).
- */
+/** An execution identity, the platform `actor` wire shape: exactly one field set (user XOR end-user). */
 export type ActorValue = { userId?: string; endUserId?: string };
 
 export interface RunOverridesValue {
-  /** Per-run model id override. */
   model_id_override?: string;
-  /** Per-run/schedule generation layer. */
   generation_config_override?: ModelGenerationSettings;
-  /** Per-run proxy id override. */
   proxy_id_override?: string;
   /**
-   * Per-integration connection sets — the launch-override layer: a run's picks, or a
-   * schedule's, replayed on every fire (a fire carries no run override). Beats member pins
-   * and the soft default; under an admin pin or an enforced org default it may only name a
-   * subset of that set, else the server refuses it (`override_outranked`).
+   * Per-integration connection sets (the launch-override layer), replayed on every
+   * schedule fire. Beats member pins and the soft default. Under an admin pin or an
+   * enforced org default the imposed set always binds and an override only adds to it
+   * (`[]` adds nothing): where the lock is closed to additions, naming a connection
+   * outside it is `override_outranked`.
    */
   connection_overrides?: Record<string, string[]>;
 }
 
-/** Whether two identities are the same one; `undefined` is no identity. */
 export function sameActor(a: ActorValue | undefined, b: ActorValue | undefined): boolean {
   return (
     (a?.userId ?? null) === (b?.userId ?? null) && (a?.endUserId ?? null) === (b?.endUserId ?? null)
   );
 }
 
-/** The override half of a schedule create: an empty override is omitted, never `null`. */
-export interface ScheduleCreateOverrides {
-  model_id_override?: string;
-  generation_config_override?: ModelGenerationSettings;
-  proxy_id_override?: string;
-  version_override?: string;
-  connection_overrides?: Record<string, string[]>;
-  actor?: ActorValue;
-}
-
-/** The override half of a schedule edit: `null` clears an override, an absent key keeps it. */
-export interface ScheduleEditOverrides {
-  model_id_override: string | null;
-  generation_config_override: ModelGenerationSettings | null;
-  proxy_id_override: string | null;
-  version_override?: string | null;
-  connection_overrides: Record<string, string[]> | null;
-  actor?: ActorValue;
-}
-
-interface ScheduleOverrideArgs {
+export interface ScheduleOverridesState {
   overrides: RunOverridesValue;
-  versionOverride: string | undefined;
-  versionOverrideChanged: boolean;
-  actor: ActorValue | undefined;
-  currentActor: ActorValue | undefined;
+  /** The integrations the fired version declares; `undefined` while it loads. */
+  declared: readonly string[] | undefined;
 }
 
-/** The override half of a schedule write; an edit sends the version and actor only if changed. */
-export function scheduleOverridePayload(
-  args: ScheduleOverrideArgs & { isEdit: true },
-): ScheduleEditOverrides;
-export function scheduleOverridePayload(
-  args: ScheduleOverrideArgs & { isEdit: false },
-): ScheduleCreateOverrides;
-export function scheduleOverridePayload(
-  args: ScheduleOverrideArgs & { isEdit: boolean },
-): ScheduleEditOverrides | ScheduleCreateOverrides {
-  const { overrides, versionOverride, actor } = args;
-  if (args.isEdit) {
-    return {
-      model_id_override: overrides.model_id_override ?? null,
-      generation_config_override: overrides.generation_config_override ?? null,
-      proxy_id_override: overrides.proxy_id_override ?? null,
-      ...(args.versionOverrideChanged ? { version_override: versionOverride ?? null } : {}),
-      connection_overrides: overrides.connection_overrides ?? null,
-      ...(actor && !sameActor(actor, args.currentActor) ? { actor } : {}),
-    };
-  }
+/**
+ * What a schedule write stores: the picks, kept to the keys of `declared` (`undefined`
+ * keeps every pick). A fallback's connection is named by the server (`withScheduleFallback`).
+ */
+export function savedScheduleOverrides(state: ScheduleOverridesState): RunOverridesValue {
+  return withDeclaredConnections(state.overrides, state.declared);
+}
+
+export type ScheduleCreateBody =
+  paths["/api/agents/{scope}/{name}/schedules"]["post"]["requestBody"]["content"]["application/json"];
+export type ScheduleUpdateBody =
+  paths["/api/schedules/{id}"]["patch"]["requestBody"]["content"]["application/json"];
+
+/** The body of a schedule create. Every override is omitted when empty, never `null`; no actor is the caller. */
+export function scheduleCreatePayload(
+  args: ScheduleOverridesState & {
+    name: string;
+    cron_expression: string;
+    timezone: string;
+    input: Record<string, unknown>;
+    versionOverride: string | undefined;
+    actor: ActorValue | undefined;
+  },
+): ScheduleCreateBody {
+  const overrides = savedScheduleOverrides(args);
+  const name = args.name.trim();
   return {
+    ...(name ? { name } : {}),
+    cron_expression: args.cron_expression,
+    timezone: args.timezone,
+    input: args.input,
     ...(overrides.model_id_override ? { model_id_override: overrides.model_id_override } : {}),
     ...(overrides.generation_config_override
       ? { generation_config_override: overrides.generation_config_override }
       : {}),
     ...(overrides.proxy_id_override ? { proxy_id_override: overrides.proxy_id_override } : {}),
-    ...(versionOverride ? { version_override: versionOverride } : {}),
+    ...(args.versionOverride ? { version_override: args.versionOverride } : {}),
     ...(overrides.connection_overrides
       ? { connection_overrides: overrides.connection_overrides }
       : {}),
-    ...(actor ? { actor } : {}),
+    ...(args.actor ? { actor: args.actor } : {}),
+  };
+}
+
+/** What the reader changed on a schedule's settings since it was stored; an absent key is untouched. */
+export interface ScheduleDraft {
+  name?: string;
+  cron?: string;
+  timezone?: string;
+  actor?: ActorValue;
+  /** `null` inherits the latest published version. */
+  versionOverride?: string | null;
+  /** The body of `input`: only what differs from the agent's values. */
+  input?: Record<string, unknown>;
+  overrides?: RunOverridesValue;
+  /** The connection picks, whole. */
+  picks?: Record<string, string[]>;
+}
+
+/**
+ * The one PATCH a settings save sends: the changed keys only (an absent key is left as stored).
+ * Connections are those of the NEXT state (`declared` is its fired version's): a move of the actor
+ * or the version, or a pick, sends `connection_overrides` (`null` when empty), and an actor move
+ * drops the stored picks, which named the previous identity's connections.
+ */
+export function scheduleUpdatePayload(args: {
+  stored: {
+    actor: ActorValue;
+    versionOverride: string | null;
+    picks: Record<string, string[]> | null;
+  };
+  draft: ScheduleDraft;
+  declared: readonly string[] | undefined;
+}): ScheduleUpdateBody {
+  const { stored, draft } = args;
+  const name = draft.name?.trim();
+  const actorMoves = draft.actor !== undefined && !sameActor(draft.actor, stored.actor);
+  const versionMoves =
+    draft.versionOverride !== undefined && draft.versionOverride !== stored.versionOverride;
+  const picks = draft.picks ?? (actorMoves ? undefined : (stored.picks ?? undefined));
+  const { connection_overrides } = savedScheduleOverrides({
+    declared: args.declared,
+    overrides: picks ? { connection_overrides: picks } : {},
+  });
+  return {
+    ...(name ? { name } : {}),
+    ...(draft.cron ? { cron_expression: draft.cron } : {}),
+    ...(draft.timezone ? { timezone: draft.timezone } : {}),
+    ...(actorMoves ? { actor: draft.actor } : {}),
+    ...(versionMoves ? { version_override: draft.versionOverride } : {}),
+    ...(draft.input ? { input: draft.input } : {}),
+    ...(draft.overrides ? scheduleExecutionPayload(draft.overrides) : {}),
+    ...(actorMoves || versionMoves || draft.picks
+      ? { connection_overrides: connection_overrides ?? null }
+      : {}),
+  };
+}
+
+export function scheduleExecutionPayload(
+  overrides: RunOverridesValue,
+): Pick<
+  ScheduleUpdateBody,
+  "model_id_override" | "generation_config_override" | "proxy_id_override"
+> {
+  return {
+    model_id_override: overrides.model_id_override ?? null,
+    generation_config_override: overrides.generation_config_override ?? null,
+    proxy_id_override: overrides.proxy_id_override ?? null,
   };
 }

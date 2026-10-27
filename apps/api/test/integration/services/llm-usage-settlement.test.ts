@@ -42,10 +42,11 @@
  * cursor read, not merely documented for consumers.
  */
 
+import type { ModelPayer } from "@appstrate/core/model-payer";
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { llmUsage, runs, type CredentialSource, type InferenceRoute } from "@appstrate/db/schema";
+import { llmUsage, runs, type InferenceRoute } from "@appstrate/db/schema";
 import { encrypt } from "@appstrate/connect";
 import type { Db } from "@appstrate/db/client";
 import { truncateAll } from "../../helpers/db.ts";
@@ -94,7 +95,7 @@ async function waitFor<T>(
 async function seedSinkRun(
   ctx: TestContext,
   overrides: {
-    modelSource?: CredentialSource | null;
+    modelSource?: ModelPayer | null;
     modelId?: string | null;
     inferenceRoute?: InferenceRoute | null;
     runOrigin?: "platform" | "remote";

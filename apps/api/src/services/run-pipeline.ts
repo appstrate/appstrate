@@ -5,7 +5,7 @@
  * Used by both the POST /run route and the scheduler's triggerScheduledRun.
  */
 
-import type { CredentialSource } from "@appstrate/db/schema";
+import type { ModelPayer } from "@appstrate/core/model-payer";
 import { logger } from "../lib/logger.ts";
 import {
   buildRunContext,
@@ -20,7 +20,7 @@ import type { DroppedIntegration } from "./integration-spawn-resolver.ts";
 import { toBundleApiError } from "./run-launcher/bundle-error-mapping.ts";
 import { createRun, appendRunLog } from "./state/runs.ts";
 import { materializeRunUploads, type PendingUploadMaterialization } from "./files.ts";
-import { resolveModel } from "./org-models.ts";
+import { requireBoundModel, resolveModelCascade } from "./org-models.ts";
 import { executeAgentInBackground } from "./run-launcher/execute-background.ts";
 import { inferenceRouteOf } from "./run-launcher/subscription-run-policy.ts";
 import { validateAgentReadiness } from "./agent-readiness.ts";
@@ -30,6 +30,7 @@ import {
   type LaunchOverrides,
 } from "./integration-connection-resolver.ts";
 import {
+  assertIntegrationVersionsResolved,
   resolveRunIntegrationVersions,
   type IntegrationManifestCache,
   type ResolvedIntegrationVersionMap,
@@ -40,6 +41,7 @@ import { parseScopedName } from "@appstrate/core/naming";
 import type { ModelCost } from "@appstrate/core/module";
 import { mintSinkCredentials } from "../lib/mint-sink-credentials.ts";
 import { encrypt } from "@appstrate/connect";
+import type { DbOrTx } from "../lib/db-helpers.ts";
 import { getEnv } from "@appstrate/env";
 import { getOrchestrator } from "./orchestrator/index.ts";
 import { ApiError, type ResolutionFieldError } from "../lib/errors.ts";
@@ -87,6 +89,11 @@ interface RunPipelineParams {
   agent: LoadedPackage;
   orgId: string;
   actor: Actor | null;
+  /**
+   * Whose personal model credentials may serve the run, or `null` for none (a
+   * schedule, an API key, a delegate): the door's `requestPayerUserId(c)`.
+   */
+  payerUserId: string | null;
   input?: Record<string, unknown> | null;
   files?: FileReference[];
   /**
@@ -111,7 +118,7 @@ interface RunPipelineParams {
   proxyId?: string | null;
   overrideVersionLabel?: string;
   /**
-   * Per-run dependency version overrides (#666). Threaded into
+   * Per-run dependency version overrides. Threaded into
    * `buildRunContext` → `buildAgentPackage` and persisted verbatim on
    * `runs.dependency_overrides`. Null when the run resolved manifest pins.
    */
@@ -123,7 +130,7 @@ interface RunPipelineParams {
   /** API key ID that triggered the run (if auth via API key). */
   apiKeyId?: string;
   /**
-   * The resolver's launch-override layer (#199): the caller's per-integration
+   * The resolver's launch-override layer: the caller's per-integration
    * connection sets for THIS run (`run_override`, persisted on
    * `runs.connection_overrides` for the audit) or the firing schedule's frozen
    * ones (`schedule_override`, already on the schedule row).
@@ -194,7 +201,7 @@ export async function resolveRunPreflight(params: {
    */
   manifestCache?: IntegrationManifestCache;
   /**
-   * Run-kickoff connect-link relay (#1207) — forwarded to readiness verbatim.
+   * Run-kickoff connect-link relay — forwarded to readiness verbatim.
    * Request paths pass `connectOfferPolicyFromRequest(c)`; the scheduler has no
    * request and no human to hand a link to, so it passes nothing.
    */
@@ -265,10 +272,11 @@ export async function resolveRunPreflight(params: {
 
 /** The manifest memo seeded with the pinned integration manifests — see `resolveRunPreflight`. */
 export async function seedPinnedIntegrationManifests(params: {
-  agent: LoadedPackage;
+  agent: Pick<LoadedPackage, "manifest">;
   orgId: string;
   dependencyOverrides: Record<string, string> | null;
   manifestCache?: IntegrationManifestCache;
+  executor?: DbOrTx;
 }): Promise<IntegrationManifestCache> {
   const manifestCache: IntegrationManifestCache = params.manifestCache ?? new Map();
   await resolveRunIntegrationVersions({
@@ -276,12 +284,13 @@ export async function seedPinnedIntegrationManifests(params: {
     orgId: params.orgId,
     dependencyOverrides: params.dependencyOverrides,
     manifestCache,
+    executor: params.executor,
   });
   return manifestCache;
 }
 
 // ---------------------------------------------------------------------------
-// Spawn-dependency freeze (#686) — shared across origins
+// Spawn-dependency freeze — shared across origins
 // ---------------------------------------------------------------------------
 
 /**
@@ -290,10 +299,8 @@ export async function seedPinnedIntegrationManifests(params: {
  *
  * The single point the integration pin is enforced for a run, shared by EVERY
  * origin — platform (`prepareAndExecuteRun`), scheduled (same), and remote
- * (`run-creation.createRun`). Extracting it is what closes the remote-origin
- * gap: before, only the platform path froze versions, so a remote run silently
- * served the mutable draft on the credential path (the exact #686 bug class on
- * a different origin).
+ * (`run-creation.createRun`). Shared, because an origin that does not freeze
+ * versions serves the mutable draft on the credential path.
  *
  *   - Rejects an override KEY that names no declared skill/integration with a
  *     400 (the "fails silently on the key axis" trap the value gate can't see).
@@ -333,16 +340,13 @@ export async function freezeRunSpawnDependencies(params: {
     dependencyOverrides: params.dependencyOverrides ?? null,
     manifestCache: params.manifestCache,
   });
-  if (!resolved.ok) {
-    const list = resolved.unresolved.map((m) => `'${m.name}@${m.versionSpec}'`).join(", ");
-    throw new ApiError({
-      status: 422,
-      code: "dependency_unresolved",
-      title: "Dependency Unresolved",
-      detail: `Could not resolve ${list} against published versions — publish the integration, fix the pin, or pass \`dependency_overrides\` to run a working copy.`,
-    });
+  // Mapped here rather than by each caller: both origins call this outside the
+  // try that maps bundle-layer errors, and an unmapped BundleError is a 500.
+  try {
+    return assertIntegrationVersionsResolved(resolved);
+  } catch (err) {
+    throw toBundleApiError(err) ?? err;
   }
-  return resolved.versions;
 }
 
 // ---------------------------------------------------------------------------
@@ -370,6 +374,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
     scheduleId,
     spaceId,
     apiKeyId,
+    payerUserId,
   } = params;
   // Per-call-graph manifest memo: reuse the caller's Map (run route — shares
   // loads with its earlier `resolveRunPreflight` call) or create one scoped
@@ -380,25 +385,18 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   // the ~1.75 s pre-createRun pipeline is decomposable in prod without a tracer.
   const pipelineStart = Date.now();
   const spanAttributes = { "appstrate.run.id": runId, "appstrate.org.id": orgId };
-  // --- Step 0: Resolve the credential source reported to the admission gate ---
+  // --- Step 0: Resolve the model, once ---
   //
-  // The `beforeUsage` gate fires for EVERY run; this resolution does not decide
-  // whether it fires, it supplies the fact the module quotes the MODEL
-  // component against (platform-supplied credential vs. the org's own BYOK /
-  // OAuth credential). Resolve the same model `buildRunContext` will (Step 3) —
-  // cheap: system models are in-memory and DB rows are short-TTL cached, so the
-  // later resolution is a cache hit. `modelId` is the effective preset (per-run
-  // override folded in by the route/scheduler/inline callers), matching the
-  // `params.modelId ?? config.modelId` cascade buildRunContext applies. A run
-  // with no resolvable model reports `null` and then fails downstream with
-  // `ModelNotConfiguredError` — it never reaches inference, so an unquotable
-  // model component costs nothing.
-  const gateModel = await resolveModel(orgId, params.agent.id, modelId ?? null);
-  const credentialSourceForGate: "system" | "org" | null = gateModel
-    ? gateModel.isSystemModel
-      ? "system"
-      : "org"
-    : null;
+  // The admission gate and the run context share this resolution. A member-paid
+  // model with no credential of the payer's is refused before the gate.
+  const modelCascade = await resolveModelCascade(
+    orgId,
+    params.agent.id,
+    modelId ?? null,
+    payerUserId,
+  );
+  if (modelCascade) requireBoundModel(modelCascade.model, payerUserId);
+  const credentialSourceForGate = modelCascade?.model.credentialSource ?? null;
 
   // --- Step 1: Shared preflight gates (rate, concurrency, timeout cap,
   //     beforeUsage hook). Shared with the remote origin in run-creation.ts so
@@ -419,7 +417,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   if (!gates.ok) throw preflightGateApiError(gates.error);
   const { agent } = gates;
 
-  // --- Step 2a: Integration manifest version snapshot (#686) ---
+  // --- Step 2a: Integration manifest version snapshot ---
   //
   // Validate `dependency_overrides` keys and freeze every declared
   // integration's manifest version against PUBLISHED versions honoring its
@@ -443,7 +441,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   );
   const freezeMs = Date.now() - freezeStart;
 
-  // --- Step 2b: Connection resolution snapshot (#199) ---
+  // --- Step 2b: Connection resolution snapshot ---
   //
   // Apply the cascade (integration-connection-resolver.ts) once at kickoff so:
   //  - the spawn loader (run-context-builder) spawns the set the cascade bound,
@@ -464,7 +462,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   let connectionsMs = 0;
   // An actor-less run leaves the connection snapshot null (nothing to pin).
   // Scheduled actor-less runs that declare integrations never reach here —
-  // the scheduler fail-fasts first (#735); other run paths always have an actor.
+  // the scheduler fail-fasts first; other run paths always have an actor.
   if (actor) {
     const connectionsStart = Date.now();
     const outcome = await runWithSpan(
@@ -497,7 +495,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
   let versionRef: string;
   let proxyLabel: string | null;
   let modelLabel: string;
-  let modelSource: CredentialSource;
+  let modelSource: ModelPayer;
   let modelCost: ModelCost | null;
   let generationConfig: ModelGenerationSettings;
   // Declared integrations this run will start WITHOUT. Persisted as run logs
@@ -530,6 +528,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
         orgId,
         spaceId,
         actor,
+        modelCascade,
         input: input ?? undefined,
         files,
         modelId,
@@ -539,6 +538,7 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
         proxyId,
         overrideVersionLabel,
         dependencyOverrides: params.dependencyOverrides ?? null,
+        resolvedIntegrationVersions,
         traceparent: params.traceparent,
         resolvedConnections,
         manifestCache,
@@ -571,11 +571,11 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
       });
     }
     // Every bundle-layer failure over stored artifacts — an unresolved
-    // dependency pin (#666), an integrity mismatch, a signature-policy
+    // dependency pin, an integrity mismatch, a signature-policy
     // rejection, a malformed archive — is translated into a coded RFC 9457
     // error BEFORE the container starts, never a silent draft fallback.
     // Anything left unmapped reaches the global handler as an opaque
-    // `500 internal_error` with no detail (#878).
+    // `500 internal_error` with no detail.
     const mapped = toBundleApiError(err);
     if (mapped) throw mapped;
     throw err;
@@ -639,13 +639,14 @@ export async function prepareAndExecuteRun(params: RunPipelineParams): Promise<v
         resolvedIntegrationVersions,
         runnerName: params.runnerName ?? null,
         runnerKind: params.runnerKind ?? null,
-        // Model aliases (issue #727, Threat A): the run DTO (`state/runs.ts`)
+        // Model aliases: the run DTO (`state/runs.ts`)
         // emits `modelCredentialId` to any dashboard user who can read the run,
         // and a credential id cross-references — via GET /api/model-provider-
         // credentials → its provider and endpoint — straight to the backing.
         // Drop it for aliases; the operator audit trail already recorded the
         // create. Non-aliased runs keep it for the connections/credentials panel.
         modelCredentialId: plan.llmConfig.aliased ? null : (plan.llmConfig.credentialId ?? null),
+        payerUserId: plan.llmConfig.payerUserId ?? null,
         consumedFileIds: params.consumedFileIds,
       },
     ),

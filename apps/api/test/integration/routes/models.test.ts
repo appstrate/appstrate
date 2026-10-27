@@ -18,12 +18,7 @@ import {
   seedSpacePackage,
 } from "../../helpers/seed.ts";
 import { db } from "@appstrate/db/client";
-import {
-  modelProviderCredentials,
-  orgModels,
-  organizations,
-  spacePackages,
-} from "@appstrate/db/schema";
+import { orgModels, organizations, spacePackages } from "@appstrate/db/schema";
 import { eq, and } from "drizzle-orm";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import {
@@ -114,6 +109,55 @@ describe("Models API", () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.data).toBeArray();
+    });
+
+    it("names each row's binding, and the payer of a built-in model", async () => {
+      const credentialId = await createProviderKey();
+      const bound = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId,
+        providerId: "openai",
+        modelId: "gpt-4o",
+        label: "Bound",
+      });
+      const [unbound] = await db
+        .insert(orgModels)
+        .values({
+          orgId: ctx.orgId,
+          label: "Unbound",
+          modelId: "gpt-4o-mini",
+          providerId: "openai",
+          credentialId: null,
+          aliased: false,
+          source: "custom",
+          createdBy: ctx.user.id,
+        })
+        .returning({ id: orgModels.id });
+      initSystemModelProviderKeys([
+        {
+          id: "sys-key-list-test",
+          providerId: "openai",
+          apiKey: "sk-system-list",
+          models: [{ id: "sys-model-list-test", modelId: "gpt-4o" }],
+        },
+      ]);
+
+      try {
+        const res = await app.request("/api/models", { headers: authHeaders(ctx) });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          data: Array<{ id: string; billed_to: string | null; binding: string }>;
+        };
+        const byId = new Map(body.data.map((m) => [m.id, m]));
+        expect(byId.get("sys-model-list-test")).toMatchObject({
+          billed_to: "system",
+          binding: "system",
+        });
+        expect(byId.get(unbound!.id)).toMatchObject({ binding: "user" });
+        expect(byId.get(bound.id)).toMatchObject({ binding: "org" });
+      } finally {
+        initSystemModelProviderKeys();
+      }
     });
 
     it("returns 401 without authentication", async () => {
@@ -315,6 +359,24 @@ describe("Models API", () => {
   });
 
   describe("POST /api/models", () => {
+    it("refuses an unbound model on a custom endpoint, which only an organization credential can serve — 400", async () => {
+      const res = await app.request("/api/models", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          label: "x",
+          modelId: "m",
+          credentialId: null,
+          providerId: "openai-compatible",
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as any;
+      expect(body.code).toBe("personal_credential_custom_endpoint");
+      expect(body.param).toBe("providerId");
+    });
+
     it("creates a model with a valid provider key", async () => {
       const credentialId = await createProviderKey();
 
@@ -707,6 +769,31 @@ describe("Models API", () => {
   });
 
   describe("PATCH /api/models/:id", () => {
+    it("refuses to unbind a model from its custom-endpoint credential — 400, the row keeps its credential", async () => {
+      const credentialId = await createGatewayKey();
+      const model = await seedOrgModel({
+        orgId: ctx.orgId,
+        credentialId,
+        providerId: "openai-compatible",
+        modelId: "gateway-model",
+        label: "Gateway",
+      });
+
+      const res = await app.request(`/api/models/${model.id}`, {
+        method: "PATCH",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({ credentialId: null }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as any).code).toBe("personal_credential_custom_endpoint");
+      const [row] = await db
+        .select({ credentialId: orgModels.credentialId })
+        .from(orgModels)
+        .where(eq(orgModels.id, model.id));
+      expect(row!.credentialId).toBe(credentialId);
+    });
+
     it("updates a model and returns the full updated resource", async () => {
       const credentialId = await createProviderKey();
 
@@ -858,7 +945,7 @@ describe("Models API", () => {
       // Regression: PUT used to write `data` (incl. `aliased`) with no
       // invariant check, so a non-aliased oauth model could become aliased by
       // update — a state POST rejects, caught only late at run launch.
-      const oauth = await seedOrgModelProviderOAuth({
+      const subscription = await seedOrgModelProviderOAuth({
         orgId: ctx.orgId,
         providerId: TEST_OAUTH_PROVIDER_ID,
         label: "Test OAuth",
@@ -873,7 +960,7 @@ describe("Models API", () => {
         body: JSON.stringify({
           label: "Subscribed",
           modelId: TEST_OAUTH_MODEL_ID,
-          credentialId: oauth.id,
+          credentialId: subscription.id,
         }),
       });
       expect(createRes.status).toBe(201);
@@ -1371,10 +1458,10 @@ describe("Models API", () => {
    */
   describe("dead credential — end-to-end recovery over HTTP", () => {
     /** A `needsReconnection` OAuth credential with one enabled model bound to it. */
-    async function seedDeadPair(label: string) {
+    async function seedDeadPair(label: string, providerId: string = TEST_OAUTH_PROVIDER_ID) {
       const cred = await seedOrgModelProviderOAuth({
         orgId: ctx.orgId,
-        providerId: TEST_OAUTH_PROVIDER_ID,
+        providerId,
         label: `${label} credential`,
         needsReconnection: true,
       });
@@ -1487,11 +1574,7 @@ describe("Models API", () => {
       // in the first place. "Reconnect this credential" would be misdirection
       // about a row the client cannot even see; the fix is to restore the
       // module. So this behaves exactly as it did before the flag existed.
-      const { cred, model } = await seedDeadPair("Orphaned provider");
-      await db
-        .update(modelProviderCredentials)
-        .set({ providerId: "@gone/provider" })
-        .where(eq(modelProviderCredentials.id, cred.id));
+      const { model } = await seedDeadPair("Orphaned provider", "@gone/provider");
 
       const list = await app.request("/api/models", { headers: authHeaders(ctx) });
       expect(((await list.json()) as any).data.find((m: any) => m.id === model.id)).toBeUndefined();
@@ -2052,6 +2135,20 @@ describe("Models API", () => {
       expect(
         seen.some((line) => line.startsWith("https://9.9.9.9/") && line.includes("sk-caller")),
       ).toBe(true);
+    });
+
+    it("refuses a personal credential, the caller's own included: a model binds organization credentials only", async () => {
+      const mine = await seedOrgModelProviderKey({
+        orgId: ctx.orgId,
+        apiShape: "openai-completions",
+        baseUrl: "https://9.9.9.9/v1",
+        apiKey: "sk-mine",
+        ownerUserId: ctx.user.id,
+      });
+
+      const res = await probe({ credentialId: mine.id, modelId: "any-model" });
+      expect(res.status).toBe(404);
+      expect(seen).toEqual([]);
     });
   });
 });

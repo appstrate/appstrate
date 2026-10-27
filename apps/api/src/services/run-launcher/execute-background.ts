@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { CredentialSource } from "@appstrate/db/schema";
+import type { ModelPayer } from "@appstrate/core/model-payer";
 import type { RunIntegrationUnbound } from "@appstrate/core/integration";
 import { logger } from "../../lib/logger.ts";
 import type { LoadedPackage } from "../../types/index.ts";
@@ -28,7 +28,7 @@ export interface ExecuteAgentInBackgroundInput {
   context: ExecutionContext;
   plan: AppstrateRunPlan;
   agentPackage?: Buffer | null;
-  modelSource?: CredentialSource;
+  modelSource?: ModelPayer;
   /** Sink credentials minted by `run-pipeline.ts` and persisted on the run row. */
   sinkCredentials: SinkCredentials;
   /** `runs.integrations_unbound`, forwarded on the `started` event; omitted when not recorded. */

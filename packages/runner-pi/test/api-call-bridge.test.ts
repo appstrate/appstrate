@@ -55,7 +55,7 @@ function bundleWith(
 
 /** Names of the Pi tools the bridge registers for `bundle`, given one resolved tool per auth. */
 async function registeredNames(bundle: ReturnType<typeof bundleWith>, resolved: string[]) {
-  const factories = await buildApiCallExtensionFactory({
+  const { factories } = await buildApiCallExtensionFactory({
     bundle,
     integrationResolver: {
       resolve: async () =>
@@ -85,7 +85,9 @@ async function registerApiCall(execute: AfpsTool["execute"]) {
     parameters: { type: "object" },
     execute,
   };
-  const [factory] = await buildApiCallExtensionFactory({
+  const {
+    factories: [factory],
+  } = await buildApiCallExtensionFactory({
     bundle: bundleWith({ tools: ["api_call"] }),
     integrationResolver: { resolve: async () => [tool] },
     runId: "run_test",
@@ -176,6 +178,14 @@ describe("buildApiCallExtensionFactory", () => {
     expect(accepts("{{site_url}}/wp-json/x")).toBe(true);
     expect(accepts("{{webhook_url}}")).toBe(true);
     expect(accepts("not a url")).toBe(false);
+    // A {{field}} after the scheme is a URL component, not a malformed URI.
+    expect(accepts("https://share.garmin.com/feed/share/{{mapshare_id}}")).toBe(true);
+    expect(accepts("https://api.acme.com/x?id={{id}}&k={{ key }}")).toBe(true);
+    expect(accepts("https://{{tenant}}.acme.com/x")).toBe(true);
+    expect(accepts("ftp://api.acme.com/x")).toBe(false);
+    expect(accepts("javascript:alert(1)")).toBe(false);
+    expect(accepts("https://")).toBe(false);
+    expect(accepts("https://api.acme.com\\{{seg}}")).toBe(false);
   });
 
   it("exposes no api_call the agent did not select", async () => {

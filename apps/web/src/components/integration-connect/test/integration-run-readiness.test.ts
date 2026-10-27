@@ -10,11 +10,14 @@
  */
 
 import { afterAll, describe, it, expect } from "bun:test";
-import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
+import {
+  CONNECTION_RESOLUTION_SOURCES,
+  CONNECTION_RESOLUTION_WARNING_CODES,
+} from "@appstrate/core/integration";
 import type { components } from "../../../api/schema";
 import i18n, { i18nReady } from "../../../i18n.ts";
 import { describeResolution, requiredNoneLabel, unboundLabel } from "../integration-run-readiness";
-import { NONE_CHOOSING_SOURCES } from "../../../lib/launch-warnings";
+import { noneChosenBy } from "../../../lib/launch-warnings";
 
 type IntegrationAgentResolution = components["schemas"]["IntegrationAgentResolution"];
 type Warning = NonNullable<IntegrationAgentResolution["warning"]>;
@@ -35,9 +38,14 @@ function candidate(): IntegrationAgentResolution["candidates"][number] {
     owner_end_user_id: null,
     owner_name: "Moi",
     scopes_granted: [],
-    shared_with_org: false,
+    scope: "org",
+    spaceId: null,
+    shared_here: false,
+    shared_space_ids: [],
+    origin_space_id: null,
     needs_reconnection: false,
     missing_scopes: [],
+    scope_fit: "unjudged",
     is_own: true,
   };
 }
@@ -53,6 +61,7 @@ function resolution(over: Partial<IntegrationAgentResolution>): IntegrationAgent
     member_pinned_connection_ids: null,
     org_default_connection_ids: null,
     org_default_enforced: false,
+    additional_connections_allowed: false,
     can_add_connection: true,
     candidates: [],
     ...over,
@@ -108,25 +117,30 @@ describe("describeResolution — lock (stored configuration, not the verdict)", 
     expect(view.lockedConnectionIds).toEqual([]);
   });
 
+  it("reads whether the lock takes additions off the server's verdict, never off the pin alone", () => {
+    const open = describeResolution(
+      resolution({ admin_pinned_connection_ids: ["a"], additional_connections_allowed: true }),
+    );
+    expect(open).toMatchObject({ lockedBy: "admin_pin", additionsAllowed: true });
+    // An enforced default closes the pin: the server says so, the view follows.
+    const closed = describeResolution(
+      resolution({
+        admin_pinned_connection_ids: ["a"],
+        org_default_connection_ids: ["d"],
+        org_default_enforced: true,
+        additional_connections_allowed: false,
+      }),
+    );
+    expect(closed).toMatchObject({ lockedBy: "admin_pin", additionsAllowed: false });
+    expect(describeResolution(resolution({})).additionsAllowed).toBe(false);
+  });
+
   it("a soft org default does not lock", () => {
     const view = describeResolution(
       resolution({ source: "org_default", org_default_connection_ids: ["d"] }),
     );
     expect(view.lockedConnectionIds).toEqual([]);
     expect(view.lockedBy).toBeNull();
-  });
-});
-
-describe("describeResolution — (par défaut)", () => {
-  it("marks what bound without anyone's pick: a soft org default or the own fallback", () => {
-    expect(describeResolution(resolution({ source: "org_default" })).byDefault).toBe(true);
-    expect(describeResolution(resolution({ source: "fallback_auto" })).byDefault).toBe(true);
-  });
-
-  it("never marks an explicit pick", () => {
-    for (const source of ["admin_pin", "org_default_enforced", "member_pin", null] as const) {
-      expect(describeResolution(resolution({ source })).byDefault).toBe(false);
-    }
   });
 });
 
@@ -190,6 +204,8 @@ describe("describeResolution — empty picker prompt", () => {
       ["auth_key_mismatch", "connect"],
       // The agent's own auth_key serves none of its selected tools: no connection clears it.
       ["auth_key_serves_no_selected_tool", "reconfigure"],
+      // It names an auth on an integration declaring none (AFPS §4.4).
+      ["auth_key_on_unauthenticated_integration", "reconfigure"],
       [null, "connect"],
     ] as const;
     for (const [error_code, prompt] of cases) {
@@ -238,33 +254,35 @@ describe("unboundLabel", () => {
       expect(label).toBeString();
       expect(label).not.toContain("detail.");
     }
-    expect(unboundLabel(warning("not_connected"))).toBe("Non connectée — l'agent s'exécute sans");
+    expect(unboundLabel(warning("not_connected"))).toBe(
+      "Non connectée : l'agent s'exécute sans elle",
+    );
     expect(unboundLabel(warning("must_choose_connection"))).toBe(
-      "Seules des connexions partagées existent — choisissez-en une pour l'utiliser",
+      "Seules des connexions partagées existent : choisissez-en une pour l'utiliser",
     );
     expect(unboundLabel(warning("auth_key_mismatch"))).toBe(
-      "Connectée avec une autre méthode d'authentification — l'agent s'exécute sans",
+      "Connectée avec une autre méthode d'authentification : l'agent s'exécute sans elle",
     );
     expect(unboundLabel(warning("integration_not_active"))).toBe(
-      "Désactivée dans cet espace — l'agent s'exécute sans",
+      "Désactivée dans cet espace : l'agent s'exécute sans elle",
     );
   });
 
   it("names the layer that chose no connection, from the warning's `source`", () => {
     expect(unboundLabel(warning("integration_unbound", { source: "member_pin" }))).toBe(
-      "Aucune connexion (votre choix) — l'agent s'exécute sans",
+      "Aucune connexion (votre choix) : l'agent s'exécute sans elle",
     );
     expect(unboundLabel(warning("integration_unbound", { source: "admin_pin" }))).toBe(
-      "Aucune connexion (choix d'un admin) — l'agent s'exécute sans",
+      "Aucune connexion (choix d'un admin) : l'agent s'exécute sans elle",
     );
-    const phrases = NONE_CHOOSING_SOURCES.map((source) =>
-      unboundLabel(warning("integration_unbound", { source })),
-    );
+    const phrases = CONNECTION_RESOLUTION_SOURCES.filter(
+      (source) => noneChosenBy(source) !== null,
+    ).map((source) => unboundLabel(warning("integration_unbound", { source })));
     expect(new Set(phrases).size).toBe(phrases.length);
     for (const phrase of phrases) expect(phrase).not.toContain("noneChosenBy.");
     // No layer named: the sentence claims nobody.
     expect(unboundLabel(warning("integration_unbound"))).toBe(
-      "Aucune connexion — l'agent s'exécute sans",
+      "Aucune connexion : l'agent s'exécute sans elle",
     );
   });
 });
@@ -277,16 +295,16 @@ describe("requiredNoneLabel", () => {
 
   it("names the layer whose set is empty, from `source`", () => {
     expect(requiredNoneLabel(resolution({ ...refused, source: "admin_pin" }))).toBe(
-      "Aucune connexion (choix d'un admin) alors que l'agent l'exige — lancement bloqué",
+      "Aucune connexion (choix d'un admin) alors que l'agent l'exige : lancement bloqué",
     );
     expect(requiredNoneLabel(resolution({ ...refused, source: "member_pin" }))).toBe(
-      "Aucune connexion (votre choix) alors que l'agent l'exige — lancement bloqué",
+      "Aucune connexion (votre choix) alors que l'agent l'exige : lancement bloqué",
     );
   });
 
   it("still says none was chosen when no layer is named", () => {
     expect(requiredNoneLabel(resolution({ ...refused, source: null }))).toBe(
-      "Aucune connexion choisie alors que l'agent l'exige — lancement bloqué",
+      "Aucune connexion choisie alors que l'agent l'exige : lancement bloqué",
     );
   });
 

@@ -1,111 +1,113 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState, useRef, useCallback } from "react";
+import { useRef, useState, type DragEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { useForm, useWatch } from "react-hook-form";
-import { Modal } from "./modal";
+import { useNavigate } from "react-router-dom";
+import { FormModal } from "./form-modal";
 import { cn } from "@appstrate/ui/cn";
-import { Button } from "@appstrate/ui/components/button";
-import { useImportPackage, useImportFromGithub } from "../hooks/use-mutations";
+import { Field, FieldError, FieldLabel, FieldSeparator } from "@appstrate/ui/components/field";
+import { Input } from "@appstrate/ui/components/input";
+import {
+  useImportPackage,
+  useImportFromGithub,
+  type ImportedPackage,
+} from "../hooks/use-mutations";
+import type { PackageType } from "../hooks/use-packages";
 import { ApiError } from "../api/errors";
+import { packageDetailPath } from "../lib/package-paths";
 import { errorMessage, onMutationError } from "../lib/mutation-error";
 
 interface ImportModalProps {
-  open: boolean;
   onClose: () => void;
+  /**
+   * The package type imported for, when the import is opened from that type's
+   * page or field: the server refuses an archive of another type before
+   * writing anything. Absent, any type is accepted.
+   */
+  type?: PackageType;
+  /**
+   * Stay where you are and hand the result back, instead of opening the
+   * imported package. For an import made from inside another form — the
+   * integration editor importing its local server — navigating would throw
+   * away the form.
+   */
+  onImported?: (result: ImportedPackage) => void;
 }
 
 const MAX_SIZE = 10 * 1024 * 1024; // 10 MB
 
-type FormData = { file: File | null; githubUrl: string };
+function fileRefusal(f: File): "import.errZip" | "import.errSize" | null {
+  const lower = f.name.toLowerCase();
+  if (!lower.endsWith(".afps") && !lower.endsWith(".afps-bundle") && !lower.endsWith(".zip")) {
+    return "import.errZip";
+  }
+  return f.size > MAX_SIZE ? "import.errSize" : null;
+}
 
-export function ImportModal({ open, onClose }: ImportModalProps) {
+export function ImportModal({ onClose, type, onImported }: ImportModalProps) {
   const { t } = useTranslation(["agents", "common"]);
+  const [file, setFile] = useState<File | null>(null);
+  const [githubUrl, setGithubUrl] = useState("");
+  const [error, setError] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [confirmOverwrite, setConfirmOverwrite] = useState<{
     activeVersion: string | null;
   } | null>(null);
   const [confirmIntegrity, setConfirmIntegrity] = useState<{ version: string } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const importPackage = useImportPackage();
+  const navigate = useNavigate();
+  const importPackage = useImportPackage({ errorHandledByCaller: true });
   const importGithub = useImportFromGithub();
 
-  const {
-    setValue,
-    setError,
-    reset,
-    control,
-    formState: { errors },
-  } = useForm<FormData>({
-    defaultValues: { file: null, githubUrl: "" },
-  });
-
-  const file = useWatch({ control, name: "file" });
-  const githubUrl = useWatch({ control, name: "githubUrl" });
-
   const isPending = importPackage.isPending || importGithub.isPending;
-  const hasFile = !!file;
   const hasUrl = !!githubUrl.trim();
-  const canSubmit = (hasFile || hasUrl) && !isPending;
 
-  const validateFile = useCallback(
-    (f: File): string => {
-      const lower = f.name.toLowerCase();
-      if (!lower.endsWith(".afps") && !lower.endsWith(".afps-bundle") && !lower.endsWith(".zip")) {
-        return t("import.errZip");
-      }
-      if (f.size > MAX_SIZE) return t("import.errSize");
-      return "";
-    },
-    [t],
-  );
+  const clearConfirmations = () => {
+    setConfirmOverwrite(null);
+    setConfirmIntegrity(null);
+  };
 
-  const handleFile = useCallback(
-    (f: File) => {
-      const err = validateFile(f);
-      setConfirmOverwrite(null);
-      setConfirmIntegrity(null);
-      setValue("githubUrl", "");
-      if (err) {
-        setError("root", { message: err });
-        setValue("file", null);
-      } else {
-        setError("root", { message: "" });
-        setValue("file", f);
-      }
-    },
-    [validateFile, setValue, setError],
-  );
+  const handleFile = (f: File) => {
+    const refusal = fileRefusal(f);
+    clearConfirmations();
+    setGithubUrl("");
+    setError(refusal ? t(refusal) : "");
+    setFile(refusal ? null : f);
+  };
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      setDragOver(false);
-      const f = e.dataTransfer.files[0];
-      if (f) handleFile(f);
-    },
-    [handleFile],
-  );
+  const handleDrop = (e: DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    const f = e.dataTransfer.files[0];
+    if (f) handleFile(f);
+  };
 
   const handleUrlChange = (value: string) => {
-    setValue("githubUrl", value);
-    setError("root", { message: "" });
+    setGithubUrl(value);
+    setError("");
     if (value.trim()) {
-      setValue("file", null);
-      setConfirmOverwrite(null);
-      setConfirmIntegrity(null);
+      setFile(null);
+      clearConfirmations();
+    }
+  };
+
+  /** A finished import opens the package, or hands it back to the form it was made from. */
+  const finish = (result: ImportedPackage) => {
+    if (onImported) {
+      onImported(result);
+      onClose();
+    } else {
+      navigate(packageDetailPath(result.type, result.packageId));
     }
   };
 
   const handleFormSubmit = () => {
-    if (hasFile) {
+    if (file) {
       const force = !!confirmOverwrite || !!confirmIntegrity;
       importPackage.mutate(
-        { file: file, force },
+        { file, force, type },
         {
-          onSuccess: () => {
-            resetAndClose();
-          },
+          onSuccess: finish,
           onError: (err) => {
             if (err instanceof ApiError && err.code === "draft_overwrite") {
               setConfirmOverwrite({
@@ -125,27 +127,14 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
         },
       );
     } else if (hasUrl) {
-      importGithub.mutate(githubUrl.trim(), {
-        onSuccess: () => {
-          resetAndClose();
+      importGithub.mutate(
+        { url: githubUrl.trim(), type },
+        {
+          onSuccess: finish,
+          onError: (err) => setError(errorMessage(err)),
         },
-        onError: (err) => {
-          setError("root", { message: errorMessage(err) });
-        },
-      });
+      );
     }
-  };
-
-  const resetAndClose = () => {
-    reset({ file: null, githubUrl: "" });
-    setConfirmOverwrite(null);
-    setConfirmIntegrity(null);
-    onClose();
-  };
-
-  const handleClose = () => {
-    if (isPending) return;
-    resetAndClose();
   };
 
   const submitLabel = isPending
@@ -154,27 +143,23 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
       ? t("import.forceSubmit")
       : confirmIntegrity
         ? t("import.forceIntegrity")
-        : t("import.submit");
-
-  const rootError = errors.root?.message;
+        : t("common:nav.import");
 
   return (
-    <Modal
-      open={open}
-      onClose={handleClose}
+    <FormModal
+      onClose={onClose}
+      onSubmit={(e) => {
+        e.preventDefault();
+        // The modal may be opened from inside another form (React bubbles through portals).
+        e.stopPropagation();
+        handleFormSubmit();
+      }}
       title={t("import.title")}
-      actions={
-        <>
-          <Button variant="outline" onClick={handleClose} disabled={isPending}>
-            {t("btn.cancel")}
-          </Button>
-          <Button onClick={handleFormSubmit} disabled={!canSubmit}>
-            {submitLabel}
-          </Button>
-        </>
-      }
+      isPending={isPending}
+      submitLabel={submitLabel}
+      submitDisabled={!file && !hasUrl}
+      error={error}
     >
-      {/* --- File upload --- */}
       <div
         className={cn(
           "border-border hover:border-primary/50 cursor-pointer rounded-lg border-2 border-dashed p-8 text-center transition-colors",
@@ -209,49 +194,32 @@ export function ImportModal({ open, onClose }: ImportModalProps) {
         )}
       </div>
 
-      {/* --- Separator --- */}
-      <div className="relative my-4">
-        <div className="absolute inset-0 flex items-center">
-          <div className="border-border w-full border-t" />
-        </div>
-        <div className="relative flex justify-center text-xs">
-          <span className="bg-popover text-muted-foreground px-2">{t("import.or")}</span>
-        </div>
-      </div>
+      <FieldSeparator>{t("import.or")}</FieldSeparator>
 
-      {/* --- URL input --- */}
-      <div>
-        <label className="text-foreground text-sm font-medium">{t("import.urlLabel")}</label>
-        <input
+      <Field>
+        <FieldLabel htmlFor="import-url">{t("import.urlLabel")}</FieldLabel>
+        <Input
+          id="import-url"
           type="url"
           value={githubUrl}
           onChange={(e) => handleUrlChange(e.target.value)}
           placeholder={t("import.urlPlaceholder")}
-          className="border-input bg-background placeholder:text-muted-foreground focus:ring-ring mt-1.5 w-full rounded-md border px-3 py-2 text-sm focus:ring-2 focus:outline-none"
           disabled={isPending}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              handleFormSubmit();
-            }
-          }}
         />
-      </div>
+      </Field>
 
-      {/* --- Errors & confirmations --- */}
-      {rootError && <p className="text-destructive mt-3 text-sm">{rootError}</p>}
       {confirmOverwrite && (
-        <p className="text-destructive mt-3 text-sm">
+        <FieldError>
           {confirmOverwrite.activeVersion
             ? t("import.confirmOverwrite", { activeVersion: confirmOverwrite.activeVersion })
             : t("import.confirmOverwriteNoVersion")}
-        </p>
+        </FieldError>
       )}
       {confirmIntegrity && (
-        <p className="text-destructive mt-3 text-sm">
+        <FieldError>
           {t("import.confirmIntegrity", { version: confirmIntegrity.version })}
-        </p>
+        </FieldError>
       )}
-    </Modal>
+    </FormModal>
   );
 }

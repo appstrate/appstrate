@@ -8,6 +8,7 @@ import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgOnlyScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
 import { agentProxyKeys, packageKeys } from "../lib/query-keys";
+import { useInvalidatePaths } from "./use-invalidate-paths";
 
 /** Wire shape from the OpenAPI spec (components.schemas.OrgProxy). */
 export type OrgProxyInfo = components["schemas"]["OrgProxy"];
@@ -22,31 +23,23 @@ export function useProxies(enabled = true) {
   );
 }
 
-/** openapi-react-query keys are [method, path, init] — invalidate the literal spec path. */
-function useInvalidateProxies() {
-  const qc = useQueryClient();
-  return () => {
-    void qc.invalidateQueries({ queryKey: ["get", "/api/proxies"] });
-  };
-}
-
 export function useCreateProxy() {
-  const invalidate = useInvalidateProxies();
+  const invalidate = useInvalidatePaths("/api/proxies");
   return $api.useMutation("post", "/api/proxies", { onSuccess: invalidate });
 }
 
 export function useUpdateProxy() {
-  const invalidate = useInvalidateProxies();
+  const invalidate = useInvalidatePaths("/api/proxies");
   return $api.useMutation("patch", "/api/proxies/{id}", { onSuccess: invalidate });
 }
 
 export function useDeleteProxy() {
-  const invalidate = useInvalidateProxies();
+  const invalidate = useInvalidatePaths("/api/proxies");
   return $api.useMutation("delete", "/api/proxies/{id}", { onSuccess: invalidate });
 }
 
 export function useSetDefaultProxy() {
-  const invalidate = useInvalidateProxies();
+  const invalidate = useInvalidatePaths("/api/proxies");
   return $api.useMutation("put", "/api/proxies/default", { onSuccess: invalidate });
 }
 

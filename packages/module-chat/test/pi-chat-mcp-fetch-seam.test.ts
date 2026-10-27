@@ -23,7 +23,7 @@ import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
 
 /** Nothing listens here — see the file header. */
 const ORIGIN = "http://127.0.0.1:1";
-const MCP_URL = `${ORIGIN}/api/mcp/o/org_1`;
+const MCP_URL = `${ORIGIN}/api/mcp/o/org_1/s/spc_1`;
 const RUN_ID = "run_seam_1";
 
 interface RegisteredTool {
@@ -126,6 +126,7 @@ function buildTurn(transport: ReturnType<typeof seamFetch>) {
   return buildPlatformMcpTools({
     url: MCP_URL,
     headers: { authorization: "Bearer loopback", "x-org-id": "org_1" },
+    spaceId: "spc_1",
     writeChunk: () => {},
     signal: new AbortController().signal,
     turnBudget: { deadlineAt: Date.now() + 10 * 60_000, stepCount: () => 0 },

@@ -21,7 +21,8 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedPackage, seedPublishedVersion, seedSpacePackage } from "../../helpers/seed.ts";
-import { createSchedule, triggerScheduledRun } from "../../../src/services/scheduler.ts";
+import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
+import { createJudgedSchedule } from "../../helpers/schedule-fixtures.ts";
 import { AGENT_PACKAGES_BUCKET } from "../../../src/services/package-storage-keys.ts";
 import type { Actor } from "../../../src/lib/actor.ts";
 
@@ -49,7 +50,7 @@ beforeEach(async () => {
   await seedSpacePackage(ctx.defaultSpaceId, AGENT);
   // No `versionOverride`: the fire resolves the latest PUBLISHED version,
   // which is the read the storage fault below lands on.
-  const schedule = await createSchedule(
+  const schedule = await createJudgedSchedule(
     { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
     AGENT,
     actor,

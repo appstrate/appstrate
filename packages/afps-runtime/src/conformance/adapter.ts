@@ -10,9 +10,8 @@
  * parses bundles, renders prompts, and verifies signatures
  * bit-compatibly with the reference implementation.
  *
- * Level 4 (bundle execution → event stream) is reserved for Phase 10 —
- * today the adapter's `runBundle` field is intentionally absent from
- * the type.
+ * Level 4 (scripted execution → event stream) is optional: an adapter
+ * without `runScripted` skips those cases.
  */
 
 import type { Bundle } from "../bundle/types.ts";

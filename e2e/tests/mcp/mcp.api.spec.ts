@@ -140,11 +140,13 @@ test.describe("MCP over an API key (full stack)", () => {
     // keeping them cost a permanent second dispatch path. See
     // `apps/api/src/modules/mcp/tools.ts` (`buildMcpTools`).
     expect(names).toEqual([
+      "api_call",
       "describe_operation",
       "get_me",
       "get_runtime_capabilities",
       "import_package_file",
       "invoke_operation",
+      "list_connections",
       "list_files",
       "read_file",
       "read_skill",
@@ -403,11 +405,15 @@ test.describe("MCP over a self-service OAuth client (DCR + PKCE)", () => {
       expect(init.envelope.result?.serverInfo).toBeTruthy();
 
       // ...and an invoke dispatches in-process as the user (owner → spaces:read).
+      // A user's token is not pinned: the call names its space.
       const invoke = await mcpRpc(anon, mcpUrl, headers, {
         jsonrpc: "2.0",
         id: 5,
         method: "tools/call",
-        params: { name: "invoke_operation", arguments: { operation_id: "listSpaces" } },
+        params: {
+          name: "invoke_operation",
+          arguments: { operation_id: "listSpaces", space_id: orgContext.org.defaultSpaceId },
+        },
       });
       const payload = toolPayload(invoke.envelope);
       expect(payload.isError).toBe(false);

@@ -54,8 +54,8 @@ import { getTestApp } from "../../helpers/app.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { uploadPackageFiles } from "../../../src/services/package-items/storage.ts";
 import { buildAgentPackage } from "../../../src/services/package-storage.ts";
-import { eq } from "drizzle-orm";
-import { packageDistTags, packages, spacePackages } from "@appstrate/db/schema";
+import { eq, sql } from "drizzle-orm";
+import { organizations, packageDistTags, packages, spacePackages } from "@appstrate/db/schema";
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { readBundleFromBuffer } from "@appstrate/afps-runtime/bundle";
@@ -64,6 +64,7 @@ import {
   versionZipKey,
 } from "../../../src/services/package-storage-keys.ts";
 import type { AgentManifest, LoadedPackage } from "../../../src/types/index.ts";
+import { apiIntegrationManifest } from "../../helpers/integration-manifests.ts";
 
 const app = getTestApp();
 
@@ -345,7 +346,11 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
       source: "local",
     };
 
-    const built = await buildAgentPackage(agent, ctx.orgId, { [SKILL_ID]: "draft" });
+    // The agent declares no integration, so the frozen integration map is empty.
+    const built = await buildAgentPackage(agent, ctx.orgId, {
+      integrationVersions: {},
+      dependencyOverrides: { [SKILL_ID]: "draft" },
+    });
 
     const bundle = readBundleFromBuffer(new Uint8Array(built.zip));
     const skill = bundle.packages.get(`${SKILL_ID}@1.0.0`);
@@ -373,5 +378,143 @@ describe("GET /api/agents/:scope/:name/bundle — dependency read scope", () => 
       headers: authHeaders(ctx),
     });
     expect(res.status).toBe(404);
+  });
+});
+
+describe("GET /api/agents/:scope/:name/bundle — integration dependency read scope", () => {
+  const INTEG_AGENT_ID = "@scopeorg/integ-agent";
+  const INTEG_ID = "@scopeorg/secret-integ";
+  const INTEG_SECRET = "SECRET INTEGRATION DOC";
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    ctx = await createTestContext({ orgSlug: "scopeorg" });
+
+    // The agent declares a skill AND an integration, so a key holding
+    // `skills:read` isolates the integration's own read scope.
+    const manifest = {
+      ...agentManifest(INTEG_AGENT_ID, { withSkillDep: true }),
+      dependencies: {
+        skills: { [SKILL_ID]: "^1.0.0" },
+        integrations: { [INTEG_ID]: "^1.0.0" },
+      },
+    };
+    await seedPackage({
+      id: INTEG_AGENT_ID,
+      homeSpaceId: ctx.defaultSpaceId,
+      type: "agent",
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: manifest,
+      draftContent: "You are the agent.",
+    });
+    await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, INTEG_AGENT_ID);
+    await publish(INTEG_AGENT_ID, "1.0.0", manifest, { "prompt.md": enc("You are the agent.") });
+
+    await seedPackage({
+      id: SKILL_ID,
+      homeSpaceId: ctx.defaultSpaceId,
+      type: "skill",
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: skillManifest("1.0.0"),
+      draftContent: SKILL_MD,
+    });
+    await publish(SKILL_ID, "1.0.0", skillManifest("1.0.0"), { "SKILL.md": enc(SKILL_MD) });
+
+    const integManifest = apiIntegrationManifest({
+      name: INTEG_ID,
+      version: "1.0.0",
+      apiCall: { authKey: "key" },
+      auths: { key: { type: "api_key" } },
+    }) as unknown as Record<string, unknown>;
+    await seedPackage({
+      id: INTEG_ID,
+      homeSpaceId: ctx.defaultSpaceId,
+      type: "integration",
+      orgId: ctx.orgId,
+      createdBy: ctx.user.id,
+      draftManifest: integManifest,
+    });
+    await publish(INTEG_ID, "1.0.0", integManifest, { "INTEGRATION.md": enc(INTEG_SECRET) });
+  });
+
+  it("403s a key with agents:read and skills:read but no integrations:read", async () => {
+    const rawKey = await keyWithScopes(ctx, ["agents:read", "skills:read"]);
+
+    const res = await app.request(`/api/agents/${INTEG_AGENT_ID}/bundle`, {
+      headers: bearer(rawKey),
+    });
+
+    expect(res.status).toBe(403);
+    const body = await res.text();
+    expect(body).not.toContain(INTEG_SECRET);
+    // The integration's own guard answered, not the fail-closed branch for a
+    // type with no read scope (which names no permission).
+    const { detail } = JSON.parse(body) as { detail: string };
+    expect(detail).toBe("Insufficient permissions: integrations:read required");
+    expect(detail).not.toContain("no read scope is defined");
+  });
+
+  it("hides an integration confined to a private space", async () => {
+    const hidden = await seedSpace({ orgId: ctx.orgId, visibility: "private" });
+    await db.update(packages).set({ homeSpaceId: hidden.id }).where(eq(packages.id, INTEG_ID));
+    await seedSpacePackage(hidden.id, INTEG_ID);
+    const rawKey = await keyWithScopes(ctx, ["agents:read", "skills:read", "integrations:read"]);
+
+    const res = await app.request(`/api/agents/${INTEG_AGENT_ID}/bundle`, {
+      headers: bearer(rawKey),
+    });
+
+    expect(res.status, await res.clone().text()).toBe(404);
+    const body = await res.text();
+    expect(body).not.toContain(INTEG_SECRET);
+    expect((JSON.parse(body) as { code: string }).code).toBe("not_found");
+  });
+
+  it("serves the integration once the key also holds integrations:read", async () => {
+    const rawKey = await keyWithScopes(ctx, ["agents:read", "skills:read", "integrations:read"]);
+
+    const res = await app.request(`/api/agents/${INTEG_AGENT_ID}/bundle`, {
+      headers: bearer(rawKey),
+    });
+
+    expect(res.status, await res.clone().text()).toBe(200);
+    const bundle = readBundleFromBuffer(new Uint8Array(await res.arrayBuffer()));
+    const integ = bundle.packages.get(`${INTEG_ID}@1.0.0`);
+    expect(integ).toBeDefined();
+    expect(new TextDecoder().decode(integ!.files.get("INTEGRATION.md"))).toBe(INTEG_SECRET);
+  });
+  it("applies the org's copy restriction to the integration, not only to the root agent", async () => {
+    // `restrict_package_copy` narrows copying a package out to `<type>:share`
+    // in its home. The root agent passes on `agents:share`; the integration
+    // member is a copy of its own, which its `download` would refuse without
+    // `integrations:share`, so the bundle must refuse it too.
+    await db
+      .update(organizations)
+      .set({
+        orgSettings: sql`COALESCE(${organizations.orgSettings}, '{}'::jsonb) || ${JSON.stringify({ restrict_package_copy: true })}::jsonb`,
+      })
+      .where(eq(organizations.id, ctx.orgId));
+    const readScopes = ["agents:read", "agents:share", "skills:read", "integrations:read"];
+
+    const refused = await app.request(`/api/agents/${INTEG_AGENT_ID}/bundle`, {
+      headers: bearer(await keyWithScopes(ctx, readScopes)),
+    });
+    expect(refused.status, await refused.clone().text()).toBe(403);
+    const body = await refused.text();
+    expect(body).not.toContain(INTEG_SECRET);
+    const problem = JSON.parse(body) as { code: string; detail: string };
+    expect(problem.code).toBe("package_copy_restricted");
+    expect(problem.detail).toContain(INTEG_ID);
+
+    const allowed = await app.request(`/api/agents/${INTEG_AGENT_ID}/bundle`, {
+      headers: bearer(await keyWithScopes(ctx, [...readScopes, "integrations:share"])),
+    });
+    expect(allowed.status, await allowed.clone().text()).toBe(200);
+    const bundle = readBundleFromBuffer(new Uint8Array(await allowed.arrayBuffer()));
+    const integ = bundle.packages.get(`${INTEG_ID}@1.0.0`);
+    expect(new TextDecoder().decode(integ!.files.get("INTEGRATION.md"))).toBe(INTEG_SECRET);
   });
 });

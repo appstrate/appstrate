@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Sidecar-side integration bootstrap (Phase 1.4 + 1.5).
+ * Sidecar-side integration bootstrap.
  *
  * Reads the `INTEGRATIONS_TO_SPAWN_JSON` env var produced by the
  * platform launcher (see `apps/api/src/services/run-launcher/pi.ts`),
@@ -12,7 +12,7 @@
  * future: Firecracker microVM, podman, …), and aggregates their tools
  * on a shared {@link McpHost}.
  *
- * Phase 1.5 also wires per-connection HTTPS MITM listeners for auths
+ * It also wires per-connection HTTPS MITM listeners for auths
  * that declare `delivery.http`: a per-run CA is minted on boot, each
  * such bound connection gets a credentials source (cache + refresh hook) +
  * listener bound on the adapter's preferred interface, and the listener
@@ -34,9 +34,11 @@ import { dirname, join, normalize } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
+import { assertHttpFieldValue } from "@appstrate/afps-shared/delivery-http";
 import { guardedFetchChain } from "@appstrate/afps-shared/guarded-fetch";
 import { compileRunnerEgressPolicy, isOperatorTrustedEgressHost } from "./ssrf.ts";
 import { unzipBounded } from "@appstrate/core/zip";
+import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
@@ -44,12 +46,16 @@ import { ListRootsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import {
   createInProcessPair,
   createMcpHttpClient,
+  httpStatusOf,
   wrapClient,
   type AppstrateMcpClient,
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
 import { planCaBundle, type CaBundle } from "@appstrate/connect/proxy-ca-planner";
-import { planHttpDeliveryInjection } from "@appstrate/afps-runtime/resolvers";
+import {
+  planHttpDeliveryInjection,
+  unresolvedPlaceholders,
+} from "@appstrate/afps-runtime/resolvers";
 import { matchesAuthorizedUriSpec } from "@appstrate/afps-shared/authorized-uris";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 
@@ -127,6 +133,11 @@ function safeUrlForLog(url: string): string {
   } catch {
     return "<unparseable>";
   }
+}
+
+/** A URL's origin for log surfaces, or `undefined` when absent or unparseable. */
+function originForLog(url: string | undefined): string | undefined {
+  return url && URL.canParse(url) ? new URL(url).origin : undefined;
 }
 
 function decodeWorkspaceHandle(): WorkspaceHandle | null {
@@ -247,7 +258,7 @@ async function fetchBundleBytes(
   serverVersion: string | undefined,
   opts: BundleFetchOptions,
 ): Promise<Uint8Array> {
-  // #588 — the platform pins a concrete version at run kickoff; forward it so
+  // The platform pins a concrete version at run kickoff; forward it so
   // the bytes match the manifest the spawn-resolver read. Only a system
   // mcp-server has none (boot registry, single version, served by id alone) —
   // for anything else the route rejects an absent `?version=`.
@@ -310,7 +321,7 @@ export async function extractBundle(bytes: Uint8Array, namespace: string): Promi
 }
 
 /**
- * Phase 7 — connect to a remote Streamable HTTP MCP server using the
+ * Connect to a remote Streamable HTTP MCP server using the
  * actor's live credentials. Auth-type-agnostic: reads the resolved
  * `HttpDeliveryPlan` per request from the credentials source so the same
  * code path handles OAuth2 (refresh-aware Bearer), api_key (static PAT
@@ -333,14 +344,13 @@ export async function extractBundle(bytes: Uint8Array, namespace: string): Promi
  * `auths.length === 1` test). So this is a trivial pick, not a second policy
  * site: the oauth2-first / first-with-a-plan ordering is just a defensive
  * tie-breaker should the payload ever surface more than one. Throws when no
- * auth produces an injectable header — Phase 7 can't run an MCP client
- * without authentication (every public hosted MCP today gates `tools/call`
- * behind some credential).
+ * auth produces an injectable header. Without a source — an unauthenticated
+ * integration (AFPS §7.2), which binds no connection — it injects nothing.
  */
 /**
  * Dependency seam for {@link connectRemoteHttpIntegration} — production
  * callers omit it (the default wires the real Streamable HTTP client). The
- * credentials source is no longer a dep: the caller hoists ONE source per
+ * credentials source is not a dep: the caller hoists ONE source per
  * integration and passes it in directly, so tests inject a fake source as the
  * second positional argument instead. Unit tests still override `createClient`
  * / `createSseClient` to exercise the per-request Bearer injection +
@@ -372,6 +382,8 @@ export interface ConnectRemoteHttpDeps {
    * injecting a transport factory does NOT disable it.
    */
   resolveHost?: HostResolver;
+  /** Budget of the Streamable HTTP connect, retries included (tests). Default 30s. */
+  connectDeadlineMs?: number;
 }
 
 /**
@@ -411,11 +423,101 @@ async function defaultCreateSseClient(
   return wrapClient(client, transport, toolTimeoutMsFromEnv());
 }
 
+/** A refusal the credential closure of a remote MCP server authored itself: safe to relay. */
+class RemoteCredentialRefusal extends Error {
+  override readonly name = "RemoteCredentialRefusal";
+}
+
+/** Why a remote MCP exchange failed, named without any text the server or the transport wrote. */
+type RemoteFailureCause = "http_error" | "timeout" | "aborted" | "network" | "protocol";
+
+/** A remote MCP failure as the sidecar reports it: the server's origin, a cause, a status. */
+export class RemoteMcpError extends Error {
+  override readonly name = "RemoteMcpError";
+  constructor(
+    readonly origin: string,
+    readonly failure: RemoteFailureCause,
+    readonly status?: number,
+  ) {
+    super(
+      `remote MCP server ${origin}: ${failure.replace("_", " ")}${status === undefined ? "" : ` (HTTP ${status})`}`,
+    );
+  }
+}
+
+/**
+ * Names of the errors relayed as they are: the sidecar's own refusals (they name a host or an
+ * origin, a header name), and the JSON-RPC answers of the exchange (`McpError` legacy,
+ * `ProtocolError` modern), which are the server's protocol content like a tool result is.
+ */
+const RELAYED_REMOTE_ERRORS = new Set([
+  "RemoteCredentialRefusal",
+  "RemoteMcpError",
+  "SsrfBlockedError",
+  "InvalidHeaderValueError",
+  "McpError",
+  "ProtocolError",
+]);
+
+/**
+ * The error a remote MCP failure is reported as, everywhere it goes (boot report, run error,
+ * logs, a tool call's result). Anything but a {@link RELAYED_REMOTE_ERRORS} one is rebuilt from
+ * safe fields only, never its message: an HTTP error body or a transport message can quote the
+ * endpoint's path, which may itself be a capability. The `cause` chain is searched first so a
+ * relayed refusal wrapped by a retry deadline keeps its own text.
+ */
+function remoteMcpFailure(err: unknown, origin: string): Error {
+  const chain: unknown[] = [];
+  for (let e: unknown = err; e !== undefined && chain.length < 8;) {
+    chain.push(e);
+    e = e instanceof Error ? e.cause : undefined;
+  }
+  const relayed = chain.find(
+    (e): e is Error => e instanceof Error && RELAYED_REMOTE_ERRORS.has(e.name),
+  );
+  if (relayed) return relayed;
+  const status = chain.map(httpStatusOf).find((s) => s !== undefined);
+  const names = chain.map((e) => (e instanceof Error ? e.name : ""));
+  const text = chain.map((e) => (e instanceof Error ? e.message : String(e))).join(" ");
+  let failure: RemoteFailureCause;
+  if (names.includes("AbortError")) failure = "aborted";
+  else if (names.includes("TimeoutError") || /deadline exceeded|timed? ?out/i.test(text)) {
+    failure = "timeout";
+  } else if (status !== undefined) failure = "http_error";
+  else if (
+    chain.some(
+      (e) => e instanceof TypeError || typeof (e as { code?: unknown } | null)?.code === "string",
+    )
+  ) {
+    failure = "network";
+  } else failure = "protocol";
+  return new RemoteMcpError(origin, failure, status);
+}
+
+/** `client` with every failure reported through {@link remoteMcpFailure}. */
+function withRemoteFailures(client: AppstrateMcpClient, origin: string): AppstrateMcpClient {
+  const guard = <T>(pending: Promise<T>): Promise<T> =>
+    pending.catch((err: unknown) => {
+      throw remoteMcpFailure(err, origin);
+    });
+  return {
+    getServerCapabilities: () => client.getServerCapabilities(),
+    getServerVersion: () => client.getServerVersion(),
+    getInstructions: () => client.getInstructions(),
+    getProtocol: () => client.getProtocol(),
+    listTools: (options) => guard(client.listTools(options)),
+    listToolsPage: (options) => guard(client.listToolsPage(options)),
+    callTool: (args, options) => guard(client.callTool(args, options)),
+    readResource: (args, options) => guard(client.readResource(args, options)),
+    close: () => guard(client.close()),
+  };
+}
+
 export async function connectRemoteHttpIntegration(
   spec: IntegrationSpawnSpec,
-  source: IntegrationCredentialsSource,
+  source: IntegrationCredentialsSource | null,
   deps: ConnectRemoteHttpDeps = {},
-): Promise<{ client: AppstrateMcpClient; authKey: string }> {
+): Promise<{ client: AppstrateMcpClient; authKey: string | null }> {
   const createClient = deps.createClient ?? createMcpHttpClient;
   const createSseClient = deps.createSseClient ?? defaultCreateSseClient;
 
@@ -436,40 +538,38 @@ export async function connectRemoteHttpIntegration(
     );
   }
 
-  // Read the hoisted source's current payload for auth-selection. The source
-  // was created (and its initial credentials fetched) once by the caller.
-  const initial = source.snapshot();
-
-  // Pick the auth whose header we'll inject. The payload normally carries a
+  // Pick the auth whose header we'll inject, from the hoisted source's current payload (created,
+  // its initial credentials fetched, once by the caller). The payload normally carries a
   // SINGLE auth (this spec's one connection), so this resolves to that
   // one auth — NOT a policy decision. OAuth2-first / first-with-a-plan is only
   // a defensive tie-breaker if the payload ever surfaces more than one. The
   // credentials resolver populates `deliveryPlans[authKey]` for every auth
   // declaring `delivery.http` — including `{}` (empty), which defaults per
   // `AUTH_TYPE_HTTP_DEFAULTS` (oauth2 → Bearer, api_key → X-Api-Key, …).
-  const oauthAuth = initial.auths.find(
-    (a) => a.authType === "oauth2" && initial.deliveryPlans[a.authKey],
-  );
-  const fallbackAuth = oauthAuth
-    ? null
-    : initial.auths.find((a) => initial.deliveryPlans[a.authKey]);
-  const pickedAuth = oauthAuth ?? fallbackAuth;
-  if (!pickedAuth) {
-    throw new Error(
-      `integration ${spec.integrationId} (sourceKind="remote") has no auth with a resolvable delivery.http plan`,
+  let credential: { source: IntegrationCredentialsSource; authKey: string } | null = null;
+  if (source) {
+    const initial = source.snapshot();
+    const oauthAuth = initial.auths.find(
+      (a) => a.authType === "oauth2" && initial.deliveryPlans[a.authKey],
     );
+    const pickedAuth = oauthAuth ?? initial.auths.find((a) => initial.deliveryPlans[a.authKey]);
+    if (!pickedAuth) {
+      throw new Error(
+        `integration ${spec.integrationId} (sourceKind="remote") has no auth with a resolvable delivery.http plan`,
+      );
+    }
+    credential = { source, authKey: pickedAuth.authKey };
   }
-  const authKey = pickedAuth.authKey;
 
   // Per-request injection planner. Reading from the snapshot on every call
   // means an OAuth refresh (which swaps `payload` in place) is picked up
   // automatically — no MCP transport restart needed. Static creds
   // (api_key) just return the same value forever.
   const planInjection = (
-    snapshot: ReturnType<typeof source.snapshot>,
+    snapshot: ReturnType<IntegrationCredentialsSource["snapshot"]> | undefined,
     callerHeaderNames: readonly string[],
   ) => {
-    const plan = snapshot.deliveryPlans[authKey];
+    const plan = credential && snapshot?.deliveryPlans[credential.authKey];
     return plan ? planHttpDeliveryInjection(plan, callerHeaderNames) : { kind: "none" as const };
   };
 
@@ -498,8 +598,8 @@ export async function connectRemoteHttpIntegration(
         credentialAnswered: boolean;
         credentialRevision: string | undefined;
       }> => {
-        const snapshot = source.snapshot();
-        const credentialRevision = snapshot.credentialRevision;
+        const snapshot = credential?.source.snapshot();
+        const credentialRevision = snapshot?.credentialRevision;
         const headers = new Headers(init?.headers);
         const injection = planInjection(snapshot, [...headers.keys()]);
         // `guardedFetch` accepts `string | URL`; the MCP transports always
@@ -512,16 +612,20 @@ export async function connectRemoteHttpIntegration(
         let validateHop: ((url: URL) => void) | undefined;
         if (injection.kind === "inject") {
           const authorizedUris =
-            snapshot.auths.find((a) => a.authKey === authKey)?.authorizedUris ?? [];
+            snapshot?.auths.find((a) => a.authKey === credential?.authKey)?.authorizedUris ?? [];
           const origin = new URL(String(target)).origin;
           validateHop = (url) => {
             if (url.origin !== origin) return;
             if (!authorizedUris.some((pattern) => matchesAuthorizedUriSpec(pattern, url.href))) {
-              throw new Error(
-                `integration ${spec.integrationId}: ${url.href} is outside the authorized URIs of its connection; the credential is not sent`,
+              throw new RemoteCredentialRefusal(
+                // The origin only: the endpoint's path may itself be a capability.
+                `integration ${spec.integrationId}: ${url.origin} is outside the authorized URIs of its connection; the credential is not sent`,
               );
             }
           };
+          // Before `Headers.set`, whose own TypeError quotes the value: the boot report the agent
+          // reads would carry the credential.
+          assertHttpFieldValue(injection.header.name, injection.header.value);
           headers.set(injection.header.name, injection.header.value);
         }
         const sensitiveHeaderName =
@@ -558,14 +662,14 @@ export async function connectRemoteHttpIntegration(
         };
       };
       let attempt = await send();
-      if (attempt.response.status === 401 && attempt.credentialAnswered) {
-        const refreshed = await source
-          .refreshOnUnauthorized(authKey, attempt.credentialRevision)
+      if (credential && attempt.response.status === 401 && attempt.credentialAnswered) {
+        const refreshed = await credential.source
+          .refreshOnUnauthorized(credential.authKey, attempt.credentialRevision)
           .catch(() => false);
         if (refreshed) attempt = await send();
       }
-      if (attempt.response.ok && attempt.credentialAnswered) {
-        source.reportUpstreamSuccess(attempt.credentialRevision);
+      if (credential && attempt.response.ok && attempt.credentialAnswered) {
+        credential.source.reportUpstreamSuccess(attempt.credentialRevision);
       }
       return attempt.response;
     },
@@ -581,16 +685,22 @@ export async function connectRemoteHttpIntegration(
   // (`customFetch` above), so credential injection + refresh semantics
   // are identical across Streamable HTTP and SSE.
   const toolTimeoutMs = toolTimeoutMsFromEnv();
-  const client =
+  const origin = originForLog(serverUrl) ?? "<unparseable>";
+  const connecting =
     transport === "sse"
-      ? await createSseClient(serverUrl, { fetch: customFetch, clientInfo })
-      : await createClient(serverUrl, {
+      ? createSseClient(serverUrl, { fetch: customFetch, clientInfo })
+      : createClient(serverUrl, {
           fetch: customFetch,
           clientInfo,
-          retry: { deadlineMs: 30_000 },
+          onWarning: (message, data) =>
+            logger.warn(message, { integrationId: spec.integrationId, ...data }),
+          retry: { deadlineMs: deps.connectDeadlineMs ?? 30_000 },
           ...(toolTimeoutMs !== undefined ? { defaultTimeoutMs: toolTimeoutMs } : {}),
         });
-  return { client, authKey };
+  const client = await connecting.catch((err: unknown) => {
+    throw remoteMcpFailure(err, origin);
+  });
+  return { client: withRemoteFailures(client, origin), authKey: credential?.authKey ?? null };
 }
 
 /**
@@ -706,15 +816,11 @@ async function prepareRunCa(runId: string, dirPrefix: string): Promise<RunCaMate
   return { bundle, minter, certHostPath };
 }
 
-interface SpawnAndConnectResult {
-  /** The wrapped MCP client (already registered + pushed onto `clients`). */
+interface StartedLocalIntegration {
+  /** The wrapped MCP client (connected + pushed onto `clients`, NOT yet registered). */
   wrapped: AppstrateMcpClient;
-  /** Namespace the host actually allocated (may be a disambiguated suffix). */
-  allocatedNs: string;
   /** The MITM credentials source when a listener was created, else null. */
   mitmSource: IntegrationCredentialsSource | null;
-  /** Tools added to the host by this registration. */
-  toolCount: number;
   /** Adapter diagnostic id (e.g. container id), when the adapter reports one. */
   diagnosticId?: string;
   /** Wall-clock ms spent in `adapter.spawn` (process fork / `docker create`+`cp`+`start`). */
@@ -724,28 +830,30 @@ interface SpawnAndConnectResult {
 }
 
 /**
- * The SINGLE spawn→connect→register pipeline for a local (node|python|binary)
- * integration MCP server. Used identically by the agent-run path
- * ({@link bootIntegrations}) and the ephemeral connect-run
- * ({@link runConnectOnce}); they diverge only in what they do AFTER (keep the
- * session alive for the agent vs. run the login tool once + tear down).
+ * The SINGLE spawn→connect pipeline for a local (node|python|binary)
+ * integration MCP server, followed by {@link registerLocalIntegration}. Used
+ * identically by the agent-run path ({@link bootIntegrations}) and the
+ * ephemeral connect-run ({@link runConnectOnce}); they diverge only in what
+ * they do AFTER (keep the session alive for the agent vs. run the login tool
+ * once + tear down).
  *
  * Steps: optional per-connection MITM listener (when `wantsMitm` && a CA is
  * available) → fetch + extract the bundle → `adapter.spawn` → open the MCP
- * client with a 30s connect race → `host.register`.
+ * client with a 30s connect race. It touches no {@link McpHost}, so several
+ * connections can run it at once; registration is the caller's ordered step.
  *
  * Resources are pushed onto the caller-owned `clients` / `mitmListeners`
  * collectors AS they are created, so a throw mid-pipeline still lets the
  * caller's teardown reclaim a half-built listener/client (no leak on error).
  */
-/** Max runner-stderr lines retained per runner for failure reports (#779). */
+/** Max runner-stderr lines retained per runner for failure reports. */
 const STDERR_TAIL_MAX_LINES = 20;
 /** Cap per stderr line folded into a failure report — avoids a runaway blob. */
 const STDERR_LINE_MAX_CHARS = 500;
 
 /**
  * Best-effort secret scrub for a runner stderr line before it is folded
- * into a run's failure report (#779). Runner stderr already flows to the
+ * into a run's failure report. Runner stderr already flows to the
  * sidecar's own logs; surfacing it in the run report widens the audience
  * to the operator who triggered the run, so scrub the high-signal
  * credential shapes a third-party server might print on a failed auth
@@ -766,7 +874,7 @@ export function scrubStderrLine(line: string): string {
 
 /**
  * Operator override for the per-call MCP tool timeout applied to
- * integration clients (#779 annex). Absent/invalid → `undefined` → the
+ * integration clients. Absent/invalid → `undefined` → the
  * MCP SDK default applies, unchanged behaviour. Third-party servers that
  * do a cold OAuth refresh on their first tool call can legitimately need
  * more. Unlike the connect deadline (a fixed constant — no writer ever set
@@ -780,12 +888,11 @@ export function toolTimeoutMsFromEnv(env: NodeJS.ProcessEnv = process.env): numb
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
 }
 
-async function spawnAndConnectLocalIntegration(params: {
+async function startLocalIntegration(params: {
   spec: IntegrationSpawnSpec;
   runId: string;
   adapter: IntegrationRuntimeAdapter;
   adapterCtx: RuntimeAdapterRunContext;
-  host: McpHost;
   bundleFetchOpts: BundleFetchOptions;
   /**
    * The integration's single shared credentials Source, hoisted by the caller
@@ -808,20 +915,6 @@ async function spawnAndConnectLocalIntegration(params: {
   workspaceHandle: WorkspaceHandle | null;
   /** Front this integration with a MITM listener (also needs `ca` + `source`). */
   wantsMitm: boolean;
-  /**
-   * Allowlist for `host.register`. `undefined` = no allowlist (AFPS §4.4
-   * wildcard). `[]` exposes nothing, which {@link assertIntegrationExposesTools}
-   * then turns into a failed boot.
-   */
-  allowedTools: readonly string[] | undefined;
-  /**
-   * R8a defensive filter — `manifest.hidden_tools` echoed back from the
-   * platform via `IntegrationSpawnSpec.hiddenTools`. The host applies it
-   * after the allowlist to defend against fixtures / direct DB writes
-   * that bypass install-time catalog resolution. `undefined` / empty =
-   * no extra filtering.
-   */
-  hiddenTools?: readonly string[];
   /** Log-message prefix: `"integration"` (agent-run) | `"connect-run"`. */
   logLabel: string;
   /** Credential-rejected signal hook; agent-run only (a connect-run has no run to attribute it to). */
@@ -830,7 +923,7 @@ async function spawnAndConnectLocalIntegration(params: {
   clients: AppstrateMcpClient[];
   mitmListeners: MitmListenerHandle[];
   /**
-   * Caller-owned bounded tail of the runner's stderr lines (#779). The
+   * Caller-owned bounded tail of the runner's stderr lines. The
    * spawn pipeline pushes every line (capped at
    * {@link STDERR_TAIL_MAX_LINES}); on failure the caller folds the tail
    * into the recorded error so the actual cause (an OAuth 405, a module
@@ -838,15 +931,15 @@ async function spawnAndConnectLocalIntegration(params: {
    * `docker logs` on the sidecar host.
    */
   stderrTail?: string[];
-}): Promise<SpawnAndConnectResult> {
-  const { spec, runId, adapter, adapterCtx, host, bundleFetchOpts, ca, logLabel } = params;
+}): Promise<StartedLocalIntegration> {
+  const { spec, runId, adapter, adapterCtx, bundleFetchOpts, ca, logLabel } = params;
 
-  // One listener per connection, picked MITM-first (#543). `egressCtx` is
+  // One listener per connection, picked MITM-first. `egressCtx` is
   // handed to the adapter as the runner's HTTPS_PROXY:
   //   - MITM listener   → caCertHostPath set (TLS terminate + inject).
   //   - plain CONNECT    → caCertHostPath null (blind tunnel), when `spec.egress` is set.
   //   - neither          → null: the runner has no egress route.
-  // Both enforce `spec.egress` (absent = deny-all) and admit only this runner (#1458).
+  // Both enforce `spec.egress` (absent = deny-all) and admit only this runner.
   let egressCtx: RuntimeEgressContext | null = null;
   const policy = compileRunnerEgressPolicy(
     spec.egress ?? { authorizedUris: [], declaredUris: [], allowAllUris: false },
@@ -1042,29 +1135,95 @@ async function spawnAndConnectLocalIntegration(params: {
     : base;
   params.clients.push(wrapped);
 
+  return {
+    wrapped,
+    mitmSource: mitmMounted ? params.source : null,
+    spawnMs,
+    connectMs,
+    ...(spawnedIntegration.diagnosticId ? { diagnosticId: spawnedIntegration.diagnosticId } : {}),
+  };
+}
+
+/**
+ * Register a started local integration's client on the host. Returns the
+ * namespace the host actually allocated (may be a disambiguated suffix) and
+ * the number of tools the registration added.
+ */
+async function registerLocalIntegration(
+  host: McpHost,
+  spec: IntegrationSpawnSpec,
+  wrapped: AppstrateMcpClient,
+  filters: {
+    /**
+     * Allowlist for `host.register`. `undefined` = no allowlist (AFPS §4.4
+     * wildcard). `[]` exposes nothing, which {@link assertIntegrationExposesTools}
+     * then turns into a failed boot.
+     */
+    allowedTools: readonly string[] | undefined;
+    /**
+     * R8a defensive filter — `manifest.hidden_tools` echoed back from the
+     * platform via `IntegrationSpawnSpec.hiddenTools`. The host applies it
+     * after the allowlist to defend against fixtures / direct DB writes
+     * that bypass install-time catalog resolution. `undefined` / empty =
+     * no extra filtering.
+     */
+    hiddenTools?: readonly string[];
+  },
+): Promise<{ allocatedNs: string; toolCount: number }> {
   const sizeBefore = host.routeCount();
   const allocatedNs = await host.register({
     namespace: spec.namespace,
     client: wrapped,
     connection: spec.connection,
-    // Niveau 2 Phase 3 — McpHost.register filters `tools/list` to the agent's
-    // declared tools. `undefined` keeps the legacy "all tools allowed".
-    ...(params.allowedTools !== undefined ? { allowedTools: params.allowedTools } : {}),
-    // R8a — apply `hidden_tools` belt-and-suspenders filter so a tool name
-    // the manifest hides is never reachable, even via fixtures that bypassed
-    // install-time catalog resolution.
-    ...((params.hiddenTools?.length ?? 0) > 0 ? { hiddenTools: params.hiddenTools } : {}),
+    ...(filters.allowedTools !== undefined ? { allowedTools: filters.allowedTools } : {}),
+    ...((filters.hiddenTools?.length ?? 0) > 0 ? { hiddenTools: filters.hiddenTools } : {}),
   });
-  const toolCount = host.routeCount() - sizeBefore;
+  return { allocatedNs, toolCount: host.routeCount() - sizeBefore };
+}
 
+/** Every string of a JSON value, property names included, as the tool receives them. */
+function stringsOf(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(stringsOf);
+  if (typeof value !== "object" || value === null) return [];
+  return Object.entries(value).flatMap(([key, item]) => [key, ...stringsOf(item)]);
+}
+
+/**
+ * Refuse an agent's tool call whose arguments carry a `{{key}}` placeholder of the connection's
+ * login inputs.
+ *
+ * While a login runs, the runner's MITM listener replaces `{{key}}` with the login secret in every
+ * request the runner sends to the auth's authorized URIs: it cannot tell the login tool's requests
+ * from a parallel tool call's. The login tool is called by the sidecar with no arguments, so its
+ * placeholders are its own code's; an agent call that names one would have the secret substituted
+ * into a request of its choosing and read it back from the response. Refused whether or not a
+ * login is running, so a call already in flight when one starts is covered.
+ */
+export function refuseLoginPlaceholders(
+  client: AppstrateMcpClient,
+  loginInputKeys: readonly string[],
+): AppstrateMcpClient {
+  const keys = new Set(loginInputKeys);
   return {
-    wrapped,
-    allocatedNs,
-    mitmSource: mitmMounted ? params.source : null,
-    toolCount,
-    spawnMs,
-    connectMs,
-    ...(spawnedIntegration.diagnosticId ? { diagnosticId: spawnedIntegration.diagnosticId } : {}),
+    ...client,
+    async callTool(args, options) {
+      const named = stringsOf(args.arguments)
+        .flatMap((text) => unresolvedPlaceholders(text, {}))
+        .find((key) => keys.has(key));
+      if (named !== undefined) {
+        return {
+          isError: true,
+          content: [
+            {
+              type: "text",
+              text: `Refused: the arguments contain the placeholder '{{${named}}}', reserved for this connection's login.`,
+            },
+          ],
+        };
+      }
+      return client.callTool(args, options);
+    },
   };
 }
 
@@ -1172,7 +1331,7 @@ export function hiddenToolsForNativeUpstream(
  * Whether the spec's entire surface is the in-process `api_call` server. The
  * resolver signals it with `sourceKind: "none"` AND an absent
  * `manifest.server`; both are checked because a hand-written spec in a test
- * has historically set only one.
+ * may set only one.
  */
 function isServerlessSpec(spec: IntegrationSpawnSpec): boolean {
   return spec.sourceKind === "none" || !spec.manifest.server;
@@ -1239,8 +1398,38 @@ export function pushServerlessReadyBreadcrumb(
 }
 
 /**
- * Spawn each spec (one per bound connection) sequentially, register the surviving ones on a
- * shared {@link McpHost}, and return the materialised tool list. Per-connection
+ * How many connections prepare at once during boot. Bounded because each local
+ * runner in flight is a `docker` CLI child process inside the sidecar's own
+ * cgroup (`SIDECAR_MEMORY_BYTES`, `SIDECAR_NANO_CPUS`), and every connection
+ * draws on the run token's shared `/internal/*` rate limit.
+ */
+const INTEGRATION_BOOT_CONCURRENCY = 8;
+
+type BoundConnection = NonNullable<IntegrationSpawnSpec["connection"]>;
+
+/** What a connection's preparation left for its registration to pick up. */
+type PreparedConnection = {
+  /** Runner stderr captured so far; the runner keeps appending to it. */
+  stderrTail: string[];
+  prepareMs: number;
+} & (
+  | { ok: false; error: unknown }
+  | {
+      ok: true;
+      /** Absent for an unauthenticated integration (AFPS §7.2). */
+      connection: BoundConnection | undefined;
+      /** The connection's ONE credentials source, shared by every consumer. */
+      source: IntegrationCredentialsSource | null;
+      upstream:
+        | { kind: "serverless" }
+        | { kind: "remote"; client: AppstrateMcpClient; authKey: string | null }
+        | { kind: "local"; started: StartedLocalIntegration };
+    }
+);
+
+/**
+ * Boot each spec (one per bound connection): prepare them concurrently, register the surviving
+ * ones in spec order on a shared {@link McpHost}, and return the materialised tool list. Per-connection
  * failures are captured in `result.failed` so a single broken connection
  * doesn't black-hole the entire run. The one fatal exception is runtime
  * adapter selection (no adapter → nothing can spawn): that rethrows.
@@ -1253,6 +1442,7 @@ export async function bootIntegrations(
    * per run by `server.ts` and shared with `createApp` (same blob store).
    * When omitted (tests / api_call-less runs) the in-process api_call
    * server is skipped — a spec that declares `apiCall` is logged + dropped.
+   * Its token budget and blob store also bound third-party MCP tool results.
    */
   apiCallDeps?: ApiCallToolDeps,
   /** Called once the adapter is prepared, before any runner spawns. */
@@ -1265,6 +1455,8 @@ export async function bootIntegrations(
         level: event.level,
         data: event.data,
       }),
+    // Same budget and blob store as api_call: one inline cap, one run budget.
+    ...(apiCallDeps ? { outputBudget: apiCallDeps } : {}),
   });
   const spawned: BootIntegrationsResult["spawned"] = [];
   const failed: BootIntegrationsResult["failed"] = [];
@@ -1291,7 +1483,7 @@ export async function bootIntegrations(
     });
     throw err;
   }
-  // ─── Phase 1.5 (kickoff) — MITM run-CA mint, raced with adapter.prepare ───
+  // ─── MITM run-CA mint, raced with adapter.prepare ───
   // The CA mint (openssl keygen + self-sign, ~100 ms) only needs the runId;
   // it has no dependency on the adapter context, so it runs concurrently
   // with `adapter.prepare` instead of serializing after it — the agent's
@@ -1336,7 +1528,7 @@ export async function bootIntegrations(
     data: { adapter: adapter.id, prepareMs: Math.round(adapterPrepareMs) },
   });
 
-  // ─── Phase 1.5 (converge) — MITM bring-up (run-CA + cert minter) ───
+  // ─── MITM bring-up (run-CA + cert minter) ───
   // The CA was minted once per run (kicked off above, concurrent with the
   // adapter phase), regardless of how many integrations need it.
   // Per-connection listeners share the same minter (lazily creates leaf
@@ -1381,16 +1573,31 @@ export async function bootIntegrations(
     }
   }
 
-  for (const spec of specs) {
-    const specStart = performance.now();
-    // #779 — bounded tail of the runner's stderr, folded into the failure
+  // ─── Per-connection boot, in two phases ───
+  // PREPARE is the slow, independent part of a connection: its credentials
+  // fetch, then a remote MCP handshake or a local runner's spawn + connect.
+  // It touches no shared state but the append-only teardown collectors, so
+  // connections prepare concurrently and the boot costs its slowest wave
+  // rather than the sum of every connection.
+  //
+  // REGISTER then runs one connection at a time, in spec order: `McpHost`
+  // allocates namespaces and sibling tool names by arrival, so the order is
+  // what keeps a run's tool names — and its report — identical from one boot
+  // to the next, whichever connection happened to answer first.
+  const prepareConnection = async (spec: IntegrationSpawnSpec): Promise<PreparedConnection> => {
+    const prepareStart = performance.now();
+    // Bounded tail of the runner's stderr, folded into the failure
     // report below so the real cause (an OAuth 405, a crashed module, …)
     // reaches operators instead of living only in `docker logs`.
     const stderrTail: string[] = [];
+    const settle = <T extends object>(outcome: T) => ({
+      ...outcome,
+      stderrTail,
+      prepareMs: performance.now() - prepareStart,
+    });
     try {
+      // Absent for an unauthenticated integration (AFPS §7.2): no source, nothing injected.
       const connection = spec.connection;
-      if (!connection) throw new Error("agent-run spawn spec binds no connection");
-      const nativeHiddenTools = hiddenToolsForNativeUpstream(spec);
       // ─── ONE shared credentials source per bound connection ───
       // The Source/Sink model (see integration-credentials-source.ts header):
       // a single source feeds every consumer of this connection's credentials
@@ -1403,141 +1610,232 @@ export async function bootIntegrations(
       const hasHttpDelivery =
         spec.httpDeliveryAuths !== undefined && Object.keys(spec.httpDeliveryAuths).length > 0;
       const needsSource = hasHttpDelivery || hasApiCall || spec.sourceKind === "remote";
-      const source = needsSource
-        ? createIntegrationCredentialsSource({
-            integrationId: spec.integrationId,
-            connectionId: connection.id,
-            platformApiUrl: bundleFetchOpts.platformApiUrl,
-            runToken: bundleFetchOpts.runToken,
-            initialPayload: await fetchInitialIntegrationCredentials(
-              spec.integrationId,
-              connection.id,
-              bundleFetchOpts,
-            ),
-          })
-        : null;
+      if (!connection && (hasHttpDelivery || hasApiCall)) {
+        throw new Error("agent-run spawn spec delivers a credential but binds no connection");
+      }
+      const source =
+        needsSource && connection
+          ? createIntegrationCredentialsSource({
+              integrationId: spec.integrationId,
+              connectionId: connection.id,
+              platformApiUrl: bundleFetchOpts.platformApiUrl,
+              runToken: bundleFetchOpts.runToken,
+              initialPayload: await fetchInitialIntegrationCredentials(
+                spec.integrationId,
+                connection.id,
+                bundleFetchOpts,
+              ),
+            })
+          : null;
 
-      // ─── generic api_call tool ───
-      // Independent of how (or whether) the integration spawns a server:
-      // read the SHARED source above, then host the generic `api_call` (+
-      // optional `api_upload`) tools as
-      // a TRUSTED in-process MCP server on the same McpHost as every
-      // spawned/remote integration — OUTSIDE any spawned container, so the
-      // server code never sees the credential. One pipeline → McpHost owns
-      // the namespacing (`{ns}__api_call`) + name validation. Two modes:
-      //  - serverless (`apiCall` block, no `spec.manifest.server`): the first
-      //    api_call allocates the namespace (`intoNamespace` omitted) and the
-      //    integration does ONLY this, skipping spawn.
-      //  - attachable (additive on a spawned/remote server): pass the server's
-      //    ALLOCATED namespace so `{ns}__api_call` sits next to the native
-      //    tools under one namespace.
-      // Returns the number of tools added so callers can sum the tool count.
-      const attachApiCall = async (intoNamespace?: string): Promise<number> => {
-        const apiCalls = spec.apiCalls ?? [];
-        if (apiCalls.length === 0) return 0;
-        if (!apiCallDeps) {
-          logger.warn("integration declares api_call but sidecar has no proxy deps; skipping", {
-            integrationId: spec.integrationId,
-          });
-          return 0;
-        }
-        if (!source) {
-          // Unreachable: `hasApiCall` forces `needsSource`, so the source always
-          // exists when there are api_calls. Guard narrows the type + fails loud
-          // if that invariant ever breaks.
-          logger.warn("integration declares api_call but no credentials source was hoisted", {
-            integrationId: spec.integrationId,
-          });
-          return 0;
-        }
-        // The SHARED source serves every auth; each api_call entry binds its own
-        // auth via a per-auth adapter reading from that same source.
-        let total = 0;
-        // A serverless multi-auth integration has no MCP upstream to allocate
-        // its namespace, so the first api_call registration allocates it and
-        // every later auth merges into that exact namespace (collision suffix
-        // included). Registered on its own, a later auth would repeat this
-        // connection's label in the slot, which McpHost refuses.
-        let sharedNamespace = intoNamespace;
-        for (const apiCall of apiCalls) {
-          const credAdapter = createApiCallCredentialAdapter({
-            source,
-            authKey: apiCall.authKey,
-            declaredUris: apiCall.authorizedUris,
-            ...(apiCall.allowAllUris ? { allowAllUris: true } : {}),
-          });
-          const integ: ApiCallIntegrationConfig = {
-            namespace: spec.namespace, // McpHost.register normalises it
-            integrationId: spec.integrationId,
-            connectionId: connection.id,
-            toolName: apiCall.toolName,
-            declaredUris: apiCall.authorizedUris,
-            fetchCredentials: credAdapter.fetchCredentials,
-            refreshCredentials: credAdapter.refreshCredentials,
-            reportUpstreamSuccess: credAdapter.reportUpstreamSuccess,
-            // Resumable-upload protocols the manifest declared (plumbed via
-            // the spawn resolver). When non-empty the factory also emits an
-            // `api_upload` tool; the agent-side resolver drives it.
-            ...(apiCall.uploadProtocols && apiCall.uploadProtocols.length > 0
-              ? { uploadProtocols: apiCall.uploadProtocols }
-              : {}),
-          };
-          const defs = createApiCallToolDefs(integ, apiCallDeps);
-          // `api_upload` cannot execute without its api_call sibling. Preserve
-          // the useful asymmetric hidden_tools semantics: hiding only upload
-          // leaves api_call available, while hiding api_call also hides every
-          // companion emitted by this auth-scoped definition set.
-          const effectiveHiddenTools = new Set(spec.hiddenTools ?? []);
-          if (effectiveHiddenTools.has(apiCall.toolName)) {
-            for (const def of defs) effectiveHiddenTools.add(def.descriptor.name);
-          }
-          const pair = await createInProcessPair(defs, {
-            serverInfo: {
-              name: `appstrate-api-call-${specTag(spec)}-${apiCall.toolName}`,
-              version: "1",
-            },
-          });
-          const wrapped = wrapClient(pair.client, { close: () => pair.close() });
-          const sizeBefore = host.routeCount();
-          const merging = sharedNamespace !== undefined;
-          const allocatedNamespace = await host.register({
-            namespace: spec.namespace,
-            client: wrapped,
-            connection,
-            trusted: true,
-            allowedTools: defs.map((d) => d.descriptor.name),
-            // `hidden_tools` is a runtime boundary, not merely catalog/UI
-            // metadata. Synthetic api_call/api_upload descriptors go through
-            // the same defensive filter as spawned/remote MCP tools.
-            ...(effectiveHiddenTools.size > 0 ? { hiddenTools: [...effectiveHiddenTools] } : {}),
-            ...(sharedNamespace ? { intoNamespace: sharedNamespace } : {}),
-          });
-          sharedNamespace ??= allocatedNamespace;
-          const count = host.routeCount() - sizeBefore;
-          clients.push(wrapped);
-          total += count;
-          logger.info("integration api_call registered (in-process)", {
-            integrationId: spec.integrationId,
-            ...connectionLabelOf(spec),
-            namespace: allocatedNamespace,
-            authKey: apiCall.authKey,
-            toolName: apiCall.toolName,
-            attached: merging,
-            toolCount: count,
-          });
-        }
-        return total;
+      // Serverless integration (api_call-only, no MCP server): nothing to
+      // start, the in-process api_call server registered below is its surface.
+      if (isServerlessSpec(spec)) {
+        return settle({ ok: true as const, connection, source, upstream: { kind: "serverless" } });
+      }
+
+      // ─── Remote HTTP MCP path ───
+      // When the spawn-spec declares `sourceKind: "remote"` the integration
+      // is a managed remote MCP (e.g. Google's gmailmcp.googleapis.com).
+      // No bundle to fetch, no runner to spawn, no MITM listener — the
+      // sidecar opens a Streamable HTTP client directly and injects the
+      // Bearer token per-request from the credentials source. Trade-off:
+      // no per-tool upstream URL can be enforced through a hosted MCP —
+      // the upstream decides.
+      if (spec.sourceKind === "remote") {
+        const { client, authKey } = await connectRemoteHttpIntegration(spec, source);
+        // On the caller-owned teardown collector as soon as it is open, so a
+        // failed registration still closes the Streamable HTTP client.
+        clients.push(client);
+        return settle({
+          ok: true as const,
+          connection,
+          source,
+          upstream: { kind: "remote", client, authKey },
+        });
+      }
+
+      // ─── SINGLE spawn→connect pipeline (shared with connect-run) ──────────
+      // MITM is created only when the CA came up AND this integration declared
+      // `delivery.http`. `mitmSource` is returned so the connect-login hook
+      // (run-start acquisition, below) drives `setSessionOutputs` on the same
+      // source the MITM listener reads from. `spec.egress` is the
+      // fallback: a no-injection runner that still needs an outbound route gets
+      // a plain CONNECT egress listener instead.
+      const wantsMitm =
+        spec.httpDeliveryAuths !== undefined && Object.keys(spec.httpDeliveryAuths).length > 0;
+      const started = await startLocalIntegration({
+        spec,
+        runId,
+        adapter,
+        adapterCtx,
+        bundleFetchOpts,
+        source,
+        ca: runCa,
+        workspaceHandle,
+        wantsMitm,
+        logLabel: "integration",
+        onCredentialRejected: () =>
+          reportRejectedCredential(spec, bundleFetchOpts, source?.snapshot().credentialRevision),
+        clients,
+        mitmListeners,
+        stderrTail,
+      });
+      return settle({
+        ok: true as const,
+        connection,
+        source,
+        upstream: { kind: "local", started },
+      });
+    } catch (error) {
+      return settle({ ok: false as const, error });
+    }
+  };
+
+  // ─── generic api_call tool ───
+  // Independent of how (or whether) the integration spawns a server:
+  // read the SHARED source above, then host the generic `api_call` (+
+  // optional `api_upload`) tools as
+  // a TRUSTED in-process MCP server on the same McpHost as every
+  // spawned/remote integration — OUTSIDE any spawned container, so the
+  // server code never sees the credential. One pipeline → McpHost owns
+  // the namespacing (`{ns}__api_call`) + name validation. Two modes:
+  //  - serverless (`apiCall` block, no `spec.manifest.server`): the first
+  //    api_call allocates the namespace (`intoNamespace` omitted) and the
+  //    integration does ONLY this, skipping spawn.
+  //  - attachable (additive on a spawned/remote server): pass the server's
+  //    ALLOCATED namespace so `{ns}__api_call` sits next to the native
+  //    tools under one namespace.
+  // Returns the number of tools added so callers can sum the tool count.
+  const attachApiCall = async (
+    spec: IntegrationSpawnSpec,
+    connection: BoundConnection | undefined,
+    source: IntegrationCredentialsSource | null,
+    intoNamespace?: string,
+  ): Promise<number> => {
+    const apiCalls = spec.apiCalls ?? [];
+    if (apiCalls.length === 0) return 0;
+    if (!apiCallDeps) {
+      logger.warn("integration declares api_call but sidecar has no proxy deps; skipping", {
+        integrationId: spec.integrationId,
+      });
+      return 0;
+    }
+    if (!source || !connection) {
+      // Unreachable: `hasApiCall` forces `needsSource` and a bound connection, so both always
+      // exist when there are api_calls. Guard narrows the type + fails loud if that invariant
+      // ever breaks.
+      logger.warn("integration declares api_call but no credentials source was hoisted", {
+        integrationId: spec.integrationId,
+      });
+      return 0;
+    }
+    // The SHARED source serves every auth; each api_call entry binds its own
+    // auth via a per-auth adapter reading from that same source.
+    let total = 0;
+    // A serverless multi-auth integration has no MCP upstream to allocate
+    // its namespace, so the first api_call registration allocates it and
+    // every later auth merges into that exact namespace (collision suffix
+    // included). Registered on its own, a later auth would repeat this
+    // connection's label in the slot, which McpHost refuses.
+    let sharedNamespace = intoNamespace;
+    for (const apiCall of apiCalls) {
+      const credAdapter = createApiCallCredentialAdapter({
+        source,
+        authKey: apiCall.authKey,
+        declaredUris: apiCall.authorizedUris,
+        ...(apiCall.allowAllUris ? { allowAllUris: true } : {}),
+      });
+      const integ: ApiCallIntegrationConfig = {
+        namespace: spec.namespace, // McpHost.register normalises it
+        integrationId: spec.integrationId,
+        connectionId: connection.id,
+        toolName: apiCall.toolName,
+        declaredUris: apiCall.authorizedUris,
+        ...(spec.manifest.server?.url
+          ? {
+              mcpEndpoint: {
+                url: spec.manifest.server.url,
+                ...(spec.manifest.server.transport
+                  ? { transport: spec.manifest.server.transport }
+                  : {}),
+              },
+            }
+          : {}),
+        fetchCredentials: credAdapter.fetchCredentials,
+        refreshCredentials: credAdapter.refreshCredentials,
+        reportUpstreamSuccess: credAdapter.reportUpstreamSuccess,
+        // Resumable-upload protocols the manifest declared (plumbed via
+        // the spawn resolver). When non-empty the factory also emits an
+        // `api_upload` tool; the agent-side resolver drives it.
+        ...(apiCall.uploadProtocols && apiCall.uploadProtocols.length > 0
+          ? { uploadProtocols: apiCall.uploadProtocols }
+          : {}),
       };
+      const defs = createApiCallToolDefs(integ, apiCallDeps);
+      // `api_upload` cannot execute without its api_call sibling. Preserve
+      // the useful asymmetric hidden_tools semantics: hiding only upload
+      // leaves api_call available, while hiding api_call also hides every
+      // companion emitted by this auth-scoped definition set.
+      const effectiveHiddenTools = new Set(spec.hiddenTools ?? []);
+      if (effectiveHiddenTools.has(apiCall.toolName)) {
+        for (const def of defs) effectiveHiddenTools.add(def.descriptor.name);
+      }
+      const pair = await createInProcessPair(defs, {
+        serverInfo: {
+          name: `appstrate-api-call-${specTag(spec)}-${apiCall.toolName}`,
+          version: "1",
+        },
+      });
+      const wrapped = wrapClient(pair.client, { close: () => pair.close() });
+      const sizeBefore = host.routeCount();
+      const merging = sharedNamespace !== undefined;
+      const allocatedNamespace = await host.register({
+        namespace: spec.namespace,
+        client: wrapped,
+        connection,
+        trusted: true,
+        allowedTools: defs.map((d) => d.descriptor.name),
+        // `hidden_tools` is a runtime boundary, not merely catalog/UI
+        // metadata. Synthetic api_call/api_upload descriptors go through
+        // the same defensive filter as spawned/remote MCP tools.
+        ...(effectiveHiddenTools.size > 0 ? { hiddenTools: [...effectiveHiddenTools] } : {}),
+        ...(sharedNamespace ? { intoNamespace: sharedNamespace } : {}),
+      });
+      sharedNamespace ??= allocatedNamespace;
+      const count = host.routeCount() - sizeBefore;
+      clients.push(wrapped);
+      total += count;
+      logger.info("integration api_call registered (in-process)", {
+        integrationId: spec.integrationId,
+        ...connectionLabelOf(spec),
+        namespace: allocatedNamespace,
+        authKey: apiCall.authKey,
+        toolName: apiCall.toolName,
+        attached: merging,
+        toolCount: count,
+      });
+    }
+    return total;
+  };
 
-      // Serverless integration (api_call-only, no MCP server) — the in-process
-      // api_call server is its entire surface (it allocates the namespace).
-      //
-      // Bind `server` from the same predicate that decides the branch, so the
-      // dispatch and the narrowing cannot disagree.
-      const server = isServerlessSpec(spec) ? undefined : spec.manifest.server;
-      if (server === undefined) {
-        const apiCallToolCount = await attachApiCall();
-        const ms = Math.round(performance.now() - specStart);
+  const prepared = await mapWithConcurrency(specs, INTEGRATION_BOOT_CONCURRENCY, prepareConnection);
+
+  for (const [index, spec] of specs.entries()) {
+    const prep = prepared[index]!;
+    const { stderrTail } = prep;
+    // A connection's own time: its preparation plus its registration, without
+    // the wait for the connections registered before it.
+    const registerStart = performance.now();
+    const elapsedMs = () => Math.round(prep.prepareMs + performance.now() - registerStart);
+    try {
+      if (!prep.ok) throw prep.error;
+      const { connection, source, upstream } = prep;
+      const nativeHiddenTools = hiddenToolsForNativeUpstream(spec);
+
+      if (upstream.kind === "serverless") {
+        const apiCallToolCount = await attachApiCall(spec, connection, source);
+        const ms = elapsedMs();
         // Contract gate FIRST, breadcrumb second — otherwise a single failure
         // prints the same diagnosis twice, at `warn` here and at `error` from
         // the catch.
@@ -1548,40 +1846,18 @@ export async function bootIntegrations(
           namespace: spec.namespace,
           ...connectionLabelOf(spec),
           toolCount: apiCallToolCount,
-          // serverless integration — no `source.server`, so `vendored` is N/A.
         });
         continue;
       }
 
-      // ─── Phase 7 — remote HTTP MCP path ───
-      // When the spawn-spec declares `sourceKind: "remote"` the integration
-      // is a managed remote MCP (e.g. Google's gmailmcp.googleapis.com).
-      // No bundle to fetch, no runner to spawn, no MITM listener — the
-      // sidecar opens a Streamable HTTP client directly and injects the
-      // Bearer token per-request from the credentials source. Trade-off:
-      // Phase 4 URL-envelope enforcement is N/A (we can't enforce per-tool
-      // upstream URLs through a hosted MCP — the upstream decides).
-      if (spec.sourceKind === "remote") {
-        if (!source) {
-          // Unreachable: `sourceKind === "remote"` forces `needsSource`. Guard
-          // narrows the type + fails loud if that invariant ever breaks.
-          throw new Error(
-            `remote integration ${spec.integrationId} has no hoisted credentials source`,
-          );
-        }
-        const { client, authKey } = await connectRemoteHttpIntegration(spec, source);
-        // Register on the caller-owned teardown collector BEFORE host.register
-        // so a register failure (namespace collision / suffix exhaustion,
-        // which throw before McpHost adds the client to its own set) still
-        // closes the open Streamable HTTP client. Mirrors the local-spawn
-        // path's leak-safe ordering.
-        clients.push(client);
+      if (upstream.kind === "remote") {
+        const { client, authKey } = upstream;
         const sizeBefore = host.routeCount();
         const allocatedNs = await host.register({
           namespace: spec.namespace,
           client,
           connection,
-          // Phase 3 tool allowlist still applies — McpHost filters
+          // The tool allowlist applies here too — McpHost filters
           // tools/list before exposing them to the agent.
           allowedTools: spec.toolAllowlist,
           // R8a defensive — `manifest.hidden_tools` is enforced at
@@ -1592,27 +1868,27 @@ export async function bootIntegrations(
         const added = host.routeCount() - sizeBefore;
         pushUnavailableToolBreadcrumb(spec, added, breadcrumbs);
         // Attach the in-process api_call tool alongside the remote MCP's tools.
-        const apiCallAdded = await attachApiCall(allocatedNs);
+        const apiCallAdded = await attachApiCall(spec, connection, source, allocatedNs);
         assertIntegrationExposesTools(spec, added + apiCallAdded);
         spawned.push({
           integrationId: spec.integrationId,
           namespace: spec.namespace,
           ...connectionLabelOf(spec),
           toolCount: added + apiCallAdded,
-          // remote-source integration — no `source.server.vendored` field.
         });
         logger.info("integration registered (remote http)", {
           integrationId: spec.integrationId,
           ...connectionLabelOf(spec),
           namespace: spec.namespace,
-          serverUrl: server.url,
+          // The origin only: the endpoint's path may itself be a capability.
+          serverOrigin: originForLog(spec.manifest.server?.url),
           // AFPS §7.1 — surface the actual transport the sidecar
           // dispatched to so operators can audit which path executed.
-          transport: server.transport,
+          transport: spec.manifest.server?.transport,
           authKey,
           toolCount: added + apiCallAdded,
         });
-        const ms = Math.round(performance.now() - specStart);
+        const ms = elapsedMs();
         breadcrumbs.push({
           message: `${specTag(spec)}: remote-http connect ${ms}ms · ready`,
           level: "info",
@@ -1627,45 +1903,27 @@ export async function bootIntegrations(
         continue;
       }
 
-      // ─── SINGLE spawn→connect→register pipeline (shared with connect-run) ──
-      // MITM is created only when the CA came up AND this integration declared
-      // `delivery.http`. `mitmSource` is returned so the connect-login hook
-      // (run-start acquisition, below) drives `setSessionOutputs` on the same
-      // source the MITM listener reads from. `spec.egress` (#543) is the
-      // fallback: a no-injection runner that still needs an outbound route gets
-      // a plain CONNECT egress listener instead.
-      const wantsMitm =
-        spec.httpDeliveryAuths !== undefined && Object.keys(spec.httpDeliveryAuths).length > 0;
       const {
         wrapped: runnerClient,
-        allocatedNs,
         mitmSource,
-        toolCount: added,
         diagnosticId,
         spawnMs,
         connectMs,
-      } = await spawnAndConnectLocalIntegration({
-        spec,
-        runId,
-        adapter,
-        adapterCtx,
+      } = upstream.started;
+      const { allocatedNs, toolCount: added } = await registerLocalIntegration(
         host,
-        bundleFetchOpts,
-        source,
-        ca: runCa,
-        workspaceHandle,
-        wantsMitm,
-        allowedTools: spec.toolAllowlist,
-        // R8a — propagate `hidden_tools` so the host filters them out at
-        // runtime, regardless of whether install-time validation removed them.
-        ...(nativeHiddenTools ? { hiddenTools: nativeHiddenTools } : {}),
-        logLabel: "integration",
-        onCredentialRejected: () =>
-          reportRejectedCredential(spec, bundleFetchOpts, source?.snapshot().credentialRevision),
-        clients,
-        mitmListeners,
-        stderrTail,
-      });
+        spec,
+        // The login itself (below) keeps the unwrapped client: it passes no arguments.
+        spec.connectLogin
+          ? refuseLoginPlaceholders(runnerClient, Object.keys(spec.connectLogin.inputs))
+          : runnerClient,
+        {
+          allowedTools: spec.toolAllowlist,
+          // R8a — propagate `hidden_tools` so the host filters them out at
+          // runtime, regardless of whether install-time validation removed them.
+          ...(nativeHiddenTools ? { hiddenTools: nativeHiddenTools } : {}),
+        },
+      );
       pushUnavailableToolBreadcrumb(spec, added, breadcrumbs);
 
       // ─── P2 — connect.tool `runAt: "run-start"` session acquisition ───
@@ -1684,7 +1942,7 @@ export async function bootIntegrations(
 
       // Attach the in-process api_call tool alongside the spawned server's
       // native tools, under the same (allocated) namespace.
-      const apiCallAdded = await attachApiCall(allocatedNs);
+      const apiCallAdded = await attachApiCall(spec, connection, source, allocatedNs);
 
       assertIntegrationExposesTools(spec, added + apiCallAdded);
       spawned.push({
@@ -1692,11 +1950,6 @@ export async function bootIntegrations(
         namespace: spec.namespace,
         ...connectionLabelOf(spec),
         toolCount: added + apiCallAdded,
-        // AFPS §7.1 — forward the local source's `vendored` build-provenance
-        // flag so the boot report surfaces it for audit/security consumers.
-        ...(typeof spec.manifest.server?.vendored === "boolean"
-          ? { vendored: spec.manifest.server.vendored }
-          : {}),
       });
       logger.info("integration registered", {
         integrationId: spec.integrationId,
@@ -1717,7 +1970,7 @@ export async function bootIntegrations(
           adapter: adapter.id,
           spawnMs: Math.round(spawnMs),
           connectMs: Math.round(connectMs),
-          durationMs: Math.round(performance.now() - specStart),
+          durationMs: elapsedMs(),
           toolCount: added + apiCallAdded,
           ...(diagnosticId ? { diagnosticId } : {}),
         },
@@ -1733,8 +1986,8 @@ export async function bootIntegrations(
       // gate. Scrubbing one half of a string the caller reads whole was the
       // bug.
       const msg = scrubSecretMaterial(err instanceof Error ? err.message : String(err));
-      const ms = Math.round(performance.now() - specStart);
-      // #779 — append the runner's stderr tail so the boot report carries
+      const ms = elapsedMs();
+      // Append the runner's stderr tail so the boot report carries
       // the actual upstream cause, not just the transport-level symptom
       // (e.g. "MCP connect timeout (30s)" hiding an OAuth 405 underneath).
       const stderrSuffix =
@@ -1921,7 +2174,7 @@ export async function runConnectOnce(
     // Same spawn→connect→register pipeline the agent-run path uses, but
     // `allowedTools: []` (connect-run never serves an agent) and `wantsMitm`
     // forced on.
-    const { wrapped, allocatedNs, mitmSource } = await spawnAndConnectLocalIntegration({
+    const { wrapped, mitmSource } = await startLocalIntegration({
       // connect-run never reaches an agent — the integration spawns only
       // long enough to mint a session, so workspace exposure is a
       // non-goal. Strip any `workspaceMount` the resolver attached so the
@@ -1932,7 +2185,6 @@ export async function runConnectOnce(
       runId,
       adapter,
       adapterCtx,
-      host,
       bundleFetchOpts,
       source,
       ca,
@@ -1942,10 +2194,12 @@ export async function runConnectOnce(
       // connect-run always mounts the MITM listener (it provides egress too),
       // so the plain-egress fallback never applies here.
       wantsMitm: true,
-      allowedTools: [],
       logLabel: "connect-run",
       clients,
       mitmListeners,
+    });
+    const { allocatedNs } = await registerLocalIntegration(host, spec, wrapped, {
+      allowedTools: [],
     });
     if (!mitmSource) {
       // Unreachable: wantsMitm=true + ca!=null always builds the source. Guard

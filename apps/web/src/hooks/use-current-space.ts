@@ -3,6 +3,17 @@
 import { useCallback, useEffect } from "react";
 import { useStore } from "zustand";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import {
+  agentModelKeys,
+  agentProxyKeys,
+  agentsKeys,
+  packageKeys,
+  paginatedRunsKeys,
+  persistenceKeys,
+  runKeys,
+  scheduleKeys,
+  versionKeys,
+} from "../lib/query-keys";
 import { authStore } from "../stores/auth-store";
 import { orgStore } from "../stores/org-store";
 import { rememberedSpaceKey, spaceStore } from "../stores/space-store";
@@ -16,22 +27,24 @@ export function useCurrentSpaceId(): string | null {
 // Flat, space-less query-key prefixes dropped on space switch. A key that embeds
 // the space (typed-client domains via `useOrgScope`, chat's
 // `["chat", "sessions", spaceId]`) refetches by itself and must NOT be listed.
-const SPACE_SCOPED_KEYS = new Set([
-  "packages",
-  "agents",
-  "agent-persistence",
-  "agent-model",
-  "agent-proxy",
-  "run",
-  "run-logs",
-  "paginated-runs",
-  "schedules",
-  "schedule",
-  "schedule-runs",
-  "version-detail",
-  "package-versions",
-  "version-info",
-]);
+const SPACE_SCOPED_KEYS = new Set<string>(
+  [
+    packageKeys.all,
+    agentsKeys.all,
+    persistenceKeys.all,
+    agentModelKeys.all,
+    agentProxyKeys.all,
+    runKeys.all,
+    runKeys.logsAll,
+    paginatedRunsKeys.all,
+    scheduleKeys.listAll,
+    scheduleKeys.detailAll,
+    scheduleKeys.runsAll,
+    versionKeys.detailAll,
+    versionKeys.listAll,
+    versionKeys.infoAll,
+  ].map(([root]) => root),
+);
 
 // The ONE way the current space changes: skipping the cache reset would serve
 // rows keyed on the previous space (or on none, right after login) as the new one's.
@@ -48,10 +61,7 @@ function selectSpace(queryClient: QueryClient, spaceId: string | null): void {
   });
 }
 
-/**
- * Hook that returns a `switchSpace` function.
- * Switches the current space and invalidates space-scoped caches.
- */
+/** Returns a `switchSpace` function that also drops space-scoped caches. */
 export function useSpaceSwitcher() {
   const queryClient = useQueryClient();
 
@@ -92,11 +102,7 @@ export function enterableSpaceId(
   return pick?.id ?? null;
 }
 
-/**
- * The only path from the remembered space to a scope: requests carry no space
- * until `GET /api/spaces` proves one enterable, and lose it the moment the
- * listing stops listing it. Render inside MainLayout.
- */
+/** The only path from the remembered space to a scope: none until `GET /api/spaces` proves one enterable, dropped when it stops listing it. Render inside MainLayout. */
 export function useSpaceResolver(): void {
   const queryClient = useQueryClient();
   const current = useStore(spaceStore, (s) => s.id);

@@ -15,6 +15,10 @@
  *      flips `consumed_at` from NULL to now() and returns the row. Any
  *      second consumption (replay, retry, race) loses the UPDATE and gets
  *      a 410 Gone.
+ *   4. The redeem then either links the credential it wrote
+ *      (`linkPairingCredential()`) or, when it ends without one, stamps `failed_at`
+ *      (`markPairingFailed()`). The dashboard's poll reads the outcome off
+ *      those two columns.
  *
  * Single-use semantics rely on the predicate-guarded UPDATE — DO NOT split
  * the consume into a SELECT-then-UPDATE pair, that would re-introduce the
@@ -29,7 +33,8 @@ import {
   hashPairingSecret,
   randomBase64Url,
 } from "@appstrate/core/pairing-token";
-import { gone } from "../../lib/errors.ts";
+import { forbidden, gone } from "../../lib/errors.ts";
+import { lockOrgMember } from "../space-members.ts";
 import { logger } from "../../lib/logger.ts";
 
 /** Generated id prefix — mirrors `apst_` (api keys) and `appp_` (pairing token). */
@@ -45,7 +50,9 @@ interface CreatePairingArgs {
   userId: string;
   orgId: string;
   providerId: string;
-  /** Existing org credential to update; omitted when connecting a new account. */
+  /** Owner of the credential the pairing produces or reconnects: `null` = the organization. */
+  ownerUserId: string | null;
+  /** Existing credential to update; omitted when connecting a new account. */
   reconnectCredentialId?: string;
   /** Public platform URL embedded in the token so the helper knows where to POST back. */
   platformUrl: string;
@@ -68,6 +75,7 @@ interface ConsumedPairing {
   userId: string;
   orgId: string;
   providerId: string;
+  ownerUserId: string | null;
   reconnectCredentialId: string | null;
   expiresAt: Date;
   consumedAt: Date;
@@ -78,6 +86,7 @@ interface PairingRow {
   id: string;
   expiresAt: Date;
   consumedAt: Date | null;
+  failedAt: Date | null;
   credentialId: string | null;
 }
 
@@ -105,14 +114,22 @@ export async function createPairing(args: CreatePairingArgs): Promise<CreatePair
   const id = generatePairingId();
   const expiresAt = new Date(Date.now() + args.ttlSeconds * 1000);
 
-  await db.insert(modelProviderPairings).values({
-    id,
-    tokenHash,
-    userId: args.userId,
-    orgId: args.orgId,
-    providerId: args.providerId,
-    reconnectCredentialId: args.reconnectCredentialId ?? null,
-    expiresAt,
+  await db.transaction(async (tx) => {
+    // The organization exit holds this lock while it deletes the member's
+    // pairings: one minted during the exit cannot outlive it.
+    if (!(await lockOrgMember(tx, args.orgId, args.userId))) {
+      throw forbidden("Not a member of this organization");
+    }
+    await tx.insert(modelProviderPairings).values({
+      id,
+      tokenHash,
+      userId: args.userId,
+      orgId: args.orgId,
+      providerId: args.providerId,
+      ownerUserId: args.ownerUserId,
+      reconnectCredentialId: args.reconnectCredentialId ?? null,
+      expiresAt,
+    });
   });
 
   return { id, token, expiresAt };
@@ -148,6 +165,7 @@ export async function consumePairing(token: string): Promise<ConsumedPairing> {
       userId: modelProviderPairings.userId,
       orgId: modelProviderPairings.orgId,
       providerId: modelProviderPairings.providerId,
+      ownerUserId: modelProviderPairings.ownerUserId,
       reconnectCredentialId: modelProviderPairings.reconnectCredentialId,
       expiresAt: modelProviderPairings.expiresAt,
       consumedAt: modelProviderPairings.consumedAt,
@@ -163,23 +181,35 @@ export async function consumePairing(token: string): Promise<ConsumedPairing> {
     userId: row.userId,
     orgId: row.orgId,
     providerId: row.providerId,
+    ownerUserId: row.ownerUserId,
     reconnectCredentialId: row.reconnectCredentialId,
     expiresAt: row.expiresAt,
     consumedAt: row.consumedAt,
   };
 }
 
-/** Read a pairing row by id, scoped to the calling org. Returns null if not found. */
-export async function getPairing(id: string, orgId: string): Promise<PairingRow | null> {
+/** Read a pairing row by id, scoped to the calling org and user. Returns null if not found. */
+export async function getPairing(
+  id: string,
+  orgId: string,
+  userId: string,
+): Promise<PairingRow | null> {
   const [row] = await db
     .select({
       id: modelProviderPairings.id,
       expiresAt: modelProviderPairings.expiresAt,
       consumedAt: modelProviderPairings.consumedAt,
+      failedAt: modelProviderPairings.failedAt,
       credentialId: modelProviderPairings.credentialId,
     })
     .from(modelProviderPairings)
-    .where(and(eq(modelProviderPairings.id, id), eq(modelProviderPairings.orgId, orgId)))
+    .where(
+      and(
+        eq(modelProviderPairings.id, id),
+        eq(modelProviderPairings.orgId, orgId),
+        eq(modelProviderPairings.userId, userId),
+      ),
+    )
     .limit(1);
   return row ?? null;
 }
@@ -187,9 +217,8 @@ export async function getPairing(id: string, orgId: string): Promise<PairingRow 
 /**
  * Link the credential created or reconnected by the helper back to its pairing
  * row, so the dashboard's poll endpoint can surface the resulting credential
- * id without a separate list call. Best-effort: if the pairing disappears
- * between consume and link (TTL purge race), log and continue — the credential
- * is already persisted.
+ * id without a separate list call. An update that matches no row (the pairing
+ * was cancelled or reaped during the redeem) is a no-op: the credential stays.
  */
 export async function linkPairingCredential(
   pairingId: string,
@@ -202,14 +231,31 @@ export async function linkPairingCredential(
 }
 
 /**
- * Delete a pairing row by id, scoped to the calling org. Idempotent — a
- * no-op when the row is absent (already deleted, never existed, or
- * belongs to a different org).
+ * Record that the redeem which consumed this pairing ended without a
+ * credential, so the dashboard's poll reads `failed` instead of waiting.
  */
-export async function cancelPairing(id: string, orgId: string): Promise<void> {
+export async function markPairingFailed(pairingId: string): Promise<void> {
+  await db
+    .update(modelProviderPairings)
+    .set({ failedAt: sql`now()` })
+    .where(eq(modelProviderPairings.id, pairingId));
+}
+
+/**
+ * Delete a pairing row by id, scoped to the calling org and user. Idempotent — a
+ * no-op when the row is absent (already deleted, never existed, or
+ * belongs to a different org or user).
+ */
+export async function cancelPairing(id: string, orgId: string, userId: string): Promise<void> {
   await db
     .delete(modelProviderPairings)
-    .where(and(eq(modelProviderPairings.id, id), eq(modelProviderPairings.orgId, orgId)));
+    .where(
+      and(
+        eq(modelProviderPairings.id, id),
+        eq(modelProviderPairings.orgId, orgId),
+        eq(modelProviderPairings.userId, userId),
+      ),
+    );
 }
 
 /**

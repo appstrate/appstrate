@@ -467,11 +467,11 @@ export function parsePackageZip(
       break;
     }
     case "integration": {
-      // Integration packages (proposal §4.1.2). Phase 1.0 bundles carry
+      // Integration packages. Bundles carry
       // manifest.json as authoritative; INTEGRATION.md is an optional
       // agent-facing documentation companion. Vendored server code lives
       // under `server/` and is left untouched by this parser — the
-      // runtime resolver (Phase 1.2a) consumes it directly.
+      // runtime resolver consumes it directly.
       const integrationRaw = files[PACKAGE_CONTENT_FILE.integration!];
       content = integrationRaw ? new TextDecoder().decode(integrationRaw) : manifestText;
       break;

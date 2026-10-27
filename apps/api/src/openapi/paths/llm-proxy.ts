@@ -129,7 +129,9 @@ const baseResponses = {
   "409": {
     description:
       "`org_deleting` — the organization's deletion is reserved, so no new " +
-      "metered usage is admitted. RFC 9457 problem+json.",
+      "metered usage is admitted. `model_credential_required` — the preset is an " +
+      "unbound model and the caller has no usable personal credential for it (a " +
+      "run: the credential it launched with is gone). RFC 9457 problem+json.",
     headers: PROXY_STATUS_HEADER,
     content: problemContent,
   },

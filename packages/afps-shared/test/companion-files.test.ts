@@ -88,6 +88,20 @@ describe("isValidSkillName", () => {
 });
 
 describe("checkSkillMarkdown — the producer gate", () => {
+  it("says where a YAML syntax error sits, in SKILL.md's own lines", () => {
+    // The opening `---` is line 1; the unclosed flow sequence is on line 3.
+    const violation = checkSkillMarkdown("---\nname: x\ndescription: [a\n---\nbody");
+    expect(violation).toMatchObject({
+      reason: "SKILL_INVALID_FRONTMATTER",
+      position: { line: 3, column: 16 },
+    });
+    // A rule the parser did not raise has no position.
+    expect(checkSkillMarkdown("# no frontmatter")).not.toHaveProperty("position");
+    const wrongType = checkSkillMarkdown("---\nname: [x]\ndescription: d\n---\n");
+    expect(wrongType?.reason).toBe("SKILL_INVALID_FRONTMATTER");
+    expect(wrongType).not.toHaveProperty("position");
+  });
+
   it("accepts a conforming SKILL.md", () => {
     expect(checkSkill(skillMd("word-count", "Counts words in a text."))).toBeNull();
   });

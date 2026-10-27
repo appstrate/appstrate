@@ -241,7 +241,7 @@ function schemaForType(type: unknown): TypeSchema | null {
  *   - `skill` / `integration` / `mcp-server` — `schema_version` is OPTIONAL at
  *     the schema level. When present we enforce the MAJOR policy; when absent
  *     we accept it. AFPS lifted `schema_version` to the root of
- *     mcp-server (§3.4), so mcp-server is no longer exempt — it gets the same
+ *     mcp-server (§3.4), so mcp-server is not exempt — it gets the same
  *     check as skill/integration.
  */
 function checkSchemaVersion(

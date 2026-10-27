@@ -17,6 +17,7 @@ import type { ValidationFieldError } from "./api-errors.ts";
 import type { Logger } from "./logger.ts";
 import type { ModuleResource, ModuleResources, OrgRole, SpaceRolePreset } from "./permissions.ts";
 import type { ModulePrincipalPermissions } from "./principal-permissions.ts";
+import type { ModelPayer } from "./model-payer.ts";
 import type { ModelApiShape } from "./sidecar-types.ts";
 import type {
   ChatAttachmentRequest,
@@ -44,7 +45,7 @@ import type { TerminalRunStatus } from "./run-status.ts";
  * attributes, bundler support). `packages/core/test/core-version.test.ts`
  * asserts it equals the published `version` field, so it cannot drift.
  */
-export const CORE_VERSION = "15.0.0";
+export const CORE_VERSION = "16.0.0";
 
 /** Metadata describing a module. */
 export interface ModuleManifest {
@@ -373,7 +374,7 @@ export interface AppstrateModule {
 /**
  * Fields shared by both halves of {@link ModulePermissionContribution}.
  * Distributes over {@link ModuleResources}: the `resource` literal PINS the
- * legal `actions` for that entry, so the runtime contribution can no longer
+ * legal `actions` for that entry, so the runtime contribution cannot
  * drift from the compile-time `declare module` augmentation that guards the
  * call sites. When both halves were plain `string`, a typo (`"taks"`, or an
  * action the augmentation never declared) produced a permission that type-
@@ -928,20 +929,11 @@ export interface AuthStrategyRequest {
 export const PRINCIPAL_KINDS = ["user", "delegate", "end_user"] as const;
 export type PrincipalKind = (typeof PRINCIPAL_KINDS)[number];
 
-/**
- * Resolution returned by a successful `AuthStrategy.authenticate()` call.
- * Mirrors the shape the core auth middleware sets on `c` via `c.set(...)`.
- *
- * `permissions` is `readonly string[]` (not the typed `Permission` union) to
- * avoid dragging the RBAC permission catalog into `@appstrate/core`. At
- * request time, `requirePermission(resource, action)` validates membership;
- * invalid strings from a strategy surface as a 403 at the guard site.
- */
-export interface AuthResolution {
+/** The fields of an {@link AuthResolution} that do not depend on when its authority resolves. */
+interface AuthResolutionBase {
   user: { id: string; email: string; name: string };
   orgId?: string;
   orgSlug?: string;
-  orgRole?: OrgRole;
   /**
    * Strategy-chosen identifier for this auth method (e.g. "oidc", "mtls",
    * "webhook-hmac"). Written to `c.set("authMethod", ...)`. NOT constrained
@@ -961,8 +953,6 @@ export interface AuthResolution {
    * `X-Space-Id` header handled by `requireSpaceContext()`.
    */
   spaceId?: string;
-  /** Permission strings already resolved by the strategy. */
-  permissions: readonly string[];
   /** Optional end-user impersonation context (mirrors `c.get("endUser")`). */
   endUser?: EndUserContext;
   /** Strategy-specific metadata to attach via `c.set` under `extra` namespace. */
@@ -977,13 +967,51 @@ export interface AuthResolution {
    * `c.get("firstPartyLoopback")`.
    */
   firstPartyLoopback?: boolean;
+}
+
+/** The strategy resolves the caller's authority itself; `permissions` carries its ceiling. */
+interface InlineAuthResolution extends AuthResolutionBase {
+  orgRole?: OrgRole;
+  /**
+   * With `orgRole`, the ceiling over that role's grants (a token's scope
+   * claim); without it, the whole grant (an end-user token's fixed allowlist).
+   * Empty means nothing either way.
+   */
+  permissions: readonly string[];
+  deferOrgResolution?: false;
+  scopeCeiling?: never;
+}
+
+/** The org, its role and the grant arrive later, from the `X-Org-Id` middleware. */
+interface DeferredAuthResolution extends AuthResolutionBase {
   /**
    * Pipeline ordering only: org and permissions come from the `X-Org-Id`
    * middleware later instead of at token-verification time. Says nothing about
    * who the caller is — that is `principalKind`, and no gate may read this.
    */
-  deferOrgResolution?: boolean;
+  deferOrgResolution: true;
+  orgRole?: never;
+  /** Always empty: a deferred resolution declares its ceiling in `scopeCeiling`. */
+  permissions: readonly never[];
+  /** The ceiling over the org role resolved later. Absent, the caller is uncapped. */
+  scopeCeiling?: readonly string[];
 }
+
+/**
+ * Resolution returned by a successful `AuthStrategy.authenticate()` call.
+ * Mirrors the shape the core auth middleware sets on `c` via `c.set(...)`.
+ *
+ * Either inline or deferred (`deferOrgResolution: true`), and each declares its
+ * ceiling in one place: `permissions` inline, `scopeCeiling` deferred. The
+ * pipeline refuses a resolution mixing the two, for a strategy the compiler
+ * never saw.
+ *
+ * Permission strings are `readonly string[]` (not the typed `Permission` union)
+ * to avoid dragging the RBAC permission catalog into `@appstrate/core`. At
+ * request time, `requirePermission(resource, action)` validates membership;
+ * invalid strings from a strategy surface as a 403 at the guard site.
+ */
+export type AuthResolution = InlineAuthResolution | DeferredAuthResolution;
 
 /**
  * End-user impersonation context. Set on the Hono request context under
@@ -1067,12 +1095,15 @@ export type BeforeUsageParams =
        *   platform's system model proxy, that seam dispatches its own
        *   `beforeUsage` with a `credentialSource` that IS known there.
        *
+       * - `"user"` — a member's own credential (key or subscription), for a
+       *   model the organization leaves to each member.
+       *
        * Naming note: this matches the `llm_usage.credential_source` ledger
        * column, which is what a metering module reconciles a run against after
        * the fact. The `runs.model_source` database column is the same concept
-       * under an older, persisted name — deliberately not renamed.
+       * under the persisted name `model_source`, deliberately not renamed.
        */
-      credentialSource: "system" | "org" | null;
+      credentialSource: ModelPayer | null;
       /**
        * Whose compute runs the work.
        *
@@ -1122,12 +1153,15 @@ export type BeforeUsageParams =
        * - `"system"` — the turn resolves to a platform-supplied model preset.
        * - `"org"` — the turn resolves to a model the organization configured
        *   with its own credential.
+       * - `"user"` — the turn resolves to the session user's own credential
+       *   (key or subscription), for a model the organization leaves to each
+       *   member.
        *
        * Never `null` here: a chat turn resolves its model on the platform,
        * before admission, so the fact is always determinable — unlike a
        * remote-origin run, which resolves its model elsewhere.
        */
-      credentialSource: "system" | "org";
+      credentialSource: ModelPayer;
       /**
        * Always `"platform"` for chat: a turn runs inside the platform's own
        * process, never on a caller-supplied host. Present rather than omitted
@@ -1170,8 +1204,8 @@ export interface RunStatusChangeParams {
   cost?: number;
   /** Duration in ms (only on terminal status). */
   duration?: number;
-  /** Model source: "system" or "org" (only on terminal status). */
-  modelSource?: string | null;
+  /** Model source: `system`, `org` or `user` (only on terminal status). */
+  modelSource?: ModelPayer | null;
   /**
    * Whether the underlying `packages` row is a shadow package (inline run).
    * Omitted for classic runs (treat as false). Consumers — e.g. the
@@ -1270,11 +1304,8 @@ export interface ModuleInitContext {
 // without an entry fails `tsc`), and a member no module consumes fails the check
 // as dead surface, exactly like an `AppstrateModule` member would. Each member's
 // own JSDoc states why the consumer cannot obtain the capability any other way.
-// The previous broad surface (orchestrator /
-// pubsub / realtime / inline / packages / models / spaces / run CRUD)
-// mirrored an in-process module that has since been removed — it carried zero
-// live consumers, so it was dropped rather than left as speculative API.
-// Re-add a member here the moment a consumer genuinely needs it.
+// A member exists here only when a consumer needs it: no speculative API
+// (orchestrator, pubsub, realtime, packages, models, spaces, run CRUD).
 // ---------------------------------------------------------------------------
 
 /**
@@ -1306,8 +1337,8 @@ export interface LlmUsageLedgerRow {
   contextType: "run" | "chat" | null;
   /** The run id / chat session id matching {@link contextType} (null when unattributed). */
   contextId: string | null;
-  /** Which credential set reached the provider: platform-provided or the org's own. */
-  credentialSource: "system" | "org" | null;
+  /** Whose credential reached the provider: the platform's, the organization's or a member's own. */
+  credentialSource: ModelPayer | null;
   /**
    * How much of {@link costUsd} is backed by real per-token rates.
    *
@@ -1385,7 +1416,7 @@ export interface PlatformServices {
     /**
      * Next VISIBLE ledger rows after `afterId` (exclusive, default 0), ordered
      * by `id` ASC, capped by `limit` (service default 500, max 1000). Optional
-     * `credentialSource` filters to rows stamped `system` / `org`.
+     * `credentialSource` filters to rows stamped with that payer.
      *
      * NOT every ledger row is visible. A remote run whose inference flows
      * through the platform's inference proxy is metered TWICE in the ledger:
@@ -1414,7 +1445,7 @@ export interface PlatformServices {
     list(args: {
       afterId?: number;
       limit?: number;
-      credentialSource?: "system" | "org";
+      credentialSource?: ModelPayer;
     }): Promise<LlmUsageLedgerRow[]>;
     /**
      * Highest ledger id `N` such that EVERY row with id ≤ `N` is settled — the
@@ -1460,8 +1491,10 @@ export interface PlatformServices {
    * access — this is the seam that resolves the credential + token server-side,
    * so the real subscription token never enters the module's own resolution
    * (only the returned in-memory string, used to build the Pi `AuthStorage`).
+   * `userId` is the session user: their own subscription serves a model the
+   * organization leaves unbound.
    */
-  resolveChatModel(orgId: string, presetId: string): Promise<ChatModelResolution>;
+  resolveChatModel(orgId: string, presetId: string, userId: string): Promise<ChatModelResolution>;
   /**
    * Record one chat turn's LLM usage as an `llm_usage` ledger row (source
    * `proxy`, `run_id` null). The chat module has no DB access, so metering for
@@ -1506,7 +1539,7 @@ export interface PlatformServices {
    * `tx` is the caller's open DB transaction handle (opaque here — core carries
    * no Drizzle dependency). The chat module passes the SAME transaction it uses
    * to delete the `chat_sessions` row, so the file teardown and the row
-   * delete commit atomically: a file materializing in the gap can no longer
+   * delete commit atomically: a file materializing in the gap cannot
    * be cascade-deleted without a storage-deletion outbox job. Omitted → the
    * platform opens its own transaction, which is correct whenever the caller
    * has no wider unit of work to join.
@@ -1520,35 +1553,23 @@ export interface PlatformServices {
    * 9457 problem response with the hook's status — 402 flows through), or null
    * to allow.
    *
-   * The platform still resolves whether the chosen model is system-provided or
-   * organization-owned — keeping that resolution server-side is what keeps the
-   * chat module dumb, since it has no model-registry access — but it now
-   * REPORTS that resolution as the `credentialSource` fact instead of using it
-   * to pre-filter. A turn on the organization's own credential reports
-   * `credentialSource: "org"` and is dispatched all the same, because a chat
-   * turn always executes in the platform's own process: the platform supplies
-   * the compute even when it supplies no credential. `executionPlane` is
-   * consequently always `"platform"` on this surface.
-   *
-   * A module that only accounts for platform-supplied inference treats such a
-   * turn as contributing nothing and admits it — the same outcome the platform
-   * used to assume on the module's behalf, now decided by the module that owns
-   * the policy.
-   *
-   * `subscription` is the one fact the caller owns and the platform cannot
-   * derive: the turn runs on a provider subscription the organization
-   * authorized over OAuth (claude-code, codex), driven in-process rather than
-   * through the inference gateway. Such a turn is `credentialSource: "org"`
-   * whatever its preset resolves to, and it is dispatched like any other — it
-   * still occupies the platform's own process. Splitting the responsibility
-   * this way keeps the seam DRY: the caller reports what it knows, the platform
-   * derives the rest from the model registry.
+   * The platform resolves the chosen model for the session user server-side —
+   * the chat module has no model-registry access — and reports who pays it as
+   * the `credentialSource` fact: the owner of the credential the turn spends,
+   * `"user"` for the member's own, `"org"` for the organization's. Every turn
+   * is dispatched, because a chat turn always executes in the platform's own
+   * process: the platform supplies the compute even when it supplies no
+   * credential. `executionPlane` is consequently always `"platform"` on this
+   * surface. A module that only accounts for platform-supplied inference
+   * treats a turn on a non-platform credential as contributing nothing and
+   * admits it.
    */
   checkUsageAllowed(args: {
     orgId: string;
     presetId: string;
     sessionId: string | null;
-    subscription: boolean;
+    /** The session user: the payer whose personal credentials the turn may spend. */
+    userId: string;
   }): Promise<UsageRejection | null>;
   /**
    * Set (or clear) an organization's per-org file storage limit — the

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { EnrichedRun } from "@appstrate/shared-types";
+import { causeSentence } from "./launch-warnings";
 
 export type ConnectionUsed = NonNullable<EnrichedRun["connections_used"]>[number];
 
@@ -20,4 +21,28 @@ export function groupByIntegration(
   }
   for (const id of unboundIds) if (!groups.has(id)) groups.set(id, []);
   return [...groups.entries()];
+}
+
+export interface RunConnectionRow {
+  integrationId: string;
+  /** Empty when the run started without it. */
+  bound: ConnectionUsed[];
+  /** Why it started without a connection, in the launch toast's words; `null` when bound. */
+  unboundCause: string | null;
+}
+
+/** One row per integration bound, then one per declared integration the run started without (`connections_used` cannot carry those). */
+export function runConnectionRows(
+  run: Pick<EnrichedRun, "connections_used" | "integrations_unbound">,
+): RunConnectionRow[] {
+  const causes = new Map(
+    (run.integrations_unbound ?? []).map((u) => [u.integration_package_id, causeSentence(u)]),
+  );
+  return groupByIntegration(run.connections_used ?? [], [...causes.keys()]).map(
+    ([integrationId, bound]) => ({
+      integrationId,
+      bound,
+      unboundCause: bound.length === 0 ? (causes.get(integrationId) ?? null) : null,
+    }),
+  );
 }

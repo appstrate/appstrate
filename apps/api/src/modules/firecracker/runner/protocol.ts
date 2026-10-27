@@ -2,7 +2,7 @@
 
 /**
  * Wire protocol between the platform's `firecracker` backend (its HTTP
- * client) and the `appstrate-runner` daemon (issue #819, phase 1).
+ * client) and the `appstrate-runner` daemon.
  *
  * Single source of truth for both sides: the daemon (`./server.ts`)
  * validates every request body against these schemas, the client
@@ -249,7 +249,7 @@ export const logLineSchema = z.object({
 });
 
 /**
- * Liveness probe answer (issue #819, phase 4 — daemon observability).
+ * Liveness probe answer.
  * `running` reflects whether the daemon still holds a live VMM process for
  * the workload. The platform's boot-phase heartbeat pump synthesises
  * heartbeats ONLY while this is `true`, so a dead VM is never masked.

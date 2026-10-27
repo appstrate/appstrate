@@ -15,8 +15,7 @@ import { organizations } from "./organizations.ts";
 import { spaces } from "./spaces.ts";
 import { packages } from "./packages.ts";
 
-// Webhooks tables — centralized into the core schema (formerly owned by the
-// webhooks module). The system migration pipeline (`applyCoreMigrations`)
+// Webhooks tables — centralized into the core schema. The system migration pipeline (`applyCoreMigrations`)
 // creates them at boot; they exist regardless of whether the webhooks module
 // is loaded in `MODULES`. Behavior (routes, delivery worker, RBAC) stays in
 // `apps/api/src/modules/webhooks`.

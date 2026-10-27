@@ -16,9 +16,13 @@
  *   - `agentResources`: the effective allocation and semantics already
  *     resolved onto the run plan
  *
+ *   - `availableIntegrationIds`: the integrations actually spawned for this
+ *     run, which narrow the root manifest's declared integrations
+ *
  * Every other field flows straight from the bundle — the same code
  * path used by the `appstrate run` CLI. Outbound API access is surfaced
- * via integration MCP tools (`{ns}__api_call`), not the prompt.
+ * via integration MCP tools (`{ns}__api_call`); the prompt only lists
+ * each integration and where its INTEGRATION.md sits in the workspace.
  *
  * Run history is NOT rendered in the prompt: the runtime wires a
  * typed `run_history` tool (see runtime-pi/entrypoint.ts Phase D) whose
@@ -32,11 +36,9 @@ import {
   buildPlatformPromptInputs,
   renderPlatformPrompt,
   UNAVAILABLE_INTEGRATION_REASONS,
-  type PlatformPromptIntegration,
 } from "@appstrate/afps-runtime/bundle";
 import { getEnv } from "@appstrate/env";
 import { getExecutionMode, type ExecutionMode } from "../../infra/mode.ts";
-import { fetchIntegrationPromptDocs } from "../integration-service.ts";
 import type { DroppedIntegration } from "../integration-spawn-resolver.ts";
 import { orchestratorAppliesWorkspaceTmpfsCap } from "../orchestrator/index.ts";
 
@@ -57,19 +59,19 @@ function promptWorkspaceTmpfsSizeMb(executionMode: ExecutionMode): number {
   return orchestratorAppliesWorkspaceTmpfsCap(executionMode) ? getEnv().WORKSPACE_TMPFS_SIZE_MB : 0;
 }
 
-export async function buildPlatformSystemPrompt(
+export function buildPlatformSystemPrompt(
   context: ExecutionContext,
   plan: AppstrateRunPlan,
-): Promise<string> {
+): string {
   const executionMode = getExecutionMode();
   // `./files/` — the ONE directory `runtime-pi/provision.ts` streams the run's
-  // input files into, since #1177. This announcement and that layout must stay
+  // input files into. This announcement and that layout must stay
   // spelled the same: a divergence is a prompt-level miss, not an error — the
   // bytes are provisioned either way, the agent is simply pointed at a
   // directory that is not there and nothing reports a fault. It is kept true by
   // the env schema, which fails boot unless `PI_IMAGE` carries the platform's
-  // own version, so the image reading this prompt is never a different #1177
-  // side than the platform writing it.
+  // own version, so the image reading this prompt lays files out as the
+  // platform writing it does.
   const uploads = plan.files?.map((f) => ({
     name: f.name,
     path: `./files/${f.workspaceName}`,
@@ -77,33 +79,18 @@ export async function buildPlatformSystemPrompt(
     ...(f.type ? { type: f.type } : {}),
   }));
 
-  // Phase 1.4 — inline each resolved integration's manifest description +
-  // INTEGRATION.md (AFPS §3.5) so the LLM can read the integration's
-  // API contract alongside the `{ns}__*` tools advertised via MCP
-  // `tools/list`. Docs are pulled from `packages.draftContent` (captured
-  // at import time by `core/zip.ts`) — never re-fetched from storage.
-  // One section per integration: a multi-connection integration spawns one spec per connection.
-  let integrations: PlatformPromptIntegration[] | undefined;
-  const integrationIds = [...new Set(plan.integrations?.map((spec) => spec.integrationId))];
-  if (integrationIds.length > 0) {
-    const docs = await fetchIntegrationPromptDocs(integrationIds);
-    const docsById = new Map(docs.map((d) => [d.packageId, d]));
-    integrations = integrationIds.map((id) => {
-      const found = docsById.get(id);
-      return {
-        id,
-        ...(found?.description ? { description: found.description } : {}),
-        ...(found?.doc ? { doc: found.doc } : {}),
-      };
-    });
-  }
+  // Only the integrations spawned for this run: a declared one that is
+  // inactive or unbound is not spawned, and a dropped one is listed under
+  // `unavailableIntegrations` instead. One id per integration, however many
+  // connections it binds.
+  const spawnedIds = new Set(plan.integrations?.map((spec) => spec.integrationId));
   const unavailableIntegrations = unavailableIntegrationsOf(plan.droppedIntegrations ?? []);
 
   const inputs = buildPlatformPromptInputs(plan.bundle, context, {
     platformName: "Appstrate",
     timeoutSeconds: plan.timeout,
     // The runtime knows the workspace is capped; without this the agent
-    // does not, and a dependency install dies with ENOSPC mid-run (#1019).
+    // does not, and a dependency install dies with ENOSPC mid-run.
     workspaceTmpfsSizeMb: promptWorkspaceTmpfsSizeMb(executionMode),
     workspaceTmpfsSizePercent: plan.resources.writableRootTmpfsPercent,
     ...(plan.resources.semantics
@@ -114,20 +101,20 @@ export async function buildPlatformSystemPrompt(
           },
         }
       : {}),
-    // Deliverables convention (Phase 2): files the agent writes under
+    // Deliverables convention: files the agent writes under
     // `./outputs/` are swept and published as durable run files at
     // finalize. Rendered as a platform-managed section BEFORE the raw prompt
     // (see renderPlatformPrompt) so the raw user prompt stays strictly last.
     deliverables: true,
     ...(uploads ? { uploads } : {}),
-    ...(integrations ? { integrations } : {}),
+    availableIntegrationIds: spawnedIds,
     ...(unavailableIntegrations.length > 0 ? { unavailableIntegrations } : {}),
   });
 
   // The agent's tools — runtime-wired (`run_history`, `recall_memory`),
   // integration tools, and the platform runtime tools (output/log/note/
   // pin) — are all advertised to the model via MCP `tools/list`
-  // (name + description + input schema), so the prompt no longer lists
+  // (name + description + input schema), so the prompt does not list
   // them. The Communication contract (rendered above) is the only
   // tool-related instruction the model can't infer from `tools/list`, and
   // it stays. This keeps a single source of truth for each tool's

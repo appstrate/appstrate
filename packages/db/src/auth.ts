@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { BASE_ERROR_CODES, betterAuth } from "better-auth";
-import { APIError, createAuthMiddleware, isAPIError } from "better-auth/api";
+import { BASE_ERROR_CODES, betterAuth, getCurrentAdapter } from "better-auth";
+import { APIError, createAuthMiddleware, getOAuthState, isAPIError } from "better-auth/api";
 import type { GenericEndpointContext } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { magicLink } from "better-auth/plugins/magic-link";
@@ -59,7 +59,7 @@ async function hasPendingInvitationByEmail(email: string): Promise<boolean> {
 }
 
 /**
- * Post-bootstrap side-effect hook (issue #228). Fires once `createBootstrapOrg`
+ * Post-bootstrap side-effect hook. Fires once `createBootstrapOrg`
  * has actually inserted the org row — never on the idempotent no-op path.
  * apps/api wires this at boot to (a) emit `onOrgCreate` so the ee module's
  * free-tier gate and other module listeners observe the bootstrap org, and (b) provision
@@ -218,29 +218,68 @@ const realmResolver = hookSlot<RealmResolver>();
 
 export const setRealmResolver = realmResolver.set;
 
-// A magic link signs in an account of its transaction's realm: asserted at Better Auth's writes.
-async function assertMagicLinkAudience(
+/**
+ * `user.realm` of `userId`, or `undefined` when no such row exists. Inside a Better Auth
+ * hook it reads through the adapter BA is writing with, so it sees the hook's own transaction.
+ */
+async function readUserRealm(
   userId: string,
   context: GenericEndpointContext | null,
-): Promise<void> {
-  const resolver = realmResolver.get();
-  if (context?.path !== "/magic-link/verify" || !resolver) return;
-  const [account] = await db
+): Promise<string | undefined> {
+  if (context) {
+    const adapter = await getCurrentAdapter(context.context.adapter);
+    const found = await adapter.findOne<{ realm: string }>({
+      model: "user",
+      where: [{ field: "id", value: userId }],
+      select: ["realm"],
+    });
+    return found?.realm;
+  }
+  const [row] = await db
     .select({ realm: user.realm })
     .from(user)
     .where(eq(user.id, userId))
     .limit(1);
-  if (!account) return;
+  return row?.realm;
+}
+
+// A magic link and a social callback sign in, and link an identity to, an account of their
+// transaction's realm only: asserted at Better Auth's writes. `readRealm` runs only on those two
+// legs with a resolver installed, so `account.delete` queries nothing elsewhere.
+const AUDIENCE_BOUND_PATHS: ReadonlySet<string> = new Set(["/magic-link/verify", "/callback/:id"]);
+
+async function assertSignInAudience(
+  readRealm: () => Promise<string | undefined>,
+  context: GenericEndpointContext | null,
+): Promise<void> {
+  const resolver = realmResolver.get();
+  if (!context?.path || !AUDIENCE_BOUND_PATHS.has(context.path) || !resolver) return;
+  const realm = await readRealm();
+  if (realm === undefined) return;
   const query = (context.query ?? {}) as Record<string, unknown>;
+  // A social callback whose transaction resolves to no audience (its client disabled since, an
+  // authorize destination naming none) is refused like one of another audience: the resolver
+  // throws there, which on this browser redirect would answer a bare error body.
   const expected = await resolver({
     headers: context.headers ?? null,
     path: context.path,
     query,
+  }).catch((error: unknown) => {
+    if (context.path !== "/callback/:id") throw error;
+    return undefined;
   });
-  if (account.realm === expected) return;
-  logger.warn("auth: refused a magic link for an account outside its audience", { expected });
+  if (realm === expected) return;
+  logger.warn("auth: refused a sign-in for an account outside its audience", {
+    expected,
+    path: context.path,
+  });
+  // A magic link carries its error page in the query; a social callback, in the OAuth state its
+  // sign-in stored.
   const raw = query.errorCallbackURL ?? query.callbackURL;
-  const callback = typeof raw === "string" ? decodeURIComponent(raw) : "/";
+  const callback =
+    typeof raw === "string"
+      ? decodeURIComponent(raw)
+      : ((await getOAuthState().catch(() => null))?.errorURL ?? "/");
   throw refusalRedirect(context, callback, "signup_disabled");
 }
 
@@ -312,7 +351,7 @@ const smtpOverrideStore = new AsyncLocalStorage<SmtpOverride>();
 
 // ─── Bootstrap-token redemption (per-request bypass) ─────────────────────────
 //
-// `AUTH_BOOTSTRAP_TOKEN` (issue #344 Layer 2b) ships an instance with
+// `AUTH_BOOTSTRAP_TOKEN` ships an instance with
 // `AUTH_DISABLE_SIGNUP=true` so a fresh `curl|bash -s -- --yes` install
 // is closed by default. The redemption route (`POST
 // /api/auth/bootstrap/redeem`) needs to bypass that gate exactly once,
@@ -649,7 +688,7 @@ function buildBasePlugins(env: ReturnType<typeof getEnv>, smtpTransport: Transpo
               }
 
               // Magic-link is now a pure passwordless-login channel. The
-              // invitation flow no longer rides on magic-link: an invited
+              // invitation flow does not ride on magic-link: an invited
               // user opens the `/invite/{token}` page and authenticates
               // through the standard login/signup path, then accepts. So a
               // single generic template covers every magic-link send.
@@ -941,14 +980,12 @@ function buildAuth(options: CreateAuthOptions) {
       // OFF by default, opt-in per deployment via
       // `AUTH_SESSION_COOKIE_CACHE_SECONDS` (0 = off).
       //
-      // History: this was hardcoded off to work around BA issue #7607 — when
-      // `session_data` expired, BA was reported to fail regenerating it from
-      // the still-valid `session_token` under some plugin configurations,
-      // logging the user out on the next request. That issue is now closed
-      // "not planned", which is NOT evidence of a fix, so the behavior was
-      // measured directly against this repo's Better Auth version and plugin
-      // set instead: `test/integration/auth/session-cookie-cache.test.ts`
-      // drives expiry-then-request, logout, cross-device revocation, the
+      // Better Auth issue #7607 reports that an expired `session_data` is not
+      // always regenerated from the still-valid `session_token`, logging the
+      // user out on the next request. The behavior is measured against this
+      // repo's Better Auth version and plugin set:
+      // `test/integration/auth/session-cookie-cache.test.ts` drives
+      // expiry-then-request, logout, cross-device revocation, the
       // freshness gate and the realm guard with the cache enabled.
       //
       // What enabling it buys: one fewer DB read per authenticated request.
@@ -1080,7 +1117,7 @@ function buildAuth(options: CreateAuthOptions) {
             // hook. A pending invitation overrides BOTH closed mode and the
             // domain allowlist (see `invited` below).
             const envForGate = getEnv();
-            // Bootstrap-token redemption (#344 Layer 2b) — explicitly
+            // Bootstrap-token redemption — explicitly
             // bypasses the `AUTH_DISABLE_SIGNUP` gate. The redeem route
             // has already verified a single-use 256-bit token against
             // `env.AUTH_BOOTSTRAP_TOKEN` via timing-safe compare; trying
@@ -1202,7 +1239,7 @@ function buildAuth(options: CreateAuthOptions) {
             // additionalField is declared. Fall back to "platform" if the
             // adapter strips it (defensive — the SQL default matches anyway).
             const realm = (user as { realm?: string }).realm ?? "platform";
-            // Self-hosting bootstrap path (issue #228) — auto-create the
+            // Self-hosting bootstrap path — auto-create the
             // root org for AUTH_BOOTSTRAP_OWNER_EMAIL. Idempotent. Runs
             // BEFORE the module after-hook so the ee module's free-tier hook etc.
             // see a coherent state.
@@ -1257,9 +1294,16 @@ function buildAuth(options: CreateAuthOptions) {
         },
       },
       account: {
+        // A social callback links its identity to the account holding the address: never one of
+        // another realm.
+        create: {
+          before: async (account, context) => {
+            await assertSignInAudience(() => readUserRealm(account.userId, context), context);
+          },
+        },
         delete: {
           before: async (account, context) => {
-            await assertMagicLinkAudience(account.userId, context);
+            await assertSignInAudience(() => readUserRealm(account.userId, context), context);
           },
         },
       },
@@ -1271,18 +1315,15 @@ function buildAuth(options: CreateAuthOptions) {
           // on every request. BA creates the session row by INSERT — we
           // return a patch to merge the realm before the write.
           before: async (sess, context) => {
-            await assertMagicLinkAudience(sess.userId, context);
-            const [row] = await db
-              .select({ realm: user.realm })
-              .from(user)
-              .where(eq(user.id, sess.userId))
-              .limit(1);
-            // If the user row vanished between session insert and our SELECT
-            // (shouldn't happen — BA inserts the user before the session in
-            // the same flow), fall back to "platform". The request-time guard
-            // then treats the session as platform-scoped, which is safer than
-            // leaking an end-user session.
-            return { data: { realm: row?.realm ?? "platform" } };
+            // One read serves both the audience check and the patch.
+            const realm = await readUserRealm(sess.userId, context);
+            if (realm === undefined) {
+              throw new Error(
+                `auth: no user row for session user ${sess.userId} — refusing to create a session without its realm`,
+              );
+            }
+            await assertSignInAudience(async () => realm, context);
+            return { data: { realm } };
           },
         },
       },

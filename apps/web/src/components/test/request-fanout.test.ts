@@ -1,23 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Guards on the three request patterns this codebase removed, each of which is
+ * Guards on the request patterns this codebase removed, each of which is
  * a one-line edit away from coming back:
  *
  *  1. the dashboard mounting `<RunList>` under a run query it already made
  *     (two `GET /api/runs` per page view, two `COUNT`s, for the same rows);
- *  2. the schedule CARD fetching a schedule's runs to count three numbers
- *     (N cards → N requests);
- *  3. the notification queries polling every 30s, which is only safe to slow
+ *  2. the notification queries polling every 30s, which is only safe to slow
  *     down while the realtime stream reconciles them on reconnect — the SSE
  *     protocol has no replay, so dropping the reconnect-side invalidation would
  *     leave a badge stale for a full poll interval;
- *  4. the reconciliation running on the FIRST connect too, which issued every
+ *  3. the reconciliation running on the FIRST connect too, which issued every
  *     notification and chat-session query twice on every page load;
- *  5. the agent page fetching the agent's runs a second time, unpaginated and
+ *  4. the agent page fetching the agent's runs a second time, unpaginated and
  *     under a key of its own, to learn whether there is any;
- *  6. a launch refetching the run lists of the page it is leaving;
- *  7. a skill or MCP-server page reading the lists only an agent page shows.
+ *  5. a launch refetching the run lists of the page it is leaving;
+ *  6. a skill or MCP-server page reading the lists only an agent page shows.
  *
  * Source-scanned rather than rendered: these modules import the SPA's typed API
  * client, which uses `import.meta.glob` and cannot be evaluated by the bun test
@@ -66,49 +64,47 @@ const code = (source: string) =>
     .replace(/^\s*\/\/.*$/gm, "");
 
 const DASHBOARD = read("../../pages/dashboard.tsx");
-const SCHEDULE_CARD = read("../schedule-card.tsx");
 const RUN_LIST = read("../run-list.tsx");
+const DASHBOARD_CONTENT = read("../../pages/dashboard-content.tsx");
+const RUNS_TABLE = read("../runs-table.tsx");
 const NOTIFICATIONS = read("../../hooks/use-notifications.ts");
 const GLOBAL_SYNC = read("../../hooks/use-global-run-sync.ts");
 const AGENT_ACTIONS = read("../package-detail/agent-actions.tsx");
+const ACTIONS_DROPDOWN = read("../package-detail/package-actions-dropdown.tsx");
 const MUTATIONS = read("../../hooks/use-mutations.ts");
 
 describe("dashboard reuses its own runs", () => {
-  it("renders the presentational rows, not a second fetching list", () => {
-    expect(DASHBOARD).toContain("<RunRows runs={runs.slice(0, RECENT_RUNS_COUNT)} />");
-    // `<RunList …>` here is what issues the duplicate query.
+  it("renders the rows it already holds, not a second fetching list", () => {
+    // The page hands its own rows down and the presentation layer trims them
+    // (rendered in `pages/test/dashboard.test.tsx`); what must never appear on
+    // either side is the FETCHING list, which would issue a second query for
+    // rows the page is already holding.
     expect(code(DASHBOARD)).not.toMatch(/<RunList[\s/>]/);
+    expect(code(DASHBOARD_CONTENT)).not.toMatch(/<RunList[\s/>]/);
+    expect(DASHBOARD_CONTENT).toContain("runs.slice(0, limit)");
   });
 
   it("keeps exactly one run query on the page", () => {
     expect([...DASHBOARD.matchAll(/usePaginatedRuns\(/g)]).toHaveLength(1);
   });
 
-  it("still exposes a fetching RunList for the pages that page through runs", () => {
+  it("keeps the table free of queries, and the fetching list exported", () => {
     // The split must not have turned the paginated list into a dead export:
-    // /runs, the agent tab and the schedule detail all rely on it.
+    // /runs, the agent tab and the schedule detail all rely on it. And the
+    // table must stay row-taking — the day it fetches for itself, mounting it
+    // under a page that already has the rows brings the duplicate query back.
     expect(RUN_LIST).toContain("export function RunList(");
-    expect(RUN_LIST).toContain("export function RunRows(");
-  });
-});
-
-describe("schedule cards read their counters from the schedule", () => {
-  it("does not fetch a schedule's runs per card", () => {
-    expect(code(SCHEDULE_CARD)).not.toContain("useScheduleRuns");
-    expect(code(SCHEDULE_CARD)).not.toContain("/runs");
-  });
-
-  it("reads the three counters served with the list payload", () => {
-    expect(SCHEDULE_CARD).toContain("schedule.running_runs");
-    expect(SCHEDULE_CARD).toContain("schedule.unread_count");
-    expect(SCHEDULE_CARD).toContain("schedule.last_run_number");
+    expect(RUNS_TABLE).toContain("export function RunsTable(");
+    expect(code(RUNS_TABLE)).not.toContain("useQuery");
+    expect(code(RUNS_TABLE)).not.toContain("usePaginatedRuns");
   });
 });
 
 describe("agent page", () => {
   it("reads whether the agent has runs off the detail it already holds", () => {
     expect(code(AGENT_ACTIONS)).not.toMatch(/use(Paginated)?Runs\(/);
-    expect(AGENT_ACTIONS).toContain("hasRuns={detail.last_run !== null}");
+    expect(code(ACTIONS_DROPDOWN)).not.toMatch(/use(Paginated)?Runs\(/);
+    expect(ACTIONS_DROPDOWN).toContain("!detail?.last_run");
   });
 
   it("marks the run lists stale on launch without refetching the page being left", () => {
@@ -124,12 +120,14 @@ describe("agent page", () => {
 });
 
 describe("package pages other than an agent's", () => {
-  // A skill page loaded the org's models and proxies, which only the
-  // agent configuration tab shows.
+  // The org's models and proxies are shown only by an agent's settings. The
+  // page itself reads neither: the agent settings view and the model alert
+  // (agents only) each read their own.
   it("do not read the model and proxy lists", () => {
     const detail = read("../../pages/unified-package-detail.tsx");
-    expect(detail).toContain('useProxies(type === "agent")');
-    expect(detail).toContain('useModels(type === "agent")');
+    expect(detail).not.toContain("useProxies(");
+    expect(detail).not.toContain("useModels(");
+    expect(detail).toContain('{type === "agent" && <ModelRequiredAlert');
   });
 });
 

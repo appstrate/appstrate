@@ -149,12 +149,12 @@ export function createWebhooksRouter() {
   // `/x/*` matches `/x` too, so this covers the collection and every by-id route.
   router.use("/api/webhooks/*", enterCallerSpace);
 
-  // Issue #172 (extension) — webhooks are space-scoped (or org-level and span
+  // Webhooks are space-scoped (or org-level and span
   // every space). A pinned credential — a key or an end-user token — must never
   // reach a webhook outside its space, so we narrow it to `SpaceScope`; a caller
   // that pins none keeps `OrgScope` (full org reach) and filters via query
   // params. Keyed on the pinned space, NOT on `authMethod === "api_key"`, for
-  // the reason `pinnedSpaceScopeGuard` is (issue #1313): an end-user token pins
+  // the reason `pinnedSpaceScopeGuard` is: an end-user token pins
   // a space too. Safe here because nothing on `/api/webhooks*` writes `spaceId`
   // for a session — the route family is not in `SPACE_SCOPED_PREFIXES` and the
   // space-context applier deliberately never writes that key, so it only ever
@@ -175,11 +175,10 @@ export function createWebhooksRouter() {
   // (`/api/oauth/clients`, `/api/end-users`, `/api/runs/remote`) and as
   // `middleware/idempotency.ts` states: "Authorization belongs before this
   // middleware". A cached replay returns the stored response WITHOUT reaching
-  // the handler, and the cache key is `idem:{orgId}:{spaceId}:{key}` — it
-  // carries no caller identity. With the check only inside the handler, any
-  // member of the same org and space who replayed the creating request's
-  // `Idempotency-Key` with the same body was handed the response, and this
-  // route's response is the one that carries the webhook SECRET.
+  // the handler. The cache key is `idem:{orgId}:{spaceId}:{principal}:{key}`, so
+  // another caller is never replayed this response; the coarse grant still
+  // belongs before `idempotency()` because a principal's own replay must not
+  // outlive its permission — and this route's response carries the webhook SECRET.
   //
   // The per-`level` verdict stays in the handler: it reads the BODY's space,
   // which no middleware has parsed yet.
@@ -385,8 +384,8 @@ export function createWebhooksRouter() {
   router.get("/api/webhooks/:id/deliveries", rateLimit(300), async (c) => {
     await loadWebhookForAction(c, "read");
     // Coerce + bound the limit: a raw `Number("-5")`/`Number("x")` (NaN)
-    // would otherwise reach the query and 500. Out-of-range / unparseable
-    // falls back to 20 — `parseListPagination` owns that idiom.
+    // would otherwise reach the query and 500. Anything but 1..100 is a 400 —
+    // `parseListPagination` owns that rule.
     const { limit } = parseListPagination(c, { defaultLimit: 20 });
     const startingAfter = c.req.query("startingAfter");
     const { data, hasMore } = await listDeliveries(webhookScope(c), c.req.param("id")!, {

@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useRef, useState } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal } from "./modal";
-import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "./spinner";
+import { FormModal } from "./form-modal";
 import { AgentInputForm, type AgentInputFormHandle } from "./agent-input-form";
 import { initialInputValues } from "../lib/agent-input";
 import { useModels, useAgentModel } from "../hooks/use-models";
-import { isModelPinUnavailable, isModelSelectable } from "../lib/model-selectability";
+import { isModelSelectable } from "@appstrate/core/model-selectable";
+import { isModelPinUnavailable } from "../lib/model-selectability";
+import { ModelBillingHint } from "./model-billing-hint";
 import type { AgentDetail } from "@appstrate/shared-types";
 
 interface RunModalProps {
@@ -20,87 +20,53 @@ interface RunModalProps {
   initialInput?: Record<string, unknown>;
 }
 
-export function RunModal({
-  open,
-  onClose,
-  agent,
-  onSubmit,
-  isPending,
-  initialInput,
-}: RunModalProps) {
-  const { t } = useTranslation(["agents", "common"]);
-
-  const guardedClose = () => {
-    if (!isPending) onClose();
-  };
-
-  return (
-    <Modal
-      open={open}
-      onClose={guardedClose}
-      title={t("input.title", { name: agent.display_name })}
-      actions={null}
-    >
-      {open && (
-        <RunModalForm
-          agent={agent}
-          onClose={guardedClose}
-          onSubmit={onSubmit}
-          isPending={isPending}
-          initialInput={initialInput}
-        />
-      )}
-    </Modal>
-  );
+/** Mounted afresh at each opening, so the fields seed from the agent again. */
+export function RunModal({ open, ...props }: RunModalProps) {
+  return open ? <RunModalForm {...props} /> : null;
 }
 
 function RunModalForm({
-  agent,
   onClose,
+  agent,
   onSubmit,
   isPending,
   initialInput,
-}: {
-  agent: AgentDetail;
-  onClose: () => void;
-  onSubmit: (input: Record<string, unknown>) => void;
-  isPending?: boolean;
-  initialInput?: Record<string, unknown>;
-}) {
-  const { t } = useTranslation(["agents", "common"]);
+}: Omit<RunModalProps, "open">) {
+  const { t } = useTranslation(["agents"]);
+  const inputRef = useRef<AgentInputFormHandle>(null);
   // `agent.input` carries both halves: the AFPS wrapper and this space's
   // stored values + locks.
   const [inputData, setInputData] = useState<Record<string, unknown>>(() =>
     initialInputValues(agent.input, agent.input, initialInput),
   );
-  const inputFormRef = useRef<AgentInputFormHandle>(null);
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (inputRef.current?.validate() ?? true) onSubmit(inputData);
+  };
 
   return (
-    <div className="space-y-5">
+    <FormModal
+      onClose={onClose}
+      title={t("input.title", { name: agent.display_name })}
+      onSubmit={submit}
+      isPending={isPending}
+      submitLabel={t("input.run")}
+    >
       <ResolvedModelHint packageId={agent.id} />
       <AgentInputForm
-        ref={inputFormRef}
+        ref={inputRef}
         wrapper={agent.input}
         settings={agent.input}
         value={inputData}
         onChange={setInputData}
-        onSubmit={onSubmit}
       />
-
-      <div className="flex justify-end gap-2 pt-1">
-        <Button variant="outline" onClick={onClose} disabled={isPending}>
-          {t("btn.cancel")}
-        </Button>
-        <Button onClick={() => inputFormRef.current?.submit()} disabled={isPending}>
-          {isPending ? <Spinner /> : t("input.run")}
-        </Button>
-      </div>
-    </div>
+    </FormModal>
   );
 }
 
 /**
- * Resolved-model transparency line (#635) — mirrors the server's resolution
+ * Resolved-model transparency line — mirrors the server's resolution
  * cascade (agent model setting > org default) so the user sees which model
  * the run will use BEFORE triggering. The org default is resolved at run
  * creation, so a default changed mid-session silently applies to the next
@@ -144,9 +110,10 @@ function ResolvedModelHint({ packageId }: { packageId: string }) {
   const source = pinned ? t("input.modelSourceAgent") : t("input.modelSourceOrgDefault");
 
   return (
-    <div className="space-y-1">
+    <div className="flex flex-col gap-1">
       <p className="text-muted-foreground text-xs" data-testid="run-resolved-model">
-        {t("input.modelResolved", { name: resolved.label, source })}
+        {t("input.modelResolved", { name: resolved.label, source })}{" "}
+        <ModelBillingHint billedTo={resolved.billed_to} />
       </p>
       {isModelPinUnavailable(orgModels, agentModel?.modelId) && (
         <p className="text-warning text-xs" data-testid="run-model-pin-unavailable">

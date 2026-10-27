@@ -6,12 +6,14 @@ import { useTranslation } from "react-i18next";
 import { useAppForm } from "../hooks/use-app-form";
 import { cn } from "@appstrate/ui/cn";
 import { Button } from "@appstrate/ui/components/button";
+import { FieldError } from "@appstrate/ui/components/field";
 import { useTheme } from "../stores/theme-store";
 import { useAuth } from "../hooks/use-auth";
 import { useAppConfig } from "../hooks/use-app-config";
 import { Mail } from "lucide-react";
 import { SocialSignInButton } from "./social-sign-in-button";
 import { EmailField, PasswordField } from "./auth-fields";
+import { AuthLink } from "./auth-message";
 import { LegalFooter } from "./legal-footer";
 import { EmailNotVerifiedError } from "../lib/auth-errors";
 import { errorMessage } from "../lib/mutation-error";
@@ -81,15 +83,12 @@ export function LoginForm({
       <div className="text-muted-foreground text-center text-sm">
         {switchAuthSlot ??
           (features.signupDisabled ? (
-            // Closed-mode self-host (issue #228) — no public registration.
+            // Closed-mode self-host — no public registration.
             // Existing accounts and invitees still sign in normally above.
             <span>{t("login.signupDisabled")}</span>
           ) : (
             <>
-              {t("login.noAccount")}{" "}
-              <Link to="/register" className="hover:text-primary underline underline-offset-4">
-                {t("login.signup")}
-              </Link>
+              {t("login.noAccount")} <AuthLink to="/register">{t("login.signup")}</AuthLink>
             </>
           ))}
       </div>
@@ -120,7 +119,7 @@ export function LoginForm({
           <PasswordField
             register={register}
             name="password"
-            label={t("login.password")}
+            label={t("common:claim.passwordLabel")}
             invalid={showError("password")}
             error={errors.password?.message}
             autoComplete="current-password"
@@ -135,7 +134,7 @@ export function LoginForm({
               )
             }
           />
-          {errors.root && <p className="text-destructive text-sm">{errors.root.message}</p>}
+          {errors.root && <FieldError>{errors.root.message}</FieldError>}
         </div>
         <Button size="lg" className="w-full" type="submit" disabled={isSubmitting}>
           {isSubmitting ? t("loading") : t("login.login")}
@@ -161,7 +160,7 @@ export function LoginForm({
                   type="button"
                   onClick={() => navigate("/magic-link", { state: { email: getValues("email") } })}
                 >
-                  <Mail className="h-4 w-4" />
+                  <Mail />
                   {t("login.magicLink")}
                 </Button>
               )}

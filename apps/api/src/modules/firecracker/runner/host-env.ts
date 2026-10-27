@@ -69,7 +69,7 @@ const firecrackerEnvSchema = z.object({
   // read-only ext4 config drive) — an escape hatch for bisecting a boot
   // regression or developing without the broker.
   FIRECRACKER_CREDENTIAL_BROKER: z.enum(["mmds", "config-drive"]).default("mmds"),
-  // Prebuilt guest-artifact resolution (issue #819, phase 2). At boot the
+  // Prebuilt guest-artifact resolution. At boot the
   // daemon downloads versioned, checksum-verified vmlinux + rootfs from this
   // repo's GitHub Release assets (see DEFAULT_ARTIFACTS_BASE_URL in
   // runner/artifacts.ts) instead of requiring an on-host docker build.

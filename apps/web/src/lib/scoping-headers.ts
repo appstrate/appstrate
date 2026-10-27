@@ -1,15 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { VIEW_AS_HEADER, VIEW_AS_QUERY } from "@appstrate/core/permissions";
+import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
 import { getCurrentOrgId } from "../stores/org-store";
 import { getCurrentSpaceId } from "../stores/space-store";
 import { getViewAsHeader } from "../stores/view-as-store";
 
 /**
- * The org/space/persona scoping headers, for the hand-rolled fetches that
- * bypass the typed client (uploads, module shells' `getHeaders` prop). Shared
- * with the client middleware in `api/client.ts` so the names cannot drift.
- * A hook caller passes the persona and space it read reactively, so a
+ * The org/space/persona headers for hand-rolled fetches that bypass the typed
+ * client. A hook caller passes the persona and space it read reactively, so a
  * callback built on them changes identity when either does.
  */
 export function buildScopingHeaders(
@@ -25,13 +23,16 @@ export function buildScopingHeaders(
 }
 
 /**
- * Add the persona to a `/api/realtime/*` URL: those routes refuse the header,
- * and `EventSource` sends none anyway. `viewAs` is passed in rather than read
- * from the store so an effect can depend on it — a stream reads its URL once,
- * at connect, and would otherwise keep streaming the caller's real authority
- * into a previewed page.
+ * The scoping headers a request still lacks. One that names another org (a reader
+ * link) leaves the previewed context, so it carries no persona: the server judges
+ * the persona per org, so another space of the same org keeps it.
  */
-export function withViewAsParam(url: string, viewAs: string | null): string {
-  if (!viewAs) return url;
-  return `${url}${url.includes("?") ? "&" : "?"}${VIEW_AS_QUERY}=${encodeURIComponent(viewAs)}`;
+export function missingScopingHeaders(
+  present: Headers,
+  scoping: Record<string, string> = buildScopingHeaders(),
+): Record<string, string> {
+  const otherOrg = present.has("X-Org-Id") && present.get("X-Org-Id") !== scoping["X-Org-Id"];
+  return Object.fromEntries(
+    Object.entries(scoping).filter(([k]) => !present.has(k) && !(otherOrg && k === VIEW_AS_HEADER)),
+  );
 }

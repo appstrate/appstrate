@@ -204,7 +204,7 @@ export async function syncSystemPackagesToDb(
     // `@appstrate/core/system-packages`) is therefore NOT picked up by a
     // redeploy — the hash still matches and the stale derivation survives.
     // Shipping such a change means bumping the affected system packages'
-    // versions, exactly as issue #928 concluded. Do not "fix" this by
+    // versions. Do not "fix" this by
     // dropping the guard; every boot would go back to 594 no-op round trips.
     if (
       existingVersion &&
@@ -256,7 +256,7 @@ export async function syncSystemPackagesToDb(
 
   // Step 2 — register every loaded version in `package_versions` so semver
   // ranges (e.g. `^1.0.0`) keep resolving when a newer major ships
-  // alongside the legacy line. createVersionAndUpload is idempotent
+  // alongside the previous line. createVersionAndUpload is idempotent
   // (skip-if-exists).
   //
   // Published versions are immutable. `zipArtifact` produces reproducible

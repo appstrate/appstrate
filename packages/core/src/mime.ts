@@ -31,8 +31,7 @@ export {
 
 /**
  * True for an `image/*` mime — the only content any surface renders as a
- * thumbnail (the gallery tiles, the run Files tab tiles, the chat attachment
- * chips).
+ * thumbnail (the file tiles, the chat attachment chips).
  *
  * Lives here, not in the web shell, for the same reason
  * `PUBLISHED_FILE_LOG_EVENT` lives in `@appstrate/core/file-uri`: two

@@ -22,7 +22,7 @@ import { logger } from "../lib/logger.ts";
  *   testable claim, and the only alternative — reading the real pino line back
  *   off `process.stdout` — is banned repo-wide (`no-restricted-syntax`: one
  *   process runs every suite, so a global capture collects other suites' output
- *   and fails non-deterministically, issue #1180).
+ *   and fails non-deterministically).
  */
 export function errorHandler(err: Error, c: Context<AppEnv>, log: Logger = logger): Response {
   const requestId: string = c.get("requestId");

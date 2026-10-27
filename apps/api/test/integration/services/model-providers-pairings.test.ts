@@ -12,8 +12,9 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
-import { createTestUser, createTestOrg, type TestOrg } from "../../helpers/auth.ts";
+import { addOrgMember, createTestUser, createTestOrg, type TestOrg } from "../../helpers/auth.ts";
 import {
+  cancelPairing,
   cleanupExpiredPairings,
   consumePairing,
   createPairing,
@@ -48,6 +49,7 @@ describe("createPairing", () => {
   it("inserts a row with the SHA-256 of the secret portion (plaintext never persisted)", async () => {
     const result = await createPairing({
       userId: fix.userId,
+      ownerUserId: fix.userId,
       orgId: fix.org.id,
       providerId: "test-oauth",
       platformUrl: PLATFORM_URL,
@@ -71,6 +73,48 @@ describe("createPairing", () => {
     expect(row!.providerId).toBe("test-oauth");
     expect(row!.consumedAt).toBeNull();
   });
+
+  it("refuses a user who is not a member of the organization with 403, inserting no pairing row", async () => {
+    const stranger = await createTestUser();
+
+    const refusal = await createPairing({
+      userId: stranger.id,
+      ownerUserId: stranger.id,
+      orgId: fix.org.id,
+      providerId: "test-oauth",
+      platformUrl: PLATFORM_URL,
+      ttlSeconds: 300,
+    }).catch((err: unknown) => err);
+
+    expect(refusal).toBeInstanceOf(ApiError);
+    expect((refusal as ApiError).status).toBe(403);
+    expect(
+      await db
+        .select({ id: modelProviderPairings.id })
+        .from(modelProviderPairings)
+        .where(eq(modelProviderPairings.orgId, fix.org.id)),
+    ).toEqual([]);
+  });
+
+  it("mints a pairing for a member of the organization", async () => {
+    const member = await createTestUser();
+    await addOrgMember(fix.org.id, member.id, "member");
+
+    const { id } = await createPairing({
+      userId: member.id,
+      ownerUserId: member.id,
+      orgId: fix.org.id,
+      providerId: "test-oauth",
+      platformUrl: PLATFORM_URL,
+      ttlSeconds: 300,
+    });
+
+    const rows = await db
+      .select({ userId: modelProviderPairings.userId })
+      .from(modelProviderPairings)
+      .where(eq(modelProviderPairings.id, id));
+    expect(rows).toEqual([{ userId: member.id }]);
+  });
 });
 
 describe("consumePairing", () => {
@@ -83,6 +127,7 @@ describe("consumePairing", () => {
   async function mint(ttlSeconds = 300, providerId = "test-oauth"): Promise<string> {
     const { token } = await createPairing({
       userId: fix.userId,
+      ownerUserId: fix.userId,
       orgId: fix.org.id,
       providerId,
       platformUrl: PLATFORM_URL,
@@ -97,6 +142,21 @@ describe("consumePairing", () => {
     expect(consumed.providerId).toBe("test-oauth");
     expect(consumed.orgId).toBe(fix.org.id);
     expect(consumed.consumedAt).toBeInstanceOf(Date);
+    expect(consumed.ownerUserId).toBe(fix.userId);
+  });
+
+  it("returns the owner the pairing was minted for: null for the organization", async () => {
+    const { token } = await createPairing({
+      userId: fix.userId,
+      ownerUserId: null,
+      orgId: fix.org.id,
+      providerId: "test-oauth",
+      platformUrl: PLATFORM_URL,
+      ttlSeconds: 300,
+    });
+    const consumed = await consumePairing(token);
+    expect(consumed.userId).toBe(fix.userId);
+    expect(consumed.ownerUserId).toBeNull();
   });
 
   it("throws gone on expired token", async () => {
@@ -149,12 +209,13 @@ describe("getPairing", () => {
   it("returns the row for the same org", async () => {
     const { id } = await createPairing({
       userId: fix.userId,
+      ownerUserId: fix.userId,
       orgId: fix.org.id,
       providerId: "test-oauth",
       platformUrl: PLATFORM_URL,
       ttlSeconds: 300,
     });
-    const row = await getPairing(id, fix.org.id);
+    const row = await getPairing(id, fix.org.id, fix.userId);
     expect(row).not.toBeNull();
     expect(row!.id).toBe(id);
   });
@@ -162,6 +223,7 @@ describe("getPairing", () => {
   it("returns null for a different org (no enumeration)", async () => {
     const { id } = await createPairing({
       userId: fix.userId,
+      ownerUserId: fix.userId,
       orgId: fix.org.id,
       providerId: "test-oauth",
       platformUrl: PLATFORM_URL,
@@ -169,8 +231,23 @@ describe("getPairing", () => {
     });
     const otherUser = await createTestUser();
     const { org: otherOrg } = await createTestOrg(otherUser.id);
-    const row = await getPairing(id, otherOrg.id);
+    const row = await getPairing(id, otherOrg.id, fix.userId);
     expect(row).toBeNull();
+  });
+
+  it("returns null and cancels nothing for another member of the same org", async () => {
+    const { id } = await createPairing({
+      userId: fix.userId,
+      ownerUserId: fix.userId,
+      orgId: fix.org.id,
+      providerId: "test-oauth",
+      platformUrl: PLATFORM_URL,
+      ttlSeconds: 300,
+    });
+    const otherMember = await createTestUser();
+    expect(await getPairing(id, fix.org.id, otherMember.id)).toBeNull();
+    await cancelPairing(id, fix.org.id, otherMember.id);
+    expect(await getPairing(id, fix.org.id, fix.userId)).not.toBeNull();
   });
 });
 
@@ -184,6 +261,7 @@ describe("cleanupExpiredPairings", () => {
   it("drops only rows past the 1h grace window, keeps fresh + recently-expired rows", async () => {
     const fresh = await createPairing({
       userId: fix.userId,
+      ownerUserId: fix.userId,
       orgId: fix.org.id,
       providerId: "test-oauth",
       platformUrl: PLATFORM_URL,
@@ -192,6 +270,7 @@ describe("cleanupExpiredPairings", () => {
     // Recently expired — past expires_at but still inside the grace window.
     const recent = await createPairing({
       userId: fix.userId,
+      ownerUserId: fix.userId,
       orgId: fix.org.id,
       providerId: "test-oauth",
       platformUrl: PLATFORM_URL,
@@ -200,6 +279,7 @@ describe("cleanupExpiredPairings", () => {
     // Old: backdate expires_at to 2h ago — outside the 1h grace window.
     const old = await createPairing({
       userId: fix.userId,
+      ownerUserId: fix.userId,
       orgId: fix.org.id,
       providerId: "test-oauth",
       platformUrl: PLATFORM_URL,
@@ -213,8 +293,8 @@ describe("cleanupExpiredPairings", () => {
     const deleted = await cleanupExpiredPairings();
     expect(deleted).toBe(1);
 
-    expect(await getPairing(fresh.id, fix.org.id)).not.toBeNull();
-    expect(await getPairing(recent.id, fix.org.id)).not.toBeNull();
-    expect(await getPairing(old.id, fix.org.id)).toBeNull();
+    expect(await getPairing(fresh.id, fix.org.id, fix.userId)).not.toBeNull();
+    expect(await getPairing(recent.id, fix.org.id, fix.userId)).not.toBeNull();
+    expect(await getPairing(old.id, fix.org.id, fix.userId)).toBeNull();
   });
 });

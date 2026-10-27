@@ -14,6 +14,7 @@ import {
   restoreProtectedResources,
   resolveProtectedResource,
   isProtectedResourceUri,
+  ensureProtectedResourcesMintable,
 } from "../../src/lib/protected-resources.ts";
 
 // The registry is a process-wide singleton shared with the live app. Snapshot it
@@ -87,5 +88,47 @@ describe("protected-resource registry", () => {
     resetProtectedResources();
     expect(isProtectedResourceUri("https://x/api/mcp/o/acme")).toBe(false);
     expect(resolveProtectedResource("/api/mcp/o/acme")).toBeUndefined();
+  });
+
+  it("lists the resource and the URIs enclosing it as accepted audiences", () => {
+    registerProtectedResourceFamily({
+      ...mcpFamily,
+      enclosingUris: (uri: string) => (uri.endsWith("/acme") ? ["https://x/org"] : []),
+    });
+    expect(resolveProtectedResource("/api/mcp/o/acme")?.accepted).toEqual([
+      "https://x/api/mcp/o/acme",
+      "https://x/org",
+    ]);
+    expect(resolveProtectedResource("/api/mcp/o/globex")?.accepted).toEqual([
+      "https://x/api/mcp/o/globex",
+    ]);
+  });
+
+  it("accepts only the resource itself when the family declares no enclosing URIs", () => {
+    registerProtectedResourceFamily(mcpFamily);
+    expect(resolveProtectedResource("/api/mcp/o/acme")?.accepted).toEqual([
+      "https://x/api/mcp/o/acme",
+    ]);
+  });
+
+  it("asks the owning family to make each owned URI mintable, once, and skips unowned URIs", async () => {
+    const calls: string[] = [];
+    registerProtectedResourceFamily({
+      ...mcpFamily,
+      ensureMintable: async (uri: string) => {
+        calls.push(uri);
+      },
+    });
+    await ensureProtectedResourcesMintable([
+      "https://x/api/mcp/o/acme",
+      "https://x/api/other",
+      "https://x/api/mcp/o/globex",
+    ]);
+    expect(calls).toEqual(["https://x/api/mcp/o/acme", "https://x/api/mcp/o/globex"]);
+  });
+
+  it("is a no-op for a family without ensureMintable", async () => {
+    registerProtectedResourceFamily(mcpFamily);
+    await ensureProtectedResourcesMintable(["https://x/api/mcp/o/acme"]);
   });
 });

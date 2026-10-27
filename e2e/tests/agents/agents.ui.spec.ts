@@ -80,7 +80,7 @@ test.describe("Agent visibility in UI", () => {
 
   test("Schedules page loads for current space context", async ({ authedPage: page }) => {
     await page.goto("/schedules");
-    await expect(page.getByRole("heading", { level: 2 }).first()).toBeVisible({
+    await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible({
       timeout: 10_000,
     });
   });

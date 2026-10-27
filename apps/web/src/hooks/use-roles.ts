@@ -2,9 +2,9 @@
 
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { useQueryClient } from "@tanstack/react-query";
-import { SPACE_ROLE_PRESETS } from "@appstrate/core/permissions";
+import { SPACE_ROLE_PRESETS, type OrgRole } from "@appstrate/core/permissions";
 import { $api, type components } from "../api/client";
+import { useInvalidatePaths } from "./use-invalidate-paths";
 import { useOrgOnlyScope } from "./use-org-scope";
 import { usePermissions, useSpaceGrant } from "./use-permissions";
 
@@ -33,21 +33,16 @@ export function useRoleVocabulary() {
   );
 }
 
-/**
- * Role and space-membership writes refresh the catalogs, the
- * spaces' `permissions` (which also carry the caller's own effective set, so a
- * member editing their own row sees it change), and the member lists' role
- * names.
- */
-export function useInvalidateRoles() {
-  const qc = useQueryClient();
-  return () => {
-    void qc.invalidateQueries({ queryKey: ["get", "/api/roles"] });
-    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}/roles"] });
-    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces"] });
-    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}/members"] });
-  };
-}
+/** Role and membership writes refresh the catalogs, the spaces' `permissions` (which carry the caller's own effective set) and the member lists' role names. */
+export const useInvalidateRoles = () =>
+  useInvalidatePaths(
+    "/api/roles",
+    "/api/spaces/{id}/roles",
+    "/api/spaces",
+    "/api/spaces/{id}/members",
+    // Each org member carries the spaces they reach and their role there.
+    "/api/orgs/{orgId}",
+  );
 
 export function useCreateRole() {
   const invalidate = useInvalidateRoles();
@@ -87,13 +82,7 @@ export function spaceRoleValue(role: {
   return role.preset_role ? `preset:${role.preset_role}` : `custom:${role.custom_role_id}`;
 }
 
-/**
- * A preset is a platform constant with no org-authored name, so its slug is
- * translated; a custom bundle renders the name its author typed.
- *
- * `t` is a parameter, not a hook call, so render paths that already hold a `t`
- * on another namespace reuse this — hence the namespace-qualified key.
- */
+/** A preset's slug is translated; a custom bundle renders its author's name. `t` is a parameter (hence the namespace-qualified key) so paths holding another namespace's `t` reuse it. */
 export function spaceRoleLabel(
   role: { kind: "preset" | "custom"; key: string; name: string } | null | undefined,
   t: (key: string) => string,
@@ -132,17 +121,9 @@ export function memberRoleValue(
 }
 
 /**
- * Space pickers use the caller's grantable catalog; org invitations use the org
- * catalog.
- *
- * `enabled: false` fetches NEITHER — for a picker that is mounted but currently
- * asking about no space at all, where the org catalog is not the fallback the
- * caller wants but a request for nothing.
- *
- * The space arm is gated on THAT space's own grant, not on `can`: `can` answers
- * over the space the caller is standing in, and a picker may ask about another
- * one (the share dialog asks about a package's home). Reading the row loses
- * nothing — the server unions the org half into every space's `permissions`.
+ * Space pickers use the caller's grantable catalog; org invitations use the org catalog.
+ * `enabled: false` fetches NEITHER. The space arm is gated on THAT space's grant, not on `can`
+ * (which answers for the current space; the share dialog asks about a package's home).
  */
 export function useSpaceRoleOptions(spaceId?: string, enabled = true) {
   const { t } = useTranslation("settings");
@@ -195,5 +176,29 @@ export function useSpaceRoleOptions(spaceId?: string, enabled = true) {
     isLoading: query.isLoading,
     error: query.error,
     refetch: query.refetch,
+  };
+}
+
+/**
+ * What each organization role grants (`GET /api/org-roles`, module contributions included), as
+ * `role → permissions`; `undefined` until it answers, and with `error` when it failed. The same
+ * for every caller.
+ */
+export function useOrgRoleGrants(): {
+  grants: Map<OrgRole, Set<string>> | undefined;
+  error: unknown;
+} {
+  const scope = useOrgOnlyScope();
+  const { data, error } = $api.useQuery(
+    "get",
+    "/api/org-roles",
+    { params: { header: scope.header } },
+    { enabled: scope.enabled, staleTime: Infinity },
+  );
+  return {
+    grants: data
+      ? new Map(data.data.map((entry) => [entry.role, new Set(entry.permissions)]))
+      : undefined,
+    error,
   };
 }

@@ -1,16 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Does a saved model row answer for its own limits and modalities, or is it
- * still following the catalog? `GET /api/models` returns RESOLVED values, so
- * "carries a value" is not "overrides": the answer is a comparison against the
- * registry entry. `label` is deliberately out of it.
- */
+// Does a saved model row override the catalog? `GET /api/models` returns RESOLVED values,
+// so "carries a value" is not "overrides": compare against the registry entry (`label` excluded).
 
 import { MODEL_INPUT_MODALITIES, type ModelInputModality } from "@appstrate/core/module";
 import { sameSet } from "./strings";
 
-/** The stored row's four catalog-derivable fields — an `OrgModel` fits. */
+/** The stored row's four catalog-derivable fields. */
 export interface StoredModelValues {
   input?: ModelInputModality[] | null;
   contextWindow?: number | null;
@@ -18,7 +14,7 @@ export interface StoredModelValues {
   reasoning?: boolean | null;
 }
 
-/** The registry entry that would answer for them — a catalog model fits. */
+/** The registry entry that would answer for them. */
 export interface CatalogModelValues {
   contextWindow: number;
   maxTokens?: number | null;

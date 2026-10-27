@@ -178,10 +178,9 @@ type DockerCpSpawn = (
  *
  * The scope is deliberately "find the socket", not "configure the client".
  * `DOCKER_TLS_VERIFY`, `DOCKER_CERT_PATH`, `DOCKER_CONTEXT` and `DOCKER_CONFIG`
- * used to reach the CLI (it inherited `process.env` wholesale) and no longer
- * do. That is a non-event for the documented deployment — a plaintext
+ * do not reach the CLI. That is a non-event for the documented deployment — a plaintext
  * socket-proxy on `DOCKER_HOST` — and it BREAKS a TLS-secured or
- * context-selected remote daemon, which would now be contacted unverified or
+ * context-selected remote daemon, which would be contacted unverified or
  * not found. Widening the list is the fix if that setup ever ships; each added
  * name also becomes reachable from an `=`-less `--env-file` line, so add only
  * names that carry no secret.
@@ -411,12 +410,7 @@ export function isContainerPathSafeForMount(containerPath: string): boolean {
  *     world-writable inside the container.
  *   - {@link STICKY_STAGED_DIRS} are the exception: `/tmp` and `/var/tmp` are
  *     1777 in every base image, and 0755 there would break every runtime that
- *     writes to them. The world-writable half is what matters and is what
- *     lands; the sticky bit is requested but not reachable from here — Bun's
- *     `fs.chmod` masks off every bit above 0o777 (setuid/setgid/sticky alike,
- *     measured on 1.3.11), so 0777 is what the staged directory actually
- *     carries. Nothing depends on the sticky bit: the runner container has one
- *     user.
+ *     writes to them, so they are staged 1777, sticky bit included.
  *
  * Throws (after wiping the partial staging directory) on an unsafe path or an
  * I/O failure, so the per-spec try/catch in `integrations-boot.ts` records it.
@@ -697,7 +691,7 @@ export async function writeSecretEnvFile(
 
 /**
  * The sidecar's own IPv4 on the per-run network, where the transparent egress
- * plane (#779) binds. Binding to that specific IP (not 0.0.0.0) keeps
+ * plane binds. Binding to that specific IP (not 0.0.0.0) keeps
  * :53/:443/:80 off the sidecar's other interfaces (the shared egress network) —
  * only this run's containers can reach them. Low-port binds require the
  * platform to have granted `net.ipv4.ip_unprivileged_port_start=0` on the
@@ -723,7 +717,7 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
   const hostTempDirsByContainer: Map<string, string[]> = new Map();
   let runNetwork: string | null = null;
   /**
-   * #779 — `null` when the setup failed: spawn() then omits
+   * `null` when the setup failed: spawn() then omits
    * `--dns` and the runner degrades to the proxy-env-only contract.
    */
   let transparentEgress: TransparentEgressPlane | null = null;
@@ -752,7 +746,7 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
         network,
         inspect: (name) => dockerExec(["network", "inspect", name]),
       });
-      // #779 — transparent egress plane for proxy-unaware HTTP clients.
+      // Transparent egress plane for proxy-unaware HTTP clients.
       transparentEgress = await startTransparentEgressPlane({
         ipv4: () => sidecarIpOn(network),
         policyForPeer: policyForRunnerPeer(peers.runnerOf, transparentPolicies),
@@ -846,7 +840,7 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
 
       const networkFlags = ["--network", runNetwork];
 
-      // #779 — transparent egress for plain-CONNECT egress runners
+      // Transparent egress for plain-CONNECT egress runners
       // (`caCertHostPath === null`). `--dns` points the embedded DNS
       // forwarder (127.0.0.11) at the sidecar's responder, so external names
       // resolve to the sidecar's SNI-passthrough splicer and proxy-unaware
@@ -980,7 +974,7 @@ function createDockerIntegrationRuntimeAdapter(): IntegrationRuntimeAdapter {
         }
       }
       hostTempDirsByContainer.clear();
-      // #779 — tear down the transparent egress plane (DNS responder +
+      // Tear down the transparent egress plane (DNS responder +
       // SNI-passthrough splicers). Idempotent: close() resolves even when
       // the underlying socket already died.
       await transparentEgress?.close();

@@ -56,7 +56,11 @@ import {
   forceRefreshOAuthModelProviderToken,
   resolveOAuthTokenForSidecar,
 } from "../services/model-providers/token-resolver.ts";
-import { serializeOAuthTokenResponse } from "../services/model-providers/credentials.ts";
+import {
+  personalModelCredentialsAllowed,
+  personalModelCredentialsDisabled,
+  serializeOAuthTokenResponse,
+} from "../services/model-providers/credentials.ts";
 import {
   resolveLiveIntegrationCredentials,
   serializeIntegrationCredentialsWire,
@@ -348,7 +352,7 @@ export function createInternalRouter() {
     const { run } = await verifyRunToken(c);
     assertPlatformOriginOAuthAccess(run.runOrigin);
     const credentialId = c.req.param("credentialId");
-    await assertOAuthModelCredential(credentialId, run.orgId, run.modelCredentialId);
+    await assertOAuthModelCredential(credentialId, run);
     return c.json(
       serializeOAuthTokenResponse(await resolveOAuthTokenForSidecar(credentialId, run.orgId)),
     );
@@ -358,7 +362,7 @@ export function createInternalRouter() {
     const { run } = await verifyRunToken(c);
     assertPlatformOriginOAuthAccess(run.runOrigin);
     const credentialId = c.req.param("credentialId");
-    await assertOAuthModelCredential(credentialId, run.orgId, run.modelCredentialId);
+    await assertOAuthModelCredential(credentialId, run);
     return c.json(
       serializeOAuthTokenResponse(
         await forceRefreshOAuthModelProviderToken(credentialId, run.orgId),
@@ -675,14 +679,14 @@ export function createInternalRouter() {
         headers: { "Content-Type": "application/zip" },
       });
     }
-    // #588 — the spawn resolver pins the CONCRETE version (from
+    // The spawn resolver pins the CONCRETE version (from
     // `source.server.version`) and the sidecar forwards it here as `?version=`,
     // so the runnable bytes match the version's manifest the resolver read. The
     // version is server-resolved at run kickoff (not caller-chosen); we serve it
     // by exact match (yank-visibility already applied upstream). Past the system
     // short-circuit above, an absent `?version=` is unanswerable rather than a
-    // request for "latest": serving the newest published version is precisely
-    // the manifest/bytes skew #588 closed, so it fails loudly instead.
+    // request for "latest": serving the newest published version would skew
+    // the manifest from the bytes, so it fails loudly instead.
     const requestedVersion = c.req.query("version")?.trim();
     if (!requestedVersion) {
       throw invalidRequest(
@@ -778,7 +782,7 @@ export function createInternalRouter() {
       // system integration auto-active with no row); skip inactive ones.
       if (!(await isIntegrationActive(integrationId, run.spaceId))) continue;
       // Read the integration manifest AT the version frozen for this run
-      // (#686) so the authz check sees the same `source.server.name` the spawn
+      // so the authz check sees the same `source.server.name` the spawn
       // resolver did. No frozen entry (soft-resolved / legacy run) → draft.
       const res = await readIntegrationManifestForRun(
         integrationId,
@@ -847,40 +851,43 @@ function assertPlatformOriginOAuthAccess(runOrigin: "platform" | "remote"): void
  * Verify a `model_provider_credentials` row exists and is reachable by
  * this run. Three layers of checks:
  *
- *   1. Per-run pinning (fail-closed): only platform-origin runs that
- *      resolved to an OAuth model carry a pin (`runs.model_credential_id`),
- *      and the requested credentialId MUST equal it. A run with a NULL pin
- *      (platform-origin API-key-model run) has NO legitimate reason to read
- *      ANY OAuth credential, so it is rejected outright — a leaked run
- *      token from such a run must not be able to enumerate the org's OAuth
- *      credentials.
- *   2. Org-membership: the credential row exists and `orgId === runOrgId`.
- *   3. UUID well-formedness: malformed path params surface as 404 not 500.
+ *   1. Per-run pinning (fail-closed): the requested credentialId MUST equal
+ *      the run's launch credential (`runs.model_credential_id`). A run with
+ *      a NULL pin (a built-in model or an alias) has NO legitimate reason to
+ *      read ANY credential, so it is rejected outright — a leaked run token
+ *      from such a run must not be able to enumerate the org's credentials.
+ *   2. Org-membership: the credential row exists and `orgId === run.orgId`.
+ *   3. Owner: a personal credential (`owner_user_id` set) serves only the run
+ *      whose recorded payer (`runs.payer_user_id`) is its owner, and nothing
+ *      while the organization has personal credentials off. An organization
+ *      credential serves every run of the organization.
+ *   4. UUID well-formedness: malformed path params surface as 404 not 500.
  *
  * Remote-origin runs (where the pin is structurally absent) are already
  * rejected upstream by `assertPlatformOriginOAuthAccess`; the null-pin
  * rejection here makes the surface fail-closed even without that guard.
  */
-async function assertOAuthModelCredential(
-  credentialId: string,
-  runOrgId: string,
-  pinnedCredentialId: string | null,
-): Promise<void> {
+type VerifiedRun = Awaited<ReturnType<typeof verifyRunToken>>["run"];
+
+async function assertOAuthModelCredential(credentialId: string, run: VerifiedRun): Promise<void> {
   // Fail closed: no pin ⇒ no OAuth credential access, ever. Narrowing the
   // pin to a non-null string HERE (instead of an `!== null &&` short-circuit
   // that silently skips the equality gate) means the lookup below can only
   // ever be keyed by the run's own pinned credential.
-  if (pinnedCredentialId === null) {
+  if (run.modelCredentialId === null) {
     throw forbidden("Run has no OAuth model provider credential pinned");
   }
-  const pinned: string = pinnedCredentialId;
+  const pinned: string = run.modelCredentialId;
   if (pinned !== credentialId) {
     throw forbidden(`Credential ${credentialId} not pinned to this run`);
   }
-  let row: { orgId: string } | undefined;
+  let row: { orgId: string; ownerUserId: string | null } | undefined;
   try {
     [row] = await db
-      .select({ orgId: modelProviderCredentials.orgId })
+      .select({
+        orgId: modelProviderCredentials.orgId,
+        ownerUserId: modelProviderCredentials.ownerUserId,
+      })
       .from(modelProviderCredentials)
       // Keyed by the (non-null) pin — equal to the requested credentialId by
       // the gate above, so the run can only ever read its own credential.
@@ -899,7 +906,15 @@ async function assertOAuthModelCredential(
   if (!row) {
     throw notFound(`OAuth model provider credential ${credentialId} not found`);
   }
-  if (row.orgId !== runOrgId) {
+  if (row.orgId !== run.orgId) {
     throw forbidden(`Credential ${credentialId} not in run org`);
+  }
+  // One rule for the door: the run's recorded payer is the only member a personal
+  // credential may serve. An API-key run records no payer, so it never matches.
+  if (row.ownerUserId !== null && row.ownerUserId !== run.payerUserId) {
+    throw forbidden(`Credential ${credentialId} is another member's`);
+  }
+  if (row.ownerUserId !== null && !(await personalModelCredentialsAllowed(run.orgId))) {
+    throw personalModelCredentialsDisabled();
   }
 }

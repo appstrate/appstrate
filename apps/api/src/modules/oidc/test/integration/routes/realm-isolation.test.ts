@@ -25,7 +25,12 @@ import { describe, it, expect, beforeEach } from "bun:test";
 import { encodeBasicCredentials } from "better-auth/oauth2";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { user as userTable, session as sessionTable } from "@appstrate/db/schema";
+import {
+  user as userTable,
+  session as sessionTable,
+  organizationMembers,
+  orgInvitations,
+} from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../../test/helpers/redis.ts";
@@ -34,7 +39,12 @@ import {
   authHeaders,
   type TestContext,
 } from "../../../../../../test/helpers/auth.ts";
+import { seedInvitation } from "../../../../../../test/helpers/seed.ts";
 import oidcModule from "../../../index.ts";
+import {
+  OrgSignupClosedError,
+  resolveOrCreateOrgMembership,
+} from "../../../services/orgmember-mapping.ts";
 import { resetOidcGuardsLimiters } from "../../../auth/guards.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
@@ -166,6 +176,92 @@ describe("realm isolation", () => {
       { headers: { cookie } },
     );
     expect(res.status).toBe(200);
+  });
+
+  /** An account of the default space's end-user realm, signed in. */
+  async function endUserRealmAccount(email: string) {
+    const password = "Sup3rSecretPass!";
+    const { userId } = await signUpBA(email, password);
+    await db
+      .update(userTable)
+      .set({ realm: `end_user:${ctx.defaultSpaceId}` })
+      .where(eq(userTable.id, userId));
+    return { userId, cookie: await signInBA(email, password) };
+  }
+
+  it("end-user-realm cookie session is rejected on the OAuth client administration", async () => {
+    // A member, so the realm is the only thing left to refuse it.
+    const { userId, cookie } = await endUserRealmAccount("euser4@example.com");
+    await db.insert(organizationMembers).values({ orgId: ctx.orgId, userId, role: "admin" });
+    for (const path of ["/api/oauth/clients", "/api/oauth/scopes"]) {
+      const res = await app.request(path, { headers: { cookie, "X-Org-Id": ctx.orgId } });
+      expect(`${path}: ${res.status}`).toBe(`${path}: 403`);
+    }
+  });
+
+  it("an end-user-realm account cannot accept an invitation sent to its address", async () => {
+    const email = "invited@example.com";
+    const { userId, cookie } = await endUserRealmAccount(email);
+    const invitation = await seedInvitation({
+      orgId: ctx.orgId,
+      email,
+      invitedBy: ctx.user.id,
+      role: "admin",
+    });
+
+    const res = await app.request(`/invite/${invitation.token}/accept`, {
+      method: "POST",
+      headers: { cookie },
+    });
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ code: "not_a_platform_account" });
+
+    const members = await db
+      .select()
+      .from(organizationMembers)
+      .where(eq(organizationMembers.userId, userId));
+    expect(members).toHaveLength(0);
+    // The refusal rolled the claim back: the address's platform owner can still accept.
+    const [row] = await db
+      .select({ status: orgInvitations.status })
+      .from(orgInvitations)
+      .where(eq(orgInvitations.id, invitation.id));
+    expect(row?.status).toBe("pending");
+  });
+
+  it("an org-level client does not auto-join an end-user-realm account", async () => {
+    const { userId } = await endUserRealmAccount("joiner@example.com");
+    await expect(
+      resolveOrCreateOrgMembership({ id: userId, email: "joiner@example.com" }, ctx.orgId, {
+        allowSignup: true,
+        signupRole: "member",
+        signupSpaceAssignments: [],
+      }),
+    ).rejects.toBeInstanceOf(OrgSignupClosedError);
+    const members = await db
+      .select()
+      .from(organizationMembers)
+      .where(eq(organizationMembers.userId, userId));
+    expect(members).toHaveLength(0);
+  });
+
+  it("the SSE cookie branch refuses a member whose session is not of the platform realm", async () => {
+    // A member, so the session's realm is the only thing left to refuse it.
+    const { userId, cookie } = await endUserRealmAccount("stream@example.com");
+    await db.insert(organizationMembers).values({ orgId: ctx.orgId, userId, role: "admin" });
+    const res = await app.request(
+      `/api/realtime/runs?orgId=${ctx.orgId}&spaceId=${ctx.defaultSpaceId}`,
+      { headers: { cookie, Accept: "text/event-stream" } },
+    );
+    expect(res.status).toBe(401);
+
+    // Control: the same query on a platform session opens the stream.
+    const open = await app.request(
+      `/api/realtime/runs?orgId=${ctx.orgId}&spaceId=${ctx.defaultSpaceId}`,
+      { headers: { Cookie: ctx.cookie, Accept: "text/event-stream" } },
+    );
+    expect(open.status).toBe(200);
+    await open.body?.cancel();
   });
 
   it("session.realm is denormalized from user.realm at session create", async () => {

@@ -26,8 +26,7 @@ export const SLUG_REGEX = new RegExp(`^${SLUG_PATTERN}$`);
 /**
  * Canonical snake_case identifier pattern: a lowercase letter followed by
  * lowercase alphanumerics and underscores. Single source of truth for every
- * `^[a-z][a-z0-9_]*$` check in the codebase (previously re-declared verbatim
- * in `apps/web/src/lib/strings.ts` and inline Zod in the API).
+ * `^[a-z][a-z0-9_]*$` check in the codebase.
  *
  * Two distinct concepts share this exact alphabet:
  *  - **Credential / AFPS auth keys** — the sidecar substitution contract
@@ -66,6 +65,24 @@ export function parseScopedName(scopedName: string): { scope: string; name: stri
   const match = scopedName.match(SCOPED_NAME_REGEX);
   if (!match) return null;
   return { scope: match[1]!, name: match[3]! };
+}
+
+/** Scope of the system packages the deployment ships (`@appstrate/<name>`, no owning organization). */
+const SYSTEM_PACKAGE_SCOPE = "appstrate";
+
+/** Scope of inline runs' ephemeral shadow packages (`@inline/r-<uuid>`). Never publishable. */
+export const INLINE_SHADOW_SCOPE = "inline";
+
+const RESERVED_SCOPES: ReadonlySet<string> = new Set([SYSTEM_PACKAGE_SCOPE, INLINE_SHADOW_SCOPE]);
+
+/**
+ * Whether `scope` (without `@`) belongs to the platform. The API refuses one
+ * both as an organization slug (the scope its ZIP/skill uploads, forks and demo
+ * agent are created under, and the one `isOwnedByOrg` compares) and as the
+ * scope of any organization package, whose id is otherwise caller-chosen.
+ */
+export function isReservedScope(scope: string): boolean {
+  return RESERVED_SCOPES.has(scope);
 }
 
 /** Single source of truth for package ownership. */
@@ -251,7 +268,7 @@ export function decodeFilenameHeader(raw: string): string | null {
 }
 
 /**
- * Canonical MIME → filename-extension table for the text-shaped and common
+ * Canonical MIME → filename-extension table for the text-shaped, image and common
  * file formats the platform names files after. Values carry no leading dot.
  *
  * ONE table because the same question is asked on both sides of the run
@@ -273,6 +290,13 @@ const MIME_EXTENSIONS: ReadonlyMap<string, string> = new Map([
   ["application/x-yaml", "yaml"],
   ["application/yaml", "yaml"],
   ["application/pdf", "pdf"],
+  ["image/png", "png"],
+  ["image/jpeg", "jpg"],
+  ["image/jpg", "jpg"],
+  ["image/gif", "gif"],
+  ["image/webp", "webp"],
+  ["image/bmp", "bmp"],
+  ["image/svg+xml", "svg"],
 ]);
 
 /**
@@ -364,13 +388,8 @@ export const TOOL_NAME_MAX_LEN = MCP_TOOL_NAME_MAX_LENGTH;
  * run prompt (`@appstrate/afps-runtime/bundle`), the MCP `run_and_wait` tool
  * descriptions (`apps/api/src/modules/mcp/tools.ts`), and the chat system
  * prompt (`@appstrate/module-chat`). `module-chat` does not depend on
- * afps-runtime, which is how the third one came to hold a hand-copied literal
- * of exactly these six names, in exactly this order — the drift the constant
- * was created to end, reintroduced in the same range that ended it.
- *
- * The copies had already drifted once before: the MCP sites banned three of
- * these six, omitting exactly the three (`result`, `document`, `file`) that
- * #1177's vocabulary makes most attractive to a model.
+ * afps-runtime, so a constant anywhere else would be hand-copied, and the
+ * copies would drift.
  */
 const CONTEXT_FREE_DELIVERABLE_FILENAMES: readonly string[] = [
   "report.md",

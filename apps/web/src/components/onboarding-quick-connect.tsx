@@ -2,9 +2,10 @@
 
 /**
  * Onboarding-only quick-connect cards for OAuth model providers.
- * One click opens the pairing dialog; on success the helper seeds the
- * org's `org_models` with the registry's featured models so the user
- * can hit "Continue" without touching the manual form.
+ * One click opens the pairing dialog for an organization subscription; on
+ * success the helper seeds the org's `org_models` with the registry's featured
+ * models, bound to it, so the user can hit "Continue" without touching the
+ * manual form.
  *
  * The list is module-driven: every OAuth provider the platform loaded
  * (`useProvidersRegistry()` filtered by `authMode === "oauth2"`) gets a
@@ -22,11 +23,8 @@ import { useTranslation } from "react-i18next";
 import { Check, ChevronRight, Plug } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@appstrate/ui/cn";
-import { Modal } from "./modal";
-import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "./spinner";
-import { OAuthPairingBody } from "./oauth-pairing-body";
-import { usePairingDismissConfirm } from "../hooks/use-pairing-dismiss-confirm";
+import { Spinner } from "@appstrate/ui/components/spinner";
+import { PairingModal } from "./pairing-modal";
 import { PROVIDER_ICONS } from "./icons";
 import {
   useModelProviderCredentials,
@@ -35,6 +33,7 @@ import {
 } from "../hooks/use-model-provider-credentials";
 import { useAutoSeedFeaturedModels } from "../hooks/use-auto-seed-models";
 import { quickConnectProviders } from "../lib/provider-registry-helpers";
+import { hasOrgSubscription } from "../lib/oauth-pairing";
 
 interface CardProps {
   entry: ProviderRegistryEntry;
@@ -45,9 +44,9 @@ function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
   const { t } = useTranslation(["settings", "common"]);
   const { seed } = useAutoSeedFeaturedModels();
 
-  const [dialogOpen, setDialogOpen] = useState(false);
   const [working, setWorking] = useState(false);
-  const oauthDismiss = usePairingDismissConfirm(() => setDialogOpen(false));
+  // The pairing's token lives in memory: a reload starts over rather than resuming it.
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   // Inline lookup to satisfy `react-hooks/static-components` — the rule
   // flags PascalCase consts assigned from helper calls. Equivalent to
@@ -124,27 +123,17 @@ function QuickConnectCard({ entry, alreadyConnected }: CardProps) {
       </button>
 
       {dialogOpen && (
-        <Modal
-          open
-          onClose={oauthDismiss.requestClose}
+        <PairingModal
           title={t("credentials.oauth.cliStageTitle")}
-          actions={
-            <Button variant="ghost" onClick={oauthDismiss.requestClose}>
-              {t("credentials.oauth.close")}
-            </Button>
-          }
-        >
-          <OAuthPairingBody
-            providerId={entry.providerId}
-            onConnected={(newId) => {
-              setDialogOpen(false);
-              void handleConnected(newId);
-            }}
-            onBusyChange={oauthDismiss.onBusyChange}
-          />
-        </Modal>
+          onClose={() => setDialogOpen(false)}
+          providerId={entry.providerId}
+          target={{ ownerType: "org" }}
+          onConnected={(newId) => {
+            setDialogOpen(false);
+            void handleConnected(newId);
+          }}
+        />
       )}
-      {oauthDismiss.confirmDialog}
     </>
   );
 }
@@ -154,25 +143,21 @@ export function OnboardingQuickConnect() {
   const credentialsQuery = useModelProviderCredentials();
 
   const entries = quickConnectProviders(registryQuery.data);
+  // Only an organization subscription can serve the models the onboarding seeds: a member's
+  // own one does not make the card connected.
+  const isConnected = (providerId: string) => hasOrgSubscription(credentialsQuery.data, providerId);
 
   if (entries.length === 0) return null;
 
   return (
     <div className="flex flex-col gap-2">
-      {entries.map((entry) => {
-        const alreadyConnected =
-          credentialsQuery.data?.some(
-            (k) =>
-              k.authMode === "oauth2" && k.providerId === entry.providerId && !k.needs_reconnection,
-          ) ?? false;
-        return (
-          <QuickConnectCard
-            key={entry.providerId}
-            entry={entry}
-            alreadyConnected={alreadyConnected}
-          />
-        );
-      })}
+      {entries.map((entry) => (
+        <QuickConnectCard
+          key={entry.providerId}
+          entry={entry}
+          alreadyConnected={isConnected(entry.providerId)}
+        />
+      ))}
     </div>
   );
 }

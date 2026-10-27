@@ -24,8 +24,8 @@
  * so {@link deriveResponseReserveTokens} treats any
  * `maxTokens >= contextWindow` as unusable and falls back to a derived
  * default rather than producing a reserve that swallows the whole window
- * (which previously threw and crashed the sidecar at boot, or pinned the
- * compaction threshold at zero so the agent compacted every turn).
+ * (which would crash the sidecar at boot, or pin the compaction threshold
+ * at zero so the agent compacts every turn).
  */
 
 /**

@@ -82,6 +82,19 @@ describe("space store", () => {
     expect(spaceStore.getState().remembered).toEqual(persisted());
   });
 
+  it("remembers a pick in another organization without scoping to it", () => {
+    // The org switcher's order: remember the pick there, then switch, which
+    // drops the scope until the resolver proves the pick enterable.
+    orgStore.getState().setId("org_a");
+    spaceStore.getState().setId("spc_studio");
+    spaceStore.getState().remember("org_d", "spc_picked");
+    expect(spaceStore.getState().id).toBe("spc_studio");
+    expect(spaceStore.getState().remembered[rememberedSpaceKey("usr_a", "org_d")]).toBe(
+      "spc_picked",
+    );
+    expect(persisted()).toMatchObject({ "usr_a:org_d": "spc_picked" });
+  });
+
   it("ignores a stored value that is not a map of ids", () => {
     storage.setItem(KEY, JSON.stringify(["spc_x", { org_z: 3 }]));
     orgStore.getState().setId("org_a");

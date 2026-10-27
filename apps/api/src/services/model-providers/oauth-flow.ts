@@ -19,8 +19,6 @@
  * @earendil-works/pi-ai and POSTs the resulting tokens to
  * `/api/model-providers-oauth/pair/redeem`, which calls
  * `importOAuthModelProviderConnection()` below.
- *
- * Spec: docs/architecture/OAUTH_MODEL_PROVIDERS_SPEC.md §4.
  */
 
 import {
@@ -111,6 +109,7 @@ export async function importOAuthModelProviderConnection(
   if (reconnectCredentialId) {
     const reconnected = await reconnectOAuthCredential({
       orgId: input.orgId,
+      userId: input.userId,
       id: reconnectCredentialId,
       providerId: input.providerId,
       accessToken: input.accessToken,
@@ -135,7 +134,7 @@ export async function importOAuthModelProviderConnection(
   // every redeem. A reconnect deliberately skips this path and preserves the
   // targeted row's label.
   const base = input.label?.trim() || config.displayName || config.providerId;
-  const label = await dedupeCredentialLabel(input.orgId, base);
+  const label = await dedupeCredentialLabel(input.orgId, base, input.ownerUserId);
 
   const credentialId = await createOAuthCredential({
     ...credentialInput,

@@ -7,8 +7,229 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`createAjv`** (`@appstrate/core/ajv`) no longer registers ajv-formats' `formatMinimum` /
+  `formatMaximum` / `formatExclusive*` keywords: they are not JSON Schema 2020-12 and threw a
+  `TypeError` at validation time. All formats stay.
+
 ### Added
 
+- **Image MIME types in `extensionForMime`** (`@appstrate/core/naming`): `image/png`, `image/jpeg` and `image/jpg` (`jpg`), `image/gif`, `image/webp`, `image/bmp` and `image/svg+xml` (`svg`) now resolve to an extension, so spilled images are no longer extensionless. (#2120)
+- **`AJV_FORMATS_OPTIONS`** (`@appstrate/core/ajv`): the ajv-formats options `createAjv` uses, so
+  the RJSF validator registers the same formats and client and server agree.
+
+- **Unauthenticated integrations** (`@appstrate/core/integration`, AFPS §7.2):
+  **`isUnauthenticatedIntegration(manifest)`** — the manifest omits `auths`, so it binds no
+  connection; **`findConnectionlessVariables`**, a write-path refusal of `variables` on such an
+  integration, which no connection could hold. `IntegrationSpawnSpec.connection` is absent for
+  one. (#2075)
+
+- **`acquiresByConnectLogin(auth)`** (`@appstrate/core/integration`): true for an `oauth2` auth
+  declaring `connect.login` (AFPS §7.7, afps-spec/afps-spec#44) — its first token is acquired by
+  a token request to `token_endpoint` carrying the grant the user submits, instead of the
+  authorization-code flow. `integrationManifestSchema` no longer asks such a login for `outputs`:
+  that rule, and the delivery gating that reads them, stay on `custom` auths.
+- **`isReservedScope(scope)`** and **`INLINE_SHADOW_SCOPE`** (`@appstrate/core/naming`):
+  the package scopes the platform owns — `appstrate` (system packages) and `inline`
+  (inline runs' shadow packages, `@inline/r-<uuid>`). The API refuses a reserved scope both as
+  an organization slug and as the scope of an organization package.
+- **`describeModelFailure`** and **`MODEL_ERROR_CATEGORIES`** (`@appstrate/core/model-error`):
+  one failed model call's text read once into `{ category, retryable, status?,
+providerMessage? }` — the `<status> <JSON body>` envelope of a provider refusal unwrapped
+  server-side — and the category vocabulary as a runtime tuple.
+- **`ValidateManifestResult.issues`** (`@appstrate/core/validation`): on an invalid
+  manifest, the failures structured as **`ManifestIssue`** `{ path, message, code? }` beside the `errors`
+  strings; `code` is set on a rule that carries its own — today
+  **`OUTPUT_TOOL_REQUIRED`** (`"output_tool_required"`, an output schema without the
+  `output` runtime tool). **`ValidationFieldError.line` / `.column`**
+  (`@appstrate/core/api-errors`): the 1-based position of a file-level failure.
+- **`AGENT_UI_META_KEY`** (`@appstrate/core/validation`): `"dev.appstrate/ui"`,
+  the `_meta` key holding an agent's presentation (`color`), next to
+  `AGENT_RESOURCES_META_KEY`.
+- **`readAgentAppearance(manifest)`** (`@appstrate/core/validation`): an
+  agent's identity tile, `{ icon, color }`, both always present — the manifest
+  `icon` when it is a non-empty string, else `null`, and the `color` under
+  `_meta[AGENT_UI_META_KEY]` when it is a palette key (`isAppearanceColor`),
+  else `null` (derived from the agent id).
+- **`@appstrate/core/appearance`**: the one grammar of a visual identity
+  (agent, space, organization). **`parseIcon(value)`** reads an `icon` as an
+  **`AppearanceIcon`** (`lucide` name, other Iconify id, image URL, or
+  `emoji:<text>`), `null` when no surface can draw it — leniently: an `emoji:`
+  value is drawn as written when it carries a pictograph, a regional indicator
+  or a keycap and holds no whitespace within 32 UTF-16 units, read with `u`-flag
+  expressions only, so the module loads and reads on browsers that cannot
+  compile a `v`-flag one. The prefixes
+  **`LUCIDE_ICON_PREFIX`** and **`EMOJI_ICON_PREFIX`**;
+  **`normalizeEmoji(value)`**, the RGI form of one emoji or `null` (beyond 32
+  UTF-16 units, before any work), only U+FE0F added or removed: a superfluous
+  one dropped, a missing one inserted after each text-default pictograph or
+  keycap base (`👍️` → `👍`, `❤` → `❤️`, `1⃣` → `1️⃣`, `👁‍🗨` → `👁️‍🗨️`), its
+  `\p{RGI_Emoji}` expression compiled on first call. The palette
+  **`APPEARANCE_COLORS`** / **`AppearanceColor`** with **`isAppearanceColor`**,
+  **`derivedColor(seed)`** (a stable hue from an entity id, never `neutral`)
+  and **`resolveColor(color, seed)`** (`null` means derived). An uploaded icon
+  image: **`isIconImage(value)`**, a base64 data URI of one of
+  **`ICON_IMAGE_TYPES`** (`image/webp`, `image/png`) whose bytes are that type,
+  within **`ICON_IMAGE_MAX_BYTES`** (12 000) and **`ICON_IMAGE_MAX_SIZE`**
+  (256 px), its type and size read by **`imageSize(bytes)`** (a WebP's first
+  chunk, a PNG's `IHDR`). The write-side Zod schemas
+  **`appearanceIconSchema(forms)`** (one of the **`IconForm`**s `lucide`,
+  `emoji`, `image`, at most **`ICON_MAX_LENGTH`** (16 384) characters; it
+  parses an emoji to its RGI form) and
+  **`appearanceColorSchema`**.
+- **`unwrapMcpResult(value)`** (`@appstrate/core/mcp-result`): the payload inside
+  an MCP tool result — a `CallToolResult`, a bare content array or a JSON
+  string — recovered even when a prose text part (the turn-budget note) follows
+  it.
+- **`realtimeRunsUrl({ orgId, spaceId, runId?, channels?, verbose?, viewAs? })`**
+  (`@appstrate/core/realtime-url`): the URL of the realtime SSE stream, org-wide
+  or one run's, scope and role preview carried in the query.
+- **`isModelSelectable(model)`** (`@appstrate/core/model-selectable`): whether a
+  listed model can be picked — enabled, and its credential not flagged for
+  reconnection.
+- **`relativeAge(iso, now)`** and **`RelativeAgeUnit`** (`@appstrate/core/format`):
+  how long ago a timestamp was, as a rounded `{ unit, count }` the caller words
+  in its own language.
+- **`listenConnectCompletion(target, onCompletion, host)`**, **`connectPopupName(packageId)`**
+  and **`CONNECT_POPUP_FEATURES`** (`@appstrate/core/connect-handshake`): the
+  completion listener both connect surfaces share (origin-checked `postMessage`
+  plus `BroadcastChannel`), the per-integration popup window name, and the one
+  popup size.
+
+### Changed
+
+- **`extensionForMime`**: `image/jpeg` now returns `jpg` (platform-named inline inputs: `.jpeg` → `.jpg`) and `image/svg+xml` returns `svg` (was `xml`). (#2120)
+- **Requires `@afps-spec/schema` `^0.12.0`** (was `^0.10.0`): `auths` is optional (AFPS §7.2,
+  an empty map stays invalid); a `{$credential.<field>}` in `source.remote.url` stays invalid.
+- **BREAKING: `ConnectionResolutionErrorCode` gains `auth_key_on_unauthenticated_integration`**
+  (`@appstrate/core/integration`, in `CONNECTION_RESOLUTION_ERROR_CODES` and so in
+  `MISSING_INTEGRATION_CONNECTION_CODES` and `READINESS_ERROR_CODES`) — the agent sets an
+  `auth_key` on an integration that declares no auth method (AFPS §4.4 MUST), which it may have
+  lost after the agent was saved. Always an error, carrying `requiredAuthKey`: no connection
+  clears it. Exhaustive switches over the union must handle it.
+- **BREAKING: `IntegrationSpawnSpec.manifest.server.vendored` and `IntegrationBootReport.spawned[].vendored`
+  removed** (`@appstrate/core/sidecar-types`): no spawn spec ever carried the field to the
+  sidecar, so the boot report never set it. The AFPS manifest field `source.server.vendored` is
+  unchanged.
+- **`acceptsCompletionMessage`** (`@appstrate/core/connect-handshake`) is now a
+  type guard: a `true` narrows `event.data` to `IntegrationConnectCompletion`.
+- **BREAKING: `ConnectionResolutionErrorCode` gains `connection_set_too_large`**
+  (`@appstrate/core/integration`, in `CONNECTION_RESOLUTION_ERROR_CODES` and so in
+  `MISSING_INTEGRATION_CONNECTION_CODES` and `READINESS_ERROR_CODES`) — the set an
+  admin pin or an enforced org default imposes plus the connections a selection
+  adds to it would bind more than `MAX_CONNECTIONS_PER_INTEGRATION`; the union is
+  refused, never truncated. `source` is the adding layer and `boundConnectionIds`
+  the deduped union. An imposed set is no longer narrowed: a launch override
+  naming only its members, or `[]`, adds nothing and the whole set binds;
+  `override_outranked` now means an override adding a connection to a set that
+  allows no addition. Exhaustive switches over the union must handle it. (#2043)
+- **BREAKING: `OVERRIDE_REFUSAL_CODES` / `OverrideRefusalCode` lose
+  `required_integration_unbound`** (`@appstrate/core/integration`) — `[]` on a
+  `required` integration is no longer refused at the write: under an imposed set
+  it adds nothing and the set satisfies the integration. Where nothing imposes
+  one, resolution answers `required_integration_unbound` (a
+  `ConnectionResolutionErrorCode`, unchanged) as a 409 item instead. (#2043)
+
+### Fixed
+
+- **`schema/*.schema.json`** (`@appstrate/core/schemas`) are generated from the JSON Schemas
+  `@afps-spec/schema` publishes, plus the fields core redefines, instead of from the Zod schemas
+  alone, which dropped the cross-field rules AFPS writes in JSON Schema. The integration schema
+  now refuses what its Zod schema refuses — an empty `auths` map, a `none` source or
+  `required_scopes` without `auths`, among others — and the mcp-server schema keeps
+  `manifest_version: "0.4"` for a `uv` server.
+
+## [16.0.0] — 2026-10-14
+
+### Added
+
+- **`MODEL_BINDINGS`** / **`ModelBinding`** and **`MODEL_CREDENTIAL_OWNERS`** /
+  **`ModelCredentialOwner`** (`@appstrate/core/model-payer`): whose credential
+  serves a listed model, `system` | `org` | `user` | `managed` (`MODEL_PAYERS`
+  plus `managed`, an alias), and who owns a stored model credential, `org` |
+  `user`, a subset of `ModelPayer`.
+- `findCleartextInjectedCredentials(manifest, isTrustedHost?)`
+  (`./integration`): the `http://` `authorized_uris` entries of the auths
+  that inject a credential over HTTP, as write-path issues. `isTrustedHost`
+  exempts a host the operator designated as internal.
+- **`findUnexposedDefaultTools(manifest, mcpServerTools?)`**
+  (`@appstrate/core/integration`): the write-path rule listing a manifest's
+  `default_tools` entries the platform can prove unexposed, each once. On
+  every source, a name `hidden_tools` lists, a `connect.tool` references, or
+  the upload companion of a hidden `api_call`. Beyond that, a name outside the
+  canonical catalog (`resolveIntegrationToolCatalog`) where it is known: a
+  `none` source carrying no `_meta` key, at any depth, outside the
+  `dev.appstrate/` namespace, a `local` source when `mcpServerTools` (the
+  referenced mcp-server's `tools[]`) is passed, and a `remote` source that
+  declares a `tools_policy`, which bounds the default as it bounds an agent's
+  explicit selection. `integrationManifestSchema` applies the rule to `none`
+  alone. (#1923)
+- **`resolveScopeToolSelection(agentSelection, manifest)`**
+  (`@appstrate/core/integration`): the tool selection an agent's OAuth scopes
+  are inferred from, to pass as `agentTools` to `requiredScopesForAgent` and
+  `missingScopesForConnection`. `"*"` when the effective selection
+  (`resolveEffectiveToolSelection`) is the wildcard, written or inherited from
+  `default_tools`; else the agent's own array, `[]` when it wrote none. Tool
+  names inherited from `default_tools` contribute no scope. (#1923)
+- **`credential-proxy:call-own`** (`@appstrate/core/permissions`): `call-own` gates a call to
+  `/api/credential-proxy/proxy` outside a run on the caller's own connections
+  only; `credential-proxy:call` is unchanged and implies it.
+  `CoreResources["credential-proxy"]` is `"call" | "call-own"`, and
+  `CorePermission` and `SpaceLevelPermission` gain the string. (#1894, #1963)
+- **`withImpliedPermissions(held)`** (`@appstrate/core/permissions`): `held`
+  plus every permission a held one implies. The implications are
+  `runs:read-all` ⇒ `runs:read` and `credential-proxy:call` ⇒
+  `credential-proxy:call-own`; other strings pass through. (#1963)
+- **`READINESS_ERROR_CODES`** / **`ReadinessErrorCode`**
+  (`@appstrate/core/integration`): every code an `errors[]` item of the
+  connection-readiness read carries, the resolver's error codes plus
+  `agent_not_active`. **`OVERRIDE_REFUSAL_CODES`** / **`OverrideRefusalCode`**:
+  what a launch override key is refused over at the write,
+  `undeclared_connection_override` and `undeclared_dependency_override` (both
+  new) and `required_integration_unbound`, each a 400 item on
+  `connection_overrides.<id>` or `dependency_overrides.<id>`. (#1914)
+- **`INSUFFICIENT_SCOPES_REMEDIES`** / **`InsufficientScopesRemedy`**
+  (`@appstrate/core/integration`): how an `insufficient_scopes` item clears,
+  `new_connection` | `upgrade_or_new` | `rebind_by_admin` |
+  `rebind_by_schedule_owner`, carried as `ResolutionFieldError.remedy`
+  (`@appstrate/core/api-errors`). (#1913)
+- **`CONNECTION_SCOPE_FITS`** / **`ConnectionScopeFit`**
+  (`@appstrate/core/integration`): a connection's grant against an agent's
+  selection, least privilege first: `exact` | `unjudged` | `broader` |
+  `missing`. (#1913)
+- **`SCOPE_TOKEN_RE`**, **`scopeTokenSchema`** and **`findInvalidScopeTokens`**
+  (`@appstrate/core/integration`): one OAuth scope as an RFC 6749 §3.3
+  `scope-token`, and the write-path rule listing a manifest's scopes that are
+  not one (`default_scopes`, `scope_catalog` values,
+  `tools_policy.*.required_scopes`). `validateAgentIntegrationScopes` applies
+  the same rule to an agent's `scopes`, reporting `invalid_format`
+  (added to `AgentIntegrationScopeError.code`). (#1913)
+- **`isSecretField`** (`@appstrate/core/form`): whether a credential field is a
+  secret, `writeOnly` or `format: "password"`. (#1913)
+- **`IntegrationConnectCompletion.scopesDenied`**
+  (`@appstrate/core/connect-handshake`): the scopes a connect flow requested
+  that the consent left out, on a successful completion. (#1913)
+
+- **`code`** and **`arguments`** on every `launchRunAndWait` refusal decided
+  before dispatch (`@appstrate/core/run-and-wait-client`): the payload is
+  `{ code, error, arguments }`, `code` being a **`RunAndWaitArgumentCode`**
+  (`missing_argument`, `unknown_argument`, `invalid_argument`) and `arguments`
+  naming the faulty arguments (`input`, `manifest`, `scope`, an unknown name,
+  …). An `unknown_argument` refusal also carries `accepted`, the declared
+  argument names. A launch the route rejected stays `{ status, body }`. (#1911)
+- **`MODEL_PAYERS`** / **`ModelPayer`** (`@appstrate/core/model-payer`): who
+  pays a model call, `system` | `org` | `user`, in `credential_source` enum
+  order. **`orgSettingsReadSchema`** (`@appstrate/core/permissions`): the org
+  settings as served, with `personal_model_credentials` read as its effective
+  value (`true` when absent). The stored and PATCH shape `orgSettingsSchema` is
+  unchanged.
+
+- **`personal_model_credentials` org setting** (`orgSettingsSchema`, absent =
+  allowed) and the **`model-provider-credentials:connect`** permission action
+  (`@appstrate/core/permissions`): a member brings their own model credential.
+  `false` refuses new personal credentials, and the resolution chain ignores
+  existing ones. (#1875)
 - **`required?: boolean`** on `ManifestIntegrationEntry` and
   `IntegrationConfiguration` (`@appstrate/core/dependencies`, AFPS §4.4,
   afps-spec#28): the agent needs at least one connection of that integration
@@ -74,6 +295,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: `AuthResolution`** (`@appstrate/core/module`) is a union of an
+  inline resolution and a deferred one (`deferOrgResolution: true`), each
+  declaring its ceiling in one place, where 15.0.0 accepted any mix. Inline,
+  `permissions` is the ceiling over `orgRole` (or the whole grant without one),
+  and `scopeCeiling` is absent. Deferred, there is no `orgRole`, `permissions`
+  is empty, and the new **`scopeCeiling`** is the ceiling over the org role
+  resolved later (absent, the caller is uncapped). A strategy that sets
+  `orgRole` or a non-empty `permissions` on a deferred resolution, or
+  `scopeCeiling` on an inline one, fails to compile, and the pipeline answers
+  one the compiler never saw with a 500. `deferOrgResolution` is `true`,
+  `false` or absent: a non-literal `boolean` no longer type-checks. A deferred
+  resolution that carried `orgRole` with `permissions` as its ceiling declares
+  that list as `scopeCeiling` instead; the `X-Org-Id` middleware already
+  replaced the role. (#1911, #1963)
+
+- **BREAKING: `ConnectionCandidate`** (`@appstrate/core/integration`) requires
+  `scopesGranted` and `missingScopes`, and a
+  `ResolutionFieldError.candidate_connections` item
+  (`@appstrate/core/api-errors`) `scopes_granted` and `missing_scopes`: what
+  each candidate holds and what the agent's selection misses on it. (#1913)
+
+- **BREAKING: `findUnevaluableExpressions`** (`@appstrate/core/integration`)
+  refuses a `connect.login` request `body` holding a `{{name}}` with no
+  `content_type` / `Content-Type` an encoder covers (JSON, form, XML,
+  multipart with a boundary, `text/plain`) and written without a `{{name}}`,
+  and a login header name written twice in different case, through
+  afps-shared's `loginBlockIssues`. (#1915)
+- **Breaking for module consumers:** the `credentialSource` unions in
+  `BeforeUsageParams`, `LlmUsageLedgerRow` and `PlatformServices.usage.list`,
+  and `RunStatusChangeParams.modelSource`, now take `ModelPayer`, which adds
+  `"user"`. A chat turn reports the owner of the credential it spends:
+  `"user"` for a member's own key or subscription, `"org"` for an organization
+  one (a subscription turn always reported `"org"`).
+
+- **BREAKING: the chat platform services take the session user.**
+  `PlatformServices.resolveChatModel(orgId, presetId, userId)` and
+  `checkUsageAllowed({ …, userId })` (`@appstrate/core/module`): a member's own
+  subscription serves a model the organization leaves unbound, and a turn on
+  such a model the user holds no credential for is refused with
+  `model_credential_required`. Out-of-tree modules that call either seam must
+  pass the session user.
+- **BREAKING: `SubscriptionChatModel.credentialId` and
+  `ChatUsageRecord.credentialId`** (`@appstrate/core/chat-contract`), both
+  required: the credential a subscription turn spends, recorded in
+  `llm_usage.credential_id` (`null` in a usage record with none).
+- **BREAKING: `PlatformServices.checkUsageAllowed` takes no `subscription`
+  flag** (`@appstrate/core/module`): the platform derives the turn's
+  `credentialSource` from the model it resolves for the session user. A caller
+  still passing `subscription` fails to typecheck.
 - **BREAKING: `IntegrationSpawnSpec.egress.declaredUris: string[]`**
   (`@appstrate/core/sidecar-types`): the auth's `authorized_uris` as the
   manifest declares them, which the sidecar's runner egress listeners read to
@@ -121,6 +391,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   would otherwise have every band of its usage dropped and price at the base
   rate. (#1552)
 
+- **BREAKING (types): `keyof TokenUsage` includes `tiers`**
+  (`@appstrate/core/token-usage`, re-exported from afps-shared). `TokenUsage`
+  is the four counters plus the optional `tiers` bands, so a
+  `Record<keyof TokenUsage, number>` or a loop over its keys that treats every
+  key as a counter does not typecheck. Iterate `TOKEN_USAGE_COUNTERS`
+  (`@appstrate/afps-shared/token-usage`) for the counters.
+
 - **Requires `@appstrate/afps-shared` `^0.13.0`** (was `^0.12.0`): the
   `tiers` validation above is its `isTokenUsageTiers`, and `parseTokenUsage`
   is its own. (#1552, #1846)
@@ -134,6 +411,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still going. (#1844, #1851)
 - **The wait poll sends the remaining seconds and the server clamps them**
   (`@appstrate/core/run-and-wait-client`). (#1851)
+- **`launchRunAndWait` (`@appstrate/core/run-and-wait-client`)**: a refusal's
+  code holds for every argument it lists. When `scope` and `name` are one
+  absent and the other unusable, the refusal lists the absent one alone as
+  `missing_argument` (it used to list both as `invalid_argument`). (#1925)
 
 ## [15.0.0] — 2026-10-08
 

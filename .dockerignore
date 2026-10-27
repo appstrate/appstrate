@@ -51,6 +51,10 @@ conformance-snapshot/
 # Documentation and configs (not needed in images)
 docs/
 scripts/
+# The one-off data tasks ship in the image so an operator runs them from it, with
+# the one file outside the directory that one of them imports.
+!scripts/migration/
+!scripts/verify-system-models.ts
 .github/
 .husky/
 **/AGENTS.md

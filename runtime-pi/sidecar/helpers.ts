@@ -355,7 +355,6 @@ export type { ProxyCredentialsPayload as CredentialsResponse } from "@appstrate/
 // NOT pull `@appstrate/connect`'s credentials module (which transitively
 // depends on @appstrate/db — unwanted in a credential-isolating proxy).
 export {
-  substituteVars,
   applyInjectedCredentialHeader,
   credentialCarryingHeader,
   withIdleBound,

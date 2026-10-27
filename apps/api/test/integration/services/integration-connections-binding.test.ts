@@ -76,6 +76,7 @@ describe("selectAccessibleConnection — integrationId + authKey binding (CRIT-1
     const leaked = await selectAccessibleConnection(INTEG_A, manifestOf(INTEG_A), connBId, {
       spaceId: ctx.defaultSpaceId,
       actor,
+      reach: "own",
     });
     expect(leaked).toBeNull();
 
@@ -83,6 +84,7 @@ describe("selectAccessibleConnection — integrationId + authKey binding (CRIT-1
     const leakedReverse = await selectAccessibleConnection(INTEG_B, manifestOf(INTEG_B), connAId, {
       spaceId: ctx.defaultSpaceId,
       actor,
+      reach: "own",
     });
     expect(leakedReverse).toBeNull();
   });
@@ -91,6 +93,7 @@ describe("selectAccessibleConnection — integrationId + authKey binding (CRIT-1
     const resolved = await selectAccessibleConnection(INTEG_B, manifestOf(INTEG_B), connBId, {
       spaceId: ctx.defaultSpaceId,
       actor,
+      reach: "own",
     });
     expect(resolved).not.toBeNull();
     expect(resolved!.id).toBe(connBId);
@@ -102,7 +105,7 @@ describe("selectAccessibleConnection — integrationId + authKey binding (CRIT-1
   it("without a named id: the actor's single connection, and null when the integration has none", async () => {
     const INTEG_C = "@bindorg/notion";
     await seedPackage({ id: INTEG_C, orgId: ctx.orgId, type: "integration", source: "local" });
-    const context = { spaceId: ctx.defaultSpaceId, actor };
+    const context = { spaceId: ctx.defaultSpaceId, actor, reach: "own" as const };
 
     const none = await selectAccessibleConnection(INTEG_C, manifestOf(INTEG_C), null, context);
     expect(none).toBeNull();

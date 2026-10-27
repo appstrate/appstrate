@@ -11,14 +11,14 @@
  *  - **pi ↔ sidecar** speak a wire protocol to each other (LLM reverse proxy,
  *    `/mcp`, credential injection). A pair built from two different commits
  *    starts normally, passes every health check, and then fails runs with an
- *    error that names neither image (#1195: pi ≥ #1167 sends a zstd-compressed
- *    Codex body; sidecar < #1166 buffered it as text and corrupted it — neither
- *    version was buggy alone, only the pair was).
+ *    error that names neither image (one side sends a zstd-compressed body the other
+ *    buffers as text and corrupts — neither version is buggy alone, only the
+ *    pair is).
  *  - **platform ↔ runtime images** speak the container boundary (workspace
  *    layout, the routes the in-container uploader posts to). The same class of
- *    silent failure lives there: a runtime image from #1177 posts published
- *    files to `/runs/{id}/files`, which a platform one release older does not
- *    register, so every `publish_file` 404s, the run finishes with no
+ *    silent failure lives there: a runtime image posts published
+ *    files to `/runs/{id}/files`, which a platform that does not register it
+ *    answers 404: the run finishes with no
  *    deliverable, and nothing in the platform log says why.
  *
  * Which is why the rule is over the *trio*, not over the pair. Comparing the
@@ -212,7 +212,7 @@ function findOddOneOut(members: readonly ComparedMember[]): RuntimeImageMember |
  *    any of them is coherent.
  *
  * What that last carve-out gives up, deliberately: a *versioned* platform with
- * both images floating on `:latest` is no longer rejected. It cannot be. The
+ * both images floating on `:latest` is not rejected. It cannot be. The
  * platform's `APP_VERSION` is baked at build time and reads the same whether
  * the image was pulled by version tag or by `:latest`, so this function cannot
  * distinguish "operator hand-edited `.env` to float the runtime images" from

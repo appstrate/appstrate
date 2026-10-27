@@ -5,10 +5,13 @@ import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
 import { connectionConflictContent } from "../responses.ts";
 
-/** The 409 both schedule writes answer when an armed schedule leaves a connection choice open. */
+/**
+ * The 409 both schedule writes answer when an armed schedule leaves a connection choice open, or
+ * a default to take.
+ */
 const scheduleConnectionNotChosen = {
   description:
-    "`missing_integration_connection` — the schedule is (or stays) enabled and a fire would not know which connection to use for an integration: its actor holds several that do not share one oauth2 account, auth and instance, or only connections other members share, and `connection_overrides` names none. An unattended run cannot ask, so the choice is made at this write. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration, which outranks it (name only connections of that set, or drop the override) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here). Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run. A non-required integration a fire would start without is reported in the success body's `warnings` instead.",
+    "`missing_integration_connection` — the schedule is (or stays) enabled and nothing names the connections a fire binds for an integration: no `connection_overrides` entry, no pin (an admin's, or the actor's own for the agent) and no org default, while its actor holds one connection or several, or only connections other members share. An unattended run cannot ask, and the actor's one connection bound by default becomes that question at their next connection, so the set is named at this write — by the server itself when the caller writes for itself (that one connection is stored in `connection_overrides`, so this refusal then means several connections or only shared ones); a write for another member takes that one connection by default, since its writer can neither see nor name it. `errors[]` carries one `must_choose_connection` item per such integration (`field: integrations.<id>`), with `candidate_connections` to name in `connection_overrides` — or `override_connection_unavailable` when a set `connection_overrides` names a connection the actor cannot reach (deleted, unshared, or another identity's), which only a new pick clears — or `override_outranked` when a set in `connection_overrides` names a connection outside the set an admin pin or an enforced org default binds for that integration when that governance allows no additions, which outranks it (name only connections of that set, or drop the override; an admin pin that allows additions accepts them) — or `auth_serves_no_selected_tool` when the schedule's own `connection_overrides` binds a connection on an auth exposing none of the agent's selected tools (`connection_id` names it; bound by a pin or default instead, it is accepted here) — or `required_integration_unbound` when the schedule's own `connection_overrides` sets `[]` on an integration the agent marks `required` and no admin pin or enforced org default imposes a set (`source: schedule_override`) — or `connection_set_too_large` when the schedule's additions take the imposed set past the cap. Judged for the schedule's actor against the definition it fires (`version_override`). A caller writing a schedule whose actor is ANOTHER MEMBER sees and binds only what both reach: `candidate_connections` lists only connections shared in the space — possibly none, in which case the actor pins one of their own for the agent or an admin pins one — and, on every write (enabled or not), a `connection_overrides` set naming a connection that is not shared is refused as `override_connection_unavailable`, the same answer whatever the id; a set is exempt only when this write changes neither the actor nor that set, and an item about a connection of that set that is not shared names no label or account. For an END-USER actor the caller picks among all of its connections and names one in `connection_overrides`. Every other connection problem (not connected, needs reconnection, missing scopes, inactive integration) is accepted here: it is repaired without editing the schedule, and a fire it still blocks records a failed run and leaves the schedule enabled. A fire refused over one of the items above records a failed run and disables the schedule (`disabled_reason: connection_choice_invalid`), which then stays disabled until it is re-enabled. A non-required integration a fire would start without is reported in the success body's `warnings` instead. — Or `model_credential_required`: the effective model (`model_id_override`, else the agent's model in the space, else the organization default) is served only by each member's own credential; a schedule spends organization credentials only, so every fire would fail. — Or `schedule_governance_changed`: the write leaves the schedule enabled, and the admin pin of the agent, the actor's own pin for it or the space's org default of an integration its connections were judged under, or of one its `connection_overrides` names, changed between that judgment and the write (a concurrent pin or default write or delete); nothing was written — reload and retry.",
   headers: REQUEST_ID_ONLY_HEADERS,
   content: connectionConflictContent,
 };
@@ -141,7 +144,7 @@ export const schedulesPaths = {
                 model_id_override: {
                   type: "string",
                   description:
-                    "Override the persisted model on every run triggered by this schedule.",
+                    "Override the persisted model on every run triggered by this schedule. It must be bound to an organization credential (a schedule never spends a member's own credential): a model each member serves with their own is a 409 `model_credential_required`. When unset, the effective model is the agent's model in the space, else the organization default, and the same rule applies to it.",
                 },
                 proxy_id_override: {
                   type: "string",
@@ -155,19 +158,19 @@ export const schedulesPaths = {
                 },
                 connection_overrides: {
                   type: "object",
-                  description: `Per-integration connection sets frozen on the schedule row (the launch-override layer of every fire). Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 0..${MAX_CONNECTIONS_PER_INTEGRATION} per integration, always an ARRAY; \`[]\` fires without the integration (see the set schema). Cascade, first layer with a set wins: admin pin → enforced org default → launch override (this run's picks, or the firing schedule's — a scheduled fire carries no run override) → member pin → soft org default → fallback (the schedule actor's own connection; among several, the least-privileged covering one when they share one oauth2 account, auth and instance; otherwise \`must_choose_connection\` — a connection shared by another member is never bound without an explicit pick). Under an admin pin or an enforced org default the set must name only connections of that governing set (\`[]\` included), which it then narrows (\`override_outranked\` otherwise, see 409). Stored on \`package_schedules.connection_overrides\` and replayed on every fire. Ids that are not uuids are refused here, and so are a key that names no integration the fired agent declares and \`[]\` on an integration it marks \`required\` (400 \`invalid_request\`, \`param: connection_overrides\`).`,
+                  description: `Per-integration connection sets frozen on the schedule row. Map of sets: \`{ "@scope/integration": ["<connection_id>", ...] }\`, 0..${MAX_CONNECTIONS_PER_INTEGRATION} per integration, always an ARRAY; \`[]\` fires without the integration (see the set schema). Resolved through the cascade \`IntegrationAgentResolution\` describes: this field is the launch-override layer of every fire, and a fire takes no fallback: when the caller writes for itself, the server names the one own connection its fallback binds for each integration the set leaves unpicked that no admin pin or enforced org default governs (an imposed set takes no fallback), and stores it (a write for another member must name it, see 409). Under an admin pin or an enforced org default the governing set is an imposed floor, bound whole at every fire whatever the set says: the set names additions only (naming only imposed connections, or \`[]\` meaning no addition, changes nothing), and a connection outside the floor is accepted only when the admin pin allows additions, \`override_outranked\` otherwise (see 409); a floor plus additions above ${MAX_CONNECTIONS_PER_INTEGRATION} is refused too (\`connection_set_too_large\`). The set is stored as named, imposed ids included: the dashboard writes the additions only. Stored on \`package_schedules.connection_overrides\` and replayed on every fire. Ids that are not uuids, and a key that names no integration the fired agent declares, are refused here: 400 \`validation_failed\`, an \`errors[]\` item on \`connection_overrides.<id>\` (\`code: undeclared_connection_override\` for the key). \`[]\` on an integration the agent marks \`required\` adds nothing under an admin pin or an enforced org default and is accepted there; where nothing imposes a set it is refused as \`required_integration_unbound\` (see 409).`,
                   additionalProperties: connectionIdSetJsonSchema,
                 },
                 dependency_overrides: {
                   type: "object",
                   description:
-                    'Per-dependency version overrides frozen on the schedule row (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run so it resolves dependencies exactly as the schedule froze them. Each value must be `draft` or a resolvable version spec (semver range, exact version, or dist-tag); the protected tags `latest` and `published` are refused at this write rather than failing at every fire. A `draft` entry requires WRITE authority on THAT dependency, proved at THIS write (`403 draft_not_writable` naming it) and never re-checked at fire time — the authority belongs to the principal who wrote the schedule, frozen exactly as `connection_overrides` are. A key that names no declared skill or integration of the effective manifest is a `400` naming the key, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant.',
+                    'Per-dependency version overrides frozen on the schedule row. Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; keys may name a declared skill OR integration. Forwarded to each fired run so it resolves dependencies exactly as the schedule froze them. Each value must be `draft` or a resolvable version spec (semver range, exact version, or dist-tag); the protected tags `latest` and `published` are refused at this write rather than failing at every fire. A `draft` entry requires WRITE authority on THAT dependency, proved at THIS write (`403 draft_not_writable` naming it) and never re-checked at fire time — the authority belongs to the principal who wrote the schedule, frozen exactly as `connection_overrides` are. A key that names no declared skill or integration of the effective manifest is a `400 validation_failed` with an `errors[]` item `undeclared_dependency_override` on `dependency_overrides.<id>`, and it is raised BEFORE the authority gate — a typo is a malformed request, not a missing grant.',
                   additionalProperties: { type: "string" },
                 },
                 actor: {
                   type: "object",
                   description:
-                    "Execution identity for runs this schedule fires (#738). Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to default to the calling identity. The actor must be able to run agents in this space (the check every fire repeats) — else `400`. Requires `schedules:write`; naming ANOTHER member (`userId` other than the caller's) also requires the org role owner or admin on the user's own credential (an API key or a third-party OAuth client is refused) — else `403 forbidden` with `param: actor`.",
+                    "Execution identity for runs this schedule fires. Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to default to the calling identity. The actor must be able to run agents in this space (the check every fire repeats) — else `400`. Requires `schedules:write`; naming ANOTHER member (`userId` other than the caller's) also requires the org role owner or admin on the user's own credential (an API key or a third-party OAuth client is refused), and naming an end user other than the caller takes an API key or the `api-keys:create` permission in the space — else `403 forbidden` with `param: actor`.",
                   properties: {
                     userId: { type: "string" },
                     endUserId: { type: "string" },
@@ -192,7 +195,14 @@ export const schedulesPaths = {
         "201": {
           description:
             "Schedule created, plus `warnings`: the integrations its fires would start without.",
-          headers: STD_RESPONSE_HEADERS,
+          headers: {
+            ...STD_RESPONSE_HEADERS,
+            ETag: {
+              description:
+                "The schedule's version (its `updatedAt` in milliseconds, quoted). Send it as `If-Match` on `PATCH /api/schedules/{id}` to refuse overwriting a write you have not seen.",
+              schema: { type: "string" },
+            },
+          },
           content: {
             "application/json": {
               schema: scheduleWriteSchema,
@@ -242,7 +252,7 @@ export const schedulesPaths = {
         "403": {
           $ref: "#/components/responses/Forbidden",
           description:
-            "Insufficient permissions — including `forbidden` with `param: actor` when a caller who is not an org owner or admin on the user's own credential (an API key or a third-party OAuth client never is) names another member as `actor`, and `draft_not_writable` when `version_override` is `draft` and the caller cannot WRITE the agent, or a `dependency_overrides` entry is `draft` on a dependency they cannot WRITE (the message names it). Authority is checked at this write; the scheduler does not re-check at fire time.",
+            "Insufficient permissions — including `forbidden` with `param: actor` when a caller who is not an org owner or admin on the user's own credential (an API key or a third-party OAuth client never is) names another member as `actor`, or when a caller who is neither an API key nor a holder of `api-keys:create` names an end user, and `draft_not_writable` when `version_override` is `draft` and the caller cannot WRITE the agent, or a `dependency_overrides` entry is `draft` on a dependency they cannot WRITE (the message names it). Authority is checked at this write; the scheduler does not re-check at fire time.",
         },
         // Shared with `PATCH /api/schedules/{id}`: both writes resolve the
         // manifest the schedule will FIRE, so both refuse a never-published
@@ -275,7 +285,14 @@ export const schedulesPaths = {
       responses: {
         "200": {
           description: "Schedule details",
-          headers: STD_RESPONSE_HEADERS,
+          headers: {
+            ...STD_RESPONSE_HEADERS,
+            ETag: {
+              description:
+                "The schedule's version (its `updatedAt` in milliseconds, quoted). Send it as `If-Match` on `PATCH /api/schedules/{id}` to refuse overwriting a write you have not seen.",
+              schema: { type: "string" },
+            },
+          },
           content: {
             "application/json": {
               schema: { $ref: "#/components/schemas/Schedule" },
@@ -326,6 +343,7 @@ export const schedulesPaths = {
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
+        { $ref: "#/components/parameters/IfMatch" },
       ],
       requestBody: {
         required: true,
@@ -347,7 +365,11 @@ export const schedulesPaths = {
                   description:
                     "Temperature/reasoning overrides for scheduled runs. Pass null to clear.",
                 },
-                model_id_override: { type: ["string", "null"] },
+                model_id_override: {
+                  type: ["string", "null"],
+                  description:
+                    "Same rule as on create: a model served only by each member's own credential is a 409 `model_credential_required`. Pass null to clear.",
+                },
                 proxy_id_override: { type: ["string", "null"] },
                 version_override: {
                   type: ["string", "null"],
@@ -356,19 +378,19 @@ export const schedulesPaths = {
                 },
                 connection_overrides: {
                   type: ["object", "null"],
-                  description: `Per-integration connection sets frozen on the schedule, one array of 0..${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per integration. Pass \`null\` to clear. Same array shape, same bounds and same cascade layer as on create. Its keys are judged against the definition the row fires after the patch, whenever the map or \`version_override\` moves: a key it does not declare, or \`[]\` on an integration it marks \`required\`, is a 400 \`invalid_request\`.`,
+                  description: `Per-integration connection sets frozen on the schedule, one array of 0..${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per integration. Pass \`null\` to clear. Same array shape, same bounds and same cascade layer as on create. Its keys are judged against the definition the row fires after the patch, whenever the map or \`version_override\` moves: a key it does not declare is a 400 \`validation_failed\`. \`[]\` on an integration it marks \`required\` that no admin pin or enforced org default governs is refused as \`required_integration_unbound\` (see 409) when the schedule is, or stays, enabled; governed, \`[]\` only adds nothing to the imposed set. A disabled schedule stores it, and it is judged when the schedule is enabled.`,
                   additionalProperties: connectionIdSetJsonSchema,
                 },
                 dependency_overrides: {
                   type: ["object", "null"],
                   description:
-                    'Per-dependency version overrides frozen on the schedule (#666/#686). Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; skill or integration ids. Pass `null` to clear. Each value must be `draft` or a resolvable version spec — same rule as on create. WRITE authority is proved per KEY and only for the keys this patch MOVES: a `draft` entry whose value the row already holds was proved at the write that introduced it, and re-sending it decides nothing.',
+                    'Per-dependency version overrides frozen on the schedule. Shape: `{ "@scope/dep": "draft" | "<semver|dist-tag>" }`; skill or integration ids. Pass `null` to clear. Each value must be `draft` or a resolvable version spec — same rule as on create. WRITE authority is proved per KEY and only for the keys this patch MOVES: a `draft` entry whose value the row already holds was proved at the write that introduced it, and re-sending it decides nothing.',
                   additionalProperties: { type: "string" },
                 },
                 actor: {
                   type: "object",
                   description:
-                    "Re-point the schedule's execution identity (#738). Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`; changing it to ANOTHER member (`userId` other than the caller's) also requires the org role owner or admin on the user's own credential (an API key or a third-party OAuth client is refused) — else `403 forbidden` with `param: actor`. A schedule already running as another member takes the same for any patch, this field included.",
+                    "Re-point the schedule's execution identity. Provide exactly one of `userId` (an org member) or `endUserId` (an end-user of this space). Omit to leave the actor unchanged — it cannot be cleared. Changing the actor resets frozen `connection_overrides` unless this patch also supplies them. Requires `schedules:write`; changing it to ANOTHER member (`userId` other than the caller's) also requires the org role owner or admin on the user's own credential (an API key or a third-party OAuth client is refused), and changing it to an end user other than the caller takes an API key or the `api-keys:create` permission in the space — else `403 forbidden` with `param: actor`. A schedule already running as another member, or as an end user, takes the matching authority for any patch, this field included.",
                   properties: {
                     userId: { type: "string" },
                     endUserId: { type: "string" },
@@ -393,7 +415,14 @@ export const schedulesPaths = {
         "200": {
           description:
             "Schedule updated, plus `warnings`: the integrations its fires would start without, `null` unless this write moves what they resolve with.",
-          headers: STD_RESPONSE_HEADERS,
+          headers: {
+            ...STD_RESPONSE_HEADERS,
+            ETag: {
+              description:
+                "The schedule's version (its `updatedAt` in milliseconds, quoted). Send it as `If-Match` on `PATCH /api/schedules/{id}` to refuse overwriting a write you have not seen.",
+              schema: { type: "string" },
+            },
+          },
           content: {
             "application/json": {
               schema: scheduleWriteSchema,
@@ -413,7 +442,7 @@ export const schedulesPaths = {
         "403": {
           $ref: "#/components/responses/Forbidden",
           description:
-            "Insufficient permissions — including `forbidden` when a caller who is not an org owner or admin on the user's own credential (an API key or a third-party OAuth client never is) patches a schedule running as another member (any field), or (with `param: actor`) changes `actor` to another member, and `draft_not_writable` when the patch CHANGES `version_override` to `draft` and the caller cannot WRITE the agent, or changes a `dependency_overrides` entry to `draft` on a dependency they cannot WRITE. A value identical to the one already stored is an echo, not a decision, and is not judged.",
+            "Insufficient permissions — including `forbidden` when a caller who is not an org owner or admin on the user's own credential (an API key or a third-party OAuth client never is) patches a schedule running as another member (any field), or (with `param: actor`) changes `actor` to another member; a schedule running as an end user, and `actor` naming one, take an API key or `api-keys:create` instead; and `draft_not_writable` when the patch CHANGES `version_override` to `draft` and the caller cannot WRITE the agent, or changes a `dependency_overrides` entry to `draft` on a dependency they cannot WRITE. A value identical to the one already stored is an echo, not a decision, and is not judged.",
         },
         // Two causes, both on this one response: `loadScheduleOr404` runs
         // first (unknown schedule id — the dominant 404 here), and a patch
@@ -428,8 +457,9 @@ export const schedulesPaths = {
         // by any patch.
         "409": {
           ...scheduleConnectionNotChosen,
-          description: `${scheduleConnectionNotChosen.description} — Or \`schedule_modified_concurrently\`: the schedule was written since this patch read it (\`updated_at\` moved: another patch, a connection delete or unshare, a fire disabling it for an actor who lost access, the actor's removal from the organization, or a lock on one of its input fields); nothing was written — reload the schedule and retry.`,
+          description: `${scheduleConnectionNotChosen.description} — Or \`schedule_modified_concurrently\`: the schedule was written since this patch read it (\`updated_at\` moved: another patch, a connection delete or unshare, the removal of the pin or org default that alone named one of its connection sets, a fire disabling it for an actor who lost access or for its own connection choice, the actor's removal from the organization, or a lock on one of its input fields); nothing was written — reload the schedule and retry.`,
         },
+        "412": { $ref: "#/components/responses/PreconditionFailed" },
         "422": { $ref: "#/components/responses/VersionArtifactUnavailable" },
         "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },
@@ -454,7 +484,7 @@ export const schedulesPaths = {
         "403": {
           $ref: "#/components/responses/Forbidden",
           description:
-            "Insufficient permissions — including `forbidden` when a caller who is not an org owner or admin on the user's own credential (an API key or a third-party OAuth client never is) deletes a schedule running as another member.",
+            "Insufficient permissions — including `forbidden` when a caller who is not an org owner or admin on the user's own credential (an API key or a third-party OAuth client never is) deletes a schedule running as another member, or when a caller who is neither an API key nor a holder of `api-keys:create` deletes one running as an end user.",
         },
         "404": { $ref: "#/components/responses/NotFound" },
       },
@@ -477,6 +507,8 @@ export const schedulesPaths = {
           schema: { type: "integer", minimum: 1, maximum: 100, default: 20 },
         },
         { $ref: "#/components/parameters/Offset" },
+        { $ref: "#/components/parameters/RunStatusFilter" },
+        { $ref: "#/components/parameters/RunSearch" },
       ],
       responses: {
         "200": {
@@ -499,6 +531,11 @@ export const schedulesPaths = {
               },
             },
           },
+        },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description:
+            "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it).",
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },

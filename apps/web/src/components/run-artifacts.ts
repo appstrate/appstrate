@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pure helpers for the run "partial deliverables" banner. Kept in a non-JSX
- * module (separate from `run-artifacts-banner.tsx`) so the component file only
- * exports a component (react-refresh) and so these can be unit-tested without a
- * DOM.
+ * Pure helpers for the run "partial deliverables" card (`run-detail/run-warnings.tsx`).
+ * Kept in a non-JSX module so the component file only exports components
+ * (react-refresh) and so these can be unit-tested without a DOM.
  */
 
 import type { RunArtifactsSummary } from "@appstrate/shared-types";

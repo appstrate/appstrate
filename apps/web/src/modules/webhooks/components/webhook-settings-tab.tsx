@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { Label } from "@appstrate/ui/components/label";
-import { Checkbox } from "@appstrate/ui/components/checkbox";
-import { Modal } from "@/components/modal";
-import { Spinner } from "@/components/spinner";
+import { CheckboxField } from "@/components/app-ui/checkbox-field";
+import { ConfirmModal } from "@/components/confirm-modal";
 import { WebhookFormFields } from "./webhook-form-fields";
-import { toggleEvent } from "../hooks/use-webhooks";
+import { toggleValue } from "@/lib/toggle-value";
 import { SecretRevealModal } from "@/components/secret-reveal-modal";
 import { toast } from "sonner";
 import {
@@ -56,7 +56,7 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
       },
       {
         onSuccess: () => {
-          toast.success(t("common:btn.save"));
+          toast.success(t("settings:webhooks.saved"));
         },
       },
     );
@@ -84,7 +84,6 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
           setRotateOpen(false);
           setRotatedSecret(result.secret);
         },
-        onError: () => setRotateOpen(false),
       },
     );
   }
@@ -94,56 +93,56 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
       { params: { path: { id: webhook.id } } },
       {
         onSuccess: () => {
-          navigate("/webhooks");
+          navigate("/workspace-settings/webhooks");
         },
-        onError: () => setDeleteConfirmOpen(false),
       },
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col gap-6">
       {/* URL (read-only) */}
-      <div className="space-y-2">
-        <Label>{t("settings:webhooks.urlLabel")}</Label>
+      <div className="flex flex-col gap-2">
+        <Label className="mb-0">{t("settings:webhooks.urlLabel")}</Label>
         <div className="bg-muted rounded px-3 py-2 font-mono text-sm break-all">{webhook.url}</div>
       </div>
 
       <WebhookFormFields
         selectedEvents={selectedEvents}
-        onToggleEvent={(e) => toggleEvent(e, setSelectedEvents)}
+        onToggleEvent={(e) => setSelectedEvents((prev) => toggleValue(prev, e))}
         payloadMode={payloadMode}
         onPayloadModeChange={setPayloadMode}
         idPrefix="edit-"
       />
 
       {/* Active toggle */}
-      <div className="flex items-center gap-2">
-        <Checkbox
-          id="webhook-active"
-          checked={active}
-          onCheckedChange={(checked) => setActive(checked === true)}
-        />
-        <Label htmlFor="webhook-active" className="cursor-pointer">
-          {t("settings:webhooks.active")}
-        </Label>
-      </div>
+      <CheckboxField
+        id="webhook-active"
+        checked={active}
+        onCheckedChange={(checked) => setActive(checked === true)}
+        label={t("settings:catalogue.filter.active")}
+      />
 
       {/* Save */}
       {canWrite && (
-        <Button onClick={handleSave} disabled={updateMutation.isPending}>
-          {updateMutation.isPending ? <Spinner /> : t("settings:webhooks.saveSettings")}
-        </Button>
+        <PendingButton
+          className="self-start"
+          onClick={handleSave}
+          pending={updateMutation.isPending}
+        >
+          {t("common:btn.save")}
+        </PendingButton>
       )}
 
       {/* Secret section */}
-      <div className="border-border space-y-2 border-t pt-4">
-        <Label>{t("settings:webhooks.secret")}</Label>
+      <div className="border-border flex flex-col gap-2 border-t pt-4">
+        <Label className="mb-0">{t("settings:webhooks.secret")}</Label>
         <div className="bg-muted rounded px-3 py-2 font-mono text-sm">whsec_****...</div>
         {canWrite && (
           <Button
             variant="outline"
             size="sm"
+            className="self-start"
             onClick={() => setRotateOpen(true)}
             disabled={rotateMutation.isPending}
           >
@@ -153,87 +152,69 @@ export function WebhookSettingsTab({ webhook }: { webhook: WebhookInfo }) {
       </div>
 
       {/* Rotate confirmation modal */}
-      <Modal
+      <ConfirmModal
         open={rotateOpen}
         onClose={() => setRotateOpen(false)}
-        title={t("settings:webhooks.rotateConfirmTitle")}
-        actions={
-          <>
-            <Button variant="outline" onClick={() => setRotateOpen(false)}>
-              {t("common:btn.cancel")}
-            </Button>
-            <Button onClick={handleRotate} disabled={rotateMutation.isPending}>
-              {rotateMutation.isPending ? <Spinner /> : t("common:btn.confirm")}
-            </Button>
-          </>
-        }
-      >
-        <p className="text-muted-foreground text-sm">{t("settings:webhooks.rotateConfirm")}</p>
-      </Modal>
+        title={t("settings:webhooks.rotateSecret")}
+        description={t("settings:webhooks.rotateConfirm")}
+        confirmLabel={t("settings:webhooks.rotateSecret")}
+        variant="default"
+        isPending={rotateMutation.isPending}
+        onConfirm={handleRotate}
+      />
 
       {/* Rotated secret display */}
       {rotatedSecret && (
         <SecretRevealModal
-          open={!!rotatedSecret}
           onClose={() => setRotatedSecret(null)}
           title={t("settings:webhooks.newSecret")}
           secret={rotatedSecret}
+          warning={t("settings:webhooks.secretWarning")}
         />
       )}
 
       {/* Test — `POST /api/webhooks/:id/test` is guarded by `write`, not `read`. */}
       {canWrite && (
         <div className="border-border border-t pt-4">
-          <Button
+          <PendingButton
             variant="outline"
             size="sm"
             onClick={handleTest}
-            disabled={testMutation.isPending}
+            pending={testMutation.isPending}
           >
-            {testMutation.isPending ? <Spinner /> : t("settings:webhooks.sendTest")}
-          </Button>
+            {t("settings:webhooks.sendTest")}
+          </PendingButton>
         </div>
       )}
 
       {/* Danger zone */}
       {canDelete && (
-        <div className="border-border space-y-3 border-t pt-4">
+        <div className="border-border flex flex-col gap-3 border-t pt-4">
           <h3 className="text-destructive text-sm font-semibold">
-            {t("settings:webhooks.dangerZone")}
+            {t("settings:spaces.dangerZone")}
           </h3>
-          <Button
+          <PendingButton
             variant="destructive"
             size="sm"
+            className="self-start"
             onClick={() => setDeleteConfirmOpen(true)}
-            disabled={deleteMutation.isPending}
+            pending={deleteMutation.isPending}
           >
-            {deleteMutation.isPending ? <Spinner /> : t("settings:webhooks.deleteBtn")}
-          </Button>
+            {t("settings:webhooks.deleteBtn")}
+          </PendingButton>
         </div>
       )}
 
       {/* Delete confirmation */}
-      <Modal
+      <ConfirmModal
         open={deleteConfirmOpen}
         onClose={() => setDeleteConfirmOpen(false)}
-        title={t("settings:webhooks.deleteConfirm")}
-        actions={
-          <>
-            <Button variant="outline" onClick={() => setDeleteConfirmOpen(false)}>
-              {t("common:btn.cancel")}
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={handleDelete}
-              disabled={deleteMutation.isPending}
-            >
-              {deleteMutation.isPending ? <Spinner /> : t("common:btn.confirm")}
-            </Button>
-          </>
-        }
-      >
-        <p className="text-muted-foreground text-sm">{t("settings:webhooks.deleteConfirm")}</p>
-      </Modal>
+        title={t("settings:webhooks.deleteTitle")}
+        description={t("settings:webhooks.deleteConfirm")}
+        confirmLabel={t("common:btn.delete")}
+        isPending={deleteMutation.isPending}
+        onConfirm={handleDelete}
+      />
     </div>
   );
 }

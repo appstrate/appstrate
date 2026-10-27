@@ -21,7 +21,7 @@ function envLevel(): LogLevel {
  * repo in one process, so that buffer also collected whatever any other suite
  * or library wrote in that window — and this logger's readers parse every
  * captured line as JSON, so one foreign byte is a `SyntaxError`, not a soft
- * assertion failure (issue #1180). Routing through a sink the test owns keeps
+ * assertion failure. Routing through a sink the test owns keeps
  * the buffer to lines this logger actually produced.
  */
 let testSink: ((level: LogLevel, line: string) => void) | null = null;

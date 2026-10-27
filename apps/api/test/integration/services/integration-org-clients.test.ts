@@ -11,13 +11,18 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedSpace } from "../../helpers/seed.ts";
+import { seedEndUser, seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { encryptCredentials } from "@appstrate/connect";
-import { integrationConnections, integrationOauthClients, packages } from "@appstrate/db/schema";
+import {
+  integrationConnectionShares,
+  integrationConnections,
+  integrationOauthClients,
+  packages,
+} from "@appstrate/db/schema";
+import { seedShares } from "../../helpers/connection-shares.ts";
 import {
   createIntegrationOAuthClient,
   deleteIntegrationOAuthClient,
-  ensureIntegrationOAuthClient,
   getIntegrationAuthStatuses,
   listIntegrationClients,
   promoteIntegrationOAuthClient,
@@ -26,6 +31,9 @@ import {
   setDefaultIntegrationClient,
   updateIntegrationOAuthClient,
 } from "../../../src/services/integration-connections.ts";
+import { ensureIntegrationOAuthClient } from "../../../src/services/integration-oauth-provisioning.ts";
+import type { ConnectionCaller } from "../../../src/services/connection-reach.ts";
+import { testCaller } from "../../helpers/connection-shares.ts";
 import {
   initSystemIntegrations,
   __resetSystemIntegrationsForTest,
@@ -179,22 +187,47 @@ describe("org-level integration OAuth clients", () => {
       AUTH_KEY,
       manifest,
       OAUTH2_AUTH,
-      "https://app.example.com/callback",
     );
     return resolveConnectClient(INTEGRATION, AUTH_KEY, manifest, OAUTH2_AUTH, resolved).clientId;
   }
 
-  async function seedConnection(spaceId: string, userId: string, clientRef: string) {
-    await db.insert(integrationConnections).values({
-      integrationId: INTEGRATION,
-      authKey: AUTH_KEY,
-      accountId: `acct-${spaceId}`,
-      label: "Connexion 1",
-      spaceId,
-      userId,
-      credentialsEncrypted: "enc",
-      clientRef,
-    });
+  /** The list reader of a member of the org acting from `spaceA` (a session, no governance). */
+  function memberReader(): ConnectionCaller {
+    return testCaller(
+      { kind: "person", actor: { type: "user", id: ctx.user.id } },
+      { spaceId: spaceA.spaceId },
+    );
+  }
+
+  /** A connection row: `spaceId: null` = org scope. Returns its id. */
+  async function seedConnection(opts: {
+    spaceId: string | null;
+    clientRef: string;
+    userId?: string;
+    endUserId?: string;
+    orgId?: string;
+    originSpaceId?: string;
+    sharedSpaceIds?: string[];
+    label?: string;
+  }): Promise<string> {
+    const [row] = await db
+      .insert(integrationConnections)
+      .values({
+        integrationId: INTEGRATION,
+        authKey: AUTH_KEY,
+        accountId: `acct-${crypto.randomUUID()}`,
+        label: opts.label ?? "Connexion 1",
+        orgId: opts.orgId ?? ctx.orgId,
+        spaceId: opts.spaceId,
+        originSpaceId: opts.originSpaceId ?? null,
+        userId: opts.userId ?? null,
+        endUserId: opts.endUserId ?? null,
+        credentialsEncrypted: "enc",
+        clientRef: opts.clientRef,
+      })
+      .returning({ id: integrationConnections.id });
+    await seedShares(row!.id, opts.sharedSpaceIds ?? []);
+    return row!.id;
   }
 
   describe("connect cascade", () => {
@@ -422,15 +455,16 @@ describe("org-level integration OAuth clients", () => {
           }),
         ).rejects.toMatchObject({ status: 400 });
       }
-      // The DCR path itself still registers its space client.
+      // The DCR path itself registers its client at the org tier.
       const dcr = await createIntegrationOAuthClient(
-        spaceA,
+        org,
         REMOTE,
         "oauth",
         { clientId: "dcr", clientSecret: "", tokenEndpointAuthMethod: "none" },
         { autoProvisioned: true },
       );
-      expect(dcr).toMatchObject({ spaceId: spaceA.spaceId, autoProvisioned: true });
+      // A machine client is found by its issuer, never the default.
+      expect(dcr).toMatchObject({ spaceId: null, autoProvisioned: true, isDefault: false });
     });
 
     it("rejects an integration of another org", async () => {
@@ -492,32 +526,43 @@ describe("org-level integration OAuth clients", () => {
       });
     });
 
-    it("org delete cascades the connections of every space of the org, not another org's", async () => {
+    it("org delete cascades the org's connections it minted, not another org's", async () => {
       const orgRow = await seedClient({ spaceId: null, clientId: "org-client", isDefault: true });
-      await seedConnection(spaceA.spaceId, ctx.user.id, orgRow);
-      await seedConnection(spaceB.spaceId, ctx.user.id, orgRow);
-      await seedConnection(otherSpace.spaceId, other.user.id, orgRow);
+      const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: spaceB.spaceId });
+      await seedConnection({
+        spaceId: null,
+        originSpaceId: spaceA.spaceId,
+        userId: ctx.user.id,
+        clientRef: orgRow,
+      });
+      await seedConnection({ spaceId: spaceB.spaceId, endUserId: endUser.id, clientRef: orgRow });
+      await seedConnection({
+        spaceId: null,
+        orgId: other.orgId,
+        userId: other.user.id,
+        clientRef: orgRow,
+      });
       expect(await deleteIntegrationOAuthClient(org, INTEGRATION, orgRow)).toMatchObject({
         deletedConnections: 2,
         disabledScheduleIds: [],
       });
       const left = await db
-        .select({ spaceId: integrationConnections.spaceId })
+        .select({ orgId: integrationConnections.orgId })
         .from(integrationConnections)
         .where(eq(integrationConnections.clientRef, orgRow));
-      expect(left).toEqual([{ spaceId: otherSpace.spaceId }]);
+      expect(left).toEqual([{ orgId: other.orgId }]);
     });
   });
 
   describe("promote", () => {
-    it("moves a space client to the org; pinned connections still resolve from every space", async () => {
+    it("moves a space client to the org; its connections still refresh from every space", async () => {
       const id = await seedClient({
         spaceId: spaceA.spaceId,
         clientId: "space-a",
         isDefault: true,
       });
-      await seedConnection(spaceA.spaceId, ctx.user.id, id);
-      const promoted = await promoteIntegrationOAuthClient(spaceA, INTEGRATION, id);
+      await seedConnection({ spaceId: spaceA.spaceId, userId: ctx.user.id, clientRef: id });
+      const { client: promoted } = await promoteIntegrationOAuthClient(spaceA, INTEGRATION, id);
       expect(promoted).toMatchObject({ id, spaceId: null, isDefault: true, client_id: "space-a" });
       for (const scope of [spaceA, spaceB]) {
         expect(
@@ -527,8 +572,50 @@ describe("org-level integration OAuth clients", () => {
       const [conn] = await db
         .select({ clientRef: integrationConnections.clientRef })
         .from(integrationConnections)
-        .where(eq(integrationConnections.spaceId, spaceA.spaceId));
+        .where(eq(integrationConnections.originSpaceId, spaceA.spaceId));
       expect(conn?.clientRef).toBe(id);
+    });
+
+    it("widens the members' connections it minted, keeping shares and deduping labels", async () => {
+      const id = await seedClient({ spaceId: spaceA.spaceId, clientId: "space-a" });
+      const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: spaceA.spaceId });
+      await seedConnection({ spaceId: null, userId: ctx.user.id, clientRef: SYSTEM_ID });
+      const mine = await seedConnection({
+        spaceId: spaceA.spaceId,
+        userId: ctx.user.id,
+        clientRef: id,
+        sharedSpaceIds: [spaceA.spaceId],
+      });
+      const endUsers = await seedConnection({
+        spaceId: spaceA.spaceId,
+        endUserId: endUser.id,
+        clientRef: id,
+      });
+
+      const { widened } = await promoteIntegrationOAuthClient(spaceA, INTEGRATION, id);
+      expect(widened.map((w) => w.id)).toContain(mine);
+
+      const byId = new Map(
+        (await db.select().from(integrationConnections)).map((row) => [row.id, row]),
+      );
+      expect(byId.get(mine)).toMatchObject({
+        spaceId: null,
+        originSpaceId: spaceA.spaceId,
+        label: "Connexion 1 (2)",
+      });
+      expect(
+        (
+          await db
+            .select({ spaceId: integrationConnectionShares.spaceId })
+            .from(integrationConnectionShares)
+            .where(eq(integrationConnectionShares.connectionId, mine))
+        ).map((row) => row.spaceId),
+      ).toEqual([spaceA.spaceId]);
+      expect(byId.get(endUsers)).toMatchObject({
+        spaceId: spaceA.spaceId,
+        originSpaceId: null,
+        label: "Connexion 1",
+      });
     });
 
     it("keeps the org's existing default", async () => {
@@ -538,10 +625,8 @@ describe("org-level integration OAuth clients", () => {
         clientId: "space-a",
         isDefault: true,
       });
-      expect(await promoteIntegrationOAuthClient(spaceA, INTEGRATION, id)).toMatchObject({
-        spaceId: null,
-        isDefault: false,
-      });
+      const { client } = await promoteIntegrationOAuthClient(spaceA, INTEGRATION, id);
+      expect(client).toMatchObject({ spaceId: null, isDefault: false });
       const clients = await listIntegrationClients(org, INTEGRATION, AUTH_KEY);
       expect(clients.find((c) => c.is_default)?.client_ref).toBe(orgDefault);
     });
@@ -561,7 +646,40 @@ describe("org-level integration OAuth clients", () => {
       }
     });
 
-    it("400s an auto-provisioned client", async () => {
+    it("moves a legacy space auto-provisioned client and widens its connections", async () => {
+      const id = await seedClient({
+        spaceId: spaceA.spaceId,
+        clientId: "dcr",
+        isDefault: true,
+        autoProvisioned: true,
+      });
+      const conn = await seedConnection({
+        spaceId: spaceA.spaceId,
+        userId: ctx.user.id,
+        clientRef: id,
+      });
+      const { client } = await promoteIntegrationOAuthClient(spaceA, INTEGRATION, id);
+      expect(client).toMatchObject({
+        id,
+        spaceId: null,
+        autoProvisioned: true,
+        // Moved, not made default: the auto-provisioned path finds it by its issuer.
+        isDefault: false,
+      });
+      const [row] = await db
+        .select()
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, conn));
+      expect(row).toMatchObject({ spaceId: null, originSpaceId: spaceA.spaceId, clientRef: id });
+    });
+
+    it("409s a legacy space auto-provisioned client when the org already holds one", async () => {
+      const orgAuto = await seedClient({
+        spaceId: null,
+        clientId: "dcr-org",
+        isDefault: true,
+        autoProvisioned: true,
+      });
       const id = await seedClient({
         spaceId: spaceA.spaceId,
         clientId: "dcr",
@@ -569,17 +687,27 @@ describe("org-level integration OAuth clients", () => {
         autoProvisioned: true,
       });
       await expect(promoteIntegrationOAuthClient(spaceA, INTEGRATION, id)).rejects.toMatchObject({
-        status: 400,
+        status: 409,
+        code: "auto_client_exists_at_org",
       });
+      const rows = await db
+        .select({ id: integrationOauthClients.id, spaceId: integrationOauthClients.spaceId })
+        .from(integrationOauthClients);
+      expect(rows).toHaveLength(2);
+      expect(rows.find((r) => r.id === id)?.spaceId).toBe(spaceA.spaceId);
+      expect(rows.find((r) => r.id === orgAuto)?.spaceId).toBeNull();
     });
   });
 
   it("has_oauth_client is true when only an org client exists", async () => {
     await seedClient({ spaceId: null, clientId: "org-client", isDefault: true });
-    const { auths } = await getIntegrationAuthStatuses(spaceA, INTEGRATION, {
-      type: "user",
-      id: ctx.user.id,
-    });
+    const { auths } = await getIntegrationAuthStatuses(
+      spaceA,
+      INTEGRATION,
+      memberReader(),
+      null,
+      "usable",
+    );
     expect(auths.find((a) => a.auth_key === AUTH_KEY)?.has_oauth_client).toBe(true);
     expect(auths.find((a) => a.auth_key === "key")?.has_oauth_client).toBe(false);
   });
@@ -592,10 +720,13 @@ describe("org-level integration OAuth clients", () => {
     manifest.auths[AUTH_KEY]!._meta = { "dev.appstrate/auth": { required: true } };
     await db.update(packages).set({ draftManifest: manifest }).where(eq(packages.id, INTEGRATION));
 
-    const { auths } = await getIntegrationAuthStatuses(spaceA, INTEGRATION, {
-      type: "user",
-      id: ctx.user.id,
-    });
+    const { auths } = await getIntegrationAuthStatuses(
+      spaceA,
+      INTEGRATION,
+      memberReader(),
+      null,
+      "usable",
+    );
     expect(auths.find((a) => a.auth_key === AUTH_KEY)?.required).toBe(true);
     expect(auths.find((a) => a.auth_key === "key")?.required).toBe(false);
   });

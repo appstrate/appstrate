@@ -3,13 +3,13 @@
 import { expect, type Page } from "@playwright/test";
 
 /**
- * Page Object for the Webhooks page (/webhooks).
+ * Page Object for the Webhooks page (/workspace-settings/webhooks).
  */
 export class WebhooksPage {
   constructor(private page: Page) {}
 
   async goto() {
-    await this.page.goto("/webhooks");
+    await this.page.goto("/workspace-settings/webhooks");
   }
 
   /** Assert a webhook URL (without protocol) is visible on the page. */

@@ -372,10 +372,8 @@ describe("stageFileMountsOnHost — delivery.files (AFPS §7.6, CC-5)", () => {
     });
     expect((await stat(dir)).mode & 0o7777).toBe(0o755);
     // `/tmp` is 1777 in every base image; narrowing it to 0755 would break
-    // every runtime that writes there. Only the world-writable half is
-    // asserted: Bun's `fs.chmod` masks off every bit above 0o777, so the
-    // sticky bit never lands (see `STICKY_STAGED_DIRS`).
-    expect((await stat(join(dir, "tmp"))).mode & 0o777).toBe(0o777);
+    // every runtime that writes there.
+    expect((await stat(join(dir, "tmp"))).mode & 0o7777).toBe(0o1777);
     expect((await stat(join(dir, "tmp/session"))).mode & 0o7777).toBe(0o755);
     expect((await stat(join(dir, "run"))).mode & 0o7777).toBe(0o755);
   });

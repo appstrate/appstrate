@@ -41,6 +41,7 @@ import {
 } from "@appstrate/afps-shared/credential-template";
 import {
   isHostUnboundedUriPattern,
+  parseAuthorizedUriPattern,
   parseUrlFormPattern,
 } from "@appstrate/afps-shared/authorized-uris";
 import {
@@ -75,6 +76,8 @@ const TEMPLATE_SCHEME_PREFIX = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
  */
 export const API_META_KEY = "dev.appstrate/api";
 
+const APPSTRATE_META_NAMESPACE = API_META_KEY.slice(0, API_META_KEY.indexOf("/") + 1);
+
 /**
  * Resumable-upload protocols an api_call auth MAY advertise under
  * `_meta["dev.appstrate/api"].auths.{key}.upload_protocols`. This is an open
@@ -93,6 +96,18 @@ export const RESERVED_INTEGRATION_UPLOAD_PROTOCOLS = [
 // ─────────────────────────────────────────────
 // Integration manifest (AFPS + Appstrate cross-field rules)
 // ─────────────────────────────────────────────
+
+/**
+ * True for an `oauth2` auth declaring `connect.login` (AFPS §7.7, *On an `oauth2` auth method*):
+ * its first token is acquired by a token request to `token_endpoint` carrying the grant the user
+ * submits through `credentials.schema`, instead of the authorization-code flow. Once acquired, the
+ * connection is an ordinary oauth2 one.
+ */
+export function acquiresByConnectLogin(auth: { type?: unknown; connect?: unknown }): boolean {
+  return (
+    auth.type === "oauth2" && (auth.connect as { login?: unknown } | undefined)?.login !== undefined
+  );
+}
 
 /**
  * The integration manifest validator. The base structural schema comes from
@@ -202,6 +217,48 @@ export interface AuthManifestIssue {
   message: string;
 }
 
+/** One OAuth scope, an RFC 6749 §3.3 `scope-token`: space-joined, one holding a space reads as several. */
+export const SCOPE_TOKEN_RE = /^[\x21\x23-\x5b\x5d-\x7e]+$/;
+export const scopeTokenSchema = z
+  .string()
+  .regex(SCOPE_TOKEN_RE, "must be one OAuth scope token (RFC 6749 §3.3)");
+
+/** The scopes of a manifest that are not one {@link scopeTokenSchema} token: a WRITE-path policy. */
+export function findInvalidScopeTokens(manifest: unknown): AuthManifestIssue[] {
+  if (typeof manifest !== "object" || manifest === null) return [];
+  const { auths, tools_policy } = manifest as { auths?: unknown; tools_policy?: unknown };
+  const found: AuthManifestIssue[] = [];
+  const check = (authKey: string, scopes: unknown, path: IssuePath, leaf: string[] = []) => {
+    if (!Array.isArray(scopes)) return;
+    scopes.forEach((scope, index) => {
+      if (scopeTokenSchema.safeParse(scope).success) return;
+      found.push({
+        authKey,
+        path: [...path, index, ...leaf],
+        message: `scope ${JSON.stringify(scope)} is not one OAuth scope token (RFC 6749 §3.3): no space, quote or backslash`,
+      });
+    });
+  };
+  for (const [authKey, auth] of Object.entries(auths ?? {})) {
+    const a = (auth ?? {}) as { default_scopes?: unknown; scope_catalog?: unknown };
+    check(authKey, a.default_scopes, ["auths", authKey, "default_scopes"]);
+    const catalog = Array.isArray(a.scope_catalog) ? a.scope_catalog : [];
+    check(
+      authKey,
+      catalog.map((entry: { value?: unknown } | null) => entry?.value),
+      ["auths", authKey, "scope_catalog"],
+      ["value"],
+    );
+  }
+  for (const [tool, policy] of Object.entries(tools_policy ?? {})) {
+    const required = (policy as { required_scopes?: unknown } | null)?.required_scopes;
+    for (const [authKey, scopes] of Object.entries(required ?? {})) {
+      check(authKey, scopes, ["tools_policy", tool, "required_scopes", authKey]);
+    }
+  }
+  return found;
+}
+
 /**
  * List the auths that inject a credential over HTTP without an `authorized_uris` allowlist that
  * names their hosts — the write-path twin of the run-time `credentialUrlPolicy`.
@@ -241,6 +298,44 @@ export function findUnboundedInjectedCredentials(manifest: unknown): AuthManifes
         authKey,
         path: ["auths", authKey, "authorized_uris", index],
         message: `authorized_uris entry "${pattern}" of auth '${authKey}', which injects a credential, does not bound the host; name it (https://api.example.com/**), keep a wildcard under a registrable domain (https://*.example.com/**, not https://*.github.io/**), or render the host from the connection (https://{$credential.<field>}/**, "{$credential.<field>}/**")`,
+      });
+    });
+  }
+  return found;
+}
+
+/**
+ * List the `http://` entries of the auths that inject a credential over HTTP: the caller picks
+ * which entry a call matches, so a cleartext one lets it send the credential unencrypted.
+ * `isTrustedHost` exempts a host the operator designated as internal, where plain HTTP is the
+ * deployment's own choice. Write-path only: a published manifest still loads.
+ */
+export function findCleartextInjectedCredentials(
+  manifest: unknown,
+  isTrustedHost: (host: string) => boolean = () => false,
+): AuthManifestIssue[] {
+  if (typeof manifest !== "object" || manifest === null) return [];
+  const auths = (manifest as { auths?: unknown }).auths;
+  if (typeof auths !== "object" || auths === null) return [];
+  const found: AuthManifestIssue[] = [];
+  for (const [authKey, auth] of Object.entries(auths)) {
+    const a = (auth ?? {}) as {
+      type?: unknown;
+      authorized_uris?: unknown;
+      delivery?: { http?: AfpsHttpDelivery };
+    };
+    if (!injectsHttpCredential(typeof a.type === "string" ? a.type : "", a.delivery?.http)) {
+      continue;
+    }
+    const uris: unknown[] = Array.isArray(a.authorized_uris) ? a.authorized_uris : [];
+    uris.forEach((pattern, index) => {
+      if (typeof pattern !== "string") return;
+      const entry = parseAuthorizedUriPattern(pattern);
+      if (entry.kind !== "url" || entry.scheme !== "http://" || isTrustedHost(entry.host)) return;
+      found.push({
+        authKey,
+        path: ["auths", authKey, "authorized_uris", index],
+        message: `authorized_uris entry "${pattern}" of auth '${authKey}', which injects a credential, is plain http; use https://`,
       });
     });
   }
@@ -353,8 +448,8 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
       checkJsonPath(path, ["identity_claims", claim]);
     }
 
-    // (1g) Entries templated with `{$credential.<field>}` (#1458) reference declared, required
-    // fields, in the authority of a `scheme://` entry or as a leading whole URL (#1627). Forbidden
+    // (1g) Entries templated with `{$credential.<field>}` reference declared, required
+    // fields, in the authority of a `scheme://` entry or as a leading whole URL. Forbidden
     // with `connect` (its hosts are pinned past the SSRF gate) and on oauth2 (a refresh keeps only
     // tokens in the bundle). Allowed on api_call: its consumers pin only the declared literal
     // entries. Entries carrying `{$variable.<name>}` are `@afps-spec/schema`'s (§7.9, §7.12).
@@ -424,9 +519,10 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
     // only reference declared connect outputs. We only enforce the gating
     // when a declarative `login` is present (the AFPS `tool` mode declares
     // its outputs out-of-band via `produces`, which the loose schema doesn't
-    // surface here).
+    // surface here). An oauth2 login declares no outputs — its response is a
+    // token response, its credential the oauth2 token bundle — so none of it applies.
     const login = auth.connect?.login;
-    if (login) {
+    if (login && !acquiresByConnectLogin(auth)) {
       const declaredOutputs = new Set(Object.keys(login.outputs ?? {}));
       if (declaredOutputs.size === 0) {
         ctx.addIssue({
@@ -594,12 +690,8 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
   //   - `"*"` requires `allow_undeclared_tools: true` (same gate as an agent's
   //     wildcard selection — a default cannot grant the passthrough surface the
   //     integration author did not opt into).
-  //   - an array MUST contain strings; for `source.kind: "none"` (api-only — the
-  //     full catalog is knowable from this manifest alone) every entry MUST be a
-  //     real catalog tool, which catches typos like `["api_calll"]`. For
-  //     local/remote sources the authoritative tool list lives in the referenced
-  //     mcp-server (not resolvable in a pure-manifest superRefine), so array
-  //     membership is left to runtime — mirroring the agent-side leniency.
+  //   - an array MUST contain strings; a `none` source's entries are also
+  //     judged here (`unexposedDefaultTools`, which states what is judged where).
   const defaultTools = (manifest as { default_tools?: unknown }).default_tools;
   if (defaultTools !== undefined) {
     if (isToolsWildcard(defaultTools)) {
@@ -618,17 +710,8 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
         path: ["default_tools"],
       });
     } else if (manifest.source?.kind === "none") {
-      const catalog = new Set(
-        resolveIntegrationToolCatalog({ integration: manifest }).map((e) => e.name),
-      );
-      for (const name of defaultTools) {
-        if (!catalog.has(name)) {
-          ctx.addIssue({
-            code: "custom",
-            message: `default_tools contains "${name}" which is not a tool this integration exposes`,
-            path: ["default_tools"],
-          });
-        }
+      for (const issue of unexposedDefaultTools(manifest)) {
+        ctx.addIssue({ code: "custom", ...issue });
       }
     }
   }
@@ -771,12 +854,41 @@ export function apiUploadToolNameFor(apiCallToolName: string): string {
 /**
  * Names of MCP tools the integration declares POLICY for in its top-level
  * `tools_policy` record. Empty when the integration didn't opt into per-tool
- * metadata. This is NOT the catalog of exposed tools — `tools_policy` is a
- * sparse policy table. The catalog comes from
- * {@link resolveIntegrationToolCatalog}.
+ * metadata. For a `local` source this is NOT the catalog of exposed tools —
+ * that is the mcp-server's, and `tools_policy` a sparse policy table over it.
+ * For any other source these names are the base of the catalog
+ * {@link resolveIntegrationToolCatalog} resolves.
  */
 export function getDeclaredToolNames(manifest: IntegrationManifest): string[] {
   return manifest.tools_policy ? Object.keys(manifest.tools_policy) : [];
+}
+
+/**
+ * An unauthenticated integration (AFPS §7.2): it omits `auths`, so it injects no credential and
+ * binds no connection — `required: true` asks nothing of it.
+ */
+export function isUnauthenticatedIntegration(
+  manifest: Pick<IntegrationManifest, "auths">,
+): boolean {
+  return manifest.auths === undefined;
+}
+
+/**
+ * An unauthenticated integration's `variables` (AFPS §7.2, §7.12): their values live on a
+ * connection, which this platform creates only on an auth method. A WRITE-path refusal.
+ */
+export function findConnectionlessVariables(
+  manifest: unknown,
+): { path: IssuePath; message: string }[] {
+  const m = manifest as { auths?: unknown; variables?: unknown } | null;
+  if (m === null || m.auths !== undefined || m.variables === undefined) return [];
+  return [
+    {
+      path: ["variables"],
+      message:
+        "an integration without auths cannot declare variables: their values live on a connection, and this platform creates connections only on an auth method",
+    },
+  ];
 }
 
 /**
@@ -938,22 +1050,7 @@ export function resolveIntegrationToolCatalog(
   ];
 
   // Step 2+3 — hide set (explicit + auto)
-  const hidden = new Set<string>([
-    ...(integration.hidden_tools ?? []),
-    ...getConnectToolNames(integration),
-  ]);
-  // `api_upload` cannot execute without its sibling `api_call`: every chunk is
-  // dispatched through that credential-proxy tool. Preserve the useful
-  // asymmetric opt-out (authors may hide upload while keeping generic calls),
-  // but never leave an orphan upload in the catalog when its dependency is
-  // hidden.
-  for (const config of apiCallConfigs) {
-    const callHidden = hidden.has(config.toolName);
-    const uploadHidden = config.uploadToolName !== undefined && hidden.has(config.uploadToolName);
-    if (config.uploadToolName && (callHidden || uploadHidden)) {
-      hidden.add(config.uploadToolName);
-    }
-  }
+  const hidden = hiddenToolNames(integration, apiCallConfigs);
 
   // Step 4 — attach policy from the sparse `tools_policy{}` table
   const policyTable = integration.tools_policy ?? {};
@@ -973,6 +1070,21 @@ export function resolveIntegrationToolCatalog(
     });
   }
   return out;
+}
+
+function hiddenToolNames(
+  integration: IntegrationManifest,
+  apiCallConfigs: readonly ApiCallConfig[],
+): Set<string> {
+  const hidden = new Set<string>([
+    ...(integration.hidden_tools ?? []),
+    ...getConnectToolNames(integration),
+  ]);
+  // An upload dispatches every chunk through its sibling `api_call`, so hiding the call hides it.
+  for (const config of apiCallConfigs) {
+    if (config.uploadToolName && hidden.has(config.toolName)) hidden.add(config.uploadToolName);
+  }
+  return hidden;
 }
 
 /** One resolved `api_call` capability — a single opted-in auth. */
@@ -1071,6 +1183,62 @@ export function readDefaultTools(
   return undefined;
 }
 
+/** Whether every key of every `_meta` object `node` carries, at any depth, is Appstrate's own. */
+function carriesOnlyAppstrateMeta(node: unknown): boolean {
+  if (node === null || typeof node !== "object") return true;
+  return Object.entries(node).every(
+    ([key, value]) =>
+      (key !== "_meta" ||
+        Object.keys(value ?? {}).every((k) => k.startsWith(APPSTRATE_META_NAMESPACE))) &&
+      carriesOnlyAppstrateMeta(value),
+  );
+}
+
+/**
+ * The `default_tools` names the manifest proves unexposed, each once: one {@link hiddenToolNames}
+ * withholds, whatever the source, and one outside {@link resolveIntegrationToolCatalog} where that
+ * catalog is known — a `none` source carrying no `_meta` extension but Appstrate's (another
+ * vendor's may supply tools), a `local` source given its mcp-server's `tools[]`, and a `remote`
+ * source declaring a `tools_policy`, which bounds the default as it bounds an agent's selection.
+ */
+function unexposedDefaultTools(
+  manifest: IntegrationManifest,
+  mcpServerTools?: ResolveIntegrationToolCatalogInput["mcpServerTools"],
+): { path: IssuePath; message: string }[] {
+  const defaults = readDefaultTools(manifest);
+  if (defaults === undefined || isToolsWildcard(defaults)) return [];
+  const kind = manifest.source?.kind;
+  const serverTools = kind === "local" ? mcpServerTools : undefined;
+  const catalogIsKnown =
+    kind === "none"
+      ? carriesOnlyAppstrateMeta(manifest)
+      : kind === "remote"
+        ? getDeclaredToolNames(manifest).length > 0
+        : serverTools !== undefined;
+  const catalog = new Set(
+    resolveIntegrationToolCatalog({ integration: manifest, mcpServerTools: serverTools }).map(
+      (e) => e.name,
+    ),
+  );
+  const hidden = hiddenToolNames(manifest, getApiCallConfigs(manifest));
+  return [...new Set(defaults)]
+    .filter((name) => hidden.has(name) || (catalogIsKnown && !catalog.has(name)))
+    .map((name) => ({
+      path: ["default_tools"],
+      message: `default_tools contains "${name}" which is not a tool this integration exposes`,
+    }));
+}
+
+/** WRITE-path form of {@link unexposedDefaultTools}; none for a structurally invalid manifest. */
+export function findUnexposedDefaultTools(
+  manifest: unknown,
+  mcpServerTools?: ResolveIntegrationToolCatalogInput["mcpServerTools"],
+): { path: IssuePath; message: string }[] {
+  return afpsIntegrationManifestSchema.safeParse(manifest).success
+    ? unexposedDefaultTools(manifest as IntegrationManifest, mcpServerTools)
+    : [];
+}
+
 /**
  * Resolve the effective per-integration tool selection for an agent. An
  * explicit agent selection — including an empty array (`[]`, "use zero tools")
@@ -1082,8 +1250,8 @@ export function readDefaultTools(
  * Precedence: explicit `[]`/`["…"]`/`"*"` ⟶ as-is; `undefined` ⟶ integration
  * `default_tools` (or `undefined` if the integration declares none).
  *
- * Applied once at every site that consumes the agent's tool selection (spawn
- * resolution AND OAuth scope inference) so the default is honoured uniformly.
+ * This is the selection a run spawns with. OAuth scope inference takes only its
+ * wildcard: an inherited array contributes no scope, the agent's own selection does.
  */
 export function resolveEffectiveToolSelection(
   agentSelection: readonly string[] | "*" | undefined,
@@ -1091,6 +1259,20 @@ export function resolveEffectiveToolSelection(
 ): readonly string[] | "*" | undefined {
   if (agentSelection !== undefined) return agentSelection;
   return readDefaultTools(manifest);
+}
+
+/**
+ * The tool selection an agent's OAuth scopes are inferred from: `"*"` when its effective
+ * selection ({@link resolveEffectiveToolSelection}) is the wildcard, written or inherited from
+ * `default_tools`, else the agent's own array, `[]` when it wrote none. Tool names inherited
+ * from `default_tools` contribute no scope.
+ */
+export function resolveScopeToolSelection(
+  agentSelection: readonly string[] | "*" | undefined,
+  manifest: IntegrationManifest,
+): readonly string[] | "*" {
+  const effective = resolveEffectiveToolSelection(agentSelection, manifest);
+  return isToolsWildcard(effective) ? TOOLS_WILDCARD : (agentSelection ?? []);
 }
 
 /**
@@ -1290,7 +1472,8 @@ export function expandScopesGranted(
 
 /**
  * The `required` scopes that `granted`, expanded through `scope_catalog[].implies`
- * (see {@link expandScopesGranted}), does not cover. Order of `required` is kept.
+ * (see {@link expandScopesGranted}), does not cover. Order of `required` is kept. `offline_access`
+ * is never uncovered: whether it yields a refresh token is the authorization server's decision.
  */
 export function scopesNotCovered(
   required: readonly string[],
@@ -1299,7 +1482,7 @@ export function scopesNotCovered(
   authKey: string,
 ): string[] {
   const expanded = new Set(expandScopesGranted(granted, manifest, authKey));
-  return required.filter((s) => !expanded.has(s));
+  return required.filter((s) => s !== "offline_access" && !expanded.has(s));
 }
 
 /**
@@ -1341,7 +1524,7 @@ export interface AgentIntegrationScopeError {
   /** Dotted JSON path into the agent manifest (`integrations.<id>.<field>`). */
   field: string;
   /** Stable machine-readable code consumed by route layer / UI. */
-  code: "unknown_tool" | "scope_not_in_catalog" | "wildcard_not_authorized";
+  code: "unknown_tool" | "scope_not_in_catalog" | "wildcard_not_authorized" | "invalid_format";
   /** Human-readable detail for surfaces that don't translate `code`. */
   message: string;
 }
@@ -1404,6 +1587,15 @@ export function validateAgentIntegrationScopes(
     }
   }
 
+  for (const scope of selection.scopes ?? []) {
+    if (scopeTokenSchema.safeParse(scope).success) continue;
+    errors.push({
+      field: `integrations_configuration.${selection.id}.scopes`,
+      code: "invalid_format",
+      message: `Scope ${JSON.stringify(scope)} is not one OAuth scope token (RFC 6749 §3.3): no space, quote or backslash`,
+    });
+  }
+
   if (selection.scopes && selection.scopes.length > 0) {
     const catalog = getAvailableScopes(integrationManifest);
     if (catalog.length > 0) {
@@ -1454,6 +1646,21 @@ export const CONNECTION_RESOLUTION_SOURCES = [
 /** The cascade layer that bound a set — drives the audit + UI badge. */
 export type ConnectionResolutionSource = (typeof CONNECTION_RESOLUTION_SOURCES)[number];
 
+/** How an `insufficient_scopes` item clears (`ResolutionFieldError.remedy`). */
+export const INSUFFICIENT_SCOPES_REMEDIES = [
+  "new_connection",
+  "upgrade_or_new",
+  "rebind_by_admin",
+  "rebind_by_schedule_owner",
+] as const;
+
+export type InsufficientScopesRemedy = (typeof INSUFFICIENT_SCOPES_REMEDIES)[number];
+
+/** A connection's granted scopes against an agent's selection, least privilege first. */
+export const CONNECTION_SCOPE_FITS = ["exact", "unjudged", "broader", "missing"] as const;
+
+export type ConnectionScopeFit = (typeof CONNECTION_SCOPE_FITS)[number];
+
 /** Per-integration resolution result. */
 export interface ResolvedConnection {
   connectionId: string;
@@ -1497,11 +1704,13 @@ export const CONNECTION_RESOLUTION_ERROR_CODES = [
   "pinned_connection_unavailable",
   "override_connection_unavailable",
   "override_outranked",
+  "connection_set_too_large",
   "must_choose_connection",
   "insufficient_scopes",
   "auth_key_mismatch",
   "auth_serves_no_selected_tool",
   "auth_key_serves_no_selected_tool",
+  "auth_key_on_unauthenticated_integration",
   "required_integration_unbound",
   "integration_not_active",
 ] as const;
@@ -1525,6 +1734,25 @@ export const MISSING_INTEGRATION_CONNECTION_CODES = [
 export type MissingIntegrationConnectionCode =
   (typeof MISSING_INTEGRATION_CONNECTION_CODES)[number];
 
+/** Every code an `errors[]` item of the connection-readiness read carries. */
+export const READINESS_ERROR_CODES = [
+  ...CONNECTION_RESOLUTION_ERROR_CODES,
+  "agent_not_active",
+] as const;
+
+export type ReadinessErrorCode = (typeof READINESS_ERROR_CODES)[number];
+
+/**
+ * What a launch override key is refused over at the write: a 400 item on
+ * `connection_overrides.<id>` or `dependency_overrides.<id>`.
+ */
+export const OVERRIDE_REFUSAL_CODES = [
+  "undeclared_connection_override",
+  "undeclared_dependency_override",
+] as const;
+
+export type OverrideRefusalCode = (typeof OVERRIDE_REFUSAL_CODES)[number];
+
 /**
  * One connection carried by `must_choose_connection`.
  *
@@ -1547,6 +1775,9 @@ export interface ConnectionCandidate {
   ownedByActor: boolean;
   /** The row's credentials died: pickable, but a run needs it reconnected. */
   needsReconnection: boolean;
+  scopesGranted: string[];
+  /** Scopes the agent's selection requires that the row lacks. */
+  missingScopes: string[];
 }
 
 /** One unresolved integration plus structured detail. */
@@ -1587,12 +1818,14 @@ export interface ConnectionResolutionError {
    */
   authKey?: string;
   /**
-   * The cascade layer whose set failed, on every layer-bound code, and the layer that chose `[]`
+   * The layer that named the failing row (or set), on every layer-bound code — the adding layer on
+   * `override_outranked` and `connection_set_too_large` — and the layer that chose `[]`
    * on an `integration_unbound` warning; absent when no layer bound anything (`not_connected`,
-   * `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`).
+   * `must_choose_connection`, `auth_key_mismatch`, `auth_key_serves_no_selected_tool`,
+   * `auth_key_on_unauthenticated_integration`).
    */
   source?: ConnectionResolutionSource;
-  /** The failing layer's whole set, in its order. */
+  /** The whole set that failed to bind, in its order: under governance, the floor then its additions. */
   boundConnectionIds?: string[];
   /**
    * True when the resolved connection belongs to the current actor. Carried on
@@ -1601,9 +1834,10 @@ export interface ConnectionResolutionError {
    */
   ownedByActor?: boolean;
   /**
-   * AFPS §4.1 — the agent dep's `auth_key`, on `auth_key_mismatch` and on
-   * `auth_key_serves_no_selected_tool` (an auth exposing none of the selected tools: the
-   * agent's configuration must change, no connection clears it).
+   * AFPS §4.1 — the agent dep's `auth_key`, on `auth_key_mismatch`, on
+   * `auth_key_serves_no_selected_tool` (an auth exposing none of the selected tools) and on
+   * `auth_key_on_unauthenticated_integration` (an integration declaring no auth, AFPS §4.4): on
+   * both, the agent's configuration must change, no connection clears it.
    */
   requiredAuthKey?: string;
   /**

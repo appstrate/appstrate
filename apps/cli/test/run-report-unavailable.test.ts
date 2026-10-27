@@ -16,6 +16,9 @@ import {
 import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
 import { parseLaunchItems } from "../src/commands/run/launch-warnings.ts";
 import { unavailableIntegrations, withoutIntegrations } from "../src/commands/run/report.ts";
+import { cliPromptInputs } from "../src/commands/run.ts";
+import { buildIntegrationResolver } from "../src/commands/run/resolver.ts";
+import type { IntegrationApiCallResolver } from "@appstrate/afps-runtime/resolvers";
 
 const GMAIL = "@appstrate/gmail";
 const NOTION = "@appstrate/notion";
@@ -37,14 +40,22 @@ const apiCallIntegration = (name: string) => ({
   },
 });
 
-function makeBundle(): Bundle {
+const MCP_ONLY = "@appstrate/mcp-only";
+
+function makeBundle(withMcpOnly = false): Bundle {
   const root = "@scope/agent@1.0.0";
   const agent = {
     name: "@scope/agent",
     version: "1.0.0",
     type: "agent",
     schema_version: "0.1",
-    dependencies: { integrations: { [GMAIL]: "^1.0.0", [NOTION]: "^1.0.0" } },
+    dependencies: {
+      integrations: {
+        [GMAIL]: "^1.0.0",
+        [NOTION]: "^1.0.0",
+        ...(withMcpOnly ? { [MCP_ONLY]: "^1.0.0" } : {}),
+      },
+    },
     integrations_configuration: {
       [GMAIL]: { tools: ["api_call"] },
       [NOTION]: { tools: ["api_call"] },
@@ -62,6 +73,17 @@ function makeBundle(): Bundle {
       pkg(root, agent, new Map([["prompt.md", new TextEncoder().encode("Do it.")]])),
       pkg(`${GMAIL}@1.0.0`, apiCallIntegration(GMAIL)),
       pkg(`${NOTION}@1.0.0`, apiCallIntegration(NOTION)),
+      ...(withMcpOnly
+        ? [
+            pkg(`${MCP_ONLY}@1.0.0`, {
+              name: MCP_ONLY,
+              version: "1.0.0",
+              schema_version: "0.1",
+              type: "integration",
+              source: { kind: "remote", url: "https://mcp.example.com/mcp" },
+            }),
+          ]
+        : []),
     ] as never),
   } as unknown as Bundle;
 }
@@ -71,28 +93,57 @@ const WARNINGS = parseLaunchItems([
   { field: "run", code: "something_else", message: "ignored" },
 ]);
 
-/** Tool names the bridge registers for `bundle`, one resolved tool per requested ref. */
-async function exposedTools(bundle: Bundle): Promise<string[]> {
-  const factories = await buildApiCallExtensionFactory({
+const fakeResolver: IntegrationApiCallResolver = {
+  resolve: async (refs) =>
+    refs.map((ref) => ({
+      name: `${ref.name}__api_call`,
+      description: ref.name,
+      parameters: { type: "object" },
+      execute: async () => ({ content: [] }),
+    })),
+};
+
+/** Factories the bridge builds for `bundle`, one resolved tool per requested ref. */
+function bridge(bundle: Bundle, integrationResolver: IntegrationApiCallResolver) {
+  return buildApiCallExtensionFactory({
     bundle,
-    integrationResolver: {
-      resolve: async (refs) =>
-        refs.map((ref) => ({
-          name: `${ref.name}__api_call`,
-          description: ref.name,
-          parameters: { type: "object" },
-          execute: async () => ({ content: [] }),
-        })),
-    },
+    integrationResolver,
     runId: "run_test",
     workspace: "/tmp",
     emitEvent: () => {},
   });
+}
+
+/** Tool names the bridge registers for `bundle`. */
+async function exposedTools(bundle: Bundle): Promise<string[]> {
   const names: string[] = [];
-  for (const factory of factories) {
+  for (const factory of (await bridge(bundle, fakeResolver)).factories) {
     factory({ registerTool: (t: { name: string }) => names.push(t.name) } as never);
   }
   return names;
+}
+
+/** The CLI prompt of `bundle` once its api_call tools are wired through `resolver`. */
+async function cliPrompt(
+  bundle: Bundle,
+  resolver: IntegrationApiCallResolver,
+  unavailable: ReturnType<typeof unavailableIntegrations> = [],
+): Promise<string> {
+  const { integrationIds } = await bridge(
+    withoutIntegrations(
+      bundle,
+      unavailable.map((entry) => entry.id),
+    ),
+    resolver,
+  );
+  return renderPlatformPrompt(
+    cliPromptInputs(
+      bundle,
+      { runId: "run_test", input: {}, memories: [] },
+      unavailable,
+      integrationIds,
+    ),
+  );
 }
 
 describe("--report local run — integrations bound to none", () => {
@@ -145,6 +196,26 @@ describe("--report local run — integrations bound to none", () => {
     expect(prompt).toContain("## Unavailable Integrations");
     expect(prompt).toContain(`- **${GMAIL}**: no connection is bound to this run`);
     expect(prompt).not.toContain(`- **${NOTION}**`);
+  });
+
+  it("lists only the available integrations in the catalog", async () => {
+    const prompt = await cliPrompt(makeBundle(), fakeResolver, unavailableIntegrations(WARNINGS));
+    expect(prompt).toContain(`<name>${NOTION}</name>`);
+    expect(prompt).not.toContain(`<name>${GMAIL}</name>`);
+    expect(prompt).toContain(`- **${GMAIL}**: no connection is bound to this run`);
+  });
+
+  it("does not list an MCP-only integration, which the CLI wires no tool for", async () => {
+    const prompt = await cliPrompt(makeBundle(true), fakeResolver);
+    expect(prompt).toContain(`<name>${GMAIL}</name>`);
+    expect(prompt).toContain(`<name>${NOTION}</name>`);
+    expect(prompt).not.toContain(`<name>${MCP_ONLY}</name>`);
+  });
+
+  it("renders no catalog under --integrations none", async () => {
+    const prompt = await cliPrompt(makeBundle(true), buildIntegrationResolver("none", null));
+    expect(prompt).not.toContain("### Integrations");
+    expect(prompt).not.toContain("<available_integrations>");
   });
 
   it("exposes no tool of an integration bound to none", async () => {

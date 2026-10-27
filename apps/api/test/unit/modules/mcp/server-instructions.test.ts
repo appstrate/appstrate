@@ -15,7 +15,10 @@
 
 import { describe, it, expect } from "bun:test";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
-import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
+import {
+  CONNECTION_RESOLUTION_WARNING_CODES,
+  INSUFFICIENT_SCOPES_REMEDIES,
+} from "@appstrate/core/integration";
 import { RUN_AND_WAIT_RESUME_INSTRUCTION } from "@appstrate/core/run-and-wait-client";
 import { RUN_AND_WAIT_LONG_POLL_RESUME } from "../../../../src/modules/mcp/tools.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
@@ -95,14 +98,13 @@ describe("MCP server instructions — connect bullet", () => {
       // Rebound by the launch override, which beats a member pin and works inline too.
       expect(part).toContain("`connection_overrides`");
       // …and the caller is told where the new connection's id comes from.
-      expect(part).toMatch(/`listIntegrationConnections`|only when `source` is `fallback_auto`/);
-      // The layers a member cannot override themselves.
-      for (const layer of ["admin_pin", "org_default_enforced", "schedule_override"]) {
-        expect(part).toContain(`\`${layer}\``);
+      expect(part).toMatch(/`listIntegrationConnections`|`candidate_connections` list the new one/);
+      // The item's own `remedy` decides, every value named.
+      for (const remedy of INSUFFICIENT_SCOPES_REMEDIES) {
+        expect(part).toContain(`\`${remedy}\``);
       }
-      // `connection_id` only on a reconnect, or an upgrade the owner chose.
+      // `connection_id` only on a reconnect.
       expect(bullet).toContain("for a needs_reconnection item only");
-      expect(part).toMatch(/`connection_id`[^.]*only when `owned_by_actor` is true/);
     }
     const cannotConnect = instructionsFor(["mcp:read", "mcp:invoke", "agents:run", "runs:read"]);
     expect(cannotConnect).toContain("An `insufficient_scopes` item carries no `connect_url`");
@@ -164,6 +166,14 @@ describe("MCP server instructions — connect bullet", () => {
       /start it with `initiateIntegrationConnect` from the warning's `auth_key` and `required_scopes`/,
     );
     expect(external).not.toMatch(/giving the caller the warning's `connect_url`/);
+  });
+
+  it("says a schedule write wants the user's one connection named too", () => {
+    const bullet = instructionsFor(permissions)
+      .split("\n")
+      .find((line) => line.startsWith("- The exception — code `must_choose_connection`"));
+    expect(bullet).toContain("An enabled schedule write answers this code for the user's one");
+    expect(bullet).toContain("in the schedule's own `connection_overrides`");
   });
 
   it("names the layers a `required_integration_unbound` comes from and what clears it", () => {
@@ -272,7 +282,7 @@ describe("MCP server instructions — run guidance", () => {
     const bulletOf = (caller: ReadonlySet<string>) =>
       prose(caller)
         .split("\n")
-        .find((line) => line.startsWith("- Code `auth_key_serves_no_selected_tool`"));
+        .find((line) => line.startsWith("- Codes `auth_key_serves_no_selected_tool`"));
     const bullet = bulletOf(RUNNER);
     expect(bullet).toContain("configuration must change");
     expect(bullet).toContain("Do not start a connect flow");
@@ -338,6 +348,14 @@ describe("MCP server instructions — agent authoring", () => {
     expect(withWrite).toContain("building or configuring an agent");
     expect(without).not.toContain("Integration tool selection");
     expect(without).not.toContain("building or configuring an agent");
+  });
+
+  // A default can hold write tools: an external client gets the narrowing rule from this text alone.
+  it("tells an author to select the tools the agent needs rather than inherit the default", () => {
+    const withWrite = instructionsFor(new Set(["mcp:read", "mcp:invoke", "agents:write"]), true);
+    expect(withWrite).toContain(
+      "List only the tools the agent needs; omit `tools` only when it needs the whole default",
+    );
   });
 
   it("teaches `required` alongside the tool selection", () => {

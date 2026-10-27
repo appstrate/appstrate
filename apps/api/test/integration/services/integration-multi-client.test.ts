@@ -7,7 +7,8 @@
  * client id (system env id or `integration_oauth_clients.id`); token refresh
  * resolves the same client's credentials by that id (system-first then DB-by-id,
  * mirroring the model-provider credential pattern). Covers:
- *   - persist stamps `client_ref` (round-trip insert/update)
+ *   - persist stamps `client_ref` (round-trip insert/update), and the row takes
+ *     its client's tier as its scope
  *   - `resolveIntegrationClientById` (system / custom-by-id / cross-scope / public)
  *   - refresh-context resolution by `client_ref`
  *   - the client-listing merge + default precedence
@@ -26,10 +27,10 @@ import {
   listIntegrationClients,
   resolveIntegrationClientById,
   resolveConnectClient,
-  ensureIntegrationOAuthClient,
   setDefaultIntegrationClient,
   type ResolvedOAuthConnect,
 } from "../../../src/services/integration-connections.ts";
+import { ensureIntegrationOAuthClient } from "../../../src/services/integration-oauth-provisioning.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { buildIntegrationOAuthRefreshContext } from "../../../src/services/integration-token-refresh.ts";
 import {
@@ -54,6 +55,10 @@ const PUBLIC_AUTH: AfpsManifestAuth = {
   token_endpoint: "https://oauth2.googleapis.com/token",
   token_endpoint_auth_method: "none",
 } as AfpsManifestAuth;
+
+const LOCAL_MANIFEST = {
+  source: { kind: "local", server: { name: `${INTEGRATION}-server`, version: "^0.1.0" } },
+} as unknown as IntegrationManifest;
 
 describe("integration multi-client", () => {
   let ctx: TestContext;
@@ -134,21 +139,41 @@ describe("integration multi-client", () => {
     return row!.clientRef;
   }
 
+  /** The insert response is not an owner view: the origin is read from the row. */
+  async function readOriginSpaceId(connectionId: string): Promise<string | null> {
+    const [row] = await db
+      .select({ originSpaceId: integrationConnections.originSpaceId })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.id, connectionId))
+      .limit(1);
+    return row!.originSpaceId;
+  }
+
   describe("persist stamps client_ref", () => {
-    it("stores the system client id on insert", async () => {
+    it("stores the system client id on insert, at org scope", async () => {
       const created = await connect(SYSTEM_ID);
       expect(await readClientRef(created.id)).toBe("gmail-system");
+      expect(created).toMatchObject({ scope: "org", spaceId: null });
+      expect(created).toMatchObject({ origin_space_id: ctx.defaultSpaceId });
+      expect(await readOriginSpaceId(created.id)).toBe(ctx.defaultSpaceId);
     });
 
-    it("stores the custom client id on insert", async () => {
+    it("stores the custom client id on insert, scoped to the client's space", async () => {
       const customId = await seedCustomClient("org-client", "org-secret");
       const created = await connect(customId);
       expect(await readClientRef(created.id)).toBe(customId);
+      expect(created).toMatchObject({ scope: "space", spaceId: ctx.defaultSpaceId });
+      expect(await readOriginSpaceId(created.id)).toBeNull();
     });
 
-    it("leaves client_ref NULL when omitted (non-oauth2 callers)", async () => {
+    it("leaves client_ref NULL when omitted (non-oauth2 callers), at org scope", async () => {
       const created = await connect();
       expect(await readClientRef(created.id)).toBeNull();
+      expect(created.scope).toBe("org");
+    });
+
+    it("refuses a custom client id that names no client", async () => {
+      await expect(connect(crypto.randomUUID())).rejects.toMatchObject({ status: 404 });
     });
 
     it("re-stamps the client_ref on reconnect (update-owned)", async () => {
@@ -167,6 +192,15 @@ describe("integration multi-client", () => {
         clientRef: SYSTEM_ID,
       });
       expect(await readClientRef(created.id)).toBe("gmail-system");
+      const [row] = await db
+        .select({
+          spaceId: integrationConnections.spaceId,
+          originSpaceId: integrationConnections.originSpaceId,
+        })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, created.id));
+      // A system client serves the org: the reconnect widened the row.
+      expect(row).toEqual({ spaceId: null, originSpaceId: ctx.defaultSpaceId });
     });
   });
 
@@ -330,6 +364,7 @@ describe("integration multi-client", () => {
       const ctxOut = await buildIntegrationOAuthRefreshContext(
         INTEGRATION,
         AUTH_KEY,
+        LOCAL_MANIFEST,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
         { clientRef: SYSTEM_ID, oauthResource: null },
@@ -344,6 +379,7 @@ describe("integration multi-client", () => {
       const ctxOut = await buildIntegrationOAuthRefreshContext(
         INTEGRATION,
         AUTH_KEY,
+        LOCAL_MANIFEST,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
         { clientRef: customId, oauthResource: null },
@@ -357,6 +393,7 @@ describe("integration multi-client", () => {
       const ctxOut = await buildIntegrationOAuthRefreshContext(
         INTEGRATION,
         AUTH_KEY,
+        LOCAL_MANIFEST,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
         { clientRef: "removed-id", oauthResource: null },
@@ -371,6 +408,7 @@ describe("integration multi-client", () => {
       const ctxOut = await buildIntegrationOAuthRefreshContext(
         INTEGRATION,
         AUTH_KEY,
+        LOCAL_MANIFEST,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
         { clientRef: null, oauthResource: null },
@@ -383,6 +421,7 @@ describe("integration multi-client", () => {
       const ctxOut = await buildIntegrationOAuthRefreshContext(
         INTEGRATION,
         AUTH_KEY,
+        LOCAL_MANIFEST,
         PUBLIC_AUTH,
         ctx.defaultSpaceId,
         { clientRef: SYSTEM_ID, oauthResource: null },
@@ -401,6 +440,7 @@ describe("integration multi-client", () => {
       const ctxOut = await buildIntegrationOAuthRefreshContext(
         INTEGRATION,
         AUTH_KEY,
+        LOCAL_MANIFEST,
         OAUTH2_AUTH,
         ctx.defaultSpaceId,
         { clientRef: pinned, oauthResource: null },
@@ -498,10 +538,6 @@ describe("integration multi-client", () => {
   });
 
   describe("resolveConnectClient honours the default flag", () => {
-    const LOCAL_MANIFEST = {
-      source: { kind: "local", server: { name: `${INTEGRATION}-server`, version: "^0.1.0" } },
-    } as unknown as IntegrationManifest;
-
     function customClient(isDefault: boolean): ResolvedOAuthConnect {
       return {
         spaceClients: [
@@ -551,7 +587,6 @@ describe("integration multi-client", () => {
         AUTH_KEY,
         LOCAL_MANIFEST,
         OAUTH2_AUTH,
-        "https://platform.test/callback",
       );
       expect(() =>
         resolveConnectClient(INTEGRATION, AUTH_KEY, LOCAL_MANIFEST, OAUTH2_AUTH, resolved),

@@ -1,17 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * MCP-server-specific tail of the manifest overview: how the server is started
- * (`server`), what it exposes (`tools`) and what it asks the installer for
- * (`user_config`). `manifest.json` IS the only required file of this package
- * type, so without this block the type has no rendered view at all.
- */
+/** MCP-server tail of the manifest overview (`server`, `tools`, `user_config`); `manifest.json` is this type's only required file, so it has no other view. */
 
 import { useTranslation } from "react-i18next";
 import { Badge } from "@appstrate/ui/components/badge";
 import type { ManifestFact, McpServerManifestDetails } from "../../lib/package-manifest";
-import { SectionCard } from "../section-card";
-import { FactGrid } from "./manifest-fact";
+import { DetailSectionCard } from "../detail-section-card";
+import { ManifestFacts } from "./manifest-fact";
+import { PackageToolCatalog } from "../package-detail/package-tool-catalog";
 
 export function McpServerDetails({ details }: { details: McpServerManifestDetails }) {
   const { t } = useTranslation("agents");
@@ -26,8 +22,7 @@ export function McpServerDetails({ details }: { details: McpServerManifestDetail
     facts.push({ labelKey: "manifest.serverEntryPoint", value: server.entryPoint });
   }
   if (server?.command) {
-    // The args belong with the command — split across two rows they read as
-    // two unrelated facts instead of the one line the runner executes.
+    // Args stay with the command: split, they read as two unrelated facts.
     facts.push({
       labelKey: "manifest.serverCommand",
       value: [server.command, ...server.args].join(" "),
@@ -37,26 +32,23 @@ export function McpServerDetails({ details }: { details: McpServerManifestDetail
   return (
     <>
       {facts.length > 0 && (
-        <SectionCard title={t("manifest.server")}>
-          <FactGrid facts={facts} />
-        </SectionCard>
+        <DetailSectionCard bodyClassName="flex flex-col gap-4 p-4" title={t("manifest.server")}>
+          <ManifestFacts facts={facts} />
+        </DetailSectionCard>
       )}
 
       {tools.length > 0 && (
-        <SectionCard title={t("manifest.tools")}>
-          {tools.map((tool) => (
-            <div key={tool.name}>
-              <code className="text-sm">{tool.name}</code>
-              {tool.description && (
-                <p className="text-muted-foreground mt-0.5 text-xs">{tool.description}</p>
-              )}
-            </div>
-          ))}
-        </SectionCard>
+        <DetailSectionCard
+          bodyClassName="flex flex-col gap-4 p-4"
+          title={t("manifest.tools")}
+          className="lg:col-span-2"
+        >
+          <PackageToolCatalog tools={tools} />
+        </DetailSectionCard>
       )}
 
       {userConfig.length > 0 && (
-        <SectionCard title={t("manifest.userConfig")}>
+        <DetailSectionCard bodyClassName="flex flex-col gap-4 p-4" title={t("manifest.userConfig")}>
           {userConfig.map((entry) => (
             <div key={entry.key}>
               <div className="flex flex-wrap items-center gap-2">
@@ -74,7 +66,7 @@ export function McpServerDetails({ details }: { details: McpServerManifestDetail
               )}
             </div>
           ))}
-        </SectionCard>
+        </DetailSectionCard>
       )}
     </>
   );

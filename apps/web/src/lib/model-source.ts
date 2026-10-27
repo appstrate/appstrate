@@ -1,28 +1,24 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/**
- * Where the model form's pick list comes from, and the one row shape all three
- * sources produce. Descriptions serve the picker; endpoint capabilities alone
- * may become overrides when adding a discovered model.
- */
+// Where the model form's pick list comes from, and the one row shape all three sources
+// produce. Only endpoint capabilities may become overrides when adding a discovered model.
 
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type {
   DiscoveredModel,
   ProviderRegistryEntry,
 } from "../hooks/use-model-provider-credentials";
-import type { OpenRouterModel } from "../hooks/use-models";
+import type { OpenRouterModel, OrgModelInfo } from "../hooks/use-models";
+import { matchesSearch } from "./strings";
 import { catalogValues, type CatalogModelValues } from "./row-overrides-catalog";
 
 export type ModelSource = "catalog" | "discover" | "search";
 
 /**
- * Which listing answers for a provider. `search` is a provider declaring
- * `live_model_search`: its live search returns the billing rate, which
- * `POST /discover` never does. `catalog` covers every entry Pi's registry
- * describes and every oauth2 one (a subscription's listing is what the plan
- * serves, and discovery refuses to spend a subscription token). `discover` is
- * the rest.
+ * Which listing answers for a provider. `search`: `live_model_search` (returns the
+ * billing rate, which `POST /discover` never does). `catalog`: entries Pi's registry
+ * describes and every oauth2 one (discovery refuses to spend a subscription token).
+ * `discover`: the rest.
  */
 export function modelSource(
   provider:
@@ -51,8 +47,8 @@ export interface ModelPickRow {
     Pick<ModelPickRow, "input" | "contextWindow" | "maxTokens" | "reasoning">
   >;
   cost: ModelCost | null;
-  /** The listing it came from: what the batch is allowed to send. */
-  origin: ModelSource;
+  /** The listing it came from (or `manual`, an id typed by hand): what the batch is allowed to send. */
+  origin: ModelSource | "manual";
   /** Catalog-only: the curated group. */
   featured: boolean;
 }
@@ -128,11 +124,20 @@ export function searchRows(models: readonly OpenRouterModel[]): ModelPickRow[] {
   );
 }
 
+/** A model the organization already has, as a ticked row (so it can be unticked) even when the listing no longer offers it; never sent again. */
+export function existingRow(m: OrgModelInfo): ModelPickRow {
+  return pickRow({
+    id: m.modelId ?? m.id,
+    label: m.label,
+    contextWindow: m.contextWindow ?? null,
+    maxTokens: m.maxTokens ?? null,
+    input: m.input ?? null,
+    reasoning: m.reasoning ?? null,
+    origin: "catalog",
+  });
+}
+
 /** Client-side search over a list. A remote search filters itself. */
 export function filterRows(rows: readonly ModelPickRow[], search: string): ModelPickRow[] {
-  const needle = search.trim().toLowerCase();
-  if (!needle) return [...rows];
-  return rows.filter(
-    (r) => r.id.toLowerCase().includes(needle) || !!r.label?.toLowerCase().includes(needle),
-  );
+  return rows.filter((r) => matchesSearch(search, [r.id, r.label]));
 }

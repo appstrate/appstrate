@@ -1,12 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { ReactNode } from "react";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@appstrate/ui/components/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@appstrate/ui/components/tooltip";
 
 /**
  * Explains why a control is disabled. A disabled control fires no pointer
@@ -22,16 +17,14 @@ export function DisabledReasonTooltip({
 }) {
   if (!reason) return children;
   return (
-    <TooltipProvider delayDuration={300}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span tabIndex={0} className="relative inline-flex">
-            {children}
-            <span className="sr-only">{reason}</span>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent className="max-w-xs">{reason}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={0} className="relative inline-flex">
+          {children}
+          <span className="sr-only">{reason}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs">{reason}</TooltipContent>
+    </Tooltip>
   );
 }

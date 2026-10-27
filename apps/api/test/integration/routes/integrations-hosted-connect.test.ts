@@ -455,19 +455,16 @@ describe("hosted connect portal — oauth2 dispatch without a client (issues #12
   it("keeps the auto-provisioning failure's own prose off a remote MCP popup", async () => {
     await seedIntegration(ctx.orgId, remoteMcpManifest("@myorg/remote-mcp"));
     const token = await mintSession(ctx, "@myorg/remote-mcp", "oauth");
+    // Its `.invalid` authorization server does not answer: an outage, not a refusal (502).
     const res = await startConnect(token);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(502);
     const html = await res.text();
-    expect(html).toContain("Ask an administrator");
-    // This click burns the link (next case), so reopening it answers 410: the
-    // only advice that works is a re-mint.
-    expect(html).toContain("request a new connection link");
-    expect(html).not.toContain("open this link again");
+    expect(html).toContain("Could not start the connection");
     // This `detail` embeds the authorization server's OWN message verbatim
-    // (`resolveConnectClient` renders `provisioningFailure.message` as-is), so
+    // (the provisioning refusal renders the failing step's reason as-is), so
     // it is upstream-controlled text on a session-less page. Log only.
     expect(html).not.toContain("Could not automatically provision an OAuth client");
-    expect(html).not.toContain("dynamic client registration");
+    expect(html).not.toContain("RFC 8414");
   });
 
   it("burns a remote MCP link: its refusal follows a registration attempt (issue #1344)", async () => {
@@ -479,7 +476,7 @@ describe("hosted connect portal — oauth2 dispatch without a client (issues #12
     // that on every click, for its whole TTL, on a route with no session.
     await seedIntegration(ctx.orgId, remoteMcpManifest("@myorg/remote-mcp"));
     const token = await mintSession(ctx, "@myorg/remote-mcp", "oauth");
-    expect((await startConnect(token)).status).toBe(403);
+    expect((await startConnect(token)).status).toBe(502);
 
     const again = await startConnect(token);
     expect(again.status).toBe(410);
@@ -599,7 +596,7 @@ describe("hosted connect portal — a fault while resolving scopes (issue #1352)
   /**
    * Mint a capability token straight from claims. The mint route validates
    * `connection_id` against the caller's rows, and this case needs claims it
-   * would refuse: a malformed id makes `getCurrentScopesGranted`'s row read
+   * would refuse: a malformed id makes `readReconnectTarget`'s row read
    * throw at the database the way a real fault there would. That read runs
    * after the jti is burned and before anything is sent upstream — the window
    * this test pins.
@@ -633,6 +630,22 @@ describe("hosted connect portal — a fault while resolving scopes (issue #1352)
     const again = await startConnect(token);
     expect(again.status).toBe(500);
     expect(await again.text()).not.toContain("already been used");
+  });
+
+  it("refuses with 404 a link whose connection is gone, sending nothing upstream", async () => {
+    const { connectUrl } = buildConnectUrl(
+      connectClaimsFor({
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        actor: { type: "user", id: ctx.user.id },
+        packageId: "@myorg/gsuite",
+        authKey: "google",
+        connectionId: crypto.randomUUID(),
+      }),
+    );
+    const res = await startConnect(new URL(connectUrl).searchParams.get("token")!);
+    expect(res.status).toBe(404);
+    expect(res.headers.get("location")).toBeNull();
+    expect(await res.text()).toContain("no longer exists");
   });
 });
 
@@ -678,9 +691,10 @@ async function sshManifest(name = SSH_ID): Promise<IntegrationManifest> {
  */
 function registerSshAsSystemPackage() {
   let restore: () => void;
-  beforeAll(() => {
+  beforeAll(async () => {
+    const manifest = (await sshManifest()) as unknown as SystemPackageEntry["manifest"];
     restore = _setSystemPackagesForTesting(
-      new Map([[SSH_ID, { packageId: SSH_ID } as SystemPackageEntry]]),
+      new Map([[SSH_ID, { packageId: SSH_ID, manifest } as SystemPackageEntry]]),
     );
   });
   afterAll(() => restore());

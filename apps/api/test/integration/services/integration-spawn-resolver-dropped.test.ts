@@ -36,7 +36,7 @@ import {
 import { truncateAll, db } from "../../helpers/db.ts";
 import { bindAllConnections } from "../../helpers/bound-connections.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPlacedPackage, seedMcpServer, seedRun } from "../../helpers/seed.ts";
+import { seedPackage, seedSpacePackage, seedMcpServer, seedRun } from "../../helpers/seed.ts";
 import { __resetSystemIntegrationsForTest } from "../../../src/services/integration-client-registry.ts";
 import {
   localIntegrationManifest,
@@ -92,6 +92,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
       authKey: "primary",
       accountId: "default",
       label: "default",
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,
@@ -165,7 +166,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
       source: "local",
       draftManifest: { schema_version: "0.2", type: "integration", name: INTEG },
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await seedConnection();
 
     const { specs, dropped } = await resolve();
@@ -205,7 +206,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
       source: "local",
       draftManifest: integManifest(MISSING_SERVER),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await seedConnection();
 
     const { specs, dropped } = await resolve();
@@ -226,7 +227,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
       source: "local",
       draftManifest: integManifest(SERVER),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
   }
 
   it("reports `no_delivery`, naming the connection, when the bound row is gone", async () => {
@@ -259,7 +260,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
       source: "local",
       draftManifest: integManifest(MISSING_SERVER),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await seedConnection();
 
     const { specs, dropped } = await resolveIntegrationSpawns({
@@ -355,7 +356,7 @@ describe("resolveIntegrationSpawns — dropped[] degradation marker", () => {
       source: "local",
       draftManifest: integManifest(SERVER),
     });
-    await seedPlacedPackage(ctx.defaultSpaceId, INTEG);
+    await seedSpacePackage(ctx.defaultSpaceId, INTEG);
     await seedConnection();
 
     const { specs, dropped } = await resolve();

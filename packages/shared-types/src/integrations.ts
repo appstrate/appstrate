@@ -10,6 +10,7 @@
 import type {
   ConnectionResolutionErrorCode,
   ConnectionResolutionSource,
+  ConnectionScopeFit,
   IntegrationManifest,
   IntegrationToolCatalogEntry,
 } from "@appstrate/core/integration";
@@ -41,7 +42,30 @@ export interface IntegrationSummary {
   block_user_connections?: boolean;
 }
 
-export interface IntegrationConnection {
+/** Where a connection is usable: its whole org, or the one space whose OAuth client minted it. */
+export const CONNECTION_SCOPES = ["org", "space"] as const;
+export type ConnectionScope = (typeof CONNECTION_SCOPES)[number];
+
+/** Actions a caller may take on a connection, listed per row on the list surfaces. */
+export const CONNECTION_ACTIONS = ["rename", "share", "share_all_spaces", "unshare_here"] as const;
+export type ConnectionAction = (typeof CONNECTION_ACTIONS)[number];
+
+/** Where a connection reaches, as one reader sees it. */
+export interface ConnectionReach {
+  scope: ConnectionScope;
+  /** The one space a space-scoped connection lives in; null for an org-scoped one. */
+  spaceId: string | null;
+  /** Shared into the space the request is made from; false where none is (account surface, connect responses). */
+  shared_here: boolean;
+  /** The owner only (absent otherwise): every space it is shared into, within its credential's binding. */
+  shared_space_ids?: string[];
+  /** Owner only: shared with every current team space and automatically with future ones. */
+  share_all_spaces?: boolean;
+  /** The owner only (absent otherwise): where an org-scoped row was connected from, within that binding. */
+  origin_space_id?: string | null;
+}
+
+export interface IntegrationConnection extends ConnectionReach {
   id: string;
   integration_package_id: string;
   auth_key: string;
@@ -75,8 +99,6 @@ export interface IntegrationConnection {
    * user-editable. The UI renders it verbatim.
    */
   label: string;
-  /** Opt-in: makes this connection selectable by other members of the same space. */
-  shared_with_org?: boolean;
   /**
    * The registered OAuth client that minted this connection — a flat client id
    * (system env id or `integration_oauth_clients.id`). `null` for non-oauth2
@@ -87,6 +109,10 @@ export interface IntegrationConnection {
   client_ref: string | null;
   /** Connection variables (AFPS §7.12); `null` when the integration declares none. */
   variables: Record<string, string> | null;
+  /** Actions the caller may take on this row. Present on the list surfaces only, like `owner_name`. */
+  allowed_actions?: ConnectionAction[];
+  /** Spaces the caller may share this row into. The owner's, on the list surfaces only. */
+  shareable_spaces?: { id: string; name: string }[];
   createdAt: string;
   updatedAt: string;
 }
@@ -121,14 +147,12 @@ export interface IntegrationAuthStatus {
    */
   has_system_client: boolean;
   /**
-   * True for an oauth2 auth on a remote MCP integration (`source.kind:
-   * "remote"`). Per the MCP Authorization spec the OAuth client is provisioned
-   * automatically at connect time — the flow discovers the authorization server
-   * (RFC 9728 → RFC 8414) and obtains a client without manual pre-registration
-   * (CIMD when advertised, else RFC 7591 dynamic registration). The UI therefore
-   * treats the auth as connectable even without a pre-registered client. Named
-   * for the capability (auto-provisioned client), not the specific mechanism, so
-   * it stays accurate once CIMD lands alongside DCR.
+   * True for an oauth2 auth declaring `token_endpoint_auth_method: "none"` on a
+   * remote MCP integration (`source.kind: "remote"`) or with an authorization
+   * server chosen per connection. Its OAuth client is provisioned at connect
+   * time — authorization server discovery (RFC 9728 → RFC 8414), then RFC 7591
+   * dynamic registration of a public client — so the UI treats the auth as
+   * connectable without a pre-registered client.
    */
   client_auto_provisioned: boolean;
 }
@@ -176,12 +200,12 @@ export interface IntegrationOAuthClient {
 
 /**
  * One connection an actor can pick from for a given (space,
- * integration): own + shared-with-org, with caller-facing display fields.
+ * integration): own + shared into the space, with caller-facing display fields.
  * Base wire shape for the annotated candidate list surfaced by
  * `GET /api/agents/:scope/:name/connection-readiness`
  * (extended by `IntegrationCandidate`).
  */
-export interface AccessibleIntegrationConnection {
+export interface AccessibleIntegrationConnection extends ConnectionReach {
   id: string;
   auth_key: string;
   account_id: string;
@@ -192,19 +216,23 @@ export interface AccessibleIntegrationConnection {
   owner_name: string | null;
   /** OAuth scopes granted to this connection (empty for api_key/basic). */
   scopes_granted: string[];
-  shared_with_org: boolean;
   needs_reconnection: boolean;
 }
 
 /**
- * An admin pin (`integration_pins`, `user_id IS NULL`) governing which
- * connections an agent uses for an integration. Wire shape for the
- * `/api/integrations/:packageId/pins` surface.
+ * A connection pin (`integration_pins`). Wire shape for the
+ * `/api/integrations/:packageId/pins` surface (admin pins) and for the
+ * member pin write of `/api/me/integration-pins/...`.
  */
 export interface IntegrationPin {
   agent_package_id: string;
   integration_package_id: string;
+  /** An admin pin's floor, bound by every run of the agent; a member pin's selection. */
   connection_ids: string[];
+  /** Admin pin: whether the run's selection may add to the floor. Never on `[]` nor a member pin. */
+  allow_additional_connections: boolean;
+  /** Whether the pin's agent is active in the space; a pin of an inactive agent still stands. */
+  agent_active: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -233,11 +261,13 @@ export interface ConsumingAgentSummary {
 
 /**
  * One accessible connection annotated for the agent-page picker — adds the
- * scopes the agent's selected tools require that the connection lacks, and
- * whether the calling actor owns it.
+ * scopes the agent's selected tools require that the connection lacks, how its
+ * grant fits that selection, and whether the calling actor owns it. Listed
+ * least privilege first.
  */
 export interface IntegrationCandidate extends AccessibleIntegrationConnection {
   missing_scopes: string[];
+  scope_fit: ConnectionScopeFit;
   is_own: boolean;
 }
 
@@ -248,11 +278,14 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  * "which connection does this run use?" logic.
  *
  * The verdict is the resolver's own vocabulary, three fields:
- *  - `source`     — the layer that bound the set, or the layer whose set failed
+ *  - `source`     — the layer that bound the set's FIRST connection (under
+ *                   governance the floor's; per-connection provenance is in the
+ *                   run's `resolved_connections`), or the layer whose set failed
  *                   (an unreachable or unhealthy member); `null` when no layer
  *                   bound anything (the fallback's `not_connected` /
  *                   `must_choose_connection`, `auth_key_mismatch`,
- *                   `auth_key_serves_no_selected_tool`) or when
+ *                   `auth_key_serves_no_selected_tool`,
+ *                   `auth_key_on_unauthenticated_integration`) or when
  *                   there is no verdict.
  *  - `error_code` — why the run would be refused on this integration; `null`
  *                   when the set binds (or there is no verdict).
@@ -260,6 +293,10 @@ export interface IntegrationCandidate extends AccessibleIntegrationConnection {
  *                   launch's `warnings[]` item itself, else `null`.
  * All three `null` with nothing resolved: an inert integration nothing binds,
  * or one whose manifest could not be loaded.
+ *
+ * Under governance the floor is `admin_pinned_connection_ids`, else the enforced
+ * `org_default_connection_ids`; any other id of `resolved_connection_ids` is the
+ * member pin's addition.
  */
 export interface IntegrationAgentResolution {
   source: ConnectionResolutionSource | null;
@@ -281,6 +318,8 @@ export interface IntegrationAgentResolution {
    */
   org_default_connection_ids: string[] | null;
   org_default_enforced: boolean;
+  /** An admin pin open to additions, with no enforced org default: `false` with nothing imposed. */
+  additional_connections_allowed: boolean;
   /** Whether the actor may add a connection (admin OR not blocked). */
   can_add_connection: boolean;
   /** Own + shared connections on an auth serving the selected tools, annotated for the dropdown. */

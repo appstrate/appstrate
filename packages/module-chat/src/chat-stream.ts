@@ -10,7 +10,7 @@
  *      before inference and the assistant turn when the stream finalizes
  *      (see persistence.ts). Generation runs through a resumable producer
  *      (resumable.ts) that drains to completion independently of the client
- *      connection, so leaving the conversation mid-inference no longer drops
+ *      connection, so leaving the conversation mid-inference does not drop
  *      messages. The client history adapter is now load-only.
  *
  * Inference goes through the llm-proxy for API-key models and natively at
@@ -150,8 +150,8 @@ export const chatStreamSchema = z
       }),
     modelId: z.string().optional(),
     generation: modelGenerationSettingsSchema.optional(),
-    /** The composer's agent-authoring switch; absent = on. See {@link turnPermissions}. */
-    agent_authoring: z.boolean().optional(),
+    /** The composer's package-authoring switch; absent = on. See {@link turnPermissions}. */
+    package_authoring: z.boolean().optional(),
     /** The conversation's skill selection; absent = the one stored on the session. */
     skill_mode: z.enum(chatSkillModeValues).optional(),
     pinned_skills: z
@@ -314,7 +314,7 @@ export async function handleChatStream(
   // inference loopback calls carry a short-lived token only this process
   // can mint, scoped to llm-proxy:call + models:read. The MCP session keeps
   // the caller's own grants (full RBAC fidelity on tool calls, narrowed by
-  // `turnPermissions` when agent authoring is off).
+  // `turnPermissions` when package authoring is off).
   //
   // The token lives 60 s, but a turn fans out into many inference calls over
   // many steps (with a run long-poll blocking for ~55s between them), so the
@@ -347,7 +347,7 @@ export async function handleChatStream(
   // lives on the session row, so the turn's grants follow its upsert.
   const turn = sessionSkills.then((skills) => {
     const permissions = turnPermissions(c.get("permissions"), {
-      authoring: body.agent_authoring !== false,
+      authoring: body.package_authoring !== false,
       skillMode: skills.skillMode,
     });
     const capabilities = turnCapabilities((permission) => permissions.includes(permission));
@@ -474,21 +474,19 @@ export async function handleChatStream(
   // binding + a fresh access token, or a reconnect signal when its credential is
   // dead. Both ride the SAME engine — this fact drives admission and the Pi
   // binding, never a choice of loop.
-  const subscription = await deps.resolveChatModel(orgId, chosen.id);
+  const subscription = await deps.resolveChatModel(orgId, chosen.id, user.id);
   const isSubscription = subscription.subscription;
 
-  // Admission gate — EVERY turn. The platform
-  // resolves system-provided vs. org-owned server-side and dispatches
-  // `beforeUsage` (chat context) with that fact; a metering module quotes it and
-  // decides.
+  // Admission gate — EVERY turn. The platform resolves the chosen model for the
+  // session user server-side and dispatches `beforeUsage` (chat context) with
+  // who pays it; a metering module quotes it and decides.
   //
-  // A subscription turn used to skip this entirely, on the reasoning that it
-  // spends the user's OWN credential (`credentialSource` `org`) and therefore
-  // costs nothing. That is the module's call to make, not the platform's: the
-  // turn is driven by the IN-PROCESS Pi engine, so the platform funds its
-  // compute even when it funds no inference, and a module gating on
-  // subscription status must be able to refuse it. `subscription` reports the
-  // credential mode, and the platform derives the credential source from it.
+  // A subscription turn is gated like any other. Its `credentialSource` is the
+  // owner of the credential it spends — `user` for the member's own
+  // subscription, `org` for the organization's — and the turn is driven by the
+  // IN-PROCESS Pi engine: the platform funds its compute even when it funds no
+  // inference, and a module gating on subscription status must be able to
+  // refuse it.
   //
   // Gated BEFORE the caller-context block is consumed, the model binding is
   // resolved and capacity is reserved, so a rejected turn opens no MCP session
@@ -498,7 +496,7 @@ export async function handleChatStream(
     orgId,
     presetId: chosen.id,
     sessionId: meteringSessionId,
-    subscription: isSubscription,
+    userId: user.id,
   });
   if (rejection) {
     const refused = usageRejectionResponse(rejection);
@@ -520,9 +518,9 @@ export async function handleChatStream(
   // instructions — the engine's own MCP handshake delivers them.
   //
   // The operation-index policy is NOT applied here. The index only ever enters a
-  // prompt through the MCP server's `instructions`, which this route no longer
-  // fetches; the engine appends them and applies the policy itself
-  // (`pi-chat/engine.ts`). Re-applying it to this prompt matched nothing — and
+  // prompt through the MCP server's `instructions`, which this route does not
+  // fetch; the engine appends them and applies the policy itself
+  // (`pi-chat/engine.ts`). Re-applying it to this prompt would match nothing — and
   // could only misfire, since the context block below carries org-authored agent
   // names and would be truncated at any that happened to spell the heading.
   let system = buildSystemPrompt(capabilities);
@@ -561,7 +559,7 @@ export async function handleChatStream(
   // Persist the user turn BEFORE inference; the assistant turn is persisted when
   // the stream finalizes (in `finalize` below). Generation runs through a
   // resumable producer that drains to completion independently of the client, so
-  // leaving the conversation mid-inference can no longer drop messages.
+  // leaving the conversation mid-inference cannot drop messages.
   // Per-turn resumable stream id. It is the key for both the resumable producer
   // (live reconnect) and the stop registry, and is stored on the session as
   // `active_stream_id` so a reloaded client's resume GET can find the live turn.
@@ -644,7 +642,7 @@ export async function handleChatStream(
   // API-key bindings carry only the inert proxy key and mint a fresh loopback
   // bearer for every llm-proxy call.
   //
-  // The engine opens its OWN platform MCP connection (`/api/mcp/o/:org`), and
+  // The engine opens its OWN platform MCP connection (`/api/mcp/o/:org/s/:space`), and
   // run_and_wait hits platform run routes with these headers. It must NEVER
   // receive the caller's raw cookie/Authorization (reusable far beyond chat).
   // Hand it a short-lived, process-local bearer carrying EXACTLY the turn's
@@ -670,8 +668,7 @@ export async function handleChatStream(
     Authorization: `Bearer ${mcpToken}`,
     "x-org-id": orgId,
   };
-  mcpHeaders["x-space-id"] = spaceId;
-  const mcpUrl = platformMcpUrl(origin, orgId);
+  const mcpUrl = platformMcpUrl(origin, orgId, spaceId);
   try {
     const response = await finalize(
       runEngine({
@@ -692,6 +689,7 @@ export async function handleChatStream(
         platformMcp: {
           url: mcpUrl,
           headers: mcpHeaders,
+          spaceId,
           // Same in-process seam the preamble reads through: the engine's
           // MCP hops re-enter the platform app directly instead of opening real
           // loopback sockets back into this process. Auth and RBAC still run on
@@ -704,7 +702,12 @@ export async function handleChatStream(
         onError: (error) => logAndMarkStreamError(error, requestId),
         // Fire-and-forget metering — never blocks or fails the turn.
         recordUsage: (record) => {
-          void deps.recordChatUsage(record).catch((err) => {
+          // Only a subscription turn meters inline, on the subscription its engine spends.
+          const credentialId =
+            subscription.subscription && "model" in subscription
+              ? subscription.model.credentialId
+              : null;
+          void deps.recordChatUsage({ ...record, credentialId }).catch((err) => {
             logger.warn("chat usage metering failed", { err: String(err) });
           });
         },

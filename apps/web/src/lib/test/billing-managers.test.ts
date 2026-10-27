@@ -15,10 +15,9 @@ import {
   billingManagerRows,
   billingManagersBody,
   eligibleBillingManagers,
-  memberLabel,
   sameBillingManagers,
-  type OrgMember,
 } from "../billing-managers.ts";
+import type { OrgMember } from "../members.ts";
 
 function member(overrides: Partial<OrgMember> & { userId: string }): OrgMember {
   return {
@@ -26,6 +25,7 @@ function member(overrides: Partial<OrgMember> & { userId: string }): OrgMember {
     email: `${overrides.userId}@acme.test`,
     role: "member",
     joinedAt: "2026-01-01T00:00:00Z",
+    spaces: [],
     ...overrides,
   };
 }
@@ -67,13 +67,6 @@ describe("billing manager rows", () => {
   it("keeps a grant whose user became an owner or an admin, and says which", () => {
     expect(billingManagerRows(["usr_admin"], MEMBERS).map((r) => r.status)).toEqual(["role"]);
     expect(billingManagerRows(["usr_owner"], MEMBERS).map((r) => r.status)).toEqual(["role"]);
-  });
-
-  it("falls back to the address, then to the id, when there is no display name", () => {
-    expect(memberLabel(member({ userId: "usr_x", displayName: undefined }))).toBe(
-      "usr_x@acme.test",
-    );
-    expect(memberLabel({ userId: "usr_x", role: "member", joinedAt: "" })).toBe("usr_x");
   });
 });
 

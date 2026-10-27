@@ -69,11 +69,12 @@ export interface CoreResources {
   // Per-space configuration; `spaces` is the org-level catalog.
   "space-settings": "write";
   "space-members": "read" | "invite" | "remove" | "change-role";
-  // `share` offers the package to another space — its AUDIENCE (`package_shares`),
-  // never its activation, which is the recipient's own act. It is a session-only
-  // grant of the `admin` and `builder` presets: it decides who runs a package
-  // with whose credentials, so it is absent from the API-key allowlist for the
-  // same reason `integrations:configure` is.
+  // `share` places the package in another space — its AUDIENCE (a
+  // `space_packages` row outside its home), switched on only where the sharer
+  // may activate. It is a session-only grant of the `admin` and `builder`
+  // presets: it decides who runs a package with whose credentials, so it is
+  // absent from the API-key allowlist for the same reason
+  // `integrations:configure` is.
   //
   // Composing an inline agent (a manifest the request carries, declaring its
   // own dependencies) is not a grant of its own: it takes `write` — the caller
@@ -107,14 +108,17 @@ export interface CoreResources {
   // actor scoping. Supersedes the dropped `memories` resource.
   persistence: "read" | "delete";
   models: "read" | "write" | "delete";
-  "model-provider-credentials": "read" | "write" | "delete";
+  // `connect` = attach a personal credential; `write` = manage org credentials.
+  "model-provider-credentials": "read" | "write" | "delete" | "connect";
   proxies: "read" | "write" | "delete";
   "api-keys": "read" | "create" | "revoke";
   spaces: "read" | "write" | "delete";
   "end-users": "read" | "write" | "delete";
-  "credential-proxy": "call";
+  // `/api/credential-proxy/proxy`: `call` outside a run reaches the connections usable in the
+  // space, and for a run (`X-Run-Id`) the ones it bound; `call-own` outside a run, own ones only.
+  "credential-proxy": "call" | "call-own";
   "llm-proxy": "call";
-  // AFPS integrations (INTEGRATIONS_PROPOSAL Phase 1.3 — marketplace UI).
+  // AFPS integrations (marketplace UI).
   // Read = browse catalog + view the actor's connection inventory.
   // Write/delete = author/edit/remove the integration manifest (JSON-body
   // editor, parity with agents/skills). Install/uninstall = manage per-space
@@ -165,6 +169,38 @@ export const RUNS_READ_PERMISSIONS = [
 
 export function canReadRuns(has: (permission: CorePermission) => boolean): boolean {
   return RUNS_READ_PERMISSIONS.some((permission) => has(permission));
+}
+
+/** `credential-proxy:call` implies `credential-proxy:call-own` ({@link withImpliedPermissions}). */
+const PROXY_CALL_PERMISSIONS = [
+  "credential-proxy:call-own",
+  "credential-proxy:call",
+] as const satisfies readonly CorePermission[];
+
+/**
+ * The implications between core permissions, one tuple each: the LAST element is the wider grant
+ * and implies every element before it.
+ */
+const IMPLICATION_TUPLES: readonly (readonly CorePermission[])[] = [
+  RUNS_READ_PERMISSIONS,
+  PROXY_CALL_PERMISSIONS,
+];
+
+const IMPLIED_BY: ReadonlyMap<string, readonly CorePermission[]> = new Map(
+  IMPLICATION_TUPLES.map((tuple) => [tuple[tuple.length - 1]!, tuple.slice(0, -1)]),
+);
+
+/**
+ * `held` plus every permission a held one implies ({@link IMPLICATION_TUPLES}); other strings
+ * pass through. For a set compared literally against another one — a ceiling, a delegation — so
+ * that a holder of `runs:read-all` holds `runs:read` there too.
+ */
+export function withImpliedPermissions(held: Iterable<string>): Set<string> {
+  const closed = new Set<string>(held);
+  for (const permission of closed) {
+    for (const implied of IMPLIED_BY.get(permission) ?? []) closed.add(implied);
+  }
+  return closed;
 }
 
 /**
@@ -277,12 +313,12 @@ export const CORE_RESOURCE_ACTIONS = {
   schedules: ["read", "write", "delete"],
   persistence: ["read", "delete"],
   models: ["read", "write", "delete"],
-  "model-provider-credentials": ["read", "write", "delete"],
+  "model-provider-credentials": ["read", "write", "delete", "connect"],
   proxies: ["read", "write", "delete"],
   "api-keys": ["read", "create", "revoke"],
   spaces: ["read", "write", "delete"],
   "end-users": ["read", "write", "delete"],
-  "credential-proxy": ["call"],
+  "credential-proxy": ["call", "call-own"],
   "llm-proxy": ["call"],
   integrations: [
     "read",
@@ -517,7 +553,14 @@ export const orgSettingsSchema = z.object({
   // would protect the link and not the content. SKILLS are exempt: the CLI's
   // `code sync` is a local copy by design and its audience is already the space.
   restrict_package_copy: z.boolean().optional(),
+  // Absent = allowed. `false` refuses new personal model credentials, and the chain ignores existing ones.
+  personal_model_credentials: z.boolean().optional(),
 });
+
+/** The org settings as served: each defaulted policy read as its effective value; other stored keys kept. */
+export const orgSettingsReadSchema = orgSettingsSchema
+  .extend({ personal_model_credentials: z.boolean().default(true) })
+  .loose();
 
 // ---------------------------------------------------------------------------
 // Module permission aggregator — runtime registry shared by apps/api and

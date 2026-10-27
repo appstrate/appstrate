@@ -5,7 +5,12 @@ import { classify } from "./load.ts";
 import { declaredTools, serverEntryPoint, diffTools } from "./mcp-local-parity.ts";
 import { diffToolSets } from "./tool-diff.ts";
 import { resolveToken, resolveAccessToken, credentialedCount, _resetCredsCache } from "./creds.ts";
-import { remoteUrl, toolsPolicyKeys, allowsUndeclared } from "./remote-parity.ts";
+import {
+  remoteUrl,
+  toolsPolicyKeys,
+  allowsUndeclared,
+  credentialHeaders,
+} from "./remote-parity.ts";
 import { applyAuth, checkAuthLiveness, requiredCredentialFields } from "./auth-live.ts";
 import { checkAuthRejection } from "./auth-reject.ts";
 import { checkIdentityClaimKeys, checkIdentitySource } from "./identity-source.ts";
@@ -24,12 +29,10 @@ import {
   INVALID_BEARER,
 } from "./identity-endpoint.ts";
 import { buildDiscoveryProbes, discoveryIssuerMatches } from "@appstrate/connect";
-import { listAllTools } from "./mcp-list.ts";
 import { snapshotSlug, writeSnapshot, readSnapshot } from "./snapshot.ts";
 import { rm, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { summarize, exitCode, formatReport } from "./report.ts";
 import {
   conformanceVariables,
@@ -304,6 +307,36 @@ describe("remote manifest accessors", () => {
     expect(allowsUndeclared({ allow_undeclared_tools: true })).toBe(true);
     expect(allowsUndeclared({ allow_undeclared_tools: false })).toBe(false);
     expect(allowsUndeclared({})).toBe(false);
+  });
+});
+
+describe("credentialHeaders", () => {
+  it("delivers an api_key in the manifest's header, bare, with no Authorization", () => {
+    // The browser-use shape.
+    const manifest = {
+      auths: {
+        api_key: {
+          type: "api_key",
+          credentials: { schema: { properties: { api_key: {} }, required: ["api_key"] } },
+          delivery: {
+            http: { in: "header", name: "X-Browser-Use-API-Key", value: "{$credential.api_key}" },
+          },
+        },
+      },
+    };
+    expect(credentialHeaders(manifest, "tok")).toEqual({ "X-Browser-Use-API-Key": "tok" });
+  });
+
+  it("still sends an OAuth credential as Authorization: Bearer", () => {
+    const manifest = {
+      auths: {
+        oauth: {
+          type: "oauth2",
+          delivery: { http: { in: "header", name: "Authorization", prefix: "Bearer " } },
+        },
+      },
+    };
+    expect(credentialHeaders(manifest, "tok")).toEqual({ Authorization: "Bearer tok" });
   });
 });
 
@@ -741,36 +774,6 @@ describe("checkAuthLiveness", () => {
     }) as unknown as typeof fetch;
     const f = await checkAuthLiveness(ghEntry, { fetchImpl: boom });
     expect(f[0]!.severity).toBe("warn");
-  });
-});
-
-describe("listAllTools — pagination", () => {
-  function fakeClient(pages: Array<{ tools: { name: string }[]; nextCursor?: string }>) {
-    let call = 0;
-    return {
-      client: {
-        listTools: async () => pages[call++ % pages.length],
-      },
-    } as unknown as AppstrateMcpClient;
-  }
-
-  it("concatenates across cursor pages", async () => {
-    const client = fakeClient([
-      { tools: [{ name: "a" }, { name: "b" }], nextCursor: "p2" },
-      { tools: [{ name: "c" }] },
-    ]);
-    const tools = await listAllTools(client);
-    expect(tools.map((t) => t.name)).toEqual(["a", "b", "c"]);
-  });
-
-  it("returns a single page when no cursor", async () => {
-    const client = fakeClient([{ tools: [{ name: "only" }] }]);
-    expect((await listAllTools(client)).map((t) => t.name)).toEqual(["only"]);
-  });
-
-  it("aborts a runaway cursor via maxPages", async () => {
-    const client = fakeClient([{ tools: [{ name: "x" }], nextCursor: "loops-forever" }]);
-    await expect(listAllTools(client, { maxPages: 3 })).rejects.toThrow(/exceeded 3 pages/);
   });
 });
 

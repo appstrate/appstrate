@@ -8,6 +8,8 @@ import {
   buildPackageId,
   encodePackageIdPath,
   isOwnedByOrg,
+  isReservedScope,
+  INLINE_SHADOW_SCOPE,
   isValidToolName,
   TOOL_NAME_MAX_LEN,
   sanitizeFilename,
@@ -15,6 +17,7 @@ import {
   MAX_FILENAME_LEN,
   encodeFilenameHeader,
   decodeFilenameHeader,
+  extensionForMime,
 } from "../src/naming.ts";
 
 describe("normalizeScope", () => {
@@ -80,6 +83,21 @@ describe("parseScopedName", () => {
 
   it('"@org123/pkg-name" (alphanumeric with hyphens) → valid', () => {
     expect(parseScopedName("@org123/pkg-name")).toEqual({ scope: "org123", name: "pkg-name" });
+  });
+});
+
+describe("isReservedScope", () => {
+  it("reserves the system scope and the inline shadow scope", () => {
+    expect(isReservedScope("appstrate")).toBe(true);
+    expect(isReservedScope(INLINE_SHADOW_SCOPE)).toBe(true);
+    expect(INLINE_SHADOW_SCOPE).toBe("inline");
+  });
+
+  it("leaves every other slug free, prefixes and suffixes included", () => {
+    expect(isReservedScope("acme")).toBe(false);
+    expect(isReservedScope("inline-2")).toBe(false);
+    expect(isReservedScope("appstrate-labs")).toBe(false);
+    expect(isReservedScope("@inline")).toBe(false);
   });
 });
 
@@ -398,5 +416,30 @@ describe("attachmentDisposition", () => {
       "attachment; filename=\"_\"; filename*=UTF-8''%E4%B8%AD",
     );
     expect(attachmentDisposition("")).toBe("attachment; filename=\"download\"; filename*=UTF-8''");
+  });
+});
+
+describe("extensionForMime", () => {
+  it("maps common image types", () => {
+    expect(extensionForMime("image/png")).toBe("png");
+    expect(extensionForMime("image/jpeg")).toBe("jpg");
+    expect(extensionForMime("image/jpg")).toBe("jpg");
+    expect(extensionForMime("image/gif")).toBe("gif");
+    expect(extensionForMime("image/webp")).toBe("webp");
+    expect(extensionForMime("image/bmp")).toBe("bmp");
+  });
+
+  it("maps image/svg+xml to svg, not the +xml suffix rule", () => {
+    expect(extensionForMime("image/svg+xml")).toBe("svg");
+    expect(extensionForMime("application/atom+xml")).toBe("xml");
+  });
+
+  it("tolerates parameters and case", () => {
+    expect(extensionForMime("Image/PNG; charset=binary")).toBe("png");
+  });
+
+  it("returns null for unknown or missing types", () => {
+    expect(extensionForMime("image/x-unknown")).toBeNull();
+    expect(extensionForMime(undefined)).toBeNull();
   });
 });

@@ -1,0 +1,288 @@
+// SPDX-License-Identifier: Apache-2.0
+/**
+ * An oauth2 auth acquiring its first token by `connect.login` (AFPS §7.7) at the route boundary: it
+ * connects through both fields doors — the member route `connect/fields` and the hosted portal,
+ * whose dispatch hands it to the form instead of an authorization server — and `connect/oauth2`
+ * refuses it.
+ *
+ * The token endpoint is a loopback server reached through `EGRESS_ALLOW_INTERNAL_HOSTS`.
+ */
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
+import { eq } from "drizzle-orm";
+import { integrationConnections } from "@appstrate/db/schema";
+import { truncateAll, db } from "../../helpers/db.ts";
+import { flushRedis } from "../../helpers/redis.ts";
+import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
+import { seedPackage } from "../../helpers/seed.ts";
+import { getTestApp } from "../../helpers/app.ts";
+import { allowLoopbackOAuthEgress } from "../../helpers/strict-authorization-server.ts";
+import { fieldsConnect, hostedSubmit } from "../../helpers/connect-surfaces.ts";
+import { initSystemIntegrations } from "../../../src/services/integration-client-registry.ts";
+
+const INTEGRATION_ID = "@myorg/mobile-sso";
+
+let server: ReturnType<typeof Bun.serve>;
+let restoreEgress: () => void;
+let origin: string;
+/** The `refresh_token` each token request carried. */
+let exchanged: string[] = [];
+/** The token endpoint's next answer status: a 503 is a failure after the grant arrived. */
+let tokenStatus = 200;
+
+beforeAll(() => {
+  restoreEgress = allowLoopbackOAuthEgress();
+  server = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    async fetch(req) {
+      if (new URL(req.url).pathname !== "/token") return new Response("no page", { status: 404 });
+      const form = new URLSearchParams(await req.text());
+      exchanged.push(form.get("refresh_token") ?? "");
+      if (tokenStatus !== 200) {
+        return Response.json({ error: "server_error" }, { status: tokenStatus });
+      }
+      return Response.json({
+        access_token: "at",
+        refresh_token: "rt-next",
+        token_type: "Bearer",
+        expires_in: 3600,
+        user_id: "acct-42",
+      });
+    },
+  });
+  origin = `http://${server.hostname}:${server.port}`;
+  initSystemIntegrations([
+    {
+      id: INTEGRATION_ID,
+      clients: [
+        {
+          id: "mobile-sso-sys",
+          auth_key: "account",
+          client_id: "PUBLIC_MOBILE_CLIENT",
+          token_endpoint_auth_method: "none",
+        },
+      ],
+    },
+  ]);
+});
+
+afterAll(async () => {
+  server.stop(true);
+  restoreEgress();
+  initSystemIntegrations([]);
+  // The hosted doors are rate-limited per IP; leave the counters clean for the next file.
+  await flushRedis();
+});
+
+/** Open the hosted form once (mint → dispatch → context) and submit it as often as asked. */
+async function openHostedForm(ctx: TestContext) {
+  const app = getTestApp();
+  const mint = await app.request(
+    `/api/integrations/${INTEGRATION_ID}/auths/account/connect/session`,
+    {
+      method: "POST",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+  const token = new URL(
+    ((await mint.json()) as { connect_url: string }).connect_url,
+  ).searchParams.get("token")!;
+  const start = await app.request(
+    `/api/integrations/connect/start?token=${encodeURIComponent(token)}`,
+    { redirect: "manual" },
+  );
+  const cookie = `appstrate_connect=${start.headers.get("set-cookie")!.match(/appstrate_connect=([^;]+)/)![1]}`;
+  const { csrf } = (await (
+    await app.request("/api/integrations/connect/context", { headers: { Cookie: cookie } })
+  ).json()) as { csrf: string };
+  return (credentials: Record<string, unknown>) =>
+    Promise.resolve(
+      app.request("/api/integrations/connect/submit", {
+        method: "POST",
+        headers: { Cookie: cookie, "Content-Type": "application/json", "x-connect-csrf": csrf },
+        body: JSON.stringify({ credentials }),
+      }),
+    );
+}
+
+describe("oauth2 acquired by connect.login — connect routes", () => {
+  let ctx: TestContext;
+
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    exchanged = [];
+    tokenStatus = 200;
+    ctx = await createTestContext({ orgSlug: "myorg" });
+    await seedPackage({
+      id: INTEGRATION_ID,
+      orgId: ctx.orgId,
+      type: "integration",
+      source: "local",
+      draftManifest: {
+        name: INTEGRATION_ID,
+        version: "1.0.0",
+        type: "integration",
+        schema_version: "0.1",
+        source: { kind: "none" },
+        auths: {
+          account: {
+            type: "oauth2",
+            token_endpoint: `${origin}/token`,
+            token_endpoint_auth_method: "none",
+            identity_claims: { account_id: "$.user_id" },
+            authorized_uris: ["https://api.example.com/**"],
+            credentials: {
+              schema: {
+                type: "object",
+                properties: { refresh_token: { type: "string" } },
+                required: ["refresh_token"],
+              },
+            },
+            delivery: {
+              http: {
+                in: "header",
+                name: "Authorization",
+                prefix: "Bearer ",
+                value: "{$credential.access_token}",
+              },
+            },
+            connect: {
+              login: {
+                request: {
+                  method: "POST",
+                  url: `${origin}/token`,
+                  content_type: "application/x-www-form-urlencoded",
+                  body: "grant_type=refresh_token&refresh_token={{refresh_token}}",
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it.each([
+    ["connect/fields", fieldsConnect],
+    ["connect/submit", hostedSubmit],
+  ] as const)("%s sends the rendered grant and stores the connection", async (_, door) => {
+    const res = await door(ctx, INTEGRATION_ID, "account", { refresh_token: "rt-submitted" });
+
+    expect(res.status).toBe(200);
+    expect(exchanged).toEqual(["rt-submitted"]);
+    const rows = await db
+      .select({
+        accountId: integrationConnections.accountId,
+        clientRef: integrationConnections.clientRef,
+      })
+      .from(integrationConnections)
+      .where(eq(integrationConnections.integrationId, INTEGRATION_ID));
+    expect(rows).toEqual([{ accountId: "acct-42", clientRef: "mobile-sso-sys" }]);
+  });
+
+  it("the hosted form presents its grant once: a concurrent second submission is refused", async () => {
+    const submit = await openHostedForm(ctx);
+
+    const statuses = (
+      await Promise.all([
+        submit({ refresh_token: "rt-submitted" }),
+        submit({ refresh_token: "rt-submitted" }),
+      ])
+    )
+      .map((r) => r.status)
+      .sort();
+
+    expect(statuses).toEqual([200, 404]);
+    expect(exchanged).toEqual(["rt-submitted"]);
+  });
+
+  it("the hosted form is spent once the token request may have redeemed the grant", async () => {
+    const submit = await openHostedForm(ctx);
+    tokenStatus = 503;
+
+    const first = await submit({ refresh_token: "rt-submitted" });
+    expect(first.status).toBe(502);
+    const problem = (await first.json()) as Record<string, unknown>;
+    expect(problem.grant_may_be_redeemed).toBe(true);
+    expect(problem.connect_session_ended).toBe(true);
+    expect(first.headers.get("set-cookie")).toContain("appstrate_connect=;");
+    tokenStatus = 200;
+    const again = await submit({ refresh_token: "rt-submitted" });
+
+    expect(again.status).toBe(404);
+    expect(exchanged).toEqual(["rt-submitted"]);
+  });
+
+  it("says the hosted form is spent when the token endpoint refused the grant", async () => {
+    const submit = await openHostedForm(ctx);
+    tokenStatus = 400;
+
+    const refused = await submit({ refresh_token: "rt-submitted" });
+    tokenStatus = 200;
+
+    expect(refused.status).toBe(400);
+    const problem = (await refused.json()) as Record<string, unknown>;
+    expect(problem.code).toBe("login_rejected");
+    expect(problem.connect_session_ended).toBe(true);
+    expect((await submit({ refresh_token: "rt-submitted" })).status).toBe(404);
+    expect(exchanged).toEqual(["rt-submitted"]);
+  });
+
+  it("the hosted form can be submitted again after a refusal before any token request", async () => {
+    const submit = await openHostedForm(ctx);
+
+    const invalid = await submit({ token: "rt-submitted" });
+    expect(invalid.status).toBe(400);
+    expect(
+      ((await invalid.json()) as Record<string, unknown>).connect_session_ended,
+    ).toBeUndefined();
+    expect(invalid.headers.get("set-cookie")).toBeNull();
+    expect(exchanged).toEqual([]);
+    const fixed = await submit({ refresh_token: "rt-submitted" });
+
+    expect(fixed.status).toBe(200);
+    expect(exchanged).toEqual(["rt-submitted"]);
+  });
+
+  it("the hosted dispatch hands the auth to the form, never to an authorization server", async () => {
+    const app = getTestApp();
+    const mint = await app.request(
+      `/api/integrations/${INTEGRATION_ID}/auths/account/connect/session`,
+      {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      },
+    );
+    expect(mint.status).toBe(200);
+    const token = new URL(
+      ((await mint.json()) as { connect_url: string }).connect_url,
+    ).searchParams.get("token")!;
+
+    const start = await app.request(
+      `/api/integrations/connect/start?token=${encodeURIComponent(token)}`,
+      { redirect: "manual" },
+    );
+
+    expect(start.status).toBe(302);
+    expect(start.headers.get("location")).toBe("/connect");
+    expect(start.headers.get("set-cookie")).toContain("appstrate_connect=");
+    expect(exchanged).toEqual([]);
+  });
+
+  it("connect/oauth2 refuses to start an authorization flow", async () => {
+    const res = await getTestApp().request(
+      `/api/integrations/${INTEGRATION_ID}/auths/account/connect/oauth2`,
+      {
+        method: "POST",
+        headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      },
+    );
+
+    expect(res.status).toBe(400);
+    expect(exchanged).toEqual([]);
+  });
+});

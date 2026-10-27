@@ -4,15 +4,15 @@
  * Verify that compose files don't re-declare env defaults that are
  * already defined in `packages/env/src/index.ts` (the Zod schema).
  *
- * The duplication risk is real: see #513 (`MODULES` drifted in compose
- * from the schema, and every CLI self-host install shipped with zero
- * model providers for weeks). This guard catches the same class of bug
+ * The duplication risk is real: a `MODULES` default that drifts in compose
+ * from the schema ships a self-host install with zero model providers.
+ * This guard catches the same class of bug
  * at PR time.
  *
  * The table + extraction + analysis live in
  * `apps/cli/src/lib/compose-defaults.ts` so this PR-time guard and the
  * runtime checks (`appstrate doctor` / `appstrate install
- * --upgrade-compose`, issue #515) share one source of truth and can
+ * --upgrade-compose`) share one source of truth and can
  * never disagree about what counts as a duplication.
  *
  * The schema population is unioned with every discovered module schema, and a compose file that
@@ -42,7 +42,7 @@ const REPO_ROOT = join(import.meta.dir, "..");
  *
  * Three Zod nodes do: `.default()`, `.prefault()` and `.catch()`. From
  * compose's point of view they are indistinguishable — the schema produces the
- * value, so a YAML line pinning the same one is the #513 duplication. `.catch`
+ * value, so a YAML line pinning the same one is that duplication. `.catch`
  * and `.prefault` appear zero times in the schema today; they are here so that
  * the day one does, the gate does not silently stop seeing that variable.
  *

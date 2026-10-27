@@ -4,15 +4,15 @@
  * Unit tests for the connection ownership helper.
  *
  * `isConnectionOwnedBy` gates every owner-only control on the integration
- * detail page — delete, the share toggle, the OAuth renew CTA — against lists
- * that now contain org-shared connections owned by OTHER members. A false
+ * detail page — delete, the share editor, the OAuth renew CTA — against lists
+ * that contain connections OTHER members share into the space. A false
  * positive renders a button whose request comes back 403/404; a false negative
  * hides a control from the person who owns the row. Both halves of the check
  * are load-bearing, so they are pinned here rather than left to the component.
  */
 
 import { describe, it, expect } from "bun:test";
-import { connectionRowGrants, isConnectionOwnedBy } from "../connection-ownership";
+import { connectionLockHintKey, isConnectionOwnedBy } from "../connection-ownership";
 
 describe("isConnectionOwnedBy", () => {
   const mine = { owner_type: "user", owner_id: "user_1" } as const;
@@ -42,65 +42,25 @@ describe("isConnectionOwnedBy", () => {
   });
 });
 
-describe("connectionRowGrants", () => {
-  const base = {
-    isOwn: false,
-    isShared: false,
-    canConnect: true,
-    canConfigure: false,
-    locked: false,
-  };
-
-  it("gives the owner rename and the share toggle", () => {
-    expect(connectionRowGrants({ ...base, isOwn: true })).toEqual({
-      canRename: true,
-      canToggleShare: true,
-      shareLocked: false,
-    });
+describe("connectionLockHintKey", () => {
+  it("names the lock that refuses an unshare or delete, and what unlocks it", () => {
+    expect(connectionLockHintKey("admin_pin", true)).toBe("integration.connection.lock.adminPin");
+    expect(connectionLockHintKey("org_default", true)).toBe(
+      "integration.connection.lock.orgDefault",
+    );
   });
 
-  it("lets a governor withdraw a colleague's share, never grant one", () => {
-    // Sharing is the owner's consent; `integrations:configure` only unshares.
-    expect(connectionRowGrants({ ...base, isShared: true, canConfigure: true })).toEqual({
-      canRename: true,
-      canToggleShare: true,
-      shareLocked: false,
-    });
-    expect(connectionRowGrants({ ...base, isShared: false, canConfigure: true })).toEqual({
-      canRename: true,
-      canToggleShare: false,
-      shareLocked: false,
-    });
+  it("tells anyone who may not change the access rules whom to ask", () => {
+    expect(connectionLockHintKey("admin_pin", false)).toBe(
+      "integration.connection.lock.adminPinAsk",
+    );
+    expect(connectionLockHintKey("org_default", false)).toBe(
+      "integration.connection.lock.orgDefaultAsk",
+    );
   });
 
-  it("gives a plain member nothing on a colleague's shared row", () => {
-    expect(connectionRowGrants({ ...base, isShared: true })).toEqual({
-      canRename: false,
-      canToggleShare: false,
-      shareLocked: false,
-    });
-  });
-
-  it("gives nothing without integrations:connect, whoever owns the row", () => {
-    expect(
-      connectionRowGrants({
-        ...base,
-        isOwn: true,
-        isShared: true,
-        canConnect: false,
-        canConfigure: true,
-      }),
-    ).toEqual({ canRename: false, canToggleShare: false, shareLocked: false });
-  });
-
-  it("locks unsharing a pinned row, never sharing one", () => {
-    // An admin pin or the space default binding the row refuses unsharing (409
-    // `connection_pinned`); sharing an unshared row breaks nothing.
-    expect(connectionRowGrants({ ...base, isOwn: true, isShared: true, locked: true })).toEqual({
-      canRename: true,
-      canToggleShare: true,
-      shareLocked: true,
-    });
-    expect(connectionRowGrants({ ...base, isOwn: true, locked: true }).shareLocked).toBe(false);
+  it("is null for an unlocked connection", () => {
+    expect(connectionLockHintKey(null, true)).toBeNull();
+    expect(connectionLockHintKey(undefined, false)).toBeNull();
   });
 });

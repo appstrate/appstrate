@@ -1,28 +1,36 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ConnectionResolutionWarningCode } from "@appstrate/core/integration";
+import type {
+  ConnectionResolutionWarningCode,
+  MissingIntegrationConnectionCode,
+} from "@appstrate/core/integration";
 import type { components } from "../../api/schema";
 import i18n from "../../i18n";
 import { noneChosenBy } from "../../lib/launch-warnings";
 
 type IntegrationAgentResolution = components["schemas"]["IntegrationAgentResolution"];
 
-/**
- * What the picker's trigger asks for when nothing is bound. `reconfigure`: the agent's own
- * `auth_key` serves none of its selected tools — no pick or connection clears it.
- */
+/** `reconfigure`: the agent's `auth_key` is at fault (see below); no pick clears it. */
 type EmptyPickerPrompt = "choose" | "connect" | "reconfigure";
 
+/** The agent's `auth_key` serves none of its selected tools, or names an auth the integration lacks. */
+const RECONFIGURE_CODES: ReadonlySet<MissingIntegrationConnectionCode> = new Set([
+  "auth_key_serves_no_selected_tool",
+  "auth_key_on_unauthenticated_integration",
+]);
+
 interface ResolutionView {
-  /** The locking set — the admin pin's (`[]` pins none), else an enforced org default's. */
+  /** The admin pin's set (`[]` pins none), else an enforced org default's. */
   lockedConnectionIds: string[];
-  /** Which of the two locks it — they are lifted in different places, so the badge names it. */
   lockedBy: "admin_pin" | "org_default" | null;
-  /** Bound without anyone's pick: a soft org default or the actor's single own connection. */
-  byDefault: boolean;
-  /** The soft org default's whole stored set while in play, incl. members candidates hide. */
+  /**
+   * The locked set always binds, and the run's pick (a launch override, else the member's pin)
+   * adds to it: only under an admin pin open to additions. Closed, nothing adds to a lock.
+   */
+  additionsAllowed: boolean;
+  /** The soft org default's whole stored set, incl. members candidates hide. */
   softDefaultIds: string[];
-  /** Connection health, not run relevance (the server's `run_blocking`). No verdict ⇒ false. */
+  /** Connection health, not run relevance (the server's `run_blocking`): bound, with no error. */
   resolved: boolean;
   emptyPickerPrompt: EmptyPickerPrompt;
 }
@@ -40,13 +48,13 @@ export function describeResolution(resolution: IntegrationAgentResolution): Reso
   return {
     lockedConnectionIds: lock?.ids ?? [],
     lockedBy: lock?.by ?? null,
-    byDefault: source === "org_default" || source === "fallback_auto",
+    additionsAllowed: resolution.additional_connections_allowed,
     softDefaultIds: source === "org_default" ? orgDefault : [],
     resolved: code === null && resolution.resolved_connection_ids.length > 0,
     emptyPickerPrompt:
       code === "must_choose_connection" || resolution.warning?.code === "must_choose_connection"
         ? "choose"
-        : code === "auth_key_serves_no_selected_tool"
+        : code !== null && RECONFIGURE_CODES.has(code)
           ? "reconfigure"
           : "connect",
   };

@@ -2,9 +2,9 @@
 
 import { describe, it, expect, beforeEach, afterEach, afterAll, spyOn } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdtemp, mkdir, rm, writeFile, readdir } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, rm, stat, symlink, writeFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import {
   ProcessOrchestrator,
   _setDataDirForTesting,
@@ -27,7 +27,22 @@ _setDataDirForTesting(DATA_DIR);
 let orchestrator: ProcessOrchestrator;
 
 afterEach(async () => {
+  // The boundaries a test left standing, read before shutdown() forgets them:
+  // a workload TMPDIR that outlives its test fails the next creation for that
+  // run id.
+  const standing = [
+    ...((
+      orchestrator as unknown as { sidecarPorts: Map<string, unknown> } | undefined
+    )?.sidecarPorts.keys() ?? []),
+  ];
   await orchestrator?.shutdown();
+  for (const runId of standing) {
+    await orchestrator.removeIsolationBoundary({
+      id: join(DATA_DIR, runId),
+      name: `process-${runId}`,
+      workspace: { kind: "directory", path: workspaceDirFor(runId) },
+    } as Parameters<ProcessOrchestrator["removeIsolationBoundary"]>[0]);
+  }
 });
 
 afterAll(async () => {
@@ -44,6 +59,38 @@ async function resetDataDir() {
 /** Where the orchestrator keeps a run's workspace — mirrors workspaceDirFor(). */
 function workspaceDirFor(runId: string): string {
   return join(tmpdir(), `appstrate-ws-${runId}`);
+}
+
+const TMP_ROLES = ["sidecar", "agent"] as const;
+
+/**
+ * Where the orchestrator keeps a workload's `TMPDIR` — mirrors tmpDirFor(). The
+ * two tests that ask a spawned workload for its `os.tmpdir()` hold them in step.
+ */
+function tmpDirFor(runId: string, role: (typeof TMP_ROLES)[number]): string {
+  const tag = new Bun.CryptoHasher("sha256").update(`${role}:${runId}`).digest("hex").slice(0, 12);
+  return join(tmpdir(), `appstrate-tmp-${tag}`);
+}
+
+const modeOf = async (path: string) => (await stat(path)).mode & 0o777;
+
+/**
+ * Source of a workload stand-in that reports the directory its own
+ * `os.tmpdir()` resolves to, leaves a directory there, and idles.
+ */
+function tmpdirReporter(report: string): string {
+  return `import { tmpdir } from "node:os";
+import { mkdtempSync } from "node:fs";
+import { join } from "node:path";
+const made = mkdtempSync(join(tmpdir(), "left-"));
+await Bun.write(${JSON.stringify(report)}, JSON.stringify({ tmpdir: tmpdir(), made }));
+setInterval(() => {}, 60000);`;
+}
+
+/** What a {@link tmpdirReporter} workload reported, once it has. */
+async function readTmpdirReport(report: string): Promise<{ tmpdir: string; made: string }> {
+  for (let i = 0; i < 100 && !(await Bun.file(report).exists()); i++) await Bun.sleep(50);
+  return Bun.file(report).json();
 }
 
 /**
@@ -116,6 +163,124 @@ describe("ProcessOrchestrator", () => {
       await orchestrator.removeIsolationBoundary(boundary);
       expect(existsSync(boundary.workspace.path)).toBe(false);
     });
+
+    it("creates one TMPDIR per workload: the agent's private, the sidecar's searchable", async () => {
+      // With a setuid runner wrapper, integration runners read their bundle and
+      // the run CA in place below the sidecar's TMPDIR, each on a uid of its
+      // own: they must be able to traverse it, and nothing more.
+      orchestrator = new ProcessOrchestrator();
+      await orchestrator.initialize();
+      const runId = "test-run-tmp-modes";
+
+      const boundary = await orchestrator.createIsolationBoundary(runId);
+      try {
+        expect(await modeOf(tmpDirFor(runId, "sidecar"))).toBe(0o711);
+        expect(await modeOf(tmpDirFor(runId, "agent"))).toBe(0o700);
+      } finally {
+        await orchestrator.removeIsolationBoundary(boundary);
+      }
+    });
+
+    it("keeps the sidecar's TMPDIR searchable under a restrictive umask", async () => {
+      orchestrator = new ProcessOrchestrator();
+      await orchestrator.initialize();
+      const runId = "test-run-tmp-umask";
+
+      const previous = process.umask(0o077);
+      let boundary;
+      try {
+        boundary = await orchestrator.createIsolationBoundary(runId);
+        expect(await modeOf(tmpDirFor(runId, "sidecar"))).toBe(0o711);
+      } finally {
+        process.umask(previous);
+        if (boundary) await orchestrator.removeIsolationBoundary(boundary);
+      }
+    });
+
+    it("removes each workload's TMPDIR with everything left in it", async () => {
+      // Both workloads are SIGKILLed at teardown: what they left is still there.
+      orchestrator = new ProcessOrchestrator();
+      await orchestrator.initialize();
+      const runId = "test-run-tmp-teardown";
+
+      const boundary = await orchestrator.createIsolationBoundary(runId);
+      try {
+        for (const role of TMP_ROLES) {
+          await mkdir(join(tmpDirFor(runId, role), "left"));
+          await writeFile(join(tmpDirFor(runId, role), "left", "file"), "by a killed workload");
+        }
+      } finally {
+        await orchestrator.removeIsolationBoundary(boundary);
+      }
+
+      for (const role of TMP_ROLES) expect(existsSync(tmpDirFor(runId, role))).toBe(false);
+    });
+
+    // Root removes a read-only directory's entries, so nothing fails to report.
+    it.skipIf(process.getuid?.() === 0)(
+      "reports a directory it could not remove, without failing the teardown",
+      async () => {
+        // What an agent's shell leaves behind, e.g. a read-only module cache.
+        // The boot sweep finds a run's TMPDIRs through the workspace this same
+        // call removes: a failure nobody is told about is never seen again.
+        orchestrator = new ProcessOrchestrator();
+        await orchestrator.initialize();
+        const runId = "test-run-tmp-stuck";
+        const agentTmp = tmpDirFor(runId, "agent");
+        const readOnly = join(agentTmp, "read-only");
+
+        const boundary = await orchestrator.createIsolationBoundary(runId);
+        await mkdir(readOnly);
+        await writeFile(join(readOnly, "file"), "cannot be unlinked");
+        await chmod(readOnly, 0o555);
+        const warn = spyOn(logger, "warn").mockImplementation(() => {});
+        try {
+          await orchestrator.removeIsolationBoundary(boundary);
+
+          const reported = warn.mock.calls.filter(
+            ([, data]) => (data as { runId?: string } | undefined)?.runId === runId,
+          );
+          expect(reported.map(([message]) => message)).toEqual([
+            "Failed to remove a run directory",
+          ]);
+          expect((reported[0]![1] as { error: string }).error).toContain(agentTmp);
+          // The other removals went through.
+          expect(existsSync(workspaceDirFor(runId))).toBe(false);
+          expect(existsSync(tmpDirFor(runId, "sidecar"))).toBe(false);
+        } finally {
+          warn.mockRestore();
+          await chmod(readOnly, 0o755).catch(() => {});
+          await rm(agentTmp, { recursive: true, force: true });
+        }
+      },
+    );
+
+    for (const planted of ["directory", "symlink"] as const) {
+      it(`refuses a workload TMPDIR path that already exists (${planted})`, async () => {
+        // The name hashes a fresh run id under os.tmpdir(): nothing legitimate
+        // is there first. Adopting what is would chmod it, and through a
+        // symlink hand the sidecar's temp files to whoever planted it.
+        orchestrator = new ProcessOrchestrator();
+        await orchestrator.initialize();
+        const runId = `test-run-tmp-planted-${planted}`;
+        const sidecarTmp = tmpDirFor(runId, "sidecar");
+        const target =
+          planted === "symlink" ? await mkdtemp(join(tmpdir(), "planted-")) : sidecarTmp;
+        if (planted === "symlink") await symlink(target, sidecarTmp);
+        else await mkdir(target);
+        await chmod(target, 0o750);
+
+        try {
+          await expect(orchestrator.createIsolationBoundary(runId)).rejects.toThrow("EEXIST");
+          expect(await modeOf(target)).toBe(0o750);
+        } finally {
+          for (const path of [sidecarTmp, target, tmpDirFor(runId, "agent")]) {
+            await rm(path, { recursive: true, force: true });
+          }
+          await rm(workspaceDirFor(runId), { recursive: true, force: true });
+        }
+      });
+    }
 
     it("advertises coherent loopback sidecar endpoints at boundary creation", async () => {
       // The sidecar's two ports are allocated when the BOUNDARY is created (not
@@ -285,6 +450,49 @@ describe("ProcessOrchestrator", () => {
       expect(existsSync(workspace)).toBe(false);
     });
 
+    it("reclaims the workload TMPDIRs of a dead owner's run, whether or not its boundary is visible", async () => {
+      // A crashed platform never reaches removeIsolationBoundary, so this sweep
+      // is the only thing that reclaims what its workloads wrote. The run-data
+      // directory is cwd-relative: a platform rebooted from another worktree
+      // sees the crashed run's workspace in os.tmpdir(), not its boundary.
+      const ownerPid = spawnSleeper();
+      const here = "tmp-owner-dead-here";
+      const elsewhere = "tmp-owner-dead-elsewhere";
+      const live = "tmp-owner-live";
+      const runs = [here, elsewhere, live];
+      for (const runId of runs) {
+        for (const role of TMP_ROLES) {
+          await mkdir(tmpDirFor(runId, role), { recursive: true });
+          await writeFile(join(tmpDirFor(runId, role), "left"), "behind");
+        }
+        await writeOwnerMarker(runId, runId === live ? ownerPid : 99999999);
+      }
+      for (const runId of [here, live]) await mkdir(join(DATA_DIR, runId), { recursive: true });
+
+      try {
+        orchestrator = new ProcessOrchestrator();
+        await orchestrator.cleanupOrphans();
+
+        for (const role of TMP_ROLES) {
+          expect(existsSync(tmpDirFor(here, role))).toBe(false);
+          expect(existsSync(tmpDirFor(elsewhere, role))).toBe(false);
+          expect(existsSync(join(tmpDirFor(live, role), "left"))).toBe(true);
+        }
+      } finally {
+        for (const runId of runs) {
+          for (const role of TMP_ROLES) {
+            await rm(tmpDirFor(runId, role), { recursive: true, force: true });
+          }
+          await rm(workspaceDirFor(runId), { recursive: true, force: true });
+        }
+        try {
+          process.kill(ownerPid, "SIGKILL");
+        } catch {
+          // Already dead
+        }
+      }
+    });
+
     it("is idempotent — second call after a wipe returns zeros", async () => {
       const dir = join(DATA_DIR, "orphan-twice");
       await mkdir(dir, { recursive: true });
@@ -407,6 +615,52 @@ describe("ProcessOrchestrator", () => {
       // The host's every interface is reachable: the sidecar and its forward proxy bind loopback.
       expect(capturedEnv?.LISTEN_HOST).toBe("127.0.0.1");
       await orchestrator.stopByRunId(runId);
+    }, 10_000);
+
+    it("gives the sidecar the run's scratch directory as its os.tmpdir()", async () => {
+      // Asked of the spawned process itself: it reports the directory its own
+      // `os.tmpdir()` resolves to, and creates a directory there the way its
+      // integration boot does.
+      orchestrator = new ProcessOrchestrator();
+      await orchestrator.initialize();
+      const runId = "test-run-sidecar-tmpdir";
+      const boundary = await orchestrator.createIsolationBoundary(runId);
+      const report = join(boundary.id, "tmpdir.json");
+      const fakeSidecar = join(boundary.id, "fake-sidecar.ts");
+      await writeFile(fakeSidecar, tmpdirReporter(report));
+
+      const originalSpawn = Bun.spawn;
+      const patched = ((cmd: string[], opts: Parameters<typeof Bun.spawn>[1]) =>
+        originalSpawn(
+          cmd[0] === "bun" && cmd[1] === "run" ? ["bun", "run", fakeSidecar] : cmd,
+          opts,
+        )) as typeof Bun.spawn;
+      (Bun as { spawn: typeof Bun.spawn }).spawn = patched;
+      let sidecar;
+      try {
+        sidecar = await orchestrator.createSidecar(runId, boundary, { runToken: "tok" });
+      } finally {
+        (Bun as { spawn: typeof Bun.spawn }).spawn = originalSpawn;
+      }
+
+      let made: string | undefined;
+      try {
+        const seen = await readTmpdirReport(report);
+        made = seen.made;
+        // SIGKILL, as at the end of a run: the sidecar removes nothing itself.
+        await orchestrator.removeWorkload(sidecar);
+
+        expect(seen.tmpdir).toBe(tmpDirFor(runId, "sidecar"));
+        // macOS sun_path: 48 (os.tmpdir()) + 1 + name + 21 (`/mitm-XXXXXX/999.sock`) <= 103.
+        expect(Buffer.byteLength(basename(seen.tmpdir))).toBeLessThanOrEqual(33);
+        expect(existsSync(made)).toBe(true);
+        await orchestrator.removeIsolationBoundary(boundary);
+        expect(existsSync(made)).toBe(false);
+      } finally {
+        await orchestrator.stopByRunId(runId);
+        await orchestrator.removeIsolationBoundary(boundary);
+        if (made) await rm(made, { recursive: true, force: true });
+      }
     }, 10_000);
   });
 
@@ -582,6 +836,38 @@ describe("ProcessOrchestrator", () => {
       expect(env.AGENT_RUN_ID).toBe("test-run-secret-handover");
       expect(env.APPSTRATE_SINK_SECRET).toBeUndefined();
       expect(JSON.parse(stdin)).toEqual({ APPSTRATE_SINK_SECRET: "dummy-sink-secret" });
+    }, 10_000);
+
+    it("gives the agent a TMPDIR of its own, which the run's spec cannot redirect", async () => {
+      // Pi spills large tool output under `os.tmpdir()` and never unlinks it;
+      // the agent's shell inherits the same variable.
+      const runId = "test-run-agent-tmpdir";
+      const { boundary, handle } = await stageAgent(runId, { TMPDIR: "/nonexistent-from-spec" });
+      const report = join(boundary.id, "tmpdir.json");
+      await withFakeEntrypoint(
+        boundary.id,
+        () => orchestrator.startWorkload(handle),
+        tmpdirReporter(report),
+      );
+
+      let made: string | undefined;
+      try {
+        const seen = await readTmpdirReport(report);
+        made = seen.made;
+        // SIGKILL, as at the end of a run: the agent removes nothing itself.
+        await orchestrator.removeWorkload(handle);
+
+        expect(seen.tmpdir).toBe(tmpDirFor(runId, "agent"));
+        // A directory of its own.
+        expect(seen.tmpdir).not.toBe(tmpDirFor(runId, "sidecar"));
+        expect(existsSync(made)).toBe(true);
+        await orchestrator.removeIsolationBoundary(boundary);
+        expect(existsSync(made)).toBe(false);
+      } finally {
+        await orchestrator.stopByRunId(runId);
+        await orchestrator.removeIsolationBoundary(boundary);
+        if (made) await rm(made, { recursive: true, force: true });
+      }
     }, 10_000);
 
     /** The exit observer's lines for one run: it logs ~100 ms after the exit. */

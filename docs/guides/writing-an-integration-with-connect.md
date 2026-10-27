@@ -34,6 +34,7 @@ variables also references them as `{$variable.<name>}` ([Connection variables](#
 | `auth.type` | `connect` | `connect.tool` `run_at` | Strategy     | Flow                                                |
 | ----------- | --------- | ----------------------- | ------------ | --------------------------------------------------- |
 | `oauth2`    | —         | —                       | OAuth2       | OAuth 2.0 + PKCE, discovery + auto-refresh          |
+| `oauth2`    | `login`   | —                       | OAuth2       | first token from a submitted grant, auto-refresh    |
 | `api_key`   | —         | —                       | Fields       | paste-the-bag (user submits the credential)         |
 | `basic`     | —         | —                       | Fields       | paste-the-bag (username + password)                 |
 | `mtls`      | —         | —                       | Fields       | paste-the-bag (client cert + key, mounted as files) |
@@ -86,7 +87,7 @@ The raw long-key spelling is **not** accepted — the alias layer that once
 carried it is gone, and a manifest using it resolves no `api_call` surface.
 When this extension declares a synthetic name, that name is reserved and takes
 precedence over a same-named native MCP tool. A native tool literally named
-`api_call__<authKey>` is therefore no longer swallowed by the synthetic surface:
+`api_call__<authKey>` is therefore not swallowed by the synthetic surface:
 it collides with nothing and stays in the catalog. Without the extension, native
 tools named `api_call` or `api_upload` remain ordinary tools.
 
@@ -233,6 +234,77 @@ provider's `.well-known/openid-configuration` can be copy-pasted.
 > `audience`. Send it for forward compatibility even when the AS is known to ignore
 > it; the resource server validates the token audience independently.
 
+### First token by `connect.login`
+
+For a provider whose sign-in no redirect flow can drive (a mobile-app SSO), the user
+obtains a grant outside Appstrate — typically a refresh token — and submits it. The auth
+declares `connect.login` as a token request to its own `token_endpoint` (AFPS §7.7, _On
+an `oauth2` auth method_):
+
+```jsonc
+"oauth": {
+  "type": "oauth2",
+  "token_endpoint": "https://idp.example.com/oauth/token",
+  "token_endpoint_auth_method": "none",
+  "userinfo_endpoint": "https://idp.example.com/userinfo",
+  "credentials": {
+    "schema": {
+      "type": "object",
+      "properties": { "refresh_token": { "type": "string", "title": "Refresh token" } },
+      "required": ["refresh_token"]
+    }
+  },
+  "connect": {
+    "login": {
+      "request": {
+        "method": "POST",
+        "url": "https://idp.example.com/oauth/token",
+        "content_type": "application/x-www-form-urlencoded",
+        "body": "grant_type=refresh_token&refresh_token={{refresh_token}}"
+      }
+    }
+  },
+  "authorized_uris": ["https://api.example.com/**"],
+  "delivery": { "http": { "in": "header", "name": "Authorization", "prefix": "Bearer ", "value": "{$credential.access_token}" } }
+}
+```
+
+- The request is a `POST` of `application/x-www-form-urlencoded` to exactly
+  `token_endpoint`, without `headers`; its `body` holds only the grant parameters
+  (`grant_type` and its own). `authorization_endpoint` and `issuer` are not required.
+  When an `issuer` is declared, its metadata is read before anything is sent: a
+  `token_endpoint` it contradicts is a `400 invalid_request` (the client is presented
+  only to its issuer's own token endpoint), and metadata that cannot be read a
+  `502 login_upstream_unavailable`.
+- The platform adds the client authentication itself, with the auth's default client —
+  the one later refreshes use: a Basic header for `client_secret_basic`, `client_id` and
+  `client_secret` in the body for `client_secret_post`, `client_id` alone for a public
+  client (`none`). Another method (`private_key_jwt`, `client_secret_jwt`,
+  `tls_client_auth`, …) is refused with a `409 connection_not_ready` before anything is
+  sent. The body never carries `client_id`, `client_secret`, `client_assertion*` or
+  `resource`.
+- No `outputs`, `success_criteria`, `expires_in_output` or `identity_outputs`: the answer
+  is read as a token response, which must carry `token_type` `Bearer` (any case; absent
+  or another type is a `502 login_upstream_unavailable`). Identity comes from
+  `identity_claims` over the token response and `userinfo_endpoint` — never an
+  `id_token`, which the platform does not validate on this path (OIDC Core §3.1.3.7).
+  A response without `scope` is granted the grant's `scope` parameter, if any. A
+  `refresh_token` grant answered without `refresh_token` keeps the one it presented,
+  whatever the field it was typed in.
+- No `scope_catalog`, no templated `issuer`, no `remote` source.
+
+The user submits the fields through the hosted form or `connect/fields`;
+`connect/oauth2` refuses the auth. Nothing is stored unless the token request succeeds:
+a grant the server refuses is a `400 login_rejected`, a refused OAuth client a
+`502 oauth_client_rejected`. Once the token request may have redeemed the grant (a
+timeout, a 5xx, an unusable 2xx, or a failure after a successful request), the problem
+carries `grant_may_be_redeemed: true` and the hosted form says the grant may need
+replacing. A hosted form submits its grant once: a second submission is a `404`, unless
+the first was refused before the grant left the platform (an invalid field, no usable
+client, an issuer or egress refusal), in which case it can be fixed and submitted again.
+Once connected, it is an ordinary `oauth2` connection.
+Reference package: `@appstrate/garmin-connect`.
+
 ### `identity_claims` — naming the connected account
 
 `identity_claims` maps AFPS keys onto accessors into the identity payload. The
@@ -344,7 +416,9 @@ document (local-fragment `$ref` only, no external `$ref`).
       "schema": {
         "type": "object",
         "required": ["api_key"],
-        "properties": { "api_key": { "type": "string", "description": "Service API key" } }
+        "properties": {
+          "api_key": { "type": "string", "writeOnly": true, "description": "Service API key" }
+        }
       }
     },
     "delivery": {
@@ -372,7 +446,7 @@ document (local-fragment `$ref` only, no external `$ref`).
         "required": ["username", "password"],
         "properties": {
           "username": { "type": "string" },
-          "password": { "type": "string" }
+          "password": { "type": "string", "writeOnly": true }
         }
       }
     },
@@ -445,7 +519,7 @@ Arazzo Selector Objects or the AFPS extractor extensions (`cookie`, `jwt`, `rege
         "required": ["email", "password"],
         "properties": {
           "email":    { "type": "string", "format": "email" },
-          "password": { "type": "string" }
+          "password": { "type": "string", "writeOnly": true }
         }
       }
     },
@@ -506,43 +580,56 @@ variable, so a declarative login cannot target a per-connection upstream.
 Each `{{name}}` value is encoded for the place it takes, so a value never adds a
 parameter, a member, a part or a header line (the sidecar does the same for the
 `{{name}}` a `connect.tool` login tool writes into its own requests, by their
-`Content-Type`):
+`Content-Type`, and every `api_call` path for the `{{field}}` an agent writes into a
+target, a header or a substituted text body, where a refused value is a
+`credential_unusable`):
 
 - `url` — a placeholder that starts the template is a base URL, inserted as is; the
   resulting URL must still match `authorized_uris`. Every other value is percent-encoded
   as one component wherever it sits — a path segment, a query component, a fragment, but
   also a port, a userinfo or a value right after the host or the base. Write the `/` a
   URL needs in the template: `{{base_url}}/login`, `https://example.com/{{tenant}}/login`,
-  never `https://example.com{{path}}`, whose `/` would be encoded. A URL refused for its
-  host (malformed, blocked, outside `authorized_uris`) is a `400 invalid_request` naming
-  the inputs in its authority.
-- `body` — by the media type of the `Content-Type` header, else of `content_type`:
+  never `https://example.com{{path}}`, whose `/` would be encoded. A path segment its
+  placeholders render empty, `.` or `..` is refused: no encoding keeps it one segment. A URL refused
+  for its host (malformed, blocked, outside `authorized_uris`) is a `400 login_url_refused`
+  naming the inputs in its authority.
+- `body` — by the media type of the `Content-Type` header, else of `content_type`. A
+  body holding a `{{name}}` needs one of these, written without a `{{name}}` (a value
+  would pick the encoder); otherwise the manifest is refused when it is written and the
+  connect fails as `invalid_config` (a login tool's request is answered 400). A header
+  name written twice in different case is refused the same way. A body with no
+  placeholder is sent untouched:
   - `application/x-www-form-urlencoded` encodes a form component (space → `+`);
-  - JSON (`application/json`, `text/json`, `application/x-json`, any `+json`) escapes a
-    value inside a string literal. A bare `{{name}}` is one JSON value of the input's
-    type: the submitted credentials are first typed by `credentials.schema`, so a field
-    declared `number` goes as a number (`"1234"` → `1234`) and a field declared `string`
-    as a JSON string whatever it spells (`"0123"`, `"true"`). A `connect.tool` login
-    tool's inputs are strings: a bare position takes them as JSON strings;
+  - JSON (`application/json`, `text/json`, `application/x-json`, `application/x-ndjson`,
+    any `+json`) escapes a value inside a string literal. A bare `{{name}}` is one JSON
+    value of the input's type: the submitted credentials are first typed by
+    `credentials.schema`, so a field declared `number` goes as a number
+    (`"1234"` → `1234`) and a field declared `string` as a JSON string whatever it
+    spells (`"0123"`, `"true"`). A `connect.tool` login tool's inputs are strings: a bare
+    position takes them as JSON strings;
   - XML (`application/xml`, `text/xml`, `+xml`) escapes entities, and only splits `]]>`
     in a CDATA section;
-  - `multipart/*` refuses a value carrying CR or LF, so a value adds no part. A value
-    inside a part's own headers (a `Content-Disposition` `filename="{{name}}"`) is not
-    escaped: keep placeholders in part bodies;
-  - any other body takes the value as is.
+  - `multipart/*` (its `boundary` parameter required) refuses a value carrying CR, LF or
+    the boundary delimiter, so a value adds no part. On a part's own header lines a
+    placeholder must sit inside a quoted string (`filename="{{name}}"`), where a value
+    carrying `"` or `\` is refused; outside one (`name={{name}}`, `Content-Type: {{name}}`)
+    the request is refused when sent, whatever the value;
+  - `text/plain` takes the value as is.
 - header values — the value as is; one carrying a line break, another control character
   or a character above U+00FF is refused, and in a `Cookie` header any character outside
   RFC 6265 `cookie-octet` too (`;`, `,`, space, `"`, `\`).
 
-A value refused where it is placed is a `400 invalid_request` naming `credentials.<name>`.
+A value refused where it is placed is a `400 login_input_unencodable` naming
+`credentials.<name>`.
 
-A login the service refuses is a `400 invalid_request` on `credentials` whose detail
-starts `Login failed:`, as for a `connect.tool` login: the declared `success_criteria`
+A login the service refuses is a `400 login_rejected` on `credentials`, as for a
+`connect.tool` login: the declared `success_criteria`
 failed on an answer below 500, or, with none declared, the service answered 400, 401,
 403 or 422. A 404, 405 or 410 (whatever the criteria) and any other answer below 500
 that no criterion judges (a 302) are a defect of the integration, a `500`. A service
-that cannot be reached, answers 429 or answers 5xx is a `502 bad_gateway`, and one that
-does not answer within `request_timeout_ms` a `504 timeout`.
+that cannot be reached, answers 429 or answers 5xx is a `502 login_upstream_unavailable`
+relaying its `Retry-After`, and one that does not answer within `request_timeout_ms` a
+`504 timeout`.
 
 **A form login should declare `success_criteria`.** AFPS makes them optional, and without
 them any 2xx counts as success — but most web apps answer a wrong password with `200` and
@@ -605,8 +692,16 @@ delivery.
 
 A login connection is named by its identity (`identity_outputs`, `identity_claims`), else,
 like a pasted credential, by the one required string field of `credentials.schema` that
-is not a secret (`format: "password"` or `writeOnly`), masked (`al****.com`), else
-`Connexion N`. Mark the password field as a secret so the username names the connection.
+is not a secret, masked (`al****.com`), else, when the only required string field is one
+secret that is not `format: "password"`, by that key, masked (`fc****f10b`), else
+`Connexion N`.
+
+**Mark every secret field `writeOnly: true`** (an API key, a token) or
+`format: "password"` (a password a human chose, which never names a connection). It is
+the one rule the platform reads, never the field's name. The connect form masks the
+input of a secret and shows any other field in clear, and a secret beside a non-secret
+field never names the connection — so marking the password is also what lets the
+username do it.
 
 Anything stateful (cookie jars, multi-step CAS, CSRF token scraping, redirect
 following) does **not** belong here — use an orchestrated `tool` (§4 / §5).
@@ -635,7 +730,7 @@ fields under the `dev.appstrate/connect` vendor extension key in `_meta` (§10).
         "required": ["email", "password"],
         "properties": {
           "email":    { "type": "string", "format": "email" },
-          "password": { "type": "string" }
+          "password": { "type": "string", "writeOnly": true }
         }
       }
     },
@@ -759,15 +854,28 @@ origin and strips it otherwise.
 
 ## `tools_policy` — per-tool authorization metadata
 
-`tools_policy` (renamed from 1.x `tools` in AFPS) is an OPTIONAL **sparse policy
-table** keyed by tool name. It carries per-tool authorization metadata for `local`
-and `remote` sources. It is NOT the catalog of "tools this integration exposes" — that
-catalog is canonical to the referenced surface (the `_policy` suffix disambiguates).
+`tools_policy` (renamed from 1.x `tools` in AFPS) is an OPTIONAL table keyed by tool
+name. It carries per-tool authorization metadata for `local` and `remote` sources.
+Whether its keys also bound the names an agent can select, and the names
+`default_tools` may hold, depends on the source:
 
-For `source.kind: "local"`, the canonical catalog is the `tools[]` array of the
-referenced `mcp-server` package; for `remote`, it is obtained via runtime
-introspection of the MCP endpoint; for `api`, there is no MCP-tool catalog and
-`tools_policy` is generally not used.
+- `source.kind: "local"` — the catalog is the `tools[]` array of the referenced
+  `mcp-server` package. `tools_policy` is a **sparse policy overlay** on it: it need
+  not name every tool, and a key adds no tool.
+- `source.kind: "remote"` — the catalog is the endpoint's, read at run time. Once
+  `tools_policy` declares any tool, its keys ARE what an agent can select by name
+  and what `default_tools` may name: another name is refused (`unknown_tool` in an
+  agent's selection, `invalid_manifest` in the default), whatever the endpoint
+  advertises. A tool outside it is reachable only through the `"*"` wildcard, which
+  an agent may use when the integration declares `allow_undeclared_tools: true`. So
+  declare every tool an agent should be able to pick or inherit, with `{}` for one
+  that needs no scope. With no `tools_policy` at all, the manifest names no MCP
+  tool, and a `default_tools` entry is checked only against the names it hides.
+- `source.kind: "none"` — there is no MCP-tool catalog and `tools_policy` is
+  generally not used; the tools are the `api_call` capabilities.
+
+For every source, `api_call` capabilities add their tools to the catalog and
+`hidden_tools` removes names from it.
 
 ```jsonc
 "tools_policy": {
@@ -799,6 +907,39 @@ referenced by a `connect.tool` (run-start primitives) are auto-hidden, so
 ```jsonc
 "hidden_tools": ["internal_debug_dump", "vendor_legacy_endpoint"]
 ```
+
+### `default_tools`
+
+`default_tools` (Appstrate extension, being standardised in AFPS: afps-spec#39) is the
+OPTIONAL tool selection an agent inherits when it declares the integration without
+`integrations_configuration.<id>.tools`: an array of tool names.
+
+```jsonc
+"default_tools": ["list_issues"]
+```
+
+- An integration that declares none has no default, and the platform supplies none:
+  every agent MUST select its tools explicitly. An agent that selects nothing is
+  refused at publish and import (`no_tools_selected`). A draft or inline run of it
+  aborts at boot once it binds a connection to the integration; when no auth of the
+  integration is mandatory (`_meta["dev.appstrate/auth"].required`) and the agent
+  neither marks it `required` nor selects a scope, the dependency is inert and the run
+  starts without the integration.
+- A declared default is what an agent that chooses nothing can call. List what such an
+  agent should have, and keep each tool within the auth's `default_scopes`: a
+  connection made with those scopes cannot serve a default tool that requires more.
+- An entry the platform judges unexposed is refused when the manifest is written
+  (`400 validation_failed`, carrying an `invalid_manifest` error on
+  `manifest.default_tools`): for every source, a name `hidden_tools` lists, a
+  `connect.tool` name or the upload companion of a hidden `api_call`; for a `none`
+  source declaring no `_meta` key outside `dev.appstrate/`, a name outside its
+  catalog; for a `remote` source that declares a `tools_policy`, a name outside its
+  catalog; for a `local` source, a name outside the catalog of the referenced
+  `mcp-server`, on create, save, import and publish, when that package resolves. A
+  `remote` source with no `tools_policy` is judged no further: a name its endpoint
+  does not serve selects nothing at run time.
+- `"*"` is accepted only with `allow_undeclared_tools: true`, and grants whatever the
+  upstream advertises. Prefer names.
 
 ---
 
@@ -1050,15 +1191,17 @@ the entry of `authorization_servers` equal to the rendered `issuer` when you dec
 — a template over the remote URL's variables — and otherwise one with the rendered URL's
 origin, and refuses the connection when there is none. Endpoints come from RFC 8414
 discovery of that server alone, and the RFC 8707 `resource` is always sent for a remote
-source. The client is registered by RFC 7591 Dynamic Client Registration as a public
-client, one per authorization server and integration (and space), and the redirect URI
-is distinct per server.
+source. The client is this instance's OAuth Client ID Metadata Document for that server
+when the server advertises `client_id_metadata_document_supported` and the instance is
+served from a public https `APP_URL` (nothing is registered), else one registered by
+RFC 7591 Dynamic Client Registration as a public client, one per authorization server and
+integration (and space); either way the redirect URI is distinct per server.
 
 Declare `issuer` when the product may be served under a path prefix: its authorization
 server is then `https://host/prefix`, which does not have the origin of the rendered URL.
 `@appstrate/gitlab-mcp` declares `"issuer": "{$variable.base_url}"` for that reason.
 
-A server without dynamic client registration cannot be connected: an admin cannot
+A server offering neither (or only CIMD, to an instance on localhost) cannot be connected: an admin cannot
 register a client by hand for an auth whose server each connection names. Declare
 `token_endpoint_auth_method: "none"` and the scopes the server expects in
 `default_scopes`.
@@ -1066,7 +1209,7 @@ register a client by hand for an auth whose server each connection names. Declar
 ### Examples
 
 GitLab — one OAuth auth, gitlab.com by default, any self-managed instance by URL
-(`scripts/system-packages/integration-gitlab-mcp-1.0.0/manifest.json`):
+(`scripts/system-packages/integration-gitlab-mcp-1.0.1/manifest.json`):
 
 ```jsonc
 "source": {
@@ -1098,7 +1241,7 @@ GitLab — one OAuth auth, gitlab.com by default, any self-managed instance by U
 ```
 
 Coolify — always self-hosted, so no `default`, and a team token the user pastes
-(`scripts/system-packages/integration-coolify-mcp-1.0.0/manifest.json`):
+(`scripts/system-packages/integration-coolify-mcp-1.0.2/manifest.json`):
 
 ```jsonc
 "source": {
@@ -1120,7 +1263,7 @@ Coolify — always self-hosted, so no `default`, and a team token the user paste
     "credentials": {
       "schema": {
         "type": "object",
-        "properties": { "token": { "type": "string" } },
+        "properties": { "token": { "type": "string", "writeOnly": true } },
         "required": ["token"]
       }
     },
@@ -1191,8 +1334,9 @@ rejects it.
 - The login secret travels in the run's `inputs` plane and is substituted
   **proxy-side** by the sidecar's MITM — the integration's tool code never reads it,
   and it is never logged.
-- `connect` is only valid on `type: "custom"`; declare **exactly one** of `login` or
-  `tool`.
+- `connect` is valid on `type: "custom"`, and its `login` mode on `type: "oauth2"`
+  too ([First token by `connect.login`](#first-token-by-connectlogin)); declare
+  **exactly one** of `login` or `tool`.
 - The declarative `login` request is bounded by `limits` (`request_timeout_ms`,
   `max_response_bytes`); the orchestrated `tool` runs in the sandboxed runner with
   the per-run CA and MITM envelope.
@@ -1222,7 +1366,7 @@ rejects it.
 - New auth type `mtls`; auth type `oauth1` is removed.
 - `tools_policy` (renamed from 1.x `tools`) is the per-tool policy table; `hidden_tools`
   suppresses canonical-catalog entries.
-- New `source` discriminator (`local | remote | api`) decouples the capability surface
+- New `source` discriminator (`local | remote | none`) decouples the capability surface
   from the authentication layer.
 - The `definition.*` namespace (`authMode`, `oauth2`, `credentialTransform`,
   `credentialEncoding`, `uploadProtocols`, `authorizedUris`, `allowAllUris`,

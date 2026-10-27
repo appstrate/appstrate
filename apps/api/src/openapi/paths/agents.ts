@@ -11,7 +11,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "List all agents",
       description:
-        "Returns the agents ACTIVE in the space named by `X-Space-Id`, with running run counts — the set that space can launch: a system agent, or one placed there (homed or offered) and switched on. An agent placed here and switched OFF, and an offer nobody has taken up, are NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it; the agent's own detail opens either way. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` and `dependencies.mcp_servers` — the skills and MCP servers the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.",
+        "Returns the agents ACTIVE in the space named by `X-Space-Id`, with running run counts — the set that space can launch: a system agent, or one placed there (homed there, or holding a row there) and switched on. An agent placed here and switched OFF is NOT on it — that is the space library's subject (`GET /api/spaces/{spaceId}/library`), which names each placement's origin and state and carries the switch that activates it; the agent's own detail opens either way. Requires `X-Org-Id` header for cookie auth. Two tiers of read: `agents:read` returns every field, while `agents:run` alone returns a summary that omits `dependencies.skills` and `dependencies.mcp_servers` — the skills and MCP servers the agent is built from — and keeps `dependencies.integrations` along with the identity, labels and run counters a launcher picks an agent by.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -40,6 +40,8 @@ export const agentsPaths = {
                 data: [
                   {
                     id: "@acme/email-sorter",
+                    icon: "lucide:mail",
+                    color: "blue",
                     display_name: "Email Sorter",
                     description: "Automatically sorts and labels incoming emails",
                     schema_version: "0.1",
@@ -58,6 +60,8 @@ export const agentsPaths = {
                   },
                   {
                     id: "@appstrate/code-reviewer",
+                    icon: null,
+                    color: null,
                     display_name: "Code Reviewer",
                     description: "Reviews pull requests and suggests improvements",
                     schema_version: "0.1",
@@ -123,7 +127,7 @@ export const agentsPaths = {
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
-              // Bare persisted resource — no `validation` echo (#657):
+              // Bare persisted resource — no `validation` echo:
               // validation failures are 400s.
               schema: { $ref: "#/components/schemas/AgentInputSettings" },
             },
@@ -208,7 +212,7 @@ export const agentsPaths = {
           content: {
             "application/json": {
               // Bare proxy-setting resource — same shape as GET …/proxy,
-              // no `success` scrap (#657).
+              // no `success` scrap.
               schema: {
                 type: "object",
                 required: ["proxyId", "resolved"],
@@ -233,7 +237,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "Bulk integration connection readiness for an agent",
       description:
-        "Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict: the run-kickoff 409 (run semantics, includeInert false + required-auth carve-out; a required integration switched off in the space is `integration_not_active`), plus `agent_not_active` when the SPACE has switched the agent off. This is a READ and answers 200 either way — the execution doors answer `404 agent_not_active_in_space` for the same state, and a panel that 404s cannot tell anyone what to fix. `integrations[]` lists every declared integration with its management verdict (includeInert true), in the resolver's own vocabulary (`source` + `error_code`) plus the agent's `required` flag, so the Connexions tab and the launch badge share one source of truth. A non-required integration the run would start without is not in `errors`: its `resolution.warning` says why.",
+        "Single call replacing N per-integration resolutions. `blocks_run`/`errors` are the authoritative run-blocking verdict: the run-kickoff 409 (run semantics, includeInert false + required-auth carve-out; a required integration switched off in the space is `integration_not_active`), plus `agent_not_active` when the SPACE has switched the agent off. This is a READ and answers 200 either way — the execution doors answer `404 agent_not_active_in_space` for the same state, and a panel that 404s cannot tell anyone what to fix. `integrations[]` lists every declared integration with its management verdict (includeInert true), in the resolver's own vocabulary (`source` + `error_code`) plus the agent's `required` flag and, under an admin pin, whether members may add to the imposed set (`additional_connections_allowed`), so the Connexions tab and the launch badge share one source of truth. A non-required integration the run would start without is not in `errors`: its `resolution.warning` says why.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -245,7 +249,7 @@ export const agentsPaths = {
           required: false,
           schema: { type: "string" },
           description:
-            "Which agent definition to assess: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). Omitted judges EXACTLY what the agent detail page rendered — the draft for a caller who may WRITE the agent, otherwise the latest published version, and the draft in read-only when nothing is published — so the badge can never 404 a page that just loaded. `draft` named explicitly requires that write authority and answers `403 draft_not_writable` otherwise. Pass a concrete version to get the same run-blocking verdict the run would produce for it (issue #770), so the modal and badge never disagree with the actual run. Ignored for system agents.",
+            "Which agent definition to assess: `draft` (the live editor working copy), `published` (the latest published version), or a version spec (exact version, dist-tag, or semver range). Omitted judges EXACTLY what the agent detail page rendered — the draft for a caller who may WRITE the agent, otherwise the latest published version, and the draft in read-only when nothing is published — so the badge can never 404 a page that just loaded. `draft` named explicitly requires that write authority and answers `403 draft_not_writable` otherwise. Pass a concrete version to get the same run-blocking verdict the run would produce for it, so the modal and badge never disagree with the actual run. Ignored for system agents.",
         },
       ],
       responses: {
@@ -275,7 +279,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "List unified agent persistence (pinned slots + memories)",
       description:
-        "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). Admins inspecting at agent level (no `actor_type` and no `runId`) see every actor's pinned slots; members always see their own actor scope plus shared rows.",
+        "Returns the agent's named pinned slots and archive memories visible to the caller's actor scope. Pinned slots include the `checkpoint` carry-over slot alongside Letta-style named blocks (`persona`, `goals`, …). A caller holding `persistence:delete` who names no `actor_type` sees every actor's rows in both halves; `runId` only narrows the rows to one run and never changes whose rows are visible. Every other caller sees their own actor scope plus shared rows, in both halves. An inline run's shadow agent (`@inline/r-…`) is readable here by a caller who may read a run of it in this space, so its run page can show what `note`/`pin` wrote.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -293,7 +297,8 @@ export const agentsPaths = {
           in: "query",
           required: false,
           schema: { type: "string", enum: ["user", "end_user", "shared"] },
-          description: "Admin-only scope override. Defaults to caller's actor scope.",
+          description:
+            "Scope override, honoured only for a caller holding `persistence:delete` (ignored otherwise). Omitted → that caller sees every actor's rows; every other caller sees their own actor scope.",
         },
         {
           name: "actor_id",
@@ -379,7 +384,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "Bulk-delete persistence rows for an agent",
       description:
-        "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only. Bulk mutation — returns a documented operation result with snake_case counts, not a 204 (issue #657).",
+        "Wipes memories (always) and optionally the `checkpoint` slot (when `actor_type` + `actor_id` resolve to a single scope). Other named pinned slots must be deleted individually via DELETE /persistence/pinned/{id}. Admin-only. Bulk mutation — returns a documented operation result with snake_case counts, not a 204.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -565,7 +570,7 @@ export const agentsPaths = {
           content: {
             "application/json": {
               // Bare model-setting resource — same shape as GET …/model,
-              // no `success` scrap (#657).
+              // no `success` scrap.
               schema: {
                 type: "object",
                 required: ["modelId", "generation"],
@@ -596,7 +601,7 @@ export const agentsPaths = {
       tags: ["Agents"],
       summary: "Export an agent as an .afps-bundle",
       description:
-        "Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies. The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). Two modes: `?source=published` (default) exports the `latest` dist-tag, or the version `?version=` pins; `?source=draft` bundles the agent's current draft state as the bundle ROOT — its dependencies are still the PUBLISHED versions the manifest pins select, exactly as a server-side `version=draft` run resolves them, so the archive carries the bytes that run would execute and a dependency with no satisfying published version answers the same `422 dependency_unresolved`. `?source=draft` is reserved to callers who may WRITE the agent (`403 draft_not_writable` otherwise) — handing over the working copy IS running it, once `--local` is in the picture. `?source=draft` cannot be combined with `?version=`. Assembly reads the same stored artifacts a run does, so it reports the same coded bundle failures — see the 422 and 500 responses. This route hands over a COPY of the agent and of every dependency's files, so an organization that sets `restrict_package_copy` narrows it to callers holding the agent's `agents:share` in its HOME space: `403 package_copy_restricted` otherwise, exactly as on `fork` and `download`. That is what the setting means — `appstrate run --local` downloads a bundle, so it is refused there too, while a server-side run is unaffected. Skills and system packages are exempt.",
+        "Streams a canonical multi-package .afps-bundle archive containing the agent and all its transitive dependencies: its skills, and its integrations at the version a run resolves (the published version the pin selects, or the system version). The archive is deterministic (byte-identical across calls with the same inputs) and carries per-file RECORD hashes plus a bundle-level SRI digest (also echoed in the `X-Bundle-Integrity` response header). Two modes: `?source=published` (default) exports the `latest` dist-tag, or the version `?version=` pins; `?source=draft` bundles the agent's current draft state as the bundle ROOT — its dependencies are still the PUBLISHED versions the manifest pins select, exactly as a server-side `version=draft` run resolves them, so the archive carries the bytes that run would execute and a dependency with no satisfying published version answers the same `422 dependency_unresolved`. `?source=draft` is reserved to callers who may WRITE the agent (`403 draft_not_writable` otherwise) — handing over the working copy IS running it, once `--local` is in the picture. `?source=draft` cannot be combined with `?version=`. Assembly reads the same stored artifacts a run does, so it reports the same coded bundle failures — see the 422 and 500 responses. This route hands over a COPY of the agent and of every dependency's files, so an organization that sets `restrict_package_copy` narrows it to callers holding the agent's `agents:share` in its HOME space: `403 package_copy_restricted` otherwise, exactly as on `fork` and `download`. That is what the setting means — `appstrate run --local` downloads a bundle, so it is refused there too, while a server-side run is unaffected. Skills and system packages are exempt.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -650,16 +655,16 @@ export const agentsPaths = {
         "403": {
           $ref: "#/components/responses/Forbidden",
           description:
-            "Insufficient permissions — `package_copy_restricted` under `restrict_package_copy`, or `draft_not_writable` when `?source=draft` is asked by a caller who cannot WRITE the agent.",
+            "Insufficient permissions — `package_copy_restricted` under `restrict_package_copy`, `draft_not_writable` when `?source=draft` is asked by a caller who cannot WRITE the agent, or the caller lacks the read scope of a dependency type the bundle carries (`skills:read`, `integrations:read`).",
         },
         "404": {
           $ref: "#/components/responses/NotFound",
           description:
-            "`agent_not_found` when this space holds no placement for the agent (homed here, offered here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — the bundle is what a `--local` run executes, so this door asks the execution question like `POST …/run` does. Switch it back on with `POST /api/spaces/{spaceId}/packages`. `no_published_version` when the agent exists and is active but has never been published and no `?version` was given — publish a version, or export the working copy with `?source=draft`.",
+            "`agent_not_found` when this space holds no placement for the agent (homed here, holding a row here, or system), and `agent_not_active_in_space` when it holds one that is switched OFF — the bundle is what a `--local` run executes, so this door asks the execution question like `POST …/run` does. Switch it back on with `POST /api/spaces/{spaceId}/packages`. `no_published_version` when the agent exists and is active but has never been published and no `?version` was given — publish a version, or export the working copy with `?source=draft`.",
         },
         "422": {
           description:
-            "The bundle cannot be assembled from stored artifacts. `version_artifact_unavailable`: the selected published version of the agent itself exists but its archive is gone from storage — nothing is substituted for it. `dependency_unresolved`: a declared dependency resolves to no published version, or it resolved but its artifact is absent from storage or out of this organization's scope — the detail names the dependency. `bundle_invalid`: a stored archive or manifest is malformed or exceeds an archive limit (for example an archive with no `manifest.json` at its root); the package must be republished. `bundle_signature_invalid`: rejected by `AFPS_SIGNATURE_POLICY`",
+            "The bundle cannot be assembled from stored artifacts. `version_artifact_unavailable`: the selected published version of the agent itself exists but its archive is gone from storage — nothing is substituted for it. `dependency_unresolved`: a declared dependency resolves to no published version (an integration pin included, exactly as a run refuses it), or it resolved but its artifact is absent from storage or out of this organization's scope — the detail names the dependency. `bundle_invalid`: a stored archive or manifest is malformed or exceeds an archive limit (for example an archive with no `manifest.json` at its root); the package must be republished. `bundle_signature_invalid`: rejected by `AFPS_SIGNATURE_POLICY`",
           headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {

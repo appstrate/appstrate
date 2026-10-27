@@ -9,18 +9,18 @@
  *   3. POST /api/auth/device/code → receive user_code + verification URL.
  *   4. Print the code in the terminal + open the browser.
  *   5. Poll /api/auth/cli/token until approval.
- *   6. Store the JWT access + rotating refresh pair in the keyring
- *      (issue #165); decode `sub` + `email` from the JWT payload
+ *   6. Store the JWT access + rotating refresh pair in the keyring;
+ * decode `sub` + `email` from the JWT payload
  *      (via `lib/jwt-identity.ts`) to capture userId + email;
  *      persist the profile in config.toml.
  *   7. Pin an organization on the profile so subsequent `X-Org-Id`-
  *      requiring routes (`/api/me`, `/api/agents`, …) work out of the
- *      box. Issue #209. Auto-pin on one org, interactive picker on
+ *      box. Auto-pin on one org, interactive picker on
  *      many, offer inline creation on zero. Non-interactive escapes:
  *      `--org <id-or-slug>`, `--create-org <name>`, `--no-org`.
  *   8. Cascade: pin a space on the profile so subsequent
  *      `X-Space-Id`-requiring routes (`/api/agents`, `/api/runs`, …)
- *      work out of the box. Issue #217. Auto-pins the default space
+ *      work out of the box. Auto-pins the default space
  *      (the server provisions one per org). Non-interactive escapes:
  *      `--space <id>`, `--create-space <name>`, `--no-space`.
  */
@@ -236,7 +236,7 @@ async function runLogin(
 
   // Step 6 — persist both the tokens and the profile in one pass.
   //
-  // Issue #165: a 2.x server MUST issue both `refresh_token` and
+  // A 2.x server MUST issue both `refresh_token` and
   // `refresh_expires_in`. A missing `refresh_token` means pre-2.x;
   // a missing `refresh_expires_in` means a non-conforming proxy
   // stripped the field. Either way the CLI refuses the login rather
@@ -294,13 +294,13 @@ async function runLogin(
     }
   });
 
-  // Step 7 — pin an organization. Issue #209. Credentials are already
+  // Step 7 — pin an organization. Credentials are already
   // persisted so `listOrgs` / `createOrg` (both authenticated) work.
   // Any failure here leaves the login valid but unpinned — surfaced as
   // a hint to the user, never as a hard failure.
   const pinned = await pinOrgOnProfile(profileName, opts, io);
 
-  // Step 8 — cascade into space pinning. Issue #217. Requires an
+  // Step 8 — cascade into space pinning. Requires an
   // `orgId` in context (listSpaces is org-scoped), so we gate on
   // `pinned` rather than re-fetching from the keyring.
   const pinnedSpace = await pinSpaceOnProfile(profileName, opts, pinned, io);
@@ -402,7 +402,7 @@ async function pinOrgOnProfile(
 }
 
 /**
- * Resolve the space-pin branch of the login cascade. Issue #217.
+ * Resolve the space-pin branch of the login cascade.
  *
  * Gated on a successful org pin: `GET /api/spaces` needs an
  * `X-Org-Id` header, so when no org is pinned (user passed `--no-org`,

@@ -4,6 +4,7 @@ import { STD_RESPONSE_HEADERS } from "../headers.ts";
 import {
   authKeyParam,
   clientIdParam,
+  droppedPinEffect,
   integrationClientsListSchema,
   oauthClientCreateBodySchema,
   oauthClientSchema,
@@ -41,7 +42,8 @@ export const orgIntegrationsPaths = {
         "Returns the org's own clients (`org`, oldest first) plus the default it " +
         "inherits, the platform-provided system client (`system`), if any. " +
         "`is_default` marks the org-tier default. Secrets are never returned. Only oauth2 auths " +
-        "whose client is not auto-provisioned (DCR/CIMD) have an org tier; " +
+        "whose client is not auto-provisioned (client metadata document or DCR) are listed here — the org's machine " +
+        "client of an auto-provisioned auth is not chosen by an admin; " +
         `any other auth is a 400. ${PERMISSION_NOTE}`,
       parameters: [...packageParams, authKeyParam],
       responses: {
@@ -88,8 +90,10 @@ export const orgIntegrationsPaths = {
       description:
         "Registers a custom (BYO-app) client at the org level (`spaceId: null`), " +
         "inherited by every space of the org. The first one becomes the org " +
-        "default. Rejected (400) for auto-provisioned (DCR/CIMD) auths, whose " +
-        `clients are per space. ${PERMISSION_NOTE}`,
+        "default. Rejected (400) for auto-provisioned auths, whose client the platform " +
+        "provisions itself at connect time (its client metadata document, else an org-level " +
+        "client registered by DCR at the first connect from any space). " +
+        PERMISSION_NOTE,
       parameters: [...packageParams, authKeyParam],
       requestBody: jsonBody(oauthClientCreateBodySchema),
       responses: {
@@ -132,6 +136,7 @@ export const orgIntegrationsPaths = {
         "Deletes one org-level client by id (a space client id is a 404 here), " +
         "with every connection it minted in any space of the org. Refused with 409 " +
         "`connection_pinned` while an admin pin or an org default (enforced or soft) names one of them. " +
+        `${droppedPinEffect} ` +
         PERMISSION_NOTE,
       parameters: [...packageParams, clientIdParam],
       responses: {

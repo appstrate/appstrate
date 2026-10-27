@@ -16,6 +16,8 @@ name: Test Installer
 #   - `scripts/semver-lt.sh`         the SemVer guard that keeps the signed
 #                                    "latest" channel manifest monotonic
 #   - `scripts/sync-installer-pages.sh` the copy/promotion logic that applies it
+#   - `.github/actions/minisign-setup` the pinned minisign every release-time
+#                                    workflow signs with — exercised here first
 #
 # Adding a file to `publish-installer.yml` means adding it to BOTH lists here.
 on:
@@ -29,6 +31,7 @@ on:
       - "scripts/sync-installer-pages.sh"
       - ".github/workflows/test-install.yml"
       - ".github/workflows/publish-installer.yml"
+      - ".github/actions/minisign-setup/**"
   push:
     branches: [main]
     paths:
@@ -40,6 +43,7 @@ on:
       - "scripts/sync-installer-pages.sh"
       - ".github/workflows/test-install.yml"
       - ".github/workflows/publish-installer.yml"
+      - ".github/actions/minisign-setup/**"
   workflow_dispatch:
 
 permissions:
@@ -240,7 +244,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install minisign
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+        # The pinned action publish-installer.yml and release.yml use, so a
+        # defect in it reds a PR instead of burning a tag.
+        uses: ./.github/actions/minisign-setup
 
       - name: Simulate publish-installer.yml render + sign
         run: |
@@ -348,7 +354,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install minisign
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+        # The pinned action publish-installer.yml and release.yml use, so a
+        # defect in it reds a PR instead of burning a tag.
+        uses: ./.github/actions/minisign-setup
 
       - name: Exercise bootstrap.sh verification path end-to-end
         run: |
@@ -1227,7 +1235,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install minisign on runner (for signing the fake release)
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+        # Host PATH only: the distro container below is a plain `docker run`.
+        uses: ./.github/actions/minisign-setup
 
       - name: Stage fake signed release + rewrite bootstrap.sh
         run: |

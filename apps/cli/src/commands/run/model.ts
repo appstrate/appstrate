@@ -224,7 +224,7 @@ export async function resolvePresetModel(inputs: PresetResolutionInputs): Promis
 
 /**
  * A listed-but-dead preset. Fails here rather than at the first LLM call:
- * `GET /api/models` no longer hides such a preset, so without this the id
+ * `GET /api/models` does not hide such a preset, so without this the id
  * would resolve and the run would die at the llm-proxy with an opaque error.
  */
 function deadPresetError(presetId: string): ModelResolutionError {

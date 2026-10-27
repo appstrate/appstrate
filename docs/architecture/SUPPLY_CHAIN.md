@@ -1,7 +1,6 @@
 # Supply-Chain Posture — Pi SDK (single-vendor dependency)
 
-Status: active. Addresses [#616](https://github.com/appstrate/appstrate/issues/616) item 2
-("single-vendor SDK supply-chain risk").
+Status: active. Addresses the single-vendor SDK supply-chain risk.
 
 The agent execution path depends on a single-maintainer SDK published by one
 author:

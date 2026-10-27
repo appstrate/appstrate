@@ -21,6 +21,7 @@ import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
 import type { ResolvedConnectionMap, RunIntegrationUnbound } from "@appstrate/core/integration";
 import type { ModelCost } from "@appstrate/core/module";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
+import type { ModelErrorCategory } from "@appstrate/core/model-error";
 import type { PricingStatus } from "../pricing-status.ts";
 import {
   runStatusEnum,
@@ -126,18 +127,18 @@ export const runs = pgTable(
     // a plain nullable ADD COLUMN (no default backfill).
     artifacts: jsonb("artifacts").$type<RunArtifactsSummary>(),
     checkpoint: jsonb("checkpoint"),
-    // `error` stores the human-readable `RunError.message` only. The
-    // runtime `RunError` shape (`code`, `message`, `stack`, `context`,
-    // `timestamp`) IS round-tripped at the runtime/runner boundary —
-    // sinks observing run-event ingestion see the full structured
-    // payload — but only `message` is persisted on the row today. The
-    // structured fields are intentionally dropped at write time
-    // (`apps/api/src/services/run-event-ingestion.ts` extracts
-    // `result.error?.message`); widening this column to `jsonb` is
-    // tracked as a follow-up so the migration + OpenAPI bump + frontend
-    // reader update can land together. Until then, OpenAPI's
-    // `Run.error: string` reflects what the database actually exposes.
+    // `error` stores the human-readable `RunError.message`, verbatim: the run
+    // surface is a debugging surface. What a READER branches on is the three
+    // `model_error_*` columns below, never this text.
     error: text("error"),
+    // A run that failed on a model call (the runner's `adapter_error`), read
+    // once at finalize by `describeModelFailure` (`@appstrate/core/model-error`):
+    // its class, the provider's HTTP status and the provider's own sentence,
+    // each when the failure text carried one. NULL on every other run, and on
+    // runs finalized before these columns existed (nothing was recorded).
+    modelErrorCategory: text("model_error_category").$type<ModelErrorCategory>(),
+    modelErrorStatus: integer("model_error_status"),
+    modelErrorMessage: text("model_error_message"),
     // Snake-case keys: matches the wire format produced by every runner
     // (PiRunner emits `input_tokens` / `output_tokens` / … directly from
     // the Pi SDK), the AFPS `tokenUsageSchema` validated on ingestion in
@@ -200,8 +201,11 @@ export const runs = pgTable(
     // Per-run integration connection overrides — the caller's explicit
     // choice at run kickoff (e.g. "for this run, use my Gmail-Boulot AND my
     // Gmail-Perso"). Shape: { "@scope/integration": ["<connection_id>", ...] }.
-    // Loses to an admin pin and an enforced org default. Resolution snapshot
-    // lives in resolvedConnections below. Flat (no per-authKey nesting): the
+    // Under an admin pin or an enforced org default the set that layer imposes
+    // is a floor, bound whole: the override only adds to it (`[]` adds
+    // nothing), where the admin pin allows additions; elsewhere an id outside
+    // the floor is `override_outranked`. Resolution snapshot lives in
+    // resolvedConnections below. Flat (no per-authKey nesting): the
     // chosen connections carry their own authKey.
     connectionOverrides: jsonb("connection_overrides").$type<Record<string, string[]>>(),
     // Snapshot of the resolver output at run start — which connections were
@@ -215,7 +219,7 @@ export const runs = pgTable(
     // detail. NULL = not recorded. Read back through `runIntegrationsUnboundSchema`.
     integrationsUnbound: jsonb("integrations_unbound").$type<RunIntegrationUnbound[]>(),
     // Snapshot of the integration manifest VERSION resolved per declared
-    // integration at run kickoff (#686). Shape:
+    // integration at run kickoff. Shape:
     // { "@scope/integration": { version: "1.4.2" | null, source: "version" | "draft" | "system" } }.
     // Frozen here so every manifest read for THIS run — the kickoff spawn
     // spec AND the long-lived runtime credential/MITM-refresh path — resolves
@@ -236,7 +240,7 @@ export const runs = pgTable(
      */
     chatSessionId: text("chat_session_id"),
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
-    // Per-run dependency version overrides (#666). Shape:
+    // Per-run dependency version overrides. Shape:
     // { "@scope/skill": "draft" | "<semver|dist-tag>" }. Run-scoped escape
     // hatch out of the published-only resolution: `"draft"` pulls that
     // dependency's mutable working copy (skill edit loop), any other value
@@ -315,9 +319,10 @@ export const runs = pgTable(
     /**
      * The `model_provider_credentials` row this run is allowed to fetch
      * tokens for (via `/internal/oauth-token/:credentialId`). Snapshotted
-     * at run creation time. Stamped only for platform-origin runs that
-     * resolve to an OAuth model provider — null otherwise (API-key model,
-     * remote-origin run, scheduler synthesis pre-resolution).
+     * at run creation time. Stamped for every platform-origin run whose
+     * non-aliased model resolves to a DB credential, OAuth or API key. Null
+     * for aliased models, remote-origin runs and scheduler synthesis
+     * pre-resolution.
      *
      * Defense-in-depth: without this binding, a leaked run token could be
      * used to enumerate ALL OAuth credentials of the run's org. With it,
@@ -326,6 +331,14 @@ export const runs = pgTable(
     modelCredentialId: uuid("model_credential_id").references(() => modelProviderCredentials.id, {
       onDelete: "set null",
     }),
+    /**
+     * The member whose own credential pays this run's inference: set iff
+     * `model_source = 'user'`, stamped at launch, the one fact every later
+     * door compares against. No FK: it outlives the member and the credential.
+     * NULL = no member pays (an organization or platform credential does), or
+     * the run records no model source at all.
+     */
+    payerUserId: text("payer_user_id"),
   },
   (table) => [
     index("idx_runs_status").on(table.status),
@@ -417,6 +430,12 @@ export const runs = pgTable(
     // and holds ACCESS EXCLUSIVE until it commits either way. The scan is why a
     // pre-existing negative row aborts the deploy — see `docs/architecture/RUN_COST.md`.
     check("runs_cost_non_negative", sql`cost >= 0`),
+    // The runner ledger row copies both columns, so the pair holds the rule
+    // `llm_usage_payer_iff_user_source` states (compared as text, same reason).
+    check(
+      "runs_payer_iff_user_source",
+      sql`(model_source::text IS NOT DISTINCT FROM 'user') = (payer_user_id IS NOT NULL)`,
+    ),
     // Closed vocabulary for the terminal provenance cache. NULL-friendly by
     // standard CHECK semantics (`NULL IN (…)` is NULL, which passes), which is
     // exactly the intent: pre-feature rows carry no verdict at all.
@@ -424,6 +443,17 @@ export const runs = pgTable(
       "runs_cost_pricing_status_valid",
       sql`cost_pricing_status IN ('priced', 'partial', 'unpriced')`,
     ),
+    // The persisted model-failure vocabulary (`MODEL_ERROR_CATEGORIES`); the
+    // status and sentence only ever qualify a classified failure.
+    check(
+      "runs_model_error_category_valid",
+      sql`model_error_category IN ('credential_unavailable', 'rate_limited', 'upstream_unavailable', 'invalid_request', 'unknown')`,
+    ),
+    check(
+      "runs_model_error_detail_has_category",
+      sql`model_error_category IS NOT NULL OR (model_error_status IS NULL AND model_error_message IS NULL)`,
+    ),
+    check("runs_model_error_status_http", sql`model_error_status BETWEEN 100 AND 599`),
     // The proxy serves the run's pinned model, never one the request names.
     check("runs_proxy_route_has_model", sql`inference_route <> 'proxy' OR model_id IS NOT NULL`),
     // A remote runner brings its own model and credentials.
@@ -635,6 +665,13 @@ export const llmUsage = pgTable(
     // run rows are backfilled from `runs.model_source`; chat / un-attributed
     // rows stay NULL (a downstream consumer treats NULL as non-attributable).
     credentialSource: credentialSourceEnum("credential_source"),
+    // The credential that served the call, personal or organization. NULL on
+    // platform-key calls and on rows predating this column. No FK: the ledger
+    // is append-only and a credential can be deleted after the fact.
+    credentialId: uuid("credential_id"),
+    // The member whose own credential paid the call: set iff `credential_source
+    // = 'user'`. No FK, same reason as `credentialId`. NULL = no member pays, or no source is recorded.
+    payerUserId: text("payer_user_id"),
     inputTokens: integer("input_tokens").notNull().default(0),
     outputTokens: integer("output_tokens").notNull().default(0),
     cacheReadTokens: integer("cache_read_tokens"),
@@ -754,6 +791,13 @@ export const llmUsage = pgTable(
     // being bypassed. Added validated in migration 0029 — see the sibling floor
     // on `runs.cost` for why it is not split into `NOT VALID` + `VALIDATE`.
     check("llm_usage_cost_usd_non_negative", sql`cost_usd >= 0`),
+    // A payer is recorded iff the member's own credential paid. Compared as text: the enum
+    // label `user` is unusable in the transaction that adds it, and drizzle applies every
+    // pending migration in one.
+    check(
+      "llm_usage_payer_iff_user_source",
+      sql`(credential_source::text IS NOT DISTINCT FROM 'user') = (payer_user_id IS NOT NULL)`,
+    ),
     // Closed vocabulary — same NULL-friendly semantics as the run-level twin
     // (`runs_cost_pricing_status_valid`): a pre-feature row carries no verdict.
     check(
@@ -802,12 +846,12 @@ export const schedules = pgTable(
     versionOverride: text("version_override"),
     // Per-schedule integration connection overrides — frozen at schedule
     // creation/edit (mirrors `dependencyOverrides` on runs). Same shape as
-    // `runs.connectionOverrides`. Loses to an admin pin and an enforced org
-    // default at fire time.
+    // `runs.connectionOverrides`, and the same floor rule at fire time: it
+    // only adds to an admin pin's or an enforced org default's set.
     connectionOverrides: jsonb("connection_overrides").$type<Record<string, string[]>>(),
     // Per-schedule dependency version overrides — frozen at schedule
-    // creation/edit, forwarded to each fired run's `runs.dependencyOverrides`
-    // (#666/#686). Shape: { "@scope/dep": "draft" | "<semver|dist-tag>" }.
+    // creation/edit, forwarded to each fired run's `runs.dependencyOverrides`.
+    // Shape: { "@scope/dep": "draft" | "<semver|dist-tag>" }.
     // Keys may name a declared skill OR integration dependency; `"draft"` opts
     // that dependency into its working copy for the dev edit loop, any other
     // value replaces the manifest pin. Mirrors `runs.dependencyOverrides`.

@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from "bun:test";
 import { Hono } from "hono";
+import { envSchema } from "@appstrate/env";
 import { apiCors, CORS_EXPOSED_HEADERS } from "../../../src/lib/cors.ts";
 
 const ORIGIN = "https://embed.example";
@@ -57,5 +58,20 @@ describe("apiCors", () => {
       headers: { Origin: "https://evil.example" },
     });
     expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+
+  it("grants no origin when TRUSTED_ORIGINS is unset or empty", async () => {
+    for (const raw of [undefined, ""]) {
+      const app = new Hono();
+      app.use("*", apiCors(envSchema.shape.TRUSTED_ORIGINS.parse(raw)));
+      app.get("/api/things", (c) => c.json({ data: [] }));
+      for (const origin of ["http://localhost:5173", "http://localhost:3000"]) {
+        const res = await app.request("/api/things", {
+          method: "OPTIONS",
+          headers: { Origin: origin, "Access-Control-Request-Method": "POST" },
+        });
+        expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+      }
+    }
   });
 });

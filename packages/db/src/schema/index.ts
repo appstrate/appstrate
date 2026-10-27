@@ -15,6 +15,7 @@ export * from "./uploads.ts";
 export * from "./files.ts";
 export * from "./storage-deletion-jobs.ts";
 export * from "./audit.ts";
+export * from "./connection-calls.ts";
 export * from "./webhooks.ts";
 export * from "./oidc.ts";
 export * from "./chat.ts";

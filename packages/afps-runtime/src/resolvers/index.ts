@@ -54,8 +54,12 @@ export {
 // integration resolver.
 export { substituteVars, templateHost, unresolvedPlaceholders } from "./template-vars.ts";
 
-// `{{name}}` into a whole HTTP request, each value encoded for its place: the login paths.
-export { headerNamed, substituteRequest, UnencodableInputError } from "./request-template.ts";
+// `{{name}}` into a whole HTTP request, each value encoded for its place: `api_call` and the login paths.
+export {
+  RequestTemplateError,
+  substituteRequest,
+  UnencodableInputError,
+} from "./request-template.ts";
 
 // The caller half of an `api_call` (target, headers, body templates), one preparation for every path.
 export { prepareApiCallRequest, type PreparedApiCallRequest } from "./api-call-request.ts";
@@ -65,6 +69,7 @@ export {
   beyondBoundReason,
   credentialStaysWithinBound,
   credentialUrlPolicy,
+  credentialUnusableMessage,
   redactionFields,
   urlPolicyRefusalMessage,
   type CredentialUrlPolicy,
@@ -79,6 +84,7 @@ export {
   MAX_STREAMED_BODY_SIZE,
   STREAMING_THRESHOLD,
   makeApiCallTool,
+  API_CALL_BODY_FROM_FILE_RULE,
   apiCallRequestJsonSchema,
   apiCallTargetJsonSchema,
   resolveSafeFile,

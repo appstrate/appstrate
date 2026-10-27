@@ -4,7 +4,6 @@
 // the chat turn injected is readable without `skills:*`, so its rule is its own
 // (`services/skill-read.ts`); REST RBAC is unchanged.
 
-import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, EmbeddedResource, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { Context } from "hono";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
@@ -16,7 +15,7 @@ import { VERSION_SELECTOR_DRAFT } from "../../services/agent-version-resolver.ts
 import { assertPermission } from "../../middleware/require-permission.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import type { AppEnv } from "../../types/index.ts";
-import { asString, RESOURCE_BLOB_MAX_BYTES, jsonResult } from "./tool-results.ts";
+import { asString, RESOURCE_BLOB_MAX_BYTES, jsonResult, refusalResult } from "./tool-results.ts";
 
 export interface SkillToolContext {
   readSkill: (packageId: string) => Promise<SkillSnapshot>;
@@ -114,9 +113,19 @@ export function buildReadSkillTool(ctx: SkillToolContext): AppstrateToolDefiniti
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const start = performance.now();
     const id = asString(args.id);
-    if (!id) throw new McpError(ErrorCode.InvalidParams, "id is required.");
+    if (!id) {
+      return refusalResult({
+        code: "missing_argument",
+        error: "id is required.",
+        arguments: ["id"],
+      });
+    }
     if (args.path !== undefined && !asString(args.path)) {
-      throw new McpError(ErrorCode.InvalidParams, "path must be a non-empty string.");
+      return refusalResult({
+        code: "invalid_argument",
+        error: "path must be a non-empty string.",
+        arguments: ["path"],
+      });
     }
     const path = asString(args.path);
     const done = (status: number) =>

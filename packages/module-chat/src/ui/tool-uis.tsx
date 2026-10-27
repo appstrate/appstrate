@@ -21,16 +21,22 @@
 import * as React from "react";
 import { makeAssistantToolUI, type ToolCallMessagePartProps } from "@assistant-ui/react";
 import {
+  ArrowUpRightIcon,
   BookOpenIcon,
-  Loader2Icon,
+  BracesIcon,
   PencilIcon,
   PlayIcon,
   PlusIcon,
   SearchIcon,
   Trash2Icon,
+  UploadIcon,
   ZapIcon,
   type LucideIcon,
 } from "lucide-react";
+import { formatDuration } from "@appstrate/core/format";
+import { Button } from "@appstrate/ui/components/button";
+import { Spinner } from "@appstrate/ui/components/spinner";
+import { StructuredOutput } from "@appstrate/ui/components/structured-output";
 import { Modal } from "./modal.tsx";
 import { useChatHost } from "./runtime-context.ts";
 import { JsonView } from "./json-view.tsx";
@@ -41,6 +47,7 @@ import {
   extractAgentLabel,
   extractRunFiles,
   extractRunId,
+  extractRunOutput,
   extractRunPackageId,
   extractRunStatus,
   isRunLaunchOp,
@@ -50,20 +57,26 @@ import {
   extractRunAndWaitAuthOffers,
   isStartedRunResult,
 } from "./auth-offer.ts";
+import { asRecordOrNull } from "@appstrate/core/safe-json";
 import {
-  asRecord,
+  packageCreatedByImport,
+  packageCreatedByOperation,
+  packagePageHref,
+  type CreatedPackage,
+} from "./package-created.ts";
+import { unwrapMcpResult } from "@appstrate/core/mcp-result";
+import {
   definedEntries,
   deriveToolPhase,
   extractErrorMessage,
   httpStatusOf,
-  unwrapResult,
   type ToolPhase,
 } from "./tool-result.ts";
 
 /**
  * `invoke_operation` operationId that kicks off an integration connect flow.
- * `initiateIntegrationConnect` is the unified, auth-type-agnostic op (issue
- * #769) whose result carries a `connect_url`; its result renders the connect
+ * `initiateIntegrationConnect` is the unified, auth-type-agnostic op
+ * whose result carries a `connect_url`; its result renders the connect
  * card (button + auto-resume on completion — see oauth-connect-card).
  */
 const INITIATE_CONNECT_OP = "initiateIntegrationConnect";
@@ -82,15 +95,11 @@ const OP_RULES: { re: RegExp; labelKey: string; Icon: LucideIcon }[] = [
 // assistant-stream ToolCallTiming = { startedAt, completedAt? } (epoch ms;
 // completedAt absent while running).
 function readDurationMs(timing: unknown): number | undefined {
-  const t = asRecord(timing);
+  const t = asRecordOrNull(timing);
   if (t && typeof t.startedAt === "number" && typeof t.completedAt === "number") {
     return t.completedAt - t.startedAt;
   }
   return undefined;
-}
-
-function formatMs(ms: number): string {
-  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 
 const BADGE_TONE: Record<ToolPhase, string> = {
@@ -116,7 +125,7 @@ function Meta({
         <code className={`rounded px-1.5 py-0.5 font-medium ${BADGE_TONE[phase]}`}>{status}</code>
       ) : null}
       {durationMs !== undefined ? (
-        <span className="text-muted-foreground">{formatMs(durationMs)}</span>
+        <span className="text-muted-foreground">{formatDuration(durationMs)}</span>
       ) : null}
     </span>
   );
@@ -130,7 +139,7 @@ function Meta({
  */
 function LeadIcon({ phase, Icon }: { phase: ToolPhase; Icon: LucideIcon }) {
   if (phase === "running") {
-    return <Loader2Icon className="text-muted-foreground size-4 shrink-0 animate-spin" />;
+    return <Spinner className="text-muted-foreground size-4 shrink-0" />;
   }
   const tone = phase === "error" ? "text-destructive" : "text-muted-foreground";
   return <Icon className={`size-4 shrink-0 ${tone}`} />;
@@ -138,7 +147,7 @@ function LeadIcon({ phase, Icon }: { phase: ToolPhase; Icon: LucideIcon }) {
 
 function hasContent(value: unknown): boolean {
   if (value === undefined || value === null || value === "") return false;
-  const rec = asRecord(value);
+  const rec = asRecordOrNull(value);
   if (rec) return Object.keys(rec).length > 0;
   if (Array.isArray(value)) return value.length > 0;
   return true;
@@ -148,7 +157,7 @@ function DetailSection({ titleKey, value }: { titleKey: string; value: unknown }
   const { t } = useChatHost();
   if (!hasContent(value)) return null;
   return (
-    <div className="space-y-1">
+    <div className="flex flex-col gap-1">
       <div className="text-muted-foreground text-[0.65rem] font-semibold tracking-wide uppercase">
         {t(titleKey)}
       </div>
@@ -173,6 +182,7 @@ export function ToolCallCard({
   isError,
   toolCallId,
   timing,
+  footer,
 }: {
   phase: ToolPhase;
   Icon: LucideIcon;
@@ -185,14 +195,16 @@ export function ToolCallCard({
   isError?: boolean;
   toolCallId: string;
   timing?: unknown;
+  /** Under the header, e.g. the link to the package the call created. */
+  footer?: React.ReactNode;
 }) {
   const { t } = useChatHost();
   const title = labelKey ? t(labelKey) : (label ?? "");
   const [open, setOpen] = React.useState(false);
-  // `unwrapResult` JSON-parses the tool payload. Unmemoized it re-parsed on
+  // `unwrapMcpResult` JSON-parses the tool payload. Unmemoized it re-parsed on
   // every render of this card — and during a stream the thread re-renders per
   // chunk, so a tool-heavy conversation paid it once per card per frame.
-  const unwrapped = React.useMemo(() => unwrapResult(result), [result]);
+  const unwrapped = React.useMemo(() => unwrapMcpResult(result), [result]);
   const status = httpStatusOf(unwrapped);
   const durationMs = readDurationMs(timing);
   const errorMsg = phase === "error" ? extractErrorMessage(unwrapped) : undefined;
@@ -225,6 +237,7 @@ export function ToolCallCard({
       {errorMsg ? (
         <div className="text-destructive border-t px-3 py-2 text-xs break-words">{errorMsg}</div>
       ) : null}
+      {footer}
       {open ? (
         <Modal
           title={
@@ -236,7 +249,7 @@ export function ToolCallCard({
           }
           onClose={() => setOpen(false)}
         >
-          <div className="space-y-4">
+          <div className="flex flex-col gap-4">
             <DetailSection titleKey="tool.detail.input" value={args} />
             <DetailSection titleKey="tool.detail.output" value={unwrapped} />
             <DetailSection titleKey="tool.detail.metadata" value={meta} />
@@ -248,6 +261,31 @@ export function ToolCallCard({
 }
 
 type AnyToolProps = ToolCallMessagePartProps<Record<string, unknown>, unknown>;
+
+/**
+ * A finished run's detail: its structured output as labelled facts, the raw
+ * input/output/metadata JSON one toggle away. The chat has no output schema to
+ * hand (inline runs declare an open one), so the labels are the field keys.
+ */
+function RunOutputDetails({
+  output,
+  raw,
+}: {
+  output: Record<string, unknown>;
+  raw: React.ReactNode;
+}) {
+  const { t } = useChatHost();
+  const [showJson, setShowJson] = React.useState(false);
+  return (
+    <div className="space-y-4">
+      {showJson ? raw : <StructuredOutput value={output} />}
+      <Button variant="outline" size="sm" onClick={() => setShowJson((v) => !v)}>
+        <BracesIcon />
+        {showJson ? t("run.output.showFields") : t("run.output.showJson")}
+      </Button>
+    </div>
+  );
+}
 
 /**
  * Render run-launch tool calls as in-chat run progress while launch/run state is
@@ -268,7 +306,7 @@ function RunLaunchCard(props: AnyToolProps): React.ReactNode {
   const runId = extractRunId(props.result);
   const initialFiles = React.useMemo(() => extractRunFiles(props.result), [props.result]);
   // Same reason as `ToolCallCard` — see the note there.
-  const unwrapped = React.useMemo(() => unwrapResult(props.result), [props.result]);
+  const unwrapped = React.useMemo(() => unwrapMcpResult(props.result), [props.result]);
   const meta = definedEntries({
     tool_call_id: props.toolCallId,
     is_error: props.isError,
@@ -283,13 +321,15 @@ function RunLaunchCard(props: AnyToolProps): React.ReactNode {
       {agentLabel ?? "Run"}
     </span>
   );
-  const details = (
-    <div className="space-y-4">
+  const output = React.useMemo(() => extractRunOutput(props.result), [props.result]);
+  const rawDetails = (
+    <div className="flex flex-col gap-4">
       <DetailSection titleKey="tool.detail.input" value={props.args} />
       <DetailSection titleKey="tool.detail.output" value={unwrapped} />
       <DetailSection titleKey="tool.detail.metadata" value={meta} />
     </div>
   );
+  const details = output ? <RunOutputDetails output={output} raw={rawDetails} /> : rawDetails;
   // Run-page link needs package id. The result normally carries it; for agent
   // runs the label is also the package id (`@scope/name`), so it is a safe fallback.
   // Inline labels are manifest names, not package ids, so they wait for result/fetch.
@@ -340,7 +380,7 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
             packageId={args?.path_params?.packageId}
             toolCallId={props.toolCallId}
             errorText={
-              phase === "error" && !offer ? extractErrorMessage(unwrapResult(result)) : undefined
+              phase === "error" && !offer ? extractErrorMessage(unwrapMcpResult(result)) : undefined
             }
           />
         );
@@ -359,6 +399,8 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
       Icon: ZapIcon,
       labelKey: "tool.op.other",
     };
+    const created =
+      phase === "success" ? packageCreatedByOperation(opId, unwrapMcpResult(result)) : null;
     return (
       <ToolCallCard
         phase={phase}
@@ -370,6 +412,66 @@ export const InvokeOperationToolUI = makeAssistantToolUI<
         isError={props.isError}
         toolCallId={props.toolCallId}
         timing={props.timing}
+        footer={
+          created ? <CreatedPackageLink created={created} toolCallId={props.toolCallId} /> : null
+        }
+      />
+    );
+  },
+});
+
+/** Tool calls whose package write the host was already told about, this page life. */
+const announcedPackageWrites = new Set<string>();
+
+/**
+ * The package a tool call created, one click away. Mounting it tells the host
+ * once per call, so its package lists show what the assistant just made.
+ */
+function CreatedPackageLink({
+  created,
+  toolCallId,
+}: {
+  created: CreatedPackage;
+  toolCallId: string;
+}) {
+  const { t, onPackagesChanged } = useChatHost();
+  React.useEffect(() => {
+    if (announcedPackageWrites.has(toolCallId)) return;
+    announcedPackageWrites.add(toolCallId);
+    onPackagesChanged();
+  }, [toolCallId, onPackagesChanged]);
+  return (
+    <a
+      href={packagePageHref(created)}
+      className="text-primary hover:bg-muted/40 flex items-center gap-1.5 border-t px-3 py-2 text-xs font-medium"
+    >
+      <ArrowUpRightIcon className="size-3.5 shrink-0" />
+      {t("tool.packageCreated.open")}
+      <code className="text-muted-foreground truncate font-normal">{created.packageId}</code>
+    </a>
+  );
+}
+
+export const ImportPackageFileToolUI = makeAssistantToolUI<Record<string, unknown>, unknown>({
+  toolName: "import_package_file",
+  render: (props: AnyToolProps) => {
+    const phase = deriveToolPhase(props);
+    const created =
+      phase === "success" ? packageCreatedByImport(unwrapMcpResult(props.result)) : null;
+    return (
+      <ToolCallCard
+        phase={phase}
+        Icon={UploadIcon}
+        labelKey="tool.importPackageFile"
+        idText={stringArg(props.args, "file_uri")}
+        args={props.args}
+        result={props.result}
+        isError={props.isError}
+        toolCallId={props.toolCallId}
+        timing={props.timing}
+        footer={
+          created ? <CreatedPackageLink created={created} toolCallId={props.toolCallId} /> : null
+        }
       />
     );
   },
@@ -421,7 +523,7 @@ export const DescribeOperationToolUI = makeAssistantToolUI<Record<string, unknow
 // fallback swap.
 //
 // A launch refused for a missing connection (409) carries a ready-to-open
-// `connect_url` per actionable integration (#1207), so the connect cards render
+// `connect_url` per actionable integration, so the connect cards render
 // UNDER the run panel and the user clicks straight through — the model is never
 // asked to kick a connect flow off, and never sees the link. A run that started
 // without an optional integration carries the same link on its warning, shown

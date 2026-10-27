@@ -2,36 +2,38 @@
 
 /**
  * Integration connection resolver — the single source of truth for which SET of connections a
- * run binds to each integration. The cascade, highest precedence first:
+ * run binds to each integration.
  *
- *   1. admin pin (`integration_pins`, user_id IS NULL)   — per agent
- *   2. enforced org default (`integration_org_defaults`) — every agent of the space
- *   3. launch override — the run body's or the schedule row's `connection_overrides`
- *   4. member pin (`integration_pins`, user_id = actor)  — per agent
- *   5. soft org default
- *   6. fallback — the actor's ONE own connection on an auth serving the selection;
- *      several oauth2 rows of one known account, auth and instance → the least-privileged
- *      covering the agent (never without an agent selection); otherwise several →
- *      `must_choose_connection`; none → as below
+ * GOVERNED — by the admin pin (`integration_pins`, user_id IS NULL, per agent), else an enforced
+ * org default (`integration_org_defaults`, every agent of the space) — the run binds
+ * `floor ∪ selection`: that set whole, in its order, then the selection's other ids, deduped. The
+ * selection is the launch override (the run body's or the schedule row's `connection_overrides`),
+ * else the member pin when additions are open ({@link additionsOpen}); additions come from the
+ * actor's accessible rows. A selection never removes: one naming only floor ids, or `[]`, adds
+ * nothing; one naming an id outside a closed floor is `override_outranked`. A union past
+ * {@link MAX_CONNECTIONS_PER_INTEGRATION} is `connection_set_too_large`, never truncated. Each bound
+ * row carries the source of the layer that named it. The credential proxy outside a run picks
+ * rather than binds (`selectAccessibleConnection`, `integration-connections.ts`).
  *
- * Layers 1-5 bind their set whole or fail loudly, never falling through. A launch override
- * under layer 1 or 2 must name a subset of that governing set, which it then narrows to;
- * naming anything outside it is `override_outranked`. A shared connection is never bound
- * implicitly. A layer with no row or key is absent; `[]` wins and binds none. With nothing to
- * bind (or switched off in the space), a `required` integration is an error, any other binds
- * none with a warning carrying the same code — `integration_unbound` (a layer's `[]`) aside.
+ * UNGOVERNED, the cascade, highest precedence first: launch override, member pin
+ * (`integration_pins`, user_id = actor), soft org default, then the fallback — the actor's ONE
+ * own usable connection on an auth serving the selection; several (one too under `noFallback`)
+ * → `must_choose_connection`; none → as below.
+ *
+ * Every named set binds whole or fails loudly on the layer that named the failing row, never
+ * falling through. A shared connection is never bound implicitly. A `must_choose_connection` item
+ * lists every serving connection, least privilege first. A layer with no row or key is absent;
+ * `[]` wins and binds none, as an empty floor does with no addition. With nothing to bind (or
+ * switched off in the space), a `required` integration is an error, any other binds none with a
+ * warning carrying the same code — `integration_unbound` (an empty set) aside. Equal labels in a
+ * bound set (two owners') get ` (n)` in set order: the snapshot and the sidecar read the same names.
  * `resolveConnections()` is pure; `resolveConnectionsForRun()` loads its inputs.
  */
 
 import { and, eq, or, inArray, isNull } from "drizzle-orm";
+import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import { db } from "@appstrate/db/client";
-import {
-  integrationConnections,
-  integrationPins,
-  packageShares,
-  packages,
-  spacePackages,
-} from "@appstrate/db/schema";
+import { integrationPins, spaces } from "@appstrate/db/schema";
 import type {
   IntegrationConnectionRow as ConnectionRow,
   IntegrationPinRow as PinRow,
@@ -43,6 +45,7 @@ import {
 } from "@appstrate/core/dependencies";
 import {
   resolveEffectiveToolSelection,
+  resolveScopeToolSelection,
   expandScopesGranted,
   missingScopesForConnection,
   partitionScopesByAuthCatalog,
@@ -50,7 +53,12 @@ import {
   requiredScopesForAgent,
   manifestAuthKeySet,
   manifestHasRequiredAuth,
+  isUnauthenticatedIntegration,
   CONNECT_FLOW_CODES,
+  CONNECTION_SCOPE_FITS,
+  MAX_CONNECTIONS_PER_INTEGRATION,
+  type ConnectionScopeFit,
+  type InsufficientScopesRemedy,
   type IntegrationManifest,
   type ConnectionCandidate,
   type ConnectionOverrides,
@@ -64,11 +72,13 @@ import {
   type RunIntegrationUnbound,
 } from "@appstrate/core/integration";
 import { ApiError, type ResolutionFieldError, type ValidationFieldError } from "../lib/errors.ts";
-import type { Actor } from "../lib/actor.ts";
-import { actorOrSharedFilter } from "../lib/actor.ts";
+import { actorFromIds, actorOwns, type Actor } from "../lib/actor.ts";
+import { CONNECTION_LABEL_MAX } from "../lib/connection-label.ts";
+import { userConnectionsBlocked } from "./connection-reach.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { fetchIntegrationManifest, type IntegrationManifestCache } from "./integration-service.ts";
 import {
+  authKeyOnUnauthenticatedIntegration,
   authKeysServingSelection,
   authKeyServingNoSelectedTool,
 } from "./integration-manifest-helpers.ts";
@@ -76,17 +86,11 @@ import {
   listOrgDefaultsForResolver,
   type OrgDefaultPick,
 } from "./integration-org-defaults-service.ts";
-import { placementReadFilter, placementShareJoin } from "./package-placement.ts";
-import { listActiveIntegrationIds } from "./integration-connections.ts";
-import {
-  connectionVariablesOf,
-  displayAccountId,
-  sameConnectionVariables,
-} from "../lib/connection-identity.ts";
+import { listActiveIntegrationIds, listReachableConnections } from "./integration-connections.ts";
 
 // ─────────────────────────────────── Types ────────────────────────────────────
 
-/** Layer 3: a run and a schedule fire never both carry one, so only `source` tells them apart. */
+/** The launch override: a run and a schedule fire never both carry one, so only `source` tells them apart. */
 export interface LaunchOverrides {
   ids: ConnectionOverrides;
   source: Extract<ConnectionResolutionSource, "run_override" | "schedule_override">;
@@ -104,7 +108,10 @@ export interface IntegrationRequirement {
   manifest: IntegrationManifest;
   /** The EFFECTIVE selection (below) is non-empty or `"*"` — what the spawn resolver starts. */
   hasSelectedTools: boolean;
-  /** The agent's own tool selection; drives scope inference (`"*"` → the auth's default scopes). */
+  /**
+   * What scopes are inferred from: `"*"` (written or inherited) → the auth's `default_scopes`,
+   * else the agent's own array.
+   */
   agentTools: readonly string[] | "*";
   /** The agent's explicit oauth scopes — the only scope signal of an apiCall integration. */
   agentScopes: readonly string[];
@@ -116,17 +123,34 @@ export interface IntegrationRequirement {
   requiredAuthKey?: string;
   /** Effective selection (`tools[]`, else `default_tools`); absent → any auth serves it. */
   effectiveTools?: readonly string[] | "*";
-  /** A credential-proxy call: no agent selection, so no scope tells own rows apart. */
-  noAgentSelection?: boolean;
+}
+
+/**
+ * The requirement of a credential-proxy call. No agent selects anything: every declared auth
+ * serves, no scope is required, and the call needs a connection.
+ */
+export function proxyRequirement(
+  integrationId: string,
+  manifest: IntegrationManifest,
+): IntegrationRequirement {
+  return {
+    integrationId,
+    manifest,
+    hasSelectedTools: true,
+    agentTools: [],
+    agentScopes: [],
+    required: true,
+  };
 }
 
 interface ResolveConnectionsInput {
   requirements: IntegrationRequirement[];
+  /** Oldest first, as readiness lists them: the order candidates of equal standing keep. */
   accessibleConnections: ConnectionRow[];
   /** Admin pins (`userId` null) and the actor's member pins for (space, agent). */
   pins: PinRow[];
   launchOverrides?: LaunchOverrides | null;
-  /** Per integration; `enforce` places it at layer 2, else layer 5. */
+  /** Per integration; `enforce` makes it the floor (absent an admin pin), else the soft default. */
   orgDefaults?: Record<string, OrgDefaultPick> | null;
   actorUserId?: string | null;
   actorEndUserId?: string | null;
@@ -134,11 +158,20 @@ interface ResolveConnectionsInput {
   includeInert?: boolean;
   /** Declared integrations switched off in the space: never walked through the cascade. */
   inactiveIntegrationIds?: ReadonlySet<string>;
+  /** The fallback binds nothing: the actor's own serving connections are a choice, one included. */
+  noFallback?: boolean;
 }
 
 // ─────────────────────────── Pure resolver (unit-tested) ──────────────────────
 
-/** Walks the cascade (file header) per integration. */
+/** Inert: nothing the spawn resolver would start, so no verdict is needed — unless required. */
+function isInert(req: IntegrationRequirement): boolean {
+  return (
+    !req.required && !req.hasSelectedTools && req.agentScopes.length === 0 && !req.hasMandatoryAuth
+  );
+}
+
+/** Applies the rule (file header) per integration. */
 export function resolveConnections(input: ResolveConnectionsInput): ConnectionResolutionResult {
   const resolved: ResolvedConnectionMap = {};
   const errors: ConnectionResolutionError[] = [];
@@ -146,9 +179,8 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
 
   const actorUserId = input.actorUserId ?? null;
   const accessibleIndex = new Map(input.accessibleConnections.map((c) => [c.id, c]));
-  const pinIds = (integrationId: string, userId: string | null) =>
-    input.pins.find((p) => p.integrationId === integrationId && p.userId === userId)
-      ?.connectionIds ?? null;
+  const pinOf = (integrationId: string, userId: string | null) =>
+    input.pins.find((p) => p.integrationId === integrationId && p.userId === userId) ?? null;
   const record = (integrationId: string, result: ResolveOneResult): void => {
     if (result.kind === "error") {
       errors.push(result.error);
@@ -160,15 +192,17 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
   };
 
   for (const req of input.requirements) {
-    // Inert: nothing the spawn resolver would start, so no verdict is needed — unless required.
-    if (
-      !req.required &&
-      !req.hasSelectedTools &&
-      req.agentScopes.length === 0 &&
-      !req.hasMandatoryAuth &&
-      !input.includeInert
-    )
+    // The agent's configuration, not a connection: refused even when inert or switched off.
+    if (authKeyOnUnauthenticatedIntegration(req.manifest, req.requiredAuthKey)) {
+      errors.push({
+        integrationId: req.integrationId,
+        code: "auth_key_on_unauthenticated_integration",
+        requiredAuthKey: req.requiredAuthKey,
+        message: `The agent requires auth '${req.requiredAuthKey}' for ${req.integrationId}, which declares no auth method — the agent's auth_key must be removed.`,
+      });
       continue;
+    }
+    if (isInert(req) && !input.includeInert) continue;
     if (input.inactiveIntegrationIds?.has(req.integrationId)) {
       record(
         req.integrationId,
@@ -179,6 +213,8 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       );
       continue;
     }
+    // AFPS §7.2 — binds no connection: no verdict, no warning, `required` asks nothing.
+    if (isUnauthenticatedIntegration(req.manifest)) continue;
 
     const auth = authFilterOf(req);
 
@@ -222,24 +258,31 @@ export function resolveConnections(input: ResolveConnectionsInput): ConnectionRe
       continue;
     }
 
+    const adminPin = pinOf(req.integrationId, null);
     const result = resolveOne({
       integrationId: req.integrationId,
       required: req.required,
       manifest: req.manifest,
       agentTools: req.agentTools,
       agentScopes: req.agentScopes,
-      adminPinIds: pinIds(req.integrationId, null),
+      adminPin: adminPin && {
+        ids: adminPin.connectionIds,
+        allowsAdditions: adminPin.allowAdditionalConnections,
+      },
       orgDefault: input.orgDefaults?.[req.integrationId] ?? null,
       launchOverride: launchOverrideFor(input.launchOverrides, req.integrationId),
-      memberPinIds: actorUserId === null ? null : pinIds(req.integrationId, actorUserId),
+      memberPinIds:
+        actorUserId === null
+          ? null
+          : (pinOf(req.integrationId, actorUserId)?.connectionIds ?? null),
       candidates,
       candidateIndex: new Map(candidates.map((c) => [c.id, c])),
       accessibleIndex,
       actorUserId,
       actorEndUserId: input.actorEndUserId ?? null,
+      noFallback: input.noFallback,
       auth,
       ...(availableAuthKeys ? { availableAuthKeys } : {}),
-      ...(req.noAgentSelection ? { noAgentSelection: true } : {}),
     });
 
     record(req.integrationId, result);
@@ -264,7 +307,7 @@ interface ResolveOneArgs {
   manifest: IntegrationManifest;
   agentTools: readonly string[] | "*";
   agentScopes: readonly string[];
-  adminPinIds: readonly string[] | null;
+  adminPin: { ids: readonly string[]; allowsAdditions: boolean } | null;
   orgDefault: OrgDefaultPick | null;
   launchOverride: { ids: readonly string[]; source: LaunchOverrides["source"] } | null;
   memberPinIds: readonly string[] | null;
@@ -275,11 +318,11 @@ interface ResolveOneArgs {
   accessibleIndex: ReadonlyMap<string, ConnectionRow>;
   actorUserId: string | null;
   actorEndUserId: string | null;
+  noFallback?: boolean;
   /** Already applied to the candidates; kept to name the connect target on `not_connected`. */
   auth: AuthFilter;
   /** Set when the dep's `auth_key` filtered out every live row: the auths those rows use. */
   availableAuthKeys?: string[];
-  noAgentSelection?: boolean;
 }
 
 type ResolveOneResult =
@@ -316,19 +359,29 @@ function offAuthReason(auth: AuthFilter, authKey: string): string {
     : `is on auth '${authKey}', not the auth '${auth.requiredAuthKey}' this agent requires`;
 }
 
-function bindSet(
-  args: ResolveOneArgs,
-  rows: ConnectionRow[],
-  source: ResolvedConnection["source"],
-): ResolveOneResult {
-  const boundConnectionIds = rows.map((c) => c.id);
+/** A row of a bound set and the layer that named it — the source its snapshot entry carries. */
+interface BoundMember {
+  row: ConnectionRow;
+  source: ResolvedConnection["source"];
+}
+
+function membersOf(rows: ConnectionRow[], source: ResolvedConnection["source"]): BoundMember[] {
+  return rows.map((row) => ({ row, source }));
+}
+
+/** Binds `members` whole, in their order: the first unhealthy one fails the set. */
+function bindSet(args: ResolveOneArgs, members: readonly BoundMember[]): ResolveOneResult {
+  const boundConnectionIds = members.map((m) => m.row.id);
   const value: ResolvedConnection[] = [];
-  for (const conn of rows) {
-    const health = checkHealth(args, conn, source);
+  const labels: string[] = [];
+  for (const { row, source } of members) {
+    const health = checkHealth(args, row, source);
     if (health.kind === "error") {
       return { kind: "error", error: { ...health.error, boundConnectionIds } };
     }
-    value.push(health.value);
+    const label = dedupeLabel(health.value.label, labels, { maxLength: CONNECTION_LABEL_MAX });
+    labels.push(label);
+    value.push({ ...health.value, label });
   }
   return { kind: "resolved", value };
 }
@@ -342,6 +395,18 @@ interface ExplicitLayerRef {
 }
 
 type ExplicitLayer<Ids = readonly string[] | null> = ExplicitLayerRef & { ids: Ids };
+
+const ADMIN_PIN_LAYER: ExplicitLayerRef = {
+  source: "admin_pin",
+  code: "pinned_connection_unavailable",
+  noun: "Pinned connection",
+};
+
+const MEMBER_PIN_LAYER: ExplicitLayerRef = {
+  source: "member_pin",
+  code: "pinned_connection_unavailable",
+  noun: "Your pinned connection",
+};
 
 function orgDefaultLayer(enforce: boolean): ExplicitLayerRef {
   return {
@@ -375,154 +440,231 @@ export function unavailableMemberError(
   };
 }
 
+/**
+ * Whether a selection may add connections to an admin pin's imposed set: the pin allows it and
+ * no enforced org default governs the integration in the space — the more restrictive rule wins.
+ */
+export function additionsOpen(adminPinAllows: boolean, orgDefaultEnforced: boolean): boolean {
+  return adminPinAllows && !orgDefaultEnforced;
+}
+
 function resolveOne(args: ResolveOneArgs): ResolveOneResult {
-  const orgDefaultIds = args.orgDefault?.connectionIds ?? null;
-  const enforced = args.orgDefault?.enforce === true;
-  const governing: ExplicitLayer<readonly string[]> | null =
-    args.adminPinIds !== null
-      ? {
-          ids: args.adminPinIds,
-          source: "admin_pin",
-          code: "pinned_connection_unavailable",
-          noun: "Pinned connection",
-        }
-      : enforced && orgDefaultIds !== null
-        ? { ids: orgDefaultIds, ...orgDefaultLayer(true) }
-        : null;
+  const enforcedIds = args.orgDefault?.enforce ? args.orgDefault.connectionIds : null;
   const override: ExplicitLayer<readonly string[]> | null = args.launchOverride
     ? { ids: args.launchOverride.ids, ...launchOverrideLayer(args.launchOverride.source) }
     : null;
-  // `[]` names nothing outside the governing set, so "none" narrows under governance too.
-  if (governing && override && override.ids.some((id) => !governing.ids.includes(id))) {
-    const by = LAYER_PHRASE[governing.source];
-    return errorOf(args, {
-      code: "override_outranked",
-      source: override.source,
-      message: `${override.noun}s for ${args.integrationId} fall outside ${by}, which governs this integration — drop the override or name only connections of that set.`,
-    });
+  const floor: ExplicitLayer<readonly string[]> | null = args.adminPin
+    ? { ids: args.adminPin.ids, ...ADMIN_PIN_LAYER }
+    : enforcedIds
+      ? { ids: enforcedIds, ...orgDefaultLayer(true) }
+      : null;
+  if (floor) {
+    const open =
+      args.adminPin !== null && additionsOpen(args.adminPin.allowsAdditions, enforcedIds !== null);
+    const selection =
+      override ??
+      (open && args.memberPinIds !== null ? { ids: args.memberPinIds, ...MEMBER_PIN_LAYER } : null);
+    return resolveGoverned(args, floor, selection, open);
   }
+
   const explicit: ExplicitLayer[] = [
     ...(override ? [override] : []),
-    ...(governing ? [governing] : []),
-    {
-      ids: args.memberPinIds,
-      source: "member_pin",
-      code: "pinned_connection_unavailable",
-      noun: "Your pinned connection",
-    },
-    { ids: enforced ? null : orgDefaultIds, ...orgDefaultLayer(false) },
+    { ids: args.memberPinIds, ...MEMBER_PIN_LAYER },
+    { ids: args.orgDefault?.connectionIds ?? null, ...orgDefaultLayer(false) },
   ];
   for (const layer of explicit) {
     if (layer.ids === null) continue;
-    if (layer.ids.length === 0) {
-      // No connect target: the absence was chosen.
-      if (!args.required) {
-        return {
-          kind: "unbound",
-          value: [],
-          warning: {
-            integrationId: args.integrationId,
-            code: "integration_unbound",
-            source: layer.source,
-            message: `Integration '${args.integrationId}' is bound to no connection by ${LAYER_PHRASE[layer.source]}; the run proceeds without it.`,
-          },
-        };
-      }
-      return errorOf(args, {
-        code: "required_integration_unbound",
-        source: layer.source,
-        boundConnectionIds: [],
-        message: `${layer.noun} set for ${args.integrationId} is empty, but the agent requires this integration — name a connection there, or remove the empty set.`,
-      });
-    }
+    if (layer.ids.length === 0) return emptySet(args, layer);
     const owned = ownedConns(args, layer.ids);
-    if ("missingId" in owned) {
-      return {
-        kind: "error",
-        error: unavailableMemberError(
-          args.integrationId,
-          layer,
-          owned.missingId,
-          owned.offAuthKey === undefined ? undefined : offAuthReason(args.auth, owned.offAuthKey),
-        ),
-      };
-    }
-    return bindSet(args, owned.rows, layer.source);
+    if ("missingId" in owned) return unavailableIn(args, layer, owned);
+    return bindSet(args, membersOf(owned.rows, layer.source));
   }
 
-  // 6. Fallback.
+  // Fallback.
   const serving = args.candidates.filter((c) => servesSelection(args.auth, c.authKey));
   // Health never switches the pick: a dead own row is still bound and answers needs_reconnection.
   const own = serving.filter((c) => isOwnedByActor(args, c));
-  if (own.length === 1) return bindSet(args, [own[0]!], "fallback_auto");
-  const sameAccount = own.length > 1 ? leastPrivilegedOfOneAccount(args, own) : null;
-  if (sameAccount) return bindSet(args, [sameAccount], "fallback_auto");
-  if (own.length > 1) {
+  if (own.length === 1 && !args.noFallback) {
+    return bindSet(args, membersOf(own, "fallback_auto"));
+  }
+  if (own.length > 0) {
     return errorOf(args, {
       code: "must_choose_connection",
-      message: `Multiple connections of yours are available for ${args.integrationId} — pick one.`,
-      candidateConnections: serving.map((c) => candidateOf(args, c)),
+      message: `Integration '${args.integrationId}' needs a connection choice — pick one.`,
+      candidateConnections: rankedCandidates(args, serving),
     });
   }
   return gapOf(args, nothingOwnServes(args, serving));
 }
 
 /**
- * Own `oauth2` connections of ONE known account, auth and instance (variables) differ only by
- * scopes, so no account is chosen. Ranked by what the agent misses, then what the row grants
- * beyond the agent's scopes and `default_scopes`, then what the defaults miss, then breadth, then
- * health: a narrow row (dead, or short of a newer default) is never traded for a broader one.
- * `null` otherwise, and with no agent selection.
+ * `floor ∪ selection` (file header): the imposed set whole, then the selection's ids it does
+ * not name. An addition under closed additions is `override_outranked` (only a launch override
+ * selects there); each row fails on the layer that named it.
  */
-function leastPrivilegedOfOneAccount(
+function resolveGoverned(
   args: ResolveOneArgs,
-  own: ConnectionRow[],
-): ConnectionRow | null {
-  if (args.noAgentSelection) return null;
-  const [first] = own;
-  const auth = args.manifest.auths?.[first!.authKey];
-  const account = displayAccountId(first!.accountId);
-  const variables = connectionVariablesOf(first!.variables);
-  if (auth?.type !== "oauth2" || account === null) return null;
-  const sameUpstream = (c: ConnectionRow) =>
-    c.authKey === first!.authKey &&
-    c.accountId === account &&
-    sameConnectionVariables(connectionVariablesOf(c.variables), variables);
-  if (!own.every(sameUpstream)) return null;
-  const { manifest } = args;
-  const authKey = first!.authKey;
-  const defaults = auth.default_scopes ?? [];
-  const allowed = new Set(
-    expandScopesGranted([...oauthScopesForAuth(args, authKey), ...defaults], manifest, authKey),
+  floor: ExplicitLayer<readonly string[]>,
+  selection: ExplicitLayer<readonly string[]> | null,
+  open: boolean,
+): ResolveOneResult {
+  const floorIds = [...new Set(floor.ids)];
+  const additions = [...new Set(selection?.ids ?? [])].filter((id) => !floorIds.includes(id));
+  const imposed = `the set ${LAYER_PHRASE[floor.source]} imposes`;
+  if (selection && additions.length > 0 && !open) {
+    return errorOf(args, {
+      code: "override_outranked",
+      source: selection.source,
+      message: `${selection.noun}s for ${args.integrationId} add connections outside ${imposed}, which allows no addition — drop them: that set is bound whatever the override names.`,
+    });
+  }
+  // `additions` is empty without a selection, so `adding` names a layer only when one adds.
+  const adding = selection ?? floor;
+  const union = [...floorIds, ...additions];
+  if (union.length > MAX_CONNECTIONS_PER_INTEGRATION) {
+    return errorOf(args, {
+      code: "connection_set_too_large",
+      source: adding.source,
+      boundConnectionIds: union,
+      message: `${union.length} connections would bind to ${args.integrationId} — ${floorIds.length} of ${imposed} plus ${additions.length} added by ${LAYER_PHRASE[adding.source]} — past the cap of ${MAX_CONNECTIONS_PER_INTEGRATION}: drop some additions.`,
+    });
+  }
+  if (union.length === 0) return emptySet(args, floor);
+  const floorRows = ownedConns(args, floorIds);
+  if ("missingId" in floorRows) return unavailableIn(args, floor, floorRows);
+  const added = ownedConns(args, additions);
+  if ("missingId" in added) return unavailableIn(args, adding, added);
+  return bindSet(args, [
+    ...membersOf(floorRows.rows, floor.source),
+    ...membersOf(added.rows, adding.source),
+  ]);
+}
+
+/** A layer's `[]` — or an empty floor with no addition: the absence was chosen, no connect target. */
+function emptySet(args: ResolveOneArgs, layer: ExplicitLayerRef): ResolveOneResult {
+  if (!args.required) {
+    return {
+      kind: "unbound",
+      value: [],
+      warning: {
+        integrationId: args.integrationId,
+        code: "integration_unbound",
+        source: layer.source,
+        message: `Integration '${args.integrationId}' is bound to no connection by ${LAYER_PHRASE[layer.source]}; the run proceeds without it.`,
+      },
+    };
+  }
+  return errorOf(args, {
+    code: "required_integration_unbound",
+    source: layer.source,
+    boundConnectionIds: [],
+    message: `${layer.noun} set for ${args.integrationId} is empty, but the agent requires this integration — name a connection there, or remove the empty set.`,
+  });
+}
+
+function unavailableIn(
+  args: ResolveOneArgs,
+  layer: ExplicitLayerRef,
+  owned: { missingId: string; offAuthKey?: string },
+): ResolveOneResult {
+  return {
+    kind: "error",
+    error: unavailableMemberError(
+      args.integrationId,
+      layer,
+      owned.missingId,
+      owned.offAuthKey === undefined ? undefined : offAuthReason(args.auth, owned.offAuthKey),
+    ),
+  };
+}
+
+/** `serving` as a `must_choose_connection` item lists it: readiness's `candidates[]` order. */
+function rankedCandidates(args: ResolveOneArgs, serving: ConnectionRow[]): ConnectionCandidate[] {
+  return rankByLeastPrivilege(args, serving).map(({ row, missingScopes }) =>
+    candidateOf(args, row, missingScopes),
   );
-  // Catalog scopes only (IdP echoes aside), `implies` expanded: an umbrella is never narrower.
-  const declared = (c: ConnectionRow) =>
-    partitionScopesByAuthCatalog(auth, expandScopesGranted(c.scopesGranted, manifest, authKey))
-      .declared;
-  const ranked = own.map((c) => ({
-    c,
-    agentMissing: missingScopesForConnection({
-      manifest,
-      authKey,
-      granted: c.scopesGranted,
-      agentTools: args.agentTools,
-      agentScopes: args.agentScopes,
-    }).length,
-    excess: declared(c).filter((scope) => !allowed.has(scope)).length,
-    defaultMissing: scopesNotCovered(defaults, c.scopesGranted, manifest, authKey).length,
-    breadth: declared(c).length,
-  }));
-  ranked.sort(
-    (a, b) =>
-      a.agentMissing - b.agentMissing ||
-      a.excess - b.excess ||
-      a.defaultMissing - b.defaultMissing ||
-      a.breadth - b.breadth ||
-      Number(a.c.needsReconnection) - Number(b.c.needsReconnection) ||
-      a.c.createdAt.getTime() - b.c.createdAt.getTime() ||
-      a.c.id.localeCompare(b.c.id),
-  );
-  return ranked[0]!.c;
+}
+
+type ScopeSelection = Pick<ResolveOneArgs, "manifest" | "agentTools" | "agentScopes">;
+type ScopedRow = Pick<ConnectionRow, "authKey" | "scopesGranted" | "needsReconnection">;
+
+/**
+ * `rows` least privilege first, each with its fit and the scopes the selection misses on it.
+ * Ordered by fit (`CONNECTION_SCOPE_FITS`), then what the agent misses, what the row grants
+ * beyond the agent's scopes and `default_scopes`, what the defaults miss, breadth, then health:
+ * a narrow row (dead, or short of a newer default) stays ahead of a broader one. Ties keep
+ * the given order. Breadth counts catalog scopes only (IdP echoes aside), `implies` expanded:
+ * an umbrella is never narrower.
+ */
+export function rankByLeastPrivilege<T extends ScopedRow>(
+  selection: ScopeSelection,
+  rows: readonly T[],
+): { row: T; scopeFit: ConnectionScopeFit; missingScopes: string[] }[] {
+  const { manifest } = selection;
+  const standings = rows.map((row) => {
+    const { authKey } = row;
+    const auth = manifest.auths?.[authKey];
+    const defaults = auth?.default_scopes ?? [];
+    const allowed = new Set(
+      expandScopesGranted(
+        [...oauthScopesForAuth(selection, authKey), ...defaults],
+        manifest,
+        authKey,
+      ),
+    );
+    const declared = partitionScopesByAuthCatalog(
+      auth,
+      expandScopesGranted(row.scopesGranted, manifest, authKey),
+    ).declared;
+    const missingScopes = missingScopesOf(selection, row);
+    const excess = declared.filter((scope) => !allowed.has(scope)).length;
+    const judged = auth?.type === "oauth2" && (auth.scope_catalog?.length ?? 0) > 0;
+    const scopeFit: ConnectionScopeFit =
+      missingScopes.length > 0
+        ? "missing"
+        : !judged
+          ? "unjudged"
+          : excess > 0
+            ? "broader"
+            : "exact";
+    const order = [
+      CONNECTION_SCOPE_FITS.indexOf(scopeFit),
+      missingScopes.length,
+      excess,
+      scopesNotCovered(defaults, row.scopesGranted, manifest, authKey).length,
+      declared.length,
+      Number(row.needsReconnection),
+    ];
+    return { row, scopeFit, missingScopes, order };
+  });
+  standings.sort((a, b) => {
+    const at = a.order.findIndex((key, i) => key !== b.order[i]);
+    return at === -1 ? 0 : a.order[at]! - b.order[at]!;
+  });
+  return standings.map(({ row, scopeFit, missingScopes }) => ({ row, scopeFit, missingScopes }));
+}
+
+function missingScopesOf(
+  selection: ScopeSelection,
+  conn: Pick<ConnectionRow, "authKey" | "scopesGranted">,
+): string[] {
+  return missingScopesForConnection({
+    manifest: selection.manifest,
+    authKey: conn.authKey,
+    granted: conn.scopesGranted,
+    agentTools: selection.agentTools,
+    agentScopes: selection.agentScopes,
+  });
+}
+
+/** How an under-scoped member of the set `source` bound clears. */
+function scopeRemedy(
+  source: ConnectionResolutionSource,
+  ownedByActor: boolean,
+): InsufficientScopesRemedy {
+  if (source === "admin_pin" || source === "org_default_enforced") return "rebind_by_admin";
+  if (source === "schedule_override") return "rebind_by_schedule_owner";
+  return ownedByActor ? "upgrade_or_new" : "new_connection";
 }
 
 const LAYER_PHRASE: Record<ExplicitSource, string> = {
@@ -575,7 +717,7 @@ function nothingOwnServes(args: ResolveOneArgs, serving: ConnectionRow[]): Gap {
   if (serving.length > 0) {
     return {
       code: "must_choose_connection",
-      candidateConnections: serving.map((c) => candidateOf(args, c)),
+      candidateConnections: rankedCandidates(args, serving),
       message: `Integration '${args.integrationId}' has only connections shared by other members — choose one explicitly (member pin or run override), or connect your own`,
     };
   }
@@ -660,7 +802,7 @@ function declaredAuthKey(manifest: IntegrationManifest, key: string): string | n
   return manifest.auths?.[key] ? key : null;
 }
 
-function oauthScopesForAuth(args: ConnectTargetArgs, authKey: string): string[] {
+function oauthScopesForAuth(args: ScopeSelection, authKey: string): string[] {
   if (args.manifest.auths?.[authKey]?.type !== "oauth2") return [];
   return requiredScopesForAgent({
     manifest: args.manifest,
@@ -674,10 +816,7 @@ function isOwnedByActor(
   actor: ActorIdentity,
   conn: Pick<ConnectionRow, "userId" | "endUserId">,
 ): boolean {
-  return (
-    (actor.actorUserId !== null && conn.userId === actor.actorUserId) ||
-    (actor.actorEndUserId !== null && conn.endUserId === actor.actorEndUserId)
-  );
+  return actorOwns(actorFromIds(actor.actorUserId, actor.actorEndUserId), conn);
 }
 
 interface ActorIdentity {
@@ -692,13 +831,14 @@ export function actorIdentityOf(actor: Actor): ActorIdentity {
   };
 }
 
-/** Project a candidate row onto the picker-facing shape carried by the 409. */
+/** A candidate row as the 409 carries it; `missingScopes` is the selection's gap on it. */
 export function candidateOf(
   actor: ActorIdentity,
   conn: Pick<
     ConnectionRow,
-    "id" | "label" | "accountId" | "needsReconnection" | "userId" | "endUserId"
+    "id" | "label" | "accountId" | "needsReconnection" | "userId" | "endUserId" | "scopesGranted"
   >,
+  missingScopes: string[],
 ): ConnectionCandidate {
   return {
     id: conn.id,
@@ -706,6 +846,8 @@ export function candidateOf(
     accountId: conn.accountId,
     ownedByActor: isOwnedByActor(actor, conn),
     needsReconnection: conn.needsReconnection,
+    scopesGranted: conn.scopesGranted,
+    missingScopes,
   };
 }
 
@@ -746,13 +888,7 @@ function checkHealth(
     });
   }
 
-  const missing = missingScopesForConnection({
-    manifest: args.manifest,
-    authKey: conn.authKey,
-    granted: conn.scopesGranted,
-    agentTools: args.agentTools,
-    agentScopes: args.agentScopes,
-  });
+  const missing = missingScopesOf(args, conn);
   if (missing.length > 0) {
     return errorOf(args, {
       code: "insufficient_scopes",
@@ -795,25 +931,48 @@ interface ResolveConnectionsForRunInput {
   scope: SpaceScope;
   launchOverrides?: LaunchOverrides | null;
   includeInert?: boolean;
+  noFallback?: boolean;
   manifestCache?: IntegrationManifestCache;
+}
+
+/** The requirement of each integration `agentManifest` declares whose manifest loads. */
+async function requirementsOf(
+  agentManifest: Record<string, unknown>,
+  manifestCache?: IntegrationManifestCache,
+): Promise<IntegrationRequirement[]> {
+  const requirements = await Promise.all(
+    parseManifestIntegrations(agentManifest).map((entry) => buildRequirement(entry, manifestCache)),
+  );
+  return requirements.filter((r): r is IntegrationRequirement => r !== null);
+}
+
+/**
+ * The integrations a run of `agentManifest` resolves a set for, whoever runs it and whatever the
+ * layers hold: those it declares whose manifest loads and that are not inert.
+ */
+export async function integrationsResolvedForRun(
+  agentManifest: Record<string, unknown>,
+  manifestCache?: IntegrationManifestCache,
+): Promise<string[]> {
+  const requirements = await requirementsOf(agentManifest, manifestCache);
+  return requirements.filter((req) => !isInert(req)).map((req) => req.integrationId);
 }
 
 export async function resolveConnectionsForRun(
   input: ResolveConnectionsForRunInput,
 ): Promise<ConnectionResolutionResult> {
-  const entries = parseManifestIntegrations(input.agentManifest);
-  if (entries.length === 0) return { resolved: {}, errors: [], warnings: [] };
-
-  const requirements = await Promise.all(
-    entries.map((entry) => buildRequirement(entry, input.manifestCache)),
-  );
-  const validReqs = requirements.filter((r): r is IntegrationRequirement => r !== null);
+  const validReqs = await requirementsOf(input.agentManifest, input.manifestCache);
+  if (validReqs.length === 0) return { resolved: {}, errors: [], warnings: [] };
 
   const { actorUserId, actorEndUserId } = actorIdentityOf(input.actor);
 
   const integrationIds = validReqs.map((r) => r.integrationId);
   const [accessibleConnections, pins, orgDefaults, activeIds] = await Promise.all([
-    loadAccessibleConnections(input.actor, input.scope.spaceId, integrationIds),
+    listReachableConnections(
+      { spaceId: input.scope.spaceId, actor: input.actor },
+      "usable",
+      integrationIds,
+    ),
     loadPins(input.scope.spaceId, input.packageId, integrationIds, actorUserId),
     listOrgDefaultsForResolver(input.scope.spaceId),
     listActiveIntegrationIds(integrationIds, input.scope.spaceId),
@@ -828,6 +987,7 @@ export async function resolveConnectionsForRun(
     actorUserId,
     actorEndUserId,
     includeInert: input.includeInert ?? false,
+    noFallback: input.noFallback,
     inactiveIntegrationIds: new Set(integrationIds.filter((id) => !activeIds.has(id))),
   });
 }
@@ -905,6 +1065,8 @@ export function translateResolutionError(e: ResolutionItem): ResolutionFieldErro
             account_id: c.accountId,
             owned_by_actor: c.ownedByActor,
             needs_reconnection: c.needsReconnection,
+            scopes_granted: c.scopesGranted,
+            missing_scopes: c.missingScopes,
           })),
         }
       : {}),
@@ -917,10 +1079,9 @@ export function translateResolutionError(e: ResolutionItem): ResolutionFieldErro
             : {}),
         }
       : {}),
-    // Scope-diff detail on insufficient_scopes: the caller chooses between a new
-    // connection and an upgrade (own connection only), or reports it (foreign owner).
     ...(e.code === "insufficient_scopes"
       ? {
+          ...(e.source ? { remedy: scopeRemedy(e.source, e.ownedByActor === true) } : {}),
           ...(e.connectionId ? { connection_id: e.connectionId } : {}),
           ...(e.missingScopes && e.missingScopes.length > 0
             ? { missing_scopes: e.missingScopes }
@@ -938,7 +1099,9 @@ export function translateResolutionError(e: ResolutionItem): ResolutionFieldErro
         }
       : {}),
     // AFPS §4.1: the dep's `auth_key` and, on a mismatch, the auths the actor's rows use.
-    ...(e.code === "auth_key_mismatch" || e.code === "auth_key_serves_no_selected_tool"
+    ...(e.code === "auth_key_mismatch" ||
+    e.code === "auth_key_serves_no_selected_tool" ||
+    e.code === "auth_key_on_unauthenticated_integration"
       ? {
           ...(e.requiredAuthKey ? { required_auth_key: e.requiredAuthKey } : {}),
           ...(e.availableAuthKeys && e.availableAuthKeys.length > 0
@@ -955,11 +1118,13 @@ const TITLE_BY_CODE: Record<ResolutionItem["code"], string> = {
   pinned_connection_unavailable: "Pinned Connection Unavailable",
   override_connection_unavailable: "Override Connection Unavailable",
   override_outranked: "Override Outranked By Governance",
-  must_choose_connection: "Multiple Connections Available — Pick One",
+  connection_set_too_large: "Connection Set Too Large",
+  must_choose_connection: "Connection Choice Required",
   insufficient_scopes: "Insufficient Permissions",
   auth_key_mismatch: "Connection Auth Method Mismatch",
   auth_serves_no_selected_tool: "Connection Auth Serves No Selected Tool",
   auth_key_serves_no_selected_tool: "Required Auth Exposes No Selected Tool",
+  auth_key_on_unauthenticated_integration: "Integration Declares No Auth Method",
   required_integration_unbound: "Required Integration Bound To No Connection",
   integration_not_active: "Integration Not Active",
   integration_unbound: "Integration Bound To No Connection — Run Proceeds Without It",
@@ -980,7 +1145,6 @@ export function requirementOf(
   entry: ManifestIntegrationEntry,
   manifest: IntegrationManifest,
 ): IntegrationRequirement {
-  const wildcard = entry.tools === "*";
   // The spawn resolver's own selection rule, so every integration it spawns gets a verdict.
   const effectiveTools = resolveEffectiveToolSelection(entry.tools, manifest);
   const hasSelectedTools =
@@ -991,35 +1155,13 @@ export function requirementOf(
     hasSelectedTools,
     hasMandatoryAuth: manifestHasRequiredAuth(manifest),
     required: entry.required === true,
-    // Scope inference stays on the agent's OWN selection: the inherited defaults would newly
-    // fail `insufficient_scopes` on connections that work.
-    agentTools: wildcard ? "*" : (entry.tools ?? []),
+    // Not the effective selection: tool names inherited from `default_tools` contribute no
+    // scope, as they would fail `insufficient_scopes` on connections that work.
+    agentTools: resolveScopeToolSelection(entry.tools, manifest),
     agentScopes: entry.scopes ?? [],
     ...(effectiveTools !== undefined ? { effectiveTools } : {}),
     ...(entry.auth_key !== undefined ? { requiredAuthKey: entry.auth_key } : {}),
   };
-}
-
-async function loadAccessibleConnections(
-  actor: Actor,
-  spaceId: string,
-  integrationIds: string[],
-): Promise<ConnectionRow[]> {
-  if (integrationIds.length === 0) return [];
-  // Own OR shared-with-org, both scoped to THIS space (the
-  // spaceId predicate is applied outside the OR) and to the
-  // integrations the agent actually requires, to avoid loading the world.
-  const rows = await db
-    .select()
-    .from(integrationConnections)
-    .where(
-      and(
-        inArray(integrationConnections.integrationId, integrationIds),
-        eq(integrationConnections.spaceId, spaceId),
-        actorOrSharedFilter(actor, integrationConnections),
-      ),
-    );
-  return rows;
 }
 
 async function loadPins(
@@ -1050,35 +1192,23 @@ async function loadPins(
   return rows;
 }
 
-// ─────────────────────────── block_user_connections gate ──────────────────────
-
 /**
  * Used at POST /api/integration-connections — refuses non-admin actors
  * when the (space, integration) row has block_user_connections=true.
  * Surfaced as a permission check, not a resolution error, because it
- * fires *before* the connection exists (so the resolver path doesn't
- * see this case in practice).
+ * fires *before* the connection exists. The predicate is the one
+ * resolution applies ({@link userConnectionsBlocked}). `enabled` is
+ * deliberately NOT required — a lock on a switched-off integration is
+ * still the space's call.
  */
 export async function isUserConnectionCreationBlocked(
   spaceId: string,
   integrationId: string,
 ): Promise<boolean> {
-  // PLACEMENT, not activation (`placementReadFilter` + its `packageShares`
-  // join): the flag is this space's decision about an integration it HOLDS, so
-  // an ORPHAN row is nobody's decision here. `enabled` is deliberately NOT
-  // required — a lock on a switched-off integration is still the space's call.
+  // In WHERE position, unlike a select field, drizzle qualifies the predicate's columns.
   const rows = await db
-    .select({ blocked: spacePackages.blockUserConnections })
-    .from(spacePackages)
-    .innerJoin(packages, eq(packages.id, spacePackages.packageId))
-    .leftJoin(packageShares, placementShareJoin(spacePackages.packageId, spaceId))
-    .where(
-      and(
-        eq(spacePackages.spaceId, spaceId),
-        eq(spacePackages.packageId, integrationId),
-        placementReadFilter(spaceId),
-      ),
-    )
-    .limit(1);
-  return rows[0]?.blocked === true;
+    .select({ id: spaces.id })
+    .from(spaces)
+    .where(and(eq(spaces.id, spaceId), userConnectionsBlocked(spaceId, integrationId)));
+  return rows.length > 0;
 }

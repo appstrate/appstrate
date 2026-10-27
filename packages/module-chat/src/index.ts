@@ -115,8 +115,8 @@ const chatModule: AppstrateModule = {
   createRouter() {
     // The module loader registers a module only after `init()` returns, so
     // `deps` is always populated by the time anything can call this — in
-    // production AND under the test harness, which runs the same pipeline
-    // since #989. An unset `deps` means a caller reached past the loader; fail
+    // production AND under the test harness, which runs the same pipeline.
+    // An unset `deps` means a caller reached past the loader; fail
     // loudly rather than serve a degraded baseline that looks like it works.
     if (!deps) {
       throw new Error("chat module: createRouter() called before init() — no platform context");

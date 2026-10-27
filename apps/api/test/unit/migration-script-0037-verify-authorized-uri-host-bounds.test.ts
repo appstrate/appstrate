@@ -66,11 +66,11 @@ describe("0037 — the Shopify connections it reads", () => {
       INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
         VALUES ('usr_0037', 'Owner', 'o-0037@example.com', true, now(), now());
       INSERT INTO integration_connections
-        (id, integration_package_id, auth_key, account_id, space_id, user_id, credentials_encrypted, label)
+        (id, integration_package_id, auth_key, account_id, org_id, space_id, user_id, credentials_encrypted, label)
       VALUES
-        ('${PRIMARY}', '${SHOPIFY}', 'primary', 'a', 'spc_0037', 'usr_0037', 'enc-1', 'Shop'),
-        ('00000000-0000-4000-8000-000000000372', '${SHOPIFY}', 'other', 'a', 'spc_0037', 'usr_0037', 'enc-2', 'Other auth'),
-        ('00000000-0000-4000-8000-000000000373', '${OTHER}', 'primary', 'a', 'spc_0037', 'usr_0037', 'enc-3', 'Other');
+        ('${PRIMARY}', '${SHOPIFY}', 'primary', 'a', '00000000-0000-4000-8000-000000000370', 'spc_0037', 'usr_0037', 'enc-1', 'Shop'),
+        ('00000000-0000-4000-8000-000000000372', '${SHOPIFY}', 'other', 'a', '00000000-0000-4000-8000-000000000370', 'spc_0037', 'usr_0037', 'enc-2', 'Other auth'),
+        ('00000000-0000-4000-8000-000000000373', '${OTHER}', 'primary', 'a', '00000000-0000-4000-8000-000000000370', 'spc_0037', 'usr_0037', 'enc-3', 'Other');
     `);
   }, 300_000);
 

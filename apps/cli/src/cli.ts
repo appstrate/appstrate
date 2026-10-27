@@ -11,8 +11,8 @@
  *   - `appstrate whoami`:  server-authoritative identity check.
  *   - `appstrate token`:   print access + refresh token metadata (debug).
  *   - `appstrate org`:     manage the pinned organization (`X-Org-Id`).
- *   - `appstrate space`:   manage the pinned space (`X-Space-Id`).
- *   - `appstrate code`:    project the spaces' skills and the pinned space's agents into
+ *   - `appstrate space`:   manage the default space of REST commands (`X-Space-Id`).
+ *   - `appstrate code`:    project the spaces' skills and agents into
  *                           coding-agent tools (Claude Code plugin, `~/.claude/skills`, Codex).
  *   - `appstrate packages`: pull a package into a folder, compare it, push it to its draft,
  *                           publish it.
@@ -65,6 +65,7 @@ import type { SkillSource } from "./lib/skills-sync/plan.ts";
 import { modelsListCommand } from "./commands/models.ts";
 import { registerOpenapiCommand } from "./commands/openapi.ts";
 import { runCommand } from "./commands/run.ts";
+import { parseConnectionFlags } from "./commands/run/connection-flag.ts";
 import { selfUpdateCommand } from "./commands/self-update.ts";
 import {
   startCommand,
@@ -98,7 +99,7 @@ import { CLI_VERSION } from "./lib/version.ts";
 // Defense in depth: restore cooked mode on exit. `@clack/prompts`
 // sets raw mode via `process.stdin.setRawMode(true)` and relies on its
 // own listeners to flip it back — if the process dies while a prompt
-// is open (crash, SIGINT, the Bun macOS keypress regression in #199)
+// is open (crash, SIGINT, a Bun macOS keypress regression)
 // the terminal is left unusable and only `reset` fixes it. Registering
 // a cooked-mode restore on every exit path is cheap and catches the
 // edge cases clack's own cleanup misses.
@@ -183,8 +184,8 @@ program
       process.env.APPSTRATE_INSECURE = "1";
     }
 
-    // One-time runtime warning when more than one `appstrate` is on PATH
-    // (issue #249, phase 5). Skipped for machine-readable subcommands and
+    // One-time runtime warning when more than one `appstrate` is on PATH.
+    // Skipped for machine-readable subcommands and
     // help/version flags — see `lib/dual-install-check.ts`.
     const subName = actionCommand.name();
     if (
@@ -233,7 +234,7 @@ program
   )
   .option(
     "--app-url <url>",
-    "Public URL of the platform for remote deployments behind a reverse proxy, e.g. https://appstrate.example.com (origin only). Drives APP_URL + TRUSTED_ORIGINS and auto-enables TRUST_PROXY for non-localhost/https URLs. Independent of --port (the host bind port the proxy forwards to). Also honored via APPSTRATE_APP_URL. Default: http://localhost:<port>.",
+    "Public URL of the platform for remote deployments behind a reverse proxy, e.g. https://appstrate.example.com (origin only). Drives APP_URL and auto-enables TRUST_PROXY for non-localhost/https URLs. Independent of --port (the host bind port the proxy forwards to). Also honored via APPSTRATE_APP_URL. Default: http://localhost:<port>.",
   )
   .option(
     "--force",
@@ -290,7 +291,7 @@ program
     });
   });
 
-// ─── Lifecycle commands (#343) — manage a Docker-tier install ────
+// ─── Lifecycle commands — manage a Docker-tier install ────
 //
 // Each command reads `<dir>/.appstrate/project.json` for the Compose
 // project name (never re-derived) and forwards to `docker compose`
@@ -439,7 +440,7 @@ program
     await tokenCommand({ profile: globalOpts.profile });
   });
 
-// ─── `appstrate org …` — manage the pinned organization (issue #209) ───
+// ─── `appstrate org …` — manage the pinned organization ───
 
 const orgGroup = program
   .command("org")
@@ -492,11 +493,13 @@ orgGroup
     });
   });
 
-// ─── `appstrate space …` — manage the pinned space (issue #217) ────────
+// ─── `appstrate space …` — manage the default space ────────
 
 const spaceGroup = program
   .command("space")
-  .description("Manage the pinned space for the active profile");
+  .description(
+    "Manage the active profile's default space for REST commands (`appstrate api`, `run`, `packages`); Claude Code reaches every space",
+  );
 
 spaceGroup
   .command("list")
@@ -517,7 +520,7 @@ spaceGroup
 spaceGroup
   .command("switch [ref]")
   .description(
-    "Re-pin the active space on the profile. With no argument, show an interactive picker.",
+    "Pin another default space on the profile. With no argument, show an interactive picker.",
   )
   .action(async (ref: string | undefined) => {
     const globalOpts = program.opts<{ profile?: string }>();
@@ -545,13 +548,13 @@ spaceGroup
 const codeGroup = program
   .command("code")
   .description(
-    "Coding-agent tools on this machine: project your spaces' skills and the pinned space's agents into Claude Code and Codex",
+    "Coding-agent tools on this machine: project your spaces' skills and agents into Claude Code and Codex",
   );
 
 codeGroup
   .command("sync")
   .description(
-    "Materialize the skills of every space this profile is a member of as Agent Skills directories, and the pinned space's agents as plugin commands. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
+    "Materialize the skills of every space this profile is a member of as Agent Skills directories, and the agents active there as plugin commands. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
   )
   .option(
     "--target <target>",
@@ -935,7 +938,7 @@ program
     await doctorCommand({ json: opts.json === true });
   });
 
-// ─── `appstrate runner …` — manage the Firecracker runner daemon (#819) ───
+// ─── `appstrate runner …` — manage the Firecracker runner daemon ───
 //
 // The daemon is a SEPARATELY-compiled binary (`appstrate-runner-<arch>`,
 // published as a GH Release asset) — the CLI downloads + verifies + installs
@@ -1112,7 +1115,7 @@ program
   .option("--json", "Emit canonical RunEvents as JSONL on stdout")
   .option(
     "--report <mode>",
-    "Stream events to the Appstrate instance: auto (default — on when a profile is present), true (force on), false (off)",
+    "Register the run on the Appstrate instance and stream its events there: auto (default — on when a profile or API key is present), true (force on), false (off — integration calls then need credential-proxy:call-own and reach your own connections; with credential-proxy:call they reach the connections usable in the space, the org default first)",
   )
   .option(
     "--report-fallback <mode>",
@@ -1125,6 +1128,12 @@ program
   .option(
     "--proxy <id>",
     "Proxy id to associate with the run (overrides per-space run-config inheritance)",
+  )
+  .option(
+    "--connection <integration>=<connection-id>",
+    "Connection the run binds to an integration (repeatable). Several values for one integration form its set under --remote; a run executed locally binds one connection per integration. Sent as the launch's connection_overrides — the answer to a must_choose_connection refusal, whose output lists the candidates.",
+    collect,
+    [],
   )
   .option(
     "--no-inherit",
@@ -1162,6 +1171,7 @@ program
       reportFallback: parseReportFallback(opts.reportFallback),
       sinkTtl: parseSinkTtl(opts.sinkTtl),
       proxy: typeof opts.proxy === "string" ? opts.proxy : undefined,
+      connectionOverrides: parseConnectionFlags(opts.connection as string[]),
       // Same `--no-X` mapping: commander stores the negated flag at
       // `opts.inherit === false`. Default (no flag) is `undefined` →
       // inheritance enabled.

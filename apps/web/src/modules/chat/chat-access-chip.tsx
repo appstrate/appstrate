@@ -1,26 +1,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * "What can this assistant do for me" — the caller's role, and the handful of
- * acts the chat performs, each with a verdict.
- *
- * Lives in the SHELL, not in `module-chat`, and reaches the composer through
- * the `composerActions` prop, beside the model picker: it answers a question
- * about the message being written. Everything it reads (the effective
- * permission set, the persona) is host state, so routing it through a
- * `ChatHost` member would buy nothing but a wider injection surface.
- *
- * An active role preview (`X-View-As`) needs no permission logic here:
- * `/api/orgs` and `/api/spaces` already answer AS the persona, so an owner
- * previewing `runner` sees the runner's verdicts. The chip only marks it (eye
- * icon, closing line).
+ * "What can this assistant do for me": the caller's role and a verdict per chat
+ * act. Lives in the SHELL (everything it reads is host state) and reaches the
+ * composer through `composerActions`. A role preview (`X-View-As`) needs no logic
+ * here: `/api/orgs` and `/api/spaces` already answer AS the persona; the chip
+ * only marks it.
  */
 
 import { useTranslation } from "react-i18next";
 import { BotOffIcon, CheckIcon, EyeIcon, ShieldIcon, XIcon } from "lucide-react";
-import { useAgentAuthoringEnabled } from "@appstrate/module-chat/agent-authoring";
+import { usePackageAuthoringEnabled } from "@appstrate/module-chat/package-authoring";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { cn } from "@appstrate/ui/cn";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { roleI18nKey, useCurrentSpaceGrant, usePermissions } from "../../hooks/use-permissions";
@@ -36,13 +29,10 @@ export function ChatAccessChip() {
   const spaceId = useCurrentSpaceId();
   const { data: spaces } = useSpaces();
   const persona = useViewAs();
-  const authoring = useAgentAuthoringEnabled();
+  const authoring = usePackageAuthoringEnabled();
 
-  // Nothing truthful to say until both lists have landed: `can` answers
-  // `false` for a set still in flight, which renders exactly like a denial.
-  // A chip that flashes "you may do nothing" on every hard reload would be
-  // worse than one that appears a beat late.
-  if (!ready || orgRole === null) return null;
+  // `can` answers `false` while a set is in flight, which looks like a denial: hold the box.
+  if (!ready || orgRole === null) return <Skeleton className="h-7 w-24 rounded-md" />;
 
   const spaceRole = spaceRoleLabel(spaces?.find((s) => s.id === spaceId)?.role, (key) => t(key));
   const orgRoleLabel = t(`settings:${roleI18nKey(orgRole)}`);
@@ -62,8 +52,7 @@ export function ChatAccessChip() {
             "min-w-0",
             persona && "border-primary/40 bg-primary/5",
           )}
-          // The accessible name CONTAINS the visible text (WCAG 2.5.3): a
-          // voice user saying the role they see on the button reaches it.
+          // The accessible name CONTAINS the visible text (WCAG 2.5.3).
           aria-label={t("chat:access.triggerLabel", { role: roleLabel })}
         >
           {persona ? (
@@ -97,12 +86,7 @@ export function ChatAccessChip() {
   );
 }
 
-/**
- * One list item per capability, the verdict INSIDE the item it judges. The
- * check/cross is decoration (`aria-hidden`); what a screen reader announces is
- * the label followed by its spoken verdict, in DOM order, so the two can never
- * be read against a neighbouring row.
- */
+/** One item per capability with the verdict INSIDE it; the icon is `aria-hidden`, the spoken verdict follows the label. */
 export function ChatCapabilityList({
   capabilities,
 }: {
@@ -110,7 +94,7 @@ export function ChatCapabilityList({
 }) {
   const { t } = useTranslation(["chat"]);
   return (
-    <ul className="mt-2 space-y-1">
+    <ul className="mt-2 flex flex-col gap-1">
       {capabilities.map((capability) => {
         const off = capability.verdict === "off";
         const granted = capability.verdict === "granted";
@@ -119,10 +103,7 @@ export function ChatCapabilityList({
             {off ? (
               <BotOffIcon aria-hidden="true" className="text-muted-foreground size-3.5 shrink-0" />
             ) : granted ? (
-              <CheckIcon
-                aria-hidden="true"
-                className="size-3.5 shrink-0 text-emerald-600 dark:text-emerald-400"
-              />
+              <CheckIcon aria-hidden="true" className="text-success size-3.5 shrink-0" />
             ) : (
               <XIcon aria-hidden="true" className="text-muted-foreground/60 size-3.5 shrink-0" />
             )}
@@ -136,11 +117,11 @@ export function ChatCapabilityList({
               )}
             >
               {t(`chat:${capability.labelKey}`)}
-              {off && ` — ${t("chat:access.turnedOff")}`}
+              {off && ` (${t("chat:access.turnedOff")})`}
             </span>
             {!off && (
               <span className="sr-only">
-                {" — "}
+                {", "}
                 {t(granted ? "chat:access.granted" : "chat:access.denied")}
               </span>
             )}

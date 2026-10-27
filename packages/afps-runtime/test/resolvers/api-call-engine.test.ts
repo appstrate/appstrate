@@ -14,6 +14,7 @@ import {
   fetchApiCall,
   HOP_BY_HOP_HEADERS,
   ApiCallRefusedError,
+  redactCredentialHost,
   type FetchApiCallOptions,
 } from "../../src/resolvers/api-call-engine.ts";
 import { URL_POLICY_REFUSAL_CODE } from "../../src/resolvers/api-call-failure-codes.ts";
@@ -785,6 +786,14 @@ describe("fetchApiCall — the target's host in a message", () => {
   });
 });
 
+describe("redactCredentialHost", () => {
+  it("scrubs the other values when one is not well-formed Unicode", () => {
+    expect(
+      redactCredentialHost("https://acme.example.com/x", { broken: "a\ud800", sub: "acme" }),
+    ).toBe("{{sub}}.example.com");
+  });
+});
+
 describe("HOP_BY_HOP_HEADERS", () => {
   it("includes the canonical RFC 7230 hop-by-hop set", () => {
     for (const h of [
@@ -801,4 +810,55 @@ describe("HOP_BY_HOP_HEADERS", () => {
       expect(HOP_BY_HOP_HEADERS.has(h)).toBe(true);
     }
   });
+});
+
+describe("fetchApiCall — a refused target", () => {
+  const refusedTarget = {
+    matches: (url: URL) => url.pathname.startsWith("/refused"),
+    message: "refused target",
+  };
+
+  for (const allowAllUris of [false, true]) {
+    it(`refuses it on a redirect hop without sending to it (allowAllUris: ${allowAllUris})`, async () => {
+      const sent: string[] = [];
+      const fetchFn = mock(async (input: string | URL | Request) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        sent.push(url.pathname);
+        return url.pathname === "/start"
+          ? new Response(null, { status: 307, headers: { location: "/refused/x" } })
+          : new Response("ok");
+      }) as unknown as typeof fetch;
+      const err = await fetchApiCall({
+        url: "https://api.example.com/start",
+        init: { method: "POST", body: "{}" },
+        authorizedUris: ["https://api.example.com/**"],
+        declaredUris: ["https://api.example.com/**"],
+        allowAllUris,
+        credentialHeaders: [],
+        internalHost: () => false,
+        integrationId: "i",
+        fetchFn,
+        resolveHost: publicResolver,
+        refusedTarget,
+        credentialFields: {},
+        targetHost: "api.example.com",
+      }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(ApiCallRefusedError);
+      expect((err as ApiCallRefusedError).message).toBe("refused target");
+      expect((err as ApiCallRefusedError).redirect).toBe(true);
+      expect(sent).toEqual(["/start"]);
+    });
+
+    it(`refuses it as the initial target (allowAllUris: ${allowAllUris})`, async () => {
+      const err = await gate("https://api.example.com/refused", {
+        allowAllUris,
+        authorizedUris: ["https://api.example.com/**"],
+        declaredUris: ["https://api.example.com/**"],
+        resolveHost: publicResolver,
+        refusedTarget,
+      });
+      expect(err?.message).toBe("refused target");
+      expect(err?.redirect).toBe(false);
+    });
+  }
 });

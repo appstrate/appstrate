@@ -1,19 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useTranslation } from "react-i18next";
-import { useForm, useWatch } from "react-hook-form";
+import { useState, type FormEvent } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import type { PackageType } from "@appstrate/core/validation";
 import { bumpVersion, planPublishVersion, type VersionBump } from "@appstrate/core/semver";
-import { Modal } from "./modal";
-import { Button } from "@appstrate/ui/components/button";
+import { FormModal } from "./form-modal";
+import { Field } from "@appstrate/ui/components/field";
 import { Label } from "@appstrate/ui/components/label";
-import { Spinner } from "./spinner";
+import { ToggleGroup, ToggleGroupItem } from "@appstrate/ui/components/toggle-group";
 import { useCreateVersion, useVersionInfo } from "../hooks/use-packages";
 import { ApiError } from "../api/errors";
 import { errorMessage } from "../lib/mutation-error";
 
 interface CreateVersionModalProps {
-  open: boolean;
   onClose: () => void;
   type: PackageType;
   packageId: string;
@@ -22,10 +21,7 @@ interface CreateVersionModalProps {
   etag?: string | null;
 }
 
-type FormData = { selectedBump: VersionBump };
-
 export function CreateVersionModal({
-  open,
   onClose,
   type,
   packageId,
@@ -36,16 +32,8 @@ export function CreateVersionModal({
   const { data: versionInfo } = useVersionInfo(type, packageId);
   const createVersion = useCreateVersion(type, packageId);
 
-  const {
-    setValue,
-    setError,
-    control,
-    formState: { errors },
-  } = useForm<FormData>({
-    defaultValues: { selectedBump: "patch" },
-  });
-
-  const selectedBump = useWatch({ control, name: "selectedBump" });
+  const [selectedBump, setSelectedBump] = useState<VersionBump>("patch");
+  const [error, setError] = useState<string | null>(null);
 
   const latestVersion = versionInfo?.latest_published_version ?? null;
   const activeVersion = versionInfo?.active_version ?? null;
@@ -59,14 +47,13 @@ export function CreateVersionModal({
 
   const canCreate = (needsBump || plan.kind === "direct") && hasUnarchivedChanges;
 
-  const handleFormSubmit = () => {
-    setError("root", { message: "" });
+  const handleFormSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
     createVersion.mutate(
       { version: plan.override, etag },
       {
-        onSuccess: () => {
-          onClose();
-        },
+        onSuccess: onClose,
         onError: (err) => {
           // The publish gate re-checks the stored SKILL.md, so a frontmatter
           // code arrives here too.
@@ -76,9 +63,7 @@ export function CreateVersionModal({
               : err instanceof ApiError && err.code === "precondition_failed"
                 ? t("version.draftChanged")
                 : null;
-          setError("root", {
-            message: refused ?? errorMessage(err),
-          });
+          setError(refused ?? errorMessage(err));
         },
       },
     );
@@ -91,74 +76,74 @@ export function CreateVersionModal({
   ];
 
   return (
-    <Modal
-      open={open}
+    <FormModal
       onClose={onClose}
       title={t("version.createVersion")}
-      actions={
-        <Button onClick={handleFormSubmit} disabled={!canCreate || createVersion.isPending}>
-          {createVersion.isPending && <Spinner />}{" "}
-          {targetVersion && hasUnarchivedChanges
-            ? t("version.createVersionX", { version: targetVersion })
-            : t("version.createVersion")}
-        </Button>
+      onSubmit={handleFormSubmit}
+      isPending={createVersion.isPending}
+      submitDisabled={!canCreate}
+      submitLabel={
+        targetVersion && hasUnarchivedChanges
+          ? t("version.createVersionX", { version: targetVersion })
+          : t("version.createVersion")
       }
+      error={error}
     >
-      <div className="space-y-4">
-        <div className="space-y-2">
-          {latestVersion && (
-            <Label className="block text-sm">
-              {t("version.latestPublished")}: <strong>{latestVersion}</strong>
-            </Label>
-          )}
-          {!needsBump && (
-            <Label className="block text-sm">
-              {t("version.activeVersionLabel")}:{" "}
-              <strong>{activeVersion ?? t("version.noVersion")}</strong>
-            </Label>
-          )}
-        </div>
-
-        {needsBump && latestVersion && hasUnarchivedChanges && (
-          <div className="space-y-2">
-            <Label className="block text-sm font-medium">{t("version.bumpLabel")}</Label>
-            <div className="flex gap-2">
-              {bumpOptions.map((opt) => {
-                const bumped = bumpVersion(latestVersion, opt.type) ?? latestVersion;
-                const isSelected = selectedBump === opt.type;
-                return (
-                  <button
-                    key={opt.type}
-                    type="button"
-                    onClick={() => setValue("selectedBump", opt.type)}
-                    className={`flex-1 rounded-md border px-3 py-2 text-sm transition-colors ${
-                      isSelected
-                        ? "border-primary bg-primary/10 text-primary"
-                        : "border-border hover:border-muted-foreground"
-                    }`}
-                  >
-                    <div className="font-medium">{opt.label}</div>
-                    <div className="text-muted-foreground mt-0.5 text-xs">
-                      {latestVersion} &rarr; {bumped}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+      <div className="flex flex-col gap-2 text-sm">
+        {latestVersion && (
+          <p>
+            <Trans
+              t={t}
+              i18nKey="version.latestPublished"
+              values={{ version: latestVersion }}
+              components={{ b: <strong /> }}
+            />
+          </p>
         )}
-
-        {isBlocked && activeVersion && latestVersion && (
-          <p className="text-warning text-sm">{t("version.mustBeHigher")}</p>
-        )}
-        {!hasUnarchivedChanges && <p className="text-warning text-sm">{t("version.noChanges")}</p>}
-        {!activeVersion && (
-          <p className="text-warning text-sm">{t("version.noVersionInManifest")}</p>
-        )}
-        {errors.root?.message && (
-          <div className="text-destructive text-sm">{errors.root.message}</div>
+        {!needsBump && (
+          <p>
+            <Trans
+              t={t}
+              i18nKey="version.activeVersionLabel"
+              values={{ version: activeVersion ?? t("version.noVersion") }}
+              components={{ b: <strong /> }}
+            />
+          </p>
         )}
       </div>
-    </Modal>
+
+      {needsBump && latestVersion && hasUnarchivedChanges && (
+        <Field>
+          <Label id="version-bump">{t("version.bumpLabel")}</Label>
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            aria-labelledby="version-bump"
+            className="grid grid-cols-3"
+            value={selectedBump}
+            onValueChange={(next) => next && setSelectedBump(next as VersionBump)}
+          >
+            {bumpOptions.map((opt) => (
+              <ToggleGroupItem
+                key={opt.type}
+                value={opt.type}
+                className="h-auto flex-col gap-0.5 py-2"
+              >
+                <span>{opt.label}</span>
+                <span className="text-muted-foreground text-xs font-normal">
+                  {latestVersion} &rarr; {bumpVersion(latestVersion, opt.type) ?? latestVersion}
+                </span>
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+        </Field>
+      )}
+
+      {isBlocked && activeVersion && latestVersion && (
+        <p className="text-warning text-sm">{t("version.mustBeHigher")}</p>
+      )}
+      {!hasUnarchivedChanges && <p className="text-warning text-sm">{t("version.noChanges")}</p>}
+      {!activeVersion && <p className="text-warning text-sm">{t("version.noVersionInManifest")}</p>}
+    </FormModal>
   );
 }

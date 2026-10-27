@@ -1,23 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Card } from "@appstrate/ui/components/card";
+import { Badge } from "@appstrate/ui/components/badge";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Plus } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
-import { Badge } from "@appstrate/ui/components/badge";
 import {
   OnboardingLayout,
   useOnboardingGuard,
   useOnboardingNav,
 } from "../../components/onboarding-layout";
-import { ModelFormModal } from "../../components/model-form-modal";
+import { ProviderAddFlow } from "../../components/provider-add-flow";
 import { OnboardingQuickConnect } from "../../components/onboarding-quick-connect";
 import { quickConnectProviders } from "../../lib/provider-registry-helpers";
-import { useModels, useModelFormHandler } from "../../hooks/use-models";
-import { useProvidersRegistry } from "../../hooks/use-model-provider-credentials";
+import { useModels } from "../../hooks/use-models";
+import {
+  useModelProviderCredentials,
+  useProvidersRegistry,
+} from "../../hooks/use-model-provider-credentials";
 import { getModelIcon } from "../../components/icons";
 import { ModelUnavailableBadge } from "../../components/model-availability-badge";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { TextSkeleton } from "../../components/loading-skeletons";
 
 export function OnboardingModelStep() {
   const { t } = useTranslation(["settings", "common"]);
@@ -25,16 +31,25 @@ export function OnboardingModelStep() {
   const orgId = useOnboardingGuard();
   const { nextRoute } = useOnboardingNav("model");
 
-  const [modalOpen, setModalOpen] = useState(false);
-  const { data: models } = useModels();
-  const { data: registry } = useProvidersRegistry();
-  const { onSubmit, isPending } = useModelFormHandler({
-    onSuccess: () => setModalOpen(false),
-  });
+  const [adding, setAdding] = useState(false);
+  const { data: models, isLoading: modelsLoading } = useModels();
+  const { data: registry, isLoading: registryLoading } = useProvidersRegistry();
+  // The list, the separator and the button's label all hang on these two reads.
+  const settled = !modelsLoading && !registryLoading;
+  const { data: credentials } = useModelProviderCredentials();
 
   const goNext = () => nextRoute && navigate(nextRoute);
 
-  if (!orgId) return null;
+  if (!orgId)
+    return (
+      <OnboardingLayout
+        step="model"
+        title={t("onboarding.modelTitle")}
+        subtitle={t("onboarding.modelSubtitle")}
+      >
+        <TextSkeleton lines={3} className="py-4" />
+      </OnboardingLayout>
+    );
 
   const hasModels = models && models.length > 0;
   const hasQuickConnect = quickConnectProviders(registry).length > 0;
@@ -54,6 +69,12 @@ export function OnboardingModelStep() {
         {/* Configured models, if any. The seeded rows land here once the
             quick-connect completes — gives the user a visible confirmation
             of what got created. */}
+        {!settled && (
+          <div className="flex flex-col gap-2">
+            <Skeleton className="h-4 w-24" />
+            <Skeleton className="h-12 w-full rounded-md" />
+          </div>
+        )}
         {hasModels && (
           <div className="flex flex-col gap-2">
             <div className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
@@ -63,10 +84,7 @@ export function OnboardingModelStep() {
               {models.map((m) => {
                 const ProviderIcon = getModelIcon(m, registry ?? []);
                 return (
-                  <div
-                    key={m.id}
-                    className="border-border bg-card flex items-center gap-3 rounded-md border px-3 py-2"
-                  >
+                  <Card key={m.id} className="flex items-center gap-3 rounded-md px-3 py-2">
                     {ProviderIcon ? (
                       <ProviderIcon className="size-4 shrink-0" />
                     ) : (
@@ -84,7 +102,7 @@ export function OnboardingModelStep() {
                         {t("models.default")}
                       </Badge>
                     )}
-                  </div>
+                  </Card>
                 );
               })}
             </div>
@@ -94,7 +112,7 @@ export function OnboardingModelStep() {
         {/* "Or add manually" — separator before the secondary CTA. Only where
             something sits above it: with no quick-connect provider and no model
             yet, the button is the single path and "or" would answer nothing. */}
-        {(hasModels || hasQuickConnect) && (
+        {settled && (hasModels || hasQuickConnect) && (
           <div className="relative my-1">
             <div className="border-border absolute inset-0 flex items-center">
               <div className="w-full border-t border-dashed" />
@@ -107,24 +125,24 @@ export function OnboardingModelStep() {
           </div>
         )}
 
-        <Button
-          variant="outline"
-          size="sm"
-          className="self-center"
-          onClick={() => setModalOpen(true)}
-        >
-          <Plus className="mr-1.5 size-3.5" />
-          {hasModels ? t("onboarding.modelSeed.addAnother") : t("models.add")}
-        </Button>
+        {settled ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="self-center"
+            onClick={() => setAdding(true)}
+          >
+            <Plus className="mr-1.5" />
+            {hasModels ? t("onboarding.modelSeed.addAnother") : t("models.add")}
+          </Button>
+        ) : (
+          <Skeleton className="h-8 w-36 self-center rounded-md" />
+        )}
       </div>
 
-      <ModelFormModal
-        open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        model={null}
-        isPending={isPending}
-        onSubmit={onSubmit}
-      />
+      {adding && (
+        <ProviderAddFlow credentials={credentials ?? []} onClose={() => setAdding(false)} />
+      )}
     </OnboardingLayout>
   );
 }

@@ -14,8 +14,7 @@
  *     writer is also the sole guarantor of the runner-row birth invariant: a
  *     `source: "runner"` row is ALWAYS inserted with a non-null `runId` (from
  *     the run's own id — see the runner-monotonic upsert below, keyed on
- *     `run_id`). The DB no longer enforces it with a CHECK (dropped in
- *     migration 0028) because a run deletion legitimately detaches the row to
+ *     `run_id`). The DB does not enforce it with a CHECK because a run deletion legitimately detaches the row to
  *     `run_id = NULL` afterwards; the at-insert invariant lives here instead.
  *
  * The ledger is a PULL surface for modules: `PlatformServices.usage.list` /
@@ -47,7 +46,8 @@
 import { getErrorMessage } from "@appstrate/core/errors";
 import type { TokenPricingStatus } from "@appstrate/afps-runtime/runner";
 import { db, type Db } from "@appstrate/db/client";
-import { llmUsage, runs, type CredentialSource } from "@appstrate/db/schema";
+import { llmUsage, runs } from "@appstrate/db/schema";
+import type { ModelPayer } from "@appstrate/core/model-payer";
 import { terminalRunStatusValues } from "@appstrate/core/run-status";
 import { and, eq, sql, type SQL } from "drizzle-orm";
 import { logger } from "../lib/logger.ts";
@@ -94,7 +94,15 @@ export interface LlmUsageEntry {
   /** Proxy dedup key — required on proxy rows, null on runner rows. */
   requestId?: string | null;
   /** Which credential set reached the provider. */
-  credentialSource?: CredentialSource | null;
+  credentialSource?: ModelPayer | null;
+  /**
+   * The `model_provider_credentials` row that served the call — the attribution
+   * of a personal credential to its owner. Null for a platform-supplied key and
+   * for rows written before the column existed.
+   */
+  credentialId?: string | null;
+  /** The member whose own credential served the call: set iff `credentialSource` is `user`. */
+  payerUserId?: string | null;
 }
 
 export interface RecordLlmUsageOptions {
@@ -225,7 +233,7 @@ export async function recordLlmUsage(
 ): Promise<number | null> {
   // Birth invariant, enforced HERE since migration 0028 dropped the
   // `llm_usage_runner_has_run_id` CHECK (a detached row legitimately has
-  // run_id NULL, so the DB can no longer distinguish birth from detach): a
+  // run_id NULL, so the DB cannot distinguish birth from detach): a
   // runner row without a run would dodge the monotonic partial unique index
   // (`WHERE source = 'runner' AND run_id IS NOT NULL`), turning every
   // cumulative snapshot into a fresh, immediately-settled row — overbilling.
@@ -244,6 +252,8 @@ export async function recordLlmUsage(
     realModel: entry.realModel ?? null,
     api: entry.api ?? null,
     credentialSource: entry.credentialSource ?? null,
+    credentialId: entry.credentialId ?? null,
+    payerUserId: entry.payerUserId ?? null,
     inputTokens: entry.inputTokens,
     outputTokens: entry.outputTokens,
     cacheReadTokens: entry.cacheReadTokens ?? null,
@@ -327,7 +337,7 @@ export async function recordLlmUsage(
  * delta (billing loss — the error below), or the snapshot was an equal-or-lower
  * cumulative replay with nothing to add (benign — silence). Every successful run
  * produces one of the latter, which is why a status-only test drowned the real
- * losses under one error per run (issue #997): `run-launcher/execute-background.ts`
+ * losses under one error per run: `run-launcher/execute-background.ts`
  * defensively synthesises a finalize on ANY clean container exit, and
  * `synthesiseFinalize` carries no cost, so finalize's terminal ledger barrier
  * re-submits the run's own last snapshot at `costUsd: 0` once the run settled.
@@ -382,9 +392,8 @@ async function traceRejectedTerminalRunnerWrite(executor: Db, entry: LlmUsageEnt
     // Reported at `error`, not warn: an unassessed refusal may be a real billing
     // loss, and a diagnostic that cannot run in a billing path is itself
     // actionable. The honest cost — runner no-ops are NOT rare (every duplicate
-    // cumulative metric event is one, not just the #997 finalize replay), so a
-    // systematically failing SELECT reproduces #997 at a higher volume than
-    // #997 itself.
+    // cumulative metric event is one, not just the finalize replay), so a
+    // systematically failing SELECT hides refusals at that volume.
     logger.error("llm_usage: could not assess a refused runner snapshot", {
       runId: entry.runId,
       orgId: entry.orgId,

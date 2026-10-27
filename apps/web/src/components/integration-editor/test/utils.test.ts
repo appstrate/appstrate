@@ -10,6 +10,7 @@ import {
   getToolsPolicy,
   emptyAuth,
   isRemoteSourceUrl,
+  isWildcardUsable,
   setAllowUndeclaredTools,
   setAuths,
   setSource,
@@ -175,9 +176,9 @@ describe("integration-editor auths", () => {
     expect(back.scopeCatalog[0]!.value).toBe("read");
   });
 
-  it("drops auths with an empty key", () => {
-    const m = setAuths({}, [{ ...emptyAuth(""), key: "" }]);
-    expect(Object.keys(m.auths as any)).toHaveLength(0);
+  it("drops auths with an empty key, and with none left leaves auths out (AFPS §7.2)", () => {
+    const m = setAuths({ auths: { old: { type: "api_key" } } }, [{ ...emptyAuth(""), key: "" }]);
+    expect("auths" in m).toBe(false);
   });
 
   it("preserves unread auth fields on edit (no data loss)", () => {
@@ -245,6 +246,52 @@ describe("integration-editor auths", () => {
     expect(a.credentials.schema.properties.api_key.description).toBe("key");
   });
 
+  it("keeps the credentials and connect block of an oauth2 auth acquired by connect.login", () => {
+    const credentials = {
+      schema: {
+        type: "object",
+        required: ["refresh_token"],
+        properties: { refresh_token: { type: "string", description: "token" } },
+      },
+    };
+    const connect = {
+      login: {
+        request: {
+          method: "POST",
+          url: "https://x.test/token",
+          content_type: "application/x-www-form-urlencoded",
+          body: "grant_type=refresh_token&refresh_token={{refresh_token}}",
+        },
+      },
+    };
+    const imported = {
+      auths: {
+        primary: {
+          type: "oauth2",
+          token_endpoint: "https://x.test/token",
+          authorized_uris: ["https://x.test/**"],
+          credentials,
+          connect,
+        },
+        code: {
+          type: "oauth2",
+          authorization_endpoint: "https://x.test/authorize",
+          token_endpoint: "https://x.test/token",
+          authorized_uris: ["https://x.test/**"],
+          credentials,
+        },
+      },
+    };
+    const auths = getAuths(imported);
+    auths[0]!.tokenEndpoint = "https://x.test/token2";
+    const out = setAuths(imported, auths).auths as any;
+    expect(out.primary.token_endpoint).toBe("https://x.test/token2");
+    expect(out.primary.credentials).toEqual(credentials);
+    expect(out.primary.connect).toEqual(connect);
+    // An authorization-code oauth2 auth still carries no credentials.
+    expect(out.code.credentials).toBeUndefined();
+  });
+
   it("keeps an mtls auth mtls across an edit", () => {
     // A type the form does not know is read back as `api_key` and SAVED as one.
     const imported = {
@@ -307,5 +354,22 @@ describe("integration-editor allow_undeclared_tools (§7.8)", () => {
 
     const disabled = setAllowUndeclaredTools(enabled, false);
     expect(disabled).not.toHaveProperty("allow_undeclared_tools");
+  });
+});
+
+describe("isWildcardUsable", () => {
+  it("is usable with no auths (unauthenticated integration)", () => {
+    expect(isWildcardUsable([])).toBe(true);
+  });
+  it("is not usable with only an oauth2 auth lacking default scopes", () => {
+    expect(isWildcardUsable([{ ...emptyAuth("a"), type: "oauth2", defaultScopes: [] }])).toBe(
+      false,
+    );
+  });
+  it("is usable with oauth2 default scopes or a non-oauth2 auth", () => {
+    expect(isWildcardUsable([{ ...emptyAuth("a"), type: "oauth2", defaultScopes: ["x"] }])).toBe(
+      true,
+    );
+    expect(isWildcardUsable([{ ...emptyAuth("a"), type: "api_key" }])).toBe(true);
   });
 });

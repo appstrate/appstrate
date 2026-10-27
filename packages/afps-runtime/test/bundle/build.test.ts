@@ -7,6 +7,7 @@ import {
   buildBundleFromAfps,
   buildBundleFromCatalog,
   extractRootFromAfps,
+  type BuildBundleOptions,
 } from "../../src/bundle/build.ts";
 import { InMemoryPackageCatalog, emptyPackageCatalog } from "../../src/bundle/catalog.ts";
 import {
@@ -113,7 +114,7 @@ describe("buildBundleFromCatalog", () => {
     expect(bundle.packages.get("@me/integ-y@1.0.0" as PackageIdentity)).toBeDefined();
   });
 
-  it("depTypes: ['skills'] walks only skills (run-bundle: integrations/mcp-servers are spawned separately)", async () => {
+  it("depTypes: ['skills'] walks only skills", async () => {
     const rootManifest = {
       ...ROOT,
       dependencies: {
@@ -308,6 +309,217 @@ describe("buildBundleFromCatalog", () => {
       expect(details.missing).toHaveLength(2);
       expect(details.missing.map((m) => m.name).sort()).toEqual(["@me/a", "@me/b"]);
     }
+  });
+
+  it("passes the dependency section to catalog.resolve for each dependency kind", async () => {
+    const root = makePkg(
+      "@me/root@1.0.0" as PackageIdentity,
+      {
+        ...ROOT,
+        dependencies: {
+          skills: { "@me/skill-a": "^1" },
+          mcp_servers: { "@me/mcp-x": "1.2.3" },
+          integrations: { "@me/integ-y": "^1" },
+        },
+      },
+      { "prompt.md": enc("p") },
+    );
+    const calls: Array<[string, string, string]> = [];
+    const recordingCatalog = {
+      resolve: async (name: string, versionSpec: string, section: string) => {
+        calls.push([name, versionSpec, section]);
+        return null;
+      },
+      fetch: async (): Promise<BundlePackage> => {
+        throw new Error("fetch must not be called");
+      },
+    };
+    await buildBundleFromCatalog(root, recordingCatalog).catch(() => {});
+    expect(calls.sort()).toEqual([
+      ["@me/integ-y", "^1", "integrations"],
+      ["@me/mcp-x", "1.2.3", "mcp_servers"],
+      ["@me/skill-a", "^1", "skills"],
+    ]);
+  });
+
+  it("optionalDepTypes: skips an unresolved entry of that section and warns", async () => {
+    const root = makePkg(
+      "@me/root@1.0.0" as PackageIdentity,
+      {
+        ...ROOT,
+        dependencies: {
+          skills: { "@me/skill-a": "^1.0.0" },
+          integrations: { "@me/integ-y": "^1.0.0" },
+        },
+      },
+      { "prompt.md": enc("p") },
+    );
+    const skill = makePkg(
+      "@me/skill-a@1.3.0" as PackageIdentity,
+      { name: "@me/skill-a", version: "1.3.0", type: "skill", schema_version: "0.1" },
+      { "SKILL.md": enc("s") },
+    );
+    const warnings: string[] = [];
+    const bundle = await buildBundleFromCatalog(root, new InMemoryPackageCatalog([skill]), {
+      depTypes: ["skills", "integrations"],
+      optionalDepTypes: ["integrations"],
+      onWarn: (m) => warnings.push(m),
+    });
+    expect([...bundle.packages.keys()].sort()).toEqual(["@me/root@1.0.0", "@me/skill-a@1.3.0"]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("@me/integ-y@^1.0.0");
+    expect(warnings[0]).toContain("@me/root@1.0.0");
+  });
+
+  it("optionalDepTypes: an unresolved dependency of another section still fails", async () => {
+    const root = makePkg(
+      "@me/root@1.0.0" as PackageIdentity,
+      {
+        ...ROOT,
+        dependencies: {
+          skills: { "@me/skill-a": "^1.0.0" },
+          integrations: { "@me/integ-y": "^1.0.0" },
+        },
+      },
+      { "prompt.md": enc("p") },
+    );
+    const err = await buildBundleFromCatalog(root, emptyPackageCatalog, {
+      depTypes: ["skills", "integrations"],
+      optionalDepTypes: ["integrations"],
+    }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(BundleError);
+    expect((err as BundleError).code).toBe("DEPENDENCY_UNRESOLVED");
+    const { missing } = (err as BundleError).details as { missing: Array<{ name: string }> };
+    expect(missing.map((m) => m.name)).toEqual(["@me/skill-a"]);
+  });
+
+  describe("optionalDepTypes: an optional member is a leaf", () => {
+    const root = makePkg(
+      "@me/root@1.0.0" as PackageIdentity,
+      { ...ROOT, dependencies: { integrations: { "@me/integ-y": "^1.0.0" } } },
+      { "prompt.md": enc("p") },
+    );
+    const integ = makePkg("@me/integ-y@1.0.0" as PackageIdentity, {
+      name: "@me/integ-y",
+      version: "1.0.0",
+      type: "integration",
+      schema_version: "0.1",
+      dependencies: { skills: { "@me/skill-a": "^1.0.0" } },
+    });
+    const skill = makePkg(
+      "@me/skill-a@1.3.0" as PackageIdentity,
+      { name: "@me/skill-a", version: "1.3.0", type: "skill", schema_version: "0.1" },
+      { "SKILL.md": enc("s") },
+    );
+    const opts: BuildBundleOptions = {
+      depTypes: ["skills", "integrations"],
+      optionalDepTypes: ["integrations"],
+    };
+
+    it("does not fail on an unresolvable dependency of the optional member", async () => {
+      const bundle = await buildBundleFromCatalog(root, new InMemoryPackageCatalog([integ]), opts);
+      expect([...bundle.packages.keys()].sort()).toEqual(["@me/integ-y@1.0.0", "@me/root@1.0.0"]);
+    });
+
+    it("does not bundle a resolvable dependency of the optional member", async () => {
+      const bundle = await buildBundleFromCatalog(
+        root,
+        new InMemoryPackageCatalog([integ, skill]),
+        opts,
+      );
+      expect([...bundle.packages.keys()].sort()).toEqual(["@me/integ-y@1.0.0", "@me/root@1.0.0"]);
+    });
+  });
+
+  describe("optionalDepTypes: fetch failures", () => {
+    const root = makePkg(
+      "@me/root@1.0.0" as PackageIdentity,
+      {
+        ...ROOT,
+        dependencies: {
+          skills: { "@me/skill-a": "^1.0.0" },
+          integrations: { "@me/integ-y": "^1.0.0" },
+        },
+      },
+      { "prompt.md": enc("p") },
+    );
+    const skill = makePkg(
+      "@me/skill-a@1.3.0" as PackageIdentity,
+      { name: "@me/skill-a", version: "1.3.0", type: "skill", schema_version: "0.1" },
+      { "SKILL.md": enc("s") },
+    );
+    const integ = makePkg("@me/integ-y@1.0.0" as PackageIdentity, {
+      name: "@me/integ-y",
+      version: "1.0.0",
+      type: "integration",
+      schema_version: "0.1",
+    });
+    /** Resolves both members; `fetch` throws `error` for `failing`. */
+    function catalogFailingFetchOf(
+      failing: PackageIdentity,
+      error: Error = new Error("storage unreachable"),
+    ) {
+      const inner = new InMemoryPackageCatalog([skill, integ]);
+      return {
+        resolve: inner.resolve.bind(inner),
+        fetch: async (identity: PackageIdentity) => {
+          if (identity === failing) throw error;
+          return inner.fetch(identity);
+        },
+      };
+    }
+
+    it("still fails on an INTEGRITY_MISMATCH of an optional member, like a skill's", async () => {
+      const build = (failing: PackageIdentity) =>
+        buildBundleFromCatalog(
+          root,
+          catalogFailingFetchOf(
+            failing,
+            new BundleError("INTEGRITY_MISMATCH", `Integrity check failed for ${failing}`),
+          ),
+          { depTypes: ["skills", "integrations"], optionalDepTypes: ["integrations"] },
+        ).then(
+          () => null,
+          (e: unknown) => e,
+        );
+      const integErr = await build(integ.identity);
+      expect(integErr).toBeInstanceOf(BundleError);
+      expect((integErr as BundleError).code).toBe("INTEGRITY_MISMATCH");
+      expect((integErr as BundleError).details).toEqual({ packages: [integ.identity] });
+      const skillErr = await build(skill.identity);
+      expect((skillErr as BundleError).details).toEqual({ packages: [skill.identity] });
+      expect((integErr as BundleError).message).toBe(
+        `Integrity check failed for ${integ.identity}`,
+      );
+    });
+
+    it("skips an optional member whose fetch throws and warns with section, identity and error", async () => {
+      const warnings: string[] = [];
+      const bundle = await buildBundleFromCatalog(root, catalogFailingFetchOf(integ.identity), {
+        depTypes: ["skills", "integrations"],
+        optionalDepTypes: ["integrations"],
+        onWarn: (m) => warnings.push(m),
+      });
+      expect([...bundle.packages.keys()].sort()).toEqual(["@me/root@1.0.0", "@me/skill-a@1.3.0"]);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toContain("integrations");
+      expect(warnings[0]).toContain("@me/integ-y@1.0.0");
+      expect(warnings[0]).toContain("storage unreachable");
+    });
+
+    it("still fails when the fetch of a non-optional member throws", async () => {
+      const err = await buildBundleFromCatalog(root, catalogFailingFetchOf(skill.identity), {
+        depTypes: ["skills", "integrations"],
+        optionalDepTypes: ["integrations"],
+      }).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect((err as Error).message).toBe("storage unreachable");
+    });
   });
 
   it("enforces maxPackages limit", async () => {

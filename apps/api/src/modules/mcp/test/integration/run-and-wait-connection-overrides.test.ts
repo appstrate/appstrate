@@ -32,11 +32,7 @@ import { eq } from "drizzle-orm";
 import { runs } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { truncateAll, db } from "../../../../../test/helpers/db.ts";
-import {
-  createTestContext,
-  authHeaders,
-  type TestContext,
-} from "../../../../../test/helpers/auth.ts";
+import { createTestContext, type TestContext } from "../../../../../test/helpers/auth.ts";
 import {
   createFakeOrchestrator,
   inlineAgentManifest,
@@ -47,8 +43,14 @@ import {
 } from "../../../../../test/helpers/run-connection-fixtures.ts";
 import { _setOrchestratorForTesting } from "../../../../services/orchestrator/index.ts";
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
-import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../../../../test/helpers/mcp.ts";
-import { seedPackage, seedPackageVersion } from "../../../../../test/helpers/seed.ts";
+import {
+  MCP_ACCEPT,
+  mcpHeaders,
+  mcpPath,
+  type JsonRpcEnvelope,
+  mcpAuthHeaders,
+} from "../../../../../test/helpers/mcp.ts";
+import { seedPackage, seedPublishedVersion } from "../../../../../test/helpers/seed.ts";
 import { localIntegrationManifest } from "../../../../../test/helpers/integration-manifests.ts";
 import { activatePackage } from "../../../../services/space-packages.ts";
 
@@ -67,9 +69,9 @@ async function callTool(
   args: Record<string, unknown>,
   query = "",
 ): Promise<{ isError: boolean; data: Record<string, unknown> }> {
-  const res = await app.request(`/api/mcp/o/${headers["X-Org-Id"]}${query}`, {
+  const res = await app.request(`${mcpPath(headers)}${query}`, {
     method: "POST",
-    headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+    headers: { ...mcpHeaders(headers), "content-type": "application/json", Accept: MCP_ACCEPT },
     body: JSON.stringify({
       jsonrpc: "2.0",
       id: 1,
@@ -124,7 +126,7 @@ describe("mcp run_and_wait — connection_overrides", () => {
     // the dispatched inline route enforces, so nothing but the connection
     // ambiguity can decide the outcome.
     ctx = await createTestContext({ orgSlug: "mcpconn" });
-    headers = authHeaders(ctx);
+    headers = mcpAuthHeaders(ctx);
   });
 
   // Drain in `afterEach`, never at the tail of a test body: the trigger is
@@ -288,8 +290,11 @@ describe("mcp run_and_wait — connection_overrides", () => {
       connection_overrides: { [INTEGRATION]: [] },
     });
 
+    // Not a static refusal: nothing imposes a set here, so resolution finds the required
+    // integration bound to none and refuses the launch.
     expect(result.isError).toBe(true);
-    expect(result.data.status).toBe(400);
+    expect(result.data.status).toBe(409);
+    expect(JSON.stringify(result.data.body)).toContain("required_integration_unbound");
     expect(JSON.stringify(result.data.body)).toContain(INTEGRATION);
     expect(await db.select().from(runs)).toHaveLength(0);
   });
@@ -321,7 +326,7 @@ describe("mcp run_and_wait — connection_overrides", () => {
       source: "local",
       draftManifest: manifest,
     });
-    await seedPackageVersion({ packageId: OAUTH, version: "1.0.0", manifest });
+    await seedPublishedVersion(OAUTH, "1.0.0", { manifest });
     await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OAUTH);
     await seedDefaultOrgModel(ctx);
 

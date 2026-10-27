@@ -6,8 +6,7 @@
  *
  * Wire format: `base64url(JSON payload).base64url(HMAC-SHA256)`.
  *
- * Two properties are load-bearing and were previously re-implemented (and
- * drifted) per token type:
+ * Two properties are load-bearing, and stated once here for every token type:
  *
  *  - **Keyring rotation.** A secret is a comma-separated list (or an array):
  *    the FIRST key signs new tokens, ALL keys verify, so a rotation never

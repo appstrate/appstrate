@@ -644,7 +644,16 @@ export function handlePiMessagesRequest(
   );
 
   const encoder = new TextEncoder();
+  // Set when the client cancels the body: the controller is closed from then
+  // on, so the loop stops writing — not a failure, nothing to warn about.
+  let cancelled = false;
   const sse = new ReadableStream<Uint8Array>({
+    cancel() {
+      cancelled = true;
+      // A body cancel does not abort `request.signal`; release the upstream now
+      // rather than when the loop next touches the closed controller.
+      unwind.abort(new Error("pi-messages backend: client cancelled the stream"));
+    },
     async start(controller) {
       let terminal: PiMessagesEvent | undefined;
       // Manual iteration, not `for await`: the idle bound has to be armed
@@ -657,6 +666,7 @@ export function handlePiMessagesRequest(
       try {
         for (;;) {
           const outcome = await withIdleBound(iterator.next(), idleTimeoutMs);
+          if (cancelled) break;
           if (outcome === STREAM_IDLE) {
             // Server-side only, so it may name the backing.
             logger.warn("pi-messages backend: upstream went silent mid-stream", {
@@ -701,10 +711,13 @@ export function handlePiMessagesRequest(
       } catch (err) {
         // pi-ai surfaces failures as an `error` EVENT, so reaching here means
         // the stream machinery broke. Server-side log, so it may name the
-        // backing; the client still gets the synthesized terminal below.
-        logger.warn("pi-messages backend: upstream stream threw", {
-          error: err instanceof Error ? err.message : String(err),
-        });
+        // backing; the client still gets the synthesized terminal below. A
+        // throw after a cancel is the abort we fired, not a broken stream.
+        if (!cancelled) {
+          logger.warn("pi-messages backend: upstream stream threw", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
       } finally {
         abort.firstResponse();
         // Release the upstream: the abort unwinds pi-ai's in-flight fetch,
@@ -713,6 +726,8 @@ export function handlePiMessagesRequest(
         unwind.abort(new Error("pi-messages backend: releasing the upstream stream"));
         void Promise.resolve(iterator.return?.()).catch(() => {});
       }
+      // Nobody is reading: no terminal to write, and nothing left to close.
+      if (cancelled) return;
       if (!terminal) {
         // The client MUST see a terminal: `pi-messages` reconstructs the
         // assistant message from it, and its absence hangs the turn.

@@ -52,6 +52,7 @@ import { toLaunchOverrides } from "../services/integration-connection-resolver.t
 import { assertExplicitModelExists } from "../services/org-models.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { getActor } from "../lib/actor.ts";
+import { requestPayerUserId } from "../services/model-providers/credential-chain.ts";
 import { getSpaceScope } from "../lib/scope.ts";
 import { getInlineRunLimits } from "../services/run-limits.ts";
 import {
@@ -73,7 +74,7 @@ import { synthesiseFinalize } from "../services/run-event-ingestion.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { currentTraceparent, telemetryTrustsIncomingTrace } from "@appstrate/core/telemetry";
 import { TERMINAL_RUN_STATUSES } from "@appstrate/db/run-status";
-import { runStatusValues } from "@appstrate/core/run-status";
+import { parseRunListFilters } from "../lib/run-list-filters.ts";
 import { parseWaitQuery, waitForRunTerminal } from "../services/run-wait.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
@@ -82,16 +83,13 @@ import { modelGenerationSettingsSchema } from "@appstrate/core/model-generation"
 /**
  * Wire-shape guard for the agent-run body (`POST /agents/{scope}/{name}/run`).
  *
- * `.strict()` on purpose (#1187). This surface had NO body schema at all: the
- * body was read with `c.req.json<RunRequestBody>()`, a cast that validates
- * nothing, so an unknown field was dropped without a trace and a malformed body
- * became `{}` — a 201 for a run executing with parameters nobody asked for.
- * That is the exact failure `assertFieldsUnlocked` states as a rule
- * (`@appstrate/core/input-resolution`) and the one #1179 fixed on the MCP
- * surface, and the
- * launch body was the last place the rule did not hold. `POST /runs/remote` was
- * already `.strict()`; the schedule bodies (`routes/schedules.ts`) took the
- * rule afterwards, and the four launch surfaces now agree.
+ * `.strict()` on purpose. A body read with a bare `c.req.json<RunRequestBody>()`
+ * cast validates nothing: an unknown field is dropped without a trace and a
+ * malformed body becomes `{}` — a 201 for a run executing with parameters nobody
+ * asked for. That is the failure `assertFieldsUnlocked` states as a rule
+ * (`@appstrate/core/input-resolution`). `POST /runs/remote` and the schedule
+ * bodies (`routes/schedules.ts`) are `.strict()` too: the four launch surfaces
+ * agree.
  *
  * Deep semantics stay downstream in `parseRequestInput` (is this dependency
  * spec resolvable, does the replayed run belong to this agent) — this schema
@@ -122,11 +120,9 @@ export const runAgentBodySchema = z
  * grossly wrong-typed field (e.g. `input: "foo"`) with a 400 instead of letting
  * it cast through and surface later as a 500.
  *
- * `.strict()` since #1187, like the three other launch surfaces. It also closes
- * a live silent drop: `dependency_overrides` was accepted here (the parser read
- * it straight off the raw body) and then never applied — `triggerInlineRun`
- * does not forward it. Undeclared here, it is now a 400 instead of a run that
- * quietly ignored the pin it was handed.
+ * `.strict()`, like the three other launch surfaces. `dependency_overrides`
+ * is undeclared here because `triggerInlineRun` does not forward it: a 400,
+ * instead of a run that quietly ignores the pin it was handed.
  */
 const inlineRunBodySchema = z
   .object({
@@ -144,7 +140,7 @@ const inlineRunBodySchema = z
      */
     context_files: z.array(z.unknown()).optional(),
     /**
-     * Per-integration connection picks for this run (cascade layer 3, the launch override).
+     * Per-integration connection picks for this run (the launch override).
      * Declared here so the parse keeps the field for the preflight's readiness
      * gate, which runs BEFORE `parseRequestInput` and would otherwise never see
      * it.
@@ -280,7 +276,7 @@ export function createRunsRouter() {
       // instead of being swallowed into `{}` and launched as an input-less run.
       const body = await readJsonBody(c, runAgentBodySchema, { allowEmpty: true });
 
-      // Omitted ⇒ the latest PUBLISHED version (#636). The working copy is
+      // Omitted ⇒ the latest PUBLISHED version. The working copy is
       // opt-in via `version=draft`, and only for a caller who can WRITE the
       // agent — the resolver honours the selector, this decides who may name it
       // (plan decision 4).
@@ -395,6 +391,7 @@ export function createRunsRouter() {
           agent: effectiveAgent,
           orgId,
           actor,
+          payerUserId: requestPayerUserId(c),
           // `parseRequestInput` collapses an effectively-empty input to
           // `undefined`; map that to NULL so an input-less run persists
           // `runs.input` as SQL NULL (one representation across all origins).
@@ -437,10 +434,10 @@ export function createRunsRouter() {
 
         // 201 + the bare created run resource — same DTO and serializer as
         // GET /runs/:id — so callers see the full launched state (resolved
-        // `model_label` / `model_source` for org-default drift detection per
-        // #635, plus status, version_ref, agent_scope, …) without a follow-up
+        // `model_label` / `model_source` for org-default drift detection,
+        // plus status, version_ref, agent_scope, …) without a follow-up
         // GET. The run row exists once `prepareAndExecuteRun` resolves.
-        // No legacy `runId` alias (#657): the run id is `id`.
+        // No legacy `runId` alias: the run id is `id`.
         const row = await getRunFull(
           getSpaceScope(c),
           runId,
@@ -476,10 +473,16 @@ export function createRunsRouter() {
     const agent = c.get("package");
     const scope = getSpaceScope(c);
     const { limit, offset } = parseListPagination(c, { defaultLimit: 50 });
+    const { status, search } = parseRunListFilters({
+      status: c.req.query("status"),
+      q: c.req.query("q"),
+    });
     const result = await listPackageRuns(scope, agent.id, {
       limit,
       offset,
       actor: getActor(c),
+      status,
+      search,
       visibility: runVisibilityFilter(c),
       canReadAgentInput: !agentReadIsSummary(c),
     });
@@ -489,11 +492,11 @@ export function createRunsRouter() {
 
   // GET /api/runs — global paginated run list across the space.
   // Supports filtering by ?user=me (self-owned runs), ?kind=inline|package|all
-  // for inline-run filtering, ?status, ?start_date/?end_date, and
+  // for inline-run filtering, ?status, ?q, ?start_date/?end_date, and
   // ?chat_session_id for the conversation context sidebar.
   //
-  // `user`, `kind` and `status` are all closed sets and all go through
-  // `closedSetQuery`: an unrecognised value is a 400, not a dropped filter.
+  // `user`, `kind` and `status` are all closed sets: an unrecognised value is
+  // a 400, not a dropped filter.
   // `limit`/`offset` deliberately keep their `.catch()` defaults — a bad page
   // size returns the first page, which narrows rather than widens, and callers
   // paging by `Link` headers never construct them by hand.
@@ -514,7 +517,10 @@ export function createRunsRouter() {
     const visibility = userFilter === "me" ? ownRunsFilter(actor) : runVisibilityFilter(c);
 
     const kind = closedSetQuery(c, "kind", GLOBAL_RUN_KINDS);
-    const status = closedSetQuery(c, "status", runStatusValues);
+    const { status, search } = parseRunListFilters({
+      status: c.req.query("status"),
+      q: c.req.query("q"),
+    });
     const startDateRaw = c.req.query("start_date");
     const endDateRaw = c.req.query("end_date");
     const chatSessionId = c.req.query("chat_session_id") || undefined;
@@ -535,6 +541,7 @@ export function createRunsRouter() {
       startDate,
       endDate,
       chatSessionId,
+      search,
       actor,
       visibility,
       canReadAgentInput: !agentReadIsSummary(c),
@@ -545,7 +552,7 @@ export function createRunsRouter() {
 
   // GET /api/runs/:id — get a single run
   //
-  // Optional `?wait=<seconds|true>` long-poll (issue #631): holds the
+  // Optional `?wait=<seconds|true>` long-poll: holds the
   // request until the run reaches a terminal status or the wait elapses
   // (capped at MAX_WAIT_SECONDS, below typical proxy idle timeouts), then
   // returns the run object exactly as the plain call does. A non-terminal
@@ -722,7 +729,7 @@ export function createRunsRouter() {
 
     // Return the bare updated run resource — read AFTER synthesiseFinalize so
     // the response reflects the terminal state (`status: "cancelled"`, cost,
-    // completed_at). Same DTO and serializer as GET /runs/:id (#657).
+    // completed_at). Same DTO and serializer as GET /runs/:id.
     const row = await getRunFull(scope, runId, getActor(c), undefined, !agentReadIsSummary(c));
     if (!row) {
       // The run was readable above; a miss here means a concurrent delete
@@ -820,6 +827,7 @@ export function createRunsRouter() {
           orgId,
           spaceId,
           actor,
+          payerUserId: requestPayerUserId(c),
           runId,
           preflight: effectivePreflight,
           parsed,
@@ -836,7 +844,7 @@ export function createRunsRouter() {
           after: { packageId, origin: "inline" },
         });
 
-        // 201 + the bare created run resource (#657) — same DTO and serializer
+        // 201 + the bare created run resource — same DTO and serializer
         // as GET /runs/:id, same status code as the sibling trigger
         // POST /agents/{scope}/{name}/run. The shadow package id callers used
         // to read from the `packageId` envelope field is the resource's own

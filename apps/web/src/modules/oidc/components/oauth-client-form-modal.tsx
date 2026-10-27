@@ -3,30 +3,30 @@
 /**
  * Dual-mode OAuth client modal (create + edit).
  *
- * - Create: form → SecretRevealModal (plaintext secret shown once)
+ * - Create: form → `onCreated` hands the plaintext secret to the host, which shows it once
  * - Edit: form → toast success → close
  *
- * Follows the ProxyFormModal pattern: outer shell with key-based remount,
- * inner body holding all form state.
+ * Mounted by the host while open, one per client (`key`).
  */
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Plus, X } from "lucide-react";
-import { Modal } from "@/components/modal";
-import { Button } from "@appstrate/ui/components/button";
+import { FormModal } from "@/components/form-modal";
+import { ErrorState } from "@/components/page-states";
+import { TextSkeleton } from "@/components/loading-skeletons";
+import { RowsEditor } from "@/components/rows-editor";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import { Spinner } from "@/components/spinner";
-import { SecretRevealModal } from "@/components/secret-reveal-modal";
+import { CheckboxField } from "@/components/app-ui/checkbox-field";
+import { FormItem } from "@/components/app-ui/form-item";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { useAppForm } from "@/hooks/use-app-form";
 import { SpaceAssignmentsField } from "@/components/space-assignments-field";
-import { useSpaces } from "@/hooks/use-spaces";
-import { spaceRoleValue, useSpaceRoleOptions, type SpaceRoleOption } from "@/hooks/use-roles";
+import { useAssignmentCatalog } from "@/hooks/use-assignment-catalog";
+import { spaceRoleValue, type SpaceRoleOption } from "@/hooks/use-roles";
 import {
   hasUnavailableAssignments,
-  assignableSpaces,
   assignmentsFor,
   toSpaceAssignments,
   type AssignmentDraft,
@@ -46,31 +46,19 @@ import { errorMessage } from "../../../lib/mutation-error";
 const REQUIRED_SCOPES = new Set(["openid", "profile", "email"]);
 
 interface Props {
-  open: boolean;
   onClose: () => void;
   client: OAuthClient | null;
   level?: "org" | "space";
+  onCreated: (secret: CreatedSecret) => void;
 }
 
 interface FormData {
   name: string;
 }
 
-export function OAuthClientFormModal({ open, onClose, client, level }: Props) {
-  if (!open) return null;
-  const key = client?.clientId ?? "__create__";
-  return <OAuthClientFormBody key={key} client={client} level={level} onClose={onClose} />;
-}
+export type CreatedSecret = { clientId: string; clientSecret: string };
 
-function OAuthClientFormBody({
-  client,
-  level,
-  onClose,
-}: {
-  client: OAuthClient | null;
-  level?: "org" | "space";
-  onClose: () => void;
-}) {
+export function OAuthClientFormModal({ client, level, onClose, onCreated }: Props) {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
   const isEditing = !!client;
@@ -79,15 +67,11 @@ function OAuthClientFormBody({
   const formLevel = effectiveLevel ?? level;
   const isOrgLevel = formLevel === "org";
   // Either catalog feeds the org signup policy only.
-  const spacesQuery = useSpaces(isOrgLevel);
-  const rolesQuery = useSpaceRoleOptions(undefined, isOrgLevel);
-  const spaces = assignableSpaces(spacesQuery.data ?? []);
-  const catalogLoading = spacesQuery.isLoading || rolesQuery.isLoading;
-  const catalogError = spacesQuery.error || rolesQuery.error;
+  const catalog = useAssignmentCatalog(isOrgLevel);
   const isSpaceLevel = formLevel === "space";
   const createMutation = useCreateOAuthClient(effectiveLevel ?? level);
   const updateMutation = useUpdateOAuthClient({ errorHandledByCaller: true });
-  const { data: availableScopes } = useOAuthScopes();
+  const { data: availableScopes, error: scopesError } = useOAuthScopes();
   const isPending = createMutation.isPending || updateMutation.isPending;
 
   const [redirectUris, setRedirectUris] = useState<string[]>(() =>
@@ -111,10 +95,6 @@ function OAuthClientFormBody({
       role: spaceRoleValue(assignment),
     })),
   );
-  const [createdSecret, setCreatedSecret] = useState<{
-    clientId: string;
-    clientSecret: string;
-  } | null>(null);
 
   const {
     register,
@@ -122,15 +102,10 @@ function OAuthClientFormBody({
     setError,
     clearErrors,
     formState: { errors },
+    showError,
   } = useAppForm<FormData>({
     defaultValues: { name: client?.name ?? "" },
   });
-
-  function handleClose() {
-    createMutation.reset();
-    updateMutation.reset();
-    onClose();
-  }
 
   function toggleScope(scope: string) {
     if (REQUIRED_SCOPES.has(scope)) return;
@@ -167,8 +142,7 @@ function OAuthClientFormBody({
    * `onError` below, so this check is deliberately a superset of the server
    * rule: `https:` or `http:` on anything that looks loopback. Being looser
    * than the server only costs a round-trip; being stricter silently blocks
-   * URIs the API accepts — that was #1012, where `http://127.0.0.1/callback`
-   * was refused here even after the server started accepting it.
+   * URIs the API accepts, `http://127.0.0.1/callback` for instance.
    */
   function validateUris(uris: string[]): string[] | null {
     for (const uri of uris) {
@@ -190,13 +164,13 @@ function OAuthClientFormBody({
     const signupSpaceAssignments = assignmentsFor(signupRole, toSpaceAssignments(assignments));
     if (isOrgLevel && signupRole !== "admin" && assignments.length) {
       if (
-        catalogLoading ||
-        catalogError ||
-        hasUnavailableAssignments(assignments, spaces, rolesQuery.options)
+        catalog.loading ||
+        catalog.error ||
+        hasUnavailableAssignments(assignments, catalog.spaces, catalog.roleOptions)
       ) {
         setError("root", {
           message: t(
-            catalogLoading || catalogError
+            catalog.loading || catalog.error
               ? "settings:orgSettings.assignmentsNotReady"
               : "settings:orgSettings.assignmentsUnavailable",
           ),
@@ -233,7 +207,7 @@ function OAuthClientFormBody({
         {
           onSuccess: () => {
             toast.success(t("settings:oauthClients.updated"));
-            handleClose();
+            onClose();
           },
           onError: (err) => {
             setError("root", { message: errorMessage(err) });
@@ -253,7 +227,7 @@ function OAuthClientFormBody({
         },
         {
           onSuccess: (result) => {
-            setCreatedSecret({ clientId: result.clientId, clientSecret: result.clientSecret });
+            onCreated({ clientId: result.clientId, clientSecret: result.clientSecret });
           },
           onError: (err) => {
             setError("root", { message: errorMessage(err) });
@@ -263,174 +237,174 @@ function OAuthClientFormBody({
     }
   }
 
-  // Create mode: show secret reveal after successful creation
-  if (createdSecret) {
-    return (
-      <SecretRevealModal
-        open
-        onClose={handleClose}
-        title={t("settings:oauthClients.createdTitle")}
-        secret={`Client ID: ${createdSecret.clientId}\nClient Secret: ${createdSecret.clientSecret}`}
-      />
-    );
-  }
-
-  const title = isEditing
-    ? t("settings:oauthClients.editTitle")
-    : t("settings:oauthClients.createTitle");
-
-  const submitLabel = isEditing ? t("common:btn.save") : t("settings:oauthClients.createBtn");
-
   return (
-    <Modal
-      open
-      onClose={handleClose}
-      title={title}
-      className="flex max-h-[85dvh] flex-col overflow-hidden"
-      actions={
-        <>
-          <Button variant="outline" type="button" onClick={handleClose}>
-            {t("common:btn.cancel")}
-          </Button>
-          <Button type="submit" form="oauth-client-form" disabled={isPending}>
-            {isPending ? <Spinner /> : submitLabel}
-          </Button>
-        </>
+    <FormModal
+      onClose={onClose}
+      title={
+        isEditing
+          ? t("settings:integration.oauthClient.btnEdit")
+          : t("settings:oauthClients.createTitle")
       }
+      className="flex max-h-[85dvh] flex-col overflow-hidden"
+      onSubmit={handleSubmit(onSubmit)}
+      isPending={isPending}
+      error={errors.root?.message}
+      formProps={{ className: "flex min-h-0 flex-col gap-4 overflow-y-auto pr-1" }}
     >
-      <form
-        id="oauth-client-form"
-        onSubmit={handleSubmit(onSubmit)}
-        className="flex min-h-0 flex-col gap-4 overflow-y-auto pr-1"
+      <FormItem
+        id="oauth-client-name"
+        label={t("settings:spaces.nameLabel")}
+        hint={isEditing ? t("settings:oauthClients.nameReadonlyHint") : undefined}
+        error={showError("name") ? t("common:validation.required") : undefined}
       >
-        <div className="space-y-2">
-          <Label htmlFor="oauth-client-name">{t("settings:oauthClients.nameLabel")}</Label>
-          <Input
-            id="oauth-client-name"
-            type="text"
-            {...register("name", { required: !isEditing, maxLength: 200 })}
-            placeholder={t("settings:oauthClients.namePlaceholder")}
-            disabled={isEditing}
-            autoFocus={!isEditing}
+        <Input
+          type="text"
+          {...register("name", { required: !isEditing, maxLength: 200 })}
+          placeholder={t("settings:oauthClients.namePlaceholder")}
+          disabled={isEditing}
+          autoFocus={!isEditing}
+        />
+      </FormItem>
+
+      <RowsEditor
+        label={t("settings:oauthClients.redirectUris")}
+        hint={t("settings:oauthClients.redirectUrisHint")}
+        rows={redirectUris}
+        onChange={setRedirectUris}
+        newRow=""
+        minRows={1}
+        addLabel={t("settings:oauthClients.addRedirectUri")}
+        renderRow={(uri, update) => (
+          <UriInput
+            value={uri}
+            onChange={update}
+            placeholder="https://example.com/oauth/callback"
           />
-          {isEditing && (
-            <p className="text-muted-foreground text-xs">
-              {t("settings:oauthClients.nameReadonlyHint")}
-            </p>
-          )}
-          {errors.name && (
-            <p className="text-destructive text-xs">{t("common:validation.required")}</p>
-          )}
-        </div>
+        )}
+      />
 
-        <UriListField
-          label={t("settings:oauthClients.redirectUris")}
-          hint={t("settings:oauthClients.redirectUrisHint")}
-          uris={redirectUris}
-          onChange={setRedirectUris}
-          placeholder="https://example.com/oauth/callback"
-          addLabel={t("settings:oauthClients.addRedirectUri")}
+      <RowsEditor
+        label={t("settings:oauthClients.postLogoutRedirectUris")}
+        hint={t("settings:oauthClients.postLogoutRedirectUrisHint")}
+        rows={postLogoutRedirectUris}
+        onChange={setPostLogoutRedirectUris}
+        newRow=""
+        minRows={1}
+        addLabel={t("settings:oauthClients.addRedirectUri")}
+        renderRow={(uri, update, index) => (
+          <UriInput
+            value={uri}
+            onChange={update}
+            placeholder="https://example.com/"
+            // An empty first field offers the origin of the redirect URI, on a new client.
+            onFocus={
+              index === 0 && !isEditing && uri.trim().length === 0
+                ? suggestPostLogoutFromRedirects
+                : undefined
+            }
+          />
+        )}
+      />
+
+      <div className="flex flex-col gap-2">
+        <Label className="mb-0">{t("settings:apiKeys.scopes")}</Label>
+        <p className="text-muted-foreground text-xs">{t("settings:oauthClients.scopesHint")}</p>
+        <ScopeList
+          scopes={availableScopes}
+          error={scopesError}
+          selected={selectedScopes}
+          onToggle={toggleScope}
         />
+      </div>
 
-        <UriListField
-          label={t("settings:oauthClients.postLogoutRedirectUris")}
-          hint={t("settings:oauthClients.postLogoutRedirectUrisHint")}
-          uris={postLogoutRedirectUris}
-          onChange={setPostLogoutRedirectUris}
-          placeholder="https://example.com/"
-          addLabel={t("settings:oauthClients.addRedirectUri")}
-          onFirstInputFocus={isEditing ? undefined : suggestPostLogoutFromRedirects}
-        />
-
-        <div className="space-y-2">
-          <Label>{t("settings:oauthClients.scopesLabel")}</Label>
-          <p className="text-muted-foreground text-xs">{t("settings:oauthClients.scopesHint")}</p>
-          <div className="flex flex-col gap-1.5">
-            {(availableScopes ?? Array.from(REQUIRED_SCOPES)).map((scope) => {
-              const required = REQUIRED_SCOPES.has(scope);
-              const checked = selectedScopes.has(scope);
-              return (
-                <label key={scope} className="flex items-start gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    disabled={required}
-                    onChange={() => toggleScope(scope)}
-                    className="accent-primary mt-0.5 h-4 w-4"
-                  />
-                  <span className="flex flex-col">
-                    <span className="flex items-center gap-2">
-                      <span>
-                        {t(`oauthClients.scopeLabels.${scope}`, {
-                          ns: "settings",
-                          keySeparator: false,
-                          nsSeparator: false,
-                          defaultValue: scope,
-                        })}
-                      </span>
-                      {required && (
-                        <span className="text-muted-foreground text-xs">
-                          ({t("settings:oauthClients.scopeRequired")})
-                        </span>
-                      )}
-                    </span>
-                    <span className="text-muted-foreground font-mono text-xs">{scope}</span>
-                  </span>
-                </label>
-              );
-            })}
-          </div>
+      {can("oauth-clients:write") && (
+        <div className="flex flex-col gap-2">
+          <CheckboxField
+            id="oauth-client-first-party"
+            checked={isFirstParty}
+            onCheckedChange={(checked) => setIsFirstParty(checked === true)}
+            label={t("settings:oauthClients.isFirstPartyLabel")}
+            description={t("settings:oauthClients.isFirstPartyHint")}
+          />
         </div>
+      )}
 
-        {can("oauth-clients:write") && (
-          <div className="space-y-2">
-            <label className="flex items-start gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={isFirstParty}
-                onChange={() => setIsFirstParty((v) => !v)}
-                className="accent-primary mt-0.5 h-4 w-4"
-              />
-              <span className="flex flex-col">
-                <span>{t("settings:oauthClients.isFirstPartyLabel")}</span>
-                <span className="text-muted-foreground text-xs">
-                  {t("settings:oauthClients.isFirstPartyHint")}
+      {(isOrgLevel || isSpaceLevel) && (
+        <SignupPolicyFields
+          isOrgLevel={isOrgLevel}
+          allowSignup={allowSignup}
+          onAllowSignupChange={() => setAllowSignup((v) => !v)}
+          signupRole={signupRole}
+          onSignupRoleChange={(role) => {
+            setSignupRole(role);
+            clearErrors("root");
+          }}
+          assignments={assignments}
+          onAssignmentsChange={(value) => {
+            setAssignments(value);
+            clearErrors("root");
+          }}
+          isPending={isPending}
+          spaces={catalog.spaces}
+          roleOptions={catalog.roleOptions}
+          catalogLoading={catalog.loading}
+          catalogError={catalog.error}
+          onRetryCatalog={catalog.retry}
+        />
+      )}
+    </FormModal>
+  );
+}
+
+/**
+ * The scope checklist. The catalogue is the server's: until it answers there is no list to draw
+ * (only the required scopes would show, then the rest would grow the modal).
+ */
+export function ScopeList({
+  scopes,
+  error,
+  selected,
+  onToggle,
+}: {
+  scopes: string[] | undefined;
+  error: unknown;
+  selected: ReadonlySet<string>;
+  onToggle: (scope: string) => void;
+}) {
+  const { t } = useTranslation("settings");
+  if (!scopes) return error ? <ErrorState error={error} compact /> : <TextSkeleton lines={6} />;
+  return (
+    <div className="flex flex-col gap-1.5">
+      {scopes.map((scope) => {
+        const required = REQUIRED_SCOPES.has(scope);
+        return (
+          <CheckboxField
+            key={scope}
+            id={`oauth-scope-${scope}`}
+            checked={selected.has(scope)}
+            disabled={required}
+            onCheckedChange={() => onToggle(scope)}
+            label={
+              <span className="flex items-center gap-2">
+                <span>
+                  {t(`oauthClients.scopeLabels.${scope}`, {
+                    keySeparator: false,
+                    nsSeparator: false,
+                    defaultValue: scope,
+                  })}
                 </span>
+                {required && (
+                  <span className="text-muted-foreground text-xs">
+                    ({t("oauthClients.scopeRequired")})
+                  </span>
+                )}
               </span>
-            </label>
-          </div>
-        )}
-
-        {(isOrgLevel || isSpaceLevel) && (
-          <SignupPolicyFields
-            isOrgLevel={isOrgLevel}
-            allowSignup={allowSignup}
-            onAllowSignupChange={() => setAllowSignup((v) => !v)}
-            signupRole={signupRole}
-            onSignupRoleChange={(role) => {
-              setSignupRole(role);
-              clearErrors("root");
-            }}
-            assignments={assignments}
-            onAssignmentsChange={(value) => {
-              setAssignments(value);
-              clearErrors("root");
-            }}
-            isPending={isPending}
-            spaces={spaces}
-            roleOptions={rolesQuery.options}
-            catalogLoading={catalogLoading}
-            catalogError={catalogError}
-            onRetryCatalog={() => {
-              void spacesQuery.refetch();
-              void rolesQuery.refetch();
-            }}
+            }
+            description={<span className="font-mono">{scope}</span>}
           />
-        )}
-
-        {errors.root && <p className="text-destructive text-sm">{errors.root.message}</p>}
-      </form>
-    </Modal>
+        );
+      })}
+    </div>
   );
 }
 
@@ -472,45 +446,36 @@ export function SignupPolicyFields({
 }) {
   const { t } = useTranslation(["settings", "common"]);
   return (
-    <div className="space-y-3 rounded-md border p-3">
-      <label className="flex items-start gap-2 text-sm">
-        <input
-          type="checkbox"
-          checked={allowSignup}
-          onChange={onAllowSignupChange}
-          className="accent-primary mt-0.5 h-4 w-4"
-        />
-        <span className="flex flex-col">
-          <span>{t("settings:oauthClients.allowSignupLabel")}</span>
-          <span className="text-muted-foreground text-xs">
-            {t("settings:oauthClients.allowSignupHint")}
-          </span>
-        </span>
-      </label>
+    <div className="flex flex-col gap-3 rounded-md border p-3">
+      <CheckboxField
+        id="oauth-client-allow-signup"
+        checked={allowSignup}
+        onCheckedChange={onAllowSignupChange}
+        label={t("settings:oauthClients.allowSignupLabel")}
+        description={t("settings:oauthClients.allowSignupHint")}
+      />
       {isOrgLevel && (
-        <div className="space-y-1">
-          <Label htmlFor="oauth-client-signup-role">
-            {t("settings:oauthClients.signupRoleLabel")}
-          </Label>
-          <select
-            id="oauth-client-signup-role"
+        <FormItem
+          id="oauth-client-signup-role"
+          label={t("settings:oauthClients.signupRoleLabel")}
+          hint={
+            <>
+              {t(`settings:orgSettings.roleHint.${signupRole}`)}
+              <br />
+              {t("settings:oauthClients.signupRoleHint")}
+            </>
+          }
+        >
+          <OptionSelect
             value={signupRole}
-            onChange={(e) => onSignupRoleChange(e.target.value as AssignableOrgRole)}
+            onValueChange={(value) => onSignupRoleChange(value as AssignableOrgRole)}
             disabled={isPending}
-            className="border-input bg-background ring-offset-background focus-visible:ring-ring flex h-9 w-full rounded-md border px-3 py-1 text-sm shadow-sm focus-visible:ring-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {ASSIGNABLE_ORG_ROLES.map((role) => (
-              <option key={role} value={role}>
-                {t(`settings:oauthClients.signupRoleOption.${role}`)}
-              </option>
-            ))}
-          </select>
-          <p className="text-muted-foreground text-xs">
-            {t(`settings:orgSettings.roleHint.${signupRole}`)}
-            <br />
-            {t("settings:oauthClients.signupRoleHint")}
-          </p>
-        </div>
+            options={ASSIGNABLE_ORG_ROLES.map((role) => ({
+              value: role,
+              label: t(`settings:oauthClients.signupRoleOption.${role}`),
+            }))}
+          />
+        </FormItem>
       )}
       {isOrgLevel && (
         <SpaceAssignmentsField
@@ -534,67 +499,24 @@ export function SignupPolicyFields({
   );
 }
 
-/** Reusable URI list field with add/remove controls. */
-function UriListField({
-  label,
-  hint,
-  uris,
+function UriInput({
+  value,
   onChange,
   placeholder,
-  addLabel,
-  onFirstInputFocus,
+  onFocus,
 }: {
-  label: string;
-  hint: string;
-  uris: string[];
-  onChange: (uris: string[]) => void;
+  value: string;
+  onChange: (value: string) => void;
   placeholder: string;
-  addLabel: string;
-  /**
-   * Called when the first input receives focus while empty. Used to offer
-   * a suggested default (e.g. derive post-logout URI from redirect URI
-   * origin) without forcing a value on the user.
-   */
-  onFirstInputFocus?: () => void;
+  onFocus?: () => void;
 }) {
   return (
-    <div className="space-y-2">
-      <Label>{label}</Label>
-      <p className="text-muted-foreground text-xs">{hint}</p>
-      <div className="flex flex-col gap-2">
-        {uris.map((uri, index) => (
-          <div key={index} className="flex gap-2">
-            <Input
-              type="url"
-              value={uri}
-              onChange={(e) => {
-                const next = [...uris];
-                next[index] = e.target.value;
-                onChange(next);
-              }}
-              onFocus={
-                index === 0 && uri.trim().length === 0 && onFirstInputFocus
-                  ? onFirstInputFocus
-                  : undefined
-              }
-              placeholder={placeholder}
-            />
-            {uris.length > 1 && (
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                onClick={() => onChange(uris.filter((_, i) => i !== index))}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            )}
-          </div>
-        ))}
-        <Button type="button" variant="outline" size="sm" onClick={() => onChange([...uris, ""])}>
-          <Plus className="h-4 w-4" /> {addLabel}
-        </Button>
-      </div>
-    </div>
+    <Input
+      type="url"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onFocus={onFocus}
+      placeholder={placeholder}
+    />
   );
 }

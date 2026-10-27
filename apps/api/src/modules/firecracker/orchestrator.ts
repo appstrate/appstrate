@@ -327,7 +327,7 @@ export interface FirecrackerOrchestratorDeps {
    */
   agentArgvOverride?: string[];
   /**
-   * Remote platform API URL (issue #819): the orchestrator runs inside
+   * Remote platform API URL: the orchestrator runs inside
    * the appstrate-runner daemon on a KVM host while the platform API
    * lives elsewhere (e.g. a Docker container on the same machine). Must
    * be `http(s)://<IPv4>[:port]` — guests have no DNS resolver, so a

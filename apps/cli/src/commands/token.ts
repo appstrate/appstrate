@@ -34,7 +34,7 @@ interface TokenOptions {
  * `io` is injected rather than written through the global streams: a test
  * that swapped `process.stdout` captured every other suite's writes too, so
  * "the plaintext never reaches stdout" was an assertion about a shared
- * buffer (issue #1180). `cli.ts` passes nothing and gets `DEFAULT_IO`.
+ * buffer. `cli.ts` passes nothing and gets `DEFAULT_IO`.
  */
 export async function tokenCommand(opts: TokenOptions, io: CommandIO = DEFAULT_IO): Promise<void> {
   const config = await readConfig();

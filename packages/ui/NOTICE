@@ -3,3 +3,7 @@ Copyright 2025-2026 Appstrate
 
 This product includes software developed at
 Appstrate (https://appstrate.dev).
+
+The Artifact component (src/components/artifact.tsx) is adapted from Vercel AI
+Elements (https://github.com/vercel/ai-elements), Copyright 2023 Vercel, Inc.,
+licensed under the Apache License, Version 2.0.

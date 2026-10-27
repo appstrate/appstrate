@@ -73,6 +73,9 @@ export function buildBaseSidecarEnv(params: BaseSidecarEnvParams): Record<string
   // same name, so a host the platform-side checks just exempted (internal model
   // endpoint, allowlisted remote MCP server) isn't re-blocked in-run by the
   // sidecar's own literal/fail-closed gates. Empty/unset ⇒ nothing exempted.
+  // Validated at boot by the process that runs this: `@appstrate/env` in the
+  // API, `runnerEnvSchema` in the Firecracker runner daemon. The sidecar
+  // re-validates with the same parser (`parseSidecarEnv`).
   // Raw process.env read, NOT getEnv(): this also runs inside the standalone
   // firecracker runner daemon, which does not carry the platform's required env
   // vars (BETTER_AUTH_SECRET, …), so getEnv()'s fail-fast validation would
@@ -122,7 +125,7 @@ export function applySpecToSidecarEnv(
       }
     }
   }
-  // Phase 1.4 — integrations the sidecar will spawn + multiplex onto
+  // Integrations the sidecar will spawn + multiplex onto
   // the agent's MCP surface. Each entry carries the bundle bytes +
   // resolved spawn env (with live OAuth tokens / API keys).
   if (spec.integrations && spec.integrations.length > 0) {

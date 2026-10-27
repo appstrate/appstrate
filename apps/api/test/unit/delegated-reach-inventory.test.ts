@@ -60,6 +60,10 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     reason: "signed connect page cookie; manifest display data only",
   },
   getInvitationInfo: { category: "public", reason: "invitation token in URL is the credential" },
+  getOAuthClientMetadataDocument: {
+    category: "public",
+    reason: "OAuth client metadata document an authorization server fetches, no credential",
+  },
   getOpenApiSpec: { category: "public", reason: "static instance spec, skipAuth" },
   getSwaggerUI: { category: "public", reason: "static Swagger UI shell, skipAuth" },
   integrationsOAuthCallback: {
@@ -70,7 +74,15 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     category: "public",
     reason: "server-side OAuth state minted under integrations:connect, tag-checked",
   },
+  integrationsOAuthCallbackForMetadataDocument: {
+    category: "public",
+    reason: "server-side OAuth state minted under integrations:connect, tag- and iss-checked",
+  },
   mcpProtectedResourceMetadata: { category: "public", reason: "RFC 9728 static metadata" },
+  mcpProtectedResourceMetadataInSpace: {
+    category: "public",
+    reason: "RFC 9728 static metadata (the org's document)",
+  },
   oauth2Introspect: { category: "public", reason: "RFC 7662, client credentials required" },
   oauth2Jwks: { category: "public", reason: "public signing keys" },
   oauth2Revoke: {
@@ -326,7 +338,8 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   },
   revokePackageShare: {
     category: "handler-guarded",
-    reason: "assertPackageShareAccess: <type>:share in home space",
+    reason:
+      "assertPlacementRemovalAccess: <type>:share in home space, or the type's deactivation permission in the target space",
   },
   rotateWebhookSecret: {
     category: "handler-guarded",
@@ -344,6 +357,11 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   streamRun: {
     category: "handler-guarded",
     reason: "validateSSEAuth: ceilinged canReadRuns + run ownership or read-all",
+  },
+  syncIntegrationFromServer: {
+    category: "handler-guarded",
+    reason:
+      "assertPackageMutationAccess: integrations:write in home space; credential-proxy:call-own when the draft declares auths",
   },
   testWebhook: {
     category: "handler-guarded",
@@ -383,6 +401,10 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
   getOrganization: {
     category: "self",
     reason: "bound org's own non-secret identity; members/invitations gated in-handler",
+  },
+  listOrgRoles: {
+    category: "self",
+    reason: "bound org's role matrix, the same in every org; no caller or tenant data",
   },
   getOrgSettings: {
     category: "self",

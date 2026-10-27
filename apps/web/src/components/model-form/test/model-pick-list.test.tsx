@@ -54,7 +54,6 @@ function list(options: Partial<Parameters<typeof ModelPickList>[0]> = {}): strin
       search=""
       onSearchChange={() => {}}
       isLoading={false}
-      loadingText="…"
       emptyText={settingsFr["models.form.modelSearchEmpty"]}
       {...options}
     />,
@@ -80,14 +79,6 @@ describe("ModelPickList", () => {
     expect(html).toContain('value="qwen"');
   });
 
-  it("says where each description came from, and stays silent when nothing did", () => {
-    const html = list();
-    expect(html).toContain(settingsFr["models.form.discoverSourceEndpoint"]);
-    expect(html).toContain(settingsFr["models.form.discoverSourceCatalog"]);
-    // One badge each, and none for the model neither source described.
-    expect(html.split(settingsFr["models.form.discoverSourceCatalog"]).length - 1).toBe(1);
-  });
-
   it("shows a context window only for the models that reported one", () => {
     const html = list();
     expect(html).toContain("33k");
@@ -109,6 +100,45 @@ describe("ModelPickList", () => {
   });
 });
 
+describe("ModelPickList, the default model's access", () => {
+  it("locks the box of the locked row and says why, and no other", () => {
+    const html = list({ selectedIds: [FROM_CATALOG.id], lockedId: FROM_CATALOG.id });
+    // The Radix box is a button, with a twin native input: both disabled, for that one row.
+    expect(html.split(' disabled=""').length - 1).toBe(2);
+    expect(list({ selectedIds: [FROM_CATALOG.id] })).not.toContain(' disabled=""');
+    expect(html).toContain(`title="${settingsFr["models.choice.defaultLocked"]}"`);
+    expect(list({ selectedIds: [FROM_CATALOG.id] })).not.toContain(
+      settingsFr["models.choice.defaultLocked"],
+    );
+  });
+});
+
+describe("ModelPickList, the default star of a key that needs reconnecting", () => {
+  const starred = (options: Partial<Parameters<typeof ModelPickList>[0]>) =>
+    list({
+      selectedIds: [FROM_ENDPOINT.id, FROM_CATALOG.id],
+      defaultId: FROM_ENDPOINT.id,
+      onDefaultChange: () => {},
+      ...options,
+    });
+
+  it("refuses the star to every other model, as the server would (model_needs_reconnection)", () => {
+    const html = starred({ defaultUnavailable: true });
+    const star = (pressed: boolean) =>
+      html.match(new RegExp(`<button[^>]*aria-pressed="${pressed}"[^>]*>`))![0];
+    expect(star(false)).toContain(' disabled=""');
+    expect(star(false)).toContain(`title="${settingsFr["credentials.unavailableHint"]}"`);
+    // The current default keeps its star.
+    expect(star(true)).not.toContain(' disabled=""');
+  });
+
+  it("offers the star on a healthy key", () => {
+    const html = starred({});
+    expect(html).not.toContain(' disabled=""');
+    expect(html).not.toContain(settingsFr["credentials.unavailableHint"]);
+  });
+});
+
 describe("ModelPickList — a catalog, in two groups", () => {
   const CURATED = pickRow({ id: "claude-opus-5", origin: "catalog", featured: true });
   const REST = pickRow({ id: "claude-3-opus-20240229", origin: "catalog" });
@@ -120,7 +150,6 @@ describe("ModelPickList — a catalog, in two groups", () => {
       search=""
       onSearchChange={() => {}}
       isLoading={false}
-      loadingText="…"
       emptyText="—"
       grouped
     />,
@@ -145,8 +174,10 @@ describe("ModelPickList — a catalog, in two groups", () => {
 });
 
 describe("ModelPickList — nothing to show", () => {
-  it("states what it is waiting for rather than showing an empty frame", () => {
-    expect(list({ rows: [], isLoading: true, loadingText: "Détection…" })).toContain("Détection…");
+  it("draws placeholder rows while it waits rather than an empty frame", () => {
+    const html = list({ rows: [], isLoading: true });
+    expect(html).toContain('role="status"');
+    expect(html).toContain("animate-pulse");
   });
 
   it("states why the list is empty once the answer is in", () => {

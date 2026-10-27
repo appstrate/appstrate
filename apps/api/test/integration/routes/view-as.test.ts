@@ -858,21 +858,29 @@ describe("view as role", () => {
       expect(response.headers.get(ACTIVE)).toBeNull();
     });
 
-    it("refuses the ORGANIZATION map to a `member`, and serves it to an owner", async () => {
-      // `GET /api/library` spans every space of the organization, so it is
-      // owner/admin-only — a PAGE gate, not an authority over any package on
-      // it. What this pins is that the org role survives the hop: the same
-      // identity, the same scope, two different verdicts.
-      await seedAgent({ id: "@view-as/mapped", orgId: owner.orgId });
-      const map = async (orgRole: string) =>
-        app.request("/api/library", { headers: loopbackHeaders(orgRole) });
+    it("grades the ORGANIZATION map by the org role carried over the hop", async () => {
+      // `GET /api/library` lists the spaces whose library the caller reads, so
+      // a closed space shows for an owner and not for a `member`. What this
+      // pins is that the org role survives the hop: the same identity, the same
+      // scope, two different maps.
+      const closed = await space("Closed map", "closed");
+      await seedAgent({ id: "@view-as/mapped", orgId: owner.orgId, homeSpaceId: closed.id });
+      const map = async (orgRole: string) => {
+        const res = await app.request("/api/library", { headers: loopbackHeaders(orgRole) });
+        expect(res.status).toBe(200);
+        return (await res.json()) as {
+          spaces: Array<{ id: string }>;
+          packages: { agent: Array<{ id: string }> };
+        };
+      };
 
       const served = await map("owner");
-      expect(served.status).toBe(200);
-      const body = (await served.json()) as { packages: { agent: Array<{ id: string }> } };
-      expect(body.packages.agent.map((pkg) => pkg.id)).toContain("@view-as/mapped");
+      expect(served.spaces.map((s) => s.id)).toContain(closed.id);
+      expect(served.packages.agent.map((pkg) => pkg.id)).toContain("@view-as/mapped");
 
-      expect((await map("member")).status).toBe(403);
+      const graded = await map("member");
+      expect(graded.spaces.map((s) => s.id)).not.toContain(closed.id);
+      expect(graded.packages.agent.map((pkg) => pkg.id)).not.toContain("@view-as/mapped");
     });
   });
 
@@ -888,9 +896,8 @@ describe("view as role", () => {
       const envelope = await expectJson<{
         result?: { isError?: boolean; content?: Array<{ text: string }> };
       }>(
-        await request(`/api/mcp/o/${owner.orgId}`, {
+        await request(`/api/mcp/o/${owner.orgId}/s/${owner.defaultSpaceId}`, {
           view,
-          space: owner.defaultSpaceId,
           headers: { Accept: "application/json, text/event-stream" },
           body: {
             jsonrpc: "2.0",
@@ -929,9 +936,8 @@ describe("view as role", () => {
     // the tools it is shown; `operator` — same session, same endpoint — is.
     const toolNames = async (view?: string): Promise<string[]> => {
       const envelope = await expectJson<{ result?: { tools?: Array<{ name: string }> } }>(
-        await request(`/api/mcp/o/${owner.orgId}`, {
+        await request(`/api/mcp/o/${owner.orgId}/s/${owner.defaultSpaceId}`, {
           view,
-          space: owner.defaultSpaceId,
           headers: { Accept: "application/json, text/event-stream" },
           body: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
         }),
@@ -948,16 +954,15 @@ describe("view as role", () => {
   });
 
   it("resolves the persona in the space the REQUEST names, not the one the persona names", async () => {
-    // Two spaces, one persona. `X-Space-Id` is what the MCP endpoint enters, so
+    // Two spaces, one persona. The URL's space is what the MCP endpoint enters, so
     // a persona whose space half points elsewhere previews nothing here — and
     // the advertised surface must say so exactly as the REST route does.
     const here = await space("Here", "closed");
     const elsewhere = await space("Elsewhere", "closed");
 
     const tools = (view: string) =>
-      request(`/api/mcp/o/${owner.orgId}`, {
+      request(`/api/mcp/o/${owner.orgId}/s/${here.id}`, {
         view,
-        space: here.id,
         headers: { Accept: "application/json, text/event-stream" },
         body: { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} },
       });

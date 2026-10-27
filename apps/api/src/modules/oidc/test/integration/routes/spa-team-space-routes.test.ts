@@ -32,7 +32,7 @@ const CREATE_IN_PERSONAL_SPACE: Record<
   string,
   (ctx: TestContext, personalId: string) => Response | Promise<Response>
 > = {
-  "/org-settings/space/oauth": (ctx, personalId) =>
+  "/workspace-settings/oauth": (ctx, personalId) =>
     app.request("/api/oauth/clients", {
       method: "POST",
       headers: {

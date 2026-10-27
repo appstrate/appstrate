@@ -810,6 +810,7 @@ describe("OIDC auth strategy — end-to-end via getTestApp", () => {
         authKey: "primary",
         accountId: "acct-oidc",
         label: "Connexion 1",
+        orgId,
         spaceId,
         userId: authUserId,
         credentialsEncrypted: "x",

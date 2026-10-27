@@ -2,7 +2,7 @@
 
 /**
  * `POST /api/auth/bootstrap/redeem` — claim ownership of a closed-by-default
- * unattended install (issue #344 Layer 2b).
+ * unattended install.
  *
  * Flow:
  *   1. Rate-limit per source IP (5/min) — closes the brute-force window

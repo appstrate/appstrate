@@ -5,11 +5,14 @@ import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Bell, CheckCheck, Circle } from "lucide-react";
 import { cn } from "@appstrate/ui/cn";
-import { Badge } from "./status-badge";
+import { RunStatusBadge } from "./status-badge";
+import { CountBadge } from "./count-badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Sheet, SheetContent, SheetTrigger } from "@appstrate/ui/components/sheet";
 import { Separator } from "@appstrate/ui/components/separator";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { EmptyState, ErrorState } from "./page-states";
 import {
   useUnreadCount,
   useMarkRead,
@@ -18,17 +21,14 @@ import {
 } from "../hooks/use-notifications";
 import { useAgents } from "../hooks/use-packages";
 import { useCanReach } from "../hooks/use-can-reach";
-import type { RoutePath } from "../lib/route-access";
 import { useIsMobile } from "@appstrate/ui/use-mobile";
 import { formatDateField } from "../lib/format-date";
+import { catalogueHref } from "../lib/catalogue-link";
 import type { paths } from "../api/client";
 
 /** One notification as returned by `GET /api/notifications`. */
 type NotificationItem =
   paths["/api/notifications"]["get"]["responses"]["200"]["content"]["application/json"]["data"][number];
-
-const ITEM_CLASS =
-  "hover:bg-muted/50 group flex w-full gap-3 px-4 py-3 text-left transition-colors";
 
 /**
  * Where a notification leads, or `null` when that page is closed to the caller:
@@ -37,10 +37,14 @@ const ITEM_CLASS =
 function notificationTarget(
   notification: NotificationItem,
   packageId: string | null,
-  canReach: (path: RoutePath) => boolean,
+  canReach: (target: string) => boolean,
 ): string | null {
   if (notification.type === "package_shared") {
-    return canReach("/space/packages") ? "/space/packages" : null;
+    // One share, one decision: open THAT package's sheet, not a list to search.
+    const share = notification.payload;
+    if (!share) return null;
+    const href = catalogueHref(share.package_type, { packageId: share.packageId });
+    return canReach(href) ? href : null;
   }
   if (packageId && notification.runId) {
     return canReach("/agents/:scope/:name/runs/:runId")
@@ -69,14 +73,23 @@ export function NotificationContent({
   onItemClick,
   onClose,
   markAllRead,
+  loading = false,
+  failed = false,
+  agentsPending = false,
 }: {
   unread: number;
   notifications: NotificationItem[];
   agentNameMap: Map<string, string>;
-  canReach: (path: RoutePath) => boolean;
+  canReach: (target: string) => boolean;
   onItemClick: (notificationId: string) => void;
   onClose: () => void;
   markAllRead: () => void;
+  /** The list is still being read: the badge may already say N. */
+  loading?: boolean;
+  /** The list could not be read. */
+  failed?: boolean;
+  /** Agent names are still being read: a row shows a bar, not the raw package id. */
+  agentsPending?: boolean;
 }) {
   const { t } = useTranslation(["common", "agents"]);
 
@@ -85,12 +98,8 @@ export function NotificationContent({
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3">
         <div className="flex items-center gap-2">
-          <h4 className="text-sm font-semibold">{t("notifications.title")}</h4>
-          {unread > 0 && (
-            <span className="bg-destructive text-destructive-foreground flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-xs font-medium">
-              {unread}
-            </span>
-          )}
+          <h4 className="text-sm font-semibold">{t("notifications.ariaLabel")}</h4>
+          <CountBadge count={unread} label={t("notifications.ariaLabel")} tone="spark" />
         </div>
         {unread > 0 && (
           <Button
@@ -99,7 +108,7 @@ export function NotificationContent({
             className="text-muted-foreground hover:text-foreground h-auto px-2 py-1 text-xs"
             onClick={markAllRead}
           >
-            <CheckCheck size={14} className="mr-1.5" />
+            <CheckCheck className="mr-1.5" />
             {t("notifications.markAllRead")}
           </Button>
         )}
@@ -107,19 +116,27 @@ export function NotificationContent({
       <Separator />
 
       {/* Notification list */}
-      {notifications.length === 0 ? (
-        <div className="flex flex-col items-center justify-center px-4 py-10">
-          <Bell size={32} className="text-muted-foreground/30 mb-3" />
-          <p className="text-muted-foreground text-sm">{t("notifications.empty")}</p>
+      {loading ? (
+        <div className="divide-y" aria-busy="true">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="flex gap-3 px-4 py-3">
+              <Skeleton className="mt-1.5 size-2 shrink-0 rounded-full" />
+              <div className="flex flex-1 flex-col gap-2">
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-3 w-24" />
+              </div>
+            </div>
+          ))}
         </div>
+      ) : failed ? (
+        <ErrorState compact />
+      ) : notifications.length === 0 ? (
+        <EmptyState compact icon={Bell} message={t("notifications.empty")} />
       ) : (
         <div className="max-h-[60vh] overflow-y-auto sm:max-h-96">
           {notifications.map((notification) => {
             const packageId = payloadString(notification.payload, "packageId");
-            // A SHARE names the sharer and the package and has no run behind
-            // it, so it carries no status to badge — reading every row as a
-            // finished run titled it "Agent supprimé", the fallback for a run
-            // whose agent is gone.
+            // A SHARE has no run behind it, so no status: read as a run it was titled "Agent supprimé".
             const shared = notification.type === "package_shared";
             const status = shared ? null : payloadString(notification.payload, "status");
             const displayName = shared
@@ -136,8 +153,12 @@ export function NotificationContent({
                 <Circle size={8} className="fill-destructive text-destructive mt-1.5 shrink-0" />
                 <div className="min-w-0 flex-1">
                   <div className="mb-0.5 flex items-center justify-between gap-2">
-                    <span className="truncate text-sm font-medium">{displayName}</span>
-                    {status && <Badge status={status} />}
+                    {agentsPending && packageId && !shared ? (
+                      <Skeleton className="h-4 w-32" />
+                    ) : (
+                      <span className="truncate text-sm font-medium">{displayName}</span>
+                    )}
+                    {status && <RunStatusBadge status={status} />}
                   </div>
                   <p className="text-muted-foreground text-xs">
                     {formatDateField(notification.createdAt)}
@@ -145,25 +166,17 @@ export function NotificationContent({
                 </div>
               </>
             );
+            const row = {
+              onClick: () => onItemClick(notification.id),
+              className:
+                "hover:bg-muted/50 flex w-full gap-3 px-4 py-3 text-left transition-colors",
+              children: body,
+            };
             // Nowhere to go: clicking still marks it read.
             return target ? (
-              <Link
-                key={notification.id}
-                to={target}
-                onClick={() => onItemClick(notification.id)}
-                className={ITEM_CLASS}
-              >
-                {body}
-              </Link>
+              <Link key={notification.id} to={target} {...row} />
             ) : (
-              <button
-                key={notification.id}
-                type="button"
-                onClick={() => onItemClick(notification.id)}
-                className={ITEM_CLASS}
-              >
-                {body}
-              </button>
+              <button key={notification.id} type="button" {...row} />
             );
           })}
         </div>
@@ -190,8 +203,14 @@ export function NotificationContent({
 export function NotificationBell() {
   const { t } = useTranslation(["common", "agents"]);
   const { data: count } = useUnreadCount();
-  const { data: agents } = useAgents();
-  const { data: notifications } = useNotifications({ unread: true, limit: 50 });
+  // `isLoading`, not `isPending`: the read is off for a role that sees no agent,
+  // and a disabled query stays pending forever.
+  const { data: agents, isLoading: agentsPending } = useAgents();
+  const {
+    data: notifications,
+    isPending: notificationsPending,
+    isError: notificationsFailed,
+  } = useNotifications({ unread: true, limit: 50 });
   const markRead = useMarkRead();
   const markAllRead = useMarkAllRead();
   const [open, setOpen] = useState(false);
@@ -222,11 +241,12 @@ export function NotificationBell() {
       aria-label={t("notifications.ariaLabel")}
     >
       <Bell size={18} />
-      {unread > 0 && (
-        <span className="bg-destructive text-destructive-foreground absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.6rem] leading-none font-medium">
-          {unread > 99 ? "99+" : unread}
-        </span>
-      )}
+      <CountBadge
+        count={unread}
+        label={t("notifications.ariaLabel")}
+        tone="spark"
+        className="absolute -top-1 -right-1"
+      />
     </button>
   );
 
@@ -238,6 +258,9 @@ export function NotificationBell() {
     onItemClick: handleClick,
     onClose: () => setOpen(false),
     markAllRead: () => markAllRead.mutate({}),
+    loading: notificationsPending,
+    failed: notificationsFailed && notifications === undefined,
+    agentsPending,
   };
 
   if (isMobile) {

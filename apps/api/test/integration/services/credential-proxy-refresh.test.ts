@@ -11,15 +11,11 @@
  * `authRefreshed: true` escape-hatch (cannot be replayed server-side).
  */
 
-import { describe, it, expect, beforeEach, afterEach, afterAll } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach, afterAll, spyOn } from "bun:test";
+import { logger } from "../../../src/lib/logger.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import {
-  seedPackage,
-  seedPackageShare,
-  seedRun,
-  seedPublishedVersion,
-} from "../../helpers/seed.ts";
+import { seedPackage, seedRun, seedPublishedVersion } from "../../helpers/seed.ts";
 import { proxyCall, ProxyCallError } from "../../../src/services/credential-proxy/core.ts";
 import { runBoundSelection } from "../../../src/services/credential-proxy/integration-resolver.ts";
 import { LocalCookieJarStore } from "../../../src/infra/cookie-jar/local-cookie-jar.ts";
@@ -89,8 +85,8 @@ async function setup(
   // The OFFER is the PLACEMENT: a `space_packages` row only speaks for a space
   // the package is placed in, so switching an unplaced integration on leaves it
   // inactive.
-  await seedPackageShare(ctx.defaultSpaceId, packageId);
   await db.insert(spacePackages).values({
+    enabled: true,
     spaceId: ctx.defaultSpaceId,
     packageId,
   });
@@ -112,11 +108,11 @@ async function setup(
     authKey: "google",
     accountId: "acct-1",
     label: "acct-1",
+    orgId: ctx.orgId,
     spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: fields }),
     scopesGranted: ["openid", "email"],
-    sharedWithOrg: false,
     // oauth2 connections always pin their minting client by id; here the org's
     // custom per-space client registered just above.
     clientRef: customClient!.id,
@@ -147,8 +143,8 @@ async function setupSystemPinned(
   // The OFFER is the PLACEMENT: a `space_packages` row only speaks for a space
   // the package is placed in, so switching an unplaced integration on leaves it
   // inactive.
-  await seedPackageShare(ctx.defaultSpaceId, packageId);
   await db.insert(spacePackages).values({
+    enabled: true,
     spaceId: ctx.defaultSpaceId,
     packageId,
   });
@@ -157,11 +153,11 @@ async function setupSystemPinned(
     authKey: "google",
     accountId: "acct-1",
     label: "acct-1",
+    orgId: ctx.orgId,
     spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: fields }),
     scopesGranted: ["openid", "email"],
-    sharedWithOrg: false,
     clientRef: systemId,
     expiresAt: new Date(Date.now() - 60_000),
   });
@@ -222,6 +218,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
+      reach: "own",
       integrationId: packageId,
       method: "GET",
       target: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
@@ -240,6 +237,76 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
     const refreshBody = new URLSearchParams(tokenReqs[0]!.body);
     expect(refreshBody.get("grant_type")).toBe("refresh_token");
     expect(refreshBody.get("refresh_token")).toBe("rt_valid");
+  });
+
+  /** A 401 then a 200, recording what each attempt carried in `X-Tok`, `Cookie` and its body. */
+  function replayWire() {
+    const sent: Array<{ tok: string | null; cookie: string | null; body: string }> = [];
+    const fakeFetch = (async (url: string, init: RequestInit) => {
+      if (String(url).startsWith(mockServer.url)) return fetch(url, init);
+      const headers = new Headers(init.headers);
+      sent.push({
+        tok: headers.get("x-tok"),
+        cookie: headers.get("cookie"),
+        body: init.body == null ? "" : await new Response(init.body).text(),
+      });
+      return new Response("{}", { status: sent.length === 1 ? 401 : 200 });
+    }) as unknown as typeof fetch;
+    return { sent, fakeFetch };
+  }
+
+  it("renders the caller's templates again from the refreshed credentials on the replay", async () => {
+    const packageId = "@cprefreshorg/gmail";
+    await setup(ctx, packageId, { access_token: "stale_token", refresh_token: "rt_valid" });
+    mockServer.setTokenResponse({ access_token: 'fresh"token', token_type: "Bearer" });
+    const { sent, fakeFetch } = replayWire();
+
+    const res = await proxyCall({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      reach: "own",
+      integrationId: packageId,
+      method: "POST",
+      target: "https://gmail.googleapis.com/gmail/v1/x",
+      headers: { "X-Tok": "{{access_token}}", "Content-Type": "application/json" },
+      body: '{"t":"{{access_token}}"}',
+      substituteBody: true,
+      fetch: fakeFetch,
+    });
+
+    expect(res.status).toBe(200);
+    expect(sent).toEqual([
+      { tok: "stale_token", cookie: null, body: '{"t":"stale_token"}' },
+      { tok: 'fresh"token', cookie: null, body: '{"t":"fresh\\"token"}' },
+    ]);
+  });
+
+  it("does not replay when the refreshed credentials no longer fit the caller's templates", async () => {
+    const packageId = "@cprefreshorg/gmail";
+    await setup(ctx, packageId, { access_token: "stale_token", refresh_token: "rt_valid" });
+    mockServer.setTokenResponse({ access_token: "fresh token", token_type: "Bearer" });
+    const { sent, fakeFetch } = replayWire();
+    const warn = spyOn(logger, "warn");
+
+    const res = await proxyCall({
+      orgId: ctx.orgId,
+      spaceId: ctx.defaultSpaceId,
+      actor: { type: "user", id: ctx.user.id },
+      reach: "own",
+      integrationId: packageId,
+      method: "GET",
+      target: "https://gmail.googleapis.com/gmail/v1/x",
+      headers: { Cookie: "sid={{access_token}}" },
+      fetch: fakeFetch,
+    });
+
+    expect(res.status).toBe(401);
+    expect(sent).toEqual([{ tok: null, cookie: "sid=stale_token", body: "" }]);
+    const logged = JSON.stringify(warn.mock.calls);
+    expect(logged).toContain("{{access_token}}");
+    expect(logged).not.toContain("fresh token");
+    warn.mockRestore();
   });
 
   it("refreshes the connection the call used, even when a fresh selection would now be ambiguous", async () => {
@@ -263,13 +330,13 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
           authKey: "google",
           accountId: "acct-2",
           label: "acct-2",
+          orgId: ctx.orgId,
           spaceId: ctx.defaultSpaceId,
           userId: ctx.user.id,
           credentialsEncrypted: encryptCredentialEnvelope({
             outputs: { access_token: "other_token", refresh_token: "rt_other" },
           }),
           scopesGranted: ["openid", "email"],
-          sharedWithOrg: false,
         });
         return new Response("expired", { status: 401 });
       }
@@ -280,6 +347,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
+      reach: "own",
       integrationId: packageId,
       method: "GET",
       target: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
@@ -323,6 +391,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         actor: { type: "user", id: ctx.user.id },
+        reach: "own",
         integrationId: packageId,
         method: "GET",
         target: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
@@ -361,6 +430,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
+      reach: "own",
       integrationId: packageId,
       method: "GET",
       target: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
@@ -391,6 +461,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         actor: { type: "user", id: ctx.user.id },
+        reach: "own",
         integrationId: packageId,
         method: body ? "POST" : "GET",
         target: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
@@ -434,6 +505,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
+      reach: "own",
       integrationId: packageId,
       method: "GET",
       target: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
@@ -477,6 +549,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
+      reach: "own",
       integrationId: packageId,
       method: "POST",
       target: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
@@ -529,6 +602,7 @@ describe("proxyCall — 401 refresh-retry on buffered bodies (integration-backed
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
+      reach: "own",
       integrationId: packageId,
       method: "GET",
       target: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
@@ -668,8 +742,9 @@ describe("proxyCall — an api_key connection's rejection streak", () => {
       }),
     });
     await seedPublishedVersion(id, "1.0.0");
-    await seedPackageShare(ctx.defaultSpaceId, id);
-    await db.insert(spacePackages).values({ spaceId: ctx.defaultSpaceId, packageId: id });
+    await db
+      .insert(spacePackages)
+      .values({ enabled: true, spaceId: ctx.defaultSpaceId, packageId: id });
     const [conn] = await db
       .insert(integrationConnections)
       .values({
@@ -677,6 +752,7 @@ describe("proxyCall — an api_key connection's rejection streak", () => {
         authKey: "key",
         accountId: "acct-1",
         label: "acct-1",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
@@ -697,6 +773,7 @@ describe("proxyCall — an api_key connection's rejection streak", () => {
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
+      reach: "own",
       integrationId,
       method: "GET",
       target: "https://api.example.com/v1/items",
@@ -732,6 +809,7 @@ describe("proxyCall — an api_key connection's rejection streak", () => {
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
+      reach: "own",
       integrationId: packageId,
       method: "GET",
       target: "https://api.example.com/v1/items",

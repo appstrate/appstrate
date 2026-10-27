@@ -1,21 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Tests for prepareBundleForPi — materialisation of the `.pi/` layout
- * from a {@link Bundle} and dynamic-loading of tool entrypoints.
+ * Tests for prepareBundleForPi — materialisation of skill and integration
+ * members into the `.pi/` layout from a {@link Bundle}.
  *
  * Strategy: build synthetic spec bundles in-memory, point the helper at
- * a fresh per-test tempdir, and assert FS side-effects + returned
- * factories via a captured registerTool call. Because Bun's dynamic
- * import() is path-based, each test writes out a real tool entrypoint
- * and imports it for real — no module mocking.
+ * a fresh per-test tempdir, and assert FS side-effects.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
-import { prepareBundleForPi } from "../src/bundle-extensions.ts";
+import { bundleMemberDir, prepareBundleForPi } from "../src/bundle-extensions.ts";
 import { makeBundlePackage, makeTestBundle } from "./helpers.ts";
 
 let workspace: string;
@@ -72,7 +69,7 @@ describe("prepareBundleForPi — skills/ install", () => {
     // built here: they are transport-neutral MCP defs
     // (`@appstrate/core/runtime-tool-defs`) served by the sidecar or
     // registered by the CLI via `buildRuntimeToolExtensions`.
-    // `prepareBundleForPi` is skills-only and returns nothing — even a
+    // `prepareBundleForPi` only writes members and returns nothing — even a
     // `runtimeTools` selection produces no side effect here.
     const root = makeBundlePackage(
       "@acme/agent",
@@ -84,6 +81,163 @@ describe("prepareBundleForPi — skills/ install", () => {
     const bundle = makeTestBundle(root);
     const result = await prepareBundleForPi(bundle, { workspaceDir: workspace });
     expect(result).toBeUndefined();
+  });
+});
+
+const exists = (p: string) =>
+  fs
+    .stat(p)
+    .then(() => true)
+    .catch(() => false);
+
+/** `makeBundlePackage` types skills/agents; the manifest override makes it an integration. */
+function makeIntegration(name: `@${string}/${string}`, files: Record<string, string>) {
+  return makeBundlePackage(name, "1.0.0", "skill", files, { type: "integration" });
+}
+
+describe("prepareBundleForPi — integrations/ install", () => {
+  it("copies every integration file under .pi/integrations/<packageId>/, never .pi/skills", async () => {
+    const root = makeBundlePackage("@acme/agent", "1.0.0", "agent");
+    const integration = makeIntegration("@acme/gmail", {
+      "INTEGRATION.md": "# gmail",
+      "docs/labels.md": "labels",
+      RECORD: "record",
+    });
+    await prepareBundleForPi(makeTestBundle(root, [integration]), { workspaceDir: workspace });
+
+    const dir = path.join(workspace, ".pi", "integrations", "@acme", "gmail");
+    expect(await fs.readFile(path.join(dir, "INTEGRATION.md"), "utf8")).toBe("# gmail");
+    expect(await fs.readFile(path.join(dir, "docs", "labels.md"), "utf8")).toBe("labels");
+    expect(await exists(path.join(dir, "manifest.json"))).toBe(false);
+    expect(await exists(path.join(dir, "RECORD"))).toBe(false);
+    expect(await exists(path.join(workspace, ".pi", "skills"))).toBe(false);
+  });
+
+  it("creates the member directory of an integration whose only file is its manifest", async () => {
+    // The entrypoint's post-check reports a member whose `bundleMemberDir` is
+    // absent as not materialised; a manifest-only member still gets its dir.
+    const root = makeBundlePackage("@acme/agent", "1.0.0", "agent");
+    const integration = makeIntegration("@acme/bare", {});
+    await prepareBundleForPi(makeTestBundle(root, [integration]), { workspaceDir: workspace });
+
+    const dir = bundleMemberDir(workspace, integration.identity, integration);
+    expect(dir).toBe(path.join(workspace, ".pi", "integrations", "@acme", "bare"));
+    expect(await exists(dir!)).toBe(true);
+    expect(await fs.readdir(dir!)).toEqual([]);
+  });
+
+  it("writes the integration docs but none of the connection data its manifest carries", async () => {
+    const token = "s3cr3t-path-token-7f2c";
+    const root = makeBundlePackage("@acme/agent", "1.0.0", "agent");
+    const integration = makeBundlePackage(
+      "@acme/remote",
+      "1.0.0",
+      "skill",
+      { "INTEGRATION.md": "# remote", "docs/usage.md": "usage", RECORD: "record" },
+      {
+        type: "integration",
+        source: {
+          kind: "remote",
+          remote: {
+            url: `https://mcp.example.com/${token}/mcp`,
+            headers: { "X-Api-Key": `literal-${token}` },
+          },
+        },
+        auths: {
+          key: { type: "api_key", authorized_uris: [`https://api.example.com/${token}/*`] },
+        },
+      },
+    );
+    const skill = makeBundlePackage("@acme/writing", "1.0.0", "skill", { "SKILL.md": "# w" });
+    await prepareBundleForPi(makeTestBundle(root, [integration, skill]), {
+      workspaceDir: workspace,
+    });
+
+    const integrationDir = path.join(workspace, ".pi", "integrations", "@acme", "remote");
+    expect(await fs.readFile(path.join(integrationDir, "INTEGRATION.md"), "utf8")).toBe("# remote");
+    expect(await fs.readFile(path.join(integrationDir, "docs", "usage.md"), "utf8")).toBe("usage");
+    expect(await exists(path.join(integrationDir, "manifest.json"))).toBe(false);
+    expect(await exists(path.join(integrationDir, "RECORD"))).toBe(false);
+
+    const skillDir = path.join(workspace, ".pi", "skills", "@acme", "writing");
+    expect(await fs.readFile(path.join(skillDir, "SKILL.md"), "utf8")).toBe("# w");
+    expect(await exists(path.join(skillDir, "manifest.json"))).toBe(false);
+
+    // No file anywhere under `.pi/` carries the manifest's connection data.
+    const written = (await fs.readdir(path.join(workspace, ".pi"), { recursive: true })).map(
+      (relative) => path.join(workspace, ".pi", relative),
+    );
+    for (const file of written) {
+      if (!(await fs.stat(file)).isFile()) continue;
+      expect(await fs.readFile(file, "utf8")).not.toContain(token);
+    }
+    expect(written.some((file) => file.endsWith("INTEGRATION.md"))).toBe(true);
+  });
+
+  it("writes no file of an integration's server/ subtree, and keeps a skill's", async () => {
+    const root = makeBundlePackage("@acme/agent", "1.0.0", "agent");
+    const integration = makeIntegration("@acme/local", {
+      "INTEGRATION.md": "# local",
+      "server/manifest.json": "{}",
+      "server/index.js": "console.log(1)",
+      "servers.md": "not the server dir",
+    });
+    const skill = makeBundlePackage("@acme/writing", "1.0.0", "skill", {
+      "SKILL.md": "# w",
+      "server/notes.md": "skill notes",
+    });
+    await prepareBundleForPi(makeTestBundle(root, [integration, skill]), {
+      workspaceDir: workspace,
+    });
+
+    const dir = path.join(workspace, ".pi", "integrations", "@acme", "local");
+    expect(await fs.readFile(path.join(dir, "INTEGRATION.md"), "utf8")).toBe("# local");
+    expect(await fs.readFile(path.join(dir, "servers.md"), "utf8")).toBe("not the server dir");
+    expect(await exists(path.join(dir, "server"))).toBe(false);
+    expect(
+      await fs.readFile(
+        path.join(workspace, ".pi", "skills", "@acme", "writing", "server", "notes.md"),
+        "utf8",
+      ),
+    ).toBe("skill notes");
+  });
+
+  it("keeps skills and integrations in their own trees in a mixed bundle", async () => {
+    const root = makeBundlePackage("@acme/agent", "1.0.0", "agent");
+    const skill = makeBundlePackage("@acme/writing", "1.0.0", "skill", { "SKILL.md": "# w" });
+    const integration = makeIntegration("@acme/gmail", { "INTEGRATION.md": "# g" });
+    await prepareBundleForPi(makeTestBundle(root, [skill, integration]), {
+      workspaceDir: workspace,
+    });
+
+    expect(
+      await exists(path.join(workspace, ".pi", "skills", "@acme", "writing", "SKILL.md")),
+    ).toBe(true);
+    expect(await exists(path.join(workspace, ".pi", "skills", "@acme", "gmail"))).toBe(false);
+    expect(
+      await exists(path.join(workspace, ".pi", "integrations", "@acme", "gmail", "INTEGRATION.md")),
+    ).toBe(true);
+    expect(await exists(path.join(workspace, ".pi", "integrations", "@acme", "writing"))).toBe(
+      false,
+    );
+  });
+});
+
+describe("bundleMemberDir", () => {
+  it("maps skill and integration members, and nothing else", () => {
+    const skill = makeBundlePackage("@acme/s", "1.0.0", "skill");
+    const integration = makeIntegration("@acme/i", {});
+    const agent = makeBundlePackage("@acme/a", "1.0.0", "agent");
+    const inherited = makeBundlePackage("@acme/c", "1.0.0", "skill", {}, { type: "constructor" });
+
+    expect(bundleMemberDir("/ws", skill.identity, skill)).toBe(
+      path.join("/ws", ".pi", "skills", "@acme", "s"),
+    );
+    expect(bundleMemberDir("/ws", integration.identity, integration)).toBe(
+      path.join("/ws", ".pi", "integrations", "@acme", "i"),
+    );
+    expect(bundleMemberDir("/ws", agent.identity, agent)).toBeNull();
+    expect(bundleMemberDir("/ws", inherited.identity, inherited)).toBeNull();
   });
 });
 

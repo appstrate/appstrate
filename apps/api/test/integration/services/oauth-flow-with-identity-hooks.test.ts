@@ -70,6 +70,7 @@ describe("OAuth flow — extractTokenIdentity + requiredIdentityClaims contract"
     const result = await importOAuthModelProviderConnection({
       orgId,
       userId,
+      ownerUserId: userId,
       providerId: TEST_OAUTH_HOOKS_PROVIDER_ID,
       label: "Test subscription",
       accessToken,
@@ -105,6 +106,7 @@ describe("OAuth flow — extractTokenIdentity + requiredIdentityClaims contract"
       importOAuthModelProviderConnection({
         orgId,
         userId,
+        ownerUserId: userId,
         providerId: TEST_OAUTH_HOOKS_PROVIDER_ID,
         label: "Test",
         accessToken: tokenWithoutAccountId,
@@ -121,6 +123,7 @@ describe("OAuth flow — extractTokenIdentity + requiredIdentityClaims contract"
     const imported = await importOAuthModelProviderConnection({
       orgId,
       userId,
+      ownerUserId: userId,
       providerId: TEST_OAUTH_HOOKS_PROVIDER_ID,
       label: "Test subscription",
       accessToken,
@@ -129,7 +132,14 @@ describe("OAuth flow — extractTokenIdentity + requiredIdentityClaims contract"
       email: "user@example.com",
     });
 
-    const list = await listOrgModelProviderCredentials(orgId);
+    const list = await listOrgModelProviderCredentials({
+      orgId,
+      userId,
+      readsOrg: true,
+      writesOrg: true,
+      deletesOrg: true,
+      connects: true,
+    });
     const oauth = list.find((k) => k.id === imported.credentialId);
     expect(oauth).toBeDefined();
     expect(oauth!.source).toBe("custom");
@@ -137,6 +147,9 @@ describe("OAuth flow — extractTokenIdentity + requiredIdentityClaims contract"
     expect(oauth!.providerId).toBe(TEST_OAUTH_HOOKS_PROVIDER_ID);
     expect(oauth!.oauth_email).toBe("user@example.com");
     expect(oauth!.needs_reconnection).toBe(false);
+    // The import writes the owner it was given.
+    expect(oauth!.owner_type).toBe("user");
+    expect(oauth!.owner_id).toBe(userId);
   });
 
   it("loadInferenceCredentials returns access token + providerId + accountId + apiShape", async () => {
@@ -147,6 +160,7 @@ describe("OAuth flow — extractTokenIdentity + requiredIdentityClaims contract"
     const imported = await importOAuthModelProviderConnection({
       orgId,
       userId,
+      ownerUserId: userId,
       providerId: TEST_OAUTH_HOOKS_PROVIDER_ID,
       label: "Test subscription",
       accessToken,

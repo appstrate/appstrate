@@ -13,8 +13,8 @@
  *
  *   PUT    /api/integrations/:packageId/pins/:agentPackageId
  *   DELETE /api/integrations/:packageId/pins/:agentPackageId
- *          Admin org-level pins (sharedWithOrg-required, layer 1 of the
- *          resolver cascade). Gated on `integrations:configure`.
+ *          Admin pins (shared-into-the-space required, the floor the
+ *          resolver binds). Gated on `integrations:configure`.
  *
  *   GET    /api/integrations/:packageId/pins
  *          List all admin pins for an integration.
@@ -22,7 +22,7 @@
  *   GET    /api/integrations/:packageId/consuming-agents
  *          Drives the "pin a new agent" picker.
  *
- * Service-layer behaviour (validation rules, sharedWithOrg enforcement,
+ * Service-layer behaviour (validation rules, share enforcement,
  * cascade resolution semantics) is covered by
  * `services/integration-pins-service.test.ts` and
  * `unit/services/integration-connection-resolver.test.ts`. This file pins
@@ -42,13 +42,19 @@ import {
 import { seedAgent, seedPackage, seedSpaceMember, seedSpaceRole } from "../../helpers/seed.ts";
 import { activatePackage, deactivatePackage } from "../../../src/services/space-packages.ts";
 import { asc, eq } from "drizzle-orm";
-import { auditEvents, integrationConnections, organizationMembers } from "@appstrate/db/schema";
+import {
+  auditEvents,
+  integrationConnections,
+  integrationPins,
+  organizationMembers,
+} from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
 } from "../../helpers/integration-manifests.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
+import { seedShares } from "../../helpers/connection-shares.ts";
 
 const app = getTestApp();
 
@@ -105,15 +111,16 @@ describe("/api/integrations/:packageId admin surface", () => {
         integrationId: INTEGRATION,
         authKey: "primary",
         accountId: `acct-shared`,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         endUserId: null,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
         scopesGranted: [],
-        sharedWithOrg: true,
         label: `Partagée ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
+    await seedShares(row!.id, [ctx.defaultSpaceId]);
     return row!.id;
   }
 
@@ -124,23 +131,41 @@ describe("/api/integrations/:packageId admin surface", () => {
         integrationId: INTEGRATION,
         authKey: "primary",
         accountId: `acct-private-${userId.slice(0, 6)}`,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId,
         endUserId: null,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "secret" } }),
         scopesGranted: [],
-        sharedWithOrg: false,
         label: `Perso ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
     return row!.id;
   }
 
-  function putPin(connectionIds: string[], agent = AGENT, headers = authHeaders(ctx)) {
+  function putPin(
+    connectionIds: string[],
+    agent = AGENT,
+    headers = authHeaders(ctx),
+    extra: { allow_additional_connections?: boolean } = {},
+  ) {
     return app.request(`/api/integrations/${INTEGRATION}/pins/${agent}`, {
       method: "PUT",
       headers: { ...headers, "Content-Type": "application/json" },
-      body: JSON.stringify({ connection_ids: connectionIds }),
+      body: JSON.stringify({ connection_ids: connectionIds, ...extra }),
+    });
+  }
+
+  /** PUT the admin pin of {@link AGENT} open (`true`) or closed (`false`) to additions. */
+  function putPinOpen(connectionIds: string[], allow: boolean) {
+    return putPin(connectionIds, AGENT, authHeaders(ctx), { allow_additional_connections: allow });
+  }
+
+  function putDefault(connectionIds: string[], enforce: boolean) {
+    return app.request(`/api/integrations/${INTEGRATION}/default`, {
+      method: "PUT",
+      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+      body: JSON.stringify({ connection_ids: connectionIds, enforce }),
     });
   }
 
@@ -299,7 +324,7 @@ describe("/api/integrations/:packageId admin surface", () => {
       expect(unpinned.admin_pinned_connection_ids).toBeNull();
       expect(unpinned.member_pinned_connection_ids).toBeNull();
 
-      expect((await putPin([])).status).toBe(200);
+      // Ungoverned first: a member pin is written only where it binds (#2043).
       const memberPin = await app.request(
         `/api/me/integration-pins/${AGENT}/integrations/${INTEGRATION}`,
         {
@@ -309,10 +334,15 @@ describe("/api/integrations/:packageId admin surface", () => {
         },
       );
       expect(memberPin.status).toBe(200);
+      const memberPinned = await getResolution(AGENT, INTEGRATION);
+      expect(memberPinned.admin_pinned_connection_ids).toBeNull();
+      expect(memberPinned.member_pinned_connection_ids).toEqual([]);
 
+      // The closed admin pin purges the member pin it would mask.
+      expect((await putPin([])).status).toBe(200);
       const entry = await getEntry(AGENT, INTEGRATION);
       expect(entry.resolution.admin_pinned_connection_ids).toEqual([]);
-      expect(entry.resolution.member_pinned_connection_ids).toEqual([]);
+      expect(entry.resolution.member_pinned_connection_ids).toBeNull();
       // The admin pin wins and binds nothing, though a shared connection would serve.
       expect(entry.run_blocking).toBe(false);
       expect(entry.resolution.error_code).toBeNull();
@@ -562,6 +592,164 @@ describe("/api/integrations/:packageId admin surface", () => {
       expect(((await ok.json()) as { connection_ids: string[] }).connection_ids).toEqual([connId]);
     });
 
+    describe("allow_additional_connections (#2043)", () => {
+      interface PinDTO {
+        connection_ids: string[];
+        allow_additional_connections: boolean;
+      }
+
+      it("stores and returns the flag; absent is false, whatever was stored (PUT replaces)", async () => {
+        const connId = await seedSharedConnection();
+
+        const closed = await putPin([connId]);
+        expect(closed.status).toBe(200);
+        expect(((await closed.json()) as PinDTO).allow_additional_connections).toBe(false);
+
+        const open = await putPinOpen([connId], true);
+        expect(open.status).toBe(200);
+        expect(((await open.json()) as PinDTO).allow_additional_connections).toBe(true);
+
+        const replaced = await putPin([connId]);
+        expect(((await replaced.json()) as PinDTO).allow_additional_connections).toBe(false);
+      });
+
+      it("DENY: 400 on true over an empty set, with the error on the flag; the pin stays as it was", async () => {
+        const connId = await seedSharedConnection();
+        expect((await putPin([connId])).status).toBe(200);
+
+        const res = await putPinOpen([], true);
+        expect(res.status).toBe(400);
+        const body = (await res.json()) as { errors: { field: string }[] };
+        expect(body.errors.map((e) => e.field)).toEqual(["allow_additional_connections"]);
+        expect((await getResolution(AGENT, INTEGRATION)).admin_pinned_connection_ids).toEqual([
+          connId,
+        ]);
+        // Control: `[]` closed is a pin to no connection.
+        expect((await putPinOpen([], false)).status).toBe(200);
+      });
+
+      it("DENY: 400 on a non-boolean flag", async () => {
+        const connId = await seedSharedConnection();
+        const res = await app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
+          method: "PUT",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify({ connection_ids: [connId], allow_additional_connections: "yes" }),
+        });
+        expect(res.status).toBe(400);
+      });
+
+      it("DENY: 409 connection_additions_conflict opening under an enforced default — both ways", async () => {
+        const connId = await seedSharedConnection();
+        expect((await putDefault([connId], true)).status).toBe(200);
+
+        const res = await putPinOpen([connId], true);
+        expect(res.status).toBe(409);
+        expect(((await res.json()) as { code: string }).code).toBe("connection_additions_conflict");
+        expect((await putPinOpen([connId], false)).status).toBe(200);
+
+        // The other door: enforcing beside an open pin.
+        expect((await putDefault([connId], false)).status).toBe(200);
+        expect((await putPinOpen([connId], true)).status).toBe(200);
+        const enforce = await putDefault([connId], true);
+        expect(enforce.status).toBe(409);
+        const problem = (await enforce.json()) as { code: string; detail: string };
+        expect(problem.code).toBe("connection_additions_conflict");
+        expect(problem.detail).toContain(AGENT);
+      });
+
+      it("GET /pins carries the flag", async () => {
+        const connId = await seedSharedConnection();
+        expect((await putPinOpen([connId], true)).status).toBe(200);
+        const res = await app.request(`/api/integrations/${INTEGRATION}/pins`, {
+          headers: authHeaders(ctx),
+        });
+        const body = (await res.json()) as { data: PinDTO[] };
+        expect(body.data.map((p) => p.allow_additional_connections)).toEqual([true]);
+      });
+
+      /** A member pin of the context's user on (AGENT, INTEGRATION), written straight to the table. */
+      async function memberPinRow(connectionIds: string[]): Promise<void> {
+        await db.insert(integrationPins).values({
+          spaceId: ctx.defaultSpaceId,
+          packageId: AGENT,
+          integrationId: INTEGRATION,
+          userId: ctx.user.id,
+          connectionIds,
+        });
+      }
+
+      /** The last audit entry recorded for `action`. */
+      async function lastAudit(action: string) {
+        const rows = await db
+          .select({ before: auditEvents.before, after: auditEvents.after })
+          .from(auditEvents)
+          .where(eq(auditEvents.action, action))
+          .orderBy(asc(auditEvents.id));
+        return rows.at(-1);
+      }
+
+      async function memberPinsLeft() {
+        return db
+          .select({ id: integrationPins.id })
+          .from(integrationPins)
+          .where(eq(integrationPins.userId, ctx.user.id));
+      }
+
+      it("audits the flag, and each member pin a write over a closed pin cleared", async () => {
+        const connId = await seedSharedConnection();
+        expect((await putPin([connId])).status).toBe(200);
+        expect((await lastAudit("integration.pin.upserted"))?.after).toEqual({
+          connectionIds: [connId],
+          allowAdditionalConnections: false,
+          memberPinsCleared: [],
+        });
+        await memberPinRow([connId]);
+        expect((await putPinOpen([connId], true)).status).toBe(200);
+
+        expect(await lastAudit("integration.pin.upserted")).toEqual({
+          before: { connectionIds: [connId], allowAdditionalConnections: false },
+          after: {
+            connectionIds: [connId],
+            allowAdditionalConnections: true,
+            memberPinsCleared: [
+              { userId: ctx.user.id, agentPackageId: AGENT, connectionIds: [connId] },
+            ],
+          },
+        });
+        expect(await memberPinsLeft()).toEqual([]);
+      });
+
+      it("DELETE of a closed pin audits each member pin it cleared; of an open one, none", async () => {
+        const connId = await seedSharedConnection();
+        const path = `/api/integrations/${INTEGRATION}/pins/${AGENT}`;
+        const del = () => app.request(path, { method: "DELETE", headers: authHeaders(ctx) });
+
+        expect((await putPin([connId])).status).toBe(200);
+        await memberPinRow([connId]);
+        expect((await del()).status).toBe(200);
+        expect(await lastAudit("integration.pin.deleted")).toEqual({
+          before: { connectionIds: [connId], allowAdditionalConnections: false },
+          after: {
+            memberPinsCleared: [
+              { userId: ctx.user.id, agentPackageId: AGENT, connectionIds: [connId] },
+            ],
+          },
+        });
+        expect(await memberPinsLeft()).toEqual([]);
+
+        // Control: an open pin's delete leaves the member's additions as their selection
+        // (a member pin naming only floor ids would go: it added nothing).
+        expect((await putPinOpen([connId], true)).status).toBe(200);
+        await memberPinRow([connId, await seedSharedConnection()]);
+        expect((await del()).status).toBe(200);
+        expect(await lastAudit("integration.pin.deleted")).toEqual({
+          before: { connectionIds: [connId], allowAdditionalConnections: true },
+          after: { memberPinsCleared: [] },
+        });
+        expect(await memberPinsLeft()).toHaveLength(1);
+      });
+    });
+
     it("DENY: 400 when body uses camelCase keys (snake_case wire contract)", async () => {
       const connId = await seedSharedConnection();
 
@@ -647,7 +835,7 @@ describe("/api/integrations/:packageId admin surface", () => {
   // ─── DELETE /:packageId/pins/:agentPackageId ──────────
 
   describe("DELETE /:packageId/pins/:agentPackageId", () => {
-    it("ALLOW: admin removes a pin (204)", async () => {
+    it("ALLOW: admin removes a pin (200)", async () => {
       const connId = await seedSharedConnection();
       expect((await putPin([connId])).status).toBe(200);
 
@@ -656,7 +844,8 @@ describe("/api/integrations/:packageId admin surface", () => {
         headers: authHeaders(ctx),
       });
 
-      expect(res.status).toBe(204);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ schedules_disabled_count: 0 });
     });
 
     it("audits upsert and delete with the set before and after, under the member pins' resource id", async () => {
@@ -668,7 +857,7 @@ describe("/api/integrations/:packageId admin surface", () => {
         method: "DELETE",
         headers: authHeaders(ctx),
       });
-      expect(del.status).toBe(204);
+      expect(del.status).toBe(200);
 
       const rows = await db
         .select({
@@ -686,30 +875,58 @@ describe("/api/integrations/:packageId admin surface", () => {
           action: "integration.pin.upserted",
           resourceId,
           before: null,
-          after: { connectionIds: [first] },
+          after: {
+            connectionIds: [first],
+            allowAdditionalConnections: false,
+            memberPinsCleared: [],
+          },
         },
         {
           action: "integration.pin.upserted",
           resourceId,
-          before: { connectionIds: [first] },
-          after: { connectionIds: [second] },
+          before: { connectionIds: [first], allowAdditionalConnections: false },
+          after: {
+            connectionIds: [second],
+            allowAdditionalConnections: false,
+            memberPinsCleared: [],
+          },
         },
         {
           action: "integration.pin.deleted",
           resourceId,
-          before: { connectionIds: [second] },
-          after: null,
+          before: { connectionIds: [second], allowAdditionalConnections: false },
+          after: { memberPinsCleared: [] },
         },
       ]);
     });
 
-    it("returns 204 when the pin doesn't exist (idempotent)", async () => {
+    it("audits the deleted pin's flag when it was open to additions", async () => {
+      const connId = await seedSharedConnection();
+      expect((await putPinOpen([connId], true)).status).toBe(200);
+      const del = await app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
+        method: "DELETE",
+        headers: authHeaders(ctx),
+      });
+      expect(del.status).toBe(200);
+
+      const [row] = await db
+        .select({ before: auditEvents.before, after: auditEvents.after })
+        .from(auditEvents)
+        .where(eq(auditEvents.action, "integration.pin.deleted"));
+      expect(row).toEqual({
+        before: { connectionIds: [connId], allowAdditionalConnections: true },
+        after: { memberPinsCleared: [] },
+      });
+    });
+
+    it("returns 200 with a count of 0 when the pin doesn't exist (idempotent)", async () => {
       const res = await app.request(`/api/integrations/${INTEGRATION}/pins/${AGENT}`, {
         method: "DELETE",
         headers: authHeaders(ctx),
       });
 
-      expect(res.status).toBe(204);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ schedules_disabled_count: 0 });
     });
 
     it("DENY: non-admin member gets 401/403", async () => {

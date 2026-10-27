@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Long-poll support for `GET /api/runs/:id?wait=…` (issue #631).
+ * Long-poll support for `GET /api/runs/:id?wait=…`.
  *
  * MCP clients cannot consume the SSE stream, so without this they must
  * loop `sleep` + `getRun`, burning one round-trip (and context tokens for

@@ -3,7 +3,7 @@
 /**
  * Injectable stdout / stderr / exit seam.
  *
- * **The flake it prevents (issue #1180).** `bun test` runs the whole repo in
+ * **The flake it prevents.** `bun test` runs the whole repo in
  * a single process, so a suite that swaps the *global* `process.stdout.write`
  * to capture a command's output also captures whatever any other suite, any
  * library, or the runner itself happens to write during that window. An

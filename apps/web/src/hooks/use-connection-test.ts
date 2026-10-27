@@ -2,28 +2,20 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import type { components } from "../api/client";
+import { refusalMessage, toastError } from "../lib/mutation-error";
 
-type TestResult = components["schemas"]["TestResult"];
+export type TestResult = components["schemas"]["TestResult"];
 
-/**
- * Structural subset of the typed `$api.useMutation` result for the
- * `POST .../{id}/test` endpoints (models, proxies, credentials) — variables
- * follow the openapi-react-query `{ params: { path: { id } } }` shape.
- */
+/** Structural subset of the typed `$api.useMutation` result for the `POST .../{id}/test` endpoints (models, proxies, credentials). */
 interface TestMutation {
-  mutate: (
-    variables: { params: { path: { id: string } } },
-    options: {
-      onSuccess: (result: TestResult) => void;
-      onError: () => void;
-    },
-  ) => void;
+  mutateAsync: (variables: { params: { path: { id: string } } }) => Promise<TestResult>;
 }
 
 export function useConnectionTest(mutation: TestMutation) {
   const { t } = useTranslation("common");
-  const [testingId, setTestingId] = useState<string | null>(null);
+  const [testingIds, setTestingIds] = useState<ReadonlySet<string>>(() => new Set());
   const [testResults, setTestResults] = useState<Record<string, TestResult | null>>({});
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
@@ -44,27 +36,35 @@ export function useConnectionTest(mutation: TestMutation) {
     timersRef.current.set(id, timer);
   };
 
-  const handleTest = (id: string) => {
-    setTestingId(id);
-    mutation.mutate(
-      { params: { path: { id } } },
-      {
-        onSuccess: (result) => {
-          setTestResults((prev) => ({ ...prev, [id]: result }));
-          setTestingId(null);
-          scheduleClear(id);
-        },
-        onError: () => {
-          setTestResults((prev) => ({
-            ...prev,
-            [id]: { ok: false, latency: 0, error: "INTERNAL_ERROR", message: t("test.failed") },
-          }));
-          setTestingId(null);
-          scheduleClear(id);
-        },
-      },
-    );
+  const handleTest = async (id: string) => {
+    setTestingIds((prev) => new Set(prev).add(id));
+    try {
+      // `mutateAsync` (not `mutate` callbacks, kept only on the latest observer) so concurrent rows never strand pending.
+      const result = await mutation.mutateAsync({ params: { path: { id } } });
+      // Named by its code when it has a sentence, as `TestResultSpan` does.
+      if (!result.ok) {
+        toast.error(
+          (result.error && refusalMessage({ code: result.error, message: result.message })) ||
+            result.message ||
+            t("test.failed"),
+        );
+      }
+      setTestResults((prev) => ({ ...prev, [id]: result }));
+    } catch (error) {
+      toastError(error);
+      setTestResults((prev) => ({
+        ...prev,
+        [id]: { ok: false, latency: 0, error: "INTERNAL_ERROR", message: t("test.failed") },
+      }));
+    } finally {
+      setTestingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
+      scheduleClear(id);
+    }
   };
 
-  return { testingId, testResults, handleTest };
+  return { testingIds, testResults, handleTest };
 }

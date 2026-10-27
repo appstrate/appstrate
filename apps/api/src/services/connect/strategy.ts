@@ -16,7 +16,12 @@
 
 import type { Actor, IntegrationOAuthCallbackResult } from "@appstrate/connect";
 import type { CredentialBundle } from "@appstrate/connect/connect";
-import type { IntegrationConnectionSummary, PersistTarget } from "../integration-connections.ts";
+import type {
+  IntegrationConnectionSummary,
+  PersistTarget,
+  ReconnectTarget,
+  WidenedConnection,
+} from "../integration-connections.ts";
 import type { JSONSchemaObject } from "@appstrate/core/form";
 import { ApiError, invalidRequest } from "../../lib/errors.ts";
 import { validateConnectionCredentials } from "../schema.ts";
@@ -32,13 +37,25 @@ export interface ConnectContext {
   actor: Actor;
   integrationId: string;
   authKey: string;
-  /** Reconnect / scope-upgrade target. Absent on a fresh connect. */
-  connectionId?: string;
+  /** The reconnect / scope-upgrade target, read once at the door. Absent on a fresh connect. */
+  target?: ReconnectTarget;
+  /** Started by a delegated credential: the row it writes or reconnects is scoped to the space. */
+  delegated?: boolean;
   /**
    * The connection variables submitted (AFPS §7.12); absent when none were. Every strategy
    * validates them (`resolveConnectionVariables`) before use and persists what that returns.
    */
   variables?: Readonly<Record<string, string>>;
+  /**
+   * Told when the reconnect's write moved the row to org scope. Only a write that re-stamps the
+   * minting client can, so only the strategy passing a `clientRef` forwards it.
+   */
+  onScopeWidened?: (widened: WidenedConnection) => void;
+  /**
+   * Told once an oauth2 `connect.login` grant may have reached the token endpoint: from then on
+   * a refusal may follow a redemption, so the hosted form's single-use page session stays spent.
+   */
+  onGrantPresented?: () => void;
 }
 
 /** Options for the interactive `begin` step (OAuth2 authorize URL). */
@@ -122,28 +139,72 @@ export function assertCredentialsMatchSchema(
   return result.data ?? credentials;
 }
 
+/**
+ * What a `login_rejected` refused, as the RFC 9457 extension member `login_refusal`, so a client
+ * words it without parsing the detail: `grant` — an oauth2 token request refused the submitted
+ * grant; `integration` — the integration's login tool refused, saying why in `integration_diagnostic`
+ * (its own text, untranslated). Absent: the service refused the submitted credentials.
+ */
+type LoginRefusal = { kind: "grant" } | { kind: "integration"; diagnostic: string };
+
 /** Credentials the service refused: a 400 naming the remedy. `diagnostic` never holds a value. */
-export function loginRejected(diagnostic: string): ApiError {
-  return invalidRequest(
-    `Login failed: ${diagnostic} Check the credentials you submitted and try again.`,
-    "credentials",
-  );
+export function loginRejected(diagnostic: string, refusal?: LoginRefusal): ApiError {
+  return new ApiError({
+    status: 400,
+    code: "login_rejected",
+    title: "Login Rejected",
+    detail: `${diagnostic} Check the credentials you submitted and try again.`,
+    param: "credentials",
+    ...(refusal
+      ? {
+          extensions: {
+            login_refusal: refusal.kind,
+            ...(refusal.kind === "integration"
+              ? { integration_diagnostic: refusal.diagnostic }
+              : {}),
+          },
+        }
+      : {}),
+  });
 }
 
-/** A login input the login request cannot carry where it sits (a line break in a header value). */
-export function loginInputRefused(field: string): ApiError {
-  return invalidRequest(
-    `The value of '${field}' contains a character this request cannot carry where it is placed.`,
-    `credentials.${field}`,
-  );
+/** A login input the login request cannot carry where it sits (a line break in a header value, a `null`). */
+export function loginInputUnencodable(field: string): ApiError {
+  return new ApiError({
+    status: 400,
+    code: "login_input_unencodable",
+    title: "Login Input Unencodable",
+    detail: `The value of '${field}' is one this request cannot carry where it is placed.`,
+    param: `credentials.${field}`,
+  });
 }
 
 /** Submitted values that put the login URL's host somewhere the auth's `authorized_uris` refuse. */
 export function loginUrlRefused(fields: readonly string[]): ApiError {
-  return invalidRequest(
-    `No address this login may reach comes from ${fields.map((f) => `'${f}'`).join(", ")}.`,
-    fields.length === 1 ? `credentials.${fields[0]}` : "credentials",
-  );
+  const detail = `No address this login may reach comes from ${fields.map((f) => `'${f}'`).join(", ")}.`;
+  return new ApiError({
+    status: 400,
+    code: "login_url_refused",
+    title: "Login URL Refused",
+    detail,
+    param: fields.length === 1 ? `credentials.${fields[0]}` : "credentials",
+    errors: fields.map((f) => ({
+      field: `credentials.${f}`,
+      code: "login_url_refused",
+      message: detail,
+    })),
+  });
+}
+
+/** A login target that is unreachable, throttling or failing; `retryAfter` is its own, in seconds. */
+export function loginUpstreamUnavailable(retryAfter: number | undefined): ApiError {
+  return new ApiError({
+    status: 502,
+    code: "login_upstream_unavailable",
+    title: "Login Upstream Unavailable",
+    detail: "The service could not complete the login. Try again later.",
+    ...(retryAfter !== undefined ? { retryAfter } : {}),
+  });
 }
 
 /** A login the service did not finish in time: not a server bug, retrying is the remedy. */
@@ -161,17 +222,23 @@ export function loginTimedOut(timeoutMs: number): ApiError {
  * when reconnecting an existing connection, otherwise a fresh insert.
  */
 export function connectionTarget(ctx: ConnectContext): PersistTarget {
-  return ctx.connectionId
+  return ctx.target
     ? {
         kind: "update-owned",
         scope: ctx.scope,
         actor: ctx.actor,
-        connectionId: ctx.connectionId,
+        connectionId: ctx.target.id,
         // Re-stamp (integrationId, authKey) into the update target so a
         // caller-supplied `connectionId` for a different integration matches
         // zero rows instead of overwriting an unrelated connection.
         packageId: ctx.integrationId,
         authKey: ctx.authKey,
+        ...(ctx.delegated ? { delegated: true } : {}),
       }
-    : { kind: "insert", scope: ctx.scope, actor: ctx.actor };
+    : {
+        kind: "insert",
+        scope: ctx.scope,
+        actor: ctx.actor,
+        ...(ctx.delegated ? { delegated: true } : {}),
+      };
 }

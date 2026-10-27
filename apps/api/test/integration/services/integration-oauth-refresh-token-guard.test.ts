@@ -26,6 +26,7 @@ import { OAuth2Strategy } from "../../../src/services/connect/oauth2-strategy.ts
 import type { ConnectContext } from "../../../src/services/connect/strategy.ts";
 import type { Actor } from "@appstrate/connect";
 import type { IntegrationOAuthCallbackResult } from "@appstrate/connect";
+import { readReconnectTarget } from "../../../src/services/integration-scope-resolver.ts";
 
 const INTEGRATION = "@orga/oauthtest";
 
@@ -98,11 +99,21 @@ describe("integration OAuth2 — refresh_token connect-time guard", () => {
     };
   }
 
-  const complete = (r: IntegrationOAuthCallbackResult, connectionId?: string) =>
-    strategy.complete(connectionId ? { ...connectCtx, connectionId } : connectCtx, {
+  const complete = async (r: IntegrationOAuthCallbackResult, connectionId?: string) => {
+    const target = connectionId
+      ? await readReconnectTarget({
+          connectionId,
+          spaceId: ctx.defaultSpaceId,
+          integrationId: INTEGRATION,
+          authKey: "primary",
+          actor,
+        })
+      : null;
+    return strategy.complete(target ? { ...connectCtx, target } : connectCtx, {
       kind: "oauth2-result",
       result: { ...r, ...(connectionId ? { connectionId } : {}) },
     });
+  };
 
   async function storedRefreshToken(connectionId: string): Promise<string | undefined> {
     const [row] = await db

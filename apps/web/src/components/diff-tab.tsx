@@ -46,7 +46,7 @@ export function DiffTab({ type, latestVersion, currentManifest, currentContent }
   }
 
   const versionLabel = `v${latestVersion.version}`;
-  const activeLabel = t("version.activeLabel");
+  const draftLabel = t("version.draft");
 
   return (
     <>
@@ -56,9 +56,7 @@ export function DiffTab({ type, latestVersion, currentManifest, currentContent }
         className="mb-4"
       >
         <TabsList>
-          {hasManifestChanges && (
-            <TabsTrigger value="manifest">{t("version.diffManifest")}</TabsTrigger>
-          )}
+          {hasManifestChanges && <TabsTrigger value="manifest">{t("run.tabManifest")}</TabsTrigger>}
           {hasContentChanges && <TabsTrigger value="content">{contentLabel}</TabsTrigger>}
         </TabsList>
       </Tabs>
@@ -68,7 +66,7 @@ export function DiffTab({ type, latestVersion, currentManifest, currentContent }
           modified={JSON.stringify(currentManifest ?? {}, null, 2)}
           language="json"
           originalLabel={versionLabel}
-          modifiedLabel={activeLabel}
+          modifiedLabel={draftLabel}
         />
       )}
       {effectiveSubTab === "content" &&
@@ -80,7 +78,7 @@ export function DiffTab({ type, latestVersion, currentManifest, currentContent }
             modified={currentContent}
             language={type === "agent" ? "markdown" : undefined}
             originalLabel={versionLabel}
-            modifiedLabel={activeLabel}
+            modifiedLabel={draftLabel}
           />
         )}
     </>

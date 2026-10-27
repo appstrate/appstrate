@@ -57,6 +57,7 @@ describe("run launch — model_credential_id on an aliased model", () => {
     const credentialId = await createApiKeyCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
+      ownerUserId: null,
       label: "Backing credential",
       providerId: "openai",
       apiKey: "sk-test-not-a-real-key",
@@ -66,7 +67,7 @@ describe("run launch — model_credential_id on an aliased model", () => {
       aliased ? "Appstrate Medium" : "Plain GPT",
       "gpt-5.5",
       ctx.user.id,
-      credentialId,
+      { credentialId },
       { aliased },
     );
     await setDefaultModel(ctx.orgId, modelDbId);

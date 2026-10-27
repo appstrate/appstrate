@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Phase 1.5 — sidecar-side `MitmCredentialSource` factory that talks to
+ * Sidecar-side `MitmCredentialSource` factory that talks to
  * the platform's `/internal/integration-credentials/{scope}/{name}`
  * endpoints (GET = read-current-with-proactive-refresh, POST /refresh =
  * force-refresh).

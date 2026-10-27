@@ -5,6 +5,7 @@
  */
 
 import { isBlockedUrl } from "@appstrate/core/ssrf";
+import { parseEgressAllowInternalHosts } from "@appstrate/afps-shared/ssrf";
 import {
   compileEgressPolicy,
   parseAuthorizedUriPattern,
@@ -13,15 +14,12 @@ import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import { isSelfHost, ownAddresses, type RunnerEgressPolicy } from "./helpers.ts";
 
 /**
- * `EGRESS_ALLOW_INTERNAL_HOSTS` (comma-separated); empty exempts nothing. Who may skip the floor
- * on these hosts: docs/architecture/SIDECAR.md.
+ * `EGRESS_ALLOW_INTERNAL_HOSTS`; empty exempts nothing, and `parseSidecarEnv` refuses a malformed
+ * entry at boot. Who may skip the floor on these hosts: docs/architecture/SIDECAR.md.
  */
-const trustedEgressHosts: ReadonlySet<string> = new Set(
-  (process.env.EGRESS_ALLOW_INTERNAL_HOSTS ?? "")
-    .split(",")
-    .map((h) => h.trim().toLowerCase())
-    .filter((h) => h.length > 0),
-);
+const trustedEgressHosts = parseEgressAllowInternalHosts(
+  process.env.EGRESS_ALLOW_INTERNAL_HOSTS,
+).hosts;
 
 export function isOperatorTrustedEgressHost(host: string): boolean {
   return trustedEgressHosts.has(host.toLowerCase());

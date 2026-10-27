@@ -34,8 +34,7 @@
  * Receivers REJECT the attribute. The platform's ingestion envelope is
  * `.strict()` with no `dataschema` member (`apps/api/src/routes/runs-events.ts`),
  * and a test asserts the 400. That is safe because the platform / PI_IMAGE /
- * SIDECAR_IMAGE trio is version-locked at boot (`findRuntimeImageTagMismatch`,
- * #1201), so no pre-removal image reaches a post-removal receiver.
+ * SIDECAR_IMAGE trio is version-locked at boot (`findRuntimeImageTagMismatch`), so no pre-removal image reaches a post-removal receiver.
  */
 
 import type { RunEvent } from "@afps-spec/types";

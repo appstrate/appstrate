@@ -8,9 +8,8 @@ import type { AppEnv } from "../types/index.ts";
  * Scope objects for multi-tenant DB queries. Carried through the service
  * layer so every DB access is explicitly scoped at the type level.
  *
- * Why: issue #172 and its 4 sibling bugs all shared the same root cause —
- * a service filtered by `orgId` only, while the resource actually lived
- * under a `spaceId`. A key in Space A could therefore reach Space B
+ * Why: a service that filters by `orgId` only, while the resource lives
+ * under a `spaceId`, lets a key in Space A reach Space B
  * rows in the same org. Making space-scoped services take `SpaceScope` (which
  * structurally requires both fields) turns the "forgot to pass
  * spaceId" bug class into a TypeScript error at the call site.
@@ -27,23 +26,6 @@ export interface OrgScope {
 }
 
 export interface SpaceScope extends OrgScope {
-  readonly spaceId: string;
-}
-
-/**
- * Space-scoped access WITHOUT an org boundary — the actor-ownership case.
- *
- * `/me/*` connection management operates purely on `(userId | endUserId)`
- * ownership: a connection belongs to its owner regardless of which org the
- * caller is currently scoped to (or whether they have an org context at all,
- * as with a cookie session). It carries the `spaceId` re-derived from the
- * resource row but deliberately NO `orgId`, so a consuming service can tell it
- * apart from an {@link SpaceScope} at the type level (`"orgId" in scope`) and skip
- * the space∈org escalation guard that only makes sense with an org. This replaces
- * the old `{ orgId: "" }` sentinel — the actor boundary is now expressed by the
- * absence of `orgId`, not a magic empty string.
- */
-export interface ActorScope {
   readonly spaceId: string;
 }
 

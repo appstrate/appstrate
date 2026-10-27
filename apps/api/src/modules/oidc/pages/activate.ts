@@ -111,7 +111,7 @@ export function renderActivateConsentPage(props: ActivateConsentPageProps): RawH
       votre compte ${props.branding.name} avec le code
       <span class="client">${props.userCodeDisplay}</span>.
     </p>
-    <p>Cette space aura accès à :</p>
+    <p>Accès demandé :</p>
     <ul class="scopes">
       ${scopeItems}
     </ul>

@@ -10,7 +10,7 @@
  * — the org-level `spaces:read` the route merely mounts behind — pointed the one
  * preset that can act on NOTHING in that library at a page that is empty for it
  * by design: `runner` holds `agents:run` and `spaces:read` but no `agents:read`,
- * so `/space/packages` answers 200 with an empty list rather than a 403.
+ * so `/catalogue/agent?view=spaces` answers 200 with an empty list rather than a 403.
  *
  * `runner` is also what makes the pair below discriminating rather than
  * decorative: the SAME caller holds `integrations:read` and not `agents:read`
@@ -64,6 +64,8 @@ function spaceFixture(permissions: string[]) {
     id: SPACE_ID,
     orgId: "org_a",
     name: "Equipe Commerciale",
+    icon: null,
+    color: null,
     isDefault: false,
     settings: {},
     visibility: "open" as const,
@@ -107,7 +109,7 @@ function hintFor(permissions: string[], type: "agent" | "integration" | "skill")
 
 /** The library link the hint wraps, when it renders one at all. */
 function libraryLink(html: string): string | null {
-  return html.match(/<a[^>]*href="\/space\/packages"[^>]*>[^<]*<\/a>/)?.[0] ?? null;
+  return html.match(/<a[^>]*href="\/catalogue\/[a-z-]+"[^>]*>[^<]*<\/a>/)?.[0] ?? null;
 }
 
 describe("SpaceLibraryHint", () => {
@@ -120,7 +122,7 @@ describe("SpaceLibraryHint", () => {
     expect(libraryLink(html)).not.toBeNull();
     // The whole sentence, not just the link: the bundle string is what the
     // reader sees, and `Trans` is what assembles it around the anchor.
-    expect(html).toContain("Packages de cet espace");
+    expect(html).toContain("catalogue");
   });
 
   it("points a reader of the type at the library", () => {
@@ -133,7 +135,7 @@ describe("SpaceLibraryHint", () => {
   });
 
   it("does not answer the question the route was mounted behind", () => {
-    // `spaces:read` is what reaches `/space/packages`, and it is NOT what fills
+    // `spaces:read` is what reaches `/catalogue/:type?view=spaces`, and it is NOT what fills
     // it. A gate that regressed to reachability renders on this fixture.
     expect(hintFor(["spaces:read"], "agent")).toBe("");
     expect(hintFor(["spaces:read"], "integration")).toBe("");

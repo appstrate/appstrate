@@ -76,9 +76,31 @@ import { isTextShapedMime, normalizeMime } from "../../services/mime-policy.ts";
 import { isTextShapedContentType } from "@appstrate/core/mime";
 import { VIEW_AS_HEADER } from "@appstrate/core/permissions";
 import { filePurposeValues } from "@appstrate/db/schema";
-import { asString, RESOURCE_BLOB_MAX_BYTES, jsonResult } from "./tool-results.ts";
+import {
+  asRecord,
+  asString,
+  dispatchHeaders,
+  RESOURCE_BLOB_MAX_BYTES,
+  jsonResult,
+  refusalResult,
+  ToolRefusal,
+  trySetHeader,
+  type Refusal,
+} from "./tool-results.ts";
+import { buildConnectionTools } from "./connection-tools.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
 import { buildReadSkillTool, type SkillToolContext } from "./skill-tools.ts";
+import {
+  describeSpace,
+  grantedIn,
+  grantedSpaces,
+  spaceArgumentRefusal,
+  spaceRef,
+  NO_FALLBACK_HINT,
+  type McpSpace,
+  type OrgWideSpaces,
+} from "./spaces.ts";
+import { connectionIdSetJsonSchema } from "../../openapi/paths/integrations.ts";
 
 /** Issue an in-process request back through the platform app. */
 export type Dispatch = (req: Request) => Promise<Response>;
@@ -95,11 +117,13 @@ export type McpToolName =
   | "validate_package_file"
   | "import_package_file"
   | "get_runtime_capabilities"
+  | "list_connections"
+  | "api_call"
   | "get_me";
 
 /** Outcome of an `invoke_operation` call, for audit + telemetry. */
 export type McpInvokeOutcome =
-  /** Client error before dispatch (unknown operationId, missing path params). */
+  /** A refusal before dispatch (unknown operationId, missing path params, bad argument). */
   | "rejected"
   /** Dispatched in-process; `status` carries the operation's HTTP status. */
   | "invoked";
@@ -114,7 +138,7 @@ export interface McpToolEvent {
   tool: McpToolName;
   /** Wall-clock duration of the handler, milliseconds. */
   durationMs: number;
-  /** Rows returned to the caller (after `limit`), not rows matched. */
+  /** Rows returned to the caller (after `limit`), not rows matched; `api_call`: its entries. */
   shownCount?: number;
   /** `search_operations`: matches withheld for lack of permission. */
   deniedCount?: number;
@@ -124,6 +148,8 @@ export interface McpToolEvent {
   path?: string;
   status?: number;
   outcome?: McpInvokeOutcome;
+  /** `run_and_wait`: the run's status when its wait ended (`pending`/`running` when the wait ran out first). */
+  runStatus?: string;
 }
 
 export type McpObserver = (event: McpToolEvent) => void;
@@ -142,13 +168,13 @@ export interface McpToolContext {
    * requests carry). Lets the file resource provider call the files
    * service DIRECTLY — no in-process HTTP round-trip, so it works identically
    * across FS / S3-proxy / S3-presigned storage (the 307-redirect a fetch
-   * cannot follow no longer degrades the read).
+   * cannot follow does not degrade the read).
    */
   actor: Actor;
   /** The caller's org+space scope (org fixed by the endpoint/token; space resolved). */
   scope: SpaceScope;
   authorizeBundle: Parameters<typeof buildPackageFileTools>[0]["authorizeBundle"];
-  mayShareRoot: Parameters<typeof buildPackageFileTools>[0]["mayShareRoot"];
+  placeRootAs: Parameters<typeof buildPackageFileTools>[0]["placeRootAs"];
   /** `read_skill`'s read, bound to the caller and space (`skillReaderFor`). */
   readSkill: SkillToolContext["readSkill"];
   /** The inbound request's id, for the problem bodies a tool builds itself. */
@@ -167,6 +193,8 @@ export interface McpToolContext {
    * server instructions); external MCP clients leave it false and keep get_me.
    */
   contextInjected?: boolean;
+  /** Org-wide connection only: its spaces; `permissions` and `scope` are the entered one's. */
+  orgSpaces?: OrgWideSpaces;
 }
 
 /** Never let an observer error affect the tool result. */
@@ -193,7 +221,6 @@ export const FORWARDED_AUTH_HEADERS = [
   "authorization",
   "cookie",
   "x-org-id",
-  "x-space-id",
   "appstrate-user",
   "appstrate-version",
   // A role preview narrows what the caller reaches; a dispatch that dropped it
@@ -204,8 +231,8 @@ export const FORWARDED_AUTH_HEADERS = [
 // Headers the caller may NOT set via the `headers` arg: the auth context is
 // forwarded from the inbound MCP request and must not be reshaped by the
 // model (no swapping credentials, switching org/space, or forging end-user
-// impersonation). Everything else (e.g. Credential-Proxy target headers) is
-// allowed — still bounded by RBAC on the dispatched route. The forwarded auth
+// impersonation). Everything else (an operation's own `in: header` parameters)
+// is allowed — still bounded by RBAC on the dispatched route. The forwarded auth
 // set plus the hop-by-hop headers we set ourselves (`host`, `content-length`)
 // and the internal self-dispatch marker: that marker is set by THIS layer (see
 // the dispatch request build below) and exempts the request from outbound
@@ -215,6 +242,8 @@ export const FORWARDED_AUTH_HEADERS = [
 // a forgery cannot succeed; this is defence in depth.)
 const PROTECTED_HEADERS = new Set<string>([
   ...FORWARDED_AUTH_HEADERS,
+  // The router sets it to the space entered; `space_id` is the only way to change it.
+  "x-space-id",
   "host",
   "content-length",
   // Client-source headers: the model must not be able to influence the
@@ -227,22 +256,6 @@ const PROTECTED_HEADERS = new Set<string>([
 // Cap the buffered response body so a large list endpoint can't dump
 // unbounded text into the model context. Truncation is flagged in the result.
 const MAX_RESPONSE_CHARS = 100_000;
-
-/** `Headers.set`, answering `false` where it would throw on an invalid name/value. */
-function trySetHeader(headers: Headers, name: string, value: string): boolean {
-  try {
-    headers.set(name, value);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
 
 // --- files (resource_link + resources/read + list_files) -----------
 // The `appfile://` URI prefix, id shape, and parser are the canonical,
@@ -276,23 +289,6 @@ function fileResourceLink(doc: RunAndWaitFile): {
   };
 }
 
-/** A run's status as an HTTP-shaped telemetry code; a failed poll's `status` already is one. */
-function runStatusToHttp(status: unknown): number {
-  if (typeof status === "number") return status;
-  switch (status) {
-    case "success":
-      return 200;
-    case "failed":
-      return 500;
-    case "timeout":
-      return 504;
-    case "cancelled":
-      return 499;
-    default:
-      return 202;
-  }
-}
-
 function scoreOperation(op: CatalogOperation, tokens: string[]): number {
   if (tokens.length === 0) return 0;
   const haystack =
@@ -311,9 +307,12 @@ function scoreOperation(op: CatalogOperation, tokens: string[]): number {
 function describePayload(
   op: CatalogOperation,
   componentSchemas: Record<string, unknown>,
-  ctx: Pick<McpToolContext, "permissions" | "ceiling">,
+  ctx: Pick<McpToolContext, "permissions" | "ceiling" | "orgSpaces">,
 ): Record<string, unknown> {
+  const granted = operationGranted(op, ctx.permissions, ctx.ceiling);
   return {
+    ...(ctx.orgSpaces ? { space: spaceRef(ctx.orgSpaces.current) } : {}),
+    ...grantedIn(ctx.orgSpaces, (s) => operationGranted(op, s.permissions, ctx.ceiling)),
     operation_id: op.operationId,
     method: op.method,
     path: op.pathTemplate,
@@ -326,7 +325,8 @@ function describePayload(
     target_space_permissions: op.requirement.targetSpaceRequirements,
     // Asked of a delegated credential's scopes only, never of the role.
     ceiling_permissions: op.requirement.ceilingRequirements,
-    granted: operationGranted(op, ctx.permissions, ctx.ceiling),
+    granted,
+    ...(ctx.orgSpaces && !granted ? { hint: NO_FALLBACK_HINT } : {}),
     parameters: op.operation.parameters ?? [],
     request_body: op.operation.requestBody ?? null,
     responses: op.operation.responses ?? {},
@@ -342,6 +342,28 @@ function deniedCeiling(
   return ctx.ceiling !== undefined && !ceilingHolds(op.requirement.ceilingRequirements, ctx.ceiling)
     ? { ceiling_permissions: op.requirement.ceilingRequirements }
     : {};
+}
+
+/** The refusal of an operation the caller's permissions do not clear, in the space the call entered. */
+function notGrantedRefusal(
+  op: CatalogOperation,
+  ctx: Pick<McpToolContext, "permissions" | "ceiling" | "orgSpaces">,
+): Refusal {
+  const reason =
+    (ctx.ceiling === undefined
+      ? "Your role does not hold this permission"
+      : "Your role, or your credential's scopes, do not hold this permission") +
+    (ctx.orgSpaces ? ` in ${describeSpace(ctx.orgSpaces.current)}` : "");
+  return {
+    code: "not_granted",
+    error: `${reason}.`,
+    required_permissions: op.requirement.requirements,
+    ...deniedCeiling(op, ctx),
+    ...grantedIn(ctx.orgSpaces, (s) => operationGranted(op, s.permissions, ctx.ceiling)),
+    hint: ctx.orgSpaces
+      ? `${NO_FALLBACK_HINT} Do not look for another operation that does the same thing.`
+      : "Report it to the user; do not retry and do not look for another operation that does the same thing.",
+  };
 }
 
 function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDefinition {
@@ -430,12 +452,14 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
         path: op.pathTemplate,
         summary: op.summary,
         tags: op.tags,
+        ...grantedIn(ctx.orgSpaces, (s) => operationGranted(op, s.permissions, ctx.ceiling)),
       })),
       denied_total: denied.length,
       denied: denied.slice(0, limit).map((op) => ({
         operation_id: op.operationId,
         required_permissions: op.requirement.requirements,
         ...deniedCeiling(op, ctx),
+        ...grantedIn(ctx.orgSpaces, (s) => operationGranted(op, s.permissions, ctx.ceiling)),
       })),
       best_match: bestMatch,
     });
@@ -485,19 +509,24 @@ function buildDescribeTool(ctx: McpToolContext, invokes: boolean): AppstrateTool
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const start = performance.now();
     const operationId = asString(args.operation_id);
-    // Structural protocol errors (-32602 InvalidParams): a missing required
-    // argument or an unknown operationId is a malformed call, not a failed
-    // execution — the MCP spec files these under protocol errors. Execution
-    // failures (upstream HTTP errors, …) stay `isError` tool results so the
-    // model sees them and can self-correct.
+    // A malformed call is a refusal result, not a failed execution: the model
+    // sees what is missing and can self-correct.
     if (!operationId) {
-      throw new McpError(ErrorCode.InvalidParams, "operation_id is required.");
+      return refusalResult({
+        code: "missing_argument",
+        error: "operation_id is required.",
+        arguments: ["operation_id"],
+      });
     }
 
     const { operations, componentSchemas } = getCatalog();
     const op = operations.get(operationId);
     if (!op) {
-      throw new McpError(ErrorCode.InvalidParams, `Unknown operationId: ${operationId}`);
+      return refusalResult({
+        code: "unknown_operation",
+        error: `Unknown operationId: ${operationId}. Find it with search_operations.`,
+        arguments: ["operation_id"],
+      });
     }
 
     emit(ctx, {
@@ -555,6 +584,34 @@ function isSafePathParamValue(value: string): boolean {
   }
   if (segments.length > 1 && !(value.startsWith("@") && segments.length === 2)) return false;
   return true;
+}
+
+type Scalar = string | number | boolean;
+
+// `String(x)` on an object yields "[object Object]"; only scalars have a
+// faithful text form for a URL.
+function isScalar(value: unknown): value is Scalar {
+  return typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+}
+
+/**
+ * Name of the first path/query parameter holding a non-scalar value, or null.
+ * The inputSchema declares the same constraint, but the SDK does not enforce it.
+ */
+function findNonScalarParam(
+  op: CatalogOperation,
+  pathParams: Record<string, unknown>,
+  query: Record<string, unknown>,
+): string | null {
+  for (const name of op.pathParams) {
+    const value = pathParams[name];
+    if (value != null && !isScalar(value)) return `path_params.${name}`;
+  }
+  for (const [key, value] of Object.entries(query)) {
+    if (value == null) continue;
+    if (Array.isArray(value) ? !value.every(isScalar) : !isScalar(value)) return `query.${key}`;
+  }
+  return null;
 }
 
 function interpolatePath(op: CatalogOperation, pathParams: Record<string, unknown>): string | null {
@@ -687,13 +744,18 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
         operation_id: { type: "string", description: "The operationId to invoke." },
         path_params: {
           type: "object",
-          description: "Values for path placeholders (e.g. { scope, name }).",
-          additionalProperties: true,
+          description: "Values for path placeholders, e.g. { scope, name }.",
+          additionalProperties: { type: ["string", "number", "boolean"] },
         },
         query: {
           type: "object",
-          description: "Query-string parameters.",
-          additionalProperties: true,
+          description: "Query-string parameters; an array repeats the key.",
+          additionalProperties: {
+            anyOf: [
+              { type: ["string", "number", "boolean", "null"] },
+              { type: "array", items: { type: ["string", "number", "boolean"] } },
+            ],
+          },
         },
         body: {
           type: "object",
@@ -710,7 +772,7 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
           type: "object",
           description:
             "Request headers (string values) for operations that declare an 'in: header' " +
-            "parameter, e.g. X-Integration-Id for the credential proxy. (Such params are also " +
+            "parameter, e.g. If-None-Match on a conditional read. (Such params are also " +
             "auto-detected if passed in `query`.) Auth headers (authorization, cookie, x-org-id, " +
             "…) are forwarded from your session and cannot be overridden here.",
           additionalProperties: { type: "string" },
@@ -724,19 +786,20 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     const start = performance.now();
     const operationId = asString(args.operation_id);
 
-    // Structural protocol errors (-32602 InvalidParams): missing required
-    // argument / unknown operationId — the call itself is malformed, per the
-    // MCP spec's protocol-error taxonomy. The telemetry `rejected` event is
-    // still emitted before throwing. Everything past this point (missing
-    // path_params, permission denial, upstream HTTP failures) stays a
-    // model-visible `isError` tool result for self-correction.
+    // A malformed call is a refusal result (`isError`), never a JSON-RPC error,
+    // and the telemetry `rejected` event is still emitted first. Upstream HTTP
+    // failures (and a denial the route decides) are operation outcomes.
     if (!operationId) {
       emit(ctx, {
         tool: "invoke_operation",
         durationMs: performance.now() - start,
         outcome: "rejected",
       });
-      throw new McpError(ErrorCode.InvalidParams, "operation_id is required.");
+      return refusalResult({
+        code: "missing_argument",
+        error: "operation_id is required.",
+        arguments: ["operation_id"],
+      });
     }
 
     const { operations } = getCatalog();
@@ -748,10 +811,32 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
         operationId,
         outcome: "rejected",
       });
-      throw new McpError(ErrorCode.InvalidParams, `Unknown operationId: ${operationId}`);
+      return refusalResult({
+        code: "unknown_operation",
+        error: `Unknown operationId: ${operationId}. Find it with search_operations.`,
+        arguments: ["operation_id"],
+      });
     }
 
     const pathParams = asRecord(args.path_params) ?? {};
+    const query = asRecord(args.query) ?? {};
+    const nonScalar = findNonScalarParam(op, pathParams, query);
+    if (nonScalar !== null) {
+      emit(ctx, {
+        tool: "invoke_operation",
+        durationMs: performance.now() - start,
+        operationId,
+        method: op.method,
+        outcome: "rejected",
+      });
+      return refusalResult({
+        code: "invalid_argument",
+        error:
+          `Invalid ${nonScalar}: only string, number or boolean values are accepted ` +
+          "(query also accepts arrays of those).",
+        arguments: [nonScalar],
+      });
+    }
     const path = interpolatePath(op, pathParams);
     if (path === null) {
       emit(ctx, {
@@ -761,16 +846,16 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
         method: op.method,
         outcome: "rejected",
       });
-      return jsonResult(
-        { error: `Missing path_params. Required: ${op.pathParams.join(", ")}` },
-        true,
-      );
+      return refusalResult({
+        code: "missing_argument",
+        error: `Missing path_params. Required: ${op.pathParams.join(", ")}`,
+        arguments: ["path_params"],
+        accepted: op.pathParams,
+      });
     }
 
-    const query = asRecord(args.query) ?? {};
-
     // An invalid model-supplied header is a tool error, not a 500.
-    const rejectHeader = (name: string): CallToolResult => {
+    const rejectHeader = (name: string, argument: string): CallToolResult => {
       emit(ctx, {
         tool: "invoke_operation",
         durationMs: performance.now() - start,
@@ -778,23 +863,28 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
         method: op.method,
         outcome: "rejected",
       });
-      return jsonResult({ error: `Invalid header name or value: ${name}` }, true);
+      return refusalResult({
+        code: "invalid_argument",
+        error: `Invalid header name or value: ${name}`,
+        arguments: [argument],
+      });
     };
     const headers = new Headers(ctx.authHeaders);
     const ifMatch = asString(args.if_match);
-    if (ifMatch && !trySetHeader(headers, "If-Match", ifMatch)) return rejectHeader("If-Match");
+    if (ifMatch && !trySetHeader(headers, "If-Match", ifMatch))
+      return rejectHeader("If-Match", "if_match");
     const extraHeaders = asRecord(args.headers);
     if (extraHeaders) {
       for (const [name, value] of Object.entries(extraHeaders)) {
         if (PROTECTED_HEADERS.has(name.toLowerCase())) continue;
         if (typeof value !== "string") continue;
-        if (!trySetHeader(headers, name, value)) return rejectHeader(name);
+        if (!trySetHeader(headers, name, value)) return rejectHeader(name, `headers.${name}`);
       }
     }
     // Auto-map OpenAPI `in: header` parameters: a model often supplies a
     // declared header value in `query` (or the operation simply requires a
-    // header it can't express otherwise, e.g. the Credential Proxy's
-    // X-Integration-Id). For each declared header param not already set,
+    // header it can't express otherwise, e.g. a conditional read's
+    // If-None-Match). For each declared header param not already set,
     // pull its value from `query` (case-insensitive) and move it to a header.
     for (const headerName of op.headerParams) {
       if (PROTECTED_HEADERS.has(headerName.toLowerCase())) continue;
@@ -803,7 +893,8 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
       if (queryKey === undefined) continue;
       const value = query[queryKey];
       if (typeof value === "string" || typeof value === "number") {
-        if (!trySetHeader(headers, headerName, String(value))) return rejectHeader(headerName);
+        if (!trySetHeader(headers, headerName, String(value)))
+          return rejectHeader(headerName, `headers.${headerName}`);
         delete query[queryKey];
       }
     }
@@ -823,7 +914,11 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
         method: op.method,
         outcome: "rejected",
       });
-      return jsonResult({ error: "`body` must be a JSON object." }, true);
+      return refusalResult({
+        code: "invalid_argument",
+        error: "`body` must be a JSON object.",
+        arguments: ["body"],
+      });
     }
     const body = asRecord(args.body);
     const sendBody = body !== undefined && METHODS_WITH_BODY.has(op.method);
@@ -858,18 +953,10 @@ function buildInvokeTool(ctx: McpToolContext): AppstrateToolDefinition {
     // ROW decided (a file ACL, `draft_not_writable`) already names its reason.
     const denial =
       response.status === 403 && !operationGranted(op, ctx.permissions, ctx.ceiling)
-        ? {
-            required_permissions: op.requirement.requirements,
-            ...deniedCeiling(op, ctx),
-            hint:
-              (ctx.ceiling === undefined
-                ? "Your role does not hold this permission."
-                : "Your role, or your credential's scopes, do not hold this permission.") +
-              " Report it to the user; do not retry and do not look for another operation " +
-              "that does the same thing.",
-          }
+        ? notGrantedRefusal(op, ctx)
         : undefined;
-    return readResponse(response, denial);
+    const space = ctx.orgSpaces ? { space: spaceRef(ctx.orgSpaces.current) } : undefined;
+    return readResponse(response, space || denial ? { ...space, ...denial } : undefined);
   };
 
   return { descriptor, handler };
@@ -1094,12 +1181,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
         ...(inline ? INLINE_ONLY_RUN_AND_WAIT_PROPERTIES : {}),
         connection_overrides: {
           type: "object",
-          additionalProperties: {
-            type: "array",
-            items: { type: "string" },
-            minItems: 0,
-            maxItems: MAX_CONNECTIONS_PER_INTEGRATION,
-          },
+          additionalProperties: connectionIdSetJsonSchema,
           description:
             "Which connections to use per integration" +
             (inline ? " (either kind)" : "") +
@@ -1107,13 +1189,17 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
             `["<connection_id>", ...] }\`, 0 to ${MAX_CONNECTIONS_PER_INTEGRATION} connection ids per ` +
             "integration — always an ARRAY, even for a single one (a bare string is a 400). " +
             "`[]` runs without that integration — only for one the agent does not mark " +
-            "`required` (a 400 otherwise). " +
+            "`required` (`required_integration_unbound` otherwise, unless an admin imposes a set, " +
+            "where `[]` adds nothing). Connections an admin imposes on an integration stay " +
+            "bound whatever is passed: here the map only adds to them, and a connection outside " +
+            "an imposed set that allows no additions is a `409 override_outranked`. " +
             "Naming several binds them all: the run's tools then take a " +
             "required `connection` argument carrying the connection's label. This is also the " +
             "retry path for a `409 must_choose_connection` launch error — that error lists the " +
             "integration and its `candidate_connections`, each with a `label`, an " +
-            "`account_id`, `owned_by_actor` and `needs_reconnection`; pick the candidates the " +
-            "task needs — never one with `needs_reconnection: true`, the run fails on it — and " +
+            "`account_id`, `owned_by_actor`, `needs_reconnection`, `scopes_granted` and " +
+            "`missing_scopes`; pick the candidates the task needs — never one with " +
+            "`needs_reconnection: true` or a non-empty `missing_scopes`, the run fails on it — and " +
             "retry the SAME call with their `id`s here. Those fields are what tells the candidates " +
             "apart, so read them rather than listing connections separately. Each key is the " +
             "integration id itself (`@scope/integration`) — NOT the " +
@@ -1137,22 +1223,26 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
     const start = performance.now();
     const signal = extra.signal;
     throwIfAborted(signal);
-    const kind = asString(args.kind);
-    if (kind !== "agent" && kind !== "inline") {
+    // `launchRunAndWait` validates `kind`; only the inline grant is decided here.
+    if (args.kind === "inline" && !inline) {
       emit(ctx, {
         tool: "run_and_wait",
         durationMs: performance.now() - start,
         outcome: "rejected",
       });
-      throw new McpError(ErrorCode.InvalidParams, "`kind` must be 'agent' or 'inline'.");
+      return refusalResult({
+        code: "invalid_argument",
+        error: "`kind` must be 'agent'.",
+        arguments: ["kind"],
+        accepted: ["agent"],
+      });
     }
 
     // Trusted in-process dispatch: forward the caller's auth + the self-dispatch
     // marker (same as invoke_operation), and route the launch and poll fetches
     // back through the platform app. `launchRunAndWait` (shared with the chat
     // paths) owns the launch body construction + validation for both kinds.
-    const dispatchHeaders = new Headers(ctx.authHeaders);
-    dispatchHeaders.set(...internalDispatchHeader());
+    const forwarded = dispatchHeaders(ctx.authHeaders);
     const dispatchFetch = ((input, init) => {
       const request =
         input instanceof Request ? new Request(input, init) : new Request(input.toString(), init);
@@ -1161,7 +1251,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
 
     const launched = await launchRunAndWait(args, {
       origin: ctx.origin,
-      headers: dispatchHeaders,
+      headers: forwarded,
       fetch: dispatchFetch,
       signal,
       // The external MCP surface hands the link to the human driving its
@@ -1175,28 +1265,23 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       // 409 keeps its links: a started run's `warnings` lose theirs (below).
       connectOffers: true,
     });
+    // Success or failure, the result names the space it was launched in.
+    const space = ctx.orgSpaces ? { space: spaceRef(ctx.orgSpaces.current) } : {};
     if (!launched.ok) {
-      // A launch HTTP failure (payload carries a numeric `status`) reached the
-      // route and it rejected the request (bad input, unconnected integration,
-      // no published version, …) — reported as an `invoked` POST. A pre-dispatch
-      // validation failure (payload carries an `error`) never touched the route.
+      // A payload carrying a numeric `status` reached the route: it rejected the
+      // request (bad input, unconnected integration, no published version, …) or
+      // answered without a run id — reported as an `invoked` POST. A pre-dispatch
+      // validation failure (payload carries its `code`, `error` and `arguments`)
+      // never touched the route.
       const launchStatus = launched.step.payload.status;
-      if (typeof launchStatus === "number") {
-        emit(ctx, {
-          tool: "run_and_wait",
-          durationMs: performance.now() - start,
-          method: "POST",
-          status: launchStatus,
-          outcome: "invoked",
-        });
-      } else {
-        emit(ctx, {
-          tool: "run_and_wait",
-          durationMs: performance.now() - start,
-          outcome: "rejected",
-        });
-      }
-      return jsonResult(launched.step.payload, true);
+      emit(ctx, {
+        tool: "run_and_wait",
+        durationMs: performance.now() - start,
+        ...(typeof launchStatus === "number"
+          ? { method: "POST", status: launchStatus, outcome: "invoked" as const }
+          : { outcome: "rejected" as const }),
+      });
+      return jsonResult({ ...launched.step.payload, ...space }, true);
     }
 
     // Any caller of this handler (an agent run included) may persist what it returns; the
@@ -1207,7 +1292,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
     emit(ctx, {
       tool: "run_and_wait",
       durationMs: performance.now() - start,
-      operationId: kind === "agent" ? "runAgent" : "runInline",
+      operationId: args.kind === "agent" ? "runAgent" : "runInline",
       status: launched.launchStatus,
       outcome: "invoked",
     });
@@ -1215,7 +1300,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
     const stopHeartbeat = startProgressHeartbeat(extra, runId);
     const waitOpts = {
       origin: ctx.origin,
-      headers: dispatchHeaders,
+      headers: forwarded,
       fetch: dispatchFetch,
       signal,
     };
@@ -1224,18 +1309,20 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       maxMs: stopHeartbeat ? undefined : RUN_AND_WAIT_UNSTREAMED_MAX_MS,
     }).finally(() => stopHeartbeat?.());
 
-    // The run's outcome, not the polling GET's HTTP status (200 for any run read).
+    // A failed poll reports its HTTP status; otherwise the run's own status (the
+    // wait may have ended on `pending`/`running`), not the polling GET's 200.
+    const waitedStatus = waited.payload.status;
     emit(ctx, {
       tool: "run_and_wait",
       durationMs: performance.now() - start,
-      operationId: "getRun",
-      method: "GET",
-      status: runStatusToHttp(waited.payload.status),
       outcome: "invoked",
+      ...(typeof waitedStatus === "number"
+        ? { operationId: "getRun", method: "GET", status: waitedStatus }
+        : { runStatus: String(waitedStatus) }),
     });
 
     const { step: final, files } = await enrichTerminalRunAndWaitStep(waited, waitOpts);
-    const result = jsonResult(final.payload, final.isError);
+    const result = jsonResult({ ...final.payload, ...space }, final.isError);
     // Each published file is also an MCP `resource_link` block (spec 2025-06-18), read with
     // `resources/read` or chained by URI; a run still going gets its next step as text.
     const blocks =
@@ -1267,9 +1354,9 @@ const MAX_FILE_LIST_LIMIT = 100;
 
 /** Dispatch an in-process GET, forwarding the caller's auth + trusted marker. */
 function dispatchGet(ctx: McpToolContext, url: URL): Promise<Response> {
-  const headers = new Headers(ctx.authHeaders);
-  headers.set(...internalDispatchHeader());
-  return ctx.dispatch(new Request(url.toString(), { method: "GET", headers }));
+  return ctx.dispatch(
+    new Request(url.toString(), { method: "GET", headers: dispatchHeaders(ctx.authHeaders) }),
+  );
 }
 
 /** Project a `FileDto` onto the compact row the list tool returns. */
@@ -1401,18 +1488,26 @@ function buildReadFileTool(ctx: McpToolContext): AppstrateToolDefinition {
     },
   };
 
-  const provider = buildFileResourceProvider(ctx);
-  const handler = async (
-    args: Record<string, unknown>,
-    extra: AppstrateRequestExtra,
-  ): Promise<CallToolResult> => {
+  const readFile = buildFileResourceReader(ctx).read;
+  const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const uri = asString(args.uri);
-    if (!uri) throw new McpError(ErrorCode.InvalidParams, "uri is required.");
-    const result = await provider.read(uri, extra);
-    return {
-      content: result.contents.map((resource) => ({ type: "resource", resource })),
-      isError: false,
-    } as CallToolResult;
+    if (!uri) {
+      return refusalResult({
+        code: "missing_argument",
+        error: "uri is required.",
+        arguments: ["uri"],
+      });
+    }
+    try {
+      const result = await readFile(uri);
+      return {
+        content: result.contents.map((resource) => ({ type: "resource", resource })),
+        isError: false,
+      } as CallToolResult;
+    } catch (err) {
+      if (err instanceof ToolRefusal) return refusalResult(err.refusal);
+      throw err;
+    }
   };
   return { descriptor, handler };
 }
@@ -1420,33 +1515,19 @@ function buildReadFileTool(ctx: McpToolContext): AppstrateToolDefinition {
 // --- resources/read for appfile:// ----------------------------------------
 
 /**
- * The `resources/read` provider for `appfile://file_xxx` URIs — lets an MCP
- * client read a file referenced by a `resource_link` (or a known
- * `appfile://` URI) WITHOUT going through the REST API.
+ * The file read shared by `read_file` and `resources/read`, through the files
+ * service's container ACL (`getFileForActor`, as the REST route) and straight
+ * from storage (`streamFileContent`, so no presigned redirect to follow). A bad
+ * or unknown URI throws a {@link ToolRefusal}; each caller maps it.
  *
- * Authorization + scope resolution call the files SERVICE directly with the
- * MCP session's resolved actor (`getFileForActor`), which enforces the same
- * container ACL the REST route does (a foreign/unknown id is a 404 → surfaced as
- * an MCP error) and derives the caller's {@link FileCapabilities} from the
- * one `getFileCapabilities`. The bytes are read via `streamFileContent`
- * — NOT an in-process `GET /content` — so there is no 307-presigned-redirect the
- * reader cannot follow: the read behaves identically on FS, S3-proxy, and
- * S3-presigned deployments (the bug this replaces).
- *
- * Return shape (each < ~1 MB total):
- *  - textual mime, ≤ {@link RESOURCE_TEXT_MAX_BYTES} → `text` contents.
- *  - non-textual, ≤ {@link RESOURCE_BLOB_MAX_BYTES} → base64 `blob` contents.
- *  - larger (either kind), OR not downloadable by this caller → metadata-only
- *    JSON, including the capabilities and (when downloadable) the REST content
- *    URL hint. When the caller lacks `metadata` (a non-creator upload) the JSON
- *    itself is degraded (generic name + mime, no sha256), flowing from the same
- *    {@link projectFileMetadata} the DTO uses.
- *
- * Deliberately provides NO `list()` (files are not enumerated under
- * `resources/list` per the plan/spec — they surface only via `resource_link`);
- * omitting it makes `resources/list` return empty.
+ * Returns, each under ~1 MB: `text` for a textual file up to
+ * {@link RESOURCE_TEXT_MAX_BYTES}, base64 `blob` for another up to
+ * {@link RESOURCE_BLOB_MAX_BYTES}, else metadata-only JSON (also when the caller
+ * may not download it), degraded per the caller's {@link FileCapabilities}.
  */
-export function buildFileResourceProvider(ctx: McpToolContext): AppstrateResourceProvider {
+function buildFileResourceReader(ctx: McpToolContext): {
+  read: (uri: string) => Promise<ReadResourceResult>;
+} {
   /** Metadata-only JSON block — degraded per the caller's capabilities. */
   const metadataOnly = (
     docId: string,
@@ -1482,12 +1563,20 @@ export function buildFileResourceProvider(ctx: McpToolContext): AppstrateResourc
     read: async (uri: string): Promise<ReadResourceResult> => {
       const docId = parseFileUri(uri);
       if (!docId) {
-        throw new McpError(ErrorCode.InvalidParams, `Not a file resource URI: ${uri}`);
+        throw new ToolRefusal({
+          code: "invalid_argument",
+          error: `Not a file resource URI: ${uri}`,
+          arguments: ["uri"],
+        });
       }
 
       const resolved = await getFileForActor(ctx.scope, ctx.actor, docId, ctx.permissions);
       if (!resolved) {
-        throw new McpError(ErrorCode.InvalidParams, `File not found: ${uri}`);
+        throw new ToolRefusal({
+          code: "not_found",
+          error: `File not found: ${uri}`,
+          arguments: ["uri"],
+        });
       }
       const { row, capabilities } = resolved;
       // Canonicalise the URI to the resolved id (the caller may have passed any
@@ -1534,6 +1623,31 @@ export function buildFileResourceProvider(ctx: McpToolContext): AppstrateResourc
   };
 }
 
+/** JSON-RPC code for an unknown resource (MCP 2025-11-25, resources "Error Handling"). */
+const RESOURCE_NOT_FOUND_ERROR_CODE = -32002;
+
+/**
+ * `resources/read` for `appfile://` URIs: a refusal is a JSON-RPC error here, as
+ * the resource protocol has no tool-result channel. A file that does not
+ * resolve is `-32002`; a malformed URI is `-32602`. No `list()`: files surface
+ * only via `resource_link`, so `resources/list` is empty.
+ */
+export function buildFileResourceProvider(ctx: McpToolContext): AppstrateResourceProvider {
+  const reader = buildFileResourceReader(ctx);
+  return {
+    read: (uri: string) =>
+      reader.read(uri).catch((err: unknown) => {
+        if (!(err instanceof ToolRefusal)) throw err;
+        const { code, error } = err.refusal;
+        throw new McpError(
+          code === "not_found" ? RESOURCE_NOT_FOUND_ERROR_CODE : ErrorCode.InvalidParams,
+          error,
+          { uri },
+        );
+      }),
+  };
+}
+
 function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "get_me",
@@ -1555,14 +1669,11 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
 
   const handler = async (): Promise<CallToolResult> => {
     const start = performance.now();
-    const headers = new Headers(ctx.authHeaders);
     // Trusted in-process re-entry — same rationale as invoke_operation: lets the
-    // org-pinned MCP token reach a space-scoped route, and lets requireSpaceContext
-    // fall back to the org default space when no X-Space-Id is forwarded.
-    headers.set(...internalDispatchHeader());
+    // org-pinned MCP token reach a space-scoped route, in the space it entered.
     const request = new Request(new URL("/api/me/context", ctx.origin).toString(), {
       method: "GET",
-      headers,
+      headers: dispatchHeaders(ctx.authHeaders),
     });
     const response = await ctx.dispatch(request);
     emit(ctx, {
@@ -1573,7 +1684,12 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
       status: response.status,
       outcome: "invoked",
     });
-    return readResponse(response);
+    const spaces = ctx.orgSpaces?.reachable.map((s) => ({
+      id: s.id,
+      name: s.name,
+      role: s.role,
+    }));
+    return readResponse(response, spaces ? { spaces } : undefined);
   };
 
   return { descriptor, handler };
@@ -1583,7 +1699,8 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
  * What one request's caller is offered: the tools `buildMcpTools` declares AND
  * the acts `buildServerInstructions` teaches, each read off the guards of the
  * route it dispatches to (or, for `import_package_file`, stands in for). A
- * withheld act is ABSENT from both — never declared then refused.
+ * withheld act is ABSENT from both — never declared then refused. Org-wide, the
+ * surface is the union of the spaces', refused per space by `withSpaceArgument`.
  */
 export interface McpSurface {
   /** `invoke_operation`; the transport already required `mcp:read`. */
@@ -1596,12 +1713,16 @@ export interface McpSurface {
   authors: boolean;
   listsFiles: boolean;
   importsPackages: boolean;
+  /** `list_connections` and `api_call`: the credential proxy outside a run. */
+  proxies: boolean;
 }
 
 export function deriveMcpSurface(
   permissions: ReadonlySet<string>,
   ceiling: ReadonlySet<string> | undefined,
   actor: Actor,
+  /** The credential proxy accepts the credential this request carries (it is bearer-only). */
+  proxyAcceptsCredential: boolean,
 ): McpSurface {
   const granted = (operationId: string): boolean =>
     operationIdGranted(operationId, permissions, ceiling);
@@ -1617,6 +1738,10 @@ export function deriveMcpSurface(
     // each package's `write`, but `mcp:invoke` and the user actor (the import
     // is recorded under a user id) are checked here and nowhere else.
     importsPackages: invokes && actor.type === "user" && granted("importBundle"),
+    // `credential-proxy:call-own` (implied by `credential-proxy:call`), read off the
+    // listing's route, which guards as `/proxy` does.
+    // `mcp:invoke` is checked here and nowhere else.
+    proxies: invokes && proxyAcceptsCredential && granted("listCredentialProxyConnections"),
   };
 }
 
@@ -1625,9 +1750,13 @@ export function deriveMcpSurface(
  * argument a tool does not read is dropped in silence — a misspelled filter
  * widens a listing, a misspelled field is simply not applied. A tool declaring
  * `additionalProperties: false` therefore gets its undeclared top-level keys
- * refused here, as -32602 naming the accepted ones, before its handler runs.
+ * refused here, as an `unknown_argument` refusal naming the accepted ones,
+ * before its handler runs.
  */
-function refuseUndeclaredArguments(tool: AppstrateToolDefinition): AppstrateToolDefinition {
+function refuseUndeclaredArguments(
+  tool: AppstrateToolDefinition,
+  pinned: boolean,
+): AppstrateToolDefinition {
   const schema = tool.descriptor.inputSchema;
   if (schema.additionalProperties !== false) return tool;
   const declared = new Set(Object.keys(schema.properties ?? {}));
@@ -1638,10 +1767,18 @@ function refuseUndeclaredArguments(tool: AppstrateToolDefinition): AppstrateTool
       if (unknown.length > 0) {
         const accepted =
           declared.size > 0 ? `Accepted: ${[...declared].join(", ")}.` : "No arguments.";
-        throw new McpError(
-          ErrorCode.InvalidParams,
-          `Unknown argument(s): ${unknown.join(", ")}. ${accepted}`,
-        );
+        const pinnedSpace = pinned && unknown.includes("space_id");
+        return refusalResult({
+          code: "unknown_argument",
+          error: `Unknown argument(s): ${unknown.join(", ")}. ${accepted}`,
+          arguments: unknown,
+          accepted: [...declared],
+          ...(pinnedSpace
+            ? {
+                hint: "This connection is pinned to one space (by its URL or its credential); drop space_id.",
+              }
+            : {}),
+        });
       }
       return tool.handler(args, extra);
     },
@@ -1656,7 +1793,7 @@ function refuseUndeclaredArguments(tool: AppstrateToolDefinition): AppstrateTool
  * and re-lists, where an alias would be a permanent second dispatch path.
  */
 export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): AppstrateToolDefinition[] {
-  return [
+  const tools = [
     buildSearchTool(ctx, surface.invokes),
     buildDescribeTool(ctx, surface.invokes),
     ...(surface.invokes ? [buildInvokeTool(ctx)] : []),
@@ -1670,7 +1807,101 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
       observe: (event) => emit(ctx, event),
     }),
     ...buildPackageFileTools(ctx, surface.importsPackages),
+    ...(surface.proxies
+      ? buildConnectionTools({
+          origin: ctx.origin,
+          authHeaders: ctx.authHeaders,
+          dispatch: ctx.dispatch,
+          observe: (event) => emit(ctx, event),
+          runs: surface.runs,
+        })
+      : []),
     // Redundant for a context-injecting caller; search_operations stays for `best_match`.
     ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx)]),
-  ].map(refuseUndeclaredArguments);
+  ];
+  const { orgSpaces } = ctx;
+  const pinned = orgSpaces === undefined;
+  return (orgSpaces ? tools.map((tool) => withSpaceArgument(tool, orgSpaces)) : tools).map((tool) =>
+    refuseUndeclaredArguments(tool, pinned),
+  );
+}
+
+/**
+ * What each tool needs in the space an org-wide call names: `false` no space
+ * (no `space_id`), `null` the route guard alone, else the surface act
+ * re-checked there. Exhaustive, so a new tool must decide.
+ */
+const SPACE_ACTS: Record<McpToolName, keyof McpSurface | null | false> = {
+  search_operations: null,
+  describe_operation: null,
+  invoke_operation: "invokes",
+  run_and_wait: "runs",
+  list_files: "listsFiles",
+  read_file: null,
+  read_skill: null,
+  validate_package_file: null,
+  import_package_file: "importsPackages",
+  list_connections: "proxies",
+  api_call: "proxies",
+  get_me: null,
+  get_runtime_capabilities: false,
+};
+
+/** `space_id`, listing the spaces itself: clients truncate server instructions. */
+function spaceIdProperty(spaces: OrgWideSpaces): Record<string, unknown> {
+  return {
+    type: "string",
+    enum: spaces.reachable.map((s) => s.id),
+    description:
+      `The space this call acts in, by id: ${spaces.reachable.map(describeSpace).join("; ")}. ` +
+      "Take it from the user's request; when the request names no space and several could serve, " +
+      "ask the user which one instead of choosing. There is no default space.",
+  };
+}
+
+/** Declare `space_id` on a space-acting tool and check it before the handler runs. */
+function withSpaceArgument(
+  tool: AppstrateToolDefinition,
+  spaces: OrgWideSpaces,
+): AppstrateToolDefinition {
+  const act = SPACE_ACTS[tool.descriptor.name as McpToolName];
+  if (act === false) return tool;
+  const holds = (need: keyof McpSurface | null) => (space: McpSpace) =>
+    need === null || space.surface[need];
+  const granted = grantedSpaces(spaces, holds(act));
+  const schema = tool.descriptor.inputSchema;
+  const descriptor: Tool = {
+    ...tool.descriptor,
+    // Leading: clients cap long descriptions, and this is the part that varies.
+    description: granted
+      ? `Available in: ${granted.map(describeSpace).join("; ")}. ${tool.descriptor.description}`
+      : tool.descriptor.description,
+    inputSchema: {
+      ...schema,
+      properties: { ...schema.properties, space_id: spaceIdProperty(spaces) },
+      required: [...(schema.required ?? []), "space_id"],
+    },
+  };
+  return {
+    descriptor,
+    handler: async (args, extra) => {
+      const refusal = spaceArgumentRefusal(spaces, args.space_id);
+      if (refusal) return refusalResult(refusal);
+      // `kind:"inline"` is the `composes` act, a narrower grant than `runs`.
+      const need = act === "runs" && args.kind === "inline" ? "composes" : act;
+      const { current } = spaces;
+      if (!holds(need)(current)) {
+        return refusalResult({
+          code: "not_granted",
+          error: `Your role in ${describeSpace(current)} does not allow ${tool.descriptor.name}${need === "composes" ? ' with kind:"inline"' : ""}.`,
+          space: spaceRef(current),
+          ...grantedIn(spaces, holds(need)),
+          hint: NO_FALLBACK_HINT,
+        });
+      }
+      // Consumed: `run_and_wait` validates its own arguments.
+      const { space_id: _entered, ...rest } = args;
+      return tool.handler(rest, extra);
+    },
+  };
 }

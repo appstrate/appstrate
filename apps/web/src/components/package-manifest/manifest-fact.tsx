@@ -1,47 +1,37 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The single row shape the manifest view uses: a label above its value.
- *
- * The value becomes an `<a>` only when the reader already proved it is an
- * http(s) URL (`normalizeHttpUrl`) — this component never decides that itself, so
- * there is one place in the codebase where a manifest string can turn into an
- * href, and it is not a JSX file.
- *
- * The row key carries the INDEX because the reader no longer dedupes: a
- * manifest declaring the same `privacy_policies` entry twice is legal jsonb and
- * produces two identical `labelKey:value` rows. Uniqueness is this component's
- * problem, not a reason to drop the author's second entry.
+ * The manifest view's facts. A value becomes an `<a>` only when the reader already proved it http(s)
+ * (`normalizeHttpUrl`) — never decided here. The row key carries the INDEX because duplicate
+ * entries (legal jsonb) produce identical `labelKey:value` rows.
  */
 
 import { useTranslation } from "react-i18next";
 import type { ManifestLink } from "../../lib/package-manifest";
+import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 
-export function FactGrid({ facts }: { facts: ManifestLink[] }) {
+export function ManifestFacts({ facts }: { facts: ManifestLink[] }) {
   const { t } = useTranslation("agents");
   if (facts.length === 0) return null;
 
   return (
-    <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+    <FactGrid>
       {facts.map((entry, index) => (
-        <div key={`${index}:${entry.labelKey}:${entry.value}`} className="min-w-0">
-          <dt className="text-muted-foreground text-xs">{t(entry.labelKey)}</dt>
-          <dd className="text-sm break-words">
-            {entry.href ? (
-              <a
-                href={entry.href}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-blue-400 hover:underline"
-              >
-                {entry.value}
-              </a>
-            ) : (
-              entry.value
-            )}
-          </dd>
-        </div>
+        <Fact key={`${index}:${entry.labelKey}:${entry.value}`} label={t(entry.labelKey)}>
+          {entry.href ? (
+            <a
+              href={entry.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-primary hover:underline"
+            >
+              {entry.value}
+            </a>
+          ) : (
+            entry.value
+          )}
+        </Fact>
       ))}
-    </dl>
+    </FactGrid>
   );
 }

@@ -6,7 +6,7 @@
  * (`self-update` CLI binary, `runner install/update` daemon binary, and the
  * firecracker tarball).
  *
- * The problem it solves (issue #821): the previous downloads buffered the
+ * The problem it solves: the previous downloads buffered the
  * whole response via `await res.arrayBuffer()` with no `AbortSignal` and no
  * progress. A 113 MB CLI binary or ~70 MB daemon was a silent multi-minute
  * gap in the terminal, and a stalled GitHub→CDN redirect would hang the

@@ -1,20 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Skills a space imposes on its chat (#1586): platform authority, since members
+// Skills a space imposes on its chat: platform authority, since members
 // without `skills:*` are bound too; `latest` published, never the draft.
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import {
-  packageDistTags,
-  packages,
-  packageShares,
-  packageVersions,
-  spacePackages,
-} from "@appstrate/db/schema";
+import { packageDistTags, packages, packageVersions, spacePackages } from "@appstrate/db/schema";
 import type { EnforcedChatSkill, EnforcedChatSkillRef } from "@appstrate/core/chat-contract";
 import { asRecord } from "@appstrate/core/safe-json";
-import { placementRowJoin, placementShareJoin } from "./package-placement.ts";
+import { placementRowJoin } from "./package-placement.ts";
 import { activePackagesFilter, latestTagJoin } from "./space-packages.ts";
 import { loadPublishedDefinition } from "./package-versions.ts";
 
@@ -31,7 +25,6 @@ export async function listEnforcedChatSkills(
     })
     .from(packages)
     .leftJoin(spacePackages, placementRowJoin(packages.id, spaceId))
-    .leftJoin(packageShares, placementShareJoin(packages.id, spaceId))
     .leftJoin(packageDistTags, latestTagJoin(packages.id))
     .leftJoin(packageVersions, eq(packageVersions.id, packageDistTags.versionId))
     .where(

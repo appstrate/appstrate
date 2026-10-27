@@ -4,8 +4,8 @@ import { lazy, Suspense } from "react";
 import { useTranslation } from "react-i18next";
 import type { AgentIntegrationEntry } from "@appstrate/shared-types";
 import { Modal } from "./modal";
-import { LoadingState } from "./page-states";
 import type { RunLauncher } from "../hooks/use-mutations";
+import { TextSkeleton } from "./loading-skeletons";
 
 /**
  * 409 recovery surface — lazy because it is a modal that only ever opens on a
@@ -38,22 +38,21 @@ export function RunLaunchRecovery({
     // dialog appears immediately and only its body swaps.
     <Suspense
       fallback={
-        <Modal open onClose={launcher.dismiss} title={t("missingConnections.title")}>
-          <LoadingState />
+        <Modal onClose={launcher.dismiss} title={t("missingConnections.title")}>
+          <TextSkeleton className="py-2" />
         </Modal>
       }
     >
       <MissingConnectionsModal
-        open
         onClose={launcher.dismiss}
         errors={launcher.missingErrors}
         agentPackageId={packageId}
         version={launcher.missingVersion}
-        {...(integrationEntries ? { integrationEntries } : {})}
+        integrationEntries={integrationEntries}
         retrying={launcher.isPending}
-        // The modal stays open until the retry lands, so the picker is still
-        // there if the server answers a fresh 409 (picks gone mid-flight).
-        onRetryWithOverrides={launcher.retry}
+        // The modal stays open until the retry lands, so the pickers are still
+        // there if the server answers a fresh 409.
+        onRetry={launcher.retry}
       />
     </Suspense>
   );

@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
-
 /** Form-state model of an end-user's `metadata`, shared by the create and edit forms. */
+
+import { jsonText } from "@appstrate/afps-shared/json-text";
 
 type MetadataValue = string | number | boolean | null;
 
 export interface MetadataEntry {
   key: string;
   value: string;
-  /**
-   * Original typed value for entries loaded from the server. Preserved so
-   * an untouched number/boolean/null round-trips as its own type instead of
-   * being stringified (`30` must not become `"30"`). Absent for new rows.
-   */
+  /** Server-loaded typed value, so an untouched number/boolean/null round-trips (`30` must not become `"30"`). */
   original?: MetadataValue;
 }
 
@@ -19,7 +16,7 @@ export function metadataToEntries(metadata: Record<string, unknown> | null): Met
   if (!metadata) return [];
   return Object.entries(metadata).map(([key, value]) => ({
     key,
-    value: typeof value === "string" ? value : JSON.stringify(value),
+    value: jsonText(value ?? null),
     original: isMetadataValue(value) ? value : undefined,
   }));
 }
@@ -33,12 +30,7 @@ function isMetadataValue(value: unknown): value is MetadataValue {
   );
 }
 
-/**
- * Resolve an entry back to its wire value. New rows and originally-string
- * values keep the raw text; a non-string original returns verbatim when
- * untouched, and re-parses to a scalar when edited (falling back to the raw
- * string when the edit is not valid JSON or is not a scalar).
- */
+// Untouched non-string originals return verbatim; edited ones re-parse to a scalar, else keep the raw text.
 function coerceEntryValue(entry: MetadataEntry): MetadataValue {
   if (entry.original === undefined || typeof entry.original === "string") {
     return entry.value;

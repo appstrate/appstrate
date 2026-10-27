@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Hono, type Context } from "hono";
-import { serveStatic } from "hono/bun";
 import { getEnv } from "@appstrate/env";
 import { recordProcessAnomaly } from "@appstrate/core/telemetry";
 import { logger } from "./lib/logger.ts";
@@ -27,6 +26,7 @@ import { createModelProvidersOAuthRouter } from "./routes/model-providers-oauth.
 import { createInternalRouter } from "./routes/internal.ts";
 import { createSpacesRouter } from "./routes/spaces.ts";
 import { createRolesRouter } from "./routes/roles.ts";
+import { createOrgRolesRouter } from "./routes/org-roles.ts";
 import { createNotificationsRouter } from "./routes/notifications.ts";
 import { createPackagesRouter } from "./routes/packages.ts";
 import { createRealtimeRouter } from "./routes/realtime.ts";
@@ -35,7 +35,7 @@ import { createUploadsRouter, createUploadContentRouter } from "./routes/uploads
 import { createFilesRouter, createFilePreviewRouter } from "./routes/files.ts";
 import { createAdminStorageDeletionRouter } from "./routes/admin-storage-deletion.ts";
 import { createSpaFallbackHandler } from "./routes/spa.ts";
-import { staticCacheControl } from "./lib/static-cache.ts";
+import { serveSpaBuild } from "./lib/static-cache.ts";
 import healthRouter, { bootGate, markServerReady } from "./routes/health.ts";
 import { createIntegrationsRouter } from "./routes/integrations.ts";
 import { createOrgIntegrationsRouter } from "./routes/org-integrations.ts";
@@ -49,6 +49,7 @@ import { ORG_PATH_MIDDLEWARE } from "./middleware/org-path-context.ts";
 import meRouter from "./routes/me.ts";
 import profileRouter from "./routes/profile.ts";
 import invitationsRouter from "./routes/invitations.ts";
+import { createOAuthClientMetadataRouter } from "./routes/oauth-client-metadata.ts";
 import welcomeRouter from "./routes/welcome.ts";
 import { swaggerUI } from "@hono/swagger-ui";
 import { createOpenApiSpecRouter } from "./routes/openapi-spec.ts";
@@ -196,7 +197,7 @@ app.use("*", async (c, next) => {
   return next();
 });
 
-// Bootstrap-token redemption (#344 Layer 2b) — registered BEFORE the
+// Bootstrap-token redemption — registered BEFORE the
 // Better Auth catch-all so the more-specific path wins. This route owns
 // its own gate (timing-safe token compare + DB-org-count check) and
 // must NOT pass through Better Auth's normal `/api/auth/*` handler.
@@ -266,7 +267,7 @@ await initAppConfig();
 // Build the per-request `<script>` that injects `window.__APP_CONFIG__`.
 // Most fields are stable after boot (modules don't load/unload at runtime),
 // but `bootstrapTokenPending` flips false the moment the operator claims
-// an unattended install via `/api/auth/bootstrap/redeem` (#344). Re-
+// an unattended install via `/api/auth/bootstrap/redeem`. Re-
 // stringifying on every SPA request is ~1µs and means the post-claim
 // page reload doesn't loop the user back into `/claim`.
 import { isBootstrapTokenPending } from "./lib/bootstrap-token.ts";
@@ -373,6 +374,7 @@ app.route("/api/model-provider-credentials", createModelProviderCredentialsRoute
 app.route("/api/model-providers-oauth", createModelProvidersOAuthRouter());
 app.route("/api/spaces", createSpacesRouter());
 app.route("/api/roles", createRolesRouter());
+app.route("/api/org-roles", createOrgRolesRouter());
 app.route("/api/library", createLibraryRouter());
 app.route("/api", profileRouter);
 app.route("/api/realtime", createRealtimeRouter());
@@ -383,6 +385,9 @@ app.route(LLM_PROXY_MOUNT, createLlmProxyRouter());
 
 // Public invitation routes (no auth required — path doesn't start with /api/ or /auth/)
 app.route("/invite", invitationsRouter);
+
+// Public OAuth Client ID Metadata Documents, fetched by integration authorization servers.
+app.route("/oauth", createOAuthClientMetadataRouter());
 
 // Welcome route (authenticated, cookie-based — org context not required)
 app.route("/api", welcomeRouter);
@@ -411,21 +416,10 @@ app.all(
   }),
 );
 
-// Static files for UI (JS, CSS, images, fonts — skip index.html, served with config below).
-// `onFound` attaches the caching policy: Hono's static middleware emits no
-// `Cache-Control` and no validator of its own, so without it every asset is
-// re-downloaded in full on every visit (there is nothing to revalidate against,
-// so no `304` either). Policy + rationale: `lib/static-cache.ts`.
-app.use(
-  "/*",
-  serveStatic({
-    root: "./apps/web/dist",
-    rewriteRequestPath: (path) => (path === "/" || path === "/index.html" ? "/.noop" : path),
-    onFound: (path, c) => {
-      c.header("Cache-Control", staticCacheControl(path));
-    },
-  }),
-);
+// Static files for UI (JS, CSS, images, fonts, the emoji dataset — skip index.html, served with
+// config below), each with its caching policy: Hono's static middleware emits no `Cache-Control`
+// and no validator of its own. Policy + rationale: `lib/static-cache.ts`.
+serveSpaBuild(app, "./apps/web/dist");
 
 // SPA fallback — serve index.html with injected app config for all non-asset
 // routes. This is the ONLY response that carries the SPA document, and so the
@@ -463,7 +457,7 @@ void bootBackground()
   .then(() => {
     markServerReady();
     logger.info("Server ready", { port: env.PORT, startupMs: Date.now() - bootStartedAt });
-    // Fire-and-forget reachability probe for USERCONTENT_URL (issue #1001).
+    // Fire-and-forget reachability probe for USERCONTENT_URL.
     // Never awaited, never fatal; runs after readiness so it can't race the
     // boot gate's 503-until-ready window against a hairpin route.
     void probeUsercontentReachability();
@@ -475,7 +469,7 @@ void bootBackground()
     process.exit(1);
   });
 
-// Proxy-upload diagnosability (issue #829): with S3 storage and no
+// Proxy-upload diagnosability: with S3 storage and no
 // S3_PUBLIC_ENDPOINT, upload URLs are signed against APP_URL and the browser
 // PUTs the bytes there. If APP_URL is still a loopback address on a remotely
 // reached production instance, every remote browser PUTs uploads at ITS OWN

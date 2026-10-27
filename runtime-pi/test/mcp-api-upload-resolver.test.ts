@@ -20,8 +20,8 @@
  *     in the result with the right status code.
  */
 
-import { describe, it, expect } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { describe, it, expect, afterEach } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -48,9 +48,20 @@ const ctxBase = (workspace: string) => ({
   signal: new AbortController().signal,
 });
 
+/** A fresh workspace, removed after the test: the files run to 12 MB each. */
+const workspaces: string[] = [];
+function makeWorkspace(): string {
+  const ws = mkdtempSync(join(tmpdir(), "upload-"));
+  workspaces.push(ws);
+  return ws;
+}
+afterEach(() => {
+  for (const ws of workspaces.splice(0)) rmSync(ws, { recursive: true, force: true });
+});
+
 /** Build a byte-deterministic synthetic file in a fresh tmpdir. */
 function writeSyntheticFile(name: string, size: number) {
-  const ws = mkdtempSync(join(tmpdir(), "upload-"));
+  const ws = makeWorkspace();
   // Use a pseudo-random pattern so different chunks have different
   // bytes (helps catch off-by-one chunk mistakes that might pass
   // with all-zeros).
@@ -871,6 +882,54 @@ describe("McpApiUploadResolver — ms-resumable", () => {
   });
 });
 
+// ─── Server-supplied session URL ──────────────────────────────────
+
+// The session URL the upstream returns becomes the next api_call's target, whose
+// `{{field}}` placeholders the sidecar renders with credentials: one holding `{{` is refused.
+describe("McpApiUploadResolver — server-supplied session URL holding '{{'", () => {
+  const leaky = "https://evil.test/session?k={{api_key}}";
+  const cases: { protocol: UploadProtocol; target: string; init: SimResult }[] = [
+    {
+      protocol: "google-resumable",
+      target: "https://example.test/upload?uploadType=resumable",
+      init: { status: 200, headers: { location: leaky }, body: "" },
+    },
+    {
+      protocol: "tus",
+      target: "https://tus.test/files",
+      init: { status: 201, headers: { location: leaky }, body: "" },
+    },
+    {
+      protocol: "ms-resumable",
+      target: "https://graph.test/me/drive/root:/foo.bin:/createUploadSession",
+      init: { status: 200, headers: {}, body: JSON.stringify({ uploadUrl: leaky }) },
+    },
+  ];
+  for (const { protocol, target, init } of cases) {
+    it(`${protocol}: refuses it and never sends it back`, async () => {
+      const targets: string[] = [];
+      const { pair, mcp } = await makePair(async (args) => {
+        targets.push(String(args.target));
+        return init;
+      });
+      try {
+        const { workspace } = writeSyntheticFile("f.bin", 1024);
+        const result = await new McpApiUploadResolver(mcp).executeUpload(
+          { apiCallToolName: API_CALL_TOOL, target, fromFile: "f.bin", uploadProtocol: protocol },
+          ctxBase(workspace),
+        );
+        expect(result.ok).toBe(false);
+        if (result.ok) throw new Error("expected failure");
+        expect(result.error).toMatch(/holds '\{\{'/);
+        expect(result.error).not.toContain(leaky);
+        expect(targets).toEqual([target]);
+      } finally {
+        await pair.close();
+      }
+    });
+  }
+});
+
 // ─── Cross-cutting ────────────────────────────────────────────────
 
 describe("McpApiUploadResolver — cross-cutting", () => {
@@ -881,7 +940,7 @@ describe("McpApiUploadResolver — cross-cutting", () => {
       body: "",
     }));
     try {
-      const workspace = mkdtempSync(join(tmpdir(), "upload-"));
+      const workspace = makeWorkspace();
       const resolver = new McpApiUploadResolver(mcp);
       const result = await resolver.executeUpload(
         {
@@ -934,7 +993,7 @@ describe("McpApiUploadResolver — cross-cutting", () => {
       body: "",
     }));
     try {
-      const workspace = mkdtempSync(join(tmpdir(), "upload-"));
+      const workspace = makeWorkspace();
       writeFileSync(join(workspace, "empty.bin"), new Uint8Array(0));
       const resolver = new McpApiUploadResolver(mcp);
       const result = await resolver.executeUpload(
@@ -965,7 +1024,7 @@ describe("McpApiUploadResolver — cross-cutting", () => {
       return { status: 200, headers: {}, body: "" };
     });
     try {
-      const ws = mkdtempSync(join(tmpdir(), "upload-"));
+      const ws = makeWorkspace();
       const path = join(ws, "huge.bin");
       const fd = await import("node:fs/promises");
       const handle = await fd.open(path, "w");

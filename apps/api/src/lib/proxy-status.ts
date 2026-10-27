@@ -57,6 +57,11 @@ const PROXY_PROBLEMS = {
     title: "Credential Exfiltration Refused",
     proxyError: "http_request_denied",
   },
+  call_permission_required: {
+    status: 403,
+    title: "Call Permission Required",
+    proxyError: "http_request_denied",
+  },
   credential_not_found: { status: 404, title: "Credential Not Found" },
   credential_unusable: {
     status: 502,
@@ -68,7 +73,13 @@ const PROXY_PROBLEMS = {
     title: "Service Unavailable",
     proxyError: "proxy_configuration_error",
   },
+  // After the upstream answered: a 500, not a 503 that would read as "nothing happened, retry".
+  session_store_unavailable: { status: 500, title: "Session Store Unavailable" },
   unresolved_placeholder: { status: 400, title: "Unresolved Placeholder" },
+  connection_not_in_org_default: {
+    status: 400,
+    title: "Connection Not In The Enforced Org Default",
+  },
   invalid_request: { status: 400, title: "Invalid Request" },
   upstream_unresolvable: {
     status: 502,
@@ -101,13 +112,14 @@ export function upstreamFailureDetail(subject: string, code: UpstreamFailureCode
 }
 
 /** The problem a proxy answers for `code`; `detail` never names a secret. */
-export function proxyProblem(code: ProxyProblemCode, detail: string): ApiError {
+export function proxyProblem(code: ProxyProblemCode, detail: string, param?: string): ApiError {
   const problem: ProxyProblem = PROXY_PROBLEMS[code];
   return new ApiError({
     status: problem.status,
     code,
     title: problem.title,
     detail,
+    param,
     ...(problem.proxyError
       ? { headers: { "Proxy-Status": proxyErrorStatus(problem.proxyError) } }
       : {}),

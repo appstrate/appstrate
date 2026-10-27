@@ -15,13 +15,9 @@ export function emailWasChanged(requested: string, sessionEmail: string | undefi
   return sessionEmail === requested.trim().toLowerCase();
 }
 
-/**
- * Where both email-change links land: the route rendering the form (`/preferences`
- * redirects there and drops the query). No address, so a crafted link prints none.
- */
+/** The route rendering the form (`/preferences` redirects there and drops the query). Carries no address, so a crafted link prints none. */
 export const EMAIL_CHANGE_CALLBACK_URL = "/preferences/general?email_change=1";
 
-/** What the settings page reports about the email-change link that led to it. */
 export function emailChangeLanding(search: string): "failed" | "refused" | "accepted" | null {
   const params = new URLSearchParams(search);
   if (!params.has("email_change")) return null;

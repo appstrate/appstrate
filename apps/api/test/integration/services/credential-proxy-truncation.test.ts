@@ -14,7 +14,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageShare, seedPublishedVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedPublishedVersion } from "../../helpers/seed.ts";
 import { spacePackages, integrationConnections } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { proxyCall } from "../../../src/services/credential-proxy/core.ts";
@@ -52,8 +52,8 @@ async function seedIntegrationWithConnection(ctx: TestContext): Promise<void> {
   // The OFFER is the PLACEMENT: a `space_packages` row only speaks for a space
   // the package is placed in, so switching an unplaced integration on leaves it
   // inactive.
-  await seedPackageShare(ctx.defaultSpaceId, PACKAGE_ID);
   await db.insert(spacePackages).values({
+    enabled: true,
     spaceId: ctx.defaultSpaceId,
     packageId: PACKAGE_ID,
   });
@@ -62,11 +62,11 @@ async function seedIntegrationWithConnection(ctx: TestContext): Promise<void> {
     authKey: "api",
     accountId: "acct-1",
     label: "acct-1",
+    orgId: ctx.orgId,
     spaceId: ctx.defaultSpaceId,
     userId: ctx.user.id,
     credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "ya29.live-token" } }),
     scopesGranted: [],
-    sharedWithOrg: false,
   });
 }
 
@@ -104,6 +104,7 @@ describe("proxyCall — response-size capping (integration-backed)", () => {
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
+      reach: "own",
       integrationId: PACKAGE_ID,
       method: "GET",
       target: "https://gmail.googleapis.com/gmail/v1/users/me/messages",
@@ -134,6 +135,7 @@ describe("proxyCall — response-size capping (integration-backed)", () => {
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       actor: { type: "user", id: ctx.user.id },
+      reach: "own",
       integrationId: PACKAGE_ID,
       method: "GET",
       target: "https://gmail.googleapis.com/gmail/v1/users/me/messages",

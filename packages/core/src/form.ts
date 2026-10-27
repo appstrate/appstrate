@@ -183,6 +183,11 @@ export function isMultipleFileField(prop: JSONSchema7): boolean {
   return resolveType(prop) === "array" && isSingleFileNode(resolveItems(prop));
 }
 
+/** Whether a credential field is a secret: the rule a form masks by and a label reads. */
+export function isSecretField(prop: JSONSchema7): boolean {
+  return prop.writeOnly === true || prop.format === "password";
+}
+
 /** Whether a schema has any file fields (format: "uri" + contentMediaType). */
 export function schemaHasFileFields(schema?: JSONSchemaObject): boolean {
   if (!schema?.properties) return false;

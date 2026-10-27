@@ -2,7 +2,7 @@
 
 import { useLocation } from "react-router-dom";
 import { useHostedAuthRedirect } from "../hooks/use-hosted-auth-redirect";
-import { Spinner } from "./spinner";
+import { Spinner } from "@appstrate/ui/components/spinner";
 
 /**
  * Render gate for the unauthenticated auth-entry routes.

@@ -1,33 +1,42 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { $api, client, type paths } from "../api/client";
-import { triggerBlobDownload } from "../lib/blob-download";
-import { invalidateRunDetails } from "../lib/query-keys";
+import { keysetPaging } from "../lib/keyset-paging";
+import { downloadOrToast } from "../lib/blob-download";
+import {
+  fileBlobKeys,
+  invalidateOrgDetail,
+  invalidatePaths,
+  invalidateRunDetails,
+} from "../lib/query-keys";
 import { useOrgScope } from "./use-org-scope";
+import { fileContextHeader, type FileContext } from "../lib/file-link";
 import { usePermissions } from "./use-permissions";
+import { useCopyToClipboard } from "@appstrate/ui/use-copy-to-clipboard";
 
 /** Wire shape of a single file (OpenAPI list-item schema). */
 export type FileDto =
   paths["/api/files"]["get"]["responses"][200]["content"]["application/json"]["data"][number];
 
-interface FileListFilters {
+export interface FileListFilters {
+  search?: string;
   purpose?: "user_upload" | "agent_output";
   runId?: string;
   contextChatSessionId?: string;
-  startingAfter?: string;
   limit?: number;
   enabled?: boolean;
 }
 
-/**
- * List files (gallery + run tab). Org/app headers are passed explicitly so
- * they are part of the React Query key — an org/app switch refetches instead of
- * serving another scope's cached page (per the typed-client convention).
- */
+/** List files (gallery + run tab); scope headers ride in the query key. */
 export function useFiles(filters: FileListFilters = {}) {
   const scope = useOrgScope();
   // A run or a conversation shows its files incidentally; neither implies `files:read`.
@@ -41,7 +50,7 @@ export function useFiles(filters: FileListFilters = {}) {
           purpose: filters.purpose,
           runId: filters.runId,
           context_chat_session_id: filters.contextChatSessionId,
-          startingAfter: filters.startingAfter,
+          q: filters.search,
           limit: filters.limit,
         },
         header: scope.header,
@@ -51,44 +60,49 @@ export function useFiles(filters: FileListFilters = {}) {
   );
 }
 
-/**
- * Fetch a single file's metadata — including a freshly-minted `preview_url`
- * (its signed token is short-lived, so the preview modal refetches on each open
- * rather than reusing a token carried in a list page). The caller mounts the
- * preview only when it is open, so the fetch is scoped to that lifetime.
- */
-export function useFile(id: string) {
+/** The gallery's files, keyset-paged. The `[method, path]` prefix lets write invalidations reach it; the extra segment keeps it apart from `useFiles`. */
+export function useFilesPaged(filters: Pick<FileListFilters, "search" | "purpose"> = {}) {
   const scope = useOrgScope();
   const { can } = usePermissions();
+  const query = { purpose: filters.purpose, q: filters.search || undefined, limit: 25 };
+  return useInfiniteQuery({
+    queryKey: ["get", "/api/files", "paged", { header: scope.header, query }] as const,
+    queryFn: async ({ pageParam, signal }) => {
+      const { data } = await client.GET("/api/files", {
+        params: { query: { ...query, startingAfter: pageParam }, header: scope.header },
+        signal,
+      });
+      if (!data) throw new Error("empty response");
+      return data;
+    },
+    ...keysetPaging,
+    enabled: can("files:read") && scope.enabled,
+    // The previous result stays on screen while a new search or purpose loads.
+    placeholderData: keepPreviousData,
+  });
+}
+
+/**
+ * A single file's metadata with a freshly-minted `preview_url` (short-lived signed token): never
+ * cached, refetched on each open. An explicit `context` (a reader link) is asked in ITS space,
+ * which the server judges: the current space's grants do not gate it, and no store changes.
+ */
+export function useFile(id: string, context?: FileContext) {
+  const scope = useOrgScope();
+  const { can } = usePermissions();
+  const enabled = !!id && (context !== undefined || (can("files:read") && scope.enabled));
   return $api.useQuery(
     "get",
     "/api/files/{id}",
-    { params: { path: { id }, header: scope.header } },
-    { enabled: can("files:read") && scope.enabled && !!id, staleTime: 0, gcTime: 0 },
+    { params: { path: { id }, header: fileContextHeader(context) ?? scope.header } },
+    { enabled, staleTime: 0, gcTime: 0 },
   );
 }
 
-/**
- * Invalidate the org detail, which carries `storage.used_bytes` — the number
- * behind every storage gauge (`use-org-storage.ts`) and the "quota reached"
- * alert. Any write that changes how many bytes the org holds (delete, keep,
- * upload) MUST call this: freeing space is the only remediation path a user
- * has, and without it the gauge and the alert stay frozen on the old value.
- */
-export function invalidateOrgStorage(qc: ReturnType<typeof useQueryClient>) {
-  void qc.invalidateQueries({ queryKey: ["get", "/api/orgs/{orgId}"] });
-}
-
-/**
- * openapi-react-query keys are `[method, path, init]` with the literal spec
- * path — invalidate the list and the single-file paths separately after a
- * write (they live under different path strings), plus the org detail that
- * carries the storage total.
- */
+/** Invalidate the list and single-file paths (different path strings) plus the org detail carrying the storage total. */
 function invalidateFiles(qc: ReturnType<typeof useQueryClient>) {
-  void qc.invalidateQueries({ queryKey: ["get", "/api/files"] });
-  void qc.invalidateQueries({ queryKey: ["get", "/api/files/{id}"] });
-  invalidateOrgStorage(qc);
+  void invalidatePaths(qc, ["/api/files", "/api/files/{id}"]);
+  void invalidateOrgDetail(qc);
 }
 
 export function useDeleteFile() {
@@ -101,12 +115,7 @@ export function useDeleteFile() {
   });
 }
 
-/**
- * Keep ("pin") a file — clear its retention deadline so the expiry GC never
- * sweeps it. Same authorization as delete (creator or `files:delete`).
- * Invalidates the file queries on success so the pinned row reloads without
- * its expiry badge.
- */
+/** Keep ("pin") a file: clears its retention deadline so the expiry GC never sweeps it. Same authorization as delete. */
 export function useKeepFile() {
   const qc = useQueryClient();
   return $api.useMutation("post", "/api/files/{id}/keep", {
@@ -115,71 +124,82 @@ export function useKeepFile() {
 }
 
 /**
- * Download a file's bytes. Uses the typed client with `parseAs: "blob"` so
- * the org/app scoping headers are injected by the client middleware (a bare
- * anchor navigation cannot send them) and the `307` to a presigned URL is
- * followed transparently by fetch — the same pattern as the package download.
- *
- * Handing the bytes to `triggerBlobDownload` is what keeps the inert type on
- * this path in particular: the content route echoes the stored `row.mime`,
- * which is uploader-controlled and can be `text/html`.
+ * Download a file's bytes through the typed client (a bare anchor cannot send the scoping
+ * headers; fetch follows the `307` to a presigned URL). `downloadOrToast` keeps the inert type:
+ * the content route echoes the uploader-controlled `row.mime`, which can be `text/html`.
  */
-export function useFileDownload() {
-  const { t } = useTranslation("common");
+export function useFileDownload(context?: FileContext) {
   return useCallback(
-    async (id: string, name: string) => {
-      try {
-        const { data } = await client.GET("/api/files/{id}/content", {
-          params: { path: { id } },
-          parseAs: "blob",
-        });
-        triggerBlobDownload(data, name);
-      } catch {
-        toast.error(t("error.downloadFailed"));
-      }
-    },
-    [t],
+    (id: string, name: string) =>
+      downloadOrToast(
+        () =>
+          client.GET("/api/files/{id}/content", {
+            params: { path: { id }, header: fileContextHeader(context) },
+            parseAs: "blob",
+          }),
+        name,
+      ),
+    [context],
   );
 }
 
-/**
- * Authenticated image preview: a stored file's bytes → an object URL for an
- * `<img src>`, revoked on unmount / id change. `null` while loading or on
- * failure, so callers fall back to a placeholder. Cookie auth alone is not
- * enough — the content route resolves the org/app context from the scoping
- * headers, which the typed client's middleware injects.
- *
- * THE single implementation for every image thumbnail in the app; the chat
- * module receives it through `ChatPage`'s injection seam instead of shipping
- * its own copy.
- */
-export function useFileImageSrc(id: string): string | null {
-  const [src, setSrc] = useState<string | null>(null);
-  const readsFiles = usePermissions().can("files:read");
-  useEffect(() => {
-    if (!readsFiles) return;
-    let cancelled = false;
-    let objectUrl: string | null = null;
-    void (async () => {
+/** Copy a text file's content to the clipboard (the Artifact frame's "copy"). A failed read is toasted here; a refused clipboard, by `useCopyToClipboard`. */
+export function useFileTextCopy(context?: FileContext) {
+  const { t } = useTranslation("files");
+  const { copied, copy } = useCopyToClipboard();
+  const copyFile = useCallback(
+    async (id: string) => {
+      let text: string;
       try {
         const { data } = await client.GET("/api/files/{id}/content", {
-          params: { path: { id } },
-          parseAs: "blob",
+          params: { path: { id }, header: fileContextHeader(context) },
+          parseAs: "text",
         });
-        // No await between this check and `createObjectURL`, so a cleanup that
-        // has already run can never miss the URL it would have to revoke.
-        if (cancelled || !data) return;
-        objectUrl = URL.createObjectURL(data);
-        setSrc(objectUrl);
+        text = data ?? "";
       } catch {
-        // Fetch failure (403 on another member's upload, network) → stay on the
-        // placeholder; this preview is decorative.
+        toast.error(t("artifact.copyFailed"));
+        return;
       }
-    })();
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [id, readsFiles]);
-  return src;
+      await copy(text);
+    },
+    [t, copy, context],
+  );
+  return { copied, copy: copyFile };
+}
+
+/** Object URLs outlive a navigation: tiles and thumbnails remounting within this window reuse them. */
+const FILE_BLOB_GC_TIME = 5 * 60 * 1000;
+
+/**
+ * Authenticated image preview: a stored file's bytes → an object URL for an `<img src>`, held in
+ * the query cache (keyed by file id) so a remount reuses it instead of re-fetching, and revoked
+ * when the entry is removed (`lib/query-client.ts`). `undefined` while loading, `null` when there
+ * is no preview (no grant, failed read). THE single implementation for image thumbnails; chat
+ * gets it via `ChatPage`'s injection seam.
+ */
+export function useFileImageSrc(id: string): string | null | undefined {
+  const scope = useOrgScope();
+  const readsFiles = usePermissions().can("files:read");
+  const query = useQuery({
+    queryKey: fileBlobKeys.detail(id, scope.header),
+    queryFn: async ({ signal }): Promise<string | null> => {
+      const { data } = await client.GET("/api/files/{id}/content", {
+        params: { path: { id }, header: scope.header },
+        parseAs: "blob",
+        signal,
+      });
+      // A transport can finish after cache removal, even when it ignores cancellation.
+      signal.throwIfAborted();
+      return data ? URL.createObjectURL(data) : null;
+    },
+    enabled: readsFiles && scope.enabled,
+    // Never refetched in place: a refetch would swap in a new URL without revoking the old one.
+    // Only leaving the cache frees it (`lib/query-client.ts`).
+    staleTime: Infinity,
+    gcTime: FILE_BLOB_GC_TIME,
+    retry: false,
+  });
+  // Decorative failures have no preview, but remain errors so reopening retries them.
+  if (!readsFiles || query.isError) return null;
+  return query.data;
 }

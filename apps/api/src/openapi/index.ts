@@ -35,6 +35,7 @@ import { organizationsPaths } from "./paths/organizations.ts";
 import { profilePaths } from "./paths/profile.ts";
 import { mePaths } from "./paths/me.ts";
 import { invitationsPaths } from "./paths/invitations.ts";
+import { oauthClientMetadataPaths } from "./paths/oauth-client-metadata.ts";
 import { internalPaths } from "./paths/internal.ts";
 import { welcomePaths } from "./paths/welcome.ts";
 import { metaPaths } from "./paths/meta.ts";
@@ -47,6 +48,7 @@ import { uploadsPaths } from "./paths/uploads.ts";
 import { filesPaths } from "./paths/files.ts";
 import { adminStorageDeletionPaths } from "./paths/admin-storage-deletion.ts";
 import { credentialProxyPaths } from "./paths/credential-proxy.ts";
+import { connectionCallsPaths } from "./paths/connection-calls.ts";
 import { llmProxyPaths, runLlmProxyPaths } from "./paths/llm-proxy.ts";
 import { libraryPaths } from "./paths/library.ts";
 
@@ -68,6 +70,7 @@ const corePaths = {
   ...profilePaths,
   ...mePaths,
   ...invitationsPaths,
+  ...oauthClientMetadataPaths,
   ...internalPaths,
   ...welcomePaths,
   ...metaPaths,
@@ -80,6 +83,7 @@ const corePaths = {
   ...filesPaths,
   ...adminStorageDeletionPaths,
   ...credentialProxyPaths,
+  ...connectionCallsPaths,
   ...llmProxyPaths,
   ...runLlmProxyPaths,
   ...libraryPaths,

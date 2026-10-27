@@ -83,17 +83,14 @@ describe("run input resolution — author / editor / schedule / caller layers", 
     const credentialId = await createApiKeyCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
+      ownerUserId: null,
       label: "Layered credential",
       providerId: "openai",
       apiKey: "sk-test-not-a-real-key",
     });
-    const modelDbId = await createOrgModel(
-      ctx.orgId,
-      "Layered GPT",
-      "gpt-5.5",
-      ctx.user.id,
+    const modelDbId = await createOrgModel(ctx.orgId, "Layered GPT", "gpt-5.5", ctx.user.id, {
       credentialId,
-    );
+    });
     await setDefaultModel(ctx.orgId, modelDbId);
   }
 

@@ -31,9 +31,9 @@ export interface QuoteRates {
   modelCreditsPerRun: number;
   /** Model estimate per chat turn. */
   modelCreditsPerChatTurn: number;
-  /** Compute estimate per second of a run's effective timeout. Phase 1: 0. */
+  /** Compute estimate per second of a run's effective timeout. Ships 0. */
   computeCreditsPerRunSecond: number;
-  /** Compute estimate per chat turn. Phase 1: 0. */
+  /** Compute estimate per chat turn. Ships 0. */
   computeCreditsPerChatTurn: number;
 }
 

@@ -26,6 +26,7 @@ import { ownAddresses } from "../helpers.ts";
 import { compileRunnerEgressPolicy } from "../ssrf.ts";
 import { privateIpv4 } from "./helpers/private-ipv4.ts";
 import { buildClientHello, tlsRecord } from "./helpers/tls-client-hello.ts";
+import { halfCloseClient, startLateReplyServer } from "./helpers/half-close.ts";
 
 const listeners: MitmListenerHandle[] = [];
 const tcpServers: NetServer[] = [];
@@ -290,6 +291,25 @@ describe("integration-egress-listener (#543)", () => {
     expect(res.statusCode).toBe(200);
     expect(res.echoed).toBe("ping");
     expect(events.some((e) => e.kind === "tunnel-opened")).toBe(true);
+  });
+
+  it("relays the client's FIN as a FIN: the upstream's later answer arrives, then both close", async () => {
+    const upstream = await startLateReplyServer((server) => tcpServers.push(server));
+    const { handle } = await makeListener();
+
+    const res = await halfCloseClient(handle.address().port, "ping", `127.0.0.1:${upstream.port}`);
+    expect(res).toEqual({ received: "late:ping", closed: true });
+    await upstream.closed;
+  });
+
+  it("closes a tunnel whose client sends a FIN mid-ClientHello, well before the preamble deadline", async () => {
+    const echo = await startTcpEcho();
+    const { handle } = await makeListener({ preambleTimeoutMs: 10_000 });
+
+    const partial = buildClientHello("api.example.com").subarray(0, 20);
+    const res = await halfCloseClient(handle.address().port, partial, `127.0.0.1:${echo.port}`);
+    expect(res.closed).toBe(true);
+    expect(echo.received).toHaveLength(0);
   });
 
   it("refuses an SSRF target at CONNECT (cloud metadata)", async () => {
@@ -580,6 +600,87 @@ describe("integration-egress-listener (#543)", () => {
       expect(resolved).toBe(false);
       expect(upstream.requests).toHaveLength(0);
     });
+
+    it("vets each pipelined request on its own and answers them in order", async () => {
+      const upstream = await startHttpUpstream();
+      const { handle, events } = await makeListener({
+        egressPolicy: {
+          allowsAuthority: (h) => h === "allowed.example.com",
+          skipsSsrfFloor: () => false,
+          isSelf: () => false,
+        },
+        // The 403 is ready while the allowed request is still upstream: Bun's response queue
+        // keeps the answers in request order.
+        resolveHostFn: async () => ["127.0.0.1"],
+      });
+      const allowed = `http://allowed.example.com:${upstream.port}/`;
+      const denied = `denied.example.com:${upstream.port}`;
+
+      const response = await exchange(handle.address().port, [
+        get(allowed, ["Connection: keep-alive"]) + get(`http://${denied}/`),
+      ]);
+      expect([...response.matchAll(/HTTP\/1\.1 (\d{3})/g)].map((m) => Number(m[1]))).toEqual([
+        200, 403,
+      ]);
+      expect(upstream.requests).toHaveLength(1);
+      expect(events).toContainEqual({
+        kind: "tunnel-refused",
+        target: denied,
+        reason: "not-authorized",
+      });
+    });
+
+    it("drops a request pipelined behind a refused one: neither vetted nor relayed", async () => {
+      const upstream = await startHttpUpstream();
+      // The first request is refused only once its lookup fails; the second needs no lookup.
+      const { handle, events } = await makeListener({
+        resolveHostFn: () => Bun.sleep(100).then(() => Promise.reject(new Error("NXDOMAIN"))),
+      });
+
+      const response = await exchange(handle.address().port, [
+        get(`http://unresolvable.example.com:${upstream.port}/`, ["Connection: keep-alive"]) +
+          get(`http://127.0.0.1:${upstream.port}/`),
+      ]);
+      await Bun.sleep(100); // a relay, had there been one, lands by now
+      expect([...response.matchAll(/HTTP\/1\.1 (\d{3})/g)].map((m) => Number(m[1]))).toEqual([403]);
+      expect(upstream.requests).toHaveLength(0);
+      expect(events.map((e) => e.reason)).toEqual(["dns-resolution-failed"]);
+    });
+
+    for (const leaves of ["before the answer", "mid-answer"]) {
+      it(`cancels the upstream request, silently, when the client leaves ${leaves}`, async () => {
+        let markArrived!: () => void;
+        const arrived = new Promise<void>((res) => (markArrived = res));
+        let markCancelled!: () => void;
+        const cancelled = new Promise<void>((res) => (markCancelled = res));
+        const server = createHttpServer((req, res) => {
+          req.socket.once("close", () => markCancelled());
+          if (leaves === "mid-answer") {
+            res.writeHead(200);
+            res.write("first"); // and never more
+          }
+          markArrived();
+        });
+        httpServers.push(server);
+        await new Promise<void>((res) => server.listen(0, "127.0.0.1", () => res()));
+        const { port } = server.address() as { port: number };
+        const { handle, events } = await makeListener({ upstreamTimeoutMs: 5_000 });
+
+        const client = netConnect(handle.address().port, "127.0.0.1", () =>
+          client.write(get(`http://127.0.0.1:${port}/`, ["Connection: keep-alive"])),
+        );
+        client.on("error", () => {});
+        if (leaves === "mid-answer") client.once("data", () => client.destroy());
+        else void arrived.then(() => client.destroy());
+        const outcome = await Promise.race([
+          cancelled.then(() => "cancelled"),
+          Bun.sleep(1_000).then(() => "still running"),
+        ]);
+        expect(outcome).toBe("cancelled");
+        await Bun.sleep(50); // a failure, had the cancel been reported as one, lands by now
+        expect(events.filter((e) => e.kind === "tunnel-error")).toEqual([]);
+      });
+    }
 
     it("answers 502 when the vetted upstream cannot be reached, closing as HTTP/1.0 asks", async () => {
       const deadPort = await new Promise<number>((resolve) => {

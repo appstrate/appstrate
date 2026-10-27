@@ -400,10 +400,10 @@ export const chatPaths = {
                 },
                 modelId: { type: "string" },
                 generation: { $ref: "#/components/schemas/ModelGenerationSettings" },
-                agent_authoring: {
+                package_authoring: {
                   type: "boolean",
                   description:
-                    "Lets the assistant author agents (create, edit, compose inline) this turn; absent = on. Narrows the caller's own grants, never widens them.",
+                    "Lets the assistant author packages of every type this turn (create, import, edit; for an agent, also compose one inline); absent = on. Narrows the caller's own grants, never widens them.",
                 },
                 skill_mode: {
                   type: "string",
@@ -449,7 +449,7 @@ export const chatPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. Or `needs_reconnection` — the selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json.",
+            "`org_deleting` — the organization's deletion is reserved, so no new metered usage is admitted. Refused whatever modules the deployment loads. Or `needs_reconnection` — the selected model's subscription credential is dead (revoked, or expired beyond refresh), so the turn is refused before inference starts rather than failing upstream. RFC 9457 problem+json. Or `model_credential_required`: the selected model has no organization credential and the caller has no usable personal credential for it.",
           content: problem,
         },
         "429": {

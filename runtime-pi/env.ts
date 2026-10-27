@@ -112,8 +112,8 @@ interface RuntimeEnv {
    */
   traceparent?: string;
   /**
-   * Optional per-call MCP tool timeout for the agent→sidecar client
-   * (#779 annex). Third-party integration servers doing a cold OAuth
+   * Optional per-call MCP tool timeout for the agent→sidecar client.
+   * Third-party integration servers doing a cold OAuth
    * refresh on their first tool call can legitimately outlive the MCP
    * SDK default; the same `APPSTRATE_MCP_TOOL_TIMEOUT_MS` operator knob
    * is honoured sidecar-side, so both legs share one budget. Absent →
@@ -153,7 +153,7 @@ export const HEARTBEAT_INTERVAL_MS = 30_000;
 
 /**
  * Wall-clock budget for the initial MCP handshake against the sidecar. Wraps
- * both the connect retry loop and the final attempt. See issue #406.
+ * both the connect retry loop and the final attempt.
  */
 export const MCP_CONNECT_DEADLINE_MS = 60_000;
 // Read from core rather than mirrored here. The mirror was guarded by
@@ -307,8 +307,8 @@ function parsePositiveNumber(
  * Parse + validate the runtime-pi env vars from a source object.
  *
  * Throws {@link RuntimeEnvError} listing every issue at once (better
- * DX than failing on the first missing var). Defaults match the
- * pre-validation behaviour of the legacy entrypoint.
+ * DX than failing on the first missing var). Defaults are
+ * the entrypoint's.
  */
 export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): RuntimeEnv {
   const issues: string[] = [];
@@ -419,7 +419,7 @@ export function parseRuntimeEnv(source: NodeJS.ProcessEnv = process.env): Runtim
     0,
     issues,
   );
-  // Optional (#779 annex): per-call MCP tool timeout for the agent→sidecar
+  // Optional: per-call MCP tool timeout for the agent→sidecar
   // client. Same 0-means-absent convention as AGENT_TIMEOUT_SECONDS.
   const mcpToolTimeoutMs = parsePositiveInt(
     "APPSTRATE_MCP_TOOL_TIMEOUT_MS",

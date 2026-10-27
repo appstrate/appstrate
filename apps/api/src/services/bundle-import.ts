@@ -27,8 +27,7 @@
  * whole import (the error propagates) rather than committing a `packages`
  * row with no version (an un-runnable orphan) — earlier-inserted packages
  * remain (new inserts are harmless). For strict all-or-nothing atomicity,
- * a full-import transaction will be added once storage becomes CAS
- * (§Phase 4).
+ * the import would need a transaction over content-addressed storage.
  */
 
 import { zipSync, unzipSync, type AsyncZippableFile } from "fflate";
@@ -47,19 +46,25 @@ import { and, eq, notExists, sql } from "drizzle-orm";
 import { conflict, invalidRequest, validationFailed } from "../lib/errors.ts";
 import type { ValidationFieldError } from "../lib/errors.ts";
 import {
+  findUnexposedLocalDefaultTools,
   validateAgentIntegrationSelections,
   type CarriedVersion,
 } from "./integration-scope-validation.ts";
 import { isSystemPackage } from "./system-packages.ts";
-import { assertArchiveContentConforms } from "./package-items/config.ts";
-import type { PackageType } from "@appstrate/core/validation";
+import {
+  assertArchiveContentConforms,
+  assertNoManifestViolations,
+} from "./package-items/config.ts";
+import { packageTypeEnum, type PackageType } from "@appstrate/core/validation";
+import { assertImportedType } from "../lib/import-type.ts";
+import { assertPackageScopeNotReserved } from "./package-items/crud.ts";
 import { postInstallPackage } from "./post-install-package.ts";
 import { lockPackageVersions } from "./package-locks.ts";
 import { assertVersionNotLower, findHigherPublishedVersion } from "./package-versions.ts";
 import { packageStorageDeletionJobs } from "./package-storage-deletion.ts";
 import { enqueueStorageDeletion } from "./storage-deletion.ts";
 import { buildBundleFromUploadedAfps, type BundleAssemblyScope } from "./bundle-assembly.ts";
-import { activatePackage } from "./space-packages.ts";
+import { activatePackage, type PlacementAuthority } from "./space-packages.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import { logger } from "../lib/logger.ts";
 import {
@@ -241,6 +246,8 @@ interface ImportBundleResult {
   root_active: boolean;
   root_package_id: string;
   root_version: string;
+  /** The root package's type: what the import opens, and what `?type=` is checked against. */
+  root_type: PackageType;
   /**
    * Non-blocking import-time warnings, each prefixed with its package identity
    * (e.g. dropped runtime tools, `_meta` soft-fails, retired dependency keys, an expression a
@@ -330,7 +337,7 @@ export async function importBundle(
   bundle: Bundle,
   scope: BundleAssemblyScope,
   userId: string,
-  mayShareRoot: (packageId: string) => Promise<boolean>,
+  placeRootAs: (packageId: string) => Promise<PlacementAuthority | null>,
 ): Promise<ImportBundleResult> {
   const imported: ImportedPackageResult[] = [];
   const warnings: string[] = [];
@@ -484,8 +491,8 @@ export async function importBundle(
     // cross-tenant TOCTOU between `detectBundleConflicts` (a read-only
     // preflight kept for UX — it reports ALL conflicts at once) and the
     // write: two concurrent imports of the same id from different orgs both
-    // pass the preflight, but only one insert wins; the loser previously
-    // fell through and grafted its version + bytes onto the WINNER's row.
+    // pass the preflight, but only one insert wins; unguarded, the loser
+    // would graft its version + bytes onto the WINNER's row.
     //
     // Serialization per packageId uses the same advisory lock as
     // `createPackageVersion` (`lockPackageVersions`), so
@@ -603,25 +610,16 @@ export async function importBundle(
     });
   }
 
-  // ACTIVATE the root in the space (idempotent — a no-op when it is already on).
-  //
-  // A root the import CREATED is homed here, so the placement rule is already
-  // satisfied. A root that existed and lives in ANOTHER space is not: this is a
-  // re-import into a second space, and activating it there is the same act as
-  // `POST /api/spaces/{id}/packages` — it needs the offer. So it takes the same
-  // door: when the caller holds `<type>:share` in the root's home, the offer is
-  // written with the placement, in one transaction; when they do not,
+  // Activate the root (idempotent). A root homed in another space is placed via
+  // `placePackage` when the caller holds `<type>:share` in its home; otherwise
   // `activatePackage` refuses and the result says `root_active: false`.
   let rootActive = false;
   try {
-    const mayShare = await mayShareRoot(rootParsed.packageId);
-    await activatePackage(scope, rootParsed.packageId, mayShare ? { shareBy: userId } : undefined);
+    const placeAs = await placeRootAs(rootParsed.packageId);
+    await activatePackage(scope, rootParsed.packageId, placeAs ? { placeAs } : undefined);
     rootActive = true;
   } catch (err) {
-    // An unreachable or unofferable root is what a caller has to diagnose, and
-    // the response only says `false`. WARN, carrying the refusal's own message:
-    // a bundle that imported its packages and then failed to place its root is
-    // an operator-visible outcome, not a debugging detail.
+    // The response only says `false`; warn with the refusal's message for operators.
     logger.warn("Bundle root not activated in space", {
       packageId: rootParsed.packageId,
       spaceId: scope.spaceId,
@@ -634,8 +632,32 @@ export async function importBundle(
     root_active: rootActive,
     root_package_id: rootParsed.packageId,
     root_version: rootParsed.version,
+    root_type: bundleRootType(bundle),
     warnings,
   };
+}
+
+/**
+ * The manifests the bundle carries, by package id, for the post-import catalog its gates judge
+ * against. Every version of an id is kept: a bundle may carry several, and the range referencing
+ * the package picks one.
+ */
+function carriedVersionsById(bundle: Bundle): Map<string, CarriedVersion[]> {
+  const carried = new Map<string, CarriedVersion[]>();
+  for (const [identity, pkg] of bundle.packages) {
+    const parsed = parsePackageIdentity(identity);
+    // System packages are authoritative platform inputs. The importer ignores
+    // carried copies below, so letting one participate in validation would
+    // judge a manifest the runtime will never import.
+    if (!parsed || isSystemPackage(parsed.packageId)) continue;
+    const versions = carried.get(parsed.packageId) ?? [];
+    versions.push({
+      version: parsed.version,
+      manifest: pkg.manifest as unknown as Record<string, unknown>,
+    });
+    carried.set(parsed.packageId, versions);
+  }
+  return carried;
 }
 
 /**
@@ -658,29 +680,11 @@ export async function importBundle(
  * keyed by package id, is resolved together with existing versions and
  * dist-tags. Same map covers the mcp-servers a local integration references.
  */
-async function assertBundleAgentsExposeCallableTools(bundle: Bundle, orgId: string): Promise<void> {
-  // Built once for the whole bundle: an agent may reference an integration that
-  // appears anywhere in the package set, not only before it in iteration order.
-  //
-  // Grouped by package id but keeping EVERY version, because a bundle may carry
-  // several versions of one package and the agent's range picks one. Flattening
-  // to one manifest per id let an agent pinning `^1` be judged against a carried
-  // `2.0.0` — a verdict about a version the run would never resolve.
-  const carried = new Map<string, CarriedVersion[]>();
-  for (const [identity, pkg] of bundle.packages) {
-    const parsed = parsePackageIdentity(identity);
-    // System packages are authoritative platform inputs. The importer ignores
-    // carried copies below, so letting one participate in validation would
-    // judge a manifest the runtime will never import.
-    if (!parsed || isSystemPackage(parsed.packageId)) continue;
-    const versions = carried.get(parsed.packageId) ?? [];
-    versions.push({
-      version: parsed.version,
-      manifest: pkg.manifest as unknown as Record<string, unknown>,
-    });
-    carried.set(parsed.packageId, versions);
-  }
-
+async function assertBundleAgentsExposeCallableTools(
+  bundle: Bundle,
+  orgId: string,
+  carried: ReadonlyMap<string, CarriedVersion[]>,
+): Promise<void> {
   const errors: ValidationFieldError[] = [];
   for (const [identity, pkg] of bundle.packages) {
     const parsed = parsePackageIdentity(identity);
@@ -717,10 +721,51 @@ function assertBundleRootConforms(bundle: Bundle): void {
 }
 
 /**
+ * The part of the root's `default_tools` rule {@link assertBundleRootConforms} cannot judge: a
+ * `local` integration's names against the mcp-server its run spawns once the bundle is imported.
+ */
+async function assertBundleRootDefaultToolsExposed(
+  bundle: Bundle,
+  orgId: string,
+  carried: ReadonlyMap<string, CarriedVersion[]>,
+): Promise<void> {
+  const root = bundle.packages.get(bundle.root);
+  const parsed = parsePackageIdentity(bundle.root);
+  if (!root || (parsed && isSystemPackage(parsed.packageId))) return;
+  assertNoManifestViolations(
+    await findUnexposedLocalDefaultTools(
+      root.manifest as unknown as Record<string, unknown>,
+      orgId,
+      carried,
+    ),
+    `${bundle.root}: `,
+  );
+}
+
+/**
  * Pure-read import preflight shared by HTTP upload and file-backed MCP
  * tools. It performs the exact parse, callable-tool and conflict checks the
  * mutation will use, but writes nothing.
  */
+/**
+ * Refuse a bundle carrying any package under a platform scope (`@appstrate/`,
+ * `@inline/`) other than a system package, which the import reuses. Part of the
+ * preflight, so it runs before any write — refusing mid-import would leave the
+ * packages before it imported — and so `validate_package_file` gives the same
+ * answer the import does.
+ */
+/** The root package's declared type, validated by the preflight's manifest checks. */
+function bundleRootType(bundle: Bundle): PackageType {
+  return packageTypeEnum.parse(bundle.packages.get(bundle.root)?.manifest.type);
+}
+
+function assertBundleScopesNotReserved(bundle: Bundle): void {
+  for (const identity of bundle.packages.keys()) {
+    const packageId = parsePackageIdentity(identity)?.packageId;
+    if (packageId && !isSystemPackage(packageId)) assertPackageScopeNotReserved(packageId);
+  }
+}
+
 export async function preflightBundleImport(
   bytes: Uint8Array,
   scope: BundleAssemblyScope,
@@ -728,8 +773,11 @@ export async function preflightBundleImport(
 ): Promise<BundleImportPreflight> {
   const bundle = await readOrBuildBundle(bytes, scope);
   assertBundleRootConforms(bundle);
+  assertBundleScopesNotReserved(bundle);
   await authorize(bundle);
-  await assertBundleAgentsExposeCallableTools(bundle, scope.orgId);
+  const carried = carriedVersionsById(bundle);
+  await assertBundleAgentsExposeCallableTools(bundle, scope.orgId, carried);
+  await assertBundleRootDefaultToolsExposed(bundle, scope.orgId, carried);
   const conflicts = await detectBundleConflicts(bundle, scope);
   return { bundle, conflicts };
 }
@@ -743,9 +791,12 @@ export async function handleImportBundle(
   scope: BundleAssemblyScope,
   userId: string,
   authorize: (bundle: Bundle) => Promise<void>,
-  mayShareRoot: (packageId: string) => Promise<boolean>,
+  placeRootAs: (packageId: string) => Promise<PlacementAuthority | null>,
+  expectedRootType?: PackageType,
 ): Promise<ImportBundleResult> {
   const { bundle, conflicts } = await preflightBundleImport(bytes, scope, authorize);
+  // Before the conflict report: a bundle of the wrong kind is refused whatever it collides with.
+  assertImportedType(bundleRootType(bundle), expectedRootType);
   if (conflicts.length > 0) {
     const summary = conflicts
       .map((c) =>
@@ -756,5 +807,5 @@ export async function handleImportBundle(
       .join("; ");
     throw conflict("bundle_conflict", `Bundle conflicts with existing packages: ${summary}`);
   }
-  return importBundle(bundle, scope, userId, mayShareRoot);
+  return importBundle(bundle, scope, userId, placeRootAs);
 }

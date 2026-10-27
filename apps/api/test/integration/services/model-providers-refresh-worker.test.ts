@@ -55,6 +55,7 @@ async function seedOauthCred(
   const id = await createOAuthCredential({
     orgId: fx.orgId,
     userId: fx.userId,
+    ownerUserId: fx.userId,
     label: `Test ${providerId}`,
     providerId,
     accessToken: "tok",
@@ -146,6 +147,7 @@ describe("scanAndEnqueueRefreshes — filter behavior", () => {
     await createApiKeyCredential({
       orgId: fx.orgId,
       userId: fx.userId,
+      ownerUserId: null,
       label: "openai key",
       providerId: "openai",
       apiKey: "sk-test",

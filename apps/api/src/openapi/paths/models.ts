@@ -10,7 +10,8 @@ export const modelsPaths = {
       operationId: "listModels",
       tags: ["Models"],
       summary: "List organization models",
-      description: "Returns all models (built-in + custom) for the current organization.",
+      description:
+        "Returns all models (built-in + custom) for the current organization. `billed_to` is computed for the caller: an unbound model (`credentialId: null`, each member brings their own credential) is `user` when the caller holds a usable personal credential for its provider, `null` otherwise.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       responses: {
         "200": {
@@ -55,6 +56,8 @@ export const modelsPaths = {
                     needs_reconnection: false,
                     aliased: false,
                     credentialId: "pk_abc123",
+                    binding: "system",
+                    billed_to: "system",
                     contextWindow: 128000,
                     maxTokens: 16384,
                     reasoning: false,
@@ -76,7 +79,7 @@ export const modelsPaths = {
       tags: ["Models"],
       summary: "Create a custom model",
       description:
-        "Create a new custom LLM model for the organization. One row per `(credentialId, modelId)` binding — a second create for a pair the organization already holds is refused with `409 model_already_added`, unless it is a managed (`aliased`) model, which may share a binding.",
+        "Create a new custom LLM model for the organization. One row per `(credentialId, modelId)` binding — a second create for a pair the organization already holds is refused with `409 model_already_added`, unless it is a managed (`aliased`) model, which may share a binding. `credentialId` must be an organization credential: a member's personal credential is refused with `400 personal_credential_not_bindable`. `credentialId: null` creates an unbound model, served by each member's own credential for `providerId`.",
       parameters: [{ $ref: "#/components/parameters/XOrgId" }],
       requestBody: {
         required: true,
@@ -98,10 +101,16 @@ export const modelsPaths = {
                   description: "Model identifier (e.g. gpt-4o)",
                 },
                 credentialId: {
+                  type: ["string", "null"],
+                  minLength: 1,
+                  description:
+                    "Organization provider credential ID. The provider's apiShape and baseUrl are resolved from the credential's providerId. `null` makes the model unbound: each member serves it with their own personal credential for `providerId`.",
+                },
+                providerId: {
                   type: "string",
                   minLength: 1,
                   description:
-                    "Provider credential ID. The provider's apiShape and baseUrl are resolved from the credential's providerId.",
+                    "Canonical registry providerId. Required when `credentialId` is `null`; with a credential it is taken from that credential.",
                 },
                 input: {
                   type: "array",
@@ -155,11 +164,138 @@ export const modelsPaths = {
         "400": {
           $ref: "#/components/responses/ValidationError",
           description:
-            "Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it.",
+            "Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it, `personal_credential_not_bindable` when `credentialId` names a member's personal credential, or `personal_credential_custom_endpoint` (param `providerId`) when `credentialId` is `null` on a provider whose endpoint is the organization's to choose (`personal_allowed: false`).",
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "409": { $ref: "#/components/responses/ModelAlreadyAdded" },
+        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
+      },
+    },
+  },
+  "/api/models/apply": {
+    post: {
+      operationId: "applyModelChoice",
+      tags: ["Models"],
+      summary: "Apply a model-provider choice in one transaction",
+      description:
+        "One write for a provider choice: the credential its models run on (an existing organization credential `{ id }`, a new organization API key — the `POST /api/model-provider-credentials` body without `owner_type` —, or `null` for models each member serves with their own credential, `providerId` then naming the service), the models to create (`add`), the ones to switch on (`enable`) and off (`disable`), and the default (`default_model_id`, the `modelId` of a model of this choice). Applied in that order — the key, the models, the switches on, the default, the switches off — inside ONE transaction: either all of it is written or none. Every entry is checked as its own route would check it (`POST /api/models`, `PATCH /api/models/{id}`, `PUT /api/models/default`); refusals come back together as `400 validation_failed` with one `errors[]` item per entry (`field`: `add.<i>`, `enable.<i>`, `disable.<i>`, `default_model_id`; `code`: that route's own, or `model_not_in_choice` for a model that does not run on the choice's credential), and nothing is written. Requires `models:write`, and `model-provider-credentials:write` to mint an organization key (the rule of `POST /api/model-provider-credentials` with `owner_type: org`; `:connect` alone does not suffice), rate-limited like that route. Accepts `Idempotency-Key`: a retry with the same key and body replays the first response.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/IdempotencyKey" },
+      ],
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: {
+              type: "object",
+              required: ["credential"],
+              properties: {
+                credential: {
+                  oneOf: [
+                    {
+                      type: "object",
+                      required: ["id"],
+                      properties: { id: { type: "string", format: "uuid" } },
+                      additionalProperties: false,
+                    },
+                    {
+                      type: "object",
+                      required: ["providerId", "api_key"],
+                      properties: {
+                        label: { type: "string", minLength: 1 },
+                        providerId: { type: "string", minLength: 1 },
+                        api_key: { type: "string", minLength: 1 },
+                        base_url_override: { type: ["string", "null"], format: "uri" },
+                      },
+                      additionalProperties: false,
+                    },
+                    { type: "null" },
+                  ],
+                },
+                providerId: {
+                  type: "string",
+                  minLength: 1,
+                  description: "The service of a choice without a credential (`credential: null`).",
+                },
+                add: {
+                  type: "array",
+                  maxItems: 100,
+                  items: {
+                    type: "object",
+                    required: ["modelId"],
+                    properties: {
+                      label: { type: "string", minLength: 1 },
+                      modelId: { type: "string", minLength: 1 },
+                      input: {
+                        type: "array",
+                        items: { type: "string", enum: [...MODEL_INPUT_MODALITIES] },
+                      },
+                      contextWindow: { type: "integer" },
+                      maxTokens: { type: "integer" },
+                      reasoning: { type: "boolean" },
+                      cost: {
+                        type: "object",
+                        properties: {
+                          input: { type: "number" },
+                          output: { type: "number" },
+                          cacheRead: { type: "number" },
+                          cacheWrite: { type: "number" },
+                          tiers: {
+                            type: "array",
+                            maxItems: MAX_TOKEN_USAGE_TIERS,
+                            items: { $ref: "#/components/schemas/ModelCostTier" },
+                          },
+                        },
+                        additionalProperties: false,
+                      },
+                    },
+                    additionalProperties: false,
+                  },
+                },
+                enable: { type: "array", maxItems: 200, items: { type: "string", format: "uuid" } },
+                disable: {
+                  type: "array",
+                  maxItems: 200,
+                  items: { type: "string", format: "uuid" },
+                },
+                default_model_id: {
+                  type: "string",
+                  minLength: 1,
+                  description: "The `modelId` of a model of this choice, created or existing.",
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+        },
+      },
+      responses: {
+        "200": {
+          description:
+            "The choice was applied: the credential the models run on (`null` for each member's own), the models created or switched (same shape as `GET`/`list`), and the default set, if any.",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "credential_id", "models", "default_model_id"],
+                properties: {
+                  object: { type: "string", enum: ["model_choice"] },
+                  credential_id: { type: ["string", "null"] },
+                  models: { type: "array", items: { $ref: "#/components/schemas/OrgModel" } },
+                  default_model_id: { type: ["string", "null"] },
+                },
+              },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "422": { $ref: "#/components/responses/IdempotencyConflict" },
+        "429": { $ref: "#/components/responses/RateLimited" },
         "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },
     },
@@ -470,7 +606,7 @@ export const modelsPaths = {
       tags: ["Models"],
       summary: "Update a custom model",
       description:
-        "Update a custom model configuration. Built-in models cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
+        "Update a custom model configuration. Built-in models cannot be modified. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. `credentialId: null` unbinds the model and requires `providerId` in the same body; a non-null `credentialId` must be an organization credential (`400 personal_credential_not_bindable` otherwise).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "id", in: "path", required: true, schema: { type: "string" } },
@@ -485,8 +621,15 @@ export const modelsPaths = {
                 label: { type: "string", minLength: 1 },
                 modelId: { type: "string", minLength: 1 },
                 credentialId: {
+                  type: ["string", "null"],
+                  description:
+                    "Organization provider credential ID to bind the model to. `null` unbinds it: each member then serves the model with their own personal credential for `providerId`.",
+                },
+                providerId: {
                   type: "string",
-                  description: "Provider key ID to change which key is used",
+                  minLength: 1,
+                  description:
+                    "Canonical registry providerId. Required in the same body when `credentialId` is `null`; with a credential it is taken from that credential.",
                 },
                 enabled: { type: "boolean" },
                 input: {
@@ -540,17 +683,17 @@ export const modelsPaths = {
         "400": {
           $ref: "#/components/responses/ValidationError",
           description:
-            "Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it.",
+            "Validation error. `code` is `model_not_offered` when the provider restricts models to its catalog offer and `modelId` is outside it, `personal_credential_not_bindable` when `credentialId` names a member's personal credential, or `personal_credential_custom_endpoint` (param `providerId`) when `credentialId` is `null` on a provider whose endpoint is the organization's to choose (`personal_allowed: false`).",
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "`model_already_added` — the update lands on a `(credentialId, modelId)` pair another row of this organization already holds; the problem body carries `existing_model_id`. `model_disabled` — `enabled: false` was sent for the current organization default: pick another default first, or clear it (`PUT /api/models/default` with `modelId: null`).",
+            "`model_already_added` — the update lands on a `(credentialId, modelId)` pair another row of this organization already holds; the problem body carries `existing_model_id`. `model_disabled` — `enabled: false` was sent for the current organization default: pick another default first, or clear it (`PUT /api/models/default` with `modelId: null`). `model_scheduled` — `credentialId: null` was sent for a model enabled schedules run (through their override, their agent's model in their space, or the organization default): a schedule spends organization credentials only, so change those schedules' model first; the problem body carries `schedule_ids`.",
           content: {
             "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
+              schema: { $ref: "#/components/schemas/ScheduleIdsProblem" },
             },
           },
         },
@@ -601,6 +744,15 @@ export const modelsPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "409": {
+          description:
+            "`model_credential_required` — the model is unbound (`credentialId: null`): each member's own credential serves it, so there is no organization credential to test.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
         "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },

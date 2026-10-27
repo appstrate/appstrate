@@ -89,7 +89,7 @@ interface PortOverrides {
 }
 
 /**
- * Optional self-hosting closed-mode bootstrap (issue #228). When set,
+ * Optional self-hosting closed-mode bootstrap. When set,
  * the install writes the AUTH_DISABLE_SIGNUP / AUTH_DISABLE_ORG_CREATION
  * pair plus AUTH_BOOTSTRAP_OWNER_EMAIL into the generated `.env`, so
  * claiming the instance as that email creates the root
@@ -152,10 +152,10 @@ export function isValidBootstrapEmail(value: string): boolean {
 }
 
 /**
- * Parse + normalize the public app URL (issue #822). Accepts an origin
+ * Parse + normalize the public app URL. Accepts an origin
  * only — scheme http/https, optional port, no path/query/fragment —
  * because APP_URL is consumed as an origin everywhere downstream
- * (TRUSTED_ORIGINS/CORS, OAuth redirect URIs, email links). A subpath
+ * (Better Auth's trusted origin, OAuth redirect URIs, email links). A subpath
  * deployment is not supported by the platform, so rejecting it here
  * surfaces the misconfiguration at install time instead of as a broken
  * OAuth callback later.
@@ -222,7 +222,6 @@ export function generateEnvForTier(
 ): EnvVars {
   const env: EnvVars = {
     APP_URL: appUrl,
-    TRUSTED_ORIGINS: appUrl,
     BETTER_AUTH_SECRET: hex32(),
     CONNECTION_ENCRYPTION_KEY: base64Key32(),
     CONNECT_SESSION_SECRET: hex32(),
@@ -230,7 +229,7 @@ export function generateEnvForTier(
     UPLOAD_SIGNING_SECRET: hex32(),
   };
 
-  // Remote deployment (issue #822): a non-localhost / https APP_URL
+  // Remote deployment: a non-localhost / https APP_URL
   // means a reverse proxy terminates TLS in front of the platform, so
   // client-IP and forwarded-proto must be read from X-Forwarded-*.
   // Elided on local installs — same "defaults are not written" policy

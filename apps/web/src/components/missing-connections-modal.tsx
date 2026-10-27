@@ -1,89 +1,85 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { Card } from "@appstrate/ui/components/card";
+import { PendingButton } from "@/components/app-ui/pending-button";
 import { useTranslation } from "react-i18next";
-import { AlertTriangle, XCircle, Puzzle, Check, Loader2 } from "lucide-react";
+import { AlertTriangle, XCircle, Puzzle, Check } from "lucide-react";
 import type { AgentIntegrationEntry } from "@appstrate/shared-types";
 import { Modal } from "./modal";
-import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "./spinner";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { IntegrationConnectionPicker } from "./integration-connect/integration-connection-picker";
 import { unboundLabel } from "./integration-connect/integration-run-readiness";
-import { useIntegrationDetail, useIntegrationReadinessEntry } from "../hooks/use-integrations";
+import {
+  blockingIntegrationIds,
+  useAgentConnectionReadiness,
+  useIntegrationReadinessEntry,
+} from "../hooks/use-integrations";
+import { useIntegrationName } from "../hooks/use-integration-name";
 import { usePermissions } from "../hooks/use-permissions";
 import {
   integrationIdOfField,
   isStructuralCode,
   retryDecision,
-  type ConnectionOverridesMap,
   type MissingIntegrationFieldError,
 } from "../lib/connection-choice";
-import { withConnectionPick, type ConnectionSet } from "../lib/connection-set";
 import { refusalMessage } from "../lib/mutation-error";
 
 interface MissingConnectionsModalProps {
-  open: boolean;
   onClose: () => void;
+  /** The 409's items, one per refused integration (`integrations.{packageId}`). */
   errors: MissingIntegrationFieldError[];
   /** The agent whose run 409'd; keys the server resolution each picker consumes. */
-  agentPackageId?: string;
+  agentPackageId: string;
   /** The version the refused launch ran: `required` (and so "no connection") is that version's. */
-  version?: string;
-  /** The agent's tools/scopes per integration, so a (re)connect requests exactly those. */
-  integrationEntries?: AgentIntegrationEntry[];
-  /** Re-run with the picked overrides. */
-  onRetryWithOverrides: (overrides: ConnectionOverridesMap) => void;
+  version: string | undefined;
+  /** The agent's tools/scopes per integration, so a new connection requests exactly those. */
+  integrationEntries: AgentIntegrationEntry[] | undefined;
+  /** Replays the refused launch. */
+  onRetry: () => void;
   /** Disables the retry button while the new run is in flight. */
-  retrying?: boolean;
+  retrying: boolean;
 }
 
 /**
  * Recovery surface for the run-kickoff `409 missing_integration_connection`: one row per
- * `errors[]` entry. Actionable rows embed `IntegrationConnectionPicker` in `override` mode;
- * validated sets accumulate into the `connection_overrides` "Re-run" hands to
- * `onRetryWithOverrides`. Structural failures keep a plain message: no pick fixes them.
+ * `errors[]` entry. An actionable row embeds `IntegrationConnectionPicker`, which shows the
+ * connection the agent's resolution binds and writes the member's pin for this agent, as the
+ * Connexions tab does. "Re-run" replays the launch without its own pick for the refused
+ * integrations (`retryLaunch`), so a row shows exactly what the replay binds. Structural
+ * failures keep a plain message: no pick fixes them.
+ * Mounted only while a refusal stands, so it is always open.
  */
 export function MissingConnectionsModal({
-  open,
   onClose,
   errors,
   agentPackageId,
   version,
   integrationEntries,
-  onRetryWithOverrides,
+  onRetry,
   retrying,
 }: MissingConnectionsModalProps) {
   const { t } = useTranslation(["agents"]);
-  const [picks, setPicks] = useState<ConnectionOverridesMap>({});
+  // The live verdict of the launched version: a row it still blocks holds the re-run.
+  const { data: readiness } = useAgentConnectionReadiness(agentPackageId, version);
+  const stillBlocking = readiness && blockingIntegrationIds(readiness);
 
-  const integrationErrors = errors.filter((e) => e.field.startsWith("integrations."));
-  const { mustChoose, showRetry, canRetry } = retryDecision(integrationErrors, picks, retrying);
-
-  // A `null` pick drops the key: the re-run falls back to the cascade.
-  const setPick = (integrationId: string, connectionIds: ConnectionSet) =>
-    setPicks((prev) => withConnectionPick(prev, integrationId, connectionIds));
+  const { showRetry, canRetry } = retryDecision(errors, retrying, stillBlocking);
 
   return (
     <Modal
-      open={open}
       onClose={onClose}
       title={t("missingConnections.title")}
       actions={
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={onClose} disabled={retrying}>
-            {t("missingConnections.close")}
-          </Button>
           {showRetry && (
-            <Button
-              onClick={() => onRetryWithOverrides(picks)}
+            <PendingButton
+              onClick={onRetry}
+              pending={retrying}
               disabled={!canRetry}
-              data-testid="must-choose-retry"
+              data-testid="missing-connections-retry"
             >
-              {retrying && <Spinner />}
-              {mustChoose
-                ? t("missingConnections.mustChoose.retry")
-                : t("missingConnections.retry")}
-            </Button>
+              {t("missingConnections.retry")}
+            </PendingButton>
           )}
         </div>
       }
@@ -92,16 +88,14 @@ export function MissingConnectionsModal({
       {/* Cap the list height so a long set of integrations scrolls inside the
           modal instead of overflowing past it (and pushing the footer out of
           view). `-mr-2 pr-2` insets the scrollbar without clipping row borders. */}
-      <div className="-mr-2 max-h-[55vh] space-y-2 overflow-y-auto pr-2">
-        {integrationErrors.map((err, i) => (
+      <div className="-mr-2 flex max-h-[55vh] flex-col gap-2 overflow-y-auto pr-2">
+        {errors.map((err, i) => (
           <MissingRow
             key={`${err.field}-${i}`}
             err={err}
             agentPackageId={agentPackageId}
             version={version}
             integrationEntries={integrationEntries}
-            pick={picks[integrationIdOfField(err.field)] ?? null}
-            onPick={setPick}
           />
         ))}
       </div>
@@ -115,51 +109,43 @@ export function MissingRow({
   agentPackageId,
   version,
   integrationEntries,
-  pick,
-  onPick,
 }: {
   err: MissingIntegrationFieldError;
-  agentPackageId?: string;
-  version?: string;
-  integrationEntries?: AgentIntegrationEntry[];
-  /** Current per-run pick set for this integration; `null` = no override. */
-  pick: ConnectionSet;
-  onPick: (integrationId: string, connectionIds: ConnectionSet) => void;
+  agentPackageId: string;
+  version: string | undefined;
+  integrationEntries: AgentIntegrationEntry[] | undefined;
 }) {
   const { t } = useTranslation(["agents"]);
   const packageId = integrationIdOfField(err.field);
-  const { data: detail } = useIntegrationDetail(packageId);
   const readsIntegrations = usePermissions().can("integrations:read");
   // Structural failures can't be fixed by connecting — an admin must activate
   // the integration, or the agent's dependency or configuration must change. No picker.
   const isStructural = isStructuralCode(err.code);
 
-  // Server-authoritative verdict — the SAME `IntegrationAgentResolution` the
-  // Connexions tab and the launch-readiness badge consume (the picker below
-  // fetches it too; React Query dedupes the shared key). The header reflects it
-  // live: the connect/renew flow invalidates the `["integrations", …]` prefix
-  // (hosted connect portal popup close, `connection_update` SSE), this query
-  // refetches, and the header flips to resolved without a manual Re-run.
+  // The server's verdict for the launched version, under the key the picker below reads it
+  // from. The header follows it live: a connect, a renew or a `connection_update` event
+  // invalidates the integration queries, this one refetches, and the header flips to resolved
+  // without a manual Re-run.
   const { data: verdict } = useIntegrationReadinessEntry(
     isStructural ? undefined : packageId,
-    isStructural ? undefined : agentPackageId,
+    agentPackageId,
     version,
   );
-  const resolution = verdict?.resolution;
   const entry = integrationEntries?.find((e) => e.id === packageId);
 
-  // Resolved = the run-kickoff gate would no longer reject it; no verdict is not "ready".
+  // Resolved = the run-kickoff gate lets this resolution through, and the replay binds this
+  // same resolution (`retryLaunch` drops the launch's own pick). No verdict is not "ready".
   const resolved = !!verdict && !verdict.run_blocking;
   const unbound = unboundLabel(verdict?.resolution.warning ?? null);
-  // The picker needs the manifest + first verdict to render fully wired; hold
-  // a spinner until both land (non-structural rows with the agent in context).
-  // Both reads gate on `integrations:read`: without it neither lands, so the
-  // row names the integration and waits for nothing.
-  const pickable = !isStructural && !!agentPackageId && readsIntegrations;
-  const canRenderPicker = pickable && !!detail && !!resolution;
-  const loadingVerdict = pickable && (!detail || !resolution);
+  // The picker needs the manifest + first verdict to render fully wired; a
+  // non-structural row holds a spinner until both land. Both reads gate on
+  // `integrations:read`: without it neither lands, so the row names the
+  // integration and waits for nothing.
+  const pickable = !isStructural && readsIntegrations;
+  const canRenderPicker = pickable && !!verdict;
+  const loadingVerdict = pickable && !canRenderPicker;
 
-  const displayName = detail?.manifest.display_name ?? packageId;
+  const displayName = useIntegrationName(packageId);
   // An item code this build has no sentence for keeps the resolver's own message.
   const message = refusalMessage(err) ?? err.message;
   const Icon = resolved ? Check : isStructural ? XCircle : AlertTriangle;
@@ -170,46 +156,34 @@ export function MissingRow({
       : "text-amber-500";
 
   return (
-    <div className="border-border bg-card flex flex-col gap-2 rounded-md border px-3 py-2">
+    <Card className="flex flex-col gap-2 rounded-md px-3 py-2">
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <Puzzle className="text-muted-foreground size-4 shrink-0" />
           <div className="min-w-0">
             <div className="truncate text-sm font-medium">{displayName}</div>
-            <div className={`flex items-center gap-1.5 truncate text-xs ${colorClass}`}>
-              <Icon className="size-3" />
-              {/* `title` because the row TRUNCATES: a structural message can
-                  carry the server's diagnosis (e.g. the manifest schema issues
-                  behind `integration_invalid_manifest`), and a cause clipped at
-                  the row width is a cause the user never reads. */}
-              <span className="truncate" title={resolved ? undefined : message}>
-                {unbound ?? (resolved ? t("missingConnections.resolved") : message)}
-              </span>
-            </div>
+            {loadingVerdict ? (
+              <Skeleton className="mt-1 h-3 w-24" />
+            ) : (
+              <div className={`flex items-start gap-1.5 text-xs ${colorClass}`}>
+                <Icon className="mt-0.5 size-3 shrink-0" />
+                <span className="min-w-0 break-words">
+                  {unbound ?? (resolved ? t("missingConnections.resolved") : message)}
+                </span>
+              </div>
+            )}
           </div>
         </div>
-        {loadingVerdict && (
-          <Loader2 className="text-muted-foreground size-4 shrink-0 animate-spin" />
-        )}
       </div>
       {canRenderPicker && (
         <div className="border-border/60 mt-1 border-t pt-2">
           <IntegrationConnectionPicker
-            integrationId={packageId}
+            integration={{ id: packageId, tools: entry?.tools, scopes: entry?.scopes }}
             agentPackageId={agentPackageId}
-            manifest={detail.manifest}
-            authStatuses={detail.auths}
-            agentTools={entry?.tools}
-            agentScopes={entry?.scopes}
             version={version}
-            persistence={{
-              mode: "override",
-              value: pick,
-              onChange: (connectionIds) => onPick(packageId, connectionIds),
-            }}
           />
         </div>
       )}
-    </div>
+    </Card>
   );
 }

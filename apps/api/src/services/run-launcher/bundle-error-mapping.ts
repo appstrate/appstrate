@@ -11,7 +11,7 @@
  *
  * Every bundle-layer throw must map here: anything left unmapped reaches the
  * global handler as an opaque `500 internal_error` with no `detail`, leaving
- * the caller (and support) with nothing to act on (#878). The draft path never
+ * the caller (and support) with nothing to act on. The draft path never
  * crosses the integrity/signature gate, so these failures only ever surface on
  * published runs. `bundle-error-mapping.test.ts` enforces exhaustiveness over
  * the `BundleErrorCode` union.
@@ -86,7 +86,7 @@ export function toBundleApiError(err: unknown): ApiError | null {
   switch (err.code) {
     // A dependency pin that resolves to nothing — an unsatisfiable range or a
     // never-published skill. Fail loud BEFORE the container starts, never a
-    // silent draft fallback (#666). The detail names the unresolved deps and
+    // silent draft fallback. The detail names the unresolved deps and
     // the fix.
     case "DEPENDENCY_UNRESOLVED":
       return new ApiError({

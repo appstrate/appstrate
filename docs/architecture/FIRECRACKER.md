@@ -113,7 +113,7 @@ versioned — the client refuses a daemon speaking another major version, so the
 daemon is upgraded with the platform whenever the protocol moves); logs
 stream as NDJSON with reconnect-and-skip and exit codes long-poll.
 
-## Installing the daemon — `appstrate runner install` (issue #819, phase 3)
+## Installing the daemon — `appstrate runner install`
 
 The supported install path is the **CLI**, not a manual checkout. On a fresh
 KVM host:
@@ -234,8 +234,8 @@ Firecracker line when a local install selects the backend — a light
 
 ## Production status
 
-Both hardening gaps that previously gated this backend (no jailer,
-in-guest credentials) are closed. It is suitable for production
+The backend runs under the jailer and keeps credentials out of the guest.
+It is suitable for production
 single-tenant and trusted-workload deployments; for hostile multi-tenant
 workloads, weigh the residual threat model below and run an independent
 security review first — the backend has not yet had one. Hardening status:
@@ -256,7 +256,7 @@ security review first — the backend has not yet had one. Hardening status:
    without propagating the VMM exit status, which would break
    `waitForExit` (see `jail.ts`).
 2. **In-guest credentials — MMDS-brokered by default.** The run's raw
-   secrets no longer ride the config drive: with
+   secrets do not ride the config drive: with
    `FIRECRACKER_CREDENTIAL_BROKER=mmds` (the default) the known-secret keys
    (LLM keys, OAuth config, `RUN_TOKEN`, `APPSTRATE_SINK_SECRET`,
    `INTEGRATIONS_TO_SPAWN_JSON`, cookie-session logins) stay in daemon
@@ -348,12 +348,13 @@ metadata (169.254.0.0/16), RFC1918 and the other non-public ranges is dropped
 in the host `forward` chain (`FIRECRACKER_EGRESS_DENY_CIDRS`) — by default
 "egress" means the internet, never the host's private neighbourhood. An
 operator who lists a private host in `EGRESS_ALLOW_INTERNAL_HOSTS` must also
-leave its range out of `FIRECRACKER_EGRESS_DENY_CIDRS`; that list is the
-runner host's `forward` chain for every guest, so narrowing it removes the L3
-backstop for that range on every run, leaving only the sidecar's app-layer
-floor (`SIDECAR.md` → "Runner egress allowlist"). Everything else
-guest→internet is masqueraded and reserved, inside the guest, to the sidecar
-uid (default-deny `output` chain; IPv6 is disabled in the guest entirely).
+leave its range out of `FIRECRACKER_EGRESS_DENY_CIDRS` (both set in a runner
+drop-in, _Env vars_); that list is the runner host's `forward` chain for every
+guest, so narrowing it removes the L3 backstop for that range on every run,
+leaving only the sidecar's app-layer floor (`SIDECAR.md` → "Runner egress
+allowlist"). Everything else guest→internet is masqueraded and reserved, inside
+the guest, to the sidecar uid (default-deny `output` chain; IPv6 is disabled in
+the guest entirely).
 
 **Guest firewall** (`guest/firewall.ts`, applied by the supervisor before
 any workload starts): the `output` chain drops MMDS for every uid, then
@@ -420,10 +421,16 @@ host↔guest isolation.
    drive** (no workload can ever read the launch spec) → `setpriv` spawns
    sidecar (1000; not hardened — it execs the setuid runner wrapper) then
    agent (1001, `--no-new-privs --bounding-set -all`). Integration runners
-   exec as `appstrate-runner-exec [--workspace] <uid> <command…>` (setuid
-   root, group-1000-only): the sidecar allocates each runner its own uid from
-   the pool 1100-1163 and hands it to the wrapper, which refuses any uid
-   outside the pool or without a pool user. Each pool user `runner<i>` has a
+   exec as `appstrate-runner-exec [--workspace] [--own <file>]… <uid> <command…>`
+   (setuid root, group-1000-only): the sidecar allocates each runner its own uid
+   from the pool 1100-1163 and hands it to the wrapper, which refuses any uid
+   outside the pool or without a pool user. Each `--own <file>` is a
+   `delivery.files` credential the sidecar wrote owner-only for that runner:
+   before dropping, the wrapper gives it to the runner's uid and private group
+   with owner bits only, and refuses anything but a single-link regular file
+   the sidecar owns, reached through no symlink at any component of its path
+   (`openat2` with `RESOLVE_NO_SYMLINKS`), so the runner reads its
+   credential and neither the agent nor a sibling runner does. Each pool user `runner<i>` has a
    private primary group (gid == uid) and a 0700 home `/home/runner<i>`; the
    wrapper sets `HOME` to it, applies `umask 007` and closes every inherited
    fd above stdio (`close_range`), so no descriptor the sidecar leaked still
@@ -450,7 +457,7 @@ host↔guest isolation.
 Timeout/cancel flow through `stopWorkload`/`stopByRunId` (graceful
 `SendCtrlAltDel` attempt, then SIGKILL). A cancel landing during the boot
 window latches (`vm.stopping`) and the just-spawned VMM is killed on the
-post-spawn recheck — a cancel can no longer race the boot into a running
+post-spawn recheck — a cancel cannot race the boot into a running
 VM. The platform stall watchdog calls `stopByRunId` when it finalizes a
 stalled run (the VM is killed, not just the DB row), and at platform boot
 the orphan finalizer does the same for every stale-heartbeat run before
@@ -483,7 +490,7 @@ Two artifacts, shared by all runs, validated at `initialize()`:
   nftables AND the iptables owner match entirely (everything `=y`, nothing
   loadable), which would break the in-guest uid firewall.
 
-### Daemon install — download, don't build (issue #819, phase 2)
+### Daemon install — download, don't build
 
 A released daemon does **not** build artifacts on the host. At boot, BEFORE
 `initialize()`, `runner/artifacts.ts` resolves the kernel + rootfs:
@@ -667,7 +674,7 @@ uptimeMs }`. `reason` is derived from the call path: `finalize` (run
   `waitForExit`), `shutdown` (daemon stopping), or `crash` (VMM exited
   non-zero without an intentional stop, incl. the console-ceiling kill).
   `exitMarkerFound` is the nonce-authenticated supervisor exit marker — the
-  same signal `waitForExit` trusts. There is no longer a silent gap between
+  same signal `waitForExit` trusts. There is no silent gap between
   "microVM booted" and cleanup.
 - **Console retention.** Before the workspace is deleted, the last 256 KiB
   of `console.log` is copied to
@@ -698,7 +705,7 @@ uptimeMs }`. `reason` is derived from the call path: `finalize` (run
   dead — so a genuinely hung or dead VM is never masked. This removes the
   historical "watchdog kills a healthy, slow-booting run" class (see the Lima
   `RUN_STALL_THRESHOLD=300` workaround).
-  The pump itself is no longer Firecracker-specific: it lives in
+  The pump itself is not Firecracker-specific: it lives in
   `services/run-boot-heartbeat.ts` and is shared with the Docker platform
   path (which hit the same class of failure on cold image pulls). This
   backend only supplies its own liveness probe. The `boot_deadline_at`
@@ -722,16 +729,58 @@ uptimeMs }`. `reason` is derived from the call path: `finalize` (run
 The daemon owns two schemas, neither part of `@appstrate/env` — the daemon
 boots on a bare KVM host with only these variables.
 
-### Daemon listen/link — `FIRECRACKER_RUNNER_*` (`runner/env.ts`)
+### Daemon listen/link — `FIRECRACKER_RUNNER_*` and `EGRESS_ALLOW_INTERNAL_HOSTS` (`runner/env.ts`)
 
-| Variable                          | Default   | Notes                                                                                                                                                                  |
-| --------------------------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `FIRECRACKER_RUNNER_TOKEN`        | —         | REQUIRED, ≥16 chars. Shared bearer secret; every request must present it. Must match the platform's `FIRECRACKER_RUNNER_TOKEN`                                         |
-| `FIRECRACKER_RUNNER_PORT`         | `3100`    | Daemon listen port (TCP mode; ignored when `FIRECRACKER_RUNNER_SOCKET` is set)                                                                                         |
-| `FIRECRACKER_RUNNER_HOST`         | `0.0.0.0` | Bind narrowly / firewall the port — the launch spec carries run credentials (TCP mode; ignored when `FIRECRACKER_RUNNER_SOCKET` is set)                                |
-| `FIRECRACKER_RUNNER_SOCKET`       | —         | Absolute path of a Unix domain socket to bind INSTEAD of HOST/PORT (UDS transport — see _Transport & auth_). Canonical: `/run/appstrate-runner/runner.sock`            |
-| `FIRECRACKER_RUNNER_SOCKET_MODE`  | `0660`    | Octal file mode of the bound socket. `0666` for a rootless / userns-remapped platform container (bearer token remains enforced)                                        |
-| `FIRECRACKER_RUNNER_PLATFORM_URL` | —         | REQUIRED. `http(s)://<IPv4>[:port]` guests use to reach the platform (IP literal — no DNS in guests). The daemon opens an explicit nft accept for exactly this ip:port |
+| Variable                          | Default   | Notes                                                                                                                                                                   |
+| --------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `FIRECRACKER_RUNNER_TOKEN`        | —         | REQUIRED, ≥16 chars. Shared bearer secret; every request must present it. Must match the platform's `FIRECRACKER_RUNNER_TOKEN`                                          |
+| `FIRECRACKER_RUNNER_PORT`         | `3100`    | Daemon listen port (TCP mode; ignored when `FIRECRACKER_RUNNER_SOCKET` is set)                                                                                          |
+| `FIRECRACKER_RUNNER_HOST`         | `0.0.0.0` | Bind narrowly / firewall the port — the launch spec carries run credentials (TCP mode; ignored when `FIRECRACKER_RUNNER_SOCKET` is set)                                 |
+| `FIRECRACKER_RUNNER_SOCKET`       | —         | Absolute path of a Unix domain socket to bind INSTEAD of HOST/PORT (UDS transport — see _Transport & auth_). Canonical: `/run/appstrate-runner/runner.sock`             |
+| `FIRECRACKER_RUNNER_SOCKET_MODE`  | `0660`    | Octal file mode of the bound socket. `0666` for a rootless / userns-remapped platform container (bearer token remains enforced)                                         |
+| `FIRECRACKER_RUNNER_PLATFORM_URL` | —         | REQUIRED. `http(s)://<IPv4>[:port]` guests use to reach the platform (IP literal — no DNS in guests). The daemon opens an explicit nft accept for exactly this ip:port  |
+| `EGRESS_ALLOW_INTERNAL_HOSTS`     | _(unset)_ | Internal hosts guest sidecars may reach, same grammar as the platform's (`docs/ENV.md`). Guests take it from HERE, not from the platform; a malformed list refuses boot |
+
+`/etc/appstrate-runner/env` belongs to `appstrate runner install`, which renders
+it whole from its own options. It writes the keys in `RUNNER_ENV_MANAGED_KEYS`
+(`apps/cli/src/lib/runner/config-files.ts`): the `FIRECRACKER_RUNNER_*` link
+keys, the binary and artifact paths, and the artifacts pin and pubkey. A
+re-install keeps the token and a `FIRECRACKER_ARTIFACTS_PUBKEY` override, drops
+every other key, warns naming each dropped key and keeps the previous file as
+`/etc/appstrate-runner/env.previous` (0600). That copy holds the token: delete it
+once its variables are in the drop-in. `appstrate runner update` rewrites only
+`FIRECRACKER_ARTIFACTS_VERSION`. Do not edit that file by hand.
+
+Every other daemon variable (`EGRESS_ALLOW_INTERNAL_HOSTS`,
+`FIRECRACKER_EGRESS_DENY_CIDRS`, `FIRECRACKER_JAILER`, every engine variable
+below that install does not write) goes in a systemd drop-in, one
+`Environment=` line per variable:
+
+```sh
+systemctl edit appstrate-runner
+```
+
+```ini
+[Service]
+# git.internal.example resolves in 10.0.0.0/8: that range leaves the default deny list
+Environment=EGRESS_ALLOW_INTERNAL_HOSTS=git.internal.example
+Environment=FIRECRACKER_EGRESS_DENY_CIDRS=169.254.0.0/16,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,198.18.0.0/15,192.0.0.0/24,224.0.0.0/3
+```
+
+```sh
+systemctl restart appstrate-runner
+```
+
+The `FIRECRACKER_EGRESS_DENY_CIDRS` value above is today's default
+(`apps/api/src/modules/firecracker/runner/host-env.ts`) minus `10.0.0.0/8`. An
+override freezes the list: re-check it against the default on upgrade.
+
+Install rewrites the unit file, never its `.d/` directory, so the drop-in
+survives a re-install; `appstrate runner uninstall` removes it with the unit.
+systemd gives `EnvironmentFile=` precedence over `Environment=`: a drop-in adds
+variables but cannot override a key install writes — change those by re-running
+install with its options. Drop-in files are world-readable (0644): no secrets
+there.
 
 ### Engine host config — `FIRECRACKER_*` (`runner/host-env.ts`)
 

@@ -9,7 +9,7 @@
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import { db } from "@appstrate/db/client";
-import { integrationConnections } from "@appstrate/db/schema";
+import { integrationConnections, integrationConnectionShares } from "@appstrate/db/schema";
 import { runUnshareSpaceAccessLoss } from "../migration/0033-unshare-space-access-loss.ts";
 import { truncateAll } from "../../apps/api/test/helpers/db.ts";
 import {
@@ -21,31 +21,36 @@ import { seedPackage, seedSpace, seedSpaceMember } from "../../apps/api/test/hel
 
 const INTEGRATION = "@mig0033/svc";
 
-async function seedSharedConnection(spaceId: string, owner: { userId: string }): Promise<string> {
+async function seedSharedConnection(
+  orgId: string,
+  spaceId: string,
+  owner: { userId: string },
+): Promise<string> {
   const [row] = await db
     .insert(integrationConnections)
     .values({
       integrationId: INTEGRATION,
       authKey: "primary",
       accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
+      orgId,
       spaceId,
       ...owner,
       credentialsEncrypted: "x",
       scopesGranted: [],
-      sharedWithOrg: true,
       label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
     })
     .returning({ id: integrationConnections.id });
+  await db.insert(integrationConnectionShares).values({ connectionId: row!.id, spaceId, orgId });
   return row!.id;
 }
 
 async function stillShared(ids: string[]): Promise<string[]> {
   const rows = await db
-    .select({ id: integrationConnections.id, shared: integrationConnections.sharedWithOrg })
-    .from(integrationConnections);
+    .selectDistinct({ id: integrationConnectionShares.connectionId })
+    .from(integrationConnectionShares);
   return rows
-    .filter((r) => r.shared && ids.includes(r.id))
     .map((r) => r.id)
+    .filter((id) => ids.includes(id))
     .sort();
 }
 
@@ -68,21 +73,21 @@ describe("runUnshareSpaceAccessLoss", () => {
     await addOrgMember(ctx.orgId, member.id, "member");
     // Shared in a closed space the member holds no row in: access lost before the deploy.
     const closed = await seedSpace({ orgId: ctx.orgId, visibility: "closed" });
-    lost = await seedSharedConnection(closed.id, { userId: member.id });
+    lost = await seedSharedConnection(ctx.orgId, closed.id, { userId: member.id });
     // An explicit member of the same closed space still reaches it.
     const insider = await createTestUser();
     await addOrgMember(ctx.orgId, insider.id, "member");
     await seedSpaceMember({ spaceId: closed.id, userId: insider.id });
     kept = [
-      await seedSharedConnection(ctx.defaultSpaceId, { userId: member.id }),
-      await seedSharedConnection(closed.id, { userId: insider.id }),
+      await seedSharedConnection(ctx.orgId, ctx.defaultSpaceId, { userId: member.id }),
+      await seedSharedConnection(ctx.orgId, closed.id, { userId: insider.id }),
     ];
     // Shared by a user who left the organization: a `user` row, no `org_members` row.
     const leaver = await createTestUser();
-    departed = await seedSharedConnection(ctx.defaultSpaceId, { userId: leaver.id });
+    departed = await seedSharedConnection(ctx.orgId, ctx.defaultSpaceId, { userId: leaver.id });
     // A second organization with its own leaver: the per-org loop reaches it too.
     const other = await createTestContext({ orgSlug: "mig0033b" });
-    otherOrgDeparted = await seedSharedConnection(other.defaultSpaceId, {
+    otherOrgDeparted = await seedSharedConnection(other.orgId, other.defaultSpaceId, {
       userId: (await createTestUser()).id,
     });
   });

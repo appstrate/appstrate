@@ -15,20 +15,12 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import {
-  packageShares,
-  spacePackages,
-  packages,
-  runs,
-  uploads,
-  chatSessions,
-} from "@appstrate/db/schema";
+import { spacePackages, packages, runs, uploads, chatSessions } from "@appstrate/db/schema";
 import { uploadStream } from "@appstrate/db/storage";
 import type { Actor } from "@appstrate/connect";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
-  authHeaders,
   createTestContext,
   createTestUser,
   addOrgMember,
@@ -40,7 +32,7 @@ import { createUpload } from "../../../src/services/uploads.ts";
 import { createFileFromStream, createFileFromUpload } from "../../../src/services/files.ts";
 import { zipSync } from "fflate";
 import { mcpServerManifest } from "../../helpers/integration-manifests.ts";
-import { mcpRpc, type JsonRpcEnvelope } from "../../helpers/mcp.ts";
+import { mcpRpc, type JsonRpcEnvelope, mcpAuthHeaders } from "../../helpers/mcp.ts";
 
 const app = getTestApp();
 await registerTestPlatformApp();
@@ -200,7 +192,11 @@ describe("mcp list_files", () => {
       method: "tools/call",
       params: { name: "list_files", arguments: { run_id: runA } },
     });
-    expect(undeclared.envelope.error?.message).toContain("Unknown argument(s): run_id");
+    expect(undeclared.envelope.error).toBeUndefined();
+    const refused = toolData(undeclared.envelope);
+    expect(refused.isError).toBe(true);
+    expect(refused.data).toMatchObject({ code: "unknown_argument", arguments: ["run_id"] });
+    expect(refused.data.error as string).toContain("Unknown argument(s): run_id");
   });
 
   it("scopes to the caller's org — a foreign org's files are not listed", async () => {
@@ -355,6 +351,29 @@ describe("mcp resources/read (appfile://)", () => {
     });
   });
 
+  it("reads a file of any reachable space on an org-wide connection: the URI names the space", async () => {
+    // Org-wide (no X-Space-Id): a `resources/read` carries no `space_id`, so
+    // the file's own space is entered. One file per space, so whichever space
+    // the request would otherwise land in, one of the two reads proves it.
+    const second = await seedSpace({ orgId: ctx.orgId, name: "Second", visibility: "closed" });
+    const secondScope = { orgId: ctx.orgId, spaceId: second.id };
+    const docs = [
+      await publishDoc(scope, await seedRun(scope), "a.txt", "text/plain", "in default"),
+      await publishDoc(secondScope, await seedRun(secondScope), "b.txt", "text/plain", "in second"),
+    ];
+    const orgWide = { Cookie: ctx.cookie, "X-Org-Id": ctx.orgId };
+    for (const [i, docId] of docs.entries()) {
+      const { envelope } = await rpc(orgWide, {
+        jsonrpc: "2.0",
+        id: i,
+        method: "resources/read",
+        params: { uri: `appfile://${docId}` },
+      });
+      const contents = (envelope.result?.contents as Array<Record<string, unknown>>) ?? [];
+      expect(contents[0]?.text).toBe(i === 0 ? "in default" : "in second");
+    }
+  });
+
   it("exposes the same file through the chat-callable read_file tool", async () => {
     const runId = await seedRun(scope);
     const docId = await publishDoc(scope, runId, "report.txt", "text/plain", "hello tool reader");
@@ -442,8 +461,11 @@ describe("mcp resources/read (appfile://)", () => {
       method: "resources/read",
       params: { uri: `appfile://${foreignDoc}` },
     });
-    // A cross-org id resolves to a 404 in the route → surfaced as an MCP error.
-    expect(envelope.error).toBeDefined();
+    // A file the caller cannot resolve is MCP's "resource not found".
+    expect(envelope.error).toMatchObject({
+      code: -32002,
+      data: { uri: `appfile://${foreignDoc}` },
+    });
     expect(envelope.error!.message).toContain("not found");
   });
 
@@ -454,7 +476,7 @@ describe("mcp resources/read (appfile://)", () => {
       method: "resources/read",
       params: { uri: "appfile://not-a-doc-id" },
     });
-    expect(envelope.error).toBeDefined();
+    expect(envelope.error).toMatchObject({ code: -32602 });
   });
 
   it("returns metadata only (no bytes) for another member's user_upload the caller cannot download", async () => {
@@ -575,9 +597,9 @@ describe("mcp file-backed package workflow", () => {
 
   it("places a root homed elsewhere by the same rule the REST import uses", async () => {
     // R7 says a re-import places its root the way `POST /api/spaces/{id}/packages`
-    // does: the offer is written with the installation when the caller may make
-    // one. One act, one rule — this tool asks the same `holdsPackageShareAuthority`
-    // predicate the REST import route asks, off its own request.
+    // does: through the placement door when the caller may place it. One act,
+    // one rule — this tool asks the same `heldPlacementAuthority` the REST
+    // import route asks, off its own request.
     //
     // The fixture homes the root in ANOTHER team space of the organization and
     // places it nowhere else, which is the reachable half of that rule: a
@@ -603,7 +625,7 @@ describe("mcp file-backed package workflow", () => {
       packageArchive(true),
     );
 
-    const sessionHeaders = authHeaders(ctx);
+    const sessionHeaders = mcpAuthHeaders(ctx);
     const { envelope } = await rpc(sessionHeaders, {
       jsonrpc: "2.0",
       id: 1,
@@ -614,19 +636,19 @@ describe("mcp file-backed package workflow", () => {
     expect(result.isError, JSON.stringify(envelope)).toBe(false);
     expect(result.data).toMatchObject({ root_package_id: packageId, root_active: true });
 
-    // The offer AND the installation, in the same transaction — asserting only
-    // the flag would pass on an install that placed the package with no
-    // audience row behind it.
-    const shares = await db
-      .select({ spaceId: packageShares.spaceId })
-      .from(packageShares)
-      .where(eq(packageShares.packageId, packageId));
-    expect(shares.map((row) => row.spaceId)).toEqual([ctx.defaultSpaceId]);
+    // The placement, switched on and naming its placer — asserting only the
+    // flag would pass on an install that wrote no row.
     const installs = await db
-      .select({ spaceId: spacePackages.spaceId })
+      .select({
+        spaceId: spacePackages.spaceId,
+        enabled: spacePackages.enabled,
+        sharedBy: spacePackages.sharedBy,
+      })
       .from(spacePackages)
       .where(eq(spacePackages.packageId, packageId));
-    expect(installs.map((row) => row.spaceId)).toEqual([ctx.defaultSpaceId]);
+    expect(installs).toEqual([
+      { spaceId: ctx.defaultSpaceId, enabled: true, sharedBy: ctx.user.id },
+    ]);
   });
 
   function packageArchive(includeEntryPoint: boolean, source = "// server\n"): Uint8Array {
@@ -701,6 +723,41 @@ describe("mcp file-backed package workflow", () => {
     expect(result.isError).toBe(true);
     expect(result.data).toMatchObject({ valid: false, importable: false });
     expect(String(result.data.error)).toContain("description");
+    expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
+  });
+
+  // The preflight is the import's own: a reserved scope must not read as
+  // importable here and then be refused by `import_package_file`.
+  it("reports a package under a platform-reserved scope as not importable", async () => {
+    const manifest = {
+      name: "@inline/evil",
+      version: "1.0.0",
+      type: "agent",
+      schema_version: "0.1",
+      display_name: "Squatter",
+      description: "Claims the inline scope.",
+    };
+    const bytes = zipSync({
+      "manifest.json": new TextEncoder().encode(JSON.stringify(manifest)),
+      "prompt.md": new TextEncoder().encode("You are a squatter."),
+    } as unknown as Parameters<typeof zipSync>[0]);
+
+    const runId = await seedRun(scope);
+    const docId = await publishDoc(scope, runId, "evil.afps", "application/zip", bytes);
+
+    const { envelope } = await rpc(headers, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "validate_package_file",
+        arguments: { file_uri: `appfile://${docId}` },
+      },
+    });
+    const result = toolData(envelope);
+    expect(result.isError).toBe(true);
+    expect(result.data).toMatchObject({ valid: false, importable: false });
+    expect(String(result.data.error)).toContain("reserved scope");
     expect(await db.select({ id: packages.id }).from(packages)).toEqual([]);
   });
 

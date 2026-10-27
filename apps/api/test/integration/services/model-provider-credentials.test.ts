@@ -28,11 +28,25 @@ import { modelProviderCredentials } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, createTestUser, createTestOrg } from "../../helpers/auth.ts";
+import { getTestApp } from "../../helpers/app.ts";
 import {
+  createTestContext,
+  createTestUser,
+  createTestOrg,
+  memberContext,
+} from "../../helpers/auth.ts";
+import type { ModelProviderCredentialAction } from "@appstrate/shared-types";
+import { ApiError } from "../../../src/lib/errors.ts";
+import { updateOrgSettings } from "../../../src/services/organizations.ts";
+import {
+  assertCredentialEditable,
+  credentialActions,
+  mayProbeCredential,
+  reconnectVerdict,
   createApiKeyCredential,
   createOAuthCredential,
   deleteModelProviderCredential,
+  type ModelCredentialCaller,
   listOrgModelProviderCredentials,
   loadInferenceCredentials,
   markCredentialNeedsReconnection,
@@ -50,7 +64,29 @@ import { seedTestModelProviders } from "../../helpers/model-providers.ts";
 import { corruptCredentialBlob } from "../../helpers/seed.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 
+/** An organization administrator of `orgId`: manages its organization credentials. */
+const orgAdmin = (orgId: string) => ({
+  orgId,
+  userId: null,
+  readsOrg: true,
+  writesOrg: true,
+  deletesOrg: true,
+  connects: true,
+});
+
+getTestApp(); // boots the model and provider registries
+
 const PLAINTEXT = "sk-test-plaintext-do-not-leak-12345";
+
+/** An org manager's view: every row of the org, and the right to change any of them. */
+const adminCaller = (orgId: string): ModelCredentialCaller => ({
+  orgId,
+  userId: "org-admin",
+  readsOrg: true,
+  writesOrg: true,
+  deletesOrg: true,
+  connects: true,
+});
 
 describe("model-provider-credentials service — api_key path", () => {
   beforeEach(async () => {
@@ -62,6 +98,7 @@ describe("model-provider-credentials service — api_key path", () => {
     const id = await createApiKeyCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
+      ownerUserId: null,
       label: "OpenAI prod",
       providerId: "openai",
       apiKey: PLAINTEXT,
@@ -81,6 +118,7 @@ describe("model-provider-credentials service — api_key path", () => {
     const id = await createApiKeyCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
+      ownerUserId: null,
       label: "Anthropic",
       providerId: "anthropic",
       apiKey: PLAINTEXT,
@@ -102,6 +140,7 @@ describe("model-provider-credentials service — api_key path", () => {
       createApiKeyCredential({
         orgId: ctx.orgId,
         userId: ctx.user.id,
+        ownerUserId: null,
         label: "x",
         providerId: "@unknown/provider",
         apiKey: "x",
@@ -115,6 +154,7 @@ describe("model-provider-credentials service — api_key path", () => {
       createApiKeyCredential({
         orgId: ctx.orgId,
         userId: ctx.user.id,
+        ownerUserId: null,
         label: "x",
         providerId: "test-oauth",
         apiKey: "x",
@@ -159,6 +199,7 @@ describe("model-provider-credentials service — api_key path", () => {
       const compatId = await createApiKeyCredential({
         orgId: ctx.orgId,
         userId: ctx.user.id,
+        ownerUserId: null,
         label: "Local Ollama",
         providerId: "openai-compatible",
         apiKey: "ollama-fake-key",
@@ -171,6 +212,7 @@ describe("model-provider-credentials service — api_key path", () => {
       const openaiId = await createApiKeyCredential({
         orgId: ctx.orgId,
         userId: ctx.user.id,
+        ownerUserId: null,
         label: "OpenAI",
         providerId: "openai",
         apiKey: "sk-foo",
@@ -193,12 +235,13 @@ describe("model-provider-credentials service — api_key path", () => {
     await createApiKeyCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
+      ownerUserId: null,
       label: "OpenAI",
       providerId: "openai",
       apiKey: PLAINTEXT,
     });
 
-    const list = (await listOrgModelProviderCredentials(ctx.orgId)).filter(
+    const list = (await listOrgModelProviderCredentials(adminCaller(ctx.orgId))).filter(
       (k) => k.source === "custom",
     );
     expect(list).toHaveLength(1);
@@ -213,6 +256,7 @@ describe("model-provider-credentials service — api_key path", () => {
     const id = await createApiKeyCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
+      ownerUserId: null,
       label: "rot",
       providerId: "openai",
       apiKey: "old-secret",
@@ -222,7 +266,7 @@ describe("model-provider-credentials service — api_key path", () => {
       .from(modelProviderCredentials)
       .where(eq(modelProviderCredentials.id, id));
 
-    await updateModelProviderCredential(ctx.orgId, id, { apiKey: "new-secret" });
+    await updateModelProviderCredential(orgAdmin(ctx.orgId), id, { apiKey: "new-secret" });
 
     const [after] = await db
       .select({ blob: modelProviderCredentials.credentialsEncrypted })
@@ -238,6 +282,7 @@ describe("model-provider-credentials service — api_key path", () => {
     const id = await createApiKeyCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
+      ownerUserId: null,
       label: "meta",
       providerId: "openai",
       apiKey: "stable-secret",
@@ -247,7 +292,7 @@ describe("model-provider-credentials service — api_key path", () => {
       .from(modelProviderCredentials)
       .where(eq(modelProviderCredentials.id, id));
 
-    await updateModelProviderCredential(ctx.orgId, id, { label: "renamed" });
+    await updateModelProviderCredential(orgAdmin(ctx.orgId), id, { label: "renamed" });
 
     const [after] = await db
       .select({
@@ -260,23 +305,28 @@ describe("model-provider-credentials service — api_key path", () => {
     expect(after!.label).toBe("renamed");
   });
 
-  it("cross-org isolation — load returns null and update is a silent no-op", async () => {
+  it("cross-org isolation — load returns null, update and delete are refused", async () => {
     const ctxA = await createTestContext({ orgSlug: "mpc-svc-iso-a" });
     const ctxB = await createTestContext({ orgSlug: "mpc-svc-iso-b" });
     const id = await createApiKeyCredential({
       orgId: ctxA.orgId,
       userId: ctxA.user.id,
+      ownerUserId: null,
       label: "a",
       providerId: "openai",
       apiKey: "secret-a",
     });
 
     expect(await loadInferenceCredentials(ctxB.orgId, id)).toBeNull();
-    await updateModelProviderCredential(ctxB.orgId, id, { apiKey: "stolen" });
+    await expect(
+      updateModelProviderCredential(orgAdmin(ctxB.orgId), id, { apiKey: "stolen" }),
+    ).rejects.toMatchObject({ status: 404 });
     const own = await loadInferenceCredentials(ctxA.orgId, id);
     expect(own!.apiKey).toBe("secret-a");
 
-    await deleteModelProviderCredential(ctxB.orgId, id);
+    await expect(deleteModelProviderCredential(orgAdmin(ctxB.orgId), id)).rejects.toMatchObject({
+      status: 404,
+    });
     const stillOwn = await loadInferenceCredentials(ctxA.orgId, id);
     expect(stillOwn).not.toBeNull();
   });
@@ -292,6 +342,7 @@ describe("model-provider-credentials service — oauth path", () => {
     const id = await createOAuthCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
+      ownerUserId: ctx.user.id,
       label: "Test OAuth personal",
       providerId: "test-oauth",
       accessToken: "access-1",
@@ -317,6 +368,7 @@ describe("model-provider-credentials service — oauth path", () => {
       createOAuthCredential({
         orgId: ctx.orgId,
         userId: ctx.user.id,
+        ownerUserId: ctx.user.id,
         label: "x",
         providerId: "openai",
         accessToken: "x",
@@ -331,15 +383,23 @@ describe("model-provider-credentials service — oauth path", () => {
     const id = await createOAuthCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
+      ownerUserId: ctx.user.id,
       label: "test-oauth",
       providerId: "test-oauth",
       accessToken: "a",
       refreshToken: "r",
       expiresAt: null,
     });
-    await expect(
-      updateModelProviderCredential(ctx.orgId, id, { apiKey: "intruder" }),
-    ).rejects.toThrow(/Cannot rotate apiKey/);
+    // A personal credential: its owner edits it.
+    const error = await updateModelProviderCredential(
+      { ...orgAdmin(ctx.orgId), userId: ctx.user.id },
+      id,
+      { apiKey: "intruder" },
+    ).catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(400);
+    expect((error as ApiError).code).toBe("invalid_request");
+    expect((error as ApiError).param).toBe("api_key");
   });
 
   it("updateOAuthCredentialTokens writes fresh tokens and preserves email/account", async () => {
@@ -347,6 +407,7 @@ describe("model-provider-credentials service — oauth path", () => {
     const id = await createOAuthCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
+      ownerUserId: ctx.user.id,
       label: "test-oauth",
       providerId: "test-oauth",
       accessToken: "old-access",
@@ -364,10 +425,10 @@ describe("model-provider-credentials service — oauth path", () => {
     const creds = await loadInferenceCredentials(ctx.orgId, id);
     expect(creds!.apiKey).toBe("new-access");
     expect(creds!.expiresAt).toBe(2_000_000);
-    // email preserved (only surface in list, not in load).
-    const list = (await listOrgModelProviderCredentials(ctx.orgId)).filter(
-      (k) => k.source === "custom",
-    );
+    // email preserved (only surface in list, not in load), shown to the owner.
+    const list = (
+      await listOrgModelProviderCredentials({ ...adminCaller(ctx.orgId), userId: ctx.user.id })
+    ).filter((k) => k.source === "custom");
     expect(list[0]!.oauth_email).toBe("x@example.test");
   });
 
@@ -376,6 +437,7 @@ describe("model-provider-credentials service — oauth path", () => {
     const id = await createOAuthCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
+      ownerUserId: ctx.user.id,
       label: "test-oauth",
       providerId: "test-oauth",
       accessToken: "a",
@@ -387,7 +449,7 @@ describe("model-provider-credentials service — oauth path", () => {
     // loadInferenceCredentials gates dead OAuth rows — null is the signal.
     expect(await loadInferenceCredentials(ctx.orgId, id)).toBeNull();
     // The list view surfaces the raw flag for UI affordances.
-    const list = (await listOrgModelProviderCredentials(ctx.orgId)).filter(
+    const list = (await listOrgModelProviderCredentials(adminCaller(ctx.orgId))).filter(
       (k) => k.source === "custom",
     );
     expect(list[0]!.needs_reconnection).toBe(true);
@@ -404,6 +466,7 @@ describe("model-provider-credentials service — upstream rejections of an api k
     const id = await createApiKeyCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
+      ownerUserId: null,
       label: "OpenAI",
       providerId: "openai",
       apiKey: PLAINTEXT,
@@ -412,7 +475,8 @@ describe("model-provider-credentials service — upstream rejections of an api k
   }
 
   const flagged = async (orgId: string, id: string) =>
-    (await listOrgModelProviderCredentials(orgId)).find((k) => k.id === id)!.needs_reconnection;
+    (await listOrgModelProviderCredentials(adminCaller(orgId))).find((k) => k.id === id)!
+      .needs_reconnection;
 
   it("flags the key at INTEGRATION_REFRESH_MAX_FAILURES rejections, and a rotation clears it", async () => {
     const { orgId, id } = await apiKeyCredential("mpc-reject-flag");
@@ -424,7 +488,7 @@ describe("model-provider-credentials service — upstream rejections of an api k
     expect(await flagged(orgId, id)).toBe(true);
     expect(await loadInferenceCredentials(orgId, id)).toBeNull();
 
-    await updateModelProviderCredential(orgId, id, { apiKey: "sk-rotated" });
+    await updateModelProviderCredential(orgAdmin(orgId), id, { apiKey: "sk-rotated" });
     expect(await flagged(orgId, id)).toBe(false);
     expect((await loadInferenceCredentials(orgId, id))!.apiKey).toBe("sk-rotated");
     const [row] = await db
@@ -437,7 +501,7 @@ describe("model-provider-credentials service — upstream rejections of an api k
   it("never flags a key the row no longer holds", async () => {
     const { orgId, id } = await apiKeyCredential("mpc-reject-rotated");
     for (let i = 0; i < 4; i++) await recordModelCredentialRejection(orgId, id, PLAINTEXT);
-    await updateModelProviderCredential(orgId, id, { apiKey: "sk-rotated" });
+    await updateModelProviderCredential(orgAdmin(orgId), id, { apiKey: "sk-rotated" });
     for (let i = 0; i < 6; i++) await recordModelCredentialRejection(orgId, id, PLAINTEXT);
     expect(await flagged(orgId, id)).toBe(false);
   });
@@ -446,12 +510,12 @@ describe("model-provider-credentials service — upstream rejections of an api k
     const { orgId, id } = await apiKeyCredential("mpc-reject-race");
     for (let round = 0; round < 10; round++) {
       const key = `sk-round-${round}`;
-      await updateModelProviderCredential(orgId, id, { apiKey: key });
+      await updateModelProviderCredential(orgAdmin(orgId), id, { apiKey: key });
       for (let i = 0; i < 4; i++) await recordModelCredentialRejection(orgId, id, key);
       const next = `sk-round-${round}-next`;
       await Promise.all([
         recordModelCredentialRejection(orgId, id, key),
-        updateModelProviderCredential(orgId, id, { apiKey: next }),
+        updateModelProviderCredential(orgAdmin(orgId), id, { apiKey: next }),
       ]);
       expect((await loadInferenceCredentials(orgId, id))?.apiKey).toBe(next);
       expect(await flagged(orgId, id)).toBe(false);
@@ -487,6 +551,7 @@ describe("model-provider-credentials service — upstream rejections of an api k
     const id = await createOAuthCredential({
       orgId: ctx.orgId,
       userId: ctx.user.id,
+      ownerUserId: ctx.user.id,
       label: "Subscription",
       providerId: "test-oauth",
       accessToken: "access-1",
@@ -528,12 +593,13 @@ describe("model-provider-credentials service — aggregator + inference loader",
       await createApiKeyCredential({
         orgId: ctx.orgId,
         userId: ctx.user.id,
+        ownerUserId: null,
         label: "Anthropic",
         providerId: "anthropic",
         apiKey: PLAINTEXT,
       });
 
-      const list = await listOrgModelProviderCredentials(ctx.orgId);
+      const list = await listOrgModelProviderCredentials(adminCaller(ctx.orgId));
       const custom = list.filter((k) => k.source === "custom");
       expect(custom).toHaveLength(1);
       // The aggregated UI shape never carries plaintext or the encrypted blob.
@@ -551,6 +617,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
       const imported = await importOAuthModelProviderConnection({
         orgId: org.id,
         userId: user.id,
+        ownerUserId: user.id,
         providerId: TEST_OAUTH,
         label: "Test OAuth",
         accessToken: "access-list-1",
@@ -559,7 +626,11 @@ describe("model-provider-credentials service — aggregator + inference loader",
         email: "user@example.com",
       });
 
-      const list = await listOrgModelProviderCredentials(org.id);
+      // The owner sees their personal subscription's email; another admin would not.
+      const list = await listOrgModelProviderCredentials({
+        ...adminCaller(org.id),
+        userId: user.id,
+      });
       const oauth = list.find((k) => k.id === imported.credentialId);
       expect(oauth).toBeDefined();
       expect(oauth!.source).toBe("custom");
@@ -580,6 +651,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
       const apiKeyId = await createApiKeyCredential({
         orgId: ctx.orgId,
         userId: ctx.user.id,
+        ownerUserId: null,
         label: "OpenAI",
         providerId: "openai",
         apiKey: PLAINTEXT,
@@ -587,6 +659,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
       const oauthId = await createOAuthCredential({
         orgId: ctx.orgId,
         userId: ctx.user.id,
+        ownerUserId: ctx.user.id,
         label: "Subscription",
         providerId: TEST_OAUTH,
         accessToken: "a",
@@ -596,7 +669,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
       await corruptCredentialBlob(apiKeyId);
       await corruptCredentialBlob(oauthId);
 
-      const list = await listOrgModelProviderCredentials(ctx.orgId);
+      const list = await listOrgModelProviderCredentials(adminCaller(ctx.orgId));
       expect(list.find((k) => k.id === apiKeyId)!.needs_reconnection).toBe(true);
       const oauth = list.find((k) => k.id === oauthId)!;
       expect(oauth.needs_reconnection).toBe(true);
@@ -614,6 +687,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
       const apiKeyId = await createApiKeyCredential({
         orgId: ctx.orgId,
         userId: ctx.user.id,
+        ownerUserId: null,
         label: "OpenAI",
         providerId: "openai",
         apiKey: PLAINTEXT,
@@ -623,7 +697,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
         .set({ credentialsEncrypted: `v1:k0gone:${Buffer.alloc(40).toString("base64")}` })
         .where(eq(modelProviderCredentials.id, apiKeyId));
 
-      const listed = (await listOrgModelProviderCredentials(ctx.orgId)).find(
+      const listed = (await listOrgModelProviderCredentials(adminCaller(ctx.orgId))).find(
         (k) => k.id === apiKeyId,
       );
       expect(listed!.needs_reconnection).toBe(false);
@@ -632,7 +706,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
         code: "encryption_key_unavailable",
       });
       // The repair gesture never reads the old blob.
-      await updateModelProviderCredential(ctx.orgId, apiKeyId, { apiKey: "sk-rotated" });
+      await updateModelProviderCredential(orgAdmin(ctx.orgId), apiKeyId, { apiKey: "sk-rotated" });
       expect((await loadInferenceCredentials(ctx.orgId, apiKeyId))!.apiKey).toBe("sk-rotated");
     });
   });
@@ -644,6 +718,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
       const idA = await createApiKeyCredential({
         orgId: ctxA.orgId,
         userId: ctxA.user.id,
+        ownerUserId: null,
         label: "A",
         providerId: "anthropic",
         apiKey: "secret-a",
@@ -664,6 +739,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
       const imported = await importOAuthModelProviderConnection({
         orgId: org.id,
         userId: user.id,
+        ownerUserId: user.id,
         providerId: TEST_OAUTH,
         label: "Test OAuth",
         accessToken: "access-load",
@@ -688,6 +764,7 @@ describe("model-provider-credentials service — aggregator + inference loader",
       const imported = await importOAuthModelProviderConnection({
         orgId: org.id,
         userId: user.id,
+        ownerUserId: user.id,
         providerId: TEST_OAUTH,
         label: "Test OAuth (about to revoke)",
         accessToken: "access-revoke",
@@ -752,7 +829,7 @@ describe("listOrgModelProviderCredentials — built-in alias-only binding mask",
       },
     ]);
 
-    const list = await listOrgModelProviderCredentials(ctx.orgId);
+    const list = await listOrgModelProviderCredentials(adminCaller(ctx.orgId));
     const entry = list.find((c) => c.id === "sys-alias-only");
     expect(entry).toBeDefined();
     expect(entry!.source).toBe("built-in");
@@ -787,10 +864,358 @@ describe("listOrgModelProviderCredentials — built-in alias-only binding mask",
       },
     ]);
 
-    const list = await listOrgModelProviderCredentials(ctx.orgId);
+    const list = await listOrgModelProviderCredentials(adminCaller(ctx.orgId));
     const entry = list.find((c) => c.id === "sys-mixed");
     expect(entry).toBeDefined();
     expect(entry!.apiShape).toBe("anthropic-messages");
     expect(entry!.base_url).toBe("https://api.anthropic.com");
+  });
+});
+
+describe("model-provider-credentials service — visibility and the personal-credential policy", () => {
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it("mayProbeCredential: an org credential needs readsOrg, a personal one its owner alone", async () => {
+    const ctx = await createTestContext({ orgSlug: "mpc-svc-visible" });
+    const member = await memberContext(ctx, "member");
+    const reader = await memberContext(ctx, "member");
+    const orgCredentialId = await createApiKeyCredential({
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      ownerUserId: null,
+      label: "Org key",
+      providerId: "test-apikey",
+      apiKey: "sk-org",
+    });
+    const personalId = await createOAuthCredential({
+      orgId: ctx.orgId,
+      userId: member.user.id,
+      ownerUserId: member.user.id,
+      label: "Member subscription",
+      providerId: "test-oauth",
+      accessToken: "at-member",
+      refreshToken: "rt-member",
+    });
+    const memberCaller: ModelCredentialCaller = {
+      orgId: ctx.orgId,
+      userId: member.user.id,
+      readsOrg: false,
+      writesOrg: false,
+      deletesOrg: false,
+      connects: true,
+    };
+    const readerCaller: ModelCredentialCaller = {
+      ...memberCaller,
+      userId: reader.user.id,
+      readsOrg: true,
+    };
+
+    expect(await mayProbeCredential(memberCaller, orgCredentialId)).toBe(false);
+    expect(await mayProbeCredential(readerCaller, orgCredentialId)).toBe(true);
+    expect(await mayProbeCredential(memberCaller, personalId)).toBe(true);
+    expect(await mayProbeCredential(readerCaller, personalId)).toBe(false);
+    expect(await mayProbeCredential(memberCaller, crypto.randomUUID())).toBe(false);
+
+    const otherOrg = await createTestContext({ orgSlug: "mpc-svc-visible-b" });
+    expect(await mayProbeCredential({ ...readerCaller, orgId: otherOrg.orgId }, personalId)).toBe(
+      false,
+    );
+  });
+
+  it("mayProbeCredential refuses the owner's personal credential with 403 while the org policy is off", async () => {
+    const ctx = await createTestContext({ orgSlug: "mpc-svc-probe-policy" });
+    const personalId = await createOAuthCredential({
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      ownerUserId: ctx.user.id,
+      label: "My subscription",
+      providerId: "test-oauth",
+      accessToken: "at",
+      refreshToken: "rt",
+    });
+    const orgCredentialId = await createApiKeyCredential({
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      ownerUserId: null,
+      label: "Org key",
+      providerId: "test-apikey",
+      apiKey: "sk-org",
+    });
+    const caller: ModelCredentialCaller = {
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      readsOrg: true,
+      writesOrg: true,
+      deletesOrg: true,
+      connects: true,
+    };
+    await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
+
+    const error = await mayProbeCredential(caller, personalId).catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(403);
+    expect((error as ApiError).code).toBe("personal_model_credentials_disabled");
+    // The org credential stays probeable.
+    expect(await mayProbeCredential(caller, orgCredentialId)).toBe(true);
+  });
+
+  it("assertCredentialEditable: deleting takes delete, editing takes write, on org and member rows", async () => {
+    const ctx = await createTestContext({ orgSlug: "mpc-svc-editable" });
+    const member = await memberContext(ctx, "member");
+    const orgCredentialId = await createApiKeyCredential({
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      ownerUserId: null,
+      label: "Org key",
+      providerId: "test-apikey",
+      apiKey: "sk-org",
+    });
+    const personalId = await createOAuthCredential({
+      orgId: ctx.orgId,
+      userId: member.user.id,
+      ownerUserId: member.user.id,
+      label: "Member subscription",
+      providerId: "test-oauth",
+      accessToken: "at-member",
+      refreshToken: "rt-member",
+    });
+    const base: ModelCredentialCaller = {
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      readsOrg: true,
+      writesOrg: false,
+      deletesOrg: false,
+      connects: false,
+    };
+    const writer = { ...base, writesOrg: true };
+    const deleter = { ...base, deletesOrg: true };
+    const refused = (caller: ModelCredentialCaller, id: string, action: "edit" | "delete") =>
+      assertCredentialEditable(caller, id, action).then(
+        () => false,
+        (err: unknown) => err instanceof ApiError && err.status === 404,
+      );
+
+    expect(await refused(writer, orgCredentialId, "edit")).toBe(false);
+    expect(await refused(writer, orgCredentialId, "delete")).toBe(true);
+    expect(await refused(deleter, orgCredentialId, "delete")).toBe(false);
+    expect(await refused(deleter, orgCredentialId, "edit")).toBe(true);
+    // Break-glass on a member's own credential: delete only, and only with `delete`.
+    expect(await refused(writer, personalId, "delete")).toBe(true);
+    expect(await refused(deleter, personalId, "delete")).toBe(false);
+    expect(await refused(deleter, personalId, "edit")).toBe(true);
+  });
+
+  it("createOAuthCredential refuses a personal subscription while the org policy is off, not an organization one", async () => {
+    const ctx = await createTestContext({ orgSlug: "mpc-svc-policy" });
+    await updateOrgSettings(ctx.orgId, { personal_model_credentials: false });
+
+    const error = await createOAuthCredential({
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      ownerUserId: ctx.user.id,
+      label: "Refused",
+      providerId: "test-oauth",
+      accessToken: "at",
+      refreshToken: "rt",
+    }).catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).code).toBe("personal_model_credentials_disabled");
+    expect((error as ApiError).status).toBe(403);
+    expect(await db.select().from(modelProviderCredentials)).toHaveLength(0);
+
+    // The policy is about personal credentials: an organization subscription is created.
+    const orgSubscriptionId = await createOAuthCredential({
+      orgId: ctx.orgId,
+      userId: ctx.user.id,
+      ownerUserId: null,
+      label: "Organization subscription",
+      providerId: "test-oauth",
+      accessToken: "at",
+      refreshToken: "rt",
+    });
+    const [row] = await db
+      .select({ ownerUserId: modelProviderCredentials.ownerUserId })
+      .from(modelProviderCredentials)
+      .where(eq(modelProviderCredentials.id, orgSubscriptionId));
+    expect(row!.ownerUserId).toBeNull();
+  });
+});
+
+describe("model-provider-credentials service — membership lock on creation", () => {
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
+  it("refuses a personal API-key credential owned by a non-member, and admits a member's", async () => {
+    const ctx = await createTestContext({ orgSlug: "mpc-svc-lock-key" });
+    const member = await memberContext(ctx, "member");
+    const outsider = await createTestUser();
+    // A personal credential may not pick its endpoint: the provider must not be overridable.
+    resetModelProviders();
+    registerModelProvider({
+      providerId: "personal-fixed-key",
+      displayName: "Fixed key",
+      iconUrl: "openai",
+      description: "",
+      docsUrl: "",
+      apiShape: "openai-completions",
+      defaultBaseUrl: "https://fixed.example.test/v1",
+      baseUrlOverridable: false,
+      authMode: "api_key",
+      featuredModels: [],
+    });
+    try {
+      const createFor = (userId: string) =>
+        createApiKeyCredential({
+          orgId: ctx.orgId,
+          userId,
+          ownerUserId: userId,
+          label: "Mine",
+          providerId: "personal-fixed-key",
+          apiKey: "sk-personal",
+        });
+
+      const error = await createFor(outsider.id).catch((err: unknown) => err);
+      expect(error).toBeInstanceOf(ApiError);
+      expect((error as ApiError).status).toBe(403);
+      expect(
+        await db
+          .select()
+          .from(modelProviderCredentials)
+          .where(eq(modelProviderCredentials.ownerUserId, outsider.id)),
+      ).toHaveLength(0);
+
+      // Control: the same call for a member of the org succeeds.
+      expect(await createFor(member.user.id)).toEqual(expect.any(String));
+    } finally {
+      seedTestModelProviders();
+    }
+  });
+
+  it("refuses a subscription owned by a non-member, and admits a member's", async () => {
+    const ctx = await createTestContext({ orgSlug: "mpc-svc-lock-oauth" });
+    const member = await memberContext(ctx, "member");
+    const outsider = await createTestUser();
+    const createFor = (userId: string) =>
+      createOAuthCredential({
+        orgId: ctx.orgId,
+        userId,
+        ownerUserId: userId,
+        label: "Subscription",
+        providerId: "test-oauth",
+        accessToken: "at",
+        refreshToken: "rt",
+      });
+
+    const error = await createFor(outsider.id).catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(403);
+    expect(
+      await db
+        .select()
+        .from(modelProviderCredentials)
+        .where(eq(modelProviderCredentials.ownerUserId, outsider.id)),
+    ).toHaveLength(0);
+
+    // Control: the same call for a member of the org succeeds.
+    expect(await createFor(member.user.id)).toEqual(expect.any(String));
+  });
+});
+
+/**
+ * Truth table of the action rules. Callers are the grant sets the org roles
+ * produce (admin: all four; member: `connect` alone), plus a reader and a
+ * delegate (an API key: org grants, no payer, so it owns nothing).
+ */
+describe("model-provider-credentials service — credentialActions and reconnectVerdict", () => {
+  const none = {
+    orgId: "org",
+    userId: "caller",
+    readsOrg: false,
+    writesOrg: false,
+    deletesOrg: false,
+    connects: false,
+  } satisfies ModelCredentialCaller;
+  const callers = {
+    admin: { ...none, readsOrg: true, writesOrg: true, deletesOrg: true, connects: true },
+    member: { ...none, connects: true },
+    reader: { ...none, readsOrg: true },
+    delegate: { ...none, userId: null, readsOrg: true, writesOrg: true, deletesOrg: true },
+  } satisfies Record<string, ModelCredentialCaller>;
+  const owners = { org: null, own: "caller", other: "someone-else" } as const;
+  const providers = { api_key: "openai", oauth2: "test-oauth" } as const;
+
+  type Row = [
+    caller: keyof typeof callers,
+    owner: keyof typeof owners,
+    authMode: keyof typeof providers,
+    personalAllowed: boolean,
+    expected: ModelProviderCredentialAction[],
+  ];
+  const rows: Row[] = [
+    // An organization credential: the policy never applies.
+    ["admin", "org", "api_key", true, ["edit", "delete", "test"]],
+    ["admin", "org", "oauth2", true, ["edit", "delete", "test", "reconnect"]],
+    ["admin", "org", "oauth2", false, ["edit", "delete", "test", "reconnect"]],
+    ["delegate", "org", "oauth2", true, ["edit", "delete", "test", "reconnect"]],
+    ["reader", "org", "oauth2", true, ["test"]],
+    ["member", "org", "api_key", true, []],
+    ["member", "org", "oauth2", true, []],
+    // The caller's own personal credential: `test` and `reconnect` follow the policy.
+    ["member", "own", "api_key", true, ["edit", "delete", "test"]],
+    ["member", "own", "api_key", false, ["edit", "delete"]],
+    ["member", "own", "oauth2", true, ["edit", "delete", "test", "reconnect"]],
+    ["member", "own", "oauth2", false, ["edit", "delete"]],
+    ["admin", "own", "oauth2", true, ["edit", "delete", "test", "reconnect"]],
+    ["admin", "own", "oauth2", false, ["edit", "delete"]],
+    ["reader", "own", "oauth2", true, ["test"]],
+    // Another member's personal credential: break-glass delete, nothing else.
+    ["admin", "other", "api_key", true, ["delete"]],
+    ["admin", "other", "oauth2", true, ["delete"]],
+    ["delegate", "other", "oauth2", true, ["delete"]],
+    ["member", "other", "oauth2", true, []],
+    ["reader", "other", "oauth2", true, []],
+  ];
+
+  for (const [caller, owner, authMode, personalAllowed, expected] of rows) {
+    const policy = personalAllowed ? "on" : "off";
+    it(`${caller} on ${owner}'s ${authMode} credential, policy ${policy}: [${expected.join(", ")}]`, () => {
+      const credential = {
+        source: "custom",
+        ownerUserId: owners[owner],
+        authMode,
+        providerId: providers[authMode],
+      } as const;
+      expect(credentialActions(callers[caller], credential, personalAllowed)).toEqual(expected);
+    });
+  }
+
+  it("reconnectVerdict: absent off the pairing's provider or on a built-in one, policy_off only where the policy alone refuses", () => {
+    const subscription = {
+      source: "custom",
+      ownerUserId: null,
+      authMode: "oauth2",
+      providerId: "test-oauth",
+    } as const;
+    const own = { ...subscription, ownerUserId: "caller" } as const;
+    const others = { ...subscription, ownerUserId: "someone-else" } as const;
+
+    expect(reconnectVerdict(callers.admin, subscription, "test-oauth", false)).toBe("ok");
+    expect(reconnectVerdict(callers.admin, subscription, "test-oauth-hooks", true)).toBe("absent");
+    expect(
+      reconnectVerdict(callers.admin, { ...subscription, source: "built-in" }, "test-oauth", true),
+    ).toBe("absent");
+    expect(reconnectVerdict(callers.member, own, "test-oauth", true)).toBe("ok");
+    expect(reconnectVerdict(callers.member, own, "test-oauth", false)).toBe("policy_off");
+    expect(reconnectVerdict(callers.admin, others, "test-oauth", false)).toBe("absent");
+    expect(reconnectVerdict(callers.member, subscription, "test-oauth", false)).toBe("absent");
+  });
+
+  it("a reader gets only test on a built-in credential, a member nothing", () => {
+    const builtIn = { source: "built-in", ownerUserId: null, authMode: "api_key" } as const;
+    expect(credentialActions(callers.reader, builtIn, true)).toEqual(["test"]);
+    expect(credentialActions(callers.member, builtIn, true)).toEqual([]);
   });
 });

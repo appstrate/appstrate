@@ -33,8 +33,10 @@ interface AgentReadinessParams {
   spaceId: string;
   /** Actor whose integration connections we validate. */
   actor: Actor;
-  /** Layer 3 picks, so readiness honours a disambiguation instead of re-firing must_choose. */
+  /** Launch override picks, so readiness honours a disambiguation instead of re-firing must_choose. */
   launchOverrides?: LaunchOverrides | null;
+  /** The resolver's `noFallback`. */
+  noFallback?: boolean;
   /**
    * Per-call-graph memo for integration manifest fetches. The run kickoff
    * path threads one Map so this readiness pass, the resolver snapshot pass,
@@ -48,7 +50,7 @@ interface ValidateAgentReadinessParams extends AgentReadinessParams {
   /** `runs.version_ref` of `agent` — the 409's `version_ref`. */
   versionRef: string;
   /**
-   * Opt-in relay for the run-kickoff connect link (#1207) — see
+   * Opt-in relay for the run-kickoff connect link — see
    * `RUN_CONNECT_OFFERS_HEADER` (`@appstrate/core/run-and-wait-client`).
    */
   connectOffers?: ConnectOfferPolicy | null;
@@ -59,7 +61,7 @@ interface ValidateAgentReadinessParams extends AgentReadinessParams {
  * error. The `integrations.` field prefix routes it into the 409 envelope
  * in `validateAgentReadiness` (request runs) and into `failSchedule`
  * (scheduled runs), so a declared-but-unspawnable integration produces a
- * visible failed run instead of a silent success (#737).
+ * visible failed run instead of a silent success.
  */
 function manifestFailureError(
   integrationId: string,
@@ -117,7 +119,7 @@ export async function collectAgentReadiness(params: AgentReadinessParams): Promi
 
   // Projected from the manifest this call is about — a draft or a published
   // snapshot — never off the package object, so the declared skills and the
-  // resolved closure always describe the same definition (#878). The catalog
+  // resolved closure always describe the same definition. The catalog
   // query is skipped entirely when no skill is declared.
   //
   // Judged against what the DECLARING agent can reach — its home space, or
@@ -148,7 +150,7 @@ export async function collectAgentReadiness(params: AgentReadinessParams): Promi
     });
   }
 
-  // Manifest health (#737): the spawn would silently skip a broken package; the resolver ignores it.
+  // Manifest health: the spawn would silently skip a broken package; the resolver ignores it.
   const declaredIntegrations = parseManifestIntegrations(manifest as Record<string, unknown>);
   const manifestResults = await Promise.all(
     declaredIntegrations.map(async (entry) => ({
@@ -166,6 +168,7 @@ export async function collectAgentReadiness(params: AgentReadinessParams): Promi
     actor,
     scope: { orgId, spaceId },
     ...(launchOverrides ? { launchOverrides } : {}),
+    noFallback: params.noFallback,
     ...(params.manifestCache ? { manifestCache: params.manifestCache } : {}),
   });
   for (const e of resolution.errors) {

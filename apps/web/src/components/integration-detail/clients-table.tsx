@@ -2,32 +2,29 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Trash2, Plus, Pencil, ArrowUpFromLine } from "lucide-react";
+import { ChevronDown, KeyRound, Plus } from "lucide-react";
+import { acquiresByConnectLogin } from "@appstrate/core/integration";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { Label } from "@appstrate/ui/components/label";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@appstrate/ui/components/tooltip";
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from "@appstrate/ui/components/table";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@appstrate/ui/components/dropdown-menu";
+import { FormItem } from "../app-ui/form-item";
 import { CopyBlock } from "../copy-block";
 import { CallbackUrlHint } from "../package-detail/callback-url-hint";
 import { ConfirmModal } from "../confirm-modal";
 import { Modal } from "../modal";
-import { SourceBadge } from "../source-badge";
-import { DefaultCell } from "../default-cell";
+import { DataTable } from "../data-table";
+import { EmptyState } from "../page-states";
 import { usePermissions } from "../../hooks/use-permissions";
+import { useUrlModal } from "../../hooks/use-url-modal";
+import { clientDeeds, clientLevelKey, useIntegrationClientColumns } from "./integration-columns";
+import { mergeClientTiers, type ClientRow } from "../../lib/integration-clients";
 import {
   useIntegrationDetail,
   useIntegrationClients,
@@ -52,6 +49,75 @@ import {
  * cleanly between invocations. The client secret is write-only — never echoed
  * back, shown as a placeholder when one is already set.
  */
+type ModalState =
+  | { mode: "create"; tier: IntegrationClientTier }
+  | { mode: "edit"; tier: IntegrationClientTier; client: IntegrationClient }
+  | null;
+
+/**
+ * The client's redirect URI override and the exact redirect_uri connect sends — none for a
+ * `connect.login` auth, whose first token comes from a token request, not a redirect.
+ */
+export function OAuthClientRedirectFields({
+  authKey,
+  authDecl,
+  redirectUri,
+  onRedirectUriChange,
+  platformRedirectUri,
+}: {
+  authKey: string;
+  authDecl?: IntegrationManifestAuth;
+  redirectUri: string;
+  onRedirectUriChange: (value: string) => void;
+  platformRedirectUri: string;
+}) {
+  const { t } = useTranslation("settings");
+  if (authDecl && acquiresByConnectLogin(authDecl)) return null;
+  // What connect will send for THIS client. Named once: the copy block and the
+  // publisher hint below must agree, and they diverge the moment the same
+  // expression is spelled out twice.
+  const effectiveRedirectUri = redirectUri.trim() || platformRedirectUri;
+  return (
+    <>
+      <FormItem
+        id={`redir-${authKey}`}
+        label={t("integration.oauthClient.redirectUri")}
+        className="sm:col-span-2"
+      >
+        <Input
+          type="url"
+          value={redirectUri}
+          onChange={(e) => onRedirectUriChange(e.target.value)}
+        />
+      </FormItem>
+      {/* The redirect_uri connect will send for THIS client: the override typed above when it
+          is set, else the platform callback. Providers compare it byte-for-byte and reject a
+          mismatch with an opaque error, so the admin is shown the exact string to register
+          rather than left to reconstruct it from the browser's origin (which is NOT
+          authoritative — `APP_URL` is). */}
+      <div className="flex flex-col gap-1 sm:col-span-2">
+        <p className="text-muted-foreground text-[0.7rem]">
+          {t("integration.oauthClient.platformRedirectUri")}
+        </p>
+        <CopyBlock
+          value={effectiveRedirectUri}
+          dense
+          testId={`platform-redirect-uri-modal-${authKey}`}
+        />
+        {/* AFPS §7.10: `auths.<key>.callback_url_hint`, its `{{callback_url}}` placeholder
+            resolved against the SAME value shown above. */}
+        {authDecl?.callback_url_hint && (
+          <CallbackUrlHint
+            hint={authDecl.callback_url_hint}
+            callbackUrl={effectiveRedirectUri}
+            authKey={authKey}
+          />
+        )}
+      </div>
+    </>
+  );
+}
+
 function OAuthClientModal({
   tier,
   packageId,
@@ -78,10 +144,6 @@ function OAuthClientModal({
   const [clientId, setClientId] = useState(existing?.client_id ?? "");
   const [clientSecret, setClientSecret] = useState("");
   const [redirectUri, setRedirectUri] = useState(existing?.redirect_uri ?? "");
-  // What connect will send for THIS client. Named once: the copy block and the
-  // publisher hint below must agree, and they diverge the moment the same
-  // expression is spelled out twice.
-  const effectiveRedirectUri = redirectUri.trim() || platformRedirectUri;
   // The admin's own declaration, read back from the row — NOT re-derived from
   // the absence of a secret. The old `!has_client_secret` guess could not tell
   // "declared public" from "secret not entered yet", so reopening a client
@@ -145,12 +207,11 @@ function OAuthClientModal({
 
   return (
     <Modal
-      open
       onClose={onClose}
       title={
         mode === "create"
           ? t("integration.oauthClient.modalCreateTitle")
-          : t("integration.oauthClient.modalEditTitle")
+          : t("integration.oauthClient.btnEdit")
       }
     >
       <form
@@ -158,24 +219,26 @@ function OAuthClientModal({
         onSubmit={submit}
         data-testid={`oauth-client-form-${authKey}`}
       >
-        <div className="space-y-1">
-          <Label htmlFor={`cid-${authKey}`} className="text-xs">
-            {t("integration.oauthClient.clientId")}
-          </Label>
+        <FormItem id={`cid-${authKey}`} label={t("oauthClients.clientIdColumn")}>
           <Input
-            id={`cid-${authKey}`}
             value={clientId}
             onChange={(e) => setClientId(e.target.value)}
             disabled={mode === "edit"}
             data-testid={`oauth-clientid-${authKey}`}
           />
-        </div>
-        <div className="space-y-1">
-          <Label htmlFor={`csecret-${authKey}`} className="text-xs">
-            {t("integration.oauthClient.clientSecret")}
-          </Label>
+        </FormItem>
+        <FormItem
+          id={`csecret-${authKey}`}
+          label={t("integration.oauthClient.clientSecret")}
+          error={
+            secretMissing && (secretTouched || attempted) ? (
+              <span data-testid={`oauth-clientsecret-error-${authKey}`}>
+                {t("integration.oauthClient.clientSecretRequired")}
+              </span>
+            ) : undefined
+          }
+        >
           <Input
-            id={`csecret-${authKey}`}
             type="password"
             value={clientSecret}
             onChange={(e) => setClientSecret(e.target.value)}
@@ -184,60 +247,21 @@ function OAuthClientModal({
             placeholder={existing?.has_client_secret ? "••••••••" : ""}
             data-testid={`oauth-clientsecret-${authKey}`}
           />
-          {secretMissing && (secretTouched || attempted) && (
-            <p
-              className="text-destructive text-sm"
-              data-testid={`oauth-clientsecret-error-${authKey}`}
-            >
-              {t("integration.oauthClient.clientSecretRequired")}
-            </p>
-          )}
-        </div>
-        <div className="space-y-1 sm:col-span-2">
-          <Label htmlFor={`redir-${authKey}`} className="text-xs">
-            {t("integration.oauthClient.redirectUri")}
-          </Label>
-          <Input
-            id={`redir-${authKey}`}
-            type="url"
-            value={redirectUri}
-            onChange={(e) => setRedirectUri(e.target.value)}
-          />
-          {/* The redirect_uri connect will send for THIS client: the override
-              typed above when it is set, else the platform callback. Providers
-              compare it byte-for-byte and reject a mismatch with an opaque
-              error, so the admin is shown the exact string to register rather
-              than left to reconstruct it from the browser's origin (which is
-              NOT authoritative — `APP_URL` is). */}
-          <div className="space-y-1">
-            <p className="text-muted-foreground text-[0.7rem]">
-              {t("integration.oauthClient.platformRedirectUri")}
-            </p>
-            <CopyBlock
-              value={effectiveRedirectUri}
-              dense
-              testId={`platform-redirect-uri-modal-${authKey}`}
-            />
-          </div>
-          {/* AFPS §7.10 — surface `auths.<key>.callback_url_hint`, with its
-              `{{callback_url}}` placeholder resolved against the SAME value
-              shown above. Read-only display; the editable override lives in
-              the input. */}
-          {authDecl?.callback_url_hint && (
-            <CallbackUrlHint
-              hint={authDecl.callback_url_hint}
-              callbackUrl={effectiveRedirectUri}
-              authKey={authKey}
-            />
-          )}
-        </div>
+        </FormItem>
+        <OAuthClientRedirectFields
+          authKey={authKey}
+          authDecl={authDecl}
+          redirectUri={redirectUri}
+          onRedirectUriChange={setRedirectUri}
+          platformRedirectUri={platformRedirectUri}
+        />
         <label className="flex items-center gap-2 text-sm sm:col-span-2">
           <Checkbox checked={publicClient} onCheckedChange={(c) => setPublicClient(Boolean(c))} />
           {t("integration.oauthClient.publicClient")}
         </label>
         <div className="flex items-center justify-end gap-2 sm:col-span-2">
           <Button type="button" variant="ghost" size="sm" onClick={onClose} disabled={pending}>
-            {t("integration.connect.btn.cancel")}
+            {t("common:btn.cancel")}
           </Button>
           <Button
             type="submit"
@@ -260,239 +284,211 @@ function OAuthClientModal({
 // ─────────────────────────────────────────────
 
 /**
- * The admin hub for an auth's OAuth clients: every client that can mint a
- * connection — the platform's system client(s) (`SYSTEM_INTEGRATIONS`,
- * read-only) plus N custom (BYO-app) clients — with which is the
- * default. Multi-client: an admin registers as many custom clients as needed,
- * edits or deletes each by id, and picks the default (the model-provider
- * pattern). Auto-provisioned (remote MCP DCR/CIMD) auths keep ONE machine
- * client, shown read-only with a delete action that re-triggers registration;
- * a manual escape hatch (opt-in) covers the rare server needing a pre-registered
- * public client. Secrets are never returned by the endpoint. `tier` picks the
- * routes; only the tier's own rows are editable.
+ * The admin hub for an auth's OAuth clients, in ONE table: the space's own
+ * clients, the organization's (inherited by every space) and the platform's
+ * system client — each once, with the one new connections here will use marked
+ * and named above the table. Multi-client: an admin registers as many clients
+ * as needed, at the space's level or, for an org integrations admin, the
+ * organization's; edits or deletes each; and picks the one in use (the
+ * model-provider pattern). Auto-provisioned (remote MCP DCR/CIMD) auths have no
+ * organization level and keep ONE machine client, shown read-only with a delete
+ * action that re-triggers registration; a manual escape hatch (opt-in) covers
+ * the rare server needing a pre-registered public client. Secrets are never
+ * returned by the endpoint.
  */
 export function ClientsTable({
-  tier,
   packageId,
   authKey,
   authDecl,
   autoProvisioned,
 }: {
-  tier: IntegrationClientTier;
   packageId: string;
   authKey: string;
   authDecl?: IntegrationManifestAuth;
   autoProvisioned: boolean;
 }) {
   const { t } = useTranslation("settings");
-  const { data: clients } = useIntegrationClients(tier, packageId, authKey);
+  const { can } = usePermissions();
+  // An auto-provisioned auth has no org list to manage (no client an admin registers or chooses
+  // there); its org-tier machine client, listed with the space's clients, stays the org admin's to
+  // delete.
+  const canManageOrg = !autoProvisioned && can("org-integrations:configure");
+  const canDeleteOrgMachineClients = can("org-integrations:configure");
+  const spaceClients = useIntegrationClients("space", packageId, authKey);
+  const orgClients = useIntegrationClients("org", canManageOrg ? packageId : undefined, authKey);
   // Read from the same query key the page already holds, rather than threading
   // the value down through `ConfigAuthBlock`, which would carry a prop it never
   // reads. React Query dedupes, so this costs no request.
   const { data: detail } = useIntegrationDetail(packageId);
   const platformRedirectUri = detail?.platform_redirect_uri ?? "";
-  const setDefault = useSetDefaultIntegrationClient(tier);
-  const del = useDeleteIntegrationOAuthClient(tier);
+  const setSpaceDefault = useSetDefaultIntegrationClient("space");
+  const setOrgDefault = useSetDefaultIntegrationClient("org");
+  const deleteSpaceClient = useDeleteIntegrationOAuthClient("space");
+  const deleteOrgClient = useDeleteIntegrationOAuthClient("org");
   const promote = usePromoteIntegrationOAuthClient();
-  const { can } = usePermissions();
-  const [modal, setModal] = useState<
-    { mode: "create" } | { mode: "edit"; client: IntegrationClient } | null
-  >(null);
-  const [confirmDelete, setConfirmDelete] = useState<IntegrationClient | null>(null);
-  const [confirmPromote, setConfirmPromote] = useState<IntegrationClient | null>(null);
+  const [newTier, setNewTier] = useState<IntegrationClientTier | null>(null);
+  // Several tables can share a page (one per auth): each answers only the parameter
+  // scoped to its own `authKey` (`?editOauthClient=<authKey>:<client_ref>`).
+  const editClient = useUrlModal("editOauthClient");
+  const scopedValue = (value: string | null) =>
+    value?.startsWith(`${authKey}:`) ? value.slice(authKey.length + 1) : null;
+  const [confirmDelete, setConfirmDelete] = useState<ClientRow | null>(null);
+  const [confirmPromote, setConfirmPromote] = useState<ClientRow | null>(null);
   // Auto-provisioned auths hide the manual register button by default — their
   // token endpoint only accepts a DCR/CIMD-acquired client, so a hand-entered
   // one usually points at the wrong server and disables auto-registration. Keep
   // an opt-in escape hatch for the rare server needing a pre-registered client.
   const [showManual, setShowManual] = useState(false);
 
-  const rows = clients ?? [];
-  // What connect will ACTUALLY send. A registered client may carry its own
-  // `redirect_uri`, and `OAuth2Strategy.begin` prefers it over the platform
-  // callback (`clientRedirectUri ?? redirectUri`) — so showing the platform
-  // value unconditionally would hand the admin the wrong string to register in
-  // exactly the setup this display exists to get right. New connections always
-  // use the default client, so that client's override is the one that decides.
-  const effectiveRedirectUri = rows.find((c) => c.is_default)?.redirect_uri || platformRedirectUri;
-  const canChooseDefault = rows.length > 1;
-  // An org row shows in both tables on the page: prefix the org table's test ids.
-  const tid = (id: string) => (tier === "space" ? id : `org-${id}`);
-  const hasAutoClient = rows.some((c) => c.auto_provisioned);
-  // Classic auths always allow registering more custom clients; auto-provisioned
+  const rows = mergeClientTiers(
+    spaceClients.data ?? [],
+    canManageOrg ? orgClients.data : undefined,
+  );
+  const loading = spaceClients.isLoading || (canManageOrg && orgClients.isLoading);
+  const inUse = rows.find((row) => row.usedHere);
+  const hasAutoClient = rows.some((row) => row.client.auto_provisioned);
+  // Classic auths always allow registering more clients; auto-provisioned
   // auths only via the opt-in escape hatch (and only when none is registered yet).
   const canRegister = !autoProvisioned || (showManual && !hasAutoClient);
-  // Auto-provisioned auths have no org tier (their clients are per space).
-  const canPromote = tier === "space" && !autoProvisioned && can("org-integrations:configure");
+  const tierOf = (row: ClientRow): IntegrationClientTier => (row.level === "org" ? "org" : "space");
+  // A parameter typed in the URL opens only what the table itself would offer.
+  const editedRow = rows.find(
+    (row) =>
+      row.client.client_ref === scopedValue(editClient.value) &&
+      clientDeeds(row, canManageOrg).editable,
+  );
+  const modal: ModalState = editedRow
+    ? { mode: "edit", tier: tierOf(editedRow), client: editedRow.client }
+    : canRegister && (newTier === "space" || (newTier === "org" && canManageOrg))
+      ? { mode: "create", tier: newTier }
+      : null;
+  const closeModal = editedRow ? editClient.close : () => setNewTier(null);
+  const pendingDefault = [setSpaceDefault, setOrgDefault].find((mutation) => mutation.isPending);
+  const pendingRemoval = [deleteSpaceClient, deleteOrgClient, promote].find(
+    (mutation) => mutation.isPending,
+  );
+  const pendingClientRef =
+    pendingDefault?.variables?.body.client_ref ??
+    pendingRemoval?.variables?.params.path.clientId ??
+    null;
+  const columns = useIntegrationClientColumns({
+    canUseHere: (spaceClients.data?.length ?? 0) > 1,
+    canManageOrg,
+    canDeleteOrgMachineClients,
+    canChooseOrgDefault: canManageOrg && (orgClients.data?.length ?? 0) > 1,
+    pendingClientRef,
+    onUseHere: (row) =>
+      setSpaceDefault.mutate({
+        params: { path: { packageId, authKey } },
+        body: { client_ref: row.client.client_ref },
+      }),
+    onUseForOrg: (row) =>
+      setOrgDefault.mutate({
+        params: { path: { packageId, authKey } },
+        body: { client_ref: row.client.client_ref },
+      }),
+    onEdit: (row) => editClient.open(`${authKey}:${row.client.client_ref}`),
+    onPromote: (row) => setConfirmPromote(row),
+    onDelete: (row) => setConfirmDelete(row),
+  });
+  const deleteMutation =
+    confirmDelete && tierOf(confirmDelete) === "org" ? deleteOrgClient : deleteSpaceClient;
+
+  // The header's button and the empty list's are the same action; only the header's carries the
+  // test ids and the compact size.
+  const registerClient = (inEmpty: boolean) => {
+    if (!canRegister) return null;
+    const trigger = (
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className={inEmpty ? undefined : "h-7 text-xs"}
+        data-testid={inEmpty ? undefined : `oauth-client-register-${authKey}`}
+        onClick={canManageOrg ? undefined : () => setNewTier("space")}
+      >
+        <Plus />
+        {t("integration.clients.register")}
+        {canManageOrg && <ChevronDown />}
+      </Button>
+    );
+    // Two levels to register at: the level is chosen before the form,
+    // so one form serves both.
+    if (!canManageOrg) return trigger;
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={() => setNewTier("space")}>
+            {t("integration.clients.registerSpace")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => setNewTier("org")}
+            data-testid={inEmpty ? undefined : `org-oauth-client-register-${authKey}`}
+          >
+            {t("integration.clients.registerOrg")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  };
 
   return (
-    <div
-      className={tier === "space" ? "mb-3" : "mt-4 mb-3 border-t pt-4"}
-      data-testid={tid(`oauth-clients-list-${authKey}`)}
-    >
-      {/* Registering this exact string on the provider's OAuth app is a
-          prerequisite to the FIRST connect attempt, so it is shown before the
-          clients table rather than only inside the registration modal — an
-          admin setting the app up at the provider needs it before there is any
-          client to register. Once per auth: the org table follows this one. */}
-      {tier === "space" && (
-        <div className="mb-3 space-y-1">
-          <p className="text-muted-foreground text-xs font-semibold">
-            {t("integration.oauthClient.platformRedirectUri")}
-          </p>
-          <CopyBlock value={effectiveRedirectUri} testId={`platform-redirect-uri-${authKey}`} />
-        </div>
-      )}
-
+    <div className="mb-3" data-testid={`oauth-clients-list-${authKey}`}>
       <div className="mb-2 flex items-center justify-between gap-2">
-        <h4 className="text-muted-foreground text-xs font-semibold">
-          {tier === "space" ? t("integration.clients.title") : t("integration.clients.orgTitle")}
-        </h4>
-        {canRegister && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs"
-            onClick={() => setModal({ mode: "create" })}
-            data-testid={tid(`oauth-client-register-${authKey}`)}
-          >
-            <Plus size={14} />
-            {t("integration.clients.register")}
-          </Button>
-        )}
+        <h4 className="text-sm font-medium">{t("integration.clients.title")}</h4>
+        {registerClient(false)}
       </div>
 
-      {tier === "org" && (
-        <p className="text-muted-foreground mb-2 text-xs">{t("integration.clients.orgHint")}</p>
-      )}
-      {tier === "space" && rows.some((c) => c.source === "org") && (
-        <p className="text-muted-foreground mb-2 text-xs">
-          {t("integration.clients.inheritedOrgHint")}
+      {/* The one answer the table exists for, then the rule in one line. */}
+      {loading && <Skeleton className="mb-1 h-5 w-64 max-w-full" />}
+      {inUse && (
+        <p className="mb-1 text-sm" data-testid={`oauth-client-in-use-${authKey}`}>
+          {t("integration.clients.inUse", {
+            client: inUse.client.client_id,
+            level: t(clientLevelKey(inUse)),
+          })}
         </p>
       )}
-
-      {autoProvisioned && !hasAutoClient && (
-        <p
-          className="text-muted-foreground mb-2 text-xs"
-          data-testid={`oauth-client-auto-hint-${authKey}`}
-        >
-          {t("integration.oauthClient.autoProvisionedHint")}
-        </p>
+      {!autoProvisioned && (
+        <p className="text-muted-foreground mb-3 text-sm">{t("integration.clients.levels")}</p>
       )}
 
-      {rows.length > 0 && (
-        <div className="overflow-hidden rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="text-xs">{t("integration.clients.col.source")}</TableHead>
-                <TableHead className="text-xs">{t("integration.clients.col.clientId")}</TableHead>
-                <TableHead className="text-xs">{t("integration.clients.col.default")}</TableHead>
-                <TableHead className="w-px text-right text-xs">
-                  {t("integration.clients.col.actions")}
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((client) => {
-                const deletable = client.source === tier;
-                const editable = deletable && !client.auto_provisioned;
-                return (
-                  <TableRow
-                    key={client.client_ref}
-                    data-testid={tid(`oauth-client-row-${client.client_ref}`)}
-                  >
-                    <TableCell>
-                      <SourceBadge
-                        source={client.source}
-                        autoProvisioned={client.auto_provisioned}
-                      />
-                    </TableCell>
-                    <TableCell className="font-mono text-xs">{client.client_id}</TableCell>
-                    <TableCell>
-                      <DefaultCell
-                        isDefault={client.is_default}
-                        defaultLabel={t("integration.clients.default")}
-                        setLabel={t("integration.clients.setDefault.action")}
-                        canSetDefault={canChooseDefault}
-                        disabled={setDefault.isPending}
-                        onSetDefault={() =>
-                          setDefault.mutate({
-                            params: { path: { packageId, authKey } },
-                            body: { client_ref: client.client_ref },
-                          })
-                        }
-                        testId={tid(`set-default-client-${client.client_ref}`)}
-                      />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {editable && canPromote && (
-                          <TooltipProvider delayDuration={300}>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-7 w-7 p-0"
-                                  onClick={() => setConfirmPromote(client)}
-                                  disabled={promote.isPending}
-                                  data-testid={`oauth-client-promote-${client.client_ref}`}
-                                  aria-label={t("integration.clients.promote.action")}
-                                >
-                                  <ArrowUpFromLine size={14} />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                {t("integration.clients.promote.action")}
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        )}
-                        {editable && (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 w-7 p-0"
-                            onClick={() => setModal({ mode: "edit", client })}
-                            data-testid={tid(`oauth-client-edit-${client.client_ref}`)}
-                            aria-label={t("integration.oauthClient.btnEdit")}
-                          >
-                            <Pencil size={14} />
-                          </Button>
-                        )}
-                        {deletable && (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 w-7 p-0"
-                            onClick={() => setConfirmDelete(client)}
-                            disabled={del.isPending}
-                            data-testid={tid(`oauth-client-delete-${client.client_ref}`)}
-                            aria-label={t("integration.oauthClient.btnDelete")}
-                          >
-                            <Trash2 size={14} className="text-destructive" />
-                          </Button>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      )}
+      <DataTable
+        tableId="integration-clients"
+        surface="integrated"
+        label={t("integration.clients.title")}
+        columns={columns}
+        rows={rows}
+        rowKey={(row) => row.client.client_ref}
+        isLoading={loading}
+        failure={spaceClients.error}
+        // On an auto-provisioned auth the reason the list is empty IS the state, so
+        // it is the empty state's hint rather than a second sentence above a
+        // table saying the same thing in other words.
+        empty={
+          <EmptyState
+            message={t("integration.clients.empty")}
+            hint={
+              autoProvisioned ? (
+                <span data-testid={`oauth-client-auto-hint-${authKey}`}>
+                  {t("integration.oauthClient.autoProvisionedHint")}
+                </span>
+              ) : undefined
+            }
+            icon={KeyRound}
+            compact
+          >
+            {registerClient(true)}
+          </EmptyState>
+        }
+      />
 
-      {autoProvisioned && !showManual && !hasAutoClient && (
+      {!loading && autoProvisioned && !showManual && !hasAutoClient && (
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          className="mt-2"
           onClick={() => setShowManual(true)}
           data-testid={`oauth-client-manual-toggle-${authKey}`}
         >
@@ -502,31 +498,32 @@ export function ClientsTable({
 
       {modal && (
         <OAuthClientModal
-          key={modal.mode === "edit" ? modal.client.client_ref : "create"}
-          tier={tier}
+          key={modal.mode === "edit" ? modal.client.client_ref : `create-${modal.tier}`}
+          tier={modal.tier}
           packageId={packageId}
           authKey={authKey}
           authDecl={authDecl}
           mode={modal.mode}
           existing={modal.mode === "edit" ? modal.client : undefined}
           platformRedirectUri={platformRedirectUri}
-          onClose={() => setModal(null)}
+          onClose={closeModal}
         />
       )}
       <ConfirmModal
         open={confirmDelete !== null}
         onClose={() => setConfirmDelete(null)}
-        title={t("btn.confirm", { ns: "common" })}
+        title={t("integration.oauthClient.delete.title")}
+        confirmLabel={t("btn.delete", { ns: "common" })}
         description={
-          tier === "space"
-            ? t("integration.oauthClient.delete.confirm")
-            : t("integration.oauthClient.delete.confirmOrg")
+          confirmDelete && tierOf(confirmDelete) === "org"
+            ? t("integration.oauthClient.delete.confirmOrg")
+            : t("integration.oauthClient.delete.confirm")
         }
-        isPending={del.isPending}
+        isPending={deleteMutation.isPending}
         onConfirm={() => {
           if (!confirmDelete) return;
-          del.mutate(
-            { params: { path: { packageId, clientId: confirmDelete.client_ref } } },
+          deleteMutation.mutate(
+            { params: { path: { packageId, clientId: confirmDelete.client.client_ref } } },
             { onSuccess: () => setConfirmDelete(null) },
           );
         }}
@@ -541,7 +538,7 @@ export function ClientsTable({
         onConfirm={() => {
           if (!confirmPromote) return;
           promote.mutate(
-            { params: { path: { packageId, clientId: confirmPromote.client_ref } } },
+            { params: { path: { packageId, clientId: confirmPromote.client.client_ref } } },
             { onSuccess: () => setConfirmPromote(null) },
           );
         }}

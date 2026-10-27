@@ -14,8 +14,7 @@
  *     in the markup until the user opens it.
  *
  * The web test runner has no DOM, so the component is rendered through the
- * shared `test/render.tsx` harness and asserted on its HTML — the same approach
- * as `run-row.test.tsx`. `<SchemaForm>` is lazy, so the two editable sections
+ * shared `test/render.tsx` harness and asserted on its HTML. `<SchemaForm>` is lazy, so the two editable sections
  * render their Suspense fallback here; the assertions are on the section
  * boundaries this component owns, never on RJSF's internals.
  */

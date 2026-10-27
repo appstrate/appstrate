@@ -41,8 +41,8 @@ export interface S3StorageConfig {
    * want to offload upload traffic to S3). When unset and
    * `uploadBaseUrl`/`uploadSecret` are provided, uploads switch to proxy
    * mode instead (see `uploadBaseUrl`). When neither is configured,
-   * presigning falls back to `endpoint` (legacy behavior for direct SDK
-   * consumers).
+   * presigning falls back to `endpoint` (what direct SDK
+   * consumers expect).
    */
   publicEndpoint?: string;
   /**
@@ -228,8 +228,10 @@ export function createS3Storage(config: S3StorageConfig): Storage {
     },
 
     async downloadFile(bucket, path) {
-      // Keep our own timer across SDK header completion: Bun 1.3.14 can drop
-      // an AbortSignal.timeout deadline when the SDK removes its listener.
+      // Our own timer, not AbortSignal.timeout: on Bun 1.3.13-1.3.14 (inside
+      // this package's `engines` range) removing a listener from a timeout
+      // signal cancels its deadline, and the SDK removes its listener once the
+      // headers arrive — the body read below would then run unbounded.
       const controller = new AbortController();
       const timeout = setTimeout(
         () => controller.abort(new DOMException("S3 download timed out", "TimeoutError")),
@@ -367,7 +369,7 @@ export function createS3Storage(config: S3StorageConfig): Storage {
     ): Promise<UploadUrlDescriptor> {
       const expiresIn = opts.expiresIn ?? 900;
       const key = makeKey(bucket, path);
-      // Proxy-upload mode (issue #829): no public S3 endpoint configured →
+      // Proxy-upload mode: no public S3 endpoint configured →
       // sign an app-domain URL instead of presigning against the bucket.
       // The platform's `/api/uploads/_content` sink streams the body to S3
       // through `uploadStream` (multipart, bounded memory, `If-None-Match`
@@ -441,7 +443,7 @@ export function createS3Storage(config: S3StorageConfig): Storage {
       opts?: CreateDownloadUrlOptions,
     ): Promise<string | null> {
       // Only presign when a public endpoint is configured — same flip as
-      // createUploadUrl (issue #829 / PR #830). Without it the bucket is
+      // createUploadUrl. Without it the bucket is
       // private (proxy mode) and a presigned URL against the internal endpoint
       // is not browser-reachable, so return null and let the caller
       // proxy-stream the bytes through the API.

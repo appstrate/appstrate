@@ -8,6 +8,7 @@
 
 import { isIP } from "node:net";
 import { normalizeHttpUrl } from "@appstrate/core/url";
+import { parseEgressAllowInternalHosts } from "@appstrate/afps-shared/ssrf";
 
 export interface SidecarEnv {
   platformApiUrl: string;
@@ -67,6 +68,9 @@ export function parseSidecarEnv(source: NodeJS.ProcessEnv = process.env): Sideca
     v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null,
   );
   const connectResultKey = parseConnectResultKey(source, issues);
+  for (const m of parseEgressAllowInternalHosts(source.EGRESS_ALLOW_INTERNAL_HOSTS).invalid) {
+    issues.push(`EGRESS_ALLOW_INTERNAL_HOSTS: ${m}`);
+  }
 
   if (issues.length > 0) throw new SidecarEnvError(issues);
 

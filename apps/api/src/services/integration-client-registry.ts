@@ -57,8 +57,10 @@ import {
 } from "./integration-manifest-helpers.ts";
 
 // `integration_connections.client_ref` is a flat client id — the env id of a
-// system client or the `integration_oauth_clients.id` (UUID) of a custom client.
-// No prefix/sentinel scheme: resolution is system-first then DB-by-id, mirroring
+// system client, the `integration_oauth_clients.id` (UUID) of a custom client, or
+// the URL of this instance's client metadata document (`^[\w.-]+$` admits no `:`
+// or `/`, so none of the three can take another's value). No prefix/sentinel
+// scheme: resolution is system-first, then document URL, then DB-by-id, mirroring
 // the model-provider credential pattern (`loadInferenceCredentials`).
 
 /**

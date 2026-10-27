@@ -1,243 +1,162 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { useForm, Controller } from "react-hook-form";
-import { Modal } from "./modal";
-import { RevealedSecret } from "./revealed-secret";
-import { Button } from "@appstrate/ui/components/button";
+import { FormModal } from "./form-modal";
+import { SecretRevealModal } from "./secret-reveal-modal";
 import { Badge } from "@appstrate/ui/components/badge";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
 import { Label } from "@appstrate/ui/components/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
-import { Spinner } from "./spinner";
-import { ScopeMultiSelect } from "./scope-multi-select";
+import { OptionSelect } from "@/components/app-ui/option-select";
+import { TextSkeleton } from "./loading-skeletons";
+import { ErrorState } from "./page-states";
+import { ScopeMultiSelect, ScopeSummaryBadges } from "./scope-multi-select";
 import { useCreateApiKey, useAvailableScopes } from "../hooks/use-api-keys";
 import { errorMessage } from "../lib/mutation-error";
-
-interface Props {
-  open: boolean;
-  onClose: () => void;
-  onKeyCreated?: (rawKey: string) => void;
-}
-
-type FormData = { name: string; expiresIn: string };
 
 function computeExpiresAt(expiresIn: string): string | null {
   if (expiresIn === "never") return null;
   return new Date(Date.now() + parseInt(expiresIn, 10) * 24 * 60 * 60 * 1000).toISOString();
 }
 
-/** Build compact resource summary from scopes (e.g. ["agents", "runs (2/3)"]). */
-function buildResourceSummary(
-  scopes: string[],
-  allScopes: string[],
-): Array<{ resource: string; full: boolean; count: number; total: number }> {
-  const byResource = new Map<string, { count: number; total: number }>();
-  const allSet = new Set(allScopes);
-  for (const s of allScopes) {
-    const r = s.split(":")[0]!;
-    const entry = byResource.get(r) ?? { count: 0, total: 0 };
-    entry.total++;
-    byResource.set(r, entry);
+export function ApiKeyCreateModal({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation(["settings", "common"]);
+  const { data: availableScopes, error: scopesError } = useAvailableScopes();
+  const [created, setCreated] = useState<{ key: string; scopes: string[] } | null>(null);
+
+  if (created) {
+    const isFullAccess = availableScopes ? created.scopes.length === availableScopes.length : true;
+
+    return (
+      <SecretRevealModal
+        onClose={onClose}
+        title={t("apiKeys.created")}
+        className="sm:max-w-lg"
+        secret={created.key}
+        warning={t("apiKeys.createdWarning")}
+      >
+        {/* Scopes granted */}
+        <div className="border-border border-t pt-3">
+          <p className="text-muted-foreground mb-2 text-xs font-medium">
+            {t("apiKeys.scopesGranted")}
+          </p>
+          {isFullAccess || !availableScopes ? (
+            <Badge variant="success">{t("apiKeys.fullAccess")}</Badge>
+          ) : (
+            <ScopeSummaryBadges available={availableScopes} selected={created.scopes} />
+          )}
+        </div>
+      </SecretRevealModal>
+    );
   }
-  const selectedSet = new Set(scopes);
-  for (const s of allSet) {
-    if (selectedSet.has(s)) {
-      const r = s.split(":")[0]!;
-      byResource.get(r)!.count++;
-    }
-  }
-  return [...byResource.entries()]
-    .filter(([, v]) => v.count > 0)
-    .map(([resource, { count, total }]) => ({
-      resource,
-      full: count === total,
-      count,
-      total,
-    }));
+
+  return (
+    <ApiKeyCreateForm
+      availableScopes={availableScopes}
+      scopesError={scopesError}
+      onClose={onClose}
+      onCreated={(key, scopes) => setCreated({ key, scopes })}
+    />
+  );
 }
 
-export function ApiKeyCreateModal({ open, onClose, onKeyCreated }: Props) {
+function ApiKeyCreateForm({
+  availableScopes,
+  scopesError,
+  onClose,
+  onCreated,
+}: {
+  availableScopes: string[] | undefined;
+  scopesError: unknown;
+  onClose: () => void;
+  onCreated: (key: string, scopes: string[]) => void;
+}) {
   const { t } = useTranslation(["settings", "common"]);
   const createMutation = useCreateApiKey();
-  const { data: availableScopes } = useAvailableScopes();
-
-  const [createdKey, setCreatedKey] = useState<string | null>(null);
-  const [createdScopes, setCreatedScopes] = useState<string[]>([]);
   const [selectedScopes, setSelectedScopes] = useState<string[] | null>(null);
 
-  const {
-    register,
-    handleSubmit,
-    reset,
-    control,
-    setError,
-    formState: { errors },
-  } = useForm<FormData>({
-    defaultValues: { name: "", expiresIn: "90" },
-  });
-
-  const handleClose = () => {
-    reset({ name: "", expiresIn: "90" });
-    setCreatedKey(null);
-    setCreatedScopes([]);
-    setSelectedScopes(null);
-    createMutation.reset();
-    onClose();
-  };
+  const [name, setName] = useState("");
+  const [expiresIn, setExpiresIn] = useState("90");
+  const [error, setError] = useState<string | null>(null);
 
   const effectiveScopes = selectedScopes !== null ? selectedScopes : (availableScopes ?? []);
   const allSelected = availableScopes ? effectiveScopes.length === availableScopes.length : true;
 
-  function onFormSubmit(data: FormData) {
-    const expiresAt = computeExpiresAt(data.expiresIn);
-
+  function onFormSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
     createMutation.mutate(
       {
         body: {
-          name: data.name.trim(),
-          expiresAt,
+          name: name.trim(),
+          expiresAt: computeExpiresAt(expiresIn),
           scopes: allSelected ? undefined : effectiveScopes,
         },
       },
       {
         onSuccess: (result) => {
-          setCreatedKey(result.key ?? null);
-          setCreatedScopes(result.scopes ?? []);
-          if (result.key) onKeyCreated?.(result.key);
+          if (result.key) onCreated(result.key, result.scopes ?? []);
         },
-        onError: (err) => {
-          setError("root", { message: errorMessage(err) });
-        },
+        onError: (err) => setError(errorMessage(err)),
       },
     );
   }
 
-  const onSubmit = handleSubmit(onFormSubmit);
-
-  // ── Success state ──
-  if (createdKey) {
-    const summary =
-      availableScopes && createdScopes.length > 0
-        ? buildResourceSummary(createdScopes, availableScopes)
-        : [];
-    const isFullAccess = availableScopes ? createdScopes.length === availableScopes.length : true;
-
-    return (
-      <Modal open={open} onClose={handleClose} title={t("apiKeys.created")} className="sm:max-w-lg">
-        <RevealedSecret secret={createdKey} warning={t("apiKeys.createdWarning")} />
-
-        {/* Scopes granted */}
-        <div className="border-border mt-4 border-t pt-3">
-          <p className="text-muted-foreground mb-2 text-xs font-medium">
-            {t("apiKeys.scopesGranted")}
-          </p>
-          {isFullAccess ? (
-            <Badge variant="success">{t("apiKeys.fullAccess")}</Badge>
-          ) : (
-            <div className="flex flex-wrap gap-1">
-              {summary.map((g) => (
-                <Badge key={g.resource} variant="secondary" className="px-1.5 py-0 text-[0.65rem]">
-                  {g.resource}
-                  {!g.full && (
-                    <span className="ml-0.5 opacity-60">
-                      {g.count}/{g.total}
-                    </span>
-                  )}
-                </Badge>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="border-border mt-4 flex justify-end gap-2 border-t pt-4">
-          <Button onClick={handleClose}>{t("btn.done")}</Button>
-        </div>
-      </Modal>
-    );
-  }
-
-  // ── Creation form ──
   return (
-    <Modal
-      open={open}
-      onClose={handleClose}
+    <FormModal
+      onClose={onClose}
       title={t("apiKeys.createTitle")}
       className="sm:max-w-lg"
-      actions={
-        <>
-          <Button variant="outline" type="button" onClick={handleClose}>
-            {t("btn.cancel")}
-          </Button>
-          <Button
-            type="submit"
-            form="create-api-key-form"
-            disabled={createMutation.isPending || effectiveScopes.length === 0}
-          >
-            {createMutation.isPending ? <Spinner /> : t("apiKeys.createBtn")}
-          </Button>
-        </>
-      }
+      onSubmit={onFormSubmit}
+      isPending={createMutation.isPending}
+      submitLabel={t("btn.create", { ns: "common" })}
+      submitDisabled={effectiveScopes.length === 0}
+      error={error}
     >
-      <form id="create-api-key-form" onSubmit={onSubmit} className="space-y-4">
-        {/* Name */}
-        <div className="space-y-2">
-          <Label htmlFor="api-key-name">{t("apiKeys.nameLabel")}</Label>
-          <Input
-            id="api-key-name"
-            type="text"
-            {...register("name", { required: true })}
-            placeholder={t("apiKeys.namePlaceholder")}
-            maxLength={100}
-            required
-            autoFocus
-          />
-        </div>
+      {/* Name */}
+      <FormItem id="api-key-name" label={t("spaces.nameLabel")}>
+        <Input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={t("apiKeys.namePlaceholder")}
+          maxLength={100}
+          required
+          autoFocus
+        />
+      </FormItem>
 
-        {/* Expiration */}
-        <div className="space-y-2">
-          <Label htmlFor="api-key-expires">{t("apiKeys.expiresLabel")}</Label>
-          <Controller
-            name="expiresIn"
-            control={control}
-            render={({ field }) => (
-              <Select value={field.value} onValueChange={field.onChange}>
-                <SelectTrigger id="api-key-expires">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="30">{t("apiKeys.expires30")}</SelectItem>
-                  <SelectItem value="90">{t("apiKeys.expires90")}</SelectItem>
-                  <SelectItem value="180">{t("apiKeys.expires180")}</SelectItem>
-                  <SelectItem value="365">{t("apiKeys.expires365")}</SelectItem>
-                  <SelectItem value="never">{t("apiKeys.expiresNever")}</SelectItem>
-                </SelectContent>
-              </Select>
-            )}
-          />
-        </div>
+      {/* Expiration */}
+      <FormItem id="api-key-expires" label={t("apiKeys.expiresLabel")}>
+        <OptionSelect
+          value={expiresIn}
+          onValueChange={setExpiresIn}
+          options={[
+            { value: "30", label: t("apiKeys.expires30") },
+            { value: "90", label: t("apiKeys.expires90") },
+            { value: "180", label: t("apiKeys.expires180") },
+            { value: "365", label: t("apiKeys.expires365") },
+            { value: "never", label: t("apiKeys.expiresNever") },
+          ]}
+        />
+      </FormItem>
 
-        {/* Permissions */}
-        {availableScopes && (
-          <div className="space-y-2">
-            <Label>{t("apiKeys.permissionSummary")}</Label>
-            <ScopeMultiSelect
-              available={availableScopes}
-              selected={effectiveScopes}
-              onChange={setSelectedScopes}
-            />
-          </div>
+      {/* Permissions */}
+      <div className="flex flex-col gap-2">
+        <Label className="mb-0">{t("roles.permissionsLabel")}</Label>
+        {availableScopes ? (
+          <ScopeMultiSelect
+            available={availableScopes}
+            selected={effectiveScopes}
+            onChange={setSelectedScopes}
+          />
+        ) : scopesError ? (
+          <ErrorState error={scopesError} compact />
+        ) : (
+          <TextSkeleton lines={4} />
         )}
-
-        {errors.root?.message && <p className="text-destructive text-sm">{errors.root.message}</p>}
-      </form>
-    </Modal>
+      </div>
+    </FormModal>
   );
 }

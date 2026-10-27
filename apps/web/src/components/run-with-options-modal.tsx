@@ -1,17 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { defaultRunVersion, VERSION_DRAFT, VERSION_PUBLISHED } from "../lib/version-selector";
-import { useRef, useState } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Modal } from "./modal";
-import { Button } from "@appstrate/ui/components/button";
-import { Spinner } from "./spinner";
+import { FormModal } from "./form-modal";
 import type { SchemaWrapper } from "@appstrate/core/form";
 import { AgentInputForm, type AgentInputFormHandle } from "./agent-input-form";
 import { storedInputValues } from "../lib/agent-input";
 import { RunOverridesPanel } from "./run-overrides-panel";
+import { withConnectionOverride } from "../lib/connection-set";
 import type { RunOverridesValue } from "../lib/schedule-payload";
-import { withDeclaredConnections } from "../lib/connection-set";
 import { AgentVersionField } from "./package-version-select";
 import { DependencyOverridesSection } from "./dependency-overrides-section";
 import { useScheduleFormDeps } from "../hooks/use-schedules";
@@ -28,6 +26,12 @@ export interface RunWithOptionsSubmit {
   input: Record<string, unknown>;
   version: string;
   overrides: RunOverridesValue;
+  /**
+   * The integrations `version` declares, which the connection picks are narrowed to: one made
+   * under another version may name an integration this one lacks. `undefined` while that
+   * version's detail loads.
+   */
+  declaredIntegrations: readonly string[] | undefined;
   dependencyOverrides: Record<string, string>;
 }
 
@@ -47,48 +51,19 @@ interface RunWithOptionsModalProps {
  * `AgentInputForm` (as in `RunModal`), `RunOverridesPanel` (the schedule
  * editor's override surface), and the per-skill `DependencyOverridesSection`.
  */
-export function RunWithOptionsModal({
-  open,
-  onClose,
-  agent,
-  onSubmit,
-  isPending,
-}: RunWithOptionsModalProps) {
-  const { t } = useTranslation(["agents", "common"]);
-  const guardedClose = () => {
-    if (!isPending) onClose();
-  };
-  return (
-    <Modal
-      open={open}
-      onClose={guardedClose}
-      title={t("run.options.title", { name: agent.display_name })}
-      actions={null}
-    >
-      {open && (
-        <RunWithOptionsForm
-          agent={agent}
-          onClose={guardedClose}
-          onSubmit={onSubmit}
-          isPending={isPending}
-        />
-      )}
-    </Modal>
-  );
+export function RunWithOptionsModal({ open, ...props }: RunWithOptionsModalProps) {
+  return open ? <RunWithOptionsForm {...props} /> : null;
 }
 
+/** Mounted afresh at each opening, so the fields seed from the agent again. */
 function RunWithOptionsForm({
-  agent,
   onClose,
+  agent,
   onSubmit,
   isPending,
-}: {
-  agent: AgentDetail;
-  onClose: () => void;
-  onSubmit: (payload: RunWithOptionsSubmit) => void;
-  isPending?: boolean;
-}) {
-  const { t } = useTranslation(["agents", "common"]);
+}: Omit<RunWithOptionsModalProps, "open">) {
+  const { t } = useTranslation(["agents"]);
+  const inputRef = useRef<AgentInputFormHandle>(null);
   // Seeded from the STORED values only — they are per-space and do not
   // move with the version pick. Author `default`s deliberately stay out: they
   // belong to the selected version's schema, and seeding the draft's here would
@@ -107,8 +82,7 @@ function RunWithOptionsForm({
   );
   const [overrides, setOverrides] = useState<RunOverridesValue>({});
   const [dependencyOverrides, setDependencyOverrides] = useState<Record<string, string>>({});
-  const inputFormRef = useRef<AgentInputFormHandle>(null);
-  // Deps follow the selected version (#770): the input / integrations / skills
+  // Deps follow the selected version: the input / integrations / skills
   // the modal renders match what the run will execute, not the draft.
   const { deps } = useScheduleFormDeps(agent.id, version);
 
@@ -127,27 +101,32 @@ function RunWithOptionsForm({
       ...(s.name ? { name: s.name } : {}),
     }));
 
-  // Picks made under another version may name an integration this one does not declare.
-  const fire = (input: Record<string, unknown>) =>
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!(inputRef.current?.validate() ?? true)) return;
     onSubmit({
-      input,
+      input: inputData,
       version,
-      overrides: withDeclaredConnections(
-        overrides,
-        (deps?.agentIntegrations ?? []).map((i) => i.id),
-      ),
+      overrides,
+      declaredIntegrations: deps?.agentIntegrations.map((i) => i.id),
       dependencyOverrides,
     });
+  };
 
   return (
-    <div className="space-y-5">
+    <FormModal
+      onClose={onClose}
+      title={t("run.options.title", { name: agent.display_name })}
+      onSubmit={submit}
+      isPending={isPending}
+      submitLabel={t("input.run")}
+    >
       <AgentInputForm
-        ref={inputFormRef}
+        ref={inputRef}
         wrapper={inputWrapper}
         settings={agent.input}
         value={inputData}
         onChange={setInputData}
-        onSubmit={fire}
       />
 
       {/* Run version — a run has no schedule-style "inherit" to defer to, so
@@ -176,6 +155,9 @@ function RunWithOptionsForm({
           agentIntegrations={deps.agentIntegrations}
           value={overrides}
           onChange={setOverrides}
+          onConnectionPick={(integrationId, connectionIds) =>
+            setOverrides((prev) => withConnectionOverride(prev, integrationId, connectionIds))
+          }
           version={version}
         />
       )}
@@ -185,15 +167,6 @@ function RunWithOptionsForm({
         value={dependencyOverrides}
         onChange={setDependencyOverrides}
       />
-
-      <div className="flex justify-end gap-2 pt-1">
-        <Button variant="outline" onClick={onClose} disabled={isPending}>
-          {t("btn.cancel")}
-        </Button>
-        <Button onClick={() => inputFormRef.current?.submit()} disabled={isPending}>
-          {isPending ? <Spinner /> : t("input.run")}
-        </Button>
-      </div>
-    </div>
+    </FormModal>
   );
 }

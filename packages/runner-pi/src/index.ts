@@ -2,7 +2,7 @@
 
 // Same rule as every block below, and it holds for TYPES as much as values: a
 // line here is only what something OUTSIDE the package imports FROM THE BARREL.
-// `installSessionBridge` (#1202) and `preserveRequestedThinkingLevel` (#1209)
+// `installSessionBridge` and `preserveRequestedThinkingLevel`
 // lost their last such reader and came off this list.
 //
 // So did fifteen `Options`/payload types across the blocks below — an options
@@ -49,11 +49,9 @@ export {
 //
 // This list is deliberately the *consumed* surface, not everything `pi-sdk.ts`
 // holds. `streamSimple`/`SimpleStreamOptions`/`AssistantMessageEventStream`,
-// `Transport`, `KnownApi`, `Context` and `ModelRuntime` were re-exported here
-// for the AI-SDK chat loop and its generic dispatch seam; #1173 folded every
-// chat turn onto `runPiChat`, and no consumer has imported them from this
-// barrel since. They remain in `pi-sdk.ts` for in-package use — re-add a line
-// here only when something outside the package actually imports it.
+// `Transport`, `KnownApi`, `Context` and `ModelRuntime` stay in `pi-sdk.ts` for
+// in-package use: no consumer imports them from this barrel. A line belongs
+// here only when something outside the package imports it.
 export {
   InMemoryCredentialStore,
   Type,
@@ -63,17 +61,19 @@ export {
 export type { Api, Model, Message, ExtensionAPI, ExtensionFactory } from "./pi-sdk.ts";
 export type { PiSdkAgentSessionEvent, PiSdkAssistantMessageEvent, PiSdkUsage } from "./pi-sdk.ts";
 
-export { piSkillsDir, prepareBundleForPi } from "./bundle-extensions.ts";
+export { bundleMemberDir, prepareBundleForPi } from "./bundle-extensions.ts";
 
 export { createIsolatedResourceLoader } from "./isolated-resource-loader.ts";
 
 export { buildApiCallExtensionFactory } from "./api-call-bridge.ts";
 
-export { buildRuntimePiEnv, pickOperatorSidecarEnv } from "./container-env.ts";
-// `SIDECAR_OPERATOR_ENV_KEYS` is NOT here: #1178 removed its last external
-// reader. The platform forwards operator env through `pickOperatorSidecarEnv`;
-// the key list itself is read only inside this package (`container-env.ts` and
-// its tests).
+export {
+  buildRuntimePiEnv,
+  pickOperatorSidecarEnv,
+  SIDECAR_OPERATOR_ENV_KEYS,
+} from "./container-env.ts";
+// `SIDECAR_OPERATOR_ENV_KEYS` is read by the API boot warning on unread env keys
+// (`apps/api/src/lib/unread-env-keys.ts`), which needs every key the platform consumes.
 
 export { emitRuntimeReady, emitBootProgress } from "./runtime-ready.ts";
 

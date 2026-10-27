@@ -1,14 +1,109 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { packageSourceValues } from "@appstrate/db/schema";
+import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
+import { APPEARANCE_PROPERTIES } from "../schemas.ts";
 import {
   agentPackageIdParam,
+  connectionActionsSchema,
+  connectionShareAllSpacesOperation,
   connectionIdSetJsonSchema,
+  connectionScopeSchema,
+  shareAllSpacesSchema,
   connectionSetRefusals,
+  connectionShareDeleteConflicts,
+  connectionShareEndpoints,
+  connectionSharePutConflicts,
+  connectionShareSpaceIdParam,
+  connectionUpdateConflicts,
+  connectionUpdateDescription,
+  connectionUpdateRefusals400,
+  connectionUpdateRequestBody,
+  droppedPinEffect,
+  integrationConnectionSchema,
   integrationPackageIdParam,
   lockedBySchema,
+  namedSpaceSchema,
+  namingLayerRemovalEffect,
+  namingLayerRemovalSchema,
+  shareableSpacesSchema,
 } from "./integrations.ts";
+
+/** One connection on the account surface, as the list (`GET /api/me/connections`) returns it. */
+const meConnectionEntrySchema = {
+  type: "object",
+  required: [
+    "connection_id",
+    "kind",
+    "label",
+    "scopes_granted",
+    "connected_at",
+    "needs_reconnection",
+    "expiresAt",
+    "identity",
+    "auth_key",
+    "scope",
+    "shared_spaces",
+    "allowed_actions",
+    "shareable_spaces",
+    "reused_by_agents",
+    "locked_by",
+    "org",
+    "space",
+    "origin_space",
+  ],
+  properties: {
+    connection_id: { type: "string" },
+    kind: { type: "string", enum: ["integration"] },
+    label: { type: "string" },
+    scopes_granted: { type: "array", items: { type: "string" } },
+    connected_at: { type: "string", format: "date-time" },
+    needs_reconnection: { type: "boolean" },
+    expiresAt: {
+      oneOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+    },
+    identity: {
+      type: "string",
+      description:
+        "First identity claim (`account_email`, `email`, `sub`), else the account id, else the label.",
+    },
+    reused_by_agents: {
+      type: "integer",
+      description:
+        "Distinct agents declaring this integration that are run in the spaces the connection serves: every space where its owner runs agents and may use it, plus the spaces it is shared into. A credential bound to a space counts no space but that one.",
+    },
+    auth_key: { type: "string" },
+    scope: connectionScopeSchema,
+    share_all_spaces: shareAllSpacesSchema,
+    shared_spaces: {
+      type: "array",
+      items: namedSpaceSchema,
+      description: "The spaces whose members may use it.",
+    },
+    allowed_actions: connectionActionsSchema,
+    shareable_spaces: shareableSpacesSchema,
+    locked_by: lockedBySchema,
+    org: {
+      type: "object",
+      required: ["id", "name"],
+      properties: {
+        id: { type: "string" },
+        name: { type: "string" },
+      },
+    },
+    space: {
+      oneOf: [namedSpaceSchema, { type: "null" }],
+      description:
+        "The one space a space-scoped connection lives in; `null` for an org-scoped one.",
+    },
+    origin_space: {
+      oneOf: [namedSpaceSchema, { type: "null" }],
+      description:
+        "The space an org-scoped connection was connected from; `null` for a space-scoped one, or once that space is deleted.",
+    },
+  },
+};
 
 /**
  * User-scoped identity routes (`/api/me/*`).
@@ -49,11 +144,12 @@ export const mePaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      required: ["id", "name", "slug", "role", "createdAt"],
+                      required: ["id", "name", "slug", "icon", "color", "role", "createdAt"],
                       properties: {
                         id: { type: "string" },
                         name: { type: "string" },
                         slug: { type: "string" },
+                        ...APPEARANCE_PROPERTIES,
                         role: {
                           type: "string",
                           enum: ["owner", "admin", "member", "guest", "end_user"],
@@ -81,6 +177,8 @@ export const mePaths = {
                     id: "org_abc123",
                     name: "Acme Corp",
                     slug: "acme",
+                    icon: null,
+                    color: null,
                     role: "owner",
                     permissions: ["org:read", "org:update", "members:invite"],
                     createdAt: "2026-01-10T08:00:00Z",
@@ -107,7 +205,8 @@ export const mePaths = {
         "single shape, grouped by source package. For the user's own credential " +
         "(cookie session, CLI or instance token) it crosses orgs/spaces by " +
         "design — does NOT require `X-Org-Id`. For a delegated or end-user credential " +
-        "the list is scoped to its bound organization, and to its space when it pins one.",
+        "the list is scoped to its bound organization, and to its space when it pins one — where a " +
+        "connection's shares, origin space and reuse count show that space only.",
       responses: {
         "200": {
           description: "Connection groups",
@@ -139,57 +238,7 @@ export const mePaths = {
                         total_connections: { type: "integer" },
                         connections: {
                           type: "array",
-                          items: {
-                            type: "object",
-                            required: [
-                              "connection_id",
-                              "kind",
-                              "label",
-                              "scopes_granted",
-                              "connected_at",
-                              "needs_reconnection",
-                              "expiresAt",
-                              "identity",
-                              "auth_key",
-                              "shared_with_org",
-                              "reused_by_agents",
-                              "locked_by",
-                              "org",
-                              "space",
-                            ],
-                            properties: {
-                              connection_id: { type: "string" },
-                              kind: { type: "string", enum: ["integration"] },
-                              label: { type: "string" },
-                              scopes_granted: { type: "array", items: { type: "string" } },
-                              connected_at: { type: "string", format: "date-time" },
-                              needs_reconnection: { type: "boolean" },
-                              expiresAt: {
-                                oneOf: [{ type: "string", format: "date-time" }, { type: "null" }],
-                              },
-                              identity: { type: "string" },
-                              reused_by_agents: { type: "integer" },
-                              auth_key: { type: "string" },
-                              shared_with_org: { type: "boolean" },
-                              locked_by: lockedBySchema,
-                              org: {
-                                type: "object",
-                                required: ["id", "name"],
-                                properties: {
-                                  id: { type: "string" },
-                                  name: { type: "string" },
-                                },
-                              },
-                              space: {
-                                type: "object",
-                                required: ["id", "name"],
-                                properties: {
-                                  id: { type: "string" },
-                                  name: { type: "string" },
-                                },
-                              },
-                            },
-                          },
+                          items: meConnectionEntrySchema,
                         },
                       },
                     },
@@ -201,6 +250,106 @@ export const mePaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
+      },
+    },
+  },
+  "/api/me/connections/{connectionId}/shares": {
+    put: {
+      ...connectionShareAllSpacesOperation,
+      operationId: "setMeConnectionShareAllSpaces",
+      tags: ["Me"],
+      summary: "Share an owned connection with current and future team spaces",
+      parameters: [
+        {
+          name: "connectionId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+      ],
+    },
+  },
+  "/api/me/connections/{connectionId}/shares/{spaceId}": {
+    put: {
+      operationId: "shareMyConnection",
+      tags: ["Profile"],
+      summary: "Share one of the caller's connections into a space",
+      description:
+        "The owner's door to the share `PUT /api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}` " +
+        "makes, wherever the connection lives. With a delegated or end-user credential, only connections " +
+        "inside its bound organization (and space, when it pins one) are reachable. " +
+        connectionShareEndpoints.put.description,
+      parameters: [
+        {
+          name: "connectionId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+        connectionShareSpaceIdParam,
+      ],
+      responses: {
+        "204": {
+          description: "Shared into the space (or already shared there)",
+          headers: STD_RESPONSE_HEADERS,
+        },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: connectionShareEndpoints.put.refusals400,
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "The credential's scope ceiling lacks `integrations:connect`; `integrations:connect` missing in the target space; or the target blocks user connections for the integration and the caller lacks `integrations:configure` there (`connection_blocked_by_admin`).",
+        },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description:
+            "No connection with this id that the caller owns inside its credential's binding.",
+        },
+        "409": connectionSharePutConflicts,
+      },
+    },
+    delete: {
+      operationId: "unshareMyConnection",
+      tags: ["Profile"],
+      summary: "Withdraw one of the caller's connections from a space",
+      description:
+        "The owner's door to the withdrawal `DELETE /api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}` " +
+        "makes, wherever the connection lives. With a delegated or end-user credential, only connections " +
+        "inside its bound organization (and space, when it pins one) are reachable. " +
+        connectionShareEndpoints.delete.description,
+      parameters: [
+        {
+          name: "connectionId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+        connectionShareSpaceIdParam,
+      ],
+      responses: {
+        "204": {
+          description: "Withdrawn from the space (or not shared there)",
+          headers: STD_RESPONSE_HEADERS,
+        },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: connectionShareEndpoints.delete.refusals400,
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "The credential's scope ceiling lacks `integrations:connect`, or a credential bound to another space than the target.",
+        },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description:
+            "No connection with this id that the caller owns inside its credential's binding.",
+        },
+        "409": connectionShareDeleteConflicts,
       },
     },
   },
@@ -270,16 +419,22 @@ export const mePaths = {
       summary: "Pin connections for the caller's runs of an agent",
       description:
         "Persists the caller's preference for an integration on this agent. " +
-        "Sits at cascade layer 4 — wins over a soft org default and the fallback, loses " +
-        "to an admin pin, an enforced org default and the launch override (the run's or " +
-        "the schedule's `connection_overrides`). " +
+        "It wins over a soft org default and the fallback, and loses to the launch override " +
+        "(the run's or the schedule's `connection_overrides`); an admin pin or an enforced org " +
+        "default governs instead. " +
+        "Under an admin pin that allows additions the pin supplies the member's additions to the " +
+        "imposed set, which it never removes (`[]` there means no addition); the set is stored as " +
+        "named, imposed ids included — the dashboard writes the additions only. It is written only " +
+        "where it binds: under an admin pin closed to additions, an enforced org default, or an " +
+        "open admin pin the space's enforced default closes, it would bind nothing, so the write " +
+        "is refused (409) and nothing is stored. " +
         "The body carries the WHOLE set and this write replaces it — `[]` pins none: the run " +
         "starts without the integration, or is refused when the agent requires it; `DELETE` " +
         "clears the pin. " +
         "Idempotent — repeated calls rewrite the same set. Path-addressed like the admin " +
         "pins; encode each id with `encodePackageIdPath`. " +
-        "This is how to pick among several connections (`must_choose_connection`): pin one whose " +
-        "`scopes_granted` covers what the agent needs, rather than upgrading one other agents use.",
+        "This is how to pick among several connections (`must_choose_connection`): pin a candidate whose " +
+        "`missing_scopes` is empty, rather than upgrading one other agents use.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -325,6 +480,15 @@ export const mePaths = {
           description:
             "A connection id that is unknown, of another integration or space, or neither owned by the caller nor shared — one answer for all, so an id cannot be probed — or the agent is not active in this space.",
         },
+        "409": {
+          description: `\`connection_additions_blocked\`: an admin pin closed to additions, an enforced org default, or an open admin pin under an enforced default imposes this agent's set for the integration, and nothing can be added to it — a member pin there would bind nothing. Ask an admin to open the pin to additions, or drop the member pin. \`connection_set_too_large\`: under an admin pin open to additions, its connections plus this set exceed ${MAX_CONNECTIONS_PER_INTEGRATION} distinct connections (compared case-insensitively) — pin fewer. Nothing is stored either way.`,
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
       },
     },
     delete: {
@@ -332,8 +496,10 @@ export const mePaths = {
       tags: ["Profile"],
       summary: "Clear the caller's pin on a (agent, integration)",
       description:
-        "Removes the caller's member pin so the resolver falls back to layers 5-6 " +
-        "(soft org default, then accessible connections). Idempotent — 204 even when no row exists.",
+        "Removes the caller's member pin. Ungoverned, the resolver falls back to the soft org " +
+        "default, then the caller's own connection; under an admin pin that allows additions the " +
+        "run binds the imposed set with no addition. Always allowed, whatever governs. " +
+        namingLayerRemovalEffect,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -341,7 +507,10 @@ export const mePaths = {
         integrationPackageIdParam,
       ],
       responses: {
-        "204": { description: "Pin cleared (or never existed)" },
+        "200": {
+          description: "Pin cleared, or there was none",
+          content: { "application/json": { schema: namingLayerRemovalSchema } },
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           $ref: "#/components/responses/Forbidden",
@@ -364,15 +533,17 @@ export const mePaths = {
         "pin left with none is removed (the agent falls back to the default resolution), and a schedule " +
         "override left with none drops that integration AND disables the schedule (`disables: true`) — " +
         "an unattended run never silently falls back to another account; its owner re-picks and " +
-        "re-enables it. One schedule entry per (schedule, integration). Other actors' enabled schedules " +
+        "re-enables it. " +
+        `${droppedPinEffect} Each pin counts them (\`schedules_disabled_count\`). ` +
+        "One schedule entry per (schedule, integration). Other actors' enabled schedules " +
         "naming the connection are disabled by the delete with their overrides kept " +
         "(`disabled_reason: connection_deleted`); they are counted in `other_schedules_disabled_count`, " +
         "never listed. Other members' pins, admin pins and org defaults are not listed: the delete " +
         "leaves them untouched. The lists are " +
         "empty for an id that is not a UUID, unknown, or of a connection the caller does not own. A " +
         "delegated or end-user credential sees its bound organization (and space) only: a connection " +
-        "outside it answers empty lists, and only the owner's schedules inside it are listed, though " +
-        "the delete also rewrites the owner's schedules outside it. A pinned connection is still " +
+        "outside it answers empty lists, and only the owner's pins and schedules inside it are listed, " +
+        "though the delete also rewrites those outside it. A pinned connection is still " +
         "listed, though its delete answers 409 `connection_pinned`. An end user has no pins.",
       parameters: [
         { name: "connectionId", in: "path", required: true, schema: { type: "string" } },
@@ -402,6 +573,7 @@ export const mePaths = {
                         "agent_display_name",
                         "integration_package_id",
                         "connection_count",
+                        "schedules_disabled_count",
                       ],
                       properties: {
                         agent_package_id: { type: "string" },
@@ -411,6 +583,12 @@ export const mePaths = {
                           type: "integer",
                           minimum: 1,
                           description: "Size of the pinned set before the delete.",
+                        },
+                        schedules_disabled_count: {
+                          type: "integer",
+                          minimum: 0,
+                          description:
+                            "How many of the caller's enabled schedules the delete disables by removing this pin; 0 when the pin only shrinks.",
                         },
                       },
                     },
@@ -459,6 +637,49 @@ export const mePaths = {
     },
   },
   "/api/me/connections/{connectionId}": {
+    patch: {
+      operationId: "updateMyConnection",
+      tags: ["Profile"],
+      summary: "Rename one of the caller's own connections",
+      description:
+        "The owner's door to the rename `PATCH /api/integrations/{packageId}/connections/{connectionId}` " +
+        "makes, wherever the connection lives: an org-scoped connection belongs to no space, so no " +
+        "`X-Space-Id` addresses it. Owner only. With a delegated or end-user credential, only connections " +
+        "inside its bound organization (and space, when it pins one) are reachable. " +
+        connectionUpdateDescription,
+      parameters: [
+        {
+          name: "connectionId",
+          in: "path",
+          required: true,
+          schema: { type: "string", format: "uuid" },
+        },
+      ],
+      requestBody: connectionUpdateRequestBody,
+      responses: {
+        "200": {
+          description: "Renamed — returns the bare connection resource, as the space door does",
+          headers: STD_RESPONSE_HEADERS,
+          content: { "application/json": { schema: integrationConnectionSchema } },
+        },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: connectionUpdateRefusals400,
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "The credential's scope ceiling lacks `integrations:connect`, or a credential bound to a space renames a connection not scoped to it.",
+        },
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description:
+            "No connection with this id that the caller owns inside its credential's binding.",
+        },
+        "409": connectionUpdateConflicts,
+      },
+    },
     delete: {
       operationId: "deleteMyConnection",
       tags: ["Profile"],
@@ -474,6 +695,7 @@ export const mePaths = {
         "empties is removed (the cascade falls back), and a schedule override it empties drops that " +
         "integration and disables the schedule (its job is removed) rather than let it fall back " +
         "unattended; `GET /api/me/connections/{connectionId}/delete-impact` lists them beforehand. " +
+        `${droppedPinEffect} ` +
         "Another member's pins keep the id, and their next run fails " +
         "(`pinned_connection_unavailable`) until they pick again — a set never shrinks behind its " +
         "owner. Another actor's enabled schedules naming the connection are disabled in the same " +
@@ -484,7 +706,9 @@ export const mePaths = {
         "Surfaced only from the /connections management page — agent-surface unlinks now " +
         "drop the member pin instead (see `DELETE /api/me/integration-pins/{agentPackageId}/integrations/{integrationPackageId}`). " +
         "With a delegated or end-user credential, only connections inside its bound " +
-        "organization (and space, when it pins one) can be deleted (204 with no effect otherwise).",
+        "organization (and space, when it pins one) can be deleted (204 with no effect otherwise); " +
+        "a credential bound to a space deletes only a connection scoped to it (403 for one serving the " +
+        "whole organization).",
       parameters: [
         {
           name: "connectionId",
@@ -496,6 +720,11 @@ export const mePaths = {
       responses: {
         "204": { description: "Connection deleted (or never existed)" },
         "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": {
+          $ref: "#/components/responses/Forbidden",
+          description:
+            "The credential's scope ceiling lacks `integrations:disconnect`, or the credential is bound to a space and the connection serves the whole organization.",
+        },
         "409": {
           description:
             "Connection is named by an admin pin or an org default (`connection_pinned`)",
@@ -560,13 +789,12 @@ export const mePaths = {
       summary: "The caller's working context for an AI agent",
       description:
         "Returns the caller's identity, their role in the pinned org, and the integrations " +
-        "they could attach when building an agent in the current space (their own or " +
-        "org-shared). One payload powering the chat system prompt, the MCP `get_me` tool, and " +
+        "they could attach when building an agent in the current space (their own, or " +
+        "shared into it). One payload powering the chat system prompt, the MCP `get_me` tool, and " +
         "direct API/MCP callers — so an agent can prefer already-connected integrations and " +
         "respect the caller's role (operations beyond it 403 at invoke time). The space is " +
         "the one the credential (API key, token) is bound to — an `X-Space-Id` naming another " +
-        "is refused — else the one `X-Space-Id` names; with neither the request is a 400, " +
-        "except through the MCP server, which falls back to the org's default space.",
+        "is refused — else the one `X-Space-Id` names; with neither the request is a 400.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

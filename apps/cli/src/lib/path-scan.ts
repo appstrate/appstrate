@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Scan `$PATH` for `appstrate` binaries (`appstrate doctor` — issue #249, phase 3).
+ * Scan `$PATH` for `appstrate` binaries (`appstrate doctor`).
  *
  * Pure helpers + an injectable filesystem interface so tests don't have to
  * shell out. The "winner" of PATH resolution is the FIRST entry whose

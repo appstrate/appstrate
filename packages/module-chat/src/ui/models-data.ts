@@ -12,6 +12,12 @@ import {
   modelGenerationCapabilitiesSchema,
   type ModelGenerationCapabilities,
 } from "@appstrate/core/model-generation";
+import {
+  MODEL_BINDINGS,
+  MODEL_PAYERS,
+  type ModelBinding,
+  type ModelPayer,
+} from "@appstrate/core/model-payer";
 
 /**
  * Runtime shape of a single `/api/models` row we depend on. The endpoint
@@ -32,6 +38,9 @@ const orgModelOptionSchema = z.object({
   enabled: z.boolean().optional(),
   aliased: z.boolean().optional(),
   generation: modelGenerationCapabilitiesSchema.nullable().optional(),
+  billed_to: z.enum(MODEL_PAYERS).nullable().optional(),
+  binding: z.enum(MODEL_BINDINGS).optional(),
+  credentialId: z.string().nullable().optional(),
 });
 
 export interface OrgModelOption {
@@ -48,6 +57,11 @@ export interface OrgModelOption {
    * OpenAI). `null` for aliases (binding hidden) or rows with no registry entry.
    */
   provider_name?: string | null;
+  /** Who pays for the caller: their own credential, the org's, or `null` (they must add one). */
+  billed_to?: ModelPayer | null;
+  /** Whose credential serves the model: the platform's, one organization credential, each member's own, or a hidden alias. */
+  binding?: ModelBinding;
+  credentialId?: string | null;
   label: string | null;
   /** snake_case to match the `/api/models` wire field (org-models.ts). */
   is_default?: boolean;

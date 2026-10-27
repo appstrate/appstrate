@@ -17,11 +17,7 @@ export interface ScopeTarget {
   choice: ScopeChoice;
 }
 
-/**
- * What "+ Ajouter" offers for one auth. Every connect requests
- * `default_scopes ∪ requested scopes`, so the defaults are a fixed baseline and
- * only the rest of the `scope_catalog` is a choice.
- */
+/** Every connect requests `default_scopes ∪ requested`: defaults are a fixed baseline, the rest of `scope_catalog` is the choice. */
 export interface ScopeChoice {
   /** The defaults to show, without those another default implies (`scope_catalog[].implies`). */
   baseline: string[];
@@ -42,10 +38,7 @@ export function scopeChoiceFor(auth: IntegrationManifestAuth | undefined): Scope
   return { baseline: defaults.filter((scope) => !implied.has(scope)), selectable };
 }
 
-/**
- * The selectable scopes an agent's declaration needs on `authKey`: what the quick-fill ticks.
- * A declaration pinned to another auth (`auth_key`) needs nothing here.
- */
+/** The selectable scopes an agent's declaration needs on `authKey` (quick-fill); none if pinned to another auth. */
 export function agentScopes(
   choice: ScopeChoice,
   manifest: IntegrationManifestView,

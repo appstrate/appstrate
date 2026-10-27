@@ -3,10 +3,9 @@
 /**
  * The file explorer's pure core.
  *
- * Everything asserted here is what a rendered test cannot reach: the tree is
- * virtualized, so a DOM-less render emits zero rows and the ARIA bookkeeping
- * (`aria-level` / `aria-setsize` / `aria-posinset`, all computed by hand
- * precisely BECAUSE rows are windowed) would go unverified.
+ * Everything asserted here is what a DOM-less render cannot reach: the tree shape,
+ * the ARIA bookkeeping (`aria-level` / `aria-setsize` / `aria-posinset`) and the
+ * keyboard model.
  */
 
 import { describe, it, expect } from "bun:test";

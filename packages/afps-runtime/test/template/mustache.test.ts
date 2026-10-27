@@ -89,3 +89,50 @@ describe("validateTemplate", () => {
     expect(result.ok).toBe(false);
   });
 });
+
+describe("renderTemplate — non-string interpolation", () => {
+  const view = {
+    obj: { a: 1, b: { c: "x" } },
+    list: ["a,b", "c"],
+    str: "<em>hi</em>",
+    items: [{ name: "one" }, { name: "two" }],
+  };
+
+  it("renders objects as JSON in {{x}}, {{{x}}} and {{&x}}", () => {
+    const json = '{"a":1,"b":{"c":"x"}}';
+    expect(renderTemplate("{{obj}}", view)).toBe(json);
+    expect(renderTemplate("{{{obj}}}", view)).toBe(json);
+    expect(renderTemplate("{{&obj}}", view)).toBe(json);
+  });
+
+  it("renders arrays as JSON in every interpolation form", () => {
+    const json = '["a,b","c"]';
+    expect(renderTemplate("{{list}}", view)).toBe(json);
+    expect(renderTemplate("{{{list}}}", view)).toBe(json);
+    expect(renderTemplate("{{&list}}", view)).toBe(json);
+  });
+
+  it("leaves strings unchanged in every interpolation form", () => {
+    for (const tpl of ["{{str}}", "{{{str}}}", "{{&str}}"]) {
+      expect(renderTemplate(tpl, view)).toBe("<em>hi</em>");
+    }
+  });
+
+  it("renders missing values as empty in every interpolation form", () => {
+    for (const tpl of ["[{{nope}}]", "[{{{nope}}}]", "[{{&nope}}]"]) {
+      expect(renderTemplate(tpl, view)).toBe("[]");
+    }
+  });
+
+  it("resolves dotted paths to objects", () => {
+    expect(renderTemplate("{{input.o}}", { input: { o: { k: 1 } } })).toBe('{"k":1}');
+  });
+
+  it("still iterates arrays of objects in sections", () => {
+    expect(renderTemplate("{{#items}}{{name}};{{/items}}", view)).toBe("one;two;");
+  });
+
+  it("still yields each string for {{.}} over an array of strings", () => {
+    expect(renderTemplate("{{#list}}[{{.}}]{{/list}}", view)).toBe("[a,b][c]");
+  });
+});

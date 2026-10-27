@@ -39,8 +39,10 @@ import {
   runBoundSelection,
 } from "../../../src/services/credential-proxy/integration-resolver.ts";
 import { selectAccessibleConnection } from "../../../src/services/integration-connections.ts";
+import { resolveConnectionsForRun } from "../../../src/services/integration-connection-resolver.ts";
 import { ApiError, type ResolutionFieldError } from "../../../src/lib/errors.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import { seedShares } from "../../helpers/connection-shares.ts";
 
 const INTEGRATION_ID = "@official/gmail";
 
@@ -155,7 +157,7 @@ describe("credential-proxy integration-resolver", () => {
     /** Also the label, which is unique per (space, integration). */
     accountId?: string;
     authKey?: string;
-    sharedWithOrg?: boolean;
+    sharedSpaceIds?: string[];
     needsReconnection?: boolean;
     scopes?: string[];
   }): Promise<string> {
@@ -174,17 +176,18 @@ describe("credential-proxy integration-resolver", () => {
         authKey: opts.authKey ?? "primary",
         accountId,
         label: accountId,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: opts.userId ?? null,
         endUserId: opts.endUserId ?? null,
         credentialsEncrypted: ciphertext,
         scopesGranted: opts.scopes ?? ["read"],
-        sharedWithOrg: opts.sharedWithOrg ?? false,
         needsReconnection: opts.needsReconnection ?? false,
         // oauth2 connection → pins the org's custom per-space client by id (seeded above).
         clientRef: customClientId,
       })
       .returning({ id: integrationConnections.id });
+    await seedShares(row!.id, opts.sharedSpaceIds ?? []);
     return row!.id;
   }
 
@@ -194,6 +197,7 @@ describe("credential-proxy integration-resolver", () => {
       spaceId: ctx.defaultSpaceId,
       orgId: ctx.orgId,
       actor: { type: "user" as const, id: actorId },
+      reach: "own" as const,
     };
   }
 
@@ -296,6 +300,7 @@ describe("credential-proxy integration-resolver", () => {
       authKey: "primary",
       accountId: "acct-1",
       label: "Connexion 1",
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       credentialsEncrypted: encryptCredentialEnvelope({
@@ -362,6 +367,7 @@ describe("credential-proxy integration-resolver", () => {
       authKey: "primary",
       accountId: "acct-1",
       label: "Connexion 1",
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
@@ -539,9 +545,7 @@ describe("credential-proxy integration-resolver", () => {
     expect(row!.needsReconnection).toBe(false);
   });
 
-  describe("a forced refresh that narrows the grant is checked against the space's scope floor", () => {
-    // The refresh that narrows `scopes_granted` is the only one that can see the shrink — it
-    // rewrites the column the shrink is measured against — so the proxy must check it too.
+  describe("a forced refresh that narrows the grant stores it; resolution judges each agent", () => {
     beforeEach(async () => {
       const base = gmailManifest(token.url);
       const primary = (base["auths"] as Record<string, Record<string, unknown>>)["primary"];
@@ -563,7 +567,7 @@ describe("credential-proxy integration-resolver", () => {
           delete_message: { required_scopes: { primary: ["delete"] } },
         },
       };
-      // The floor reads the draft; the proxy reads the latest published version.
+      // Resolution reads the draft; the proxy reads the latest published version.
       await db
         .update(packages)
         .set({ draftManifest: scoped })
@@ -571,13 +575,9 @@ describe("credential-proxy integration-resolver", () => {
       await seedPublishedVersion(INTEGRATION_ID, "1.0.1", { manifest: scoped });
     });
 
-    async function activateAgent(name: string, tools: string[]) {
-      await seedPackage({
-        id: name,
-        homeSpaceId: ctx.defaultSpaceId,
-        orgId: ctx.orgId,
-        type: "agent",
-        draftManifest: {
+    const resolveFor = (name: string, tools: string[]) =>
+      resolveConnectionsForRun({
+        agentManifest: {
           name,
           version: "1.0.0",
           type: "agent",
@@ -586,12 +586,12 @@ describe("credential-proxy integration-resolver", () => {
           dependencies: { integrations: { [INTEGRATION_ID]: "^1.0.0" } },
           integrations_configuration: { [INTEGRATION_ID]: { tools } },
         },
+        packageId: name,
+        actor: { type: "user", id: ctx.user.id },
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       });
-      await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, name);
-    }
 
-    it("flags needsReconnection when the shrink drops below the floor, still serving the refreshed token", async () => {
-      await activateAgent("@cproxy/deleter", ["delete_message"]);
+    it("keeps the connection usable and refuses only the agent needing the dropped scope", async () => {
       const connId = await seedConnection({
         userId: ctx.user.id,
         scopes: ["read", "send", "delete"],
@@ -600,20 +600,22 @@ describe("credential-proxy integration-resolver", () => {
 
       const refreshed = await forceRefreshIntegrationProxyCredentials(input(), null);
       expect(JSON.stringify(refreshed)).toContain("narrowed-access");
-      expect(await flaggedConnection(connId)).toBe(true);
-    });
+      const [row] = await db
+        .select({
+          scopesGranted: integrationConnections.scopesGranted,
+          needsReconnection: integrationConnections.needsReconnection,
+        })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, connId));
+      expect(row).toEqual({ scopesGranted: ["read", "send"], needsReconnection: false });
 
-    it("does not flag a shrink that still covers the floor", async () => {
-      await activateAgent("@cproxy/reader", ["list_messages"]);
-      const connId = await seedConnection({
-        userId: ctx.user.id,
-        scopes: ["read", "send", "delete"],
-      });
-      token.setResponse({ access_token: "narrowed-access", expires_in: 3600, scope: "read" });
-
-      const refreshed = await forceRefreshIntegrationProxyCredentials(input(), null);
-      expect(JSON.stringify(refreshed)).toContain("narrowed-access");
-      expect(await flaggedConnection(connId)).toBe(false);
+      const deleter = await resolveFor("@cproxy/deleter", ["delete_message"]);
+      expect(deleter.errors).toMatchObject([
+        { code: "insufficient_scopes", connectionId: connId, missingScopes: ["delete"] },
+      ]);
+      const reader = await resolveFor("@cproxy/reader", ["list_messages"]);
+      expect(reader.errors).toEqual([]);
+      expect(reader.resolved[INTEGRATION_ID]?.map((c) => c.connectionId)).toEqual([connId]);
     });
   });
 
@@ -632,7 +634,7 @@ describe("credential-proxy integration-resolver", () => {
     expect(refreshed).toBeNull();
   });
 
-  describe("no X-Connection-Id, no org default — only the actor's single OWN connection is picked", () => {
+  describe("outside a run — only the actor's OWN connections are reachable", () => {
     async function rejectionOf(p: Promise<unknown>): Promise<unknown> {
       try {
         await p;
@@ -644,7 +646,11 @@ describe("credential-proxy integration-resolver", () => {
 
     it("uses the actor's own connection even when a colleague shares one", async () => {
       const colleague = await createTestUser();
-      await seedConnection({ userId: colleague.id, accountId: "shared", sharedWithOrg: true });
+      await seedConnection({
+        userId: colleague.id,
+        accountId: "shared",
+        sharedSpaceIds: [ctx.defaultSpaceId],
+      });
       const ownId = await seedConnection({ userId: ctx.user.id, accountId: "mine" });
 
       const resolved = await resolveIntegrationProxyCredentials(input());
@@ -652,30 +658,7 @@ describe("credential-proxy integration-resolver", () => {
       expect(JSON.stringify(resolved.payload)).toContain("live-mine");
     });
 
-    it("never picks a colleague's shared connection implicitly — 409 naming it as a candidate", async () => {
-      const colleague = await createTestUser();
-      const sharedId = await seedConnection({
-        userId: colleague.id,
-        accountId: "shared",
-        sharedWithOrg: true,
-      });
-
-      const err = (await rejectionOf(resolveIntegrationProxyCredentials(input()))) as ApiError;
-      expect(err).toBeInstanceOf(ApiError);
-      expect(err.status).toBe(409);
-      expect(err.code).toBe("must_choose_connection");
-      const [item] = err.fieldErrors as ResolutionFieldError[];
-      expect(item!.candidate_connections!.map((c) => [c.id, c.owned_by_actor])).toEqual([
-        [sharedId, false],
-      ]);
-      const named = await resolveIntegrationProxyCredentials({
-        ...input(),
-        connectionId: sharedId,
-      });
-      expect(named.connectionId).toBe(sharedId);
-    });
-
-    it("answers 409 must_choose_connection listing every nameable connection when the actor owns several", async () => {
+    it("answers 409 must_choose_connection listing the actor's own connections only when they own several", async () => {
       const colleague = await createTestUser();
       const liveId = await seedConnection({ userId: ctx.user.id, accountId: "live" });
       const deadId = await seedConnection({
@@ -683,12 +666,12 @@ describe("credential-proxy integration-resolver", () => {
         accountId: "dead",
         needsReconnection: true,
       });
-      const sharedId = await seedConnection({
+      // A colleague's connection, shared into the space or not, is not the caller's to name.
+      await seedConnection({
         userId: colleague.id,
         accountId: "shared",
-        sharedWithOrg: true,
+        sharedSpaceIds: [ctx.defaultSpaceId],
       });
-      // A colleague's UNshared connection is not the caller's to name.
       await seedConnection({ userId: colleague.id, accountId: "private" });
 
       const err = await rejectionOf(resolveIntegrationProxyCredentials(input()));
@@ -710,6 +693,9 @@ describe("credential-proxy integration-resolver", () => {
             account_id: "live",
             owned_by_actor: true,
             needs_reconnection: false,
+
+            scopes_granted: ["read"],
+            missing_scopes: [],
           },
           {
             id: deadId,
@@ -717,13 +703,9 @@ describe("credential-proxy integration-resolver", () => {
             account_id: "dead",
             owned_by_actor: true,
             needs_reconnection: true,
-          },
-          {
-            id: sharedId,
-            label: "shared",
-            account_id: "shared",
-            owned_by_actor: false,
-            needs_reconnection: false,
+
+            scopes_granted: ["read"],
+            missing_scopes: [],
           },
         ].sort(byId),
       );
@@ -735,7 +717,11 @@ describe("credential-proxy integration-resolver", () => {
 
     it("reports a lone dead own connection as 409 needs_reconnection — never switches to the shared one", async () => {
       const colleague = await createTestUser();
-      await seedConnection({ userId: colleague.id, accountId: "shared", sharedWithOrg: true });
+      await seedConnection({
+        userId: colleague.id,
+        accountId: "shared",
+        sharedSpaceIds: [ctx.defaultSpaceId],
+      });
       const deadId = await seedConnection({
         userId: ctx.user.id,
         accountId: "dead",
@@ -756,6 +742,7 @@ describe("credential-proxy integration-resolver", () => {
       const context = {
         spaceId: ctx.defaultSpaceId,
         actor: { type: "user" as const, id: ctx.user.id },
+        reach: "own" as const,
       };
       const manifest = gmailManifest(token.url) as unknown as IntegrationManifest;
       const primary = manifest.auths!.primary!;
@@ -849,7 +836,13 @@ describe("credential-proxy integration-resolver", () => {
         actor,
       });
 
-      const underRun = await resolveIntegrationProxyCredentials({ ...input(), run: run1 });
+      const underRun = await resolveIntegrationProxyCredentials({
+        integrationId: INTEGRATION_ID,
+        spaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        actor,
+        run: run1,
+      });
       expect(underRun.declaredUris).toEqual(["https://api.example.com/*"]);
       const withoutRun = await resolveIntegrationProxyCredentials(input());
       expect(withoutRun.declaredUris).toEqual(["https://later.example.com/**"]);

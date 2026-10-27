@@ -73,6 +73,7 @@ const MCP_TOOL_RESULT = {
   reason: "MCP spec wire name (`tools/call` result, MCP 2025-06-18)",
   within: [
     "#/paths/~1api~1mcp~1o~1{org}/post/responses/200/content/application~1json/schema/properties/result/",
+    "#/paths/~1api~1mcp~1o~1{org}~1s~1{space}/post/responses/200/content/application~1json/schema/properties/result/",
   ],
 };
 

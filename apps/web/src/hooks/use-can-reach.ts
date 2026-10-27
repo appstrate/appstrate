@@ -21,3 +21,8 @@ export function useCanReach(): (target: string) => boolean {
     [can, features, inPersonalSpace],
   );
 }
+
+/** Whether the reach verdicts are answers yet: until the permission set loads every one reads as refused. */
+export function useReachReady(): boolean {
+  return usePermissions().ready;
+}

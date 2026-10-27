@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * CLI token service (issue #165).
+ * CLI token service.
  *
  * Mints a **15-minute signed JWT access token + 30-day opaque rotating
  * refresh token** pair for the Appstrate CLI's device-authorization
@@ -126,7 +126,7 @@ interface TokenPair {
 
 /**
  * Device metadata captured at device-code exchange. Persisted on the head
- * of family for the listing/revocation UI (issue #251). All fields
+ * of family for the listing/revocation UI. All fields
  * optional — pre-2.x CLIs that omit `X-Appstrate-Device-Name`, and
  * deployments where `getClientIpFromRequest` returns `null` (no
  * forwarded header trusted, no socket address surfaced), will produce
@@ -912,7 +912,7 @@ export async function lookupCliDeviceName(familyId: string): Promise<string | nu
   }
 }
 
-// ─── Phase 3: admin org-scoped oversight (#251) ─────────────────────────────
+// ─── Admin org-scoped oversight ────────────────────────────────────
 
 /**
  * Admin-facing variant of {@link CliSessionListEntry}. Carries the
@@ -994,8 +994,8 @@ export async function listSessionsForOrg(orgId: string): Promise<AdminCliSession
  * Revoke a CLI session on behalf of an org admin. The family must belong
  * to a CURRENT member of `orgId` — a session whose owner has since left
  * the org is invisible to admins of that org and cannot be revoked
- * through this surface (the user themselves still can via the Phase 2
- * personal endpoints).
+ * through this surface (the user themselves still can via the personal
+ * endpoints).
  *
  * Returns `false` when the family is unknown, doesn't belong to a member
  * of `orgId`, or is already fully revoked. Reason `org_admin_revoked` is

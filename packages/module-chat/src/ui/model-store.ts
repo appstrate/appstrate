@@ -29,7 +29,7 @@ import {
   type ModelGenerationCapabilities,
   type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
-import { isModelLive } from "../model-liveness.ts";
+import { isModelSelectable } from "@appstrate/core/model-selectable";
 
 const KEY = "appstrate.chat.modelPick";
 const GENERATION_KEY = "appstrate.chat.generation";
@@ -127,7 +127,12 @@ function notifyModel(): void {
   for (const l of generationListeners) l();
 }
 
-/** Runs on every catalog change; a dead model is listed but never kept selected. */
+/**
+ * Runs on every catalog change; a dead model is listed but never kept selected.
+ * A model nothing pays for yet (`billed_to: null`) stays selectable: the server
+ * refuses its turn with the "add your key" path, rather than the selection
+ * moving silently to a model someone else pays for.
+ */
 export function setModelCatalog(
   models: ReadonlyArray<{
     id: string;
@@ -139,7 +144,7 @@ export function setModelCatalog(
   generationCapabilities = new Map(
     models.flatMap((model) => (model.generation ? [[model.id, model.generation] as const] : [])),
   );
-  const live = models.filter(isModelLive);
+  const live = models.filter(isModelSelectable);
   liveModelIds = new Set(live.map((m) => m.id));
 
   orgDefaultModelId = (live.find((m) => m.is_default) ?? live[0])?.id ?? null;

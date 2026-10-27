@@ -103,7 +103,7 @@ function detectColor(): boolean {
  * `registerOpenapiCommand` below (and therefore `cli.ts`) needs no change
  * while tests get a sink they exclusively own — reassigning the global
  * streams made every `toBe("")` here an assertion about writes from other
- * suites running in the same `bun test` process (issue #1180).
+ * suites running in the same `bun test` process.
  */
 export async function openapiListCommand(
   opts: OpenapiListOptions,

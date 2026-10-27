@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { inlineImageBudgetExtension } from "./inline-image-budget.ts";
 import type { ExtensionFactory, PiCodingAgentSdk } from "./pi-sdk.ts";
 
 interface IsolatedResourceLoaderOptions extends Pick<
@@ -28,7 +29,13 @@ const NO_PACKAGE_RESOURCES = {
  * `noSkills` and its sibling flags, so the flags alone do not stop the scan:
  * its two discovery calls are replaced with ones that resolve nothing.
  * `packageManager` is private in Pi's TypeScript surface but a normal instance
- * field at runtime.
+ * field at runtime. The guard fails loudly if a Pi version no longer exposes
+ * those two methods, because an unpatched loader would scan the host.
+ *
+ * Every session also gets {@link inlineImageBudgetExtension}. It sits in this
+ * shared loader so every session builder (runs and chat) gets it; chat carries
+ * no tool-result images today (module-chat flattens MCP images to text and has
+ * no built-in tools), so in practice it protects runs.
  */
 export async function createIsolatedResourceLoader({
   DefaultResourceLoader,
@@ -45,7 +52,7 @@ export async function createIsolatedResourceLoader({
     cwd,
     agentDir,
     settingsManager: SettingsManager.inMemory(),
-    extensionFactories,
+    extensionFactories: [...extensionFactories, inlineImageBudgetExtension],
     additionalSkillPaths: skillPaths,
     noExtensions: true,
     noSkills: true,
@@ -55,6 +62,15 @@ export async function createIsolatedResourceLoader({
     systemPrompt,
     appendSystemPrompt: [],
   });
+  const live: unknown = Reflect.get(resourceLoader, "packageManager");
+  if (
+    typeof (live as { resolve?: unknown } | null)?.resolve !== "function" ||
+    typeof (live as { resolveExtensionSources?: unknown }).resolveExtensionSources !== "function"
+  ) {
+    throw new Error(
+      "Pi's DefaultResourceLoader no longer exposes packageManager.resolve/resolveExtensionSources: the host-isolation shim cannot be applied, and without it Pi would scan the host's skill and extension directories. Update packages/runner-pi/src/isolated-resource-loader.ts for this Pi version.",
+    );
+  }
   Reflect.set(resourceLoader, "packageManager", {
     resolve: async () => NO_PACKAGE_RESOURCES,
     resolveExtensionSources: async () => NO_PACKAGE_RESOURCES,

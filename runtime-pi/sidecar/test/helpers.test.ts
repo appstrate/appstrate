@@ -5,7 +5,6 @@ import {
   ABSOLUTE_BODY_CEILING,
   concatAndRelease,
   isBlockedHost,
-  substituteVars,
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
   INTEGRATION_ID_RE,
@@ -195,32 +194,6 @@ describe("isBlockedHost", () => {
 
   it("allows bracketed public IPv6", () => {
     expect(isBlockedHost("[2001:db8::1]")).toBe(false);
-  });
-});
-
-// --- substituteVars ---
-
-describe("substituteVars", () => {
-  it("replaces single variable", () => {
-    expect(substituteVars("Bearer {{token}}", { token: "abc" })).toBe("Bearer abc");
-  });
-
-  it("replaces multiple variables", () => {
-    expect(substituteVars("{{host}}/{{path}}", { host: "example.com", path: "api" })).toBe(
-      "example.com/api",
-    );
-  });
-
-  it("leaves unknown placeholders unchanged", () => {
-    expect(substituteVars("{{missing}}", {})).toBe("{{missing}}");
-  });
-
-  it("handles text without variables", () => {
-    expect(substituteVars("plain text", { key: "val" })).toBe("plain text");
-  });
-
-  it("handles empty string", () => {
-    expect(substituteVars("", { key: "val" })).toBe("");
   });
 });
 

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Unix-socket filesystem guard for the daemon's UDS listen path (#868).
+ * Unix-socket filesystem guard for the daemon's UDS listen path.
  *
  * The daemon runs as root, so an unconditional `unlink(path)` before bind
  * would delete WHATEVER a misconfigured FIRECRACKER_RUNNER_SOCKET points

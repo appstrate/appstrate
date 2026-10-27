@@ -79,7 +79,7 @@ export const OIDC_ALLOWED_SCOPES: ReadonlySet<Permission> = new Set<Permission>(
  * `scopesToPermissions("dashboard_user", role)` intersects the request with the
  * subject's live authority, so an admin gets it and a `runner` does not. Absent
  * from the vocabulary entirely, the scope could not be asked for at all and
- * every dashboard token was silently capped at its own runs (issue #1372).
+ * every dashboard token was silently capped at its own runs.
  *
  * Self-service (DCR / CIMD) registrants are unaffected: their ceiling is
  * {@link getSelfServiceScopes}, which lists no core action scope.

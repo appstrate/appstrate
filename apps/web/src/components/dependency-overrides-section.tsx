@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Card } from "@appstrate/ui/components/card";
 import { useTranslation } from "react-i18next";
 import { Label } from "@appstrate/ui/components/label";
 import { PackageVersionSelect } from "./package-version-select";
@@ -30,7 +31,7 @@ interface DependencyOverridesSectionProps {
 }
 
 /**
- * Per-skill dependency override editor (#666). For each declared skill the
+ * Per-skill dependency override editor. For each declared skill the
  * user can keep the manifest pin (inherit), run the dependency's mutable
  * working copy ("draft" — the skill edit loop, offered only for a skill this
  * caller can write), or pin an exact published version for this run. Emits
@@ -49,10 +50,10 @@ export function DependencyOverridesSection({
   const { t } = useTranslation(["agents"]);
   if (skills.length === 0) return null;
   return (
-    <div className="space-y-2">
-      <Label>{t("run.overrides.dependencyLabel")}</Label>
+    <div className="flex flex-col gap-2">
+      <Label className="mb-0">{t("run.overrides.dependencyLabel")}</Label>
       <p className="text-muted-foreground text-xs">{t("run.overrides.dependencyHint")}</p>
-      <div className="border-border bg-card space-y-3 rounded-md border p-3">
+      <Card className="flex flex-col gap-3 rounded-md p-3">
         {skills.map((skill) => (
           <DependencyOverrideRow
             key={skill.id}
@@ -66,7 +67,7 @@ export function DependencyOverridesSection({
             }}
           />
         ))}
-      </div>
+      </Card>
     </div>
   );
 }
@@ -84,7 +85,7 @@ function DependencyOverrideRow({
   const { t } = useTranslation(["agents"]);
   const label = skill.name ?? skill.id;
   return (
-    <div className="space-y-1.5" data-testid={`dep-override-row-${skill.id}`}>
+    <div className="flex flex-col gap-1.5" data-testid={`dep-override-row-${skill.id}`}>
       <div className="text-xs font-medium">{label}</div>
       <PackageVersionSelect
         type="skill"

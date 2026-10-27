@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import {
+  MODEL_ERROR_RETRYABLE_BY_CATEGORY,
+  type ModelErrorCategory,
+} from "@appstrate/core/model-error";
 import type { z } from "zod";
 import type { ModelCost, ModelInputModality } from "@appstrate/core/module";
 import type { TokenUsage } from "@appstrate/core/token-usage";
@@ -20,10 +24,14 @@ export {
 } from "./member-role-policy.ts";
 
 export type { WebhookInfo, WebhookCreateResponse, WebhookDelivery } from "./webhooks.ts";
-import type { AgentIntegrationEntry } from "./integrations.ts";
+import type { AgentIntegrationEntry, ConnectionAction, ConnectionScope } from "./integrations.ts";
+export { CONNECTION_ACTIONS, CONNECTION_SCOPES } from "./integrations.ts";
 export type {
   AccessibleIntegrationConnection,
   AgentIntegrationEntry,
+  ConnectionAction,
+  ConnectionReach,
+  ConnectionScope,
   ConsumingAgentSummary,
   IntegrationAgentResolution,
   IntegrationAuthStatus,
@@ -44,11 +52,8 @@ import type { PackageType } from "@appstrate/core/validation";
 export type { PackageType };
 
 export type { RunArtifactsSummary } from "@appstrate/db/schema";
-import type {
-  CredentialSource,
-  RunArtifactsSummary,
-  ScheduleDisabledReason,
-} from "@appstrate/db/schema";
+import type { RunArtifactsSummary, ScheduleDisabledReason } from "@appstrate/db/schema";
+import type { ModelBinding, ModelCredentialOwner, ModelPayer } from "@appstrate/core/model-payer";
 
 /**
  * Stripe-canonical list envelope for HTTP list responses.
@@ -76,6 +81,32 @@ import type { PricingStatus as _PricingStatus } from "@appstrate/db/pricing-stat
  * DB-convention names (`id`, `packageId`, `createdAt`, `runOrigin`, …) stay
  * camelCase — by their literal name, never by suffix.
  */
+/** A model-call failure as a run carries it on the wire. */
+export interface RunModelError {
+  category: ModelErrorCategory;
+  /** Whether a new attempt, unchanged, might succeed — derived from `category`. */
+  retryable: boolean;
+  /** The provider's HTTP status, when the failure carried one. */
+  status: number | null;
+  /** The provider's own sentence, when its response body carried one. */
+  message: string | null;
+}
+
+/** The one projection of the `model_error_*` columns onto {@link RunModelError}. */
+export function runModelErrorWire(columns: {
+  category: ModelErrorCategory | null;
+  status: number | null;
+  message: string | null;
+}): RunModelError | null {
+  if (!columns.category) return null;
+  return {
+    category: columns.category,
+    retryable: MODEL_ERROR_RETRYABLE_BY_CATEGORY[columns.category],
+    status: columns.status,
+    message: columns.message,
+  };
+}
+
 export interface RunWireDto {
   id: string;
   packageId: string | null;
@@ -99,6 +130,12 @@ export interface RunWireDto {
   artifacts: RunArtifactsSummary | null;
   checkpoint: unknown;
   error: string | null;
+  /**
+   * What a run that failed on a model call failed on, classified once at finalize
+   * ({@link RunModelError}); `null` on every other run, and on a run finalized before the
+   * platform recorded it. Read this, never `error`'s text, to say why.
+   */
+  model_error: RunModelError | null;
   metadata: unknown;
   started_at: string | null;
   completed_at: string | null;
@@ -117,7 +154,7 @@ export interface RunWireDto {
   token_usage: TokenUsage | null;
   version_label: string | null;
   /**
-   * Unambiguous reference to the agent definition the run executed (#636):
+   * Unambiguous reference to the agent definition the run executed:
    * `"draft"` when the mutable draft ran with unpublished changes (or no
    * version was ever published), the concrete semver (e.g. `"2.1.0"`) when
    * the run executed that published definition (or a draft identical to it).
@@ -125,7 +162,7 @@ export interface RunWireDto {
   version_ref: string;
   proxy_label: string | null;
   model_label: string | null;
-  model_source: CredentialSource | null;
+  model_source: ModelPayer | null;
   /** Effective generation controls frozen at kickoff and raw override layer. */
   generation: ModelGenerationSettings | null;
   generation_override: ModelGenerationSettings | null;
@@ -138,7 +175,7 @@ export interface RunWireDto {
   modelCredentialId: string | null;
   connection_overrides: unknown;
   /**
-   * Per-run dependency version overrides (#666) — `{ "@scope/name": "draft" |
+   * Per-run dependency version overrides — `{ "@scope/name": "draft" |
    * "<spec>" }`. Present when the caller opted a dependency out of the
    * published-only resolution; a non-null map (esp. with a `"draft"` value)
    * means the run is NOT reproducible from its `version_ref` alone.
@@ -182,8 +219,8 @@ export type EnrichedRun = RunWireDto & {
   /** In declaration order; null when the run recorded none (no connection resolution ran). */
   integrations_unbound: RunIntegrationUnboundWire[] | null;
   /**
-   * True when the requesting recipient has an unread notification for this run
-   * (issue #667). Per-recipient: derived from the `notifications` table for the
+   * True when the requesting recipient has an unread notification for this run.
+   * Per-recipient: derived from the `notifications` table for the
    * current actor, so a dashboard user and an end-user see independent state.
    * Drives the unread dot on run rows and the per-schedule unread count.
    */
@@ -224,7 +261,7 @@ export interface AppConfigFeatures {
   /** AUTH_DISABLE_SIGNUP — webapp hides "Create account" links and copy. */
   signupDisabled: boolean;
   /**
-   * AUTH_BOOTSTRAP_TOKEN is set and unredeemed (#344 Layer 2b). The webapp
+   * AUTH_BOOTSTRAP_TOKEN is set and unredeemed. The webapp
    * routes the user to `/claim` instead of `/login`, where they paste the
    * token + their owner credentials to seize ownership of a freshly-
    * installed unattended instance. Flips back to false once the token is
@@ -385,8 +422,8 @@ export type { OrgRole };
  */
 export type { SpaceAssignment };
 
-import type { orgSettingsSchema } from "@appstrate/core/permissions";
-export type OrgSettings = z.infer<typeof orgSettingsSchema>;
+import type { orgSettingsReadSchema } from "@appstrate/core/permissions";
+export type OrgSettings = z.output<typeof orgSettingsReadSchema>;
 
 /**
  * Mirrored by an OpenAPI response schema, and reached only by name.
@@ -408,6 +445,16 @@ export interface OrganizationMember {
   joinedAt: string;
   displayName?: string;
   email?: string;
+  /** The spaces this member reaches, among those whose member list the caller may read. */
+  spaces: OrganizationMemberSpace[];
+}
+
+/** One space an org member reaches — the per-member projection of `GET /api/spaces/:id/members`. */
+export interface OrganizationMemberSpace {
+  id: string;
+  name: string;
+  source: SpaceMember["source"];
+  role: SpaceMember["role"];
 }
 
 /** Mirrored by an OpenAPI response schema and reached only by name — see
@@ -419,6 +466,10 @@ export interface OrganizationWithRole {
   id: string;
   name: string;
   slug: string;
+  /** `lucide:<name>`, `emoji:<one emoji>` or a base64 WebP or PNG data URI; `null` when unset. */
+  icon: string | null;
+  /** A palette key (`@appstrate/core/appearance`); `null` = derived from the id. */
+  color: string | null;
   createdAt: string;
   role: OrgRole;
   /** Org-level effective set in this org, ceiling-applied (RBAC spec §6.5). */
@@ -465,21 +516,23 @@ export interface MeConnectionEntry {
   identity: string;
   /** Which auth slot this connection satisfies. */
   auth_key: string;
-  /** Admin/owner sharing toggle (per-org). */
-  shared_with_org: boolean;
+  scope: ConnectionScope;
+  /** Spaces whose members may use it. */
+  shared_spaces: { id: string; name: string }[];
+  share_all_spaces?: boolean;
+  /** Actions the caller may take on this connection. */
+  allowed_actions: ConnectionAction[];
+  /** Spaces the caller may share this connection into. */
+  shareable_spaces: { id: string; name: string }[];
   /** What binds it for the whole space; while set, unshare and delete answer 409. */
   locked_by: "admin_pin" | "org_default" | null;
-  /**
-   * Number of agents this connection's space RUNS — placed here and switched
-   * on, or on by the deployment's default — that declare this integration in
-   * their dependencies. Used by the UI to surface "reused by N agents" so
-   * members understand that the connection is shared across the org's agents
-   * rather than per-agent.
-   */
+  /** Distinct agents declaring this integration, run where it serves: owner's spaces and shares. */
   reused_by_agents: number;
-  /** Where this connection lives (the connection is keyed per-space). */
   org: { id: string; name: string };
-  space: { id: string; name: string };
+  /** The one space a space-scoped connection lives in; `null` for an org-scoped one. */
+  space: { id: string; name: string } | null;
+  /** Where an org-scoped connection was connected from; `null` when unknown or space-scoped. */
+  origin_space: { id: string; name: string } | null;
 }
 
 export interface MeConnectionSourceGroup {
@@ -512,6 +565,10 @@ export interface BasePackageListItem {
 }
 
 export interface AgentListItem extends BasePackageListItem {
+  /** AFPS manifest `icon`, read as written (the client parses it); `null` when absent. */
+  icon: string | null;
+  /** Palette key from `_meta["dev.appstrate/ui"].color`; `null` = derived from the id. */
+  color: string | null;
   display_name?: string;
   schema_version?: string;
   author?: string;
@@ -531,6 +588,10 @@ export interface AgentListItem extends BasePackageListItem {
 
 export interface AgentDetail {
   id: string;
+  /** AFPS manifest `icon`, read as written (the client parses it); `null` when absent. */
+  icon: string | null;
+  /** Palette key from `_meta["dev.appstrate/ui"].color`; `null` = derived from the id. */
+  color: string | null;
   /** Manifest-derived; may be absent (the SPA falls back to the id). */
   display_name?: string;
   description?: string;
@@ -731,6 +792,18 @@ export interface OrgPackageItem extends BasePackageListItem {
    * package asks for no `share`. Always emitted.
    */
   home_shareable: boolean;
+}
+
+/**
+ * A row of the integration INDEX (`GET /api/packages/integrations`): the
+ * common row plus the two facts of the manifest's `source` the page splits and
+ * labels its list by, so it draws itself without the manifest.
+ */
+export interface IntegrationIndexItem extends OrgPackageItem {
+  /** The manifest's `source.kind`: a sandboxed server, a hosted MCP, or no MCP backing. */
+  source_kind: "local" | "remote" | "none";
+  /** `source.server` of a `local` integration — the package it runs and its range. `null` otherwise. */
+  server: { name: string; version: string } | null;
 }
 
 // The detail endpoint does not emit the list-only `used_by_agents`, so it is
@@ -979,8 +1052,27 @@ export interface OrgModelInfo extends ModelMetadata {
    */
   iconUrl: string | null;
   source: "built-in" | "custom";
-  /** `null` for model aliases — see {@link apiShape}. */
+  /**
+   * The credential serving the model: the organization credential when
+   * {@link binding} is `org`, the platform's key when it is `system`; `null`
+   * when it is `user` or `managed`.
+   */
   credentialId: string | null;
+  /**
+   * Whose credential serves the model: `system` — a built-in model, served by
+   * the platform's key; `org` — bound to an organization credential; `user` —
+   * unbound, each member serves it with their own credential for
+   * {@link providerId}; `managed` — an alias, whose binding is not exposed.
+   */
+  binding: ModelBinding;
+  /**
+   * Who pays for a call to this model, as seen by the caller: `system` for a
+   * built-in model, `org` when an organization credential serves it, `user` when
+   * the caller's own personal credential serves it, `null` when they have neither
+   * (the spend is refused with `model_credential_required`). Never `user` for a
+   * model alias.
+   */
+  billed_to: ModelPayer | null;
   created_by: string | null;
   createdAt: string;
   updatedAt: string;
@@ -998,7 +1090,7 @@ export interface ModelProviderCredentialInfo {
   label: string;
   /**
    * Protocol family + endpoint. Both `null` for a **built-in** credential
-   * whose every backing model is a model alias (issue #727): exposing the
+   * whose every backing model is a model alias: exposing the
    * endpoint host (e.g. `api.anthropic.com`) would reveal the hidden backing
    * provider to an org admin who can read credentials but did not configure
    * the env key. Custom credentials always carry them (the admin configured
@@ -1015,10 +1107,35 @@ export interface ModelProviderCredentialInfo {
   oauth_email?: string | null;
   /** True when the credential is dead (an OAuth `invalid_grant`, or undecryptable). */
   needs_reconnection?: boolean;
+  /** `user` for a personal credential (usable and editable by {@link owner_id} only); `org` for an organization or built-in one. */
+  owner_type: ModelCredentialOwner;
+  /** The owning member's user id for a personal credential; `null` for `org`. */
+  owner_id: string | null;
+  /** Display name of {@link owner_id}; `null` for `org`. */
+  owner_name: string | null;
+  /**
+   * The actions the caller may take on this credential. Built-in: `test` to an org-credentials reader.
+   * Organization: `edit` / `delete` / `test` to holders of the org write / delete / read permission.
+   * Personal: `edit` to its owner (connect or org write), `delete` to its owner (connect) or an org
+   * delete holder; while the org allows personal model credentials, `test` to its owner (connect or
+   * org read). OAuth: `reconnect` to whoever may `edit` it, a personal one only while the org allows
+   * personal model credentials.
+   */
+  allowed_actions: ModelProviderCredentialAction[];
+  /** Whether an organization model may be bound to this credential: `true` for an organization one (API key or subscription), `false` for a personal or a built-in one. */
+  bindable: boolean;
+  /**
+   * On a personal credential, the organization models left to members' own credentials that it
+   * pays for (`servesModel`: the same service, or a subscription offering the model on its
+   * API); `[]` on an organization or built-in one, whose models name it as their credential.
+   */
+  serves_model_ids: string[];
   created_by: string | null;
   createdAt: string;
   updatedAt: string;
 }
+
+export type ModelProviderCredentialAction = "edit" | "delete" | "test" | "reconnect";
 
 /**
  * Wire shape of `GET /api/model-provider-credentials/registry` — surfaces the
@@ -1038,6 +1155,8 @@ export interface ProviderRegistryEntry {
   defaultBaseUrl: string;
   baseUrlOverridable: boolean;
   authMode: "api_key" | "oauth2";
+  /** Whether members may bring their own credential for this provider (`false` when the endpoint is the organization's to choose). */
+  personal_allowed: boolean;
   /** Surface in the picker's "Featured" group. Module-supplied metadata. */
   featured: boolean;
   /** Models are searched live on the provider and any id is accepted, not only `models`. */
@@ -1117,6 +1236,10 @@ export interface ApiKeyInfo {
 export interface SpaceInfo {
   id: string;
   name: string;
+  /** `lucide:<name>` or `emoji:<one emoji>`; `null` when unset. */
+  icon: string | null;
+  /** A palette key (`@appstrate/core/appearance`); `null` = derived from the id. */
+  color: string | null;
   isDefault: boolean;
   settings: { allowedRedirectDomains?: string[] };
   /** Who reaches the space without an explicit membership row (RBAC spec §3.1). */

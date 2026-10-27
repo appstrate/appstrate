@@ -21,7 +21,7 @@ import { eq, sql } from "drizzle-orm";
 import { getAuth, _authHookSlotsForTesting } from "@appstrate/db/auth";
 import { db } from "./db.ts";
 import { captureMails, firstLink } from "./smtp.ts";
-import { seedSpaceMember } from "./seed.ts";
+import { seedSpaceMember, seedSpaceRole } from "./seed.ts";
 import { prefixedId, SPACE_ID_RE } from "@appstrate/db/ids";
 import {
   organizations,
@@ -262,6 +262,19 @@ export async function memberContext(
     user: { id: member.id, email: member.email, name: member.name },
     cookie: member.cookie,
   };
+}
+
+/** A member of `ctx`'s org whose custom role in its default space holds exactly `permissions`. */
+export async function memberHolding(ctx: TestContext, permissions: string[]): Promise<TestContext> {
+  const member = await memberContext(ctx, "member");
+  const role = await seedSpaceRole({ orgId: ctx.orgId, permissions });
+  await seedSpaceMember({
+    spaceId: ctx.defaultSpaceId,
+    userId: member.user.id,
+    presetRole: null,
+    customRoleId: role.id,
+  });
+  return member;
 }
 
 /**

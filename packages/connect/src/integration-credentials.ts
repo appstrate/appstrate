@@ -7,6 +7,7 @@
  * spawn/credentials resolvers and the sidecar's MITM listener.
  */
 
+import { jsonTextMap } from "@appstrate/afps-shared/json-text";
 import type { ProxyCredentialsPayload } from "./proxy-primitives.ts";
 
 // `HttpDeliveryPlan` lives once in @appstrate/afps-runtime (the dependency-free
@@ -50,19 +51,12 @@ export interface IntegrationCredentialsPayload {
 }
 
 /**
- * Project an already-decrypted credentials object to a flat
- * `Record<string, string>`, dropping non-string (incl. `undefined`)
- * values. Shared by the credential-envelope decryptors (`./credential-decrypt.ts`)
- * and the provider-side credential resolvers so the projection rule lives once.
- * Stays here (no crypto dependency) so the sidecar can import this module
- * without pulling in the encryption keyring.
+ * A credential bag as the flat `Record<string, string>` templates substitute
+ * (`{$credential.<field>}`) and login tools read: `jsonTextMap`, so a non-string credential
+ * (JSON Schema 2020-12, AFPS §7.5) is its JSON text and a `null` one is absent.
  */
-export function projectToStringMap(raw: Record<string, unknown>): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(raw)) {
-    if (typeof v === "string") out[k] = v;
-  }
-  return out;
+export function toCredentialStringMap(raw: Record<string, unknown>): Record<string, string> {
+  return jsonTextMap(raw);
 }
 
 /**

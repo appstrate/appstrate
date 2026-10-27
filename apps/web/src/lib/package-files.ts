@@ -5,35 +5,13 @@ import { PACKAGE_CONTENT_FILE, PACKAGE_MANIFEST_FILE } from "@appstrate/core/pac
 import type { PackageType } from "@appstrate/core/validation";
 import { ApiError } from "../api/errors";
 
-/**
- * A file surfaced in the package UI: the editor's content tab label, the diff
- * sub-tab, and the file the explorer pre-selects for a package type.
- */
 interface DisplayFile {
-  /** File name, shown verbatim as a tab label (filenames are not translated). */
   name: string;
-  /**
-   * Where the displayed bytes come from:
-   * - `"content"`: the package's stored content file (e.g. prompt.md, SKILL.md)
-   * - `"manifest"`: serialized from the manifest object — the type has no
-   *   separate content file, the manifest IS the displayed payload.
-   */
+  /** `"content"`: the stored content file (prompt.md, SKILL.md); `"manifest"`: serialized from the manifest. */
   source: "manifest" | "content";
 }
 
-/**
- * Primary file of a package type — the editor's content tab, and the entry the
- * file explorer opens on when the artifact carries it.
- *
- * Derived from `PACKAGE_CONTENT_FILE` rather than restated: which file a type's
- * content lives in is one AFPS fact, and it is the fact the ZIP parser and the
- * draft overlay already read from that map. A local copy here is how the four
- * declarations that preceded it drifted apart.
- *
- * Most types follow the shape `manifest + one content file`. `mcp-server`
- * breaks it: it has no content file at all — `manifest.json` IS its only
- * required file (AFPS §3.4) — which the map records as `null`.
- */
+/** Primary file of a package type, from `PACKAGE_CONTENT_FILE` (shared with the ZIP parser). `mcp-server` has none: `manifest.json` IS its only file (AFPS §3.4). */
 export function primaryDisplayFile(type: PackageType): DisplayFile {
   const content = PACKAGE_CONTENT_FILE[type];
   return content === null
@@ -41,11 +19,6 @@ export function primaryDisplayFile(type: PackageType): DisplayFile {
     : { name: content, source: "content" };
 }
 
-/**
- * The content-sourced file diffed alongside the manifest, if the type has one.
- * `undefined` for types whose only file is the manifest (e.g. mcp-server) —
- * there is nothing to diff beside it.
- */
 export function companionDisplayFile(type: PackageType): DisplayFile | undefined {
   const primary = primaryDisplayFile(type);
   return primary.source === "content" ? primary : undefined;
@@ -59,21 +32,13 @@ export const PACKAGE_PATH_ERROR_KEYS = {
 } as const;
 
 /**
- * The message an author reads when a draft-tree write is refused, keyed by the
- * route's machine-readable `code` rather than by its status or its English
- * `detail` — or `null` for a failure this surface does not own.
+ * The message key for a refused draft-tree write, keyed by the route's `code`, or
+ * `null` for a failure this surface does not own. `null` is load-bearing: the same
+ * save sends the files AND the manifest and the banner asks both translators, so a
+ * blanket message would swallow the manifest's specific ones.
  *
- * `null` is the load-bearing half: the same save button sends the file batch
- * AND the manifest, so the editor's error banner asks both translators. A
- * blanket "saving the files failed" here would swallow the manifest's own
- * messages, which are the specific ones.
- *
- * Only the refusals the editor can actually provoke are named. The two it
- * cannot — `content_entry_immovable` and `not_found` — are deliberately absent:
- * the tree offers no rename or delete on a pinned entry, and every path it
- * sends comes from the index it is showing, so either one means the client's
- * picture of the package is wrong in a way no specific sentence would help
- * with.
+ * `content_entry_immovable` and `not_found` are deliberately absent: the tree
+ * cannot provoke them, so they mean the client's picture is wrong.
  */
 export function packageFilesErrorKey(error: unknown): string | null {
   if (!(error instanceof ApiError) && !(error instanceof PackageFileWriteError)) return null;
@@ -86,11 +51,8 @@ export function packageFilesErrorKey(error: unknown): string | null {
     case "reserved_entry":
     case "path_conflict":
       return PACKAGE_PATH_ERROR_KEYS[error.code];
-    // `payload_too_large` is the GLOBAL body-limit middleware, which answers
-    // before the route runs: several near-1 MiB files in one import inflate
-    // ~1.37x as base64 and cross `API_BODY_LIMIT_BYTES` while every individual
-    // file is under the per-file ceiling. The author's fix is the same one —
-    // send fewer or smaller files — so it is the same sentence.
+    // `payload_too_large` is the global body-limit middleware: near-1 MiB files
+    // inflate ~1.37x as base64 and cross `API_BODY_LIMIT_BYTES` under the per-file ceiling.
     case "file_too_large":
     case "tree_too_large":
     case "payload_too_large":

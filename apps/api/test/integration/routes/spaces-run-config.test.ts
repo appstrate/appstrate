@@ -10,7 +10,7 @@ import { eq, and } from "drizzle-orm";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll, db } from "../../helpers/db.ts";
 import { createTestContext, authHeaders, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage, seedPackageShare, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { spacePackages } from "@appstrate/db/schema";
 
 const app = getTestApp();
@@ -42,6 +42,7 @@ describe("GET /api/spaces/:spaceId/packages/:scope/:name/run-config", () => {
     await seedPackageVersion({ packageId: "@testorg/agent", version: "1.2.3" });
 
     await db.insert(spacePackages).values({
+      enabled: true,
       spaceId: ctx.defaultSpaceId,
       packageId: "@testorg/agent",
       modelId: "claude-sonnet",
@@ -80,6 +81,7 @@ describe("GET /api/spaces/:spaceId/packages/:scope/:name/run-config", () => {
       draftManifest: { name: "@testorg/agent", version: "1.0.0", type: "agent" },
     });
     await db.insert(spacePackages).values({
+      enabled: true,
       spaceId: ctx.defaultSpaceId,
       packageId: "@testorg/agent",
       inputSettings: { values: { folder: "archive" }, locked: ["folder"] },
@@ -118,6 +120,7 @@ describe("GET /api/spaces/:spaceId/packages/:scope/:name/run-config", () => {
       homeSpaceId: ctx.defaultSpaceId,
     });
     await db.insert(spacePackages).values({
+      enabled: true,
       spaceId: ctx.defaultSpaceId,
       packageId: "@testorg/agent",
     });
@@ -156,6 +159,7 @@ describe("GET /api/spaces/:spaceId/packages/:scope/:name/run-config", () => {
       homeSpaceId: ctx.defaultSpaceId,
     });
     await db.insert(spacePackages).values({
+      enabled: true,
       spaceId: ctx.defaultSpaceId,
       packageId: "@testorg/agent",
       modelId: "model-of-default-space",
@@ -171,8 +175,8 @@ describe("GET /api/spaces/:spaceId/packages/:scope/:name/run-config", () => {
     const otherSpaceId = ((await otherSpaceRes.json()) as { id: string }).id;
     // The offer is what places the package in the OTHER space — its home is
     // the default one, and a row without a placement behind it is nothing.
-    await seedPackageShare(otherSpaceId, "@testorg/agent");
     await db.insert(spacePackages).values({
+      enabled: true,
       spaceId: otherSpaceId,
       packageId: "@testorg/agent",
       modelId: "model-of-other-space",

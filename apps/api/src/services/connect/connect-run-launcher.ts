@@ -39,6 +39,7 @@
 
 import { createDecipheriv, randomBytes } from "node:crypto";
 
+import { toCredentialStringMap } from "@appstrate/connect/integration-credentials";
 import { ApiError } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { signRunToken } from "../../lib/run-token.ts";
@@ -85,8 +86,8 @@ const MAX_DIAGNOSTIC_CHARS = 300;
 /**
  * Extract the caller-safe login diagnostic from a raw `APPSTRATE_CONNECT_ERROR:`
  * message, or `null` when the message is a sidecar-internal fault (which the
- * caller must never see). Returns a sentence — the tool's own text when it
- * carried one, a neutral fallback when it did not.
+ * caller must never see). Returns the tool's own text as a sentence, or `""`
+ * when it carried none.
  *
  * The discriminator is `CONNECT_LOGIN_TOOL_ERROR_PREFIX`, which the sidecar's
  * connect-login primitive puts on a failure the LOGIN TOOL ITSELF reported — the
@@ -103,29 +104,12 @@ const MAX_DIAGNOSTIC_CHARS = 300;
 function loginToolDiagnostic(msg: string): string | null {
   if (!msg.startsWith(CONNECT_LOGIN_TOOL_ERROR_PREFIX)) return null;
   const detail = msg.slice(CONNECT_LOGIN_TOOL_ERROR_PREFIX.length).replace(/^:\s*/, "").trim();
-  if (!detail) return "the integration rejected the submitted credentials.";
+  if (!detail) return "";
   // The text is authored by the integration package — clip it so a runaway
   // upstream body can't be pasted wholesale into an API response.
   const clipped =
     detail.length > MAX_DIAGNOSTIC_CHARS ? `${detail.slice(0, MAX_DIAGNOSTIC_CHARS)}…` : detail;
   return /[.!?…]$/.test(clipped) ? clipped : `${clipped}.`;
-}
-
-/**
- * Coerce a credential bag's values to strings. The sidecar's MITM substitutes
- * `{{name}}` placeholders only on strings (a URL or header value template
- * has no notion of "substitute a number"), so non-string credential values
- * are JSON-stringified at this boundary. The route layer's
- * `importConnectionSchema` accepts JSON-typed credentials per JSON Schema
- * 2020-12 §7.5; this is where they get serialized for the wire-level
- * substitution contract.
- */
-function stringifyInputs(inputs: Record<string, unknown>): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(inputs)) {
-    out[k] = typeof v === "string" ? v : JSON.stringify(v);
-  }
-  return out;
 }
 
 /** How long to wait for the connect-run sidecar to mint the session before killing it. */
@@ -162,8 +146,8 @@ interface ConnectRunExecutorOptions {
  * It returns the CONCRETE published version alongside the manifest because
  * the sidecar's byte route (`GET /internal/mcp-server-bundle/:scope/:name`)
  * requires it: past the system-package short-circuit an absent `?version=` is
- * rejected outright (#588 — serving "latest" is exactly the manifest/bytes
- * skew that guard closed). `version: null` is the system-mcp-server case, the
+ * rejected outright (serving "latest" would skew the manifest from the
+ * bytes). `version: null` is the system-mcp-server case, the
  * one population the byte route serves by id alone.
  *
  * `pin` is the manifest's `source.server.version` RANGE (e.g. `^1.0.0`), not
@@ -285,7 +269,7 @@ export async function buildConnectLoginSpec(
         type: run.type,
         entry_point: run.entry_point,
         packageId: ref.name,
-        // #588 — the CONCRETE version the resolver picked, forwarded to the
+        // The CONCRETE version the resolver picked, forwarded to the
         // byte route as `?version=` so the bytes match the manifest read
         // above. Absent only for a system mcp-server (served from the boot
         // registry by id alone), which is the one case the route allows.
@@ -316,9 +300,10 @@ export async function buildConnectLoginSpec(
       authorizedUris: [...authorizedUris],
       deliveryHttp,
       variables: {},
-      // The sidecar's MITM substitutes `{{name}}` placeholders only on strings —
-      // JSON-stringify non-string credential values so they round-trip cleanly.
-      inputs: stringifyInputs(execution.inputs),
+      // Same projection as the run-start re-bootstrap reads back from storage
+      // (`decryptCredentialInputsToStringMap`), so a login input is never
+      // delivered on the first login and lost on the next.
+      inputs: toCredentialStringMap(execution.inputs),
       ...(reauthOn ? { reauthOn: [...reauthOn] } : {}),
     },
     // The login runner's MITM enforces the same allowlist as an agent run's.
@@ -407,7 +392,10 @@ export function parseConnectResult(
         // their input, not a server fault. Surface the tool's diagnostic so the
         // connect form can say "wrong password" / "MFA required" instead of
         // "An internal error occurred", and name the remedy.
-        throw loginRejected(diagnostic);
+        // The tool's own text, if any, rides `integration_diagnostic` for a client to show as is.
+        throw diagnostic
+          ? loginRejected(diagnostic, { kind: "integration", diagnostic })
+          : loginRejected("The integration rejected the submitted credentials.");
       }
       // Anything else on this channel is a sidecar-internal fault: stay a plain
       // Error so the routes map it to a generic 500 (the raw text is logged

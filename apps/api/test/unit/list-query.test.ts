@@ -10,6 +10,15 @@ import {
 } from "../../src/lib/list-query.ts";
 
 /** Minimal Context stub exposing only `req.query(name)`. */
+function catchError(run: () => unknown): unknown {
+  try {
+    run();
+  } catch (err) {
+    return err;
+  }
+  return undefined;
+}
+
 function fakeCtx(query: Record<string, string | undefined>): Context {
   return { req: { query: (name: string) => query[name] } } as unknown as Context;
 }
@@ -105,12 +114,31 @@ describe("parseListPagination", () => {
     });
   });
 
-  it("falls back to the default for an out-of-range or garbage limit", () => {
-    expect(parseListPagination(fakeCtx({ limit: "9999" }), { defaultLimit: 50 }).limit).toBe(50);
-    expect(parseListPagination(fakeCtx({ limit: "abc" }), { defaultLimit: 50 }).limit).toBe(50);
+  it("refuses a limit that is not an integer from 1 to the maximum with a 400 naming `limit`", () => {
+    for (const [limit, opts] of [
+      ["101", { defaultLimit: 50 }],
+      ["9999", { defaultLimit: 50 }],
+      ["51", { defaultLimit: 10, maxLimit: 50 }],
+      ["0", { defaultLimit: 50 }],
+      ["-3", { defaultLimit: 50 }],
+      ["1.5", { defaultLimit: 50 }],
+      ["abc", { defaultLimit: 50 }],
+      ["", { defaultLimit: 50 }],
+    ] as const) {
+      const err = catchError(() => parseListPagination(fakeCtx({ limit }), opts));
+      expect(err).toMatchObject({ status: 400, code: "invalid_request", param: "limit" });
+    }
+    expect(parseListPagination(fakeCtx({ limit: "100" }), { defaultLimit: 50 }).limit).toBe(100);
   });
 
-  it("clamps a negative offset back to 0", () => {
-    expect(parseListPagination(fakeCtx({ offset: "-5" }), { defaultLimit: 50 }).offset).toBe(0);
+  it("refuses an offset that is not a non-negative integer with a 400 naming `offset`", () => {
+    for (const offset of ["-5", "1.5", "abc", ""]) {
+      const err = catchError(() => parseListPagination(fakeCtx({ offset }), { defaultLimit: 50 }));
+      expect(err).toMatchObject({ status: 400, code: "invalid_request", param: "offset" });
+    }
+  });
+
+  it("does not hold an absent limit to the maximum", () => {
+    expect(parseListPagination(fakeCtx({}), { defaultLimit: 200, maxLimit: 100 }).limit).toBe(200);
   });
 });

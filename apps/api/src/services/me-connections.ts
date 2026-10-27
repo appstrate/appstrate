@@ -6,21 +6,21 @@
  * Returns integration connections in a single shape, grouped by their
  * "source" (the package they connect to).
  *
- * Scope depends on the caller's AUTHORITY, not just their identity:
- *   - A `user` principal crosses orgs and spaces — the connection list
+ * Scope depends on the caller's principal, not just their identity:
+ *   - A `person` principal crosses orgs and spaces — the connection list
  *     belongs to the person, not to any single org context.
- *   - Every other kind authenticates as its issuer but is bound; its listing
- *     is hard-scoped to that binding at the SQL level so a leaked credential
- *     can never enumerate the issuer's connections elsewhere
- *     ({@link MeConnectionAuthority}).
+ *   - A `delegated` principal authenticates as its issuer but is bound; its
+ *     listing is hard-scoped to that binding at the SQL level so a leaked
+ *     credential can never enumerate the issuer's connections elsewhere
+ *     ({@link ConnectionPrincipal}).
  */
 
 import { db } from "@appstrate/db/client";
-import { and, eq, inArray, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import { and, eq, inArray, sql, type SQL } from "drizzle-orm";
 import {
   spacePackages,
-  packageShares,
   integrationConnections,
+  integrationPins,
   organizationMembers,
   organizations,
   packages,
@@ -28,6 +28,8 @@ import {
   spaces,
 } from "@appstrate/db/schema";
 import { actorFilter, type Actor } from "../lib/actor.ts";
+import { displayAccountId } from "../lib/connection-identity.ts";
+import type { ConnectionPrincipal } from "../lib/connection-principal.ts";
 import type { MeConnectionEntry, MeConnectionSourceGroup } from "@appstrate/shared-types";
 import { asRecord } from "@appstrate/core/safe-json";
 import { toISORequired } from "../lib/date-helpers.ts";
@@ -37,41 +39,40 @@ import {
   orgOrSystemFilter,
 } from "../lib/package-helpers.ts";
 import { activeHereSql } from "./package-activation.ts";
-import { placementRowJoin, placementShareJoin } from "./package-placement.ts";
-import { connectionLocks, planConnectionForget } from "./integration-connections.ts";
+import { placementRowJoin } from "./package-placement.ts";
+import {
+  connectionLocks,
+  connectionReach,
+  connectionViewOf,
+  loadConnectionShares,
+  planConnectionForget,
+} from "./integration-connections.ts";
+import { pinLayer, schedulesLeftUnnamedWithout } from "./schedules-named-by-layer.ts";
+import {
+  connectionActions,
+  meConnectionAuthorityFilter,
+  ownUsableInSpace,
+  type ConnectionCaller,
+} from "./connection-reach.ts";
+import { shareableSpaces } from "./connection-shares.ts";
+import { listSpacesForPrincipal } from "./spaces.ts";
+import { spacePermissions } from "../lib/space-role.ts";
+import type { OrgRole } from "@appstrate/core/permissions";
 
-/**
- * The authority boundary of the credential presented on `/api/me/connections`.
- *
- * REQUIRED on every read/delete path of this module so the scoping decision
- * is made explicitly at the callsite and lands in the SQL `WHERE` — a caller
- * cannot "forget" to scope an API key.
- *
- *   - `user_global`: a `user` principal (cookie session, CLI or instance
- *     token, chat loopback). Cross-org, cross-space by design — that is the
- *     dashboard connections-management feature.
- *   - `bound`: any other kind — an API key (org + space), a third-party OAuth
- *     client (org only), an end-user token (org + space). Its blast radius is
- *     its binding, and that binding lands in the WHERE clause. On `main` an
- *     end-user token took the global view.
- */
-export type MeConnectionAuthority =
-  { kind: "user_global" } | { kind: "bound"; orgId: string; spaceId?: string };
-
-/**
- * A `bound` authority's org (and space, when it pins one) as a WHERE conjunct — in the SQL, so a
- * bound credential can only ever SELECT rows inside its binding. Nothing for `user_global`.
- */
-function authorityFilter(
-  authority: MeConnectionAuthority,
-  orgId: AnyColumn,
-  spaceId: AnyColumn,
-): SQL | undefined {
-  if (authority.kind !== "bound") return undefined;
+/** The same binding over `schedules`, which carry both columns. */
+function scheduleAuthorityFilter(principal: ConnectionPrincipal): SQL | undefined {
+  if (principal.kind !== "delegated") return undefined;
   return and(
-    eq(orgId, authority.orgId),
-    authority.spaceId ? eq(spaceId, authority.spaceId) : undefined,
+    eq(schedules.orgId, principal.orgId),
+    principal.spaceId ? eq(schedules.spaceId, principal.spaceId) : undefined,
   );
+}
+
+/** Its space over member pins — a pin of the connection is in the connection's org already. */
+function pinAuthorityFilter(principal: ConnectionPrincipal): SQL | undefined {
+  return principal.kind === "delegated" && principal.spaceId
+    ? eq(integrationPins.spaceId, principal.spaceId)
+    : undefined;
 }
 
 /**
@@ -86,40 +87,70 @@ const declaredIntegrationIds = sql<string[]>`ARRAY(
 )`;
 
 /**
- * Fetch every integration_connections row owned by the actor, joined with
- * its space + integration package. Cross-space, cross-org for a
- * `user_global` authority; confined to the authority's org — and to its space
- * when it pins one — for a `bound` caller.
+ * For each of the user's rows, the spaces they run agents in (`agents:run`) where the row is
+ * {@link ownUsableInSpace}: one listing per org, one query per space, never one per connection.
  */
-async function listAllActorIntegrationConnections(
+async function spacesServedToOwner(
   actor: Actor,
-  authority: MeConnectionAuthority,
+  orgRoles: ReadonlyMap<string, OrgRole>,
+): Promise<{ byConnection: Map<string, string[]>; orgOfSpace: Map<string, string> }> {
+  const byConnection = new Map<string, string[]>();
+  const orgOfSpace = new Map<string, string>();
+  if (actor.type !== "user") return { byConnection, orgOfSpace };
+  const listed = await Promise.all(
+    [...orgRoles].map(([orgId, role]) => listSpacesForPrincipal(orgId, role, actor.id, actor.id)),
+  );
+  const runnable = listed
+    .flat()
+    .filter(({ role }) => spacePermissions(role).has("agents:run"))
+    .map(({ space }) => space);
+  await Promise.all(
+    runnable.map(async (space) => {
+      const usable = await db
+        .select({ id: integrationConnections.id })
+        .from(integrationConnections)
+        .where(ownUsableInSpace(space.id, actor));
+      if (usable.length > 0) orgOfSpace.set(space.id, space.orgId);
+      for (const { id } of usable) {
+        byConnection.set(id, [...(byConnection.get(id) ?? []), space.id]);
+      }
+    }),
+  );
+  return { byConnection, orgOfSpace };
+}
+
+/**
+ * Every connection the caller owns, within its credential's binding, grouped by integration; the
+ * connections of a group keep the order of the query. The route derives the principal from the
+ * credential, so a delegated credential is scoped to its own binding while a `person` principal
+ * keeps the cross-org dashboard view. Groups sorted by display name.
+ */
+export async function listMeConnections(
+  caller: ConnectionCaller,
 ): Promise<MeConnectionSourceGroup[]> {
+  const principal = caller.principal;
+  const actor = principal.actor;
   const rows = await db
     .select({
       connectionId: integrationConnections.id,
       packageId: integrationConnections.integrationId,
       authKey: integrationConnections.authKey,
       accountId: integrationConnections.accountId,
+      orgId: integrationConnections.orgId,
+      userId: integrationConnections.userId,
+      endUserId: integrationConnections.endUserId,
       spaceId: integrationConnections.spaceId,
-      spaceName: spaces.name,
-      orgId: spaces.orgId,
+      originSpaceId: integrationConnections.originSpaceId,
+      shareAllSpaces: integrationConnections.shareAllSpaces,
       scopesGranted: integrationConnections.scopesGranted,
       needsReconnection: integrationConnections.needsReconnection,
       expiresAt: integrationConnections.expiresAt,
       label: integrationConnections.label,
-      sharedWithOrg: integrationConnections.sharedWithOrg,
       identityClaims: integrationConnections.identityClaims,
       createdAt: integrationConnections.createdAt,
     })
     .from(integrationConnections)
-    .innerJoin(spaces, eq(integrationConnections.spaceId, spaces.id))
-    .where(
-      and(
-        actorFilter(actor, integrationConnections),
-        authorityFilter(authority, spaces.orgId, integrationConnections.spaceId),
-      ),
-    );
+    .where(and(actorFilter(actor, integrationConnections), meConnectionAuthorityFilter(principal)));
 
   if (rows.length === 0) return [];
 
@@ -134,16 +165,55 @@ async function listAllActorIntegrationConnections(
   // For dashboard users, additionally filter to orgs they're still a member of.
   // (An integration connection survives the user leaving the org via on-delete cascade,
   // but if no cascade fired we still don't want stale rows.)
+  const orgRoles = new Map<string, OrgRole>();
   if (actor.type === "user") {
     const memberOrgs = await db
-      .select({ orgId: organizationMembers.orgId })
+      .select({ orgId: organizationMembers.orgId, role: organizationMembers.role })
       .from(organizationMembers)
       .where(eq(organizationMembers.userId, actor.id));
-    const memberSet = new Set(memberOrgs.map((m) => m.orgId));
+    const memberRoles = new Map(memberOrgs.map((m) => [m.orgId, m.role]));
     for (const id of uniqueOrgIds) {
-      if (!memberSet.has(id)) orgNameMap.delete(id);
+      const role = memberRoles.get(id);
+      if (role) orgRoles.set(id, role);
+      else orgNameMap.delete(id);
     }
   }
+
+  const shares = await loadConnectionShares(
+    db,
+    rows.map((r) => r.connectionId),
+  );
+  const reaches = new Map(
+    rows.map((r) => [
+      r.connectionId,
+      connectionReach(r, connectionViewOf(principal, r, null, shares.get(r.connectionId) ?? [])),
+    ]),
+  );
+  // The shares each row's caller sees (all of them, or its bound space's).
+  const sharesOf = (connectionId: string) => reaches.get(connectionId)!.shared_space_ids ?? [];
+  // The spaces each row reaches by name: its home (its space, else its origin) and its shares.
+  const reachedSpaces = (r: (typeof rows)[number]) => {
+    const home = r.spaceId ?? reaches.get(r.connectionId)!.origin_space_id ?? null;
+    return [...new Set([...(home ? [home] : []), ...sharesOf(r.connectionId)])];
+  };
+  const shareable = await shareableSpaces(
+    caller,
+    rows.map((r) => ({ ...r, id: r.connectionId })),
+    orgRoles,
+  );
+  const uniqueSpaceIds = [...new Set(rows.flatMap(reachedSpaces))];
+  const spaceRows =
+    uniqueSpaceIds.length === 0
+      ? []
+      : await db
+          .select({ id: spaces.id, name: spaces.name, orgId: spaces.orgId })
+          .from(spaces)
+          .where(inArray(spaces.id, uniqueSpaceIds));
+  const spaceById = new Map(spaceRows.map((sp) => [sp.id, sp]));
+  const spaceRef = (id: string | null) => {
+    const sp = id ? spaceById.get(id) : undefined;
+    return sp ? { id: sp.id, name: sp.name } : null;
+  };
 
   // Resolve integration display names + icons
   const uniquePackageIds = [...new Set(rows.map((r) => r.packageId))];
@@ -161,48 +231,71 @@ async function listAllActorIntegrationConnections(
     });
   }
 
+  // Where a row serves agents: for the owner, every space they run in that it is usable in; for a
+  // delegated credential, its home and shares within the binding. Share targets count either way.
+  const served =
+    principal.kind === "person"
+      ? await spacesServedToOwner(actor, orgRoles)
+      : { byConnection: new Map<string, string[]>(), orgOfSpace: new Map<string, string>() };
+  const servingSpaces = (r: (typeof rows)[number]) =>
+    principal.kind === "person"
+      ? [
+          ...new Set([
+            ...(served.byConnection.get(r.connectionId) ?? []),
+            ...sharesOf(r.connectionId),
+          ]),
+        ]
+      : reachedSpaces(r);
+  const orgOfSpace = new Map([
+    ...spaceRows.map((sp) => [sp.id, sp.orgId] as const),
+    ...served.orgOfSpace,
+  ]);
+  const countedSpaces = [...new Set(rows.flatMap(servingSpaces))].flatMap((id) => {
+    const orgId = orgOfSpace.get(id);
+    return orgId ? [{ id, orgId }] : [];
+  });
+
   // Count the agents each space RUNS that declare this integration in their
   // dependencies — "reused by N agents" is a statement about runs, so the
   // question is the ONE activation rule ({@link activeHereSql}) and not the
-  // presence of a `space_packages` row: a deactivated agent, and an ORPHAN row
-  // naming a package the space has lost, execute nowhere and reuse nothing.
+  // presence of a `space_packages` row: a deactivated agent executes nowhere
+  // and reuses nothing.
   //
-  // That rule is per-space, so this is ONE query per space the caller holds a
-  // connection in (never per connection, never per integration), written in
+  // That rule is per-space, so this is ONE query per space a row serves
+  // (never per connection, never per integration), written in
   // the query builder so the predicate is CONJOINED rather than hand-copied
-  // into SQL — a hand copy is the drift this rule exists to remove.
-  const spaceOrg = new Map(rows.map((r) => [r.spaceId, r.orgId]));
-  const wantedPackageIds = new Set(uniquePackageIds);
-  const reuseCount = new Map<string, number>();
-  if (wantedPackageIds.size > 0) {
-    const perSpace = await Promise.all(
-      [...spaceOrg].map(async ([spaceId, orgId]) => {
-        const agents = await db
-          .select({ integrationIds: declaredIntegrationIds })
-          .from(packages)
-          .leftJoin(spacePackages, placementRowJoin(packages.id, spaceId))
-          .leftJoin(packageShares, placementShareJoin(packages.id, spaceId))
-          .where(
-            and(
-              eq(packages.type, "agent"),
-              orgOrSystemFilter(orgId),
-              notEphemeralFilter(),
-              activeHereSql(spaceId),
-            ),
-          );
-        return { spaceId, agents };
-      }),
-    );
-    for (const { spaceId, agents } of perSpace) {
-      for (const agent of agents) {
-        for (const integrationId of agent.integrationIds ?? []) {
-          if (!wantedPackageIds.has(integrationId)) continue;
-          const key = `${spaceId}|${integrationId}`;
-          reuseCount.set(key, (reuseCount.get(key) ?? 0) + 1);
-        }
-      }
-    }
-  }
+  // into SQL — a hand copy is the drift this rule exists to remove. An agent run
+  // in two of a row's spaces is one agent.
+  const agentsBySpace = new Map(
+    await Promise.all(
+      countedSpaces.map(
+        async (sp) =>
+          [
+            sp.id,
+            await db
+              .select({ id: packages.id, integrationIds: declaredIntegrationIds })
+              .from(packages)
+              .leftJoin(spacePackages, placementRowJoin(packages.id, sp.id))
+              .where(
+                and(
+                  eq(packages.type, "agent"),
+                  orgOrSystemFilter(sp.orgId),
+                  notEphemeralFilter(),
+                  activeHereSql(),
+                ),
+              ),
+          ] as const,
+      ),
+    ),
+  );
+  const reusingAgents = (r: (typeof rows)[number]) =>
+    new Set(
+      servingSpaces(r).flatMap((spaceId) =>
+        (agentsBySpace.get(spaceId) ?? [])
+          .filter((agent) => agent.integrationIds?.includes(r.packageId))
+          .map((agent) => agent.id),
+      ),
+    ).size;
 
   const locks = await connectionLocks(
     db,
@@ -229,6 +322,7 @@ async function listAllActorIntegrationConnections(
       groups.set(row.packageId, group);
     }
 
+    const reach = reaches.get(row.connectionId)!;
     const claims = asRecord(row.identityClaims);
     const identity =
       typeof claims.account_email === "string"
@@ -237,7 +331,7 @@ async function listAllActorIntegrationConnections(
           ? claims.email
           : typeof claims.sub === "string"
             ? claims.sub
-            : row.accountId;
+            : (displayAccountId(row.accountId) ?? row.label);
 
     const entry: MeConnectionEntry = {
       connection_id: row.connectionId,
@@ -249,32 +343,22 @@ async function listAllActorIntegrationConnections(
       expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
       identity,
       auth_key: row.authKey,
-      shared_with_org: row.sharedWithOrg,
+      scope: reach.scope,
+      shared_spaces: sharesOf(row.connectionId).flatMap((id) => spaceRef(id) ?? []),
+      share_all_spaces: reach.share_all_spaces,
+      allowed_actions: connectionActions(row, caller, false, orgRoles.get(row.orgId)),
+      shareable_spaces: shareable.get(row.connectionId) ?? [],
       locked_by: locks.get(row.connectionId) ?? null,
-      reused_by_agents: reuseCount.get(`${row.spaceId}|${row.packageId}`) ?? 0,
+      reused_by_agents: reusingAgents(row),
       org: { id: row.orgId, name: orgName },
-      space: { id: row.spaceId, name: row.spaceName },
+      space: spaceRef(row.spaceId),
+      origin_space: spaceRef(reach.origin_space_id ?? null),
     };
     group.connections.push(entry);
     group.total_connections += 1;
   }
 
-  return [...groups.values()];
-}
-
-/**
- * Unified user-scope listing of integration connection groups, sorted
- * alphabetically by display name. `authority` is required — the route derives
- * it from the principal's kind, so a bound credential is scoped to its own
- * binding while a `user` principal keeps the cross-org dashboard view.
- */
-export async function listMeConnections(
-  actor: Actor,
-  authority: MeConnectionAuthority,
-): Promise<MeConnectionSourceGroup[]> {
-  const integrations = await listAllActorIntegrationConnections(actor, authority);
-  integrations.sort((a, b) => a.display_name.localeCompare(b.display_name));
-  return integrations;
+  return [...groups.values()].sort((a, b) => a.display_name.localeCompare(b.display_name));
 }
 
 /** One of the caller's member pins that deleting a connection would shrink. */
@@ -284,6 +368,8 @@ interface OwnPinHoldingConnection {
   integration_package_id: string;
   /** Size of the stored set today; the delete leaves `connection_count - 1` (0 drops the pin). */
   connection_count: number;
+  /** The caller's schedules the dropped pin leaves unnamed: the delete disables them. */
+  schedules_disabled_count: number;
 }
 
 /** One of the caller's schedules whose override set for an integration names the connection. */
@@ -316,36 +402,44 @@ export function noConnectionDeleteImpact(): ConnectionDeleteImpact {
 }
 
 /**
- * The plan `deleteIntegrationConnection` applies ({@link planConnectionForget}), one entry per pin
+ * The plan `deleteOwnConnection` applies ({@link planConnectionForget}), one entry per pin
  * and per (schedule, integration) naming `connectionId`, plus the number of other actors' schedules
  * it disables. Empty for an unknown connection, one the caller does not own, or one outside a bound
- * credential's org (and space); a bound credential sees only the schedules of its org (and space),
- * though the delete rewrites the others too. A pinned connection is listed: its delete is a 409.
+ * credential's org (and space); a bound credential sees only the pins and schedules of its org (and
+ * space), though the delete rewrites the others too. A pinned connection is listed: its delete is a 409.
  */
 export async function getConnectionDeleteImpact(
-  actor: Actor,
+  principal: ConnectionPrincipal,
   connectionId: string,
-  authority: MeConnectionAuthority,
 ): Promise<ConnectionDeleteImpact> {
+  const actor = principal.actor;
   const [row] = await db
     .select({ id: integrationConnections.id })
     .from(integrationConnections)
-    .innerJoin(spaces, eq(spaces.id, integrationConnections.spaceId))
     .where(
       and(
         eq(integrationConnections.id, connectionId),
         actorFilter(actor, integrationConnections),
-        authorityFilter(authority, spaces.orgId, integrationConnections.spaceId),
+        meConnectionAuthorityFilter(principal),
       ),
     )
     .limit(1);
   if (!row) return noConnectionDeleteImpact();
-  // Member pins need no such filter: a pin write requires its connections in the pin's own space.
   const plan = await planConnectionForget(
     db,
     { id: row.id, owner: actor },
-    { scheduleFilter: authorityFilter(authority, schedules.orgId, schedules.spaceId) },
+    {
+      scheduleFilter: scheduleAuthorityFilter(principal),
+      pinFilter: pinAuthorityFilter(principal),
+    },
   );
+  // The schedules of a pin are of its space, which `pinFilter` narrows.
+  const unnamedByPin = new Map<string, number>();
+  for (const pin of plan.pins) {
+    if (pin.nextConnectionIds.length > 0) continue;
+    const unnamed = await schedulesLeftUnnamedWithout(pinLayer(pin, actor.id));
+    unnamedByPin.set(pin.id, unnamed.length);
+  }
   const agentIds = [...new Set([...plan.pins, ...plan.schedules].map((r) => r.agentPackageId))];
   const agents =
     agentIds.length === 0
@@ -363,6 +457,7 @@ export async function getConnectionDeleteImpact(
       agent_display_name: displayName(pin.agentPackageId),
       integration_package_id: pin.integrationId,
       connection_count: pin.connectionIds.length,
+      schedules_disabled_count: unnamedByPin.get(pin.id) ?? 0,
     })),
     schedules: plan.schedules.flatMap((schedule) =>
       schedule.entries.map((entry) => ({

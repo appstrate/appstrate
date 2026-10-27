@@ -1,5 +1,7 @@
-# Standalone test config for the conformance harness. No preload — these are
-# pure-logic unit tests that need neither Docker nor a database, so they must
-# not inherit the root bunfig's heavy preload (test/setup/preload.ts).
+# Standalone test config for the conformance harness. Only the scratch-tmpdir
+# preload — these are pure-logic unit tests that need neither Docker nor a
+# database, so they must not load the root bunfig's heavy preload
+# (test/setup/preload.ts).
 [test]
 root = "."
+preload = ["../../test/setup/tmpdir-preload.ts"]

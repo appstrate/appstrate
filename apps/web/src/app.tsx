@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useEffect, lazy, Suspense, type ReactNode } from "react";
+import { useEffect, Suspense, type ReactNode } from "react";
 import { Routes, Route, Outlet, useLocation, useSearchParams, Navigate } from "react-router-dom";
-import { PackageList } from "./pages/package-list";
+import { PackageIndexPage } from "./pages/package-index";
 import { DashboardPage } from "./pages/dashboard";
 import { InviteAcceptPage } from "./pages/invite-accept";
 import { LoginPage } from "./pages/login";
@@ -15,10 +15,31 @@ import { MagicLinkPage } from "./pages/magic-link";
 import { MagicLinkConfirmPage } from "./pages/magic-link-confirm";
 import { ErrorBoundary } from "./components/error-boundary";
 import { HostedAuthGate } from "./components/hosted-auth-gate";
-import { AppSidebar } from "./components/app-sidebar";
-import { NotificationBell } from "./components/notification-bell";
-import { NavUser } from "./components/nav-user";
-import { LoadingState } from "./components/page-states";
+import { OverlayExitProvider, OverlayProvider, useOverlayState } from "./lib/modal-route";
+import {
+  catalogueChunk,
+  orgSettingsGeneralChunk,
+  preferencesGeneralChunk,
+  settingsLayoutChunk,
+  workspaceSettingsGeneralChunk,
+} from "./lib/overlay-chunks";
+import { chunkComponent, lazyPage } from "./lib/lazy-chunk";
+import { OverlayFrame } from "./components/overlay-frame";
+import { OverlayUnavailable } from "./components/overlay-unavailable";
+import { AppSidebar, ShellHeader } from "./components/app-shell";
+import { ShellFrameProvider } from "./components/shell-header-slots";
+import {
+  ChatConversationSkeleton,
+  ChatPanelSkeleton,
+  FormPageSkeleton,
+  ListPageSkeleton,
+  OverlayPanelSkeleton,
+  PackageDetailSkeleton,
+  RunDetailSkeleton,
+  ScheduleDetailSkeleton,
+  SettingsSkeleton,
+  SettingsTableSkeleton,
+} from "./components/loading-skeletons";
 import { PendingPairingsWatcher } from "./components/pending-pairings-watcher";
 import { ViewAsBanner } from "./components/view-as-banner";
 
@@ -29,360 +50,252 @@ import { useAppConfig } from "./hooks/use-app-config";
 import { useOrg } from "./hooks/use-org";
 import { useGlobalRunSync } from "./hooks/use-global-run-sync";
 import { useSpaceResolver } from "./hooks/use-current-space";
-import { RouteGate, RequireOrgCatalogAdmin } from "./components/route-gate";
-import { useSidebarStore } from "./stores/sidebar-store";
-import { Spinner } from "./components/spinner";
+import { NotFoundPage, RouteGate } from "./components/route-gate";
+import { useChatSidebarStore, useSidebarStore } from "./stores/sidebar-store";
+import { Spinner } from "@appstrate/ui/components/spinner";
 import { HostedConnectPage } from "./pages/hosted-connect";
-import { SidebarInset, SidebarProvider, SidebarTrigger } from "@appstrate/ui/components/sidebar";
+import { SidebarInset, SidebarProvider } from "@appstrate/ui/components/sidebar";
 import { AppToaster } from "./components/app-toaster";
-import type { RoutePath } from "./lib/route-access";
+import {
+  isOverlayPath,
+  isUnder,
+  OVERLAY_NOT_FOUND_PATHS,
+  SETTINGS_INDEX,
+  type RoutePath,
+} from "./lib/route-access";
+import type { PackageType } from "@appstrate/core/validation";
 
-// Module-owned pages live under `apps/web/src/modules/<name>/` and are
-// lazy-loaded so their bundle is never fetched when the corresponding module
-// is disabled (zero-footprint invariant): `RouteGate` redirects before
-// rendering a route whose declared `feature` is off.
-const WebhooksPage = lazy(() =>
-  import("./modules/webhooks/pages/webhooks-page").then((m) => ({ default: m.WebhooksPage })),
+// Module pages are lazy-loaded so a disabled module's bundle is never fetched
+// (zero-footprint): `RouteGate` renders its unavailable state when the `feature` is off.
+const WebhooksPage = lazyPage(
+  () => import("./modules/webhooks/pages/webhooks-page"),
+  "WebhooksPage",
 );
-const WebhookDetailPage = lazy(() =>
-  import("./modules/webhooks/pages/webhook-detail-page").then((m) => ({
-    default: m.WebhookDetailPage,
-  })),
+const WebhookDetailPage = lazyPage(
+  () => import("./modules/webhooks/pages/webhook-detail-page"),
+  "WebhookDetailPage",
 );
-const AuthCallbackPage = lazy(() =>
-  import("./modules/oidc/pages/auth-callback").then((m) => ({ default: m.AuthCallbackPage })),
+const AuthCallbackPage = lazyPage(
+  () => import("./modules/oidc/pages/auth-callback"),
+  "AuthCallbackPage",
 );
-const ChatModulePage = lazy(() =>
-  import("./modules/chat/chat-page").then((m) => ({ default: m.ChatModulePage })),
-);
+const ChatModulePage = lazyPage(() => import("./modules/chat/chat-page"), "ChatModulePage");
 
-// Route-level code splitting — heavy authenticated pages are lazy-loaded so
-// the entry chunk only carries the login/dashboard shell. Same Suspense +
-// LoadingState fallback pattern as the module pages above.
-const UnifiedPackageDetailPage = lazy(() =>
-  import("./pages/unified-package-detail").then((m) => ({ default: m.UnifiedPackageDetailPage })),
+// Heavy authenticated pages are lazy-loaded; each waits on its chunk under `skeletonOf`.
+const UnifiedPackageDetailPage = lazyPage(
+  () => import("./pages/unified-package-detail"),
+  "UnifiedPackageDetailPage",
 );
-const PackageEditorPage = lazy(() =>
-  import("./pages/package-editor").then((m) => ({ default: m.PackageEditorPage })),
+const IntegrationFromMcpUrlPage = lazyPage(
+  () => import("./pages/integration-from-mcp-url"),
+  "IntegrationFromMcpUrlPage",
 );
-const RunDetailPage = lazy(() =>
-  import("./pages/run-detail").then((m) => ({ default: m.RunDetailPage })),
-);
-const RunsPage = lazy(() => import("./pages/runs-page").then((m) => ({ default: m.RunsPage })));
-const FilesPage = lazy(() => import("./pages/files").then((m) => ({ default: m.FilesPage })));
-const SchedulesListPage = lazy(() =>
-  import("./pages/schedules-list").then((m) => ({ default: m.SchedulesListPage })),
-);
-const ScheduleDetailPage = lazy(() =>
-  import("./pages/schedule-detail").then((m) => ({ default: m.ScheduleDetailPage })),
-);
-const ScheduleCreatePage = lazy(() =>
-  import("./pages/schedule-create").then((m) => ({ default: m.ScheduleCreatePage })),
-);
-const ScheduleEditPage = lazy(() =>
-  import("./pages/schedule-edit").then((m) => ({ default: m.ScheduleEditPage })),
-);
-const SkillsPage = lazy(() =>
-  import("./pages/skills-page").then((m) => ({ default: m.SkillsPage })),
-);
-const McpServersPage = lazy(() =>
-  import("./pages/mcp-servers-page").then((m) => ({ default: m.McpServersPage })),
-);
-const IntegrationsPage = lazy(() =>
-  import("./pages/integrations-page").then((m) => ({ default: m.IntegrationsPage })),
-);
-const IntegrationDetailPage = lazy(() =>
-  import("./pages/integration-detail").then((m) => ({ default: m.IntegrationDetailPage })),
-);
-const SpacePackagesPage = lazy(() =>
-  import("./pages/library-page").then((m) => ({ default: m.SpacePackagesPage })),
-);
-const LibraryPage = lazy(() =>
-  import("./pages/library-page").then((m) => ({ default: m.LibraryPage })),
-);
-const EndUsersPage = lazy(() =>
-  import("./pages/end-users-page").then((m) => ({ default: m.EndUsersPage })),
-);
-const ApiKeysPage = lazy(() =>
-  import("./pages/api-keys-page").then((m) => ({ default: m.ApiKeysPage })),
-);
-const WelcomePage = lazy(() => import("./pages/welcome").then((m) => ({ default: m.WelcomePage })));
-const OnboardingCreateStep = lazy(() =>
-  import("./pages/onboarding/create-step").then((m) => ({ default: m.OnboardingCreateStep })),
-);
-const OnboardingPlanStep = lazy(() =>
-  import("./pages/onboarding/plan-step").then((m) => ({ default: m.OnboardingPlanStep })),
-);
-const OnboardingModelStep = lazy(() =>
-  import("./pages/onboarding/model-step").then((m) => ({ default: m.OnboardingModelStep })),
-);
-const OnboardingMembersStep = lazy(() =>
-  import("./pages/onboarding/members-step").then((m) => ({ default: m.OnboardingMembersStep })),
-);
-const OnboardingDoneStep = lazy(() =>
-  import("./pages/onboarding/done-step").then((m) => ({ default: m.OnboardingDoneStep })),
-);
-const OnboardingWaitingStep = lazy(() =>
-  import("./pages/onboarding/waiting-step").then((m) => ({ default: m.OnboardingWaitingStep })),
-);
-const OrgSettingsLayout = lazy(() =>
-  import("./pages/org-settings/layout").then((m) => ({ default: m.OrgSettingsLayout })),
-);
-const OrgSettingsGeneralPage = lazy(() =>
-  import("./pages/org-settings/general").then((m) => ({ default: m.OrgSettingsGeneralPage })),
-);
-const OrgSettingsMembersPage = lazy(() =>
-  import("./pages/org-settings/members").then((m) => ({ default: m.OrgSettingsMembersPage })),
-);
-const OrgSettingsModelsPage = lazy(() =>
-  import("./pages/org-settings/models").then((m) => ({ default: m.OrgSettingsModelsPage })),
-);
-const OrgSettingsProxiesPage = lazy(() =>
-  import("./pages/org-settings/proxies").then((m) => ({ default: m.OrgSettingsProxiesPage })),
-);
-const OrgSettingsOAuthPage = lazy(() =>
-  import("./pages/org-settings/oauth").then((m) => ({ default: m.OrgSettingsOAuthPage })),
-);
-const OrgSettingsBillingPage = lazy(() =>
-  import("./pages/org-settings/billing").then((m) => ({ default: m.OrgSettingsBillingPage })),
-);
-const OrgSettingsCliSessionsPage = lazy(() =>
-  import("./pages/org-settings/cli-sessions").then((m) => ({
-    default: m.OrgSettingsCliSessionsPage,
-  })),
-);
-const OrgSettingsRolesPage = lazy(() =>
-  import("./pages/org-settings/roles").then((m) => ({ default: m.OrgSettingsRolesPage })),
-);
-const OrgSettingsSpacesPage = lazy(() =>
-  import("./pages/org-settings/spaces").then((m) => ({
-    default: m.OrgSettingsSpacesPage,
-  })),
-);
-const OrgSettingsSpaceGeneralPage = lazy(() =>
-  import("./pages/org-settings/space/general").then((m) => ({
-    default: m.OrgSettingsSpaceGeneralPage,
-  })),
-);
-const OrgSettingsSpaceMembersPage = lazy(() =>
-  import("./pages/org-settings/space/members").then((m) => ({
-    default: m.OrgSettingsSpaceMembersPage,
-  })),
-);
-const OrgSettingsSpaceAuthPage = lazy(() =>
-  import("./pages/org-settings/space/auth").then((m) => ({ default: m.OrgSettingsSpaceAuthPage })),
-);
-const OrgSettingsSpaceOauthPage = lazy(() =>
-  import("./pages/org-settings/space/oauth").then((m) => ({
-    default: m.OrgSettingsSpaceOauthPage,
-  })),
-);
-const PreferencesLayout = lazy(() =>
-  import("./pages/preferences/layout").then((m) => ({ default: m.PreferencesLayout })),
-);
-const PreferencesGeneralPage = lazy(() =>
-  import("./pages/preferences/general").then((m) => ({ default: m.PreferencesGeneralPage })),
-);
-const PreferencesAppearancePage = lazy(() =>
-  import("./pages/preferences/appearance").then((m) => ({ default: m.PreferencesAppearancePage })),
-);
-const PreferencesSecurityPage = lazy(() =>
-  import("./pages/preferences/security").then((m) => ({ default: m.PreferencesSecurityPage })),
-);
-const PreferencesConnectionsPage = lazy(() =>
-  import("./pages/preferences/connections").then((m) => ({
-    default: m.PreferencesConnectionsPage,
-  })),
-);
-const PreferencesDevicesPage = lazy(() =>
-  import("./pages/preferences/devices").then((m) => ({ default: m.PreferencesDevicesPage })),
+const RunDetailPage = lazyPage(() => import("./pages/run-detail"), "RunDetailPage");
+const RunsPage = lazyPage(() => import("./pages/runs-page"), "RunsPage");
+const FilesPage = lazyPage(() => import("./pages/files"), "FilesPage");
+const FileReaderPage = lazyPage(() => import("./pages/file-reader"), "FileReaderPage");
+const SchedulesListPage = lazyPage(() => import("./pages/schedules-list"), "SchedulesListPage");
+const ScheduleDetailPage = lazyPage(() => import("./pages/schedule-detail"), "ScheduleDetailPage");
+const SkillsPage = lazyPage(() => import("./pages/skills-page"), "SkillsPage");
+const McpServersPage = lazyPage(() => import("./pages/mcp-servers-page"), "McpServersPage");
+const IntegrationsPage = lazyPage(() => import("./pages/integrations-page"), "IntegrationsPage");
+const IntegrationDetailPage = lazyPage(
+  () => import("./pages/integration-detail"),
+  "IntegrationDetailPage",
 );
 
-/** Suspense boundary for lazy route elements — same fallback as module pages. */
-function LazyRoute({ children }: { children: React.ReactNode }) {
-  return <Suspense fallback={<LoadingState />}>{children}</Suspense>;
+const EndUsersPage = lazyPage(() => import("./pages/end-users-page"), "EndUsersPage");
+const ApiKeysPage = lazyPage(() => import("./pages/api-keys-page"), "ApiKeysPage");
+const WelcomePage = lazyPage(() => import("./pages/welcome"), "WelcomePage");
+const OnboardingCreateStep = lazyPage(
+  () => import("./pages/onboarding/create-step"),
+  "OnboardingCreateStep",
+);
+const OnboardingPlanStep = lazyPage(
+  () => import("./pages/onboarding/plan-step"),
+  "OnboardingPlanStep",
+);
+const OnboardingModelStep = lazyPage(
+  () => import("./pages/onboarding/model-step"),
+  "OnboardingModelStep",
+);
+const OnboardingMembersStep = lazyPage(
+  () => import("./pages/onboarding/members-step"),
+  "OnboardingMembersStep",
+);
+const OnboardingDoneStep = lazyPage(
+  () => import("./pages/onboarding/done-step"),
+  "OnboardingDoneStep",
+);
+const OnboardingWaitingStep = lazyPage(
+  () => import("./pages/onboarding/waiting-step"),
+  "OnboardingWaitingStep",
+);
+const UnifiedSettingsLayout = chunkComponent(settingsLayoutChunk, (m) => m.UnifiedSettingsLayout);
+const CataloguePage = chunkComponent(catalogueChunk, (m) => m.CataloguePage);
+const CatalogueIndexRedirect = chunkComponent(catalogueChunk, (m) => m.CatalogueIndexRedirect);
+const SettingsIndexRedirect = chunkComponent(settingsLayoutChunk, (m) => m.SettingsIndexRedirect);
+const OrgSettingsGeneralPage = chunkComponent(
+  orgSettingsGeneralChunk,
+  (m) => m.OrgSettingsGeneralPage,
+);
+const OrgSettingsMembersPage = lazyPage(
+  () => import("./pages/org-settings/members"),
+  "OrgSettingsMembersPage",
+);
+const OrgSettingsModelsPage = lazyPage(
+  () => import("./pages/org-settings/models"),
+  "OrgSettingsModelsPage",
+);
+const OrgSettingsProxiesPage = lazyPage(
+  () => import("./pages/org-settings/proxies"),
+  "OrgSettingsProxiesPage",
+);
+const OrgSettingsOAuthPage = lazyPage(
+  () => import("./pages/org-settings/oauth"),
+  "OrgSettingsOAuthPage",
+);
+const PreferencesMcpAccessPage = lazyPage(
+  () => import("./pages/preferences/mcp-access"),
+  "PreferencesMcpAccessPage",
+);
+const OrgSettingsBillingPage = lazyPage(
+  () => import("./pages/org-settings/billing"),
+  "OrgSettingsBillingPage",
+);
+const OrgSettingsCliSessionsPage = lazyPage(
+  () => import("./pages/org-settings/cli-sessions"),
+  "OrgSettingsCliSessionsPage",
+);
+const OrgSettingsRolesPage = lazyPage(
+  () => import("./pages/org-settings/roles"),
+  "OrgSettingsRolesPage",
+);
+const OrgSettingsSpacesPage = lazyPage(
+  () => import("./pages/org-settings/spaces"),
+  "OrgSettingsSpacesPage",
+);
+const WorkspaceSettingsGeneralPage = chunkComponent(
+  workspaceSettingsGeneralChunk,
+  (m) => m.WorkspaceSettingsGeneralPage,
+);
+const WorkspaceSettingsMembersPage = lazyPage(
+  () => import("./pages/workspace-settings/members"),
+  "WorkspaceSettingsMembersPage",
+);
+const WorkspaceSettingsAuthPage = lazyPage(
+  () => import("./pages/workspace-settings/auth"),
+  "WorkspaceSettingsAuthPage",
+);
+const WorkspaceSettingsOAuthPage = lazyPage(
+  () => import("./pages/workspace-settings/oauth"),
+  "WorkspaceSettingsOAuthPage",
+);
+const PreferencesGeneralPage = chunkComponent(
+  preferencesGeneralChunk,
+  (m) => m.PreferencesGeneralPage,
+);
+const PreferencesAppearancePage = lazyPage(
+  () => import("./pages/preferences/appearance"),
+  "PreferencesAppearancePage",
+);
+const PreferencesSecurityPage = lazyPage(
+  () => import("./pages/preferences/security"),
+  "PreferencesSecurityPage",
+);
+const PreferencesConnectionsPage = lazyPage(
+  () => import("./pages/preferences/connections"),
+  "PreferencesConnectionsPage",
+);
+const PreferencesDevicesPage = lazyPage(
+  () => import("./pages/preferences/devices"),
+  "PreferencesDevicesPage",
+);
+const PreferencesModelsPage = lazyPage(
+  () => import("./pages/preferences/models"),
+  "PreferencesModelsPage",
+);
+
+/** A lazy screen outside the shell (welcome, onboarding): it waits like the boot does. */
+function PreShellRoute({ children }: { children: React.ReactNode }) {
+  return <Suspense fallback={<BootScreen />}>{children}</Suspense>;
 }
 
+/** The screens outside the shell, in the order of the onboarding. */
+const PRE_SHELL_PAGES = [
+  ["/welcome", WelcomePage],
+  ["/onboarding/waiting", OnboardingWaitingStep],
+  ["/onboarding/create", OnboardingCreateStep],
+  ["/onboarding/plan", OnboardingPlanStep],
+  ["/onboarding/model", OnboardingModelStep],
+  ["/onboarding/members", OnboardingMembersStep],
+  ["/onboarding/complete", OnboardingDoneStep],
+] as const;
+
 /**
- * The page of every route under `MainLayout`, keyed like its access
- * declaration (`lib/route-access.ts`): a route without one, or one without a
- * page, fails to compile. Mounted by `pageRoute`, always behind `RouteGate`.
+ * Signed-out auth-entry routes go through `HostedAuthGate`: in OIDC mode it redirects to the
+ * hosted page before the native form mounts. `/register` stays mounted when `signupDisabled`
+ * so an invited address can sign up; the real barrier is server-side
+ * (`databaseHooks.user.create.before`).
+ */
+const AUTH_GATE_PAGES = [
+  ["/login", LoginPage, "login"],
+  ["/register", RegisterPage, "signup"],
+  ["/forgot-password", ForgotPasswordPage, "login"],
+  ["/reset-password", ResetPasswordPage, "login"],
+  ["/magic-link", MagicLinkPage, "login"],
+] as const;
+
+/** Mounted signed out AND signed in: the session cookie is already set when the browser lands, so the stashed `returnTo` is consumed on either tree. */
+const authCallbackRoute = (
+  <Route
+    path="/auth/callback"
+    element={
+      <PreShellRoute>
+        <AuthCallbackPage />
+      </PreShellRoute>
+    }
+  />
+);
+
+/**
+ * The page of every signed-in route, keyed like its access declaration
+ * (`lib/route-access.ts`): a route without one, or one without a page, fails to compile.
  */
 const PAGES: Record<RoutePath, ReactNode> = {
   "/": <DashboardPage />,
-  "/agents": <PackageList />,
-  "/agents/new": (
-    <LazyRoute>
-      <PackageEditorPage type="agent" />
-    </LazyRoute>
-  ),
-  "/agents/:scope/:name/edit": (
-    <LazyRoute>
-      <PackageEditorPage type="agent" />
-    </LazyRoute>
-  ),
-  "/agents/:scope/:name": (
-    <LazyRoute>
-      <UnifiedPackageDetailPage type="agent" />
-    </LazyRoute>
-  ),
-  "/agents/:scope/:name/:version": (
-    <LazyRoute>
-      <UnifiedPackageDetailPage type="agent" />
-    </LazyRoute>
-  ),
-  "/agents/:scope/:name/runs/:runId": (
-    <LazyRoute>
-      <RunDetailPage />
-    </LazyRoute>
-  ),
-  "/runs": (
-    <LazyRoute>
-      <RunsPage />
-    </LazyRoute>
-  ),
-  "/files": (
-    <LazyRoute>
-      <FilesPage />
-    </LazyRoute>
-  ),
-  "/schedules": (
-    <LazyRoute>
-      <SchedulesListPage />
-    </LazyRoute>
-  ),
-  "/schedules/new": (
-    <LazyRoute>
-      <ScheduleCreatePage />
-    </LazyRoute>
-  ),
-  "/schedules/:id": (
-    <LazyRoute>
-      <ScheduleDetailPage />
-    </LazyRoute>
-  ),
-  "/schedules/:id/edit": (
-    <LazyRoute>
-      <ScheduleEditPage />
-    </LazyRoute>
-  ),
-  "/skills": (
-    <LazyRoute>
-      <SkillsPage />
-    </LazyRoute>
-  ),
-  "/skills/new": (
-    <LazyRoute>
-      <PackageEditorPage type="skill" />
-    </LazyRoute>
-  ),
-  "/skills/:scope/:name/edit": (
-    <LazyRoute>
-      <PackageEditorPage type="skill" />
-    </LazyRoute>
-  ),
-  "/skills/:scope/:name": (
-    <LazyRoute>
-      <UnifiedPackageDetailPage type="skill" />
-    </LazyRoute>
-  ),
-  "/skills/:scope/:name/:version": (
-    <LazyRoute>
-      <UnifiedPackageDetailPage type="skill" />
-    </LazyRoute>
-  ),
-  "/integrations": (
-    <LazyRoute>
-      <IntegrationsPage />
-    </LazyRoute>
-  ),
-  "/integrations/new": (
-    <LazyRoute>
-      <PackageEditorPage type="integration" />
-    </LazyRoute>
-  ),
-  "/integrations/:scope/:name/edit": (
-    <LazyRoute>
-      <PackageEditorPage type="integration" />
-    </LazyRoute>
-  ),
-  "/integrations/:scope/:name": (
-    <LazyRoute>
-      <IntegrationDetailPage />
-    </LazyRoute>
-  ),
-  "/mcp-servers": (
-    <LazyRoute>
-      <McpServersPage />
-    </LazyRoute>
-  ),
-  "/mcp-servers/:scope/:name/edit": (
-    <LazyRoute>
-      <PackageEditorPage type="mcp-server" />
-    </LazyRoute>
-  ),
-  "/mcp-servers/:scope/:name": (
-    <LazyRoute>
-      <UnifiedPackageDetailPage type="mcp-server" />
-    </LazyRoute>
-  ),
-  "/mcp-servers/:scope/:name/:version": (
-    <LazyRoute>
-      <UnifiedPackageDetailPage type="mcp-server" />
-    </LazyRoute>
-  ),
-  "/space/packages": (
-    <LazyRoute>
-      <SpacePackagesPage />
-    </LazyRoute>
-  ),
-  "/library": (
-    <RequireOrgCatalogAdmin>
-      <LazyRoute>
-        <LibraryPage />
-      </LazyRoute>
-    </RequireOrgCatalogAdmin>
-  ),
-  "/preferences": (
-    <LazyRoute>
-      <PreferencesLayout />
-    </LazyRoute>
-  ),
+  "/agents": <PackageIndexPage type="agent" />,
+  "/agents/:scope/:name": <UnifiedPackageDetailPage type="agent" />,
+  "/agents/:scope/:name/:version": <UnifiedPackageDetailPage type="agent" />,
+  "/agents/:scope/:name/runs/:runId": <RunDetailPage />,
+  "/runs": <RunsPage />,
+  "/files": <FilesPage />,
+  "/files/:fileId": <FileReaderPage />,
+  "/schedules": <SchedulesListPage />,
+  "/schedules/:id": <ScheduleDetailPage />,
+  "/skills": <SkillsPage />,
+  "/skills/:scope/:name": <UnifiedPackageDetailPage type="skill" />,
+  "/skills/:scope/:name/:version": <UnifiedPackageDetailPage type="skill" />,
+  "/integrations": <IntegrationsPage />,
+  "/integrations/new/mcp": <IntegrationFromMcpUrlPage />,
+  "/integrations/:scope/:name": <IntegrationDetailPage />,
+  "/mcp-servers": <McpServersPage />,
+  "/mcp-servers/:scope/:name": <UnifiedPackageDetailPage type="mcp-server" />,
+  "/mcp-servers/:scope/:name/:version": <UnifiedPackageDetailPage type="mcp-server" />,
+  "/catalogue": <CatalogueIndexRedirect />,
+  "/catalogue/:type": <CataloguePage />,
+  "/preferences": <Outlet />,
   "/preferences/general": <PreferencesGeneralPage />,
   "/preferences/appearance": <PreferencesAppearancePage />,
   "/preferences/security": <PreferencesSecurityPage />,
   "/preferences/devices": <PreferencesDevicesPage />,
   "/preferences/connections": <PreferencesConnectionsPage />,
-  "/webhooks": (
-    <LazyRoute>
-      <WebhooksPage />
-    </LazyRoute>
-  ),
-  "/webhooks/:id": (
-    <LazyRoute>
-      <WebhookDetailPage />
-    </LazyRoute>
-  ),
-  "/chat": (
-    <LazyRoute>
-      <ChatModulePage />
-    </LazyRoute>
-  ),
-  "/chat/:conversationId": (
-    <LazyRoute>
-      <ChatModulePage />
-    </LazyRoute>
-  ),
-  "/end-users": (
-    <LazyRoute>
-      <EndUsersPage />
-    </LazyRoute>
-  ),
-  "/org-settings": (
-    <LazyRoute>
-      <OrgSettingsLayout />
-    </LazyRoute>
-  ),
+  "/preferences/mcp-access": <PreferencesMcpAccessPage />,
+  "/preferences/models": <PreferencesModelsPage />,
+  "/chat": <ChatModulePage />,
+  "/chat/:conversationId": <ChatModulePage />,
+  // The settings scopes share `UnifiedSettingsLayout` (mounted one level up, so switching scope keeps the dialog).
+  "/org-settings": <Outlet />,
   "/org-settings/general": <OrgSettingsGeneralPage />,
   "/org-settings/members": <OrgSettingsMembersPage />,
   "/org-settings/roles": <OrgSettingsRolesPage />,
@@ -392,46 +305,110 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/org-settings/oauth": <OrgSettingsOAuthPage />,
   "/org-settings/cli-sessions": <OrgSettingsCliSessionsPage />,
   "/org-settings/billing": <OrgSettingsBillingPage />,
-  "/org-settings/space/general": <OrgSettingsSpaceGeneralPage />,
-  "/org-settings/space/members": <OrgSettingsSpaceMembersPage />,
-  "/org-settings/space/api-keys": <ApiKeysPage />,
-  "/org-settings/space/auth": <OrgSettingsSpaceAuthPage />,
-  "/org-settings/space/oauth": <OrgSettingsSpaceOauthPage />,
+  // Workspace settings are scoped by `X-Space-Id`, except webhooks, which also manages the org's own (`org-webhooks:read`).
+  "/workspace-settings": <Outlet />,
+  "/workspace-settings/general": <WorkspaceSettingsGeneralPage />,
+  "/workspace-settings/members": <WorkspaceSettingsMembersPage />,
+  "/workspace-settings/auth": <WorkspaceSettingsAuthPage />,
+  "/workspace-settings/api-keys": <ApiKeysPage />,
+  "/workspace-settings/oauth": <WorkspaceSettingsOAuthPage />,
+  "/workspace-settings/end-users": <EndUsersPage />,
+  "/workspace-settings/webhooks": <WebhooksPage />,
+  "/workspace-settings/webhooks/:id": <WebhookDetailPage />,
 };
 
 const PATHS = Object.keys(PAGES) as RoutePath[];
 
-/** The two nested layouts; each index redirects to its `general` child. */
-const LAYOUTS = ["/preferences", "/org-settings"] as const satisfies readonly RoutePath[];
+/** The nested layouts: the settings scopes, each index opening the scope's first page. */
+const LAYOUTS = Object.values(SETTINGS_INDEX);
+type LayoutPath = (typeof LAYOUTS)[number];
+const inLayout = (path: RoutePath) => LAYOUTS.some((layout) => isUnder(path, layout));
+
+/**
+ * A tree's routes that no layout nests. Routed modals mount in the overlay tree ONLY (the main
+ * tree renders the background location, so a copy there could never match).
+ */
+const flatPaths = (overlay: boolean) =>
+  PATHS.filter((path) => isOverlayPath(path) === overlay && !inLayout(path));
+
+/** The package detail routes, by family. */
+const DETAIL_PACKAGE_TYPE: [string, PackageType][] = [
+  ["/agents/", "agent"],
+  ["/skills/", "skill"],
+  ["/mcp-servers/", "mcp-server"],
+  ["/integrations/", "integration"],
+];
+
+/** What a route draws while its chunk or permissions load: the same skeleton its page draws for data. */
+/** The collections a reader may show as cards: the screen key `useListView` stores their choice under. */
+const LIST_VIEW_OF: Partial<Record<RoutePath, string>> = {
+  "/agents": "agent",
+  "/skills": "skill",
+  "/mcp-servers": "mcp-server",
+  "/integrations": "integrations",
+};
+
+/** The settings pages that are a table, not rows of fields; the value says whether a toolbar leads. */
+const SETTINGS_TABLES: Partial<Record<RoutePath, boolean>> = {
+  "/org-settings/members": false,
+  "/org-settings/spaces": false,
+  "/org-settings/proxies": false,
+  "/org-settings/cli-sessions": false,
+  "/preferences/devices": false,
+  "/workspace-settings/members": false,
+  "/workspace-settings/api-keys": false,
+  "/workspace-settings/webhooks": false,
+  "/workspace-settings/end-users": true,
+};
+
+function skeletonOf(path: RoutePath): ReactNode {
+  const table = SETTINGS_TABLES[path];
+  if (table !== undefined) return <SettingsTableSkeleton toolbar={table} />;
+  if (inLayout(path)) return <SettingsSkeleton />;
+  if (isOverlayPath(path)) return <OverlayPanelSkeleton list />;
+  if (path === "/chat/:conversationId") return <ChatConversationSkeleton />;
+  if (isUnder(path, "/chat")) return <ChatPanelSkeleton />;
+  if (path === "/integrations/new/mcp") return <FormPageSkeleton />;
+  if (path === "/agents/:scope/:name/runs/:runId") return <RunDetailSkeleton />;
+  if (path === "/schedules/:id") return <ScheduleDetailSkeleton />;
+  const packageType = DETAIL_PACKAGE_TYPE.find(([prefix]) => path.startsWith(prefix))?.[1];
+  if (packageType && path.includes("/:")) return <PackageDetailSkeleton type={packageType} />;
+  return <ListPageSkeleton list={LIST_VIEW_OF[path]} />;
+}
 
 function pageRoute(path: RoutePath) {
+  const skeleton = skeletonOf(path);
   return (
-    <Route key={path} path={path} element={<RouteGate path={path}>{PAGES[path]}</RouteGate>} />
+    <Route
+      key={path}
+      path={path}
+      element={
+        <RouteGate path={path} pending={skeleton} inPanel={isOverlayPath(path)}>
+          <Suspense fallback={skeleton}>{PAGES[path]}</Suspense>
+        </RouteGate>
+      }
+    />
   );
 }
 
-function layoutRoute(layout: (typeof LAYOUTS)[number]) {
+function layoutRoute(layout: LayoutPath) {
   return (
     <Route
       key={layout}
       path={layout}
-      element={<RouteGate path={layout}>{PAGES[layout]}</RouteGate>}
+      element={
+        <RouteGate path={layout} pending={<SettingsSkeleton />}>
+          {PAGES[layout]}
+        </RouteGate>
+      }
     >
-      <Route index element={<Navigate to="general" replace />} />
+      <Route index element={<SettingsIndexRedirect />} />
       {PATHS.filter((path) => path.startsWith(`${layout}/`)).map(pageRoute)}
     </Route>
   );
 }
 
-/**
- * The one boot placeholder. Every gate below renders it, so a visitor sees a
- * single uninterrupted spinner while the boot reads settle, never a sequence
- * of visually identical ones handed off between gates.
- *
- * The boot reads themselves are started in `main.tsx`, in parallel: by the
- * time `useAuth()` reports a user the org list is usually already cached, so
- * `OrgGate` normally resolves without ever painting this.
- */
+/** The one boot placeholder every gate renders, so a visitor sees a single uninterrupted spinner. */
 function BootScreen() {
   return (
     <div className="flex min-h-screen items-center justify-center">
@@ -440,64 +417,63 @@ function BootScreen() {
   );
 }
 
+/**
+ * The ONE layout of both products (Studio and the chat): switching product must not
+ * remount the shared frame (realtime stream, sidebar queries). The space is resolved
+ * HERE, above the route gate, which waits on it before it refuses. The realtime sync
+ * covers the chat too: a chat turn runs agents.
+ */
 function MainLayout() {
-  const { open: sidebarOpen, setOpen: setSidebarOpen } = useSidebarStore();
+  const studioSidebar = useSidebarStore();
+  const chatSidebar = useChatSidebarStore();
   const { pathname } = useLocation();
+  const product = isUnder(pathname, "/chat") ? "chat" : "studio";
+  const sidebar = product === "chat" ? chatSidebar : studioSidebar;
   useSpaceResolver();
+  useGlobalRunSync();
 
   return (
-    <SidebarProvider open={sidebarOpen} onOpenChange={setSidebarOpen}>
-      <AppSidebar />
-      <SidebarInset className="h-svh">
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
-          {/* Mobile-only trigger — desktop collapse lives in the sidebar header */}
-          <SidebarTrigger className="ml-2 md:hidden" />
-          <div className="flex-1" />
-          <div className="flex items-center gap-1 px-4">
-            <NotificationBell />
-            <NavUser />
+    <ShellFrameProvider>
+      <SidebarProvider open={sidebar.open} onOpenChange={sidebar.setOpen}>
+        <AppSidebar product={product} />
+        {/* Studio: the scroll lives HERE, not on an inner div (which would narrow the content
+            by the scrollbar width and misalign it with the header). Chat owns its height. */}
+        <SidebarInset
+          className={
+            product === "chat"
+              ? "bg-canvas h-svh min-h-0 overflow-hidden"
+              : "bg-canvas h-svh overflow-y-auto"
+          }
+        >
+          <ShellHeader />
+          {/* Must stay visible on every route, permission-denied pages included. */}
+          <ViewAsBanner />
+          {/* Full-bleed surfaces opt out with `data-full-bleed` on their root. */}
+          <div
+            className={
+              product === "chat"
+                ? "flex min-h-0 min-w-0 flex-1 *:flex-1"
+                : "max-w-page px-gutter mx-auto w-full pt-8 pb-18 has-[[data-full-bleed]]:max-w-none has-[[data-full-bleed]]:p-0"
+            }
+          >
+            <ErrorBoundary resetKey={pathname}>
+              <Outlet />
+            </ErrorBoundary>
           </div>
-        </header>
-        {/* Above the scroll container: the preview must stay visible on every
-            route, including the settings layouts and the permission-denied
-            pages a persona is precisely there to provoke. */}
-        <ViewAsBanner />
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          {/* A page that crashes on render takes only itself down: the sidebar
-              and the header stay, and navigating away clears the error. */}
-          <ErrorBoundary resetKey={pathname}>
-            <Outlet />
-          </ErrorBoundary>
-        </div>
-      </SidebarInset>
-    </SidebarProvider>
+        </SidebarInset>
+      </SidebarProvider>
+    </ShellFrameProvider>
   );
-}
-
-function GlobalRealtimeSync({ children }: { children: React.ReactNode }) {
-  useGlobalRunSync();
-  return <>{children}</>;
 }
 
 /** Routes that don't require an org to be selected. */
 const ORG_GATE_BYPASS = ["/welcome", "/onboarding", "/invite", "/auth/callback"];
 
 /**
- * Bridge for server-side redirects that land at `/auth/login?returnTo=...`.
- *
- * Only same-origin absolute paths are accepted — no schemes, no host,
- * no path-traversal tricks — so this cannot be abused as an open
- * redirect even if the `returnTo` query lands in an attacker-controlled
- * email. Anything malformed silently falls through to the default
- * post-login destination (`/`).
- */
-/**
- * Accept only same-origin relative paths. Rejects protocol-relative and
- * absolute-scheme values — including the backslash bypass (`/\evil.com`,
- * `/\/evil.com`), which browsers normalize to `//evil.com`. Backslashes are
- * folded to forward slashes before the protocol-relative test, mirroring the
- * OIDC redirect sanitizer, so a crafted `returnTo` in an attacker-controlled
- * email cannot become an open redirect.
+ * SECURITY: accept only same-origin relative paths (open-redirect guard for a `returnTo`
+ * that may come from an attacker-controlled email). Rejects protocol-relative and
+ * absolute-scheme values, including the backslash bypass (`/\evil.com`) that browsers
+ * normalize to `//evil.com`; mirrors the OIDC redirect sanitizer. Malformed falls through to `/`.
  */
 function sanitizeReturnTo(raw: string | null): string | undefined {
   if (!raw || !raw.startsWith("/")) return undefined;
@@ -529,7 +505,7 @@ function OrgGate({ children }: { children: React.ReactNode }) {
   }
 
   // No orgs at all -- redirect to onboarding (or to "waiting for invitation"
-  // when this user may not create one — issue #228 closed mode).
+  // when this user may not create one, the closed mode).
   if (orgs.length === 0) {
     return <Navigate to={orgLessEntry(canCreateOrg)} replace />;
   }
@@ -574,17 +550,18 @@ function SignedOutFallback() {
 export function App() {
   const { user, loading } = useAuth();
   const { features } = useAppConfig();
+  const location = useLocation();
+  // While an overlay is up the page tree renders the page it opened over (scroll and filters kept).
+  const { page, overlay, exit } = useOverlayState();
   useExternalRedirect(!!user);
 
   if (loading) {
     return <BootScreen />;
   }
 
-  // Hosted connect portal (issue #769) — standalone, auth-agnostic. Rendered
-  // before every auth/bootstrap gate because it authenticates via its own
-  // httpOnly page cookie (pinned by the dispatch redirect), not the platform
-  // session: it must work for embedded end-users with no Better Auth user.
-  if (window.location.pathname === "/connect") {
+  // Hosted connect portal: rendered before every gate because it authenticates via its own
+  // httpOnly page cookie, so it must work for embedded end-users with no Better Auth user.
+  if (location.pathname === "/connect") {
     return (
       <ErrorBoundary>
         <HostedConnectPage />
@@ -593,7 +570,7 @@ export function App() {
   }
 
   // Honoured whoever is signed in: the link's account replaces the session.
-  if (window.location.pathname === "/magic-link/confirm") {
+  if (location.pathname === "/magic-link/confirm") {
     return (
       <ErrorBoundary>
         <MagicLinkConfirmPage />
@@ -601,12 +578,8 @@ export function App() {
     );
   }
 
-  // Bootstrap-token redemption (#344 Layer 2b) — when the platform has a
-  // pending unattended-install token AND the visitor isn't authenticated,
-  // every route funnels into `/claim`. The redeem route owns its own gate
-  // (timing-safe compare + DB-org-count); the SPA's job is just to render
-  // the form and prevent users from wandering into login/register on a
-  // closed-by-default fresh instance.
+  // A pending unattended-install token funnels every unauthenticated route into `/claim`;
+  // the redeem route owns its own gate server-side.
   if (!user && features.bootstrapTokenPending) {
     return (
       <ErrorBoundary>
@@ -622,98 +595,25 @@ export function App() {
     return (
       <ErrorBoundary>
         <Routes>
-          {/*
-           * The auth-entry routes are wrapped in `HostedAuthGate`: in OIDC
-           * mode it redirects to the hosted login/register page before the
-           * native form mounts (one mechanism, no per-page `useEffect`
-           * check to forget); in OSS mode it renders the form below. The
-           * ESLint `auth-client` ban (eslint.config.mjs) backs this up by
-           * stopping any of these pages from calling Better Auth directly.
-           */}
-          <Route
-            path="/login"
-            element={
-              <HostedAuthGate starter="login">
-                <LoginPage />
-              </HostedAuthGate>
-            }
-          />
-          {/*
-           * `/register` stays mounted even when `signupDisabled` is true so
-           * an invited address can sign up via email/password without
-           * Google/GitHub/SMTP. The real
-           * barrier is server-side in `databaseHooks.user.create.before` —
-           * unauthorized signups receive a `signup_disabled` error that
-           * `RegisterPage` surfaces. The signup link is still hidden from
-           * `/login` to avoid public discoverability.
-           */}
-          <Route
-            path="/register"
-            element={
-              <HostedAuthGate starter="signup">
-                <RegisterPage />
-              </HostedAuthGate>
-            }
-          />
-          {/*
-           * Server-rendered flows outside the SPA (e.g. the device-flow
-           * `/activate` page) redirect unauthenticated visitors here with
-           * a `?returnTo=<path>` query. Capture it into `state.from`
-           * before forwarding to `/login` so `LoginPage`'s existing
-           * `location.state?.from` hookup feeds it into
-           * `startOidcLogin(redirectTo)` and the callback returns to the
-           * original page. The `replace` keeps the back button sane.
-           */}
-          <Route path="/auth/login" element={<AuthLoginReturnToBridge />} />
-          {features.oidc && (
+          {AUTH_GATE_PAGES.map(([path, Page, starter]) => (
             <Route
-              path="/auth/callback"
+              key={path}
+              path={path}
               element={
-                <Suspense fallback={<BootScreen />}>
-                  <AuthCallbackPage />
-                </Suspense>
+                <HostedAuthGate starter={starter}>
+                  <Page />
+                </HostedAuthGate>
               }
             />
-          )}
-          {/*
-           * `/verify-email` is deliberately NOT gated: it is a post-signup
-           * interstitial (and verification-error display), not a login entry
-           * point. In OIDC + SMTP mode the server-rendered register flow can
-           * route an unauthenticated visitor here with `?email=` / `?error=`
-           * (see verify-email.tsx) — redirecting it to the hosted login would
-           * break that flow. It renders natively in both modes.
-           */}
+          ))}
+          {/* Server-rendered flows (device-flow `/activate`) land here with `?returnTo=`;
+              the bridge moves it into `state.from` for `LoginPage`. */}
+          <Route path="/auth/login" element={<AuthLoginReturnToBridge />} />
+          {features.oidc && authCallbackRoute}
+          {/* `/verify-email` is deliberately NOT gated: in OIDC + SMTP mode the server-rendered
+              register flow routes unauthenticated visitors here (see verify-email.tsx). */}
           <Route path="/verify-email" element={<VerifyEmailPage />} />
-          <Route
-            path="/forgot-password"
-            element={
-              <HostedAuthGate starter="login">
-                <ForgotPasswordPage />
-              </HostedAuthGate>
-            }
-          />
-          <Route
-            path="/reset-password"
-            element={
-              <HostedAuthGate starter="login">
-                <ResetPasswordPage />
-              </HostedAuthGate>
-            }
-          />
-          <Route
-            path="/magic-link"
-            element={
-              <HostedAuthGate starter="login">
-                <MagicLinkPage />
-              </HostedAuthGate>
-            }
-          />
-          {/*
-           * `/invite/:token` is NOT wrapped: it loads invite data first, then
-           * drives `useHostedAuthRedirect` directly with a starter (login vs
-           * signup) and login-hint derived from that data. Same seam, dynamic
-           * inputs — see invite-accept.tsx.
-           */}
+          {/* `/invite/:token` is NOT wrapped: it drives `useHostedAuthRedirect` itself (invite-accept.tsx). */}
           <Route path="/invite/:token" element={<InviteAcceptPage />} />
           <Route path="*" element={<SignedOutFallback />} />
         </Routes>
@@ -734,105 +634,58 @@ export function App() {
   return (
     <ErrorBoundary>
       <AppToaster />
-      {/*
-       * Mounted outside OrgGate/MainLayout so an in-flight OAuth pairing
-       * completes (toast + credential invalidation) even when the user is
-       * on an onboarding route or closed the modal that started it.
-       */}
+      {/* Outside OrgGate/MainLayout so an in-flight OAuth pairing completes on any route. */}
       <PendingPairingsWatcher />
       <OrgGate>
-        <Routes>
-          <Route path="/login" element={<Navigate to="/" replace />} />
-          <Route path="/register" element={<Navigate to="/" replace />} />
-          {/*
-           * `/auth/callback` must be reachable while authenticated too: by
-           * the time the browser lands here, the BA session cookie is
-           * already set by the server, so `useAuth()` flips us into this
-           * block before `AuthCallbackPage` runs. Without the route here
-           * the URL falls through to the catch-all and the `sessionStorage`
-           * returnTo we stashed pre-login is never consumed.
-           */}
-          {features.oidc && (
-            <Route
-              path="/auth/callback"
-              element={
-                <Suspense fallback={<BootScreen />}>
-                  <AuthCallbackPage />
-                </Suspense>
-              }
-            />
-          )}
-          <Route path="/invite/:token" element={<InviteAcceptPage />} />
-          <Route
-            path="/welcome"
-            element={
-              <LazyRoute>
-                <WelcomePage />
-              </LazyRoute>
-            }
-          />
-          <Route
-            path="/onboarding/waiting"
-            element={
-              <LazyRoute>
-                <OnboardingWaitingStep />
-              </LazyRoute>
-            }
-          />
-          <Route
-            path="/onboarding/create"
-            element={
-              <LazyRoute>
-                <OnboardingCreateStep />
-              </LazyRoute>
-            }
-          />
-          <Route
-            path="/onboarding/plan"
-            element={
-              <LazyRoute>
-                <OnboardingPlanStep />
-              </LazyRoute>
-            }
-          />
-          <Route
-            path="/onboarding/model"
-            element={
-              <LazyRoute>
-                <OnboardingModelStep />
-              </LazyRoute>
-            }
-          />
-          <Route
-            path="/onboarding/members"
-            element={
-              <LazyRoute>
-                <OnboardingMembersStep />
-              </LazyRoute>
-            }
-          />
-          <Route
-            path="/onboarding/complete"
-            element={
-              <LazyRoute>
-                <OnboardingDoneStep />
-              </LazyRoute>
-            }
-          />
-          <Route
-            element={
-              <GlobalRealtimeSync>
-                <MainLayout />
-              </GlobalRealtimeSync>
-            }
-          >
-            {PATHS.filter(
-              (path) => !LAYOUTS.some((l) => path.startsWith(`${l}/`) || path === l),
-            ).map(pageRoute)}
-            {LAYOUTS.map(layoutRoute)}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Route>
-        </Routes>
+        <OverlayProvider value={overlay}>
+          <OverlayExitProvider value={exit}>
+            <Routes location={page}>
+              <Route path="/login" element={<Navigate to="/" replace />} />
+              <Route path="/register" element={<Navigate to="/" replace />} />
+              {features.oidc && authCallbackRoute}
+              <Route path="/invite/:token" element={<InviteAcceptPage />} />
+              {PRE_SHELL_PAGES.map(([path, Page]) => (
+                <Route
+                  key={path}
+                  path={path}
+                  element={
+                    <PreShellRoute>
+                      <Page />
+                    </PreShellRoute>
+                  }
+                />
+              ))}
+              <Route element={<MainLayout />}>
+                {flatPaths(false).map(pageRoute)}
+                <Route path="*" element={<NotFoundPage />} />
+              </Route>
+            </Routes>
+            {/* Overlay tree: the ONLY home of the routed modals. Outside MainLayout's boundary, so it has its own. */}
+            {overlay && (
+              <ErrorBoundary resetKey={location.pathname}>
+                <Routes>
+                  {/* One dialog for every panel overlay: it opens once and its
+                      panes (skeleton, then page) change inside it. */}
+                  <Route element={<OverlayFrame />}>
+                    {flatPaths(true).map(pageRoute)}
+                    <Route
+                      element={
+                        <Suspense fallback={<OverlayPanelSkeleton />}>
+                          <UnifiedSettingsLayout />
+                        </Suspense>
+                      }
+                    >
+                      {LAYOUTS.map(layoutRoute)}
+                    </Route>
+                  </Route>
+                  {OVERLAY_NOT_FOUND_PATHS.map((path) => (
+                    <Route key={path} path={path} element={<OverlayUnavailable />} />
+                  ))}
+                </Routes>
+              </ErrorBoundary>
+            )}
+          </OverlayExitProvider>
+        </OverlayProvider>
       </OrgGate>
     </ErrorBoundary>
   );

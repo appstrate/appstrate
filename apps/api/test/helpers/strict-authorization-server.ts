@@ -86,6 +86,8 @@ export interface StrictAuthorizationServerOptions {
   offlineParam?: { name: string; value: string };
   /** Access-token lifetime. Defaults to 1h, the common short-lived case. */
   expiresIn?: number;
+  /** Scopes the user unticks at consent: requested, never granted. */
+  declinedScopes?: string[];
 }
 
 export interface StrictAuthorizationServer {
@@ -307,7 +309,10 @@ export function createStrictAuthorizationServer(
     codes.set(code, {
       redirectUri: params.redirect_uri,
       ...(params.code_challenge ? { codeChallenge: params.code_challenge } : {}),
-      scope: params.scope ?? "",
+      scope: (params.scope ?? "")
+        .split(" ")
+        .filter((scope) => !options.declinedScopes?.includes(scope))
+        .join(" "),
       offline,
       used: false,
     });

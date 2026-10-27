@@ -14,6 +14,8 @@ import {
 
 export type { RealtimeEvent };
 
+type ConnectionUpdate = Extract<RealtimeEvent, { event: "connection_update" }>["data"];
+
 /** Every channel name the fan-out can emit (`ping` is transport-level, not a channel). */
 export type RealtimeChannel = RealtimeEvent["event"];
 
@@ -44,7 +46,7 @@ type Subscriber = {
     channels?: ReadonlySet<RealtimeChannel>;
     /**
      * Actor identity for the `connection_update` channel. The trigger
-     * fires for every connection on the space; the subscriber
+     * fires for every connection of the org; the subscriber
      * forwards a row when it belongs to this actor (own connection).
      * Cross-actor shared-connection invalidations rely on the consumer
      * refetching from the server, so we don't need the shared/owner
@@ -233,11 +235,21 @@ function handleRunMetric(payload: string): void {
 // page's member picker verdict, the integration detail's connection
 // row all read off React Query keys that this event invalidates.
 //
-// Filter is per-space; the subscriber owns its actor identity
-// (set at SSE auth time) so a member only sees their own rows. The
-// payload deliberately omits `org_id` (the table has none) — tenant
-// isolation is bound to the upstream SSE auth gate proving
-// `spaceId ∈ orgId`.
+// Tenant filter: the row's org, and its space unless it is org-scoped
+// (`space_id` NULL), which reaches the owner in every space. The subscriber
+// owns its actor identity (set at SSE auth time) so a member only sees their
+// own rows.
+function receivesConnection(sub: Subscriber, data: ConnectionUpdate): boolean {
+  if (!accepts(sub, "connection_update")) return false;
+  if (sub.filter.orgId !== data.orgId) return false;
+  if (data.spaceId !== null && sub.filter.spaceId !== data.spaceId) return false;
+  // Actor filter: only fan out rows the subscriber owns; a subscription
+  // without an actor is skipped rather than leaked to.
+  if (sub.filter.userId !== undefined) return data.userId === sub.filter.userId;
+  if (sub.filter.endUserId !== undefined) return data.endUserId === sub.filter.endUserId;
+  return false;
+}
+
 function handleConnectionUpdate(payload: string): void {
   try {
     if (!anyAccepts("connection_update")) return;
@@ -251,20 +263,7 @@ function handleConnectionUpdate(payload: string): void {
     }
     const data = parsed.data;
     for (const sub of subscribers.values()) {
-      if (!accepts(sub, "connection_update")) continue;
-      if (sub.filter.spaceId !== raw.space_id) continue;
-      // Actor filter: only fan out rows the subscriber owns. Without
-      // this, every member of a space would receive every other
-      // member's connection events (org-wide cache pollution).
-      if (sub.filter.userId !== undefined) {
-        if (raw.user_id !== sub.filter.userId) continue;
-      } else if (sub.filter.endUserId !== undefined) {
-        if (raw.end_user_id !== sub.filter.endUserId) continue;
-      } else {
-        // No actor filter on the subscription — skip rather than leak.
-        continue;
-      }
-      sub.send({ event: "connection_update", data });
+      if (receivesConnection(sub, data)) sub.send({ event: "connection_update", data });
     }
   } catch (err) {
     logger.error("Failed to parse connection_update payload", {

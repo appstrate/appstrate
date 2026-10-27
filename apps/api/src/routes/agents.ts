@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { connectionPrincipal } from "../lib/connection-principal.ts";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
@@ -27,11 +28,12 @@ import {
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import { asRecord } from "@appstrate/core/safe-json";
 import type { AgentManifest } from "../types/index.ts";
-import { requireActiveAgent, requireAgent } from "../middleware/guards.ts";
+import { requireActiveAgent, requireAgent, requireAgentOrInlineRun } from "../middleware/guards.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { getActor } from "../lib/actor.ts";
 import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { parseScopedName } from "@appstrate/core/naming";
+import { readAgentAppearance } from "@appstrate/core/validation";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { z } from "zod";
 import { ApiError, forbidden, invalidRequest, notFound, validationFailed } from "../lib/errors.ts";
@@ -124,12 +126,13 @@ function scopeFromQueryParams(
 /**
  * Read guards for the package types a bundle can carry BEYOND its root.
  *
- * Both export paths walk `depTypes: ["skills"]`, so `skill` is the only type
- * that can appear today. Anything else fails CLOSED — an archive must never
- * ship bytes whose read scope this route does not name.
+ * Both export paths walk `depTypes: ["skills", "integrations"]`, so a skill or
+ * an integration is what can appear. Anything else fails CLOSED — an archive
+ * must never ship bytes whose read scope this route does not name.
  */
 const BUNDLE_DEPENDENCY_READ_GUARDS = new Map<string, ReturnType<typeof requirePermission>>([
   ["skill", requirePermission("skills", "read")],
+  ["integration", requirePermission("integrations", "read")],
 ]);
 
 /**
@@ -140,11 +143,11 @@ const BUNDLE_DEPENDENCY_READ_GUARDS = new Map<string, ReturnType<typeof requireP
  * catalog puts a dependency's ENTIRE stored file map into the archive
  * (`DbPackageCatalog.fetch` extracts the whole published artifact — the same
  * catalog for a `?source=draft` export as for a published one, since only the
- * ROOT of a draft export is a working copy). A bundle carrying a skill
- * therefore hands out exactly the bytes
- * `GET /api/packages/{scope}/{name}/files[/content]` serves — and #1123/#1124
- * settled that those need `skills:read`, resolved per package TYPE rather than
- * one blanket scope. Without this guard the export is a looser door to the same
+ * ROOT of a draft export is a working copy). A bundle carrying a skill or an
+ * integration therefore hands out exactly the bytes
+ * `GET /api/packages/{scope}/{name}/files[/content]` serves — and
+ * those need `skills:read` / `integrations:read`, resolved per package TYPE
+ * rather than one blanket scope. Without this guard the export is a looser door to the same
  * bytes: an `agents:read`-only credential is 403'd on the file explorer and
  * served the identical content here.
  *
@@ -153,11 +156,15 @@ const BUNDLE_DEPENDENCY_READ_GUARDS = new Map<string, ReturnType<typeof requireP
  *
  * Every dependency also needs live catalog reachability. This allows a readable
  * source in another accessible space while hiding packages confined to private
- * spaces.
+ * spaces. And each one is a COPY leaving the platform, so it answers the org's
+ * copy restriction the way its own `download` would: an integration archive
+ * that route refuses must not leave inside a bundle (skills and system
+ * packages stay exempt inside the helper).
  */
 async function requireBundleDependencyReadPermissions(
   c: Context<AppEnv>,
   bundle: Bundle,
+  copySource: Parameters<typeof assertPackageCopyAllowed>[2],
 ): Promise<void> {
   const checked = new Set<string>();
   for (const [identity, pkg] of bundle.packages) {
@@ -183,7 +190,8 @@ async function requireBundleDependencyReadPermissions(
       // as every route-level RBAC call site.
       await guard(c, async () => {});
     }
-    await assertCatalogPackageAccess(c, parsed.packageId);
+    const dependency = await assertCatalogPackageAccess(c, parsed.packageId);
+    await assertPackageCopyAllowed(c, dependency, copySource);
   }
 }
 
@@ -198,7 +206,7 @@ export function createAgentsRouter() {
     // Single query: the activation rule (`activeHereSql` — placed here AND
     // switched on, or a system agent with no row) via LEFT JOIN. This page
     // answers "what can I launch here?", so every row on it is launchable;
-    // an agent merely placed here, offered or switched off, lives on the
+    // an agent placed here but switched off (or never switched on) lives on the
     // space library instead (`GET /api/spaces/{spaceId}/library`), which
     // carries its origin, its state and the switch.
     const [rows, runningCounts] = await Promise.all([
@@ -209,8 +217,10 @@ export function createAgentsRouter() {
     const agentList = rows.map((row) => {
       const manifest = asRecord(row.draftManifest) as AgentManifest;
       const parsed = parseScopedName(manifest.name);
+      const appearance = readAgentAppearance(manifest as Record<string, unknown>);
       return {
         id: row.id,
+        ...appearance,
         display_name: manifest.display_name,
         description: manifest.description,
         schema_version: manifest.schema_version,
@@ -234,7 +244,7 @@ export function createAgentsRouter() {
         source: row.source ?? "local",
         // Canonical scope format includes the `@` sigil (e.g. "@myorg") so
         // list output is directly usable as `{scope}` path-param input — one
-        // operation's output must be valid input for the next (issue #629).
+        // operation's output must be valid input for the next.
         scope: parsed ? `@${parsed.scope}` : null,
         // `version` from the manifest may be absent on a partial draft; the DB
         // `type` column is NOT NULL and authoritative (manifest JSONB can lie).
@@ -331,7 +341,7 @@ export function createAgentsRouter() {
         after: { locked: body.locked_fields },
       });
 
-      // 200 + the bare persisted resource (#657): validation failures are
+      // 200 + the bare persisted resource: validation failures are
       // 400s, so a 200 needs no valid:true scrap.
       return c.json({ values, locked_fields: body.locked_fields });
     },
@@ -341,7 +351,7 @@ export function createAgentsRouter() {
   // Permission BEFORE `requireAgent()`, as on every agent route: that
   // middleware 404s on an unknown agent, so the reverse order answers "does
   // this agent exist?" to a caller that is not allowed to read agents at all —
-  // 403-vs-404 enumerates the space's private catalog (#1341). The order is
+  // 403-vs-404 enumerates the space's private catalog. The order is
   // enforced by `test/integration/middleware/agent-lookup-permission-order.test.ts`.
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/proxy`,
@@ -375,7 +385,7 @@ export function createAgentsRouter() {
         await resolveAgentConnectionReadiness({
           scope: getSpaceScope(c),
           agentPackageId: agent.id,
-          actor: getActor(c),
+          principal: connectionPrincipal(c),
           // Drive `can_add_connection` with the connect routes' own guard and
           // exemption, so the badge cannot promise what the mutation refuses.
           canConnect: c.get("permissions")?.has("integrations:connect") ?? false,
@@ -412,7 +422,7 @@ export function createAgentsRouter() {
       });
 
       // Return the bare proxy-setting resource — same shape and read path
-      // (`getSpacePackageSettings`) as GET /agents/:scope/:name/proxy (#657).
+      // (`getSpacePackageSettings`) as GET /agents/:scope/:name/proxy.
       const { proxyId } = await getSpacePackageSettings(scope, agent.id);
       return c.json({ proxyId, resolved: proxyId !== "none" });
     },
@@ -438,11 +448,11 @@ export function createAgentsRouter() {
       const scope = getSpaceScope(c);
       const data = await readJsonBody(c, modelIdSchema);
 
-      // Reject unknown/cross-org ids like run and schedule overrides do (#960); null clears.
+      // Reject unknown/cross-org ids like run and schedule overrides do; null clears.
       const current = await getSpacePackageSettings(scope, agent.id);
       const explicitModel = await assertExplicitModelExists(scope.orgId, data.modelId);
       const selectedModel =
-        explicitModel ?? (await resolveModel(scope.orgId, agent.id, data.modelId));
+        explicitModel ?? (await resolveModel(scope.orgId, agent.id, data.modelId, null));
       let generation = data.generation;
       if (generation && Object.keys(generation).length > 0) {
         generation = validateGenerationOverride(generation, selectedModel, "generation");
@@ -469,7 +479,7 @@ export function createAgentsRouter() {
       });
 
       // Return the bare model-setting resource — same shape and read path
-      // (`getSpacePackageSettings`) as GET /agents/:scope/:name/model (#657).
+      // (`getSpacePackageSettings`) as GET /agents/:scope/:name/model.
       const { modelId, generationConfig } = await getSpacePackageSettings(scope, agent.id);
       return c.json({ modelId, generation: generationConfig });
     },
@@ -484,7 +494,7 @@ export function createAgentsRouter() {
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/persistence`,
     requirePermission("persistence", "read"),
-    requireAgent(),
+    requireAgentOrInlineRun(),
     async (c) => {
       const agent = c.get("package");
       const spaceId = c.get("spaceId");
@@ -493,9 +503,7 @@ export function createAgentsRouter() {
       const actorIdParam = c.req.query("actor_id");
       const runIdParam = c.req.query("runId");
 
-      // Default scope = caller's actor. Admin filtering by other actors
-      // is controlled by `persistence:read` (admin-grade); members see
-      // their own actor's view through this endpoint.
+      // Default scope = caller's actor.
       const callerScope = scopeFromActor(getActor(c));
 
       // Optional explicit scope override. `persistence:read` gates the route
@@ -515,16 +523,19 @@ export function createAgentsRouter() {
         throw invalidRequest("kind must be 'pinned' or 'memory'");
       }
 
-      // A cross-actor reader inspecting at agent-level (no scope override, no
-      // runId) sees every actor's pinned slots; everyone else is narrowed to
-      // their scope.
-      const pinnedScope = canReadEveryActor && !scopeOverride ? undefined : scope;
+      // A cross-actor reader naming no actor sees every actor's rows, in both
+      // halves, with or without `runId` — which only filters rows, never
+      // widens or narrows the actor scope. Everyone else is narrowed to their
+      // scope (own + shared).
+      const visibleScope = canReadEveryActor && !scopeOverride ? undefined : scope;
 
       const [pinned, memories] = await Promise.all([
         wantsPinned
-          ? listPinnedSlots(agent.id, spaceId, pinnedScope, runIdParam)
+          ? listPinnedSlots(agent.id, spaceId, visibleScope, runIdParam)
           : Promise.resolve([]),
-        wantsMemory ? listMemories(agent.id, spaceId, scope, runIdParam) : Promise.resolve([]),
+        wantsMemory
+          ? listMemories(agent.id, spaceId, visibleScope, runIdParam)
+          : Promise.resolve([]),
       ]);
 
       // One resource, not a list: a snapshot of both halves under the SAME
@@ -680,8 +691,8 @@ export function createAgentsRouter() {
   // answer this agent the same way.
   // Past `agents:read` the handler refuses on the package
   // itself — the org's copy restriction (`assertPackageCopyAllowed`), draft
-  // ownership (`assertDraftSelectorAllowed`) and a per-type read scope for
-  // every dependency the assembled bundle carries.
+  // ownership (`assertDraftSelectorAllowed`), and a per-type read scope plus
+  // the same copy restriction for every dependency the assembled bundle carries.
   router.get(
     `/${SCOPED_PACKAGE_ROUTE}/bundle`,
     rateLimit(30),
@@ -725,11 +736,12 @@ export function createAgentsRouter() {
       // which is what `org_settings.restrict_package_copy` governs (RBAC spec
       // §6.10). Read + active is not enough: without this gate a restricted
       // organization's `download` refusal is one `--local` run away from being
-      // pointless. Gated on the ROOT agent only (dependencies keep their own
-      // read-scope gate below), with skills and system packages exempt inside
-      // the helper. The consequence is deliberate: `appstrate run @scope/agent
-      // --local` answers 403 `package_copy_restricted` there. A SERVER-side run
-      // is unaffected; it assembles the same bundle without handing it over.
+      // pointless. Gated here on the ROOT agent and, once the bundle is
+      // assembled, on every dependency it carries (skills and system packages
+      // exempt inside the helper). The consequence is deliberate: `appstrate
+      // run @scope/agent --local` answers 403 `package_copy_restricted` there.
+      // A SERVER-side run is unaffected; it assembles the same bundle without
+      // handing it over.
       const accessible = await packageAccessSpaces(c);
       const root = await assertCatalogPackageAccess(c, packageId);
       await assertPackageCopyAllowed(c, root, { orgId, accessible });
@@ -790,9 +802,10 @@ export function createAgentsRouter() {
         }
         // The archive carries every dependency's full stored file map, which
         // `agents:read` does not authorize. Gate on the read scope of each
-        // dependency TYPE before any bytes are serialised, so this route is not
-        // a looser door to the same content the package file explorer guards.
-        await requireBundleDependencyReadPermissions(c, bundle);
+        // dependency TYPE and on its copy restriction before any bytes are
+        // serialised, so this route is not a looser door to the same content
+        // the package file explorer and `download` guard.
+        await requireBundleDependencyReadPermissions(c, bundle, { orgId, accessible });
         // Serialization stays inside the try: `writeBundleToBuffer` re-validates
         // the assembled map and raises the same `BundleError` family, so leaving
         // it outside would keep that throw on the untyped path.

@@ -29,8 +29,12 @@
  * named route here):
  *   - GET    /orgs                      — orgs the caller belongs to
  *   - GET    /connections               — the caller's integration connections
+ *   - PATCH  /connections/:connectionId — rename it
+ *   - PUT    /connections/:connectionId/shares/:spaceId — share it into a space
+ *   - DELETE /connections/:connectionId/shares/:spaceId — withdraw it from a space
  *   - DELETE /connections/:connectionId — destructive global credential delete
  *   - GET    /connections/:connectionId/delete-impact — the caller's pins/schedules it rewrites
+ *   - GET    /connections/:connectionId/calls — the credential proxy's calls made with it
  *   - GET    /integration-pins          — member-self pins for an agent
  *   - PUT    /integration-pins/:agentPackageId/integrations/:integrationPackageId — upsert a member-self pin
  *   - DELETE /integration-pins/:agentPackageId/integrations/:integrationPackageId — clear it
@@ -43,22 +47,24 @@ import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { getOrgById, getUserOrganizations } from "../services/organizations.ts";
 import { db } from "@appstrate/db/client";
-import { integrationConnections, spaces } from "@appstrate/db/schema";
+import { integrationConnections } from "@appstrate/db/schema";
 import { and, eq } from "drizzle-orm";
 import {
   listMeConnections,
-  type MeConnectionAuthority,
   getConnectionDeleteImpact,
   noConnectionDeleteImpact,
 } from "../services/me-connections.ts";
+import { meConnectionAuthorityFilter } from "../services/connection-reach.ts";
 import { actorFilter, getActor } from "../lib/actor.ts";
+import { connectionPrincipal } from "../lib/connection-principal.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
 import { callerOrgRole, resolveListingViewAs } from "../lib/view-as.ts";
 import { callerPermissions } from "../lib/permissions.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import { requireSpaceContext } from "../middleware/space-context.ts";
 import { requireCeiling } from "../middleware/require-permission.ts";
-import { getSpaceScope, type ActorScope, type SpaceScope } from "../lib/scope.ts";
+import { rateLimit } from "../middleware/rate-limit.ts";
+import { getSpaceScope } from "../lib/scope.ts";
 import {
   upsertMemberPin,
   deletePin,
@@ -67,10 +73,23 @@ import {
   pinAuditResourceId,
 } from "../services/integration-pins-service.ts";
 import {
-  deleteIntegrationConnection,
+  deleteOwnConnection,
   getIntegrationConnectionCredentialFields,
   listUsableIntegrationsForActor,
 } from "../services/integration-connections.ts";
+import {
+  applyConnectionRename,
+  applyConnectionShareAllSpaces,
+  connectionShareAllSpacesSchema,
+  applyConnectionShare,
+  applyConnectionUnshare,
+  connectionCaller,
+  readConnectionId,
+  readShareSpaceId,
+  updateConnectionSchema,
+  type ConnectionEdit,
+} from "./integrations.ts";
+import { serveOwnConnectionCalls } from "./connection-calls-handler.ts";
 import { handoffStepsFor } from "../services/connect/provisioning.ts";
 import { removeScheduleJobs } from "../services/scheduler.ts";
 import { connectionIdSetSchema } from "../lib/connection-set.ts";
@@ -78,7 +97,7 @@ import { logger } from "../lib/logger.ts";
 import { listRunnableAgents, listActiveSkills } from "../services/space-packages.ts";
 import { homeWireForCaller, packageAccessSpaces } from "../lib/package-access.ts";
 import { listRecentForActor } from "../services/state/runs.ts";
-import { canReadRuns } from "@appstrate/core/permissions";
+import { VIEW_AS_HEADER, canReadRuns } from "@appstrate/core/permissions";
 import { getEndUser } from "../services/end-users.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { forbidden, unauthorized } from "../lib/errors.ts";
@@ -86,27 +105,6 @@ import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../lib/list-response.ts";
 
 const router = new Hono<AppEnv>();
-
-/**
- * Derive the authority boundary of the presented credential for the
- * `/me/connections` surface (list + delete).
- *
- * `user_global` is the `user` principal — the person themselves, by any
- * transport. Every other kind is `bound`: an API key (org + space), a
- * third-party OAuth client (org only), an end-user token (org + space). Each
- * authenticates as its issuer, but its bearer is a credential that may be held
- * by somebody else, so the cross-org dashboard view must never be reachable
- * with one — a leaked key could otherwise enumerate (and destructively delete)
- * the creator's connections in every org they belong to. On `main` an end-user
- * token took the global view. The org id is always pinned for a bound
- * credential; its absence is an auth-pipeline bug, so fail closed.
- */
-function getMeConnectionAuthority(c: Context<AppEnv>): MeConnectionAuthority {
-  if (isUserPrincipal(c)) return { kind: "user_global" };
-  const orgId = c.get("orgId");
-  if (!orgId) throw unauthorized("Credential is missing its organization binding");
-  return { kind: "bound", orgId, spaceId: c.get("spaceId") };
-}
 
 /**
  * GET /api/me/orgs — list orgs the authenticated caller belongs to.
@@ -139,6 +137,8 @@ router.get("/orgs", async (c) => {
           id: org.id,
           name: org.name,
           slug: org.slug,
+          icon: org.icon,
+          color: org.color,
           // End-users have no org role — surface a stable string instead
           // of `undefined` so the consumer doesn't have to special-case it.
           role: "end_user" as const,
@@ -178,6 +178,8 @@ router.get("/orgs", async (c) => {
             id: o.id,
             name: o.name,
             slug: o.slug,
+            icon: o.icon,
+            color: o.color,
             role: identity.role,
             permissions: identity.permissions,
             createdAt: o.createdAt,
@@ -199,13 +201,13 @@ router.get("/orgs", async (c) => {
  * For every other kind: hard-scoped to its binding — its org, and its space
  * when it pins one. Such a credential authenticates as its issuer, but its
  * bearer must not be able to enumerate the issuer's connections elsewhere
- * (see {@link getMeConnectionAuthority}). Source-grouped (one group per
+ * (see {@link connectionPrincipal}). Source-grouped (one group per
  * package) in both cases.
  */
 router.get("/connections", requireCeiling("integrations", "read"), async (c) => {
-  const actor = getActor(c);
-  const authority = getMeConnectionAuthority(c);
-  const groups = await listMeConnections(actor, authority);
+  if (c.req.header(VIEW_AS_HEADER) !== undefined)
+    await resolveListingViewAs(c, await getUserOrganizations(c.get("user").id));
+  const groups = await listMeConnections(connectionCaller(c, null));
   return c.json(listResponse(groups));
 });
 
@@ -222,20 +224,28 @@ router.get(
     const connectionId = c.req.param("connectionId")!;
     if (!z.uuid().safeParse(connectionId).success) return c.json(noConnectionDeleteImpact());
     return c.json(
-      await getConnectionDeleteImpact(
-        getActor(c),
-        connectionId.toLowerCase(),
-        getMeConnectionAuthority(c),
-      ),
+      await getConnectionDeleteImpact(connectionPrincipal(c), connectionId.toLowerCase()),
     );
   },
+);
+
+/**
+ * `GET /api/me/connections/:connectionId/calls` — the credential proxy's journal for a connection
+ * the caller owns: every call made with it, whoever made it. 404 for a non-UUID, unknown or
+ * not-owned id, or a connection outside a bound credential's org (and space).
+ */
+router.get(
+  "/connections/:connectionId/calls",
+  rateLimit(60),
+  requireCeiling("integrations", "read"),
+  serveOwnConnectionCalls,
 );
 
 /**
  * `/api/me/integration-pins` — member-self pin CRUD.
  *
  * When an agent has >1 candidate connection on a declared integration, the member's pick is
- * stored here and read by the resolver on every run (cascade layer 4).
+ * stored here and read by the resolver on every run (the member pin, below the launch override).
  *
  * Member-only (no end-user surface — end-users are addressed via API key
  * impersonation and the calling member controls the choice via run
@@ -243,7 +253,7 @@ router.get(
  * to (member, space, agent, integration).
  *
  * Admin pins live under `/api/integrations/:packageId/pins/...` and use
- * a different validation rule (the connection must be `sharedWithOrg`);
+ * a different validation rule (the connection must be shared into the space);
  * the two sets coexist in the same table, discriminated by `user_id`.
  */
 export const upsertMemberPinSchema = z
@@ -324,15 +334,67 @@ router.delete(
     const agentPackageId = c.req.param("agentPackageId")!;
     const integrationPackageId = c.req.param("integrationPackageId")!;
     const scope = getSpaceScope(c);
-    const { previous } = await deletePin(scope, agentPackageId, integrationPackageId, userId);
+    const { previous, disabledScheduleIds } = await deletePin(
+      scope,
+      agentPackageId,
+      integrationPackageId,
+      userId,
+    );
+    await removeScheduleJobs(disabledScheduleIds);
     if (previous) {
       await recordAuditFromContext(c, {
         action: "integration.member_pin.deleted",
         resourceType: "integration_pin",
         resourceId: pinAuditResourceId(agentPackageId, integrationPackageId),
-        before: pinAudit(previous),
+        before: pinAudit(previous.connectionIds),
+        ...(disabledScheduleIds.length > 0 ? { after: { disabledScheduleIds } } : {}),
       });
     }
+    return c.json({ schedules_disabled_count: disabledScheduleIds.length });
+  },
+);
+
+/**
+ * The owner's edit doors on the account surface: no request space, so the services reach only the
+ * caller's own rows inside its credential's binding; a miss is a 404.
+ */
+function meEdit(c: Context<AppEnv>): ConnectionEdit {
+  return { caller: connectionCaller(c, null), integrationId: null };
+}
+
+router.patch("/connections/:connectionId", requireCeiling("integrations", "connect"), async (c) => {
+  const connectionId = readConnectionId(c);
+  const body = await readJsonBody(c, updateConnectionSchema);
+  return c.json(await applyConnectionRename(c, meEdit(c), connectionId, body.label));
+});
+
+router.put(
+  "/connections/:connectionId/shares",
+  requireCeiling("integrations", "connect"),
+  async (c) => {
+    // No org context here, so a role preview names its org with X-Org-Id, as on the listing.
+    if (c.req.header(VIEW_AS_HEADER) !== undefined)
+      await resolveListingViewAs(c, await getUserOrganizations(c.get("user").id));
+    const body = await readJsonBody(c, connectionShareAllSpacesSchema);
+    await applyConnectionShareAllSpaces(c, meEdit(c), readConnectionId(c), body.share_all_spaces);
+    return c.body(null, 204);
+  },
+);
+
+router.put(
+  "/connections/:connectionId/shares/:spaceId",
+  requireCeiling("integrations", "connect"),
+  async (c) => {
+    await applyConnectionShare(c, meEdit(c), readConnectionId(c), readShareSpaceId(c));
+    return c.body(null, 204);
+  },
+);
+
+router.delete(
+  "/connections/:connectionId/shares/:spaceId",
+  requireCeiling("integrations", "connect"),
+  async (c) => {
+    await applyConnectionUnshare(c, meEdit(c), readConnectionId(c), readShareSpaceId(c));
     return c.body(null, 204);
   },
 );
@@ -351,76 +413,21 @@ router.delete(
  * there they switch the agent's pick with `PUT /api/me/integration-pins/{agent}/integrations/{integration}`,
  * which stops one agent using a connection without destroying it.
  *
- * Space context is implicit — the connection row carries `space_id`,
- * we re-derive scope from it instead of asking the SPA to send a header
- * for a per-row operation. EXCEPT for a bound credential: a delete outside its
- * binding is refused (a leaked key must not be able to destroy the creator's
- * credentials in other orgs/spaces), so its own scope is used instead of the
- * row-derived one.
+ * A row outside a bound credential's binding answers 204 like an unknown one.
  */
 router.delete(
   "/connections/:connectionId",
   requireCeiling("integrations", "disconnect"),
   async (c) => {
     const connectionId = c.req.param("connectionId")!;
-    const actor = getActor(c);
-    const authority = getMeConnectionAuthority(c);
 
-    // The id hits a `uuid` column — a non-UUID would raise PG `22P02` and surface
-    // as a 500. Validate first and short-circuit to 204: same non-disclosure
-    // intent as the "row not found" branch below (no information leak to a caller
-    // probing ids).
+    // The id hits a `uuid` column — a non-UUID would raise PG `22P02` and surface as a 500.
     if (!z.uuid().safeParse(connectionId).success) {
       return c.body(null, 204);
     }
-
-    // /me/* skips org/space context middleware — derive spaceId from
-    // the connection row itself. Ownership is enforced by the service via
-    // (userId | endUserId) filter, not by org membership: a connection
-    // belongs to its owner regardless of which org context they're browsing.
-    const [row] = await db
-      .select({ spaceId: integrationConnections.spaceId, orgId: spaces.orgId })
-      .from(integrationConnections)
-      .innerJoin(spaces, eq(spaces.id, integrationConnections.spaceId))
-      .where(eq(integrationConnections.id, connectionId))
-      .limit(1);
-    if (!row) {
-      // 204 instead of 404 keeps the response stable whether the connection
-      // never existed or already deleted — same end state, no information
-      // disclosure to a caller probing IDs.
-      return c.body(null, 204);
-    }
-
-    // Scope selection depends on the credential's authority:
-    //
-    //   - A bound credential: when it pins a space, a connection outside that
-    //     space short-circuits to 204 (same non-disclosure as the "row not
-    //     found" branch — a probing key learns nothing). The delete then runs
-    //     under the CREDENTIAL's `SpaceScope`, so the service's space∈org
-    //     assertion and its `spaceId` WHERE filter both enforce the binding in
-    //     SQL; an org-only credential is held to its org by that same assertion.
-    //
-    //   - A `user` principal (`user_global`): pass an `ActorScope`
-    //     (spaceId only, no orgId) deliberately. `/me/connections` is an
-    //     actor-ownership boundary, not a space∈org one: a connection belongs to
-    //     its owner regardless of which org the caller is currently scoped to.
-    //     The absence of `orgId` tells the service to skip its space∈org
-    //     assertion and rely solely on the (userId | endUserId) ownership
-    //     predicate. Passing the caller's live `c.get("orgId")` here (populated
-    //     for OIDC callers, empty for cookie sessions) would wrongly run that
-    //     assertion and 404 a self-owned connection whose space lives in
-    //     a different org. Ownership is still fully enforced downstream by the
-    //     actor filter.
-    let scope: SpaceScope | ActorScope;
-    if (authority.kind === "bound") {
-      if (authority.spaceId && row.spaceId !== authority.spaceId) {
-        return c.body(null, 204);
-      }
-      scope = { orgId: authority.orgId, spaceId: row.spaceId };
-    } else {
-      scope = { spaceId: row.spaceId } satisfies ActorScope;
-    }
-    const { disabledScheduleIds } = await deleteIntegrationConnection(scope, connectionId, actor);
+    const deleted = await deleteOwnConnection(connectionPrincipal(c), connectionId);
+    if (!deleted) return c.body(null, 204);
+    const { orgId, disabledScheduleIds } = deleted;
     await removeScheduleJobs(disabledScheduleIds);
     // A cookie session carries no org context on /me/*: the audit names the connection's org.
     await recordAuditFromContext(c, {
@@ -428,7 +435,7 @@ router.delete(
       resourceType: "integration_connection",
       resourceId: connectionId,
       after: { disabledScheduleIds },
-      orgIdOverride: row.orgId,
+      orgIdOverride: orgId,
     });
     return c.body(null, 204);
   },
@@ -447,39 +454,28 @@ router.get(
   requireCeiling("integrations", "disconnect"),
   async (c) => {
     const connectionId = c.req.param("connectionId")!;
-    const actor = getActor(c);
-    const authority = getMeConnectionAuthority(c);
+    const principal = connectionPrincipal(c);
     const empty = () => c.json(listResponse([]));
 
     if (!z.uuid().safeParse(connectionId).success) return empty();
 
-    // The org comes from the space (connections are space-scoped). Ownership
-    // rides the WHERE via `actorFilter`, so a row this actor does not own never
-    // loads and nothing below can decrypt it.
+    // Ownership and a bound credential's org (and space) ride the WHERE, so a row
+    // out of reach never loads and nothing below can decrypt it.
     const [row] = await db
       .select({
-        spaceId: integrationConnections.spaceId,
-        orgId: spaces.orgId,
         integrationId: integrationConnections.integrationId,
         authKey: integrationConnections.authKey,
       })
       .from(integrationConnections)
-      .innerJoin(spaces, eq(spaces.id, integrationConnections.spaceId))
       .where(
         and(
           eq(integrationConnections.id, connectionId),
-          actorFilter(actor, integrationConnections),
+          actorFilter(principal.actor, integrationConnections),
+          meConnectionAuthorityFilter(principal),
         ),
       )
       .limit(1);
     if (!row) return empty();
-
-    // A BOUND credential is held to its org and pinned space, as on the list
-    // and the delete.
-    if (authority.kind === "bound") {
-      if (row.orgId !== authority.orgId) return empty();
-      if (authority.spaceId && row.spaceId !== authority.spaceId) return empty();
-    }
 
     try {
       const credentials = await getIntegrationConnectionCredentialFields(connectionId);
@@ -506,13 +502,12 @@ router.get(
  * prompt, the platform MCP server exposes it as the `get_me` tool, and
  * external REST/MCP clients call it directly. Returns the caller's identity,
  * their role in the pinned org, and the integrations they could attach when
- * building an agent in the current space (own or org-shared) — so the
+ * building an agent in the current space (own or shared into it) — so the
  * agent can prefer already-connected integrations and respect the caller's
  * role (operations beyond it will 403 at invoke time).
  *
  * Space context resolves as `requireSpaceContext` does: the credential's
- * space, else `X-Space-Id`, else (in-process MCP sub-dispatch only) the org's
- * default space. The payload names that space: an empty list alone cannot
+ * space, else `X-Space-Id`; with neither, a 400. The payload names that space: an empty list alone cannot
  * tell an agent whether nothing is there for it or it is in the wrong space.
  */
 router.get("/context", requireSpaceContext(), async (c) => {

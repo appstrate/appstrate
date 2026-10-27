@@ -15,7 +15,7 @@
  * verbatim. This descriptor is what the runtime Pi-tool registration
  * (`mcp-forward.ts`) and the platform prompt builder consume — that
  * description is the LLM-facing doc (the agent learns the tool from
- * `tools/list`; the prompt no longer carries a TOOL.md).
+ * `tools/list`; the prompt carries no TOOL.md).
  */
 
 import { defineTool } from "../define.ts";

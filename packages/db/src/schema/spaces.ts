@@ -25,6 +25,17 @@ export const spaces = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     name: text("name").notNull(),
+    /**
+     * Visual identity, shared with agents and organizations: `lucide:<name>` or
+     * `emoji:<one emoji>` — a space takes no uploaded image (`PATCH /api/spaces/{id}`
+     * refuses one). Null renders the space's initial.
+     */
+    icon: text("icon"),
+    /**
+     * A palette key (`blue`, `emerald`, …), validated by the application so a new
+     * colour needs no migration. Null derives the colour from the id.
+     */
+    color: text("color"),
     isDefault: boolean("is_default").notNull().default(false),
     settings: jsonb("settings").notNull().default({}),
     createdBy: text("created_by").references(() => user.id, {
@@ -62,6 +73,9 @@ export const spaces = pgTable(
   },
   (table) => [
     index("idx_spaces_org_id").on(table.orgId),
+    // Referenced target of `integration_connections`' composite origin FK, which keeps
+    // `origin_space_id` inside the row's own org. `id` alone is the PK, so it never collides.
+    uniqueIndex("uq_spaces_id_org_id").on(table.id, table.orgId),
     uniqueIndex("idx_spaces_one_default")
       .on(table.orgId)
       .where(sql`${table.isDefault} = true`),
@@ -85,6 +99,10 @@ export const spaces = pgTable(
     check("spaces_personal_is_private", sql`owner_user_id IS NULL OR visibility = 'private'`),
     check("spaces_personal_not_default", sql`owner_user_id IS NULL OR NOT is_default`),
     check("spaces_orphaned_is_personal", sql`orphaned_at IS NULL OR owner_user_id IS NOT NULL`),
+    // Backstop behind the application's icon validation, the same bound as
+    // `organizations_icon_length`: one ceiling for the one icon grammar, though a
+    // space's own forms stay far below it.
+    check("spaces_icon_length", sql`octet_length(icon) <= 16384`),
   ],
 );
 

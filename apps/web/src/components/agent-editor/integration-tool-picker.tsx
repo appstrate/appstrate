@@ -1,57 +1,59 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Niveau 2 — per-integration tool/scope picker rendered inside the agent
- * editor's Integrations section. Drives
- * `IntegrationSpawnSpec.toolAllowlist` → sidecar `McpHost.allowedTools`
- * (Phase 3) and optionally pins extra OAuth scopes beyond those
- * inferred from the tool selection.
+ * Per-integration tool/scope picker for the agent editor's Integrations section.
  *
- * Least-privilege contract: `tools: undefined` and `tools: []` are NOT
- * the same selection — `undefined` inherits the integration's declared
- * `default_tools` (§4.4), `[]` overrides it with nothing. The picker
- * surfaces "Select all" / "Select none" buttons so the author can flip
- * the common cases in one click; per-tool checkboxes handle the fine
- * grain. The first toggle promotes the inherited default to an explicit
- * array so subsequent renders see the written form.
- *
- * "Select none" stays — clearing the grid before re-picking is a normal
- * editing move and the draft saves fine — but it cannot be the state you
- * SHIP: publish/import refuse it with `no_tools_selected` and a run aborts
- * at sidecar boot. `tools.noneNotice` says so in the panel.
- *
- * The picker writes back through `onChange` (handed in by
- * `ResourceSection`); the resulting `ResourceEntry` is split into the
- * `dependencies.integrations[id]` version (§4.1) and the
- * `integrations_configuration[id]` selection (§4.4) by
- * `setResourceEntries('integrations')`. Above it, the §4.4 `required` flag: set, a run refuses
- * to start without a connection; unset (an absent key), it starts without the integration.
+ * `tools: undefined` and `tools: []` differ: `undefined` inherits the integration's
+ * `default_tools` (§4.4), `[]` selects nothing. The first toggle promotes the inherited default
+ * to an explicit array. "Select none" is allowed in a draft, but publish/import refuse it
+ * (`no_tools_selected`) and a run aborts at sidecar boot; `tools.noneNotice` says so.
+ * The `required` flag (§4.4) above it: set, a run refuses to start without a connection.
  */
 
-import { useState } from "react";
+import { toggleValue } from "../../lib/toggle-value";
+import { type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import {
   apiUploadToolNameFor,
   expandScopesGranted,
   getApiCallConfigs,
   readDefaultTools,
+  resolveScopeToolSelection,
 } from "@appstrate/core/integration";
 import {
   isApiCallToolSelectionEnabled,
   replaceNativeToolSelection,
   toggleApiCallToolSelection,
 } from "./tool-selection.ts";
+import { cn } from "@appstrate/ui/cn";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
-import { Spinner } from "../spinner";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@appstrate/ui/components/select";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@appstrate/ui/components/collapsible";
+import { Button } from "@appstrate/ui/components/button";
+import { PackageToolCatalog } from "../package-detail/package-tool-catalog";
 import { useIntegrationDetail } from "../../hooks/use-integrations";
 import type { ResourceEntry } from "./types";
+import { TextSkeleton } from "../loading-skeletons";
 
 interface IntegrationToolPickerProps {
   packageId: string;
   entry: ResourceEntry;
   onChange: (next: ResourceEntry) => void;
 }
+
+/** Radix `Select` refuses an empty item value: this stands for "the integration's default auth". */
+const DEFAULT_AUTH_KEY = "__default__";
 
 export function IntegrationToolPicker(props: IntegrationToolPickerProps) {
   return (
@@ -95,14 +97,9 @@ function RequiredIntegrationToggle({ packageId, entry, onChange }: IntegrationTo
 function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPickerProps) {
   const { t } = useTranslation("settings");
   const { data: detail, isLoading } = useIntegrationDetail(packageId);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   if (isLoading) {
-    return (
-      <div className="mt-2 flex items-center justify-center py-2">
-        <Spinner />
-      </div>
-    );
+    return <TextSkeleton lines={2} className="mt-2" />;
   }
   if (!detail) {
     return (
@@ -112,19 +109,11 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
     );
   }
 
-  // Effective agent-facing tool catalog. Resolved server-side from the
-  // referenced mcp-server's MCPB `tools[]` minus `hidden_tools` and
-  // auto-hidden connect.tool primitives — the integration's sparse
-  // `tools{}` policy table is no longer the source of truth for "what
-  // exists" (it only carries per-tool policy when present).
+  // Server-resolved catalog; the integration's sparse `tools{}` policy table is not the source of "what exists".
   const fullCatalog = detail.tool_catalog ?? [];
   const fullCatalogNames = new Set(fullCatalog.map((tool) => tool.name));
-  // The api_call tool(s) have their own dedicated checkbox row(s); exclude
-  // them from the native tools list so they don't render twice. Their
-  // `api_upload` companions get no row of their own: the runtime grants the
-  // pair together (each upload chunk is dispatched through the sibling
-  // api_call tool), so a separate checkbox could only express a selection the
-  // resolver refuses to honour.
+  // api_call tools have their own rows. Their `api_upload` companions get none: the runtime grants
+  // the pair together, so a separate checkbox could express a selection the resolver refuses.
   const apiCallConfigs = getApiCallConfigs(detail.manifest);
   const syntheticApiCallNames = new Set(apiCallConfigs.map((config) => config.toolName));
   const derivedSyntheticApiUploadNames = new Set(
@@ -148,29 +137,15 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
   const declaredToolNames = nativeCatalog.map((t) => t.name);
   const hasToolCatalog = declaredToolNames.length > 0;
 
-  // Reflect the server's `resolveEffectiveToolSelection`: when the agent
-  // declared no selection (`tools === undefined`, i.e. no
-  // `integrations_configuration.<id>`), the runtime inherits the integration's
-  // declared `default_tools` (AFPS §4.4). Mirror that here so the picker shows
-  // what will actually run — generically, from whatever the integration
-  // declares, with no hard-coded api_call special-casing. The default is NOT
-  // materialised into the manifest: the inheritance is preserved until the
-  // author makes an explicit pick, and the first toggle/Select-* promotes it to
-  // an explicit array (which overrides the default, mirroring runtime
-  // precedence). An explicit selection — including `[]` and `"*"` — passes
-  // through untouched.
+  // Mirrors the server's `resolveEffectiveToolSelection`: with no selection, the integration's
+  // `default_tools` (§4.4) apply. Not written into the manifest until the author makes an explicit pick.
   const effectiveTools =
     entry.tools === undefined ? readDefaultTools(detail.manifest) : entry.tools;
 
-  // AFPS §4.4 wildcard — `tools: "*"` (explicit, or inherited from a wildcard
-  // `default_tools`) bypasses the per-tool picker. Tracked separately because
-  // the wildcard and the array form share the same field but the UI branches.
+  // `tools: "*"` (explicit or inherited) bypasses the per-tool picker.
   const wildcardSelected = effectiveTools === "*";
 
-  // Multi-auth surface (AFPS §4.4 `auth_key`): when the integration
-  // declares >1 auth method, the agent author can pin which `auths.<key>`
-  // this dep uses at runtime. `undefined` keeps the resolver cascade's
-  // default behaviour (any accessible connection wins).
+  // `auth_key` (§4.4) pins one of >1 auth methods; `undefined` keeps the resolver's default cascade.
   const authEntries = Object.entries(detail.manifest.auths ?? {});
   const hasMultipleAuths = authEntries.length > 1;
   const authMethodLabel = (key: string, auth: (typeof authEntries)[number][1]): string => {
@@ -186,15 +161,9 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
     onChange({ ...entry, auth_key: next });
   };
 
-  // api_call integrations expose generic credential-injecting tool(s) (one per
-  // auth opted into the `_meta["dev.appstrate/api"]` extension) instead of, or
-  // alongside, discrete MCP tools. Surface each as a selectable tool so the
-  // agent author can opt in (the runtime gates injection on the selection).
   const isApiCall = apiCallToolNames.length > 0;
 
-  // Aggregate scope catalog across every auth — the resolver treats them
-  // as a single namespace per integration (Phase 0). Dedup by `value`,
-  // keep the first occurrence's label/description.
+  // One namespace across every auth, as the resolver sees it; first occurrence wins per `value`.
   const scopeCatalog = new Map<string, { value: string; label: string; description?: string }>();
   for (const auth of Object.values(detail.manifest.auths ?? {})) {
     for (const s of auth.scope_catalog ?? []) {
@@ -203,42 +172,26 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
   }
   const hasScopeCatalog = scopeCatalog.size > 0;
 
-  // The effective selection, canonicalised. `undefined` is reflected through
-  // `effectiveTools` above so an inherited `default_tools` shows as checked
-  // without being written back; the first toggle promotes that to an explicit
-  // array. The wildcard form `"*"` short-circuits the picker (see
-  // `wildcardSelected` above) — fall back to an empty set so the checkbox
-  // lookups below stay safe.
+  // Wildcard falls back to an empty set so the checkbox lookups below stay safe.
   const arrayTools = Array.isArray(effectiveTools) ? [...new Set(effectiveTools)] : [];
   const selectedTools = new Set(arrayTools);
   const selectedScopes = new Set(entry.scopes ?? []);
   const allSelected =
     declaredToolNames.length > 0 && declaredToolNames.every((name) => selectedTools.has(name));
-  // Disabled-state for the "Select none" button, which clears the NATIVE slice
-  // only (`replaceNativeToolSelection` preserves visible synthetic api_call
-  // selections).
+  // "Select none" clears the NATIVE slice only (api_call selections are preserved).
   const noneSelected = declaredToolNames.every((name) => !selectedTools.has(name));
-  // Nothing callable AT ALL — mirrors `selectsNoCallableTool` on the API side:
-  // the whole effective selection, api_call rows included, not just the native
-  // slice.
+  // Mirrors `selectsNoCallableTool` on the API side: the whole selection, api_call rows included.
   const selectsNothing = !wildcardSelected && arrayTools.length === 0;
 
-  // Inferred OAuth scopes — exactly what Phase 2 `computeRequiredScopes`
-  // will union into the OAuth kickoff. Contributes the union of
-  // selected tools' requiredScopes only (`undefined`/`[]` selection
-  // contributes nothing). Map keeps attribution for "required by: …".
-  // Policy lookup goes through the resolved catalog: a tool without
-  // policy contributes nothing (expected — most discoverable tools have
-  // no scope requirements).
-  //
-  // Wildcard path (`tools: "*"`) skips per-tool inference entirely — the
-  // server-side resolver uses the auth's `default_scopes` instead, which
-  // is shown to the user via a dedicated notice rather than the attribution
-  // map.
+  // Inferred OAuth scopes: the union of `required_scopes` of the tools the agent ITSELF selects
+  // (`resolveScopeToolSelection`, the server's rule); tools inherited from `default_tools`
+  // contribute none. The map keeps attribution for "required by: …". Wildcard skips inference
+  // (the server uses the auth's `default_scopes`, shown via a dedicated notice).
   const catalogByName = new Map(fullCatalog.map((t) => [t.name, t]));
   const inferredScopes = new Map<string, string[]>();
-  if (!wildcardSelected) {
-    for (const toolName of arrayTools) {
+  const scopeTools = resolveScopeToolSelection(entry.tools, detail.manifest);
+  if (scopeTools !== "*") {
+    for (const toolName of scopeTools) {
       const meta = catalogByName.get(toolName);
       for (const scope of Object.values(meta?.policy?.required_scopes ?? {}).flat()) {
         const existing = inferredScopes.get(scope) ?? [];
@@ -249,11 +202,8 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
   }
   const hasInferredScopes = inferredScopes.size > 0;
 
-  // Transitively expand the inferred set through the manifest's `implies`
-  // hierarchy (mirrors `expandScopesGranted` used server-side for missing-
-  // scope diffs). Without this, `repo` would be flagged as inferred but
-  // its implied children (`repo:status`, `repo_deployment`) would render
-  // as toggleable — even though the OAuth grant already covers them.
+  // Expand through the manifest's `implies` hierarchy (as the server does), so implied children
+  // of an inferred scope are not offered as toggleable.
   const inferredExpanded = new Set<string>(inferredScopes.keys());
   const directInferred = [...inferredScopes.keys()];
   for (const authKey of Object.keys(detail.manifest.auths ?? {})) {
@@ -262,39 +212,23 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
     }
   }
 
-  // Pinned scopes that aren't already inferred — surface them as
-  // "(pinned)" badges to make the union visible. Pinned scopes that
-  // ARE also inferred get the inferred attribution (no point showing
-  // "pinned" — the tool selection already covers them, the pin is redundant
-  // but harmless).
+  // A pin that is also inferred shows as inferred; only the rest get a "(pinned)" badge.
   const pinnedOnlyScopes = [...selectedScopes].filter((s) => !inferredScopes.has(s));
 
   const toggleTool = (name: string) => {
-    // Defensive: the per-tool checkboxes are hidden when `wildcardSelected`,
-    // but a stray click during render race shouldn't silently corrupt the
-    // wildcard with an array. Treat `"*"` as no-op here.
-    if (wildcardSelected) return;
-    const current = arrayTools;
-    const next = current.includes(name) ? current.filter((t) => t !== name) : [...current, name];
+    const next = toggleValue(arrayTools, name);
     onChange({ ...entry, tools: next });
   };
 
-  // api_call rows carry their `api_upload` companion (when the integration
-  // declared `upload_protocols`) so the written selection matches what the
-  // runtime will expose. Toggling the pair as one keeps the manifest honest —
-  // the resolver grants both from either name, and a half-selection would read
-  // as a capability the agent doesn't have.
+  // Toggles the api_call and its `api_upload` companion as one: the resolver grants both from either name.
   const toggleApiCallTool = (name: string) => {
-    if (wildcardSelected) return;
     onChange({
       ...entry,
       tools: toggleApiCallToolSelection(arrayTools, name, visibleSyntheticApiUploadNames),
     });
   };
 
-  // Wildcard toggle (AFPS §4.4) — gated by `detail.allow_undeclared_tools`.
-  // ON: replace any array selection with `"*"`. OFF: drop back to an empty
-  // array, mirroring "Select none" (the user re-picks tools individually).
+  // Wildcard (§4.4), gated by `allow_undeclared_tools`. OFF drops back to `[]`, like "Select none".
   const wildcardEnabled = detail.allow_undeclared_tools === true;
   const onWildcardChange = (next: boolean) => {
     onChange({ ...entry, tools: next ? "*" : [] });
@@ -302,79 +236,56 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
 
   const toggleScope = (value: string) => {
     const current = entry.scopes ?? [];
-    const next = current.includes(value) ? current.filter((s) => s !== value) : [...current, value];
+    const next = toggleValue(current, value);
     onChange({ ...entry, scopes: next.length > 0 ? next : undefined });
   };
 
-  const selectAllTools = () =>
+  const setNative = (all: boolean) =>
     onChange({
       ...entry,
       tools: replaceNativeToolSelection(
         arrayTools,
         declaredToolNames,
         visibleSyntheticToolNames,
-        true,
-      ),
-    });
-  const selectNoTools = () =>
-    onChange({
-      ...entry,
-      tools: replaceNativeToolSelection(
-        arrayTools,
-        declaredToolNames,
-        visibleSyntheticToolNames,
-        false,
+        all,
       ),
     });
 
-  // Niveau 2 contract: when the integration manifest declares neither a
-  // `tools` block nor any `scope_catalog` catalog, there is literally
-  // nothing for the agent author to pick — every tool is allowed and
-  // scopes default to `auths.{key}.scopes`. Render an explicit notice
-  // (rather than `return null`) so the user understands why the panel
-  // is empty and can debug "the gmail integration shows nothing"
-  // without grepping the codebase — typical root cause is a DB
-  // manifest that predates the niveau 2 fields and needs a server
-  // reboot to drift-heal.
-  //
-  // AFPS §4.4 wildcard exception — when the integration declares
-  // `allow_undeclared_tools: true` but no declared catalog (the canonical
-  // "trust the upstream MCP server" case), the wildcard toggle is still
-  // meaningful and MUST surface; the early-return below would otherwise
-  // hide it. We render the toggle in a minimal frame instead of the
-  // noCatalog notice.
+  const wildcardControl = wildcardEnabled && (
+    <div className="bg-background border-warning/30 rounded-md border-l-2 p-2">
+      <label
+        className="flex cursor-pointer items-start gap-2"
+        data-testid={`integ-wildcard-${packageId}`}
+      >
+        <Checkbox
+          checked={wildcardSelected}
+          onCheckedChange={(v) => onWildcardChange(v === true)}
+          className="mt-0.5"
+        />
+        <span className="flex min-w-0 flex-col">
+          <span className="text-xs font-semibold">
+            {t("agentEditor.integrations.wildcard.label")}
+          </span>
+          <span className="text-muted-foreground text-[11px]">
+            {t("agentEditor.integrations.wildcard.description")}
+          </span>
+        </span>
+      </label>
+      {wildcardSelected && (
+        <p className="text-muted-foreground mt-2 text-[11px]">
+          {t("agentEditor.integrations.wildcard.scopesNotice")}
+        </p>
+      )}
+    </div>
+  );
+
+  // Nothing to pick: render an explicit notice rather than `null` so an empty panel is explained.
+  // Exception: `allow_undeclared_tools: true` with no catalog still needs the wildcard toggle.
   if (!hasToolCatalog && !hasScopeCatalog && !isApiCall && !hasMultipleAuths) {
     if (wildcardEnabled) {
       return (
-        <div
-          className="bg-muted/30 mt-2 space-y-3 rounded-md border p-3"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="bg-background rounded-md border-l-2 border-amber-500/30 p-2">
-            <label
-              className="flex cursor-pointer items-start gap-2"
-              data-testid={`integ-wildcard-${packageId}`}
-            >
-              <Checkbox
-                checked={wildcardSelected}
-                onCheckedChange={(v) => onWildcardChange(v === true)}
-                className="mt-0.5"
-              />
-              <span className="flex min-w-0 flex-col">
-                <span className="text-xs font-semibold">
-                  {t("agentEditor.integrations.wildcard.label")}
-                </span>
-                <span className="text-muted-foreground text-[11px]">
-                  {t("agentEditor.integrations.wildcard.description")}
-                </span>
-              </span>
-            </label>
-            {wildcardSelected && (
-              <p className="text-muted-foreground mt-2 text-[11px]">
-                {t("agentEditor.integrations.wildcard.scopesNotice")}
-              </p>
-            )}
-          </div>
+        <div className="bg-muted/30 mt-2 flex flex-col gap-3 rounded-md border p-3">
+          {wildcardControl}
         </div>
       );
     }
@@ -386,17 +297,9 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
   }
 
   return (
-    <div
-      className="bg-muted/30 mt-2 space-y-3 rounded-md border p-3"
-      onClick={(e) => e.stopPropagation()}
-    >
-      {/* Sits above the pickers because it applies to the whole integration,
-          not to the native slice alone. */}
+    <div className="bg-muted/30 mt-2 flex flex-col gap-3 rounded-md border p-3">
       {selectsNothing && (
-        <p
-          className="text-[11px] text-amber-600 dark:text-amber-500"
-          data-testid={`integ-no-tools-${packageId}`}
-        >
+        <p className="text-warning text-[11px]" data-testid={`integ-no-tools-${packageId}`}>
           {t("agentEditor.integrations.tools.noneNotice")}
         </p>
       )}
@@ -406,55 +309,32 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
             <span className="text-xs font-semibold">
               {t("agentEditor.integrations.authKey.label")}
             </span>
-            <select
-              className="bg-background rounded border px-2 py-1 text-xs"
-              value={entry.auth_key ?? ""}
-              onChange={(e) => onAuthKeyChange(e.target.value)}
-              data-testid={`integ-auth-key-${packageId}`}
+            <Select
+              value={entry.auth_key ?? DEFAULT_AUTH_KEY}
+              onValueChange={(key) => onAuthKeyChange(key === DEFAULT_AUTH_KEY ? "" : key)}
             >
-              <option value="">{t("agentEditor.integrations.authKey.default")}</option>
-              {authEntries.map(([key, auth]) => (
-                <option key={key} value={key}>
-                  {authMethodLabel(key, auth)}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="h-8 text-xs" data-testid={`integ-auth-key-${packageId}`}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={DEFAULT_AUTH_KEY}>
+                  {t("agentEditor.integrations.authKey.default")}
+                </SelectItem>
+                {authEntries.map(([key, auth]) => (
+                  <SelectItem key={key} value={key}>
+                    {authMethodLabel(key, auth)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </label>
         </div>
       )}
-      {wildcardEnabled && (
-        <div className="bg-background rounded-md border-l-2 border-amber-500/30 p-2">
-          <label
-            className="flex cursor-pointer items-start gap-2"
-            data-testid={`integ-wildcard-${packageId}`}
-          >
-            <Checkbox
-              checked={wildcardSelected}
-              onCheckedChange={(v) => onWildcardChange(v === true)}
-              className="mt-0.5"
-            />
-            <span className="flex min-w-0 flex-col">
-              <span className="text-xs font-semibold">
-                {t("agentEditor.integrations.wildcard.label")}
-              </span>
-              <span className="text-muted-foreground text-[11px]">
-                {t("agentEditor.integrations.wildcard.description")}
-              </span>
-            </span>
-          </label>
-          {wildcardSelected && (
-            <p className="text-muted-foreground mt-2 text-[11px]">
-              {t("agentEditor.integrations.wildcard.scopesNotice")}
-            </p>
-          )}
-        </div>
-      )}
+      {wildcardControl}
       {!wildcardSelected &&
         isApiCall &&
         apiCallEntries.map((tool) => {
-          // The `api_upload` companion has no checkbox of its own — it is
-          // granted with its api_call sibling. Say so in the row's own label
-          // rather than leaving the extra capability invisible.
+          // The `api_upload` companion is granted with its api_call sibling; the row label says so.
           const uploadToolName = apiUploadToolNameFor(tool.name);
           const withUpload = visibleSyntheticApiUploadNames.has(uploadToolName);
           const pairSelected = isApiCallToolSelectionEnabled(
@@ -500,61 +380,39 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
               {t("agentEditor.integrations.tools.title")}
             </span>
             <div className="flex items-center gap-2">
-              <button
+              <Button
                 type="button"
-                className="text-muted-foreground hover:text-foreground text-[10px] underline disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50"
-                onClick={selectAllTools}
+                variant="ghost"
+                size="sm"
+                onClick={() => setNative(true)}
                 disabled={allSelected}
                 data-testid={`integ-tools-select-all-${packageId}`}
               >
-                {t("agentEditor.integrations.tools.selectAll")}
-              </button>
-              <button
+                {t("models.form.discoverSelectAll")}
+              </Button>
+              <Button
                 type="button"
-                className="text-muted-foreground hover:text-foreground text-[10px] underline disabled:cursor-not-allowed disabled:no-underline disabled:opacity-50"
-                onClick={selectNoTools}
+                variant="ghost"
+                size="sm"
+                onClick={() => setNative(false)}
                 disabled={noneSelected}
                 data-testid={`integ-tools-select-none-${packageId}`}
               >
-                {t("agentEditor.integrations.tools.selectNone")}
-              </button>
+                {t("apiKeys.deselectAll")}
+              </Button>
             </div>
           </div>
           <p className="text-muted-foreground mb-2 text-[11px]">
             {t("agentEditor.integrations.tools.explicitNotice")}
           </p>
-          <div className="grid gap-1.5">
-            {nativeCatalog.map((entry) => {
-              const requiredScopes = [
-                ...new Set(Object.values(entry.policy?.required_scopes ?? {}).flat()),
-              ];
-              return (
-                <label
-                  key={entry.name}
-                  className="flex cursor-pointer items-start gap-2 text-xs"
-                  data-testid={`integ-tool-${packageId}-${entry.name}`}
-                >
-                  <Checkbox
-                    checked={selectedTools.has(entry.name)}
-                    onCheckedChange={() => toggleTool(entry.name)}
-                    className="mt-0.5"
-                  />
-                  <span className="flex min-w-0 flex-col">
-                    <span className="font-mono">{entry.name}</span>
-                    {entry.description && (
-                      <span className="text-muted-foreground text-[11px]">{entry.description}</span>
-                    )}
-                    {requiredScopes.length > 0 && (
-                      <span className="text-muted-foreground">
-                        {t("agentEditor.integrations.tools.requires")}{" "}
-                        <span className="font-mono">{requiredScopes.join(", ")}</span>
-                      </span>
-                    )}
-                  </span>
-                </label>
-              );
-            })}
-          </div>
+          <PackageToolCatalog
+            tools={nativeCatalog.map((tool) => ({
+              name: tool.name,
+              description: tool.description,
+              permissions: tool.policy?.required_scopes,
+            }))}
+            selection={{ values: selectedTools, onToggle: toggleTool }}
+          />
         </div>
       )}
 
@@ -570,103 +428,119 @@ function IntegrationToolPanel({ packageId, entry, onChange }: IntegrationToolPic
             {[...inferredScopes.entries()].map(([scope, tools]) => {
               const meta = scopeCatalog.get(scope);
               return (
-                <span
+                <ScopeChip
                   key={scope}
-                  className="bg-background inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 text-[11px]"
-                  data-testid={`integ-inferred-scope-${packageId}-${scope}`}
+                  scope={scope}
+                  testId={`integ-inferred-scope-${packageId}-${scope}`}
                   title={
                     t("agentEditor.integrations.scopes.requiredBy", {
                       tools: tools.join(", "),
                     }) + (meta?.description ? ` — ${meta.description}` : "")
                   }
                 >
-                  <span className="font-mono">{scope}</span>
-                  <span className="text-muted-foreground text-[10px]">
-                    {tools.length === 1
-                      ? t("agentEditor.integrations.scopes.requiredBy1", { tool: tools[0] })
-                      : t("agentEditor.integrations.scopes.requiredByN", { count: tools.length })}
-                  </span>
-                </span>
+                  {tools.length === 1
+                    ? t("agentEditor.integrations.scopes.requiredBy1", { tool: tools[0] })
+                    : t("agentEditor.integrations.scopes.requiredByN", { count: tools.length })}
+                </ScopeChip>
               );
             })}
             {pinnedOnlyScopes.map((scope) => (
-              <span
+              <ScopeChip
                 key={scope}
-                className="bg-background inline-flex items-center gap-1.5 rounded border border-dashed px-1.5 py-0.5 text-[11px]"
-                data-testid={`integ-pinned-scope-${packageId}-${scope}`}
+                dashed
+                scope={scope}
+                testId={`integ-pinned-scope-${packageId}-${scope}`}
                 title={t("agentEditor.integrations.scopes.pinnedHint")}
               >
-                <span className="font-mono">{scope}</span>
-                <span className="text-muted-foreground text-[10px]">
-                  {t("agentEditor.integrations.scopes.pinnedBadge")}
-                </span>
-              </span>
+                {t("agentEditor.integrations.scopes.pinnedBadge")}
+              </ScopeChip>
             ))}
           </div>
         </div>
       )}
 
       {hasScopeCatalog && (
-        <div>
-          <button
+        <Collapsible>
+          <CollapsibleTrigger
             type="button"
-            className="text-muted-foreground hover:text-foreground -mx-1 flex items-center gap-1 px-1 py-0.5 text-xs font-semibold"
-            onClick={() => setAdvancedOpen((v) => !v)}
-            aria-expanded={advancedOpen}
+            className="group text-muted-foreground hover:text-foreground -mx-1 flex items-center gap-1 px-1 py-0.5 text-xs font-semibold"
             data-testid={`integ-advanced-toggle-${packageId}`}
           >
-            {advancedOpen ? (
-              <ChevronDown className="h-3 w-3" />
-            ) : (
-              <ChevronRight className="h-3 w-3" />
-            )}
+            <ChevronRight className="size-3 group-data-[state=open]:rotate-90" />
             {t("agentEditor.integrations.scopes.advancedToggle")}
-          </button>
-          {advancedOpen && (
-            <div className="mt-2">
-              <p className="text-muted-foreground mb-2 text-[11px]">
-                {t("agentEditor.integrations.scopes.advancedNotice")}
-              </p>
-              <div className="grid gap-1.5">
-                {[...scopeCatalog.values()].map((s) => {
-                  const isInferred = inferredExpanded.has(s.value);
-                  const checked = isInferred || selectedScopes.has(s.value);
-                  return (
-                    <label
-                      key={s.value}
-                      className={`flex items-start gap-2 text-xs ${
-                        isInferred ? "cursor-not-allowed opacity-60" : "cursor-pointer"
-                      }`}
-                      data-testid={`integ-scope-${packageId}-${s.value}`}
-                    >
-                      <Checkbox
-                        checked={checked}
-                        disabled={isInferred}
-                        onCheckedChange={isInferred ? undefined : () => toggleScope(s.value)}
-                        className="mt-0.5"
-                      />
-                      <span className="flex min-w-0 flex-col">
-                        <span>
-                          {s.label}{" "}
-                          <span className="text-muted-foreground font-mono">({s.value})</span>
-                          {isInferred && (
-                            <span className="text-muted-foreground ml-1 text-[10px]">
-                              {t("agentEditor.integrations.scopes.alreadyInferred")}
-                            </span>
-                          )}
-                        </span>
-                        {s.description && (
-                          <span className="text-muted-foreground">{s.description}</span>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="mt-2">
+            <p className="text-muted-foreground mb-2 text-[11px]">
+              {t("agentEditor.integrations.scopes.advancedNotice")}
+            </p>
+            <div className="grid gap-1.5">
+              {[...scopeCatalog.values()].map((s) => {
+                const isInferred = inferredExpanded.has(s.value);
+                const checked = isInferred || selectedScopes.has(s.value);
+                return (
+                  <label
+                    key={s.value}
+                    className={`flex items-start gap-2 text-xs ${
+                      isInferred ? "cursor-not-allowed opacity-60" : "cursor-pointer"
+                    }`}
+                    data-testid={`integ-scope-${packageId}-${s.value}`}
+                  >
+                    <Checkbox
+                      checked={checked}
+                      disabled={isInferred}
+                      onCheckedChange={isInferred ? undefined : () => toggleScope(s.value)}
+                      className="mt-0.5"
+                    />
+                    <span className="flex min-w-0 flex-col">
+                      <span>
+                        {s.label}{" "}
+                        <span className="text-muted-foreground font-mono">({s.value})</span>
+                        {isInferred && (
+                          <span className="text-muted-foreground ml-1 text-[10px]">
+                            {t("agentEditor.integrations.scopes.alreadyInferred")}
+                          </span>
                         )}
                       </span>
-                    </label>
-                  );
-                })}
-              </div>
+                      {s.description && (
+                        <span className="text-muted-foreground">{s.description}</span>
+                      )}
+                    </span>
+                  </label>
+                );
+              })}
             </div>
-          )}
-        </div>
+          </CollapsibleContent>
+        </Collapsible>
       )}
     </div>
+  );
+}
+
+/** A scope the selection needs (solid) or that is pinned by hand (dashed). */
+function ScopeChip({
+  dashed,
+  scope,
+  testId,
+  title,
+  children,
+}: {
+  dashed?: boolean;
+  scope: string;
+  testId: string;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <span
+      className={cn(
+        "bg-background inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 text-[11px]",
+        dashed && "border-dashed",
+      )}
+      data-testid={testId}
+      title={title}
+    >
+      <span className="font-mono">{scope}</span>
+      <span className="text-muted-foreground text-[10px]">{children}</span>
+    </span>
   );
 }

@@ -3,13 +3,8 @@
 import type { IntegrationAuthStatus, IntegrationManifestView } from "../../hooks/use-integrations";
 
 /**
- * Whether an oauth2 auth can start a connect flow: it needs a usable client —
- * an org-registered one (`has_oauth_client`), the shared platform client
- * (`has_system_client`, `SYSTEM_INTEGRATIONS`), or one auto-provisioned
- * at connect time for remote MCP integrations (`client_auto_provisioned`,
- * MCP-spec CIMD/DCR). Without any, the server refuses connect with 403. Single
- * source of truth for the gate shared by the agent surfaces and the integration
- * detail page.
+ * An oauth2 auth can connect only with a usable client (org-registered, shared platform, or
+ * auto-provisioned for remote MCP); otherwise the server refuses with 403.
  */
 export function isOauthAuthConnectable(status: IntegrationAuthStatus | undefined): boolean {
   return Boolean(
@@ -17,11 +12,7 @@ export function isOauthAuthConnectable(status: IntegrationAuthStatus | undefined
   );
 }
 
-/**
- * Auth keys the actor can actually start a connect flow on. oauth2 auths gate on
- * {@link isOauthAuthConnectable}; non-oauth2 auths (api_key / basic / custom)
- * carry no client and are always connectable via the fields modal.
- */
+/** Non-oauth2 auths carry no client and are always connectable via the fields modal. */
 export function connectableAuthKeys(
   manifest: IntegrationManifestView,
   authStatuses: IntegrationAuthStatus[],

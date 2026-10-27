@@ -1,6 +1,6 @@
 {
   "name": "Appstrate Dev",
-  "image": "oven/bun:1.3.14-debian",
+  "image": "oven/bun:1.4.2-debian",
   "features": {
     "ghcr.io/devcontainers/features/docker-in-docker:2": {}
   },

@@ -15,6 +15,7 @@ import {
   fetchMcpServerManifest,
   getIntegration,
   listIntegrations,
+  readMcpServerTools,
 } from "../../../src/services/integration-service.ts";
 import { logger } from "../../../src/lib/logger.ts";
 import {
@@ -224,5 +225,25 @@ describe("integration-service", () => {
       const out = await listIntegrations(scopeOf(ctx));
       expect(out).toEqual([]);
     });
+  });
+});
+
+describe("readMcpServerTools", () => {
+  const read = (tools: unknown) =>
+    readMcpServerTools({ tools } as unknown as Parameters<typeof readMcpServerTools>[0]);
+
+  it("is undefined when the manifest declares no tools array", () => {
+    expect(read(undefined)).toBeUndefined();
+    expect(read({ search: {} })).toBeUndefined();
+  });
+
+  it("keeps the named entries, with a description only when it is a string", () => {
+    expect(read([])).toEqual([]);
+    const malformed = [null, { name: 1 }, { name: "c", description: 3 }];
+    expect(read([{ name: "a" }, { name: "b", description: "d" }, ...malformed])).toEqual([
+      { name: "a", description: undefined },
+      { name: "b", description: "d" },
+      { name: "c", description: undefined },
+    ]);
   });
 });

@@ -34,7 +34,7 @@
  * idempotent on a missing object, so an over-broad enqueue costs one no-op
  * worker pass, whereas an under-broad one leaks bytes forever.
  *
- * ## Keys outlive their rows (#1612)
+ * ## Keys outlive their rows
  *
  * A package key names an id, not an incarnation: a package deleted then
  * recreated under the same id, or a version deleted then republished, writes

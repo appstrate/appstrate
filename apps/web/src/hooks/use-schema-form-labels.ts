@@ -12,7 +12,7 @@ import { errorMessage } from "../lib/mutation-error";
  * Stable until the language changes, so `<SchemaForm>`'s own memos hold.
  */
 export function useSchemaFormLabels(): Required<SchemaFormLabels> {
-  const { t } = useTranslation(["settings", "common"]);
+  const { t, i18n } = useTranslation(["settings", "common"]);
   return useMemo<Required<SchemaFormLabels>>(
     () => ({
       uploading: t("file.uploading", { ns: "settings" }),
@@ -30,6 +30,9 @@ export function useSchemaFormLabels(): Required<SchemaFormLabels> {
       removeItem: t("btn.remove", { ns: "common" }),
       moveItemUp: t("btn.moveUp", { ns: "common" }),
       moveItemDown: t("btn.moveDown", { ns: "common" }),
+      noOptions: t("toolbar.noResults", { ns: "common" }),
+      locale: i18n.language,
+      unusualYear: (year) => t("date.unusualYear", { ns: "settings", year }),
       // Ajv's `params` carry the bound (`limit`, also the plural `count`), the `format`…
       validationError: (keyword, params) =>
         t(`validation.schema.${keyword}`, {
@@ -39,6 +42,6 @@ export function useSchemaFormLabels(): Required<SchemaFormLabels> {
           defaultValue: "",
         }) || undefined,
     }),
-    [t],
+    [t, i18n.language],
   );
 }

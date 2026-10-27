@@ -33,8 +33,8 @@ import { useAISDKRuntime } from "@assistant-ui/react-ai-sdk";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { PanelLeftIcon } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
+import { ConversationSkeleton } from "./conversation-skeleton.tsx";
 import { Thread } from "./thread.tsx";
 import {
   ChatHeadersProvider,
@@ -53,9 +53,15 @@ import type {
   UploadFile,
   UseFileImageSrc,
 } from "./runtime-context.ts";
-export type { OpenFile } from "./runtime-context.ts";
-
-import { ThreadList, ActiveConversationTitle } from "./thread-list.tsx";
+export type {
+  ChatCan,
+  ChatTranslate,
+  GetHeaders,
+  OpenFile,
+  SelectConversation,
+} from "./runtime-context.ts";
+export { ChatConversationList, ChatConversationTitle } from "./thread-list.tsx";
+export { ChatHeadersProvider, SelectConversationProvider } from "./runtime-context.ts";
 import { ModelSelect } from "./model-select.tsx";
 import { fetchModels, type OrgModelOption } from "./models-data.ts";
 import {
@@ -82,13 +88,13 @@ import {
   setModelCatalog,
   setSelectedModel,
 } from "./model-store.ts";
-import { getAgentAuthoringEnabled } from "./agent-authoring-store.ts";
+import { getPackageAuthoringEnabled } from "./package-authoring-store.ts";
 import { latestTurnModelId } from "./turn-model.ts";
-import { AgentAuthoringToggle } from "./agent-authoring-toggle.tsx";
+import { PackageAuthoringToggle } from "./package-authoring-toggle.tsx";
 import { SkillsPicker } from "./skills-picker.tsx";
 import { EnforcedSkillsIndicator } from "./enforced-skills.tsx";
 import { DEFAULT_SKILL_SELECTION, type ChatSkillSelection } from "../skills.ts";
-import { canAuthorAgents, canPinSkills } from "../capabilities.ts";
+import { canAuthorPackages, canPinSkills } from "../capabilities.ts";
 import { createChatAttachmentAdapter } from "./attachment-adapter.ts";
 import { shouldReconcileHistory } from "./history-reconcile.ts";
 
@@ -131,6 +137,11 @@ export interface ChatPageProps {
    */
   newChatKey?: string;
   /**
+   * Optional text staged in a brand-new conversation's composer. The module
+   * never sends it: the reader can edit or discard the handoff before sending.
+   */
+  initialComposerDraft?: string;
+  /**
    * Called when the active conversation changes (selection, new thread, or when
    * a brand-new conversation is created lazily on its first message). The host
    * navigates its URL.
@@ -143,8 +154,6 @@ export interface ChatPageProps {
    * to deep tool UIs via context, not props.
    */
   onOpenFile?: OpenFile;
-  /** Optional host-owned actions displayed beside the conversation title. */
-  headerActions?: ReactNode;
   /** Optional host-owned controls beside the model picker. Pass a memoized node. */
   composerActions?: ReactNode;
   /**
@@ -158,24 +167,33 @@ export interface ChatPageProps {
   t: ChatTranslate;
   /** The caller's grants (see `ChatCan`). Pass a stable function. */
   can: ChatCan;
+  /** Whether the organization allows personal model credentials, `undefined` until known (see `ChatHost`). */
+  personalModelCredentials: boolean | undefined;
+  /** The credentials naming the model picker's groups (see `ChatHost`). Pass a stable array. */
+  modelCredentials: ChatHost["modelCredentials"];
   /** Renders a byte count in the host's language. Pass a stable function. */
   formatBytes: ChatHost["formatBytes"];
+  /** Refreshes the host's package lists (see `ChatHost`). Pass a stable function. */
+  onPackagesChanged: ChatHost["onPackagesChanged"];
 }
 
 export function ChatPage({
   getHeaders,
   conversationId,
   newChatKey,
+  initialComposerDraft,
   onConversationChange,
   onOpenFile,
-  headerActions,
   composerActions,
   downloadFile,
   useFileImageSrc,
   uploadFile,
   t,
   can,
+  personalModelCredentials,
+  modelCredentials,
   formatBytes,
+  onPackagesChanged,
 }: ChatPageProps) {
   // The conversation the runtime is bound to. A persisted conversation's id
   // comes from the URL and wins; for a brand-new one (bare `/chat`) we mint an
@@ -192,8 +210,6 @@ export function ChatPage({
   // URL). A not-yet-persisted conversation is known-empty → skip its history GET.
   const isPersisted = conversationId != null;
 
-  const [mobileOpen, setMobileOpen] = useState(false);
-
   // The model catalog is a React Query, not a per-mount fetch: leaving and
   // re-entering `/chat` within `staleTime` reuses the cached list instead of
   // re-hitting `/api/models` at exactly the moment the composer is trying to
@@ -208,6 +224,8 @@ export function ChatPage({
     staleTime: MODELS_STALE_MS,
   });
   const models = modelsQuery.data ?? EMPTY_MODELS;
+  const modelsPending = modelsQuery.isPending;
+  const modelsFailed = modelsQuery.isError;
   // Model selection lives in an external store (localStorage-backed), not React
   // state: the transport's header builder reads it per request through a stable
   // function (see ConversationInner), so a switch applies to the very next send
@@ -260,11 +278,6 @@ export function ChatPage({
     void markSessionRead(getHeaders, activeId).catch(() => {});
   }, [sessions.data, activeId, getHeaders, pageSpaceId, queryClient, visible, canWrite]);
 
-  const unreadIds = useMemo(() => {
-    const list = sessions.data ?? [];
-    return new Set(list.filter((s) => s.id !== activeId && s.unread).map((s) => s.id));
-  }, [sessions.data, activeId]);
-
   // The host services, published as ONE value (see `runtime-context.ts`). Every
   // member is a stable host function, so this object is referentially stable
   // between renders and consumers re-render no more than with a context each.
@@ -275,9 +288,22 @@ export function ChatPage({
       useFileImageSrc,
       t,
       can,
+      personalModelCredentials,
+      modelCredentials,
       formatBytes,
+      onPackagesChanged,
     }),
-    [onOpenFile, downloadFile, useFileImageSrc, t, can, formatBytes],
+    [
+      onOpenFile,
+      downloadFile,
+      useFileImageSrc,
+      t,
+      can,
+      personalModelCredentials,
+      modelCredentials,
+      formatBytes,
+      onPackagesChanged,
+    ],
   );
 
   // File attachments: the composer stages picked files through the HOST uploader
@@ -296,22 +322,32 @@ export function ChatPage({
   // `Conversation` a new prop each time and defeat its `memo` below. The
   // setters are stable module functions, so the deps are exactly the values
   // the picker displays.
-  const authorsAgents = canAuthorAgents(can);
+  const authorsPackages = canAuthorPackages(can);
   const composerSlot = useMemo(
     () => (
       <div className="flex items-center gap-2">
-        {authorsAgents ? <AgentAuthoringToggle /> : null}
+        {authorsPackages ? <PackageAuthoringToggle /> : null}
         <ModelSelect
           models={models}
           selectedId={selectedModel}
           onSelect={setSelectedModel}
           generation={generation}
           onGenerationChange={editGenerationSettings}
+          pending={modelsPending}
+          failed={modelsFailed}
         />
         {composerActions}
       </div>
     ),
-    [authorsAgents, models, selectedModel, generation, composerActions],
+    [
+      authorsPackages,
+      models,
+      selectedModel,
+      generation,
+      composerActions,
+      modelsPending,
+      modelsFailed,
+    ],
   );
 
   // The server's view of the ACTIVE conversation, reduced to two primitives so
@@ -326,67 +362,27 @@ export function ChatPage({
     <ChatHeadersProvider value={getHeaders ?? null}>
       <SelectConversationProvider value={onConversationChange ?? null}>
         <ChatHostProvider value={host}>
-          <div className="bg-background flex h-full w-full">
-            <aside className="hidden w-64 shrink-0 flex-col border-r md:flex">
-              <ThreadList activeId={conversationId ?? null} unreadIds={unreadIds} />
-            </aside>
-
-            {mobileOpen && (
-              <div className="fixed inset-0 z-40 md:hidden">
-                <div
-                  className="absolute inset-0 bg-black/40"
-                  onClick={() => setMobileOpen(false)}
-                  aria-hidden
-                />
-                <aside
-                  className="bg-background absolute inset-y-0 left-0 flex w-72 max-w-[85%] flex-col border-r shadow-xl"
-                  // Bubble phase, NOT capture: a capture handler would flush
-                  // `setMobileOpen(false)` synchronously (discrete event) and
-                  // unmount this subtree BEFORE the bubble dispatch, swallowing
-                  // the row button's own onClick (select/navigate). In bubble
-                  // order the child's handler runs first, then this closes.
-                  onClick={(e) => {
-                    if ((e.target as HTMLElement).closest("button")) setMobileOpen(false);
-                  }}
-                >
-                  <ThreadList activeId={conversationId ?? null} unreadIds={unreadIds} />
-                </aside>
-              </div>
-            )}
-
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-                <button
-                  type="button"
-                  onClick={() => setMobileOpen(true)}
-                  aria-label={t("threads.title")}
-                  className="hover:bg-accent -ml-1 rounded-md p-1.5 md:hidden"
-                >
-                  <PanelLeftIcon className="size-5" />
-                </button>
-                <div className="flex min-w-0 flex-1 items-center overflow-hidden">
-                  <ActiveConversationTitle activeId={conversationId ?? null} />
-                </div>
-                {headerActions ? (
-                  <div className="flex shrink-0 items-center">{headerActions}</div>
-                ) : null}
-              </div>
-              <main className="min-h-0 min-w-0 flex-1 overflow-hidden">
-                <Conversation
-                  key={activeId}
-                  id={activeId}
-                  getHeaders={getHeaders}
-                  isPersisted={isPersisted}
-                  onConversationChange={onConversationChange}
-                  attachments={attachments}
-                  composerSlot={composerSlot}
-                  canPinSkills={canPinSkills(can)}
-                  canWrite={canWrite}
-                  serverGenerating={serverGenerating}
-                  serverUpdatedAt={serverUpdatedAt}
-                />
-              </main>
-            </div>
+          {/* The conversation list and the conversation title are NOT here:
+              they are the shell's navigation and the shell's "where you are",
+              mounted by the host from `ChatConversationList` /
+              `ChatConversationTitle`. What is left is the thread itself. */}
+          {/* A plain div, not a `main`: the host shell's inset already IS the
+              page's `main` landmark, and two nested ones name two pages. */}
+          <div className="bg-canvas flex size-full min-h-0 min-w-0 flex-col overflow-hidden">
+            <Conversation
+              key={activeId}
+              id={activeId}
+              getHeaders={getHeaders}
+              isPersisted={isPersisted}
+              initialComposerDraft={isPersisted ? undefined : initialComposerDraft}
+              onConversationChange={onConversationChange}
+              attachments={attachments}
+              composerSlot={composerSlot}
+              canPinSkills={canPinSkills(can)}
+              canWrite={canWrite}
+              serverGenerating={serverGenerating}
+              serverUpdatedAt={serverUpdatedAt}
+            />
           </div>
         </ChatHostProvider>
       </SelectConversationProvider>
@@ -398,6 +394,7 @@ interface ConversationProps {
   id: string;
   getHeaders?: GetHeaders;
   isPersisted: boolean;
+  initialComposerDraft?: string;
   onConversationChange?: SelectConversation;
   /** Composer attachment adapter, built once by `ChatPage` from the host props. */
   attachments: AttachmentAdapter;
@@ -488,9 +485,10 @@ const Conversation = memo(function Conversation({
 
   if (persistedAtMount && history.isPending) {
     return (
-      <div className="text-muted-foreground flex h-full items-center justify-center text-sm">
-        {t("conversation.loading")}
-      </div>
+      <ConversationSkeleton
+        label={t("conversation.loading")}
+        placeholder={canWrite ? t("composer.placeholder") : null}
+      />
     );
   }
   // No composer on a 404: the server would create a session under that id.
@@ -542,6 +540,7 @@ function ConversationInner({
   getHeaders,
   initialMessages,
   isPersisted,
+  initialComposerDraft,
   onConversationChange,
   attachments,
   composerSlot,
@@ -593,7 +592,7 @@ function ConversationInner({
               messages,
               generation: getCompatibleGenerationSettings(),
               // Read at request time, like the model above, for the same reason.
-              agent_authoring: getAgentAuthoringEnabled(),
+              package_authoring: getPackageAuthoringEnabled(),
               ...(skills && {
                 skill_mode: skills.skillMode,
                 pinned_skills: skills.pinnedSkills,
@@ -765,7 +764,7 @@ function ConversationInner({
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
-      <Thread composerSlot={composerSlot} />
+      <Thread composerSlot={composerSlot} initialComposerDraft={initialComposerDraft} />
     </AssistantRuntimeProvider>
   );
 }

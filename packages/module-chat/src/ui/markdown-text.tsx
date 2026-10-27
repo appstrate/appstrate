@@ -3,6 +3,7 @@
 /** Streaming-aware markdown renderer for assistant messages (GFM + prose). */
 
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
+import { cn } from "@appstrate/ui/cn";
 import remarkGfm from "remark-gfm";
 
 /**
@@ -38,6 +39,15 @@ const MARKDOWN_COMPONENTS = { a: MarkdownLink };
 const REMARK_PLUGINS = [remarkGfm];
 
 export function MarkdownText() {
+  return <Markdown />;
+}
+
+/** The reasoning part: same renderer, read as secondary. */
+export function ReasoningText() {
+  return <Markdown className="text-muted-foreground prose-p:my-1.5" />;
+}
+
+function Markdown({ className }: { className?: string }) {
   return (
     <MarkdownTextPrimitive
       remarkPlugins={REMARK_PLUGINS}
@@ -68,7 +78,10 @@ export function MarkdownText() {
       // commit, so a commit floor below the frame rate turns the reveal into
       // steps.
       smooth={{ drainMs: 150, maxCharIntervalMs: 10 }}
-      className="prose prose-sm dark:prose-invert max-w-none break-words [&_code]:text-[0.85em] [&_pre]:rounded-md [&_pre]:p-3 [&_pre]:text-xs"
+      className={cn(
+        "prose prose-sm dark:prose-invert max-w-none break-words [&_code]:text-[0.85em] [&_pre]:rounded-md [&_pre]:p-3 [&_pre]:text-xs",
+        className,
+      )}
       components={MARKDOWN_COMPONENTS}
     />
   );

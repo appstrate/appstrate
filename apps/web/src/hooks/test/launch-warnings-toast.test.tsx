@@ -19,6 +19,7 @@ import { installFakeStorage } from "../../test/fake-storage.ts";
 installFakeStorage({ __APP_CONFIG__: { features: {}, trustedOrigins: [] } });
 
 const { $api, client } = await import("../../api/client.ts");
+const { orgStore } = await import("../../stores/org-store.ts");
 const { loadIntegrationNames } = await import("../use-integrations.ts");
 const { render } = await import("../../test/render.tsx");
 const { useRunLauncher } = await import("../use-mutations.ts");
@@ -134,6 +135,44 @@ describe("launch warnings, wired", () => {
     await Bun.sleep(0);
     expect(warned).toHaveBeenCalledTimes(1);
     expect(warned.mock.calls[0]![0]).toBe(EXPECTED_SCHEDULE);
+  });
+});
+
+describe("the Connecter action", () => {
+  const ORG_ID = "org_1";
+  const CONNECTABLE = [{ field: "integrations.@acme/gmail", code: "not_connected", message: "x" }];
+
+  /** The action a launch's toast carries for a viewer holding `permissions` in the org. */
+  async function actionFor(permissions: string[]): Promise<unknown> {
+    const qc = cachedClient();
+    qc.setQueryData(
+      ["orgs"],
+      [{ id: ORG_ID, name: "Acme", slug: "acme", role: "member", permissions }],
+    );
+    stubs.push(
+      spyOn(orgStore, "getInitialState").mockReturnValue({
+        ...orgStore.getInitialState(),
+        id: ORG_ID,
+      }),
+      spyOn(client, "POST").mockResolvedValue({ data: { id: "run_1", warnings: CONNECTABLE } }),
+    );
+    const launcher = capture(() => useRunLauncher(AGENT), qc);
+    launcher.launch({});
+    await Bun.sleep(0);
+    await Bun.sleep(0);
+    return (warned.mock.calls[0]![1] as { action?: unknown }).action;
+  }
+
+  it("is offered when the viewer reaches the agent's page and sees its Connexions tab", async () => {
+    expect(await actionFor(["agents:read", "integrations:read"])).toBeDefined();
+  });
+
+  it("is withheld when the page shows the viewer no Connexions tab", async () => {
+    expect(await actionFor(["agents:read"])).toBeUndefined();
+  });
+
+  it("is withheld from a viewer the agent's page is closed to", async () => {
+    expect(await actionFor(["integrations:read"])).toBeUndefined();
   });
 });
 

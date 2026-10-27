@@ -7,6 +7,108 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `truncateToolResult` summarises image blocks
+
+- Every image block (`{ type: "image", data }`, at any depth) is logged as
+  `{ type: "image", mimeType, bytes }` instead of its base64, which used to fill
+  the 2 KB preview and hide the text after it (the spill pointer). (#2123)
+
+### Changed — `@afps-spec/schema` `^0.12.0`
+
+- An integration manifest may omit `auths` (AFPS §7.2, unauthenticated integrations). (#2075)
+
+### Added — `API_CALL_BODY_FROM_FILE_RULE`
+
+- The request-body rule both `api_call` surfaces state: write the complete body
+  to a workspace file and pass `{ fromFile }`, never re-type it into the
+  arguments. `apiCallRequestSchema`'s `body` description carries it.
+
+### Changed — catalogs resolve per dependency section (#2005, BREAKING)
+
+- `PackageCatalog.resolve(name, versionSpec, section)` takes a required third
+  parameter, the `dependencies.*` section the request comes from, typed by the
+  new exported `DependencySection` (`"skills" | "mcp_servers" |
+"integrations"`), so a catalog can resolve each package type from its own
+  source of truth. Every `PackageCatalog` implementation must accept it.
+
+### Added — dependency sections a bundle may skip (#2005)
+
+- `BuildBundleOptions.optionalDepTypes`: an entry of one of these sections that
+  `resolve` returns `null` for, or whose `fetch` throws, is reported through
+  `onWarn` and left out of the bundle instead of failing the build. An
+  `INTEGRITY_MISMATCH` from `fetch` is the exception: it fails the build as it
+  does for any other section, aggregated with the others into one error.
+  A member of such a section is a leaf: it is bundled alone, and its own
+  `dependencies.*` are neither resolved nor fetched.
+
+### Changed — integrations disclosed as a catalog, not inlined (#2005, BREAKING)
+
+- `renderPlatformPrompt` renders the integrations as a `### Integrations`
+  catalog (`<available_integrations>`, one `<integration>` with `<name>`,
+  optional `<description>` and `<location>`), instead of one
+  `## Integration: <id>` section with the `INTEGRATION.md` text inlined under
+  `### API Documentation`. The agent reads the file on demand (AFPS §3.5).
+- The `### Skills` section is gone: Pi announces the bundled skills itself
+  (`<available_skills>`, from each `SKILL.md` frontmatter), and the second list,
+  built from the manifests, could describe them differently.
+  `PlatformPromptOptions.availableSkills` and the `PlatformPromptTool` type are
+  removed.
+- `PlatformPromptIntegration.doc` is removed; pass `location` (the
+  workspace-relative path of `INTEGRATION.md`) instead.
+- `buildPlatformPromptInputs` derives `integrations` from the bundle: one
+  entry per integration the root manifest declares in
+  `dependencies.integrations`, in declaration order, with the member's
+  `description` and `location` (`.pi/integrations/<packageId>/INTEGRATION.md`)
+  when the bundle carries it. The new override `availableIntegrationIds`
+  keeps only the integrations the run starts (none when absent); the
+  `integrations` override is removed.
+
+### Changed — `api_call` values encoded for their place (#1915, BREAKING)
+
+- `prepareApiCallRequest` (`./resolvers`) renders the target, the headers and
+  the text body through `substituteRequest`. It takes `body` (the text body to
+  substitute, or `null`) and optional `bodyParts` (strings of a structured body
+  the caller serializes itself) in place of `bodyTemplates`, returns the
+  substituted `body` and `renderPart`, which renders one such string as is, and
+  refuses with two new kinds: `credential_unusable` for a value its place
+  cannot carry (a `bodyParts` value that is not well-formed Unicode included),
+  `invalid_body` for a body it cannot encode. Headers holding one name twice
+  in different case are an `invalid_header`.
+- `substituteRequest`, for every caller (`api_call`, `connect.login`, the MITM
+  listener):
+  - refuses, with `UnencodableInputError`, a path segment its placeholders
+    render empty, `.` or `..` (percent-encoded dots included). The rendered
+    segment is judged, not the value: `x{{v}}y` takes `..`. Host and port
+    placeholders are no path segment;
+  - substitutes a body only under a media type with an encoder: JSON (now with
+    `application/x-ndjson`), form, XML, multipart with a `boundary`, and
+    `text/plain` (as is). Any other, or none, throws the new
+    `RequestTemplateError` when the body holds a placeholder of the inputs, as
+    does a `Content-Type` that holds a placeholder itself. The rule is
+    afps-shared's `placeholderBodyEncoding`;
+  - multipart: refuses a value holding `--<boundary>`; in a part header,
+    throws `RequestTemplateError` on a placeholder outside a quoted string
+    and refuses `"` or `\` in a value inside one;
+  - XML: a `<![CDATA[` inside a comment opens no CDATA section.
+- `UnencodableInputError` messages name the placeholder (`{{field}} …`), where
+  they read `input 'field' …`.
+- `LocalIntegrationResolver` substitutes a string body only under
+  `substituteBody: true`, escaped for the call's `Content-Type`, and answers
+  `credential_unusable` for a CR/LF a credential puts in a header
+  (`RESOLVER_HEADER_INVALID` stays the agent's own header value).
+- `credentialUnusableMessage` (`./resolvers`): the one `credential_unusable`
+  message of the three doors.
+- `headerNamed` and the `{{name}}` grammar moved to
+  `@appstrate/afps-shared/request-template`; `headerNamed` is no longer
+  exported from `./resolvers`.
+- `redactCredentialHost` no longer throws on a credential value that is not
+  well-formed Unicode.
+
+### Removed (BREAKING)
+
+- `ResolveBodyStreamOptions.transformString` (`./resolvers`): a caller
+  substitutes a string body before `resolveBodyForFetch`.
+
 ### Added — login inputs encoded for their place (#1818)
 
 - `substituteRequest` (`./resolvers`): substitutes `{{name}}` into a request's
@@ -28,6 +130,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `unresolvedPlaceholders` accepts a `Readonly<Record<string, unknown>>` (it
   reads only the keys); a `Record<string, string>` still passes.
+- `substituteRequest` (`./resolvers`) throws `UnencodableInputError` naming a
+  `null` or `undefined` input a template references, where `null` rendered as
+  the text `null`. (#1913)
 
 ### Added — the integrations a run starts without (#1830)
 

@@ -6,7 +6,8 @@ import { X } from "lucide-react";
 import type { WidgetProps } from "@rjsf/utils";
 import { formatBytes } from "@appstrate/core/format";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { Button, LABEL_CLASS } from "./primitives.tsx";
+import { Button } from "../components/button.tsx";
+import { Label } from "../components/label.tsx";
 import { cn } from "../cn.ts";
 import { isUploadUri } from "@appstrate/core/file-uri";
 import type { UploadFn } from "./upload-client.ts";
@@ -213,10 +214,10 @@ export function FileWidget(props: WidgetProps) {
 
   return (
     <div className="space-y-2">
-      <label htmlFor={id} className={LABEL_CLASS}>
+      <Label htmlFor={id}>
         {label}
         {required && " *"}
-      </label>
+      </Label>
       {attachments.length === 0 ? (
         <div
           role="button"
@@ -251,7 +252,7 @@ export function FileWidget(props: WidgetProps) {
         </div>
       ) : (
         <>
-          <div className="space-y-1">
+          <div className="flex flex-col gap-1">
             {attachments.map((a, i) => (
               <div
                 key={`${a.uri}-${i}`}
@@ -267,11 +268,11 @@ export function FileWidget(props: WidgetProps) {
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="text-muted-foreground ml-2 h-7 w-7 shrink-0"
+                  className="text-muted-foreground ml-2 size-7 shrink-0"
                   disabled={locked}
                   onClick={() => remove(i)}
                 >
-                  <X className="h-4 w-4" />
+                  <X className="size-4" />
                 </Button>
               </div>
             ))}

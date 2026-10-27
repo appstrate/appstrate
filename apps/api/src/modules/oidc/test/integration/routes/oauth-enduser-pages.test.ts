@@ -1028,15 +1028,16 @@ describe("Public end-user pages — /api/oauth/*", () => {
       expect(res.status).toBe(400);
     });
 
-    it("GET displays the recipient email when provided (SOTA UX: Slack/Linear)", async () => {
+    // The page knows the address only from the query string, which the link's sender writes.
+    it("GET names no account, whatever `email` the link carries", async () => {
       const { clientId } = await registerClient(ctx);
       const res = await app.request(
         buildConfirmUrl({ token: "magic_tok_email", clientId, email: "user@example.com" }),
       );
       expect(res.status).toBe(200);
       const html = await res.text();
-      expect(html).toContain("user@example.com");
-      expect(html).toContain("en tant que");
+      expect(html).not.toContain("user@example.com");
+      expect(html).not.toContain("user%40example.com");
     });
 
     it("GET renders a no-referrer meta tag to prevent token leakage in Referer", async () => {

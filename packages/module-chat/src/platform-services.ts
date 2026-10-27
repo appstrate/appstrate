@@ -52,12 +52,14 @@ export interface ChatPlatformDeps {
   /** Public origin (`APP_URL`) that pagination `Link` headers are rooted on. */
   publicOrigin: string;
   /**
-   * Resolve the chosen model row (`presetId`) for a chat turn: an API-key /
-   * unknown provider yields `{ subscription: false }` (llm-proxy-bound); an oauth2
-   * provider yields the real upstream binding + a fresh access token, or a
-   * `needsReconnection` signal when its credential is dead.
+   * Resolve the chosen model row (`presetId`) for a chat turn, for the session
+   * user `userId`: an API-key / unknown provider yields `{ subscription: false }`
+   * (llm-proxy-bound); an oauth2 provider yields the real upstream binding + a
+   * fresh access token from the subscription that serves it (the organization's,
+   * or the user's own on an unbound model), or a `needsReconnection` signal when
+   * its credential is dead.
    */
-  resolveChatModel(orgId: string, presetId: string): Promise<ChatModelResolution>;
+  resolveChatModel(orgId: string, presetId: string, userId: string): Promise<ChatModelResolution>;
   /** Persist one metered `llm_usage` row for a completed chat turn. */
   recordChatUsage(record: ChatUsageRecord): Promise<void>;
   /**
@@ -80,27 +82,22 @@ export interface ChatPlatformDeps {
   cleanupSessionFiles(chatSessionId: string, tx?: ChatDbTx): Promise<void>;
   /**
    * Admission gate for a turn — EVERY turn, on either binding (llm-proxy or
-   * native OAuth subscription). The
-   * platform resolves whether the chosen preset is system-provided and reports
-   * it as a fact to the `beforeUsage` hook, which it dispatches unconditionally
-   * — a metering module decides what an org-credential turn costs, the platform
-   * no longer decides it is free. Returns a {@link UsageRejection} to block the
-   * turn (surfaced as an RFC 9457 problem response with the hook's status — 402
-   * flows through), or null to allow.
-   *
-   * `subscription` is the one fact THIS module owns: the turn is served by the
-   * in-process Pi engine on the org's own OAuth provider subscription, which
-   * makes it `credentialSource: "org"` whatever the preset resolves to. The
-   * module reports it rather than deriving the credential source itself — it
-   * has no model-registry access by design, so the platform keeps deriving the
-   * rest. A subscription turn is NOT exempt: it runs inside the platform's own
-   * process, so the platform funds its compute.
+   * native OAuth subscription). The platform resolves the chosen model for the
+   * session user and reports who pays it to the `beforeUsage` hook, which it
+   * dispatches unconditionally: the turn's `credentialSource` is the owner of
+   * the credential it spends, `"user"` for the member's own, `"org"` for an
+   * organization credential or subscription. A metering module decides what the
+   * turn costs. Returns a {@link UsageRejection} to block the turn (surfaced as
+   * an RFC 9457 problem response with the hook's status — 402 flows through), or
+   * null to allow. A subscription turn is NOT exempt: it runs inside the
+   * platform's own process, so the platform funds its compute.
    */
   checkUsageAllowed(args: {
     orgId: string;
     presetId: string;
     sessionId: string | null;
-    subscription: boolean;
+    /** The session user, whose payer credentials the turn resolves against. */
+    userId: string;
   }): Promise<UsageRejection | null>;
   /**
    * The space's enforced skills, read with the platform's authority: a member
@@ -135,13 +132,11 @@ function enforcedSkillsRead<T>(read: Promise<T>, orgId: string, spaceId: string)
  * Build the immutable deps object from the module init context. Called once in
  * `chatModule.init(ctx)`.
  *
- * `ctx` is REQUIRED. It used to be optional, for the apps/api test harness,
- * which mounted this router without ever running `init()`. That fallback
- * silently degraded two post-incident guards — the #968/#971 admission gate
- * (fail-open `null`) and the #965 file teardown (no-op) — so any test that
- * believed it exercised them exercised nothing (issue #989). The harness now
- * runs the real `init()` pipeline, so nothing needs the degraded baseline and
- * a missing context can no longer be mistaken for a working one.
+ * `ctx` is REQUIRED. An optional one would silently degrade two guards — the
+ * admission gate (fail-open `null`) and the file teardown (no-op) — so a test
+ * believing it exercised them would exercise nothing. The test harness runs
+ * the real `init()` pipeline, and a missing context cannot be mistaken for a
+ * working one.
  */
 export function buildChatPlatformDeps(ctx: ModuleInitContext): ChatPlatformDeps {
   const inProcess = ctx.services.inProcess ?? null;
@@ -149,7 +144,8 @@ export function buildChatPlatformDeps(ctx: ModuleInitContext): ChatPlatformDeps 
     dispatch: (request) => (inProcess ? inProcess.dispatch(request) : fetch(request)),
     rateLimit: (maxPerMinute) => ctx.services.http.rateLimit(maxPerMinute),
     publicOrigin: ctx.appUrl,
-    resolveChatModel: (orgId, presetId) => ctx.services.resolveChatModel(orgId, presetId),
+    resolveChatModel: (orgId, presetId, userId) =>
+      ctx.services.resolveChatModel(orgId, presetId, userId),
     recordChatUsage: (record) => ctx.services.recordChatUsage(record),
     resolveChatAttachment: (request) => ctx.services.resolveChatAttachment(request),
     cleanupSessionFiles: (chatSessionId, tx) => ctx.services.cleanupSessionFiles(chatSessionId, tx),

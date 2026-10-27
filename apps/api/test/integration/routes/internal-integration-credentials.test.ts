@@ -15,7 +15,7 @@
  *
  * Mirrors the structure of `internal-mcp-server-bundle.test.ts`. Deep
  * OAuth refresh semantics (invalid_grant → 410, transient → 502,
- * scope-shrink behaviour) live in the service-level test
+ * narrowed-grant behaviour) live in the service-level test
  * `services/integration-credentials-resolver.test.ts`. This file pins
  * the HTTP route boundary: auth, dep, install, the `connection_id` selector,
  * response shape.
@@ -50,9 +50,11 @@ import {
   integrationOauthClients,
   packages,
   runs,
+  integrationConnectionShares,
 } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
+import { seedShares } from "../../helpers/connection-shares.ts";
 
 const app = getTestApp();
 
@@ -160,7 +162,7 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
       authKey?: string;
       credentialsEncrypted?: string;
       userId?: string;
-      sharedWithOrg?: boolean;
+      shared?: boolean;
     } = {},
   ): Promise<string> {
     const label = `acct-test-${++seededConnections}`;
@@ -171,6 +173,7 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
         authKey: opts.authKey ?? "primary",
         accountId: label,
         label,
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: opts.userId ?? ctx.user.id,
         endUserId: null,
@@ -178,9 +181,9 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
           opts.credentialsEncrypted ??
           encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } }),
         scopesGranted: [],
-        sharedWithOrg: opts.sharedWithOrg ?? false,
       })
       .returning({ id: integrationConnections.id });
+    await seedShares(row!.id, opts.shared ? [ctx.defaultSpaceId] : []);
     return row!.id;
   }
 
@@ -303,14 +306,11 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     expect(body.delivery_plans.primary).toBeDefined();
   });
 
-  // NOTE — a RUN token never gets an empty payload from this endpoint. The
-  // zero-auth branch that used to produce one is gone: `@afps-spec/schema`
-  // requires every integration to declare at least one auth ("integration MUST
-  // declare at least one auth method"), so a zero-auth manifest fails
-  // validation on read and this endpoint answers 500 `invalid_manifest` long
-  // before any resolver code. The one empty payload that remains belongs to the
-  // CONNECT-run branch, which never reaches the resolver — it is covered in
-  // `internal-connect-run-grant.test.ts`.
+  // NOTE — a RUN token never gets an empty payload from this endpoint. An
+  // integration declaring no auths (AFPS §7.2) binds no connection, so its spawn
+  // spec carries none and the sidecar never asks this endpoint for it. The one
+  // empty payload that remains belongs to the CONNECT-run branch, which never
+  // reaches the resolver — it is covered in `internal-connect-run-grant.test.ts`.
 
   // ─── Fail-loud: the three states that used to answer 200-with-empty ───
   //
@@ -346,7 +346,7 @@ describe("GET /internal/integration-credentials/:scope/:name", () => {
     const colleague = await memberContext(ctx, "member");
     const connectionId = await seedConnectionRow(INTEGRATION, {
       userId: colleague.user.id,
-      sharedWithOrg: true,
+      shared: true,
     });
     await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
     const fetchCredentials = () =>
@@ -580,9 +580,9 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
 
   async function seedConnection(
     integrationId: string,
-    owner: { userId: string; sharedWithOrg: boolean } = {
+    owner: { userId: string; shared: boolean } = {
       userId: ctx.user.id,
-      sharedWithOrg: false,
+      shared: false,
     },
   ): Promise<string> {
     const ciphertext = encryptCredentialEnvelope({ outputs: { api_key: "live-secret-value" } });
@@ -593,13 +593,15 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
         authKey: "primary",
         accountId: "acct-test",
         label: "acct-test",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         endUserId: null,
         credentialsEncrypted: ciphertext,
         scopesGranted: [],
-        ...owner,
+        userId: owner.userId,
       })
       .returning({ id: integrationConnections.id });
+    await seedShares(row!.id, owner.shared ? [ctx.defaultSpaceId] : []);
     return row!.id;
   }
 
@@ -804,6 +806,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
           authKey: "primary",
           accountId: "acct-oauth",
           label: "acct-oauth",
+          orgId: ctx.orgId,
           spaceId: ctx.defaultSpaceId,
           userId: ctx.user.id,
           credentialsEncrypted: encryptCredentialEnvelope({
@@ -815,7 +818,7 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
       const connectionId = conn!.id;
       await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
       const held = await heldRevision(connectionId);
-      // Flagged after kickoff — a scope shrink seen by another caller, a peer's invalid_grant.
+      // Flagged after kickoff — a peer's invalid_grant.
       await db
         .update(integrationConnections)
         .set({ needsReconnection: true })
@@ -928,13 +931,16 @@ describe("POST /internal/integration-credentials/:scope/:name/refresh", () => {
     const colleague = await memberContext(ctx, "member");
     const connectionId = await seedConnection(INTEGRATION, {
       userId: colleague.user.id,
-      sharedWithOrg: true,
+      shared: true,
     });
     await bindConnectionsToRun(runId, { [INTEGRATION]: [connectionId] });
     const held = await heldRevision(connectionId);
     await db
+      .delete(integrationConnectionShares)
+      .where(eq(integrationConnectionShares.connectionId, connectionId));
+    await db
       .update(integrationConnections)
-      .set({ sharedWithOrg: false, refreshFailureCount: 2 })
+      .set({ refreshFailureCount: 2 })
       .where(eq(integrationConnections.id, connectionId));
 
     expect((await reportSuccess(connectionId, held)).status).toBe(204);
@@ -1042,6 +1048,7 @@ describe("GET /internal/integration-credentials — version-pinned runs", () => 
         authKey: "primary",
         accountId: "acct-test",
         label: "acct-test",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         endUserId: null,

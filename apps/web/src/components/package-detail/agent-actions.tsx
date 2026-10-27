@@ -1,95 +1,83 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { schemaHasFileFields } from "@appstrate/core/form";
-import { usePackageDetail } from "../../hooks/use-packages";
+import { useDeletePackage, usePackageDetail } from "../../hooks/use-packages";
 import { agentLaunchRefusal } from "../../hooks/use-agent-readiness";
 import { useAgentMemories } from "../../hooks/use-persistence";
 import {
-  useDeleteAgent,
   useDeleteAgentRuns,
   useDeleteAllMemories,
   useRunLauncher,
 } from "../../hooks/use-mutations";
-import { useSetPackageActive } from "../../hooks/use-library";
-import { useCurrentSpaceId } from "../../hooks/use-current-space";
+import { usePermissions } from "../../hooks/use-permissions";
 import { PackageActionsDropdown } from "./package-actions-dropdown";
 import { ConfirmModal } from "../confirm-modal";
 import { RunWithOptionsModal } from "../run-with-options-modal";
 import { RunLaunchRecovery } from "../run-launch-recovery";
 import { launchFromOptions } from "../../lib/run-launch";
+import { NewScheduleModal } from "../new-schedule-modal";
+
+type Confirmation = "deleteAgent" | "clearRuns" | "clearMemories";
+
+/** The title of each confirmation names its act; the button repeats the verb. */
+const CONFIRM_TEXT: Record<Confirmation, { title: string; description: string }> = {
+  deleteAgent: { title: "detail.deleteTitle", description: "detail.deleteConfirm" },
+  clearRuns: { title: "detail.clearRunsTitle", description: "detail.clearRunsConfirm" },
+  clearMemories: {
+    title: "detail.clearMemoriesTitle",
+    description: "detail.clearMemoriesConfirm",
+  },
+};
 
 export function AgentActions({
   packageId,
-  isOwned,
   isHistoricalVersion,
   downloadVersion,
   downloadPackage,
   downloadBundle,
   onCreateVersion,
-  onFork,
+  unsavedReason,
+  catalogueVersion,
 }: {
   packageId: string;
-  isOwned: boolean;
   isHistoricalVersion: boolean;
   downloadVersion: string | undefined;
   downloadPackage: (v: string) => void;
   /** Export the agent + transitive deps as a single .afps-bundle. */
   downloadBundle?: (v?: string) => void;
   onCreateVersion: () => void;
-  onFork?: () => void;
+  /** Set while the page holds unsaved definition edits a version or run would not carry. */
+  unsavedReason?: string;
+  /** The published version the catalogue sheet opens on (`catalogueVersionFor`). */
+  catalogueVersion?: string;
 }) {
   const { t } = useTranslation(["agents", "common"]);
-  const navigate = useNavigate();
+  const { can } = usePermissions();
   const { data: detail } = usePackageDetail("agent", packageId);
   const { data: memories } = useAgentMemories(packageId);
-  const deleteAgent = useDeleteAgent();
+  const deleteAgent = useDeletePackage("agent");
   const deleteRuns = useDeleteAgentRuns(packageId);
   const deleteAllMemories = useDeleteAllMemories(packageId);
-  const setActive = useSetPackageActive();
   const launcher = useRunLauncher(packageId);
-  const currentSpaceId = useCurrentSpaceId();
-
-  const [confirmState, setConfirmState] = useState<{
-    type: "deleteAgent" | "clearRuns" | "clearMemories" | "deactivateAgent";
-    label: string;
-  } | null>(null);
+  const [confirming, setConfirming] = useState<Confirmation | null>(null);
+  const [newScheduleOpen, setNewScheduleOpen] = useState(false);
   const [runOptionsOpen, setRunOptionsOpen] = useState(false);
 
   if (!detail) return null;
 
-  const hasFileInput = schemaHasFileFields(detail.input?.schema);
-  // Whether the agent RUNS in the space this page is read from, straight off
-  // the response this menu already has. `GET /api/packages/agents/{id}` answers
-  // it for the same space it resolved everything else in, so the menu and the
-  // rest of the page cannot disagree — and a caller the library stays silent
-  // about (a `runner` holds `agents:run` and no `agents:read`, so the space
-  // library lists no agents at all) still gets a verdict here.
-  const activeHere = detail.active;
   // Not the full run verdict: the options modal picks the model and the version.
   const refusal = agentLaunchRefusal(detail);
-  const runBlockedReason = refusal ? t(refusal) : undefined;
+  const runBlockedReason = refusal ? t(refusal) : unsavedReason;
+  const canRunWithOptions = can("agents:run") && !runBlockedReason;
+  const pendingConfirmation =
+    deleteAgent.isPending || deleteRuns.isPending || deleteAllMemories.isPending;
 
-  const handleConfirm = () => {
-    if (!confirmState) return;
-    const onSuccess = () => setConfirmState(null);
-    switch (confirmState.type) {
-      case "deleteAgent":
-        deleteAgent.mutate(detail.id, { onSuccess });
-        break;
-      case "clearRuns":
-        deleteRuns.mutate(undefined, { onSuccess });
-        break;
-      case "clearMemories":
-        deleteAllMemories.mutate(undefined, { onSuccess });
-        break;
-      case "deactivateAgent":
-        if (!currentSpaceId) return;
-        setActive.mutate({ spaceId: currentSpaceId, packageId, active: false }, { onSuccess });
-        break;
-    }
+  const confirm = () => {
+    const onSuccess = () => setConfirming(null);
+    if (confirming === "deleteAgent") deleteAgent.mutate(detail.id, { onSuccess });
+    else if (confirming === "clearRuns") deleteRuns.mutate(undefined, { onSuccess });
+    else if (confirming === "clearMemories") deleteAllMemories.mutate(undefined, { onSuccess });
   };
 
   return (
@@ -97,101 +85,53 @@ export function AgentActions({
       <PackageActionsDropdown
         packageId={packageId}
         type="agent"
-        isOwned={isOwned}
-        isBuiltIn={detail.source === "system"}
+        detail={detail}
         isHistoricalVersion={isHistoricalVersion}
-        homeSpaceId={detail.home_space_id}
-        homeWritable={detail.home_writable}
-        homeDeletable={detail.home_deletable}
-        homeShareable={detail.home_shareable}
         downloadVersion={downloadVersion}
         onDownload={downloadPackage}
-        onDownloadBundle={downloadBundle}
-        hasPublishedVersion={(detail.version_count ?? 0) > 0}
-        isActiveHere={activeHere}
+        // Whether the agent RUNS in the space this page is read from, off the response the menu
+        // already has: a system agent is no exception, and a caller the library stays silent
+        // about (a `runner` holds no `agents:read`) still gets a verdict.
+        isActiveHere={detail.active}
         onCreateVersion={onCreateVersion}
-        onFork={onFork}
-        runningRuns={detail.running_runs}
-        // Under the same run visibility as the list the item would clear.
-        hasRuns={detail.last_run !== null}
-        hasMemories={!!memories && memories.length > 0}
-        hasFileInput={!!hasFileInput}
-        onDeleteAgent={() =>
-          setConfirmState({
-            type: "deleteAgent",
-            label: t("detail.deleteConfirm", { name: detail.display_name }),
-          })
-        }
-        // The agents index lists what this space READS — an agent placed here
-        // and switched off is on it, and running it needs the switch on. This is
-        // the door: the same `POST /api/spaces/{spaceId}/packages` the library
-        // calls, reached from the page the index links to. A SYSTEM agent is
-        // not exempt: "active here" has one definition for the four families,
-        // the row wins over the platform's default, and switching one off per
-        // space is the sticky opt-out the run gate then honours.
-        canActivate={!activeHere}
-        onActivate={() => {
-          if (!currentSpaceId) return;
-          setActive.mutate({ spaceId: currentSpaceId, packageId, active: true });
+        createVersionBlockedReason={unsavedReason}
+        catalogueVersion={catalogueVersion}
+        agent={{
+          hasMemories: !!memories && memories.length > 0,
+          onDownloadBundle: downloadBundle,
+          onDeleteAgent: () => setConfirming("deleteAgent"),
+          onDeleteRuns: () => setConfirming("clearRuns"),
+          onDeleteMemories: () => setConfirming("clearMemories"),
+          onAddSchedule: () => setNewScheduleOpen(true),
+          onRunWithOptions: () => setRunOptionsOpen(true),
+          runBlockedReason,
         }}
-        canDeactivate={activeHere}
-        onDeactivate={() =>
-          setConfirmState({
-            type: "deactivateAgent",
-            label: t("packages.deactivateConfirm", {
-              name: detail.display_name,
-              ns: "settings",
-            }),
-          })
-        }
-        activationPending={setActive.isPending}
-        onDeleteRuns={() =>
-          setConfirmState({
-            type: "clearRuns",
-            label: t("detail.clearRunsConfirm"),
-          })
-        }
-        onAddSchedule={() => navigate("/schedules/new")}
-        onDeleteMemories={() =>
-          setConfirmState({
-            type: "clearMemories",
-            label: t("detail.clearMemoriesConfirm"),
-          })
-        }
-        onRunWithOptions={() => setRunOptionsOpen(true)}
-        {...(runBlockedReason ? { runBlockedReason } : {})}
       />
       <RunWithOptionsModal
-        open={runOptionsOpen}
+        open={runOptionsOpen && canRunWithOptions}
         onClose={() => setRunOptionsOpen(false)}
         agent={detail}
         isPending={launcher.isPending}
-        onSubmit={(submit) =>
-          launcher.launch(launchFromOptions(submit), () => setRunOptionsOpen(false))
-        }
+        onSubmit={(submit) => launcher.launch(launchFromOptions(submit))}
       />
+      {newScheduleOpen && (
+        <NewScheduleModal initialAgentId={packageId} onClose={() => setNewScheduleOpen(false)} />
+      )}
       <RunLaunchRecovery
         launcher={launcher}
         packageId={packageId}
         integrationEntries={detail.dependencies.integrations}
       />
       <ConfirmModal
-        open={confirmState !== null}
-        onClose={() => setConfirmState(null)}
-        onConfirm={handleConfirm}
-        title={t("btn.confirm", { ns: "common" })}
-        description={confirmState?.label ?? ""}
-        confirmLabel={
-          confirmState?.type === "deactivateAgent"
-            ? t("packages.deactivate", { ns: "settings" })
-            : undefined
+        open={confirming !== null}
+        onClose={() => setConfirming(null)}
+        onConfirm={confirm}
+        title={confirming ? t(CONFIRM_TEXT[confirming].title) : ""}
+        description={
+          confirming ? t(CONFIRM_TEXT[confirming].description, { name: detail.display_name }) : ""
         }
-        isPending={
-          deleteAgent.isPending ||
-          deleteRuns.isPending ||
-          deleteAllMemories.isPending ||
-          setActive.isPending
-        }
+        confirmLabel={t("btn.delete", { ns: "common" })}
+        isPending={pendingConfirmation}
       />
     </>
   );

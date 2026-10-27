@@ -5,6 +5,7 @@ import { createOrgItem } from "./package-items/crud.ts";
 import { CONFIG_BY_TYPE } from "./package-items/config.ts";
 import { activatePackage } from "./space-packages.ts";
 import { createVersionFromDraft } from "./package-versions.ts";
+import { recordAudit } from "./audit.ts";
 import { logger } from "../lib/logger.ts";
 
 const HELLO_WORLD_MANIFEST = {
@@ -83,7 +84,7 @@ export async function provisionDefaultAgentForOrg(
     );
 
     const published = await createVersionFromDraft({ packageId, orgId, userId: createdBy });
-    if ("error" in published) {
+    if (!published.ok) {
       logger.warn("Failed to publish the default hello-world agent", {
         orgId,
         packageId,
@@ -91,6 +92,15 @@ export async function provisionDefaultAgentForOrg(
       });
       return;
     }
+    await recordAudit({
+      orgId,
+      spaceId: defaultSpaceId,
+      actorType: "system",
+      action: "package.version_created",
+      resourceType: "package",
+      resourceId: packageId,
+      after: { type: "agent", version: published.version },
+    });
 
     logger.info("Provisioned default hello-world agent", { orgId, packageId });
   } catch (err) {

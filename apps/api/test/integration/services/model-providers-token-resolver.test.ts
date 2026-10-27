@@ -68,6 +68,7 @@ async function seedOAuthCredential(opts: {
   const id = await createOAuthCredential({
     orgId: opts.orgId,
     userId: opts.userId,
+    ownerUserId: opts.userId,
     label: `Test ${opts.providerId}`,
     providerId: opts.providerId,
     accessToken: opts.accessToken ?? "stale-access",

@@ -306,7 +306,7 @@ export async function createWebhook(params: CreateWebhookInput): Promise<Webhook
  * org-level webhooks, whose `spaceId IS NULL`); an `OrgScope` adds no
  * space-level constraint — the session caller can see the whole org.
  *
- * Issue #172 (extension): this is the compile-time replacement for the
+ * This is the compile-time replacement for the
  * original `spaceIdScope?: string` parameter. Taking a `Scope` union
  * forces every caller to construct a scope object (via `getSpaceScope(c)` or
  * `getOrgScope(c)`), and the type system now rejects the old bug of

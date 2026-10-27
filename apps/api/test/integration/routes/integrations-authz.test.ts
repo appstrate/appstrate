@@ -34,22 +34,17 @@ import {
   addOrgMember,
   type TestContext,
 } from "../../helpers/auth.ts";
-import {
-  seedPackage,
-  seedApiKey,
-  seedEndUser,
-  seedSpace,
-  seedPackageShare,
-} from "../../helpers/seed.ts";
+import { seedPackage, seedApiKey, seedEndUser, seedSpace } from "../../helpers/seed.ts";
 import { orgPermissions, presetPermissions, validateScopes } from "../../../src/lib/permissions.ts";
 import { and, eq } from "drizzle-orm";
 import {
   auditEvents,
   integrationConnections,
+  integrationConnectionShares,
   integrationPins,
-  packageShares,
   spacePackages,
 } from "@appstrate/db/schema";
+import { seedShares } from "../../helpers/connection-shares.ts";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import {
   localIntegrationManifest,
@@ -112,7 +107,7 @@ async function seedIntegration(orgId: string, manifest: IntegrationManifest, hom
 
 /** Activate (install) the integration in the space. */
 async function activate(spaceId: string, packageId: string): Promise<void> {
-  await db.insert(spacePackages).values({ spaceId, packageId });
+  await db.insert(spacePackages).values({ enabled: true, spaceId, packageId });
 }
 
 function memberHeaders(
@@ -385,87 +380,6 @@ describe("block_user_connections — auto-active system integration", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────
-// 1c. block_user_connections on an ORPHAN placement row
-// ─────────────────────────────────────────────────────────────────────────
-
-/**
- * A `space_packages` row with neither a home nor a share behind it is the
- * ORPHAN `scripts/migration/0016` repairs — inherited residue no live path
- * writes, and a decision about an integration this space has LOST.
- *
- * The gate that enforces this flag (`isUserConnectionCreationBlocked`) asks
- * PLACEMENT, so honouring the row here would persist a lock nothing enforces:
- * `200 blocked: true`, a padlock on the Integrations page, and
- * `POST …/connect` still admitting every member. The write must refuse instead
- * — through the same 404 an integration that is not installed already gets.
- */
-describe("block_user_connections — ORPHAN placement row", () => {
-  let ctx: TestContext;
-  const ORPHAN = "@myorg/orphan-gmail";
-
-  beforeEach(async () => {
-    await truncateAll();
-    ctx = await createTestContext({ orgSlug: "myorg" });
-    // Homed in ANOTHER space of the org — reachable by the owner in session,
-    // so the route's gate passes and what the assertion reads is the placement
-    // conjunct, not an authorization refusal standing in for it.
-    const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
-    await seedIntegration(ctx.orgId, gmailManifest(ORPHAN), elsewhere.id);
-    // The row, and ONLY the row: no home here, no offer here.
-    await activate(ctx.defaultSpaceId, ORPHAN);
-  });
-
-  const patchBlock = (blocked: boolean) =>
-    app.request(`/api/integrations/${ORPHAN}/settings`, {
-      method: "PATCH",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ block_user_connections: blocked }),
-    });
-
-  it("404s the PATCH on an orphan row, writes no flag and grafts no share", async () => {
-    const res = await patchBlock(true);
-    expect(res.status, await res.clone().text()).toBe(404);
-
-    // The row is exactly as it was seeded — the UPDATE matched nothing, and
-    // the activation door it fell through to rolled the transaction back.
-    const [row] = await db
-      .select({
-        enabled: spacePackages.enabled,
-        blocked: spacePackages.blockUserConnections,
-      })
-      .from(spacePackages)
-      .where(
-        and(eq(spacePackages.spaceId, ctx.defaultSpaceId), eq(spacePackages.packageId, ORPHAN)),
-      );
-    expect(row?.blocked).toBe(false);
-    expect(row?.enabled).toBe(true);
-    // A refusal is not a repair: the offer that would place it is not written.
-    expect(
-      await db.select().from(packageShares).where(eq(packageShares.packageId, ORPHAN)),
-    ).toEqual([]);
-  });
-
-  it("succeeds on the exact same PATCH once a share PLACES the integration here", async () => {
-    // The discriminating control: same row, same request, one offer apart.
-    await seedPackageShare(ctx.defaultSpaceId, ORPHAN);
-
-    const res = await patchBlock(true);
-    expect(res.status, await res.clone().text()).toBe(200);
-    expect((await res.json()) as { block_user_connections: boolean }).toMatchObject({
-      block_user_connections: true,
-    });
-
-    const [row] = await db
-      .select({ blocked: spacePackages.blockUserConnections })
-      .from(spacePackages)
-      .where(
-        and(eq(spacePackages.spaceId, ctx.defaultSpaceId), eq(spacePackages.packageId, ORPHAN)),
-      );
-    expect(row?.blocked).toBe(true);
-  });
-});
-
-// ─────────────────────────────────────────────────────────────────────────
 // 2. PATCH /:packageId/connections/:connectionId — metadata authorization
 // ─────────────────────────────────────────────────────────────────────────
 
@@ -491,14 +405,15 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
         integrationId: "@myorg/gmail",
         authKey: "google",
         accountId: "acct-1",
+        orgId: ctx.orgId,
         spaceId: opts.spaceId ?? ctx.defaultSpaceId,
         userId: opts.userId,
         credentialsEncrypted: "x",
         scopesGranted: ["openid", "email"],
-        sharedWithOrg: opts.shared ?? false,
         label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
+    if (opts.shared) await seedShares(row!.id, [opts.spaceId ?? ctx.defaultSpaceId]);
     return row!.id;
   }
 
@@ -517,7 +432,7 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
       integration_package_id: string;
       auth_key: string;
       label: string;
-      shared_with_org: boolean;
+      shared_space_ids: string[];
       owner_type: string;
       createdAt: string;
       updatedAt: string;
@@ -543,51 +458,41 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
     await addOrgMember(ctx.orgId, member.id, "member");
     const connId = await seedConn({ userId: member.id });
 
-    const res = await app.request(`/api/integrations/@myorg/gmail/connections/${connId}`, {
-      method: "PATCH",
-      headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
-      body: JSON.stringify({ shared_with_org: true }),
-    });
+    const res = await shareRequest(connId, true, authHeaders(ctx));
     // Admin is allowed to edit metadata in general, but sharing is consent —
     // only the owner may give it.
     expect(res.status).toBe(403);
     const body = (await res.json()) as { detail?: string };
     expect(body.detail ?? "").toMatch(/only the connection owner can share it/i);
 
-    // Not flipped.
-    const [row] = await db
-      .select({ shared: integrationConnections.sharedWithOrg })
-      .from(integrationConnections)
-      .where(eq(integrationConnections.id, connId));
-    expect(row?.shared).toBe(false);
+    // Not shared.
+    expect(await isShared(connId)).toBe(false);
   });
 
-  /** PATCH `shared_with_org` on `connId` as the session behind `headers`. */
-  function patchShared(connId: string, shared: boolean, headers: Record<string, string>) {
-    return app.request(`/api/integrations/@myorg/gmail/connections/${connId}`, {
-      method: "PATCH",
-      headers: { ...headers, "Content-Type": "application/json" },
-      body: JSON.stringify({ shared_with_org: shared }),
-    });
+  /** Share `connId` into (or withdraw it from) the default space, as the session behind `headers`. */
+  function shareRequest(connId: string, shared: boolean, headers: Record<string, string>) {
+    return app.request(
+      `/api/integrations/@myorg/gmail/connections/${connId}/shares/${ctx.defaultSpaceId}`,
+      { method: shared ? "PUT" : "DELETE", headers },
+    );
   }
 
-  async function isShared(connId: string): Promise<boolean | undefined> {
-    const [row] = await db
-      .select({ shared: integrationConnections.sharedWithOrg })
-      .from(integrationConnections)
-      .where(eq(integrationConnections.id, connId));
-    return row?.shared;
+  async function isShared(connId: string): Promise<boolean> {
+    const rows = await db
+      .select({ spaceId: integrationConnectionShares.spaceId })
+      .from(integrationConnectionShares)
+      .where(eq(integrationConnectionShares.connectionId, connId));
+    return rows.some((row) => row.spaceId === ctx.defaultSpaceId);
   }
 
-  it("lets an integrations:configure holder unshare a colleague's connection (200)", async () => {
+  it("lets an integrations:configure holder unshare a colleague's connection (204)", async () => {
     const member = await createTestUser({ email: "sharer@myorg.test" });
     await addOrgMember(ctx.orgId, member.id, "member");
     const connId = await seedConn({ userId: member.id, shared: true });
 
-    const res = await patchShared(connId, false, authHeaders(ctx));
+    const res = await shareRequest(connId, false, authHeaders(ctx));
 
-    expect(res.status, await res.clone().text()).toBe(200);
-    expect(((await res.json()) as { shared_with_org: boolean }).shared_with_org).toBe(false);
+    expect(res.status, await res.clone().text()).toBe(204);
     expect(await isShared(connId)).toBe(false);
   });
 
@@ -597,7 +502,7 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
     const member = await createTestUser({ email: "operator@myorg.test" });
     await addOrgMember(ctx.orgId, member.id, "member");
 
-    const res = await patchShared(connId, false, memberHeaders(member.cookie, ctx));
+    const res = await shareRequest(connId, false, memberHeaders(member.cookie, ctx));
 
     expect(res.status).toBe(403);
     expect(await isShared(connId)).toBe(true);
@@ -616,7 +521,7 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
       connectionIds: [connId],
     });
 
-    const res = await patchShared(connId, false, authHeaders(ctx));
+    const res = await shareRequest(connId, false, authHeaders(ctx));
 
     expect(res.status).toBe(409);
     expect(((await res.json()) as { code?: string }).code).toBe("connection_pinned");
@@ -643,9 +548,8 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
   });
 
   it("404s a connection that belongs to a different space", async () => {
-    // A second space in the SAME org; the connection lives there, so the
-    // route's `ownership.spaceId !== scope.spaceId` check 404s
-    // (scope is ctx.defaultSpaceId via the headers).
+    // A second space in the SAME org; the connection is scoped to it, so it
+    // does not reach ctx.defaultSpaceId (the headers' space) and the edit 404s.
     const otherSpace = await seedSpace({ orgId: ctx.orgId, name: "Other Space" });
     const connId = await seedConn({ userId: ctx.user.id, spaceId: otherSpace.id });
 
@@ -665,6 +569,7 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
         integrationId: "@myorg/gmail",
         authKey: "google",
         accountId: "acct-eu",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         endUserId: endUser.id,
         credentialsEncrypted: "x",
@@ -679,11 +584,17 @@ describe("PATCH /api/integrations/:packageId/connections/:connectionId", () => {
       scopes: ["integrations:connect"],
     });
 
-    const res = await patchShared(row!.id, true, {
-      Authorization: `Bearer ${key.rawKey}`,
-      "X-Space-Id": ctx.defaultSpaceId,
-      "Appstrate-User": endUser.id,
-    });
+    const res = await app.request(
+      `/api/integrations/@myorg/gmail/connections/${row!.id}/shares/${ctx.defaultSpaceId}`,
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${key.rawKey}`,
+          "X-Space-Id": ctx.defaultSpaceId,
+          "Appstrate-User": endUser.id,
+        },
+      },
+    );
 
     expect(res.status).toBe(409);
     expect(((await res.json()) as { code?: string }).code).toBe(
@@ -714,14 +625,15 @@ describe("integrations:configure is never grantable to an API key", () => {
         integrationId: "@myorg/gmail",
         authKey: "google",
         accountId: "acct-1",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "x",
         scopesGranted: ["openid", "email"],
-        sharedWithOrg: true,
         label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });
+    await seedShares(row!.id, [ctx.defaultSpaceId]);
     return row!.id;
   }
 
@@ -942,11 +854,11 @@ describe("connect/oauth2 reconnect scope-union (incremental consent)", () => {
         integrationId: "@myorg/gmail",
         authKey: "google",
         accountId: "acct-1",
+        orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: "x",
         scopesGranted: ["openid", "email", "https://www.googleapis.com/auth/gmail.readonly"],
-        sharedWithOrg: false,
         label: `Connexion ${crypto.randomUUID().slice(0, 8)}`,
       })
       .returning({ id: integrationConnections.id });

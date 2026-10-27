@@ -4,36 +4,21 @@
  * Space-level package management — activate, deactivate, list, and configure
  * packages within a space context.
  *
- * `space_packages` is the PLACEMENT's local instance: one row per (package,
- * space) carrying `enabled`, the model, the proxy and the stored input
- * settings. The three doors in this file are the only writers that CREATE one;
- * deactivating is not one of them, so deactivating and reactivating keeps every
- * setting the space chose.
- *
- * A row is deleted only when the placement behind it is withdrawn, by one of
- * two acts, each inside the transaction that withdraws it: `revokePackageShare`
- * (`services/package-shares.ts`) and the `keep: false` branch of
- * `reconcilePlacementsAfterRehome` (`services/package-placement.ts`) — plus the
- * cascades of the package's deletion and the space's.
- * `setBlockUserConnections` (`services/integration-pins-service.ts`) writes here
- * too, but only UPDATES a column in place on a row already placed.
+ * `space_packages` is the placement: one row per (package, space) carrying
+ * `enabled`, model, proxy and input settings (RBAC spec §6.10). The doors here
+ * create rows; outside the home only {@link placePackage} does. Deactivating
+ * keeps the row; only `withdrawPlacement` deletes it.
  */
 
 import { eq, and, exists, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { db } from "@appstrate/db/client";
-import {
-  spacePackages,
-  packages,
-  packageShares,
-  packageDistTags,
-  packageVersions,
-} from "@appstrate/db/schema";
+import { spacePackages, packages, packageDistTags, packageVersions } from "@appstrate/db/schema";
 import {
   CHAT_SKILLS_CONTENT_BUDGET_CHARS,
   MAX_ENFORCED_CHAT_SKILLS,
 } from "@appstrate/core/chat-contract";
-import { conflict, notFound, parseBody } from "../lib/errors.ts";
+import { conflict, forbidden, notFound, parseBody } from "../lib/errors.ts";
 import { inputSettingsSchema } from "../lib/jsonb-schemas.ts";
 import { orgOrSystemFilter, notEphemeralFilter } from "../lib/package-helpers.ts";
 import type { DbOrTx, Tx } from "../lib/db-helpers.ts";
@@ -45,8 +30,12 @@ import { assertSpaceInScope } from "./spaces.ts";
 import { ApiError } from "../lib/errors.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { parsePackageZip } from "@appstrate/core/zip";
-import { placementReadFilter, placementRowJoin, placementShareJoin } from "./package-placement.ts";
-import { getVersionForDownload, loadPublishedDefinition } from "./package-versions.ts";
+import { placementRowJoin } from "./package-placement.ts";
+import {
+  getLatestVersionId,
+  getVersionForDownload,
+  loadPublishedDefinition,
+} from "./package-versions.ts";
 import { downloadVersionZip } from "./package-storage.ts";
 import {
   activeHereSql,
@@ -65,18 +54,10 @@ import {
  * same parser used at authoring/import and runtime boot. System packages are
  * boot-registry artifacts and do not have a package_versions row here.
  *
- * Exported because {@link activatePackageWithin} cannot run it: it reads object
- * storage, which has no place inside a transaction. Every caller that opens its
- * own transaction around the activation — the home MOVE — runs this first, so
- * an unexecutable mcp-server fails the whole act with its 422 instead of
- * arriving switched on.
- *
- * The window between this check and the commit is ASSUMED: a republication
- * landing inside it swaps the archive this validated. The act gated here is an
- * activation, not an execution — the run path parses what it downloads — so the
- * worst outcome is a switch turned on for a bundle the next run refuses, which
- * the door would have reached one click later anyway. Closing the window would
- * mean holding object storage inside a database transaction.
+ * Exported because {@link activatePackageWithin} cannot run it (object storage
+ * has no place inside a transaction); callers owning the transaction run it first.
+ * A republication between this check and the commit is accepted: the run path
+ * parses what it downloads anyway.
  */
 export async function assertMcpServerActivatable(
   scope: SpaceScope,
@@ -118,96 +99,7 @@ export async function assertMcpServerActivatable(
   }
 }
 
-/**
- * Is the package OFFERED to this space (`package_shares`)?
- *
- * `FOR UPDATE`, and that is the whole point of reading it here rather than in a
- * route. `revokePackageShare` deletes the offer and the placement row it backs
- * in one transaction; an activation that read the offer WITHOUT the lock could
- * commit its `space_packages` row after that DELETE had already scanned the
- * table, leaving a placement nothing authorizes. The lock serializes the two:
- * whichever starts second waits, and then sees the other's result — an
- * activation that got there first blocks the revoke until its row exists to be
- * deleted, and a revoke that got there first leaves this read finding nothing
- * (READ COMMITTED re-evaluates after the lock releases) so the activation
- * refuses.
- */
-async function sharedWith(tx: Tx, packageId: string, spaceId: string): Promise<boolean> {
-  const [row] = await tx
-    .select({ packageId: packageShares.packageId })
-    .from(packageShares)
-    .where(and(eq(packageShares.packageId, packageId), eq(packageShares.spaceId, spaceId)))
-    .limit(1)
-    .for("update");
-  return !!row;
-}
-
-/**
- * Is the package PLACED in this space? — the transactional reading of the rule
- * {@link placementReadFilter} states in SQL (`services/package-placement.ts`):
- * shipped with the deployment, homed here, or offered here. Nothing else, and
- * a `space_packages` row least of all — a row is a placement's consequence.
- *
- * BOTH doors need it, for the same two answers: whether the activation must
- * first write the offer (or refuse), and `wasActive` — the pre-write verdict
- * driving the status code and the audit, since an ORPHAN row is not "on"
- * anywhere ({@link isActiveHere}).
- *
- * The offer half goes through {@link sharedWith}, so it is read under the
- * `FOR UPDATE` lock the write path needs anyway: the answer has to still be
- * true when the transaction commits.
- */
-async function placedHere(
-  tx: Tx,
-  pkg: { id: string; source: string | null; homeSpaceId: string | null },
-  spaceId: string,
-): Promise<boolean> {
-  if (pkg.source === "system") return true;
-  if (pkg.homeSpaceId === spaceId) return true;
-  return sharedWith(tx, pkg.id, spaceId);
-}
-
-/**
- * The same question as {@link placedHere}, expressed as a WHERE clause an
- * UPDATE can carry — "this `space_packages` row is one the package is actually
- * PLACED in this space".
- *
- * Drizzle's `update` has no join, so the rule goes in as an `EXISTS` sub-select
- * instead of a `packageShares` LEFT JOIN — same rule, one statement, which is
- * what keeps a WRITE from deciding on a bare `(space_id, package_id)` pair
- * while every reader answers "absent".
- *
- * Conjoin it into ANY update of a `space_packages` row a caller can reach by
- * id, and treat "zero rows updated" as "not placed here". On an ORPHAN row the
- * UPDATE matches nothing, so the refusal is true rather than approximate.
- */
-export function placedRowFilter(tx: DbOrTx, spaceId: string, packageId: string) {
-  return exists(
-    tx
-      .select({ one: sql`1` })
-      .from(packages)
-      .leftJoin(packageShares, placementShareJoin(packages.id, spaceId))
-      .where(and(eq(packages.id, packageId), placementReadFilter(spaceId))),
-  );
-}
-
-/**
- * Read the placement row of `(space, package)` inside a transaction.
- *
- * Both doors need it before they decide anything, and both need more than a
- * boolean: `activatePackage` reports whether it created the row and whether the
- * package was already active, and `deactivatePackage` tells "no row here yet"
- * from "a row that says false".
- *
- * `FOR UPDATE`, for the same reason {@link sharedWith} takes the lock on the
- * offer: `revokePackageShare` deletes the placement row and the offer behind it
- * in one transaction, and a bare SELECT here would let a reactivation decide on
- * a row that is being deleted — the `UPDATE … RETURNING` below would then match
- * nothing and the door would answer a placement that no longer exists. Under
- * the lock the revoke waits for us, or we wait for it and re-read (READ
- * COMMITTED) to find no row, which sends the call down the creation branch
- * where the offer is checked again and found gone.
- */
+/** The placement row of `(space, package)`, `FOR UPDATE` so a concurrent withdrawal cannot delete it under a door's decision. */
 async function currentPlacement(tx: Tx, packageId: string, spaceId: string) {
   const [row] = await tx
     .select()
@@ -219,20 +111,11 @@ async function currentPlacement(tx: Tx, packageId: string, spaceId: string) {
 }
 
 /**
- * The catalog row both doors start from, or a 404 the caller cannot tell from
- * "no such package": the org-or-system predicate lands in the SQL WHERE, and an
- * ephemeral shadow row is never placeable.
- *
- * `FOR SHARE`, because `home_space_id` is read here and DECIDES whether the
- * placement needs an offer, while the home MOVE rewrites that column and
- * back-fills the offers the spaces losing the home now need. Unlocked, the two
- * interleave into a placement nothing places: this call reads `home = A` and
- * takes the "no offer required" branch, the move sets `home = B` and scans for
- * orphans without seeing our uncommitted row, and A keeps a `space_packages`
- * row with no offer behind it. A SHARE lock serializes the pair while leaving
- * concurrent activations in other spaces untouched.
+ * The catalog row every door starts from, or an opaque 404. `FOR SHARE` because
+ * `home_space_id` decides whether a row may be created and a home move rewrites
+ * it. Lock order: `packages`, then the `space_packages` row.
  */
-async function loadPlaceablePackage(tx: Tx, scope: SpaceScope, packageId: string) {
+export async function loadPlaceablePackage(tx: Tx, scope: SpaceScope, packageId: string) {
   const [pkg] = await tx
     .select({
       id: packages.id,
@@ -249,14 +132,64 @@ async function loadPlaceablePackage(tx: Tx, scope: SpaceScope, packageId: string
   return pkg;
 }
 
+/** Placed here without a row — shipped with the deployment, or homed here. */
+function placedWithoutRow(
+  pkg: { source: string | null; homeSpaceId: string | null },
+  spaceId: string,
+): boolean {
+  return pkg.source === "system" || pkg.homeSpaceId === spaceId;
+}
+
+/** Who places a package outside its home: recorded as `shared_by`, plus the route's `<type>:share` rule as a predicate, judged against the locked home. */
+export interface PlacementAuthority {
+  sharedBy: string;
+  authorizeHome: (homeSpaceId: string | null) => boolean;
+}
+
 /**
- * The placement as the wire names it, built from the rows the transaction just
- * wrote rather than re-read after it. A second SELECT would describe whatever
- * state the table is in when it lands, not the state this call produced — and
- * under concurrency that is a response describing somebody else's act.
- * Deliberately the same projection as {@link spacePackageSelect}, so the two
- * doors and the GET render one shape.
+ * The one door that creates a row outside the home (RBAC spec §6.10). Refuses
+ * 403 without `<type>:share` in the locked home (checked first, so a caller who
+ * no longer governs the package learns nothing), 409 `share_target_is_home`,
+ * 409 `package_has_no_version`. `pkg` comes from `loadPlaceablePackage` in this
+ * transaction. Returns `null` when a row already existed (left untouched).
  */
+export async function placePackage(
+  tx: Tx,
+  pkg: { id: string; homeSpaceId: string | null },
+  spaceId: string,
+  params: PlacementAuthority & { enabled: boolean },
+) {
+  if (!params.authorizeHome(pkg.homeSpaceId)) {
+    throw forbidden(
+      `Placing '${pkg.id}' requires the share permission in its home space — the package moved home while this request was in flight.`,
+    );
+  }
+  if (pkg.homeSpaceId === spaceId) {
+    throw conflict(
+      "share_target_is_home",
+      "This package already lives in that space — sharing it there would place it in itself.",
+    );
+  }
+  await assertHasPublishedVersion(pkg.id, tx);
+  const [row] = await tx
+    .insert(spacePackages)
+    .values({ spaceId, packageId: pkg.id, enabled: params.enabled, sharedBy: params.sharedBy })
+    .onConflictDoNothing()
+    .returning();
+  return row ?? null;
+}
+
+/** 409 `package_has_no_version` unless a version is published; {@link placePackage}'s precondition, exported so callers can ask before a side effect. */
+export async function assertHasPublishedVersion(packageId: string, executor: DbOrTx = db) {
+  if ((await getLatestVersionId(packageId, executor)) === null) {
+    throw conflict(
+      "package_has_no_version",
+      `Package '${packageId}' has no published version — publish one first, since a package runs its latest published version outside the space that owns it.`,
+    );
+  }
+}
+
+/** The placement as the wire names it, built from the rows just written (a re-read could describe another call's act); same shape as {@link spacePackageSelect}. */
 function spacePackageWire(
   row: typeof spacePackages.$inferSelect,
   pkg: { type: string; source: string | null; draftManifest: unknown },
@@ -282,177 +215,98 @@ export interface PackageActivation {
   placement: ReturnType<typeof spacePackageWire>;
   /** Whether THIS call created the placement row. */
   created: boolean;
-  /** Whether THIS call created the offer that places the package here. */
+  /** Whether THIS call placed the package here through {@link placePackage}. */
   shared: boolean;
   /** Whether the package was ALREADY active here when the call arrived. */
   wasActive: boolean;
 }
 
 /**
- * Activate a package in a space — the ONE door, for a personal space and a team
- * space alike (RBAC spec §6.10), and an UPSERT rather than a create: the
- * placement row carries the space's model, proxy and stored input settings, so
- * putting a package down and picking it up again must not cost them. A second
- * activation of an active package is a no-op answering with the same body, not
- * a 409 — asking for a state the system is already in is not an error.
- *
- * CREATING the row is the part the PLACEMENT rule gates: the package must be
- * HOMED here or SHARED here, read under the row lock of the transaction that
- * acts on it (see {@link sharedWith}). So the placement exists first, or is
- * CREATED by this call — that is what `shareBy` is for. Flipping an EXISTING
- * row back on asks nothing more, since a revoke takes row and offer together.
- *
- * `shareBy` is the caller's id and means "write the offer in with the
- * placement". The route checks that authority (`assertPackageShareAccess`)
- * beforehand; here it only means the two rows land in ONE transaction, so a
- * placement can never exist without the offer that authorizes it. A missing
- * placement WITHOUT `shareBy` is a 404, never a 403: the package id may be
- * private, and a named refusal would confirm it exists.
- *
- * Writes neither initial values nor a version. `input_settings` has exactly one
- * write path (`PUT /api/agents/{scope}/{name}/input-settings`), and outside its
- * home a package runs the `latest` published version, always.
- *
- * Both returned flags answer for what this call DID, so the route's audits
- * cannot claim an act that did not happen: `shared` is set only when the
- * `onConflictDoNothing` insert created the offer, and `wasActive` is
- * {@link isActiveHere} evaluated BEFORE the write — so a package the deployment
- * already switches on with no row answers 200 and records nothing.
+ * Activate a package in a space: the one door, an upsert that keeps the row's
+ * settings (RBAC spec §6.10). An existing row is switched on; with none, the
+ * row is created where the package is placed without one (home, system) and
+ * elsewhere only via {@link placePackage} with `placeAs`. Without `placeAs` the
+ * answer is a 404, never a 403 (the id may be private). `shared` and `wasActive`
+ * report what this call did, so audits never claim an act that did not happen.
  */
 export async function activatePackage(
   scope: SpaceScope,
   packageId: string,
-  opts?: { shareBy?: string },
+  opts?: { placeAs?: PlacementAuthority },
 ): Promise<PackageActivation> {
   await assertSpaceInScope(scope);
   await assertMcpServerActivatable(scope, packageId);
 
-  // The org-visibility check and the write run in ONE transaction so the tenant
-  // boundary is atomic with it — a separate preflight would leave a window
-  // where a `space_packages` row could be grafted onto a package the org
-  // cannot see.
+  // One transaction: the org-visibility check is atomic with the write.
   return db.transaction((tx) => activatePackageWithin(tx, scope, packageId, opts));
 }
 
 /**
- * {@link activatePackage}'s body, inside a transaction the CALLER owns — the
- * seam that keeps `space_packages` to a single writer.
- *
- * The home MOVE (`PUT /api/packages/{scope}/{name}/home`) has to place the package
- * in its new home atomically with the move itself, and an activation that
- * opened a transaction of its own would break that atomicity. It therefore
- * calls this directly, having run {@link assertSpaceInScope} and
- * {@link assertMcpServerActivatable} first — neither belongs inside a
- * transaction (the second reads object storage), and both must still refuse the
- * act rather than let it half-happen.
- *
- * `keepExistingDecision` is the move's other need: a destination that had
- * deliberately switched the package OFF keeps that decision, because moving the
- * home transfers AUTHORITY over a package, not a verdict about what any space
- * runs. Absent the flag — the HTTP door — an existing row is switched back on,
- * which is the whole point of that door.
+ * {@link activatePackage}'s body inside the caller's transaction, for the home
+ * move; the caller has already run {@link assertSpaceInScope} and
+ * {@link assertMcpServerActivatable}. `keepExistingDecision` leaves a
+ * destination's existing on/off verdict alone (a move transfers authority, not
+ * what a space runs).
  */
 export async function activatePackageWithin(
   tx: Tx,
   scope: SpaceScope,
   packageId: string,
-  opts?: { shareBy?: string; keepExistingDecision?: boolean },
+  opts?: { placeAs?: PlacementAuthority; keepExistingDecision?: boolean },
 ): Promise<PackageActivation> {
   const pkg = await loadPlaceablePackage(tx, scope, packageId);
-  // The placement question, asked ONCE for both branches and BEFORE anything
-  // is written — the offer this call may be about to create does not count.
-  //
-  // It comes BEFORE `currentPlacement`, and the ORDER is the contract: this
-  // takes `package_shares` and that takes `space_packages`, while
-  // `revokePackageShare` deletes the two in that same order (offer, then the
-  // placement it backs). Two transactions taking the same pair of row locks in
-  // OPPOSITE orders is a deadlock — one waits on the offer while holding the
-  // row, the other waits on the row while holding the offer, and PostgreSQL
-  // aborts one with `40P01`. Every path that touches both tables takes the
-  // OFFER first.
-  const placedBefore = await placedHere(tx, pkg, scope.spaceId);
   const existing = await currentPlacement(tx, packageId, scope.spaceId);
-  // THE rule, read before the write: the row if there is one AND the package
-  // is placed here, the deployment's default otherwise
-  // (`services/package-activation.ts`).
-  const wasActive = isActiveHere(pkg, existing, placedBefore);
-
-  // A SYSTEM package is readable in every space of every organization and
-  // takes no share — the placement rule has nothing to say about it, here as
-  // in `placementGrantsRead`. Everything else must be placed BEFORE its row
-  // means anything, an existing row included: a row with no placement behind
-  // it is the orphan `scripts/migration/0016` repairs, and switching it on
-  // would be writing `enabled = true` onto a state no page shows and no door
-  // honours. With `shareBy` this call writes the offer that places it — which
-  // is also how the recipient of an offer activates it in the first place.
-  let shared = false;
-  if (!placedBefore) {
-    if (opts?.shareBy === undefined) {
-      throw notFound(`Package '${packageId}' not found in this organization`);
-    }
-    const offer = await tx
-      .insert(packageShares)
-      .values({ packageId, spaceId: scope.spaceId, sharedBy: opts.shareBy })
-      .onConflictDoNothing()
-      .returning({ packageId: packageShares.packageId });
-    shared = offer.length > 0;
-  }
+  // The activation rule, read before the write.
+  const wasActive = isActiveHere(pkg, existing);
+  const switchOn = async (created: boolean, shared: boolean) => {
+    const [row] = await tx
+      .update(spacePackages)
+      .set({ enabled: true, updatedAt: new Date() })
+      .where(and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.packageId, packageId)))
+      .returning();
+    if (!row) throw notFound(`Package '${packageId}' is not placed in this space`);
+    return { placement: spacePackageWire(row, pkg), created, shared, wasActive };
+  };
 
   if (existing) {
     if (opts?.keepExistingDecision) {
       return {
         placement: spacePackageWire(existing, pkg),
         created: false,
-        shared,
+        shared: false,
         wasActive,
       };
     }
-    const [row] = await tx
-      .update(spacePackages)
-      .set({ enabled: true, updatedAt: new Date() })
-      .where(and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.packageId, packageId)))
-      .returning();
-    // `currentPlacement` held the row under `FOR UPDATE`, so this matches. An
-    // empty result would mean the row vanished under the lock — impossible, and
-    // a non-null assertion here would turn that impossibility into a response
-    // describing a placement that does not exist.
-    if (!row) throw notFound(`Package '${packageId}' is not placed in this space`);
-    return { placement: spacePackageWire(row, pkg), created: false, shared, wasActive };
+    return switchOn(false, false);
   }
 
-  // `onConflictDoUpdate` rather than a bare INSERT: nothing locks a row that
-  // does not exist yet, so two first activations racing each other both read no
-  // placement, and the loser would take a unique-constraint 500 on an act R16
-  // makes idempotent. The cost is that `created` is decided by the read above
-  // and can be true on both sides of that race — one duplicate audit entry at
-  // worst, where the alternative is a 500 on a button press.
-  const [row] = await tx
-    .insert(spacePackages)
-    .values({ spaceId: scope.spaceId, packageId })
-    .onConflictDoUpdate({
-      target: [spacePackages.spaceId, spacePackages.packageId],
-      set: opts?.keepExistingDecision
-        ? { updatedAt: new Date() }
-        : { enabled: true, updatedAt: new Date() },
-    })
-    .returning();
-  if (!row) throw notFound(`Package '${packageId}' is not placed in this space`);
+  if (placedWithoutRow(pkg, scope.spaceId)) {
+    // Upsert: two racing first activations both read no row, and the loser
+    // must not 500. `created` may then be true on both sides (one duplicate audit).
+    const [row] = await tx
+      .insert(spacePackages)
+      .values({ spaceId: scope.spaceId, packageId, enabled: true })
+      .onConflictDoUpdate({
+        target: [spacePackages.spaceId, spacePackages.packageId],
+        set: opts?.keepExistingDecision
+          ? { updatedAt: new Date() }
+          : { enabled: true, updatedAt: new Date() },
+      })
+      .returning();
+    if (!row) throw notFound(`Package '${packageId}' is not placed in this space`);
+    return { placement: spacePackageWire(row, pkg), created: true, shared: false, wasActive };
+  }
 
-  return { placement: spacePackageWire(row, pkg), created: true, shared, wasActive };
+  if (!opts?.placeAs) throw notFound(`Package '${packageId}' not found in this organization`);
+  const placed = await placePackage(tx, pkg, scope.spaceId, { ...opts.placeAs, enabled: true });
+  if (placed) {
+    return { placement: spacePackageWire(placed, pkg), created: true, shared: true, wasActive };
+  }
+  // A concurrent call placed it first: switch that row on, like any other.
+  return switchOn(false, false);
 }
 
-/**
- * "There is NO row here — is the package on anyway?" — the ONE reading of the
- * deployment's default in this file, and the refusal both doors that would
- * WRITE a first row share.
- *
- * Two callers: {@link deactivatePackage}, which materializes the sticky opt-out
- * only for a package the default switches on, and
- * {@link updateSpacePackage}'s create-on-first-write, which must not turn
- * configuring into activating. The rule is not re-derived here —
- * {@link isActiveWithoutRow} IS the deployment default; this only decides what
- * the refusal looks like.
- */
+/** 404 unless the deployment default switches the package on with no row. */
 function assertActiveWithoutRow(pkg: ActivatablePackage, packageId: string): void {
   if (!isActiveWithoutRow(pkg)) {
     throw notFound(`Package '${packageId}' is not active in this space`);
@@ -460,28 +314,9 @@ function assertActiveWithoutRow(pkg: ActivatablePackage, packageId: string): voi
 }
 
 /**
- * Deactivate a package in a space — `enabled = false`, the row and every
- * setting on it left exactly where they are.
- *
- * The row is NOT deleted, and that is the whole point: it holds the space's
- * model, proxy, generation settings and stored input values, so "switch it off
- * for a week" must not cost the configuration. Only `revokePackageShare`
- * removes it, along with the placement itself.
- *
- * Three answers, following from the activation rule, not from the type:
- *
- *   - a row is here → set it to `false`;
- *   - NO row and the package is ON by the deployment's default (a system
- *     package, an integration `SYSTEM_INTEGRATIONS` names) → materialize the row
- *     that says `false`. The sticky opt-out: only an explicit row outvotes the
- *     default, run after run;
- *   - NO row and the package is not on → 404. An offer nobody has taken up is
- *     not "on", and writing a row would turn the library's pending offer into
- *     "switched off" — a decision the recipient never made.
- *
- * `changed` says whether the space's answer actually moved, so the route can
- * keep `package.deactivated` symmetric with `package.activated` and write only
- * for an act that happened.
+ * Deactivate a package in a space: `enabled = false`, the row and its settings
+ * kept. With no row, a default-on package gets a row saying `false` (the sticky
+ * opt-out); otherwise 404. `changed` says whether the space's answer moved.
  */
 export async function deactivatePackage(
   scope: SpaceScope,
@@ -491,14 +326,8 @@ export async function deactivatePackage(
 
   return db.transaction(async (tx) => {
     const pkg = await loadPlaceablePackage(tx, scope, packageId);
-    // Offer BEFORE placement row, the lock order every path that touches both
-    // tables takes — see `activatePackageWithin`.
-    const placed = await placedHere(tx, pkg, scope.spaceId);
     const existing = await currentPlacement(tx, packageId, scope.spaceId);
-    // Same pre-write verdict the activation door reads, for the same reason:
-    // `changed` drives the `package.deactivated` audit, and an ORPHAN row was
-    // never running anything to switch off.
-    const wasActive = isActiveHere(pkg, existing, placed);
+    const wasActive = isActiveHere(pkg, existing);
 
     if (existing) {
       if (existing.enabled) {
@@ -512,8 +341,6 @@ export async function deactivatePackage(
       return { changed: wasActive };
     }
 
-    // No row: only the deployment default can have switched this on, and only
-    // an explicit row can outvote it.
     assertActiveWithoutRow(pkg, packageId);
 
     await tx
@@ -531,11 +358,7 @@ export async function deactivatePackage(
 // Query
 // ---------------------------------------------------------------------------
 
-// Stored input values (`space_packages.input_settings`) are deliberately
-// NOT projected here: this listing is the activation surface, and the agent's
-// stored values are read through `GET /api/agents/{scope}/{name}` where they
-// travel with the schema and the locks that give them meaning
-// (`AgentDetail.input`).
+// `input_settings` is deliberately not projected: it is read via `AgentDetail.input`.
 const spacePackageSelect = {
   packageId: spacePackages.packageId,
   generation_config: spacePackages.generationConfig,
@@ -552,15 +375,9 @@ const spacePackageSelect = {
 
 /** Every placement row of a space — active and inactive alike. */
 export async function listSpacePackages(scope: SpaceScope, type?: PackageType) {
-  // Two filters, two different leaks — the projection carries `draft_manifest`
-  // either way. `orgOrSystemFilter`: a stray row pointing at another org's
-  // package must not surface that package. `placementReadFilter`: a row is not
-  // a placement, so an ORPHAN row must not surface a draft this space has lost.
-  const conditions = [
-    eq(spacePackages.spaceId, scope.spaceId),
-    orgOrSystemFilter(scope.orgId),
-    placementReadFilter(scope.spaceId),
-  ];
+  // `orgOrSystemFilter`: a stray row pointing at another org's package must not
+  // surface that package — the projection carries `draft_manifest`.
+  const conditions = [eq(spacePackages.spaceId, scope.spaceId), orgOrSystemFilter(scope.orgId)];
   if (type) {
     conditions.push(eq(packages.type, type));
   }
@@ -569,26 +386,20 @@ export async function listSpacePackages(scope: SpaceScope, type?: PackageType) {
     .select(spacePackageSelect)
     .from(spacePackages)
     .innerJoin(packages, eq(packages.id, spacePackages.packageId))
-    .leftJoin(packageShares, placementShareJoin(spacePackages.packageId, scope.spaceId))
     .where(and(...conditions));
 }
 
 export async function getSpacePackage(scope: SpaceScope, packageId: string) {
-  // Both filters land in the SQL WHERE so this is never an existence oracle:
-  // a row pointing at another org's package resolves to `null`, and so does an
-  // orphan row — exactly like a package that does not exist. See
-  // `listSpacePackages` above.
+  // Org filter in the WHERE: never an existence oracle.
   const [row] = await db
     .select(spacePackageSelect)
     .from(spacePackages)
     .innerJoin(packages, eq(packages.id, spacePackages.packageId))
-    .leftJoin(packageShares, placementShareJoin(spacePackages.packageId, scope.spaceId))
     .where(
       and(
         eq(spacePackages.spaceId, scope.spaceId),
         eq(spacePackages.packageId, packageId),
         orgOrSystemFilter(scope.orgId),
-        placementReadFilter(scope.spaceId),
       ),
     )
     .limit(1);
@@ -601,21 +412,16 @@ export async function getSpacePackage(scope: SpaceScope, packageId: string) {
 // ---------------------------------------------------------------------------
 
 /**
- * WHERE for "ACTIVE in this space, of this `type`" — org-or-system owned,
- * never an ephemeral shadow. Expects BOTH of {@link activeHereSql}'s joins,
- * `spacePackages` and `packageShares`, each on (package, this space).
- *
- * The predicate is {@link activeHereSql}, shared with
- * {@link isPackageActiveHere}, with the library's projection and with the index
- * listings, so what an index page shows, what the caller-context hints tell the
- * model it may invoke, and what the run gate lets through are one set.
+ * WHERE for "active in this space, of this `type`", org-or-system owned, never
+ * an ephemeral shadow. Expects the `spacePackages` join of {@link activeHereSql},
+ * which index pages, hints and the run gate all share.
  */
 export function activePackagesFilter(scope: SpaceScope, type: PackageType) {
   return and(
     eq(packages.type, type),
     orgOrSystemFilter(scope.orgId),
     notEphemeralFilter(),
-    activeHereSql(scope.spaceId),
+    activeHereSql(),
   );
 }
 
@@ -637,27 +443,10 @@ function packageListingOrder() {
 }
 
 /**
- * List every package of one `type` this space RUNS — {@link
- * activePackagesFilter}, so `GET /api/agents` is the agents index page in the
- * sense every other index page has: what can be launched from here.
- *
- * A package merely PLACED here — a pending offer, or one switched off — is not
- * on it. That state is the space library's subject
- * (`GET /api/spaces/{id}/library`, `services/package-library.ts`), which names
- * each placement's origin and state and carries the switch. The detail page
- * stays open either way — an author edits an agent nobody runs.
- *
- * Single query via LEFT JOIN — no N+1.
- *
- * The projection is what an INDEX draws a card from, and nothing else.
- * `draft_content` in particular — the whole `prompt.md` / `SKILL.md` body, by
- * far the largest column on the row (`services/package-items/crud.ts` says the
- * same where it omits it) — is not on it: the one caller's mapper never read it,
- * so every load of `GET /api/agents` was shipping K prompts out of Postgres to
- * drop them. Neither is the `latest` dist-tag: no reader of this listing asks
- * whether the package is published, which is why the join that produced it is
- * gone too. The hints listing below keeps both the join and the column because
- * its own `published` field reads them.
+ * List every package of one `type` this space runs ({@link activePackagesFilter}):
+ * what can be launched from here. Placed-but-off packages belong to the library
+ * (`services/package-library.ts`). The projection omits `draft_content` and the
+ * `latest` tag: an index card reads neither.
  */
 export async function listActivePackages(scope: SpaceScope, type: PackageType) {
   return db
@@ -669,7 +458,6 @@ export async function listActivePackages(scope: SpaceScope, type: PackageType) {
     })
     .from(packages)
     .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
-    .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
     .where(activePackagesFilter(scope, type))
     .orderBy(...packageListingOrder());
 }
@@ -791,7 +579,6 @@ async function listActivePackageHints<T extends PackageHint>(
     })
     .from(packages)
     .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
-    .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
     .leftJoin(packageDistTags, latestTagJoin(packages.id))
     .where(activePackagesFilter(scope, type))
     .orderBy(...packageListingOrder())
@@ -890,34 +677,18 @@ export async function listActiveSkills(
   return { skills: items, truncated, total };
 }
 
-/**
- * The RUN gate: is this package ACTIVE in this space?
- *
- * Deactivated means it does not execute (RBAC spec §6.10) — the switch the
- * space threw is the whole answer, and it is the same one the library renders
- * and the hints obey ({@link activeHereSql}). The row always wins where the
- * package is PLACED, a system package included: a space that switched one off
- * runs it nowhere. With no row the deployment's default decides. Placement
- * alone grants nothing either — a package homed here and never switched on
- * runs nowhere.
- *
- * The org boundary is IN this query (`orgOrSystemFilter`) rather than left to
- * each caller's next read: a boundary held by convention is one an added
- * caller drops silently, and the cost of stating it here is a predicate on an
- * indexed column.
- */
+/** The run gate: is this package active in this space (RBAC spec §6.10)? The row wins, system packages included; with no row the deployment default decides. Carries the org boundary itself. */
 export async function isPackageActiveHere(scope: SpaceScope, packageId: string): Promise<boolean> {
   const [row] = await db
     .select({ id: packages.id })
     .from(packages)
     .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
-    .leftJoin(packageShares, placementShareJoin(packages.id, scope.spaceId))
     .where(
       and(
         eq(packages.id, packageId),
         orgOrSystemFilter(scope.orgId),
         notEphemeralFilter(),
-        activeHereSql(scope.spaceId),
+        activeHereSql(),
       ),
     )
     .limit(1);
@@ -946,21 +717,9 @@ export interface SpacePackageSettings {
 }
 
 /**
- * The `space_packages` row of `(space, package)` as SETTINGS, or the defaults
- * when this space holds no row it may act on.
- *
- * Carries the tenant boundary and the placement rule IN this query, like every
- * other reader of the table ({@link isPackageActiveHere},
- * {@link getResolvedRunConfig}): `orgOrSystemFilter` so a row pointing at
- * another organization's package resolves to defaults instead of handing back
- * its model and proxy override, and {@link placementReadFilter} so an ORPHAN row
- * reads as no row at all. A dozen call sites reach this — the run doors, the
- * scheduler tick, the schedule routes, the agent model/proxy pair, the detail —
- * and a boundary held by convention is one the next of them drops in silence.
- * The joins the rule needs are part of this query, not the caller's.
- *
- * "No row it may act on" and "a row holding nothing" are deliberately the same
- * answer — the defaults below — since no caller could use the distinction.
+ * The `space_packages` row of `(space, package)` as settings, or defaults when
+ * none exists. The org boundary is in the query, so another organization's row
+ * yields defaults rather than its model and proxy override.
  */
 export async function getSpacePackageSettings(
   scope: SpaceScope,
@@ -975,13 +734,11 @@ export async function getSpacePackageSettings(
     })
     .from(spacePackages)
     .innerJoin(packages, eq(packages.id, spacePackages.packageId))
-    .leftJoin(packageShares, placementShareJoin(spacePackages.packageId, scope.spaceId))
     .where(
       and(
         eq(spacePackages.spaceId, scope.spaceId),
         eq(spacePackages.packageId, packageId),
         orgOrSystemFilter(scope.orgId),
-        placementReadFilter(scope.spaceId),
       ),
     )
     .limit(1);
@@ -1021,10 +778,7 @@ export async function getSpacePackageSettings(
  *
  * The org filter lands in the SQL WHERE (`orgOrSystemFilter`) so a stray
  * association row pointing at another org's package id resolves to `null`
- * instead of leaking its model/proxy override, and `placementReadFilter`
- * closes the same shape within the org: an ORPHAN row carries the model and
- * the display name of a package this space no longer holds, so it reads as no
- * row at all.
+ * instead of leaking its model/proxy override.
  *
  * `input` republishes the row's stored input values and locks — layer 2 of
  * `services/input-resolution.ts`. The CLI needs them because `appstrate run
@@ -1045,13 +799,11 @@ export async function getResolvedRunConfig(
     })
     .from(spacePackages)
     .innerJoin(packages, eq(packages.id, spacePackages.packageId))
-    .leftJoin(packageShares, placementShareJoin(spacePackages.packageId, scope.spaceId))
     .where(
       and(
         eq(spacePackages.spaceId, scope.spaceId),
         eq(spacePackages.packageId, packageId),
         orgOrSystemFilter(scope.orgId),
-        placementReadFilter(scope.spaceId),
       ),
     )
     .limit(1);
@@ -1074,32 +826,15 @@ export async function getResolvedRunConfig(
 }
 
 /**
- * Update the per-space settings row for `(spaceId, packageId)` — the model, the
- * proxy, the generation settings, the stored input values and — with
- * `requirePlacement` only, never on a create — the chat enforcement flag, and
- * nothing else. `chatEnforcedChanged` says whether the write moved that flag.
+ * Update the per-space settings row: model, proxy, generation settings, input
+ * values and, with `requirePlacement`, the chat enforcement flag
+ * (`chatEnforcedChanged` says whether it moved). Never `enabled` (activation
+ * doors own it). The org check shares the write's transaction.
  *
- * `enabled` is NOT here: activation has its own pair of doors
- * ({@link activatePackage} / {@link deactivatePackage}), which keeps the
- * placement rule, the offer it may create and the audit in one place.
- *
- * The org-visibility check runs in the SAME transaction as the write, so the
- * write can never graft a row onto a package id the org cannot see.
- *
- * Two modes:
- *   - `requirePlacement: true` (the public
- *     `PUT /spaces/:id/packages/:packageId` route): the placement row MUST
- *     already exist AND the package must be PLACED here
- *     ({@link placedRowFilter}) — creating a row, or acting on an orphan one,
- *     is a 404, never an implicit activation.
- *   - default (the agent input-settings / proxy / model routes): upsert, but
- *     ONLY where creating the row states no new decision. A system agent the
- *     deployment switches on has no row until its first per-space setting, and
- *     the row it gains says `enabled = true`, which it already was. A package
- *     NOT on and with no row — a pending offer — is refused, since writing the
- *     row there would ACTIVATE it. Those routes preflight via `requireAgent()`,
- *     which asks PLACEMENT only; the in-transaction checks below re-enforce
- *     both boundaries atomically.
+ *   - `requirePlacement: true`: the row must already exist, else 404.
+ *   - default: update the row; with none, create it only where the package is
+ *     placed without one (home, system), with the default's `enabled`;
+ *     elsewhere 404 (outside the home only {@link placePackage} creates).
  */
 export async function updateSpacePackage(
   scope: SpaceScope,
@@ -1121,12 +856,7 @@ export async function updateSpacePackage(
     generationConfig: import("@appstrate/core/model-generation").ModelGenerationSettings | null;
     proxyId: string | null;
   }> = { updatedAt: new Date() };
-  // `space_packages.input_settings` has exactly ONE write path, and it is
-  // this function — the public input-settings route and every internal caller
-  // both land here. The column's byte cap therefore belongs on THIS side of the
-  // call rather than in the route body schema, which an internal caller would
-  // simply walk past. `parseBody` renders a cap violation as the same RFC-9457
-  // 400 the route would have produced (`errors[0].field === "input_settings"`).
+  // The column's byte cap is enforced here, the one write path, not in a route schema.
   const inputSettings =
     updates.inputSettings === undefined
       ? undefined
@@ -1137,24 +867,10 @@ export async function updateSpacePackage(
   if (updates.proxyId !== undefined) set.proxyId = updates.proxyId;
 
   const work = async (tx: Tx) => {
-    // Tenant boundary, atomic with the write: the target package must be
-    // visible to the org (own or system) and not an ephemeral shadow row.
-    const [pkg] = await tx
-      .select({ id: packages.id, type: packages.type, source: packages.source })
-      .from(packages)
-      .where(and(eq(packages.id, packageId), orgOrSystemFilter(scope.orgId), notEphemeralFilter()))
-      .limit(1);
-    if (!pkg) {
-      throw notFound(`Package '${packageId}' not found in this organization`);
-    }
+    // `FOR SHARE`: the home read below decides whether a row may be created.
+    const pkg = await loadPlaceablePackage(tx, scope, packageId);
 
     if (opts?.requirePlacement) {
-      // PLACED here, not merely "there is a row": the pair alone matches an
-      // ORPHAN (`scripts/migration/0016`), and this route's own follow-up read
-      // (`getSpacePackage`, placement-joined) then finds nothing — the write
-      // landed and the 200 body was `{"object":"space_package"}`. The
-      // `EXISTS` makes the UPDATE match nothing instead, so the refusal below
-      // states the truth.
       const { chatEnforced } = updates;
       // Read under the row lock, so the caller's audit names a real change.
       const before =
@@ -1163,11 +879,7 @@ export async function updateSpacePackage(
         .update(spacePackages)
         .set(chatEnforced === undefined ? set : { ...set, chatEnforced })
         .where(
-          and(
-            eq(spacePackages.spaceId, scope.spaceId),
-            eq(spacePackages.packageId, packageId),
-            placedRowFilter(tx, scope.spaceId, packageId),
-          ),
+          and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.packageId, packageId)),
         )
         .returning({ packageId: spacePackages.packageId });
       if (updated.length === 0) {
@@ -1178,20 +890,26 @@ export async function updateSpacePackage(
       };
     }
 
-    // Create-on-first-write, and only where it changes no verdict. Without this
-    // guard, configuring a package that is merely OFFERED here would create its
-    // placement row, and a row means active — a silent activation through a
-    // door that asks neither the placement rule nor `<type>:share`, and writes
-    // no `package.activated`. Same refusal, from the same function, as
-    // {@link deactivatePackage}'s third branch.
     const existing = await currentPlacement(tx, packageId, scope.spaceId);
-    if (!existing) assertActiveWithoutRow(pkg, packageId);
-
+    if (existing) {
+      await tx
+        .update(spacePackages)
+        .set(set)
+        .where(
+          and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.packageId, packageId)),
+        );
+      return { chatEnforcedChanged: false };
+    }
+    // Configuring never activates: `enabled` keeps the default's verdict.
+    if (!placedWithoutRow(pkg, scope.spaceId)) {
+      throw notFound(`Package '${packageId}' is not placed in this space`);
+    }
     await tx
       .insert(spacePackages)
       .values({
         spaceId: scope.spaceId,
         packageId,
+        enabled: isActiveWithoutRow(pkg),
         ...(inputSettings !== undefined ? { inputSettings } : {}),
         ...(updates.modelId !== undefined ? { modelId: updates.modelId } : {}),
         ...(updates.generationConfig !== undefined

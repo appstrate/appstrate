@@ -22,6 +22,7 @@ import { pinnedSpaceScopeGuard } from "../middleware/guards.ts";
 import { ApiError, forbidden, invalidRequest, internalError, notFound } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { appearanceColorSchema, appearanceIconSchema } from "@appstrate/core/appearance";
 import { listResponse } from "../lib/list-response.ts";
 import { toISO } from "../lib/date-helpers.ts";
 import {
@@ -66,6 +67,7 @@ import { validateDomainList } from "../services/redirect-validation.ts";
 import {
   assertCatalogPackageAccess,
   assertPackageShareAccess,
+  callerPlacementAuthority,
   isPackageReadableInSpace,
 } from "../lib/package-access.ts";
 import {
@@ -82,6 +84,7 @@ import {
 import type { PackageType } from "@appstrate/core/validation";
 import type { SpaceSweepResult } from "@appstrate/shared-types";
 import { auditDiff, recordAuditFromContext } from "../services/audit.ts";
+import { recordSharesRemoved } from "../services/connection-shares.ts";
 import { listSpaceRoles } from "../services/space-roles.ts";
 import { removeScheduleJobs } from "../services/scheduler.ts";
 import { assertCanGrantSpaceRole, canGrantSpaceRole } from "../lib/space-role-policy.ts";
@@ -109,6 +112,8 @@ function spaceWireForCaller(
   c: Context<AppEnv>,
   space: {
     id: string;
+    icon: string | null;
+    color: string | null;
     createdBy: string | null;
     visibility: SpaceVisibility;
     defaultRole: SpaceRolePreset;
@@ -188,6 +193,8 @@ export const updateSpaceSchema = z
       .min(1, "name is required")
       .max(100, "name must be 100 characters or less")
       .optional(),
+    icon: appearanceIconSchema(["lucide", "emoji"]).nullable().optional(),
+    color: appearanceColorSchema.nullable().optional(),
     settings: spaceSettingsSchema.optional(),
     visibility: z.enum(SPACE_VISIBILITIES).optional(),
     default_role: z.enum(SPACE_ROLE_PRESETS).optional(),
@@ -217,15 +224,8 @@ export const activatePackageSchema = z
   })
   .strict();
 
-// No `version_id`: a placement carries no version. Which bytes a space runs is
-// decided per launch — the published `latest`, or the draft for whoever can
-// write the package — not frozen on the row.
-//
-// No `enabled` either: activation is its own act, with its own pair of doors
-// (`POST` / `DELETE` on this collection), so the placement rule and the offer
-// that may have to be created with it are stated once instead of twice. The
-// schema is `.strict()`, so a body still sending either field is a 400 rather
-// than a silent no-op.
+// No `version_id` (a placement carries no version) and no `enabled` (activation
+// has its own `POST` / `DELETE` doors); `.strict()` makes either a 400.
 export const updatePackageSchema = z
   .object({
     generation_config: modelGenerationSettingsSchema.nullable().optional(),
@@ -318,15 +318,10 @@ async function coarseSpacePackageGate(
  * (404). Inherent to gating per type, and far narrower than letting any space
  * member enumerate the catalog.
  *
- * ONE exception, and it is the whole authorization story of a PERSONAL space
- * (RBAC spec §3.6): in the caller's OWN personal space the `activate` /
- * `deactivate` grants are not required — ownership is the authorization. A
- * `guest` holds only `operator` there, which carries none of them, so requiring
- * them would mean a recipient could never take up a package offered to them.
- * Both gates are skipped together; the CATALOG read is not, so an unreachable
- * package stays a 404 in their own space too, and the offer is re-checked under
- * a row lock inside `activatePackage`. `configure` keeps its grant even there:
- * choosing a model spends the organization's LLM budget.
+ * Exception (RBAC spec §3.6): in the caller's own personal space the
+ * `activate` / `deactivate` grants are not required, since ownership authorizes.
+ * The catalog read still runs; `configure` keeps its grant (it spends the
+ * organization's LLM budget).
  */
 async function gateSpacePackageWrite(
   c: Context<AppEnv>,
@@ -406,7 +401,7 @@ export function createSpacesRouter() {
     // A credential PINNED to a space never enumerates its siblings: it sees the
     // one space it is bound to, whatever its subject reaches. Keyed on the
     // pinned space rather than on `authMethod === "api_key"`, for the reason
-    // `pinnedSpaceScopeGuard` is (issue #1313) — any strategy that pins a space
+    // `pinnedSpaceScopeGuard` is — any strategy that pins a space
     // is confined, not just the one auth method that did when this was written.
     const pinnedSpaceId = c.get("spaceId");
     const scoped = pinnedSpaceId ? entries.filter((e) => e.space.id === pinnedSpaceId) : entries;
@@ -510,7 +505,7 @@ export function createSpacesRouter() {
 
       try {
         const { default_role, ...rest } = data;
-        const { space, unsharedConnectionIds, disabledScheduleIds } = await updateSpace(
+        const { space, unsharedShares, disabledScheduleIds } = await updateSpace(
           orgId,
           spaceId,
           { ...rest, defaultRole: default_role },
@@ -523,12 +518,14 @@ export function createSpacesRouter() {
           resourceId: space.id,
           after: {
             name: data.name,
+            icon: data.icon,
+            color: data.color,
             settings: data.settings,
             visibility: data.visibility,
             defaultRole: default_role,
-            unsharedConnectionIds,
           },
         });
+        await recordSharesRemoved(c, orgId, unsharedShares, "access_lost");
         return c.json(spaceWireForCaller(c, space, c.get("spaceRole") ?? null));
       } catch (err) {
         if (err instanceof ApiError) throw err;
@@ -551,12 +548,13 @@ export function createSpacesRouter() {
       // administrative acts decide it — a 409 on somebody else's LIVE personal
       // space would confirm that the id is one (RBAC spec §3.6).
       assertSpaceAdminAct(await getSpace(orgId, spaceId), callerFor(c), "delete");
-      await deleteSpace(orgId, spaceId);
+      const { removedShares } = await deleteSpace(orgId, spaceId);
       await recordAuditFromContext(c, {
         action: "space.deleted",
         resourceType: "space",
         resourceId: spaceId,
       });
+      await recordSharesRemoved(c, orgId, removedShares, "space_deleted");
       return c.body(null, 204);
     } catch (err) {
       if (err instanceof ApiError) throw err;
@@ -611,13 +609,14 @@ export function createSpacesRouter() {
     const orgId = c.get("orgId");
     const spaceId = c.req.param("id")!;
     assertSpaceAdminAct(await getSpace(orgId, spaceId), callerFor(c), "sweep");
-    const counts = await emptyAndDeletePersonalSpace(orgId, spaceId);
+    const { counts, removedShares } = await emptyAndDeletePersonalSpace(orgId, spaceId);
     await recordAuditFromContext(c, {
       action: "space.swept",
       resourceType: "space",
       resourceId: spaceId,
       after: counts,
     });
+    await recordSharesRemoved(c, orgId, removedShares, "space_deleted");
     return c.json(toSweepWire(spaceId, counts));
   });
 
@@ -741,24 +740,23 @@ export function createSpacesRouter() {
     // granted, and the standing being dropped one they could have granted too —
     // are asserted inside `removeSpaceMember`, on the rows it acts on and under
     // the lock the grant path holds. Judged here they would rest on an org role
-    // a concurrent promotion can move between the read and the DELETE (#1439),
+    // a concurrent promotion can move between the read and the DELETE,
     // which is also why `access_after` comes back from that transaction rather
     // than from a lookup after it.
-    const { removed, accessAfter, unsharedConnectionIds, disabledScheduleIds } =
-      await removeSpaceMember({
-        orgId: c.get("orgId"),
-        space,
-        userId,
-        actorPermissions: c.get("permissions"),
-      });
+    const { removed, accessAfter, unsharedShares, disabledScheduleIds } = await removeSpaceMember({
+      orgId: c.get("orgId"),
+      space,
+      userId,
+      actorPermissions: c.get("permissions"),
+    });
     if (!removed) throw notFound("Space member not found");
     await removeScheduleJobs(disabledScheduleIds);
     await recordAuditFromContext(c, {
       action: "space.member_removed",
       resourceType: "space_member",
       resourceId: `${space.id}:${userId}`,
-      after: { unsharedConnectionIds },
     });
+    await recordSharesRemoved(c, c.get("orgId"), unsharedShares, "access_lost");
 
     return c.json({ access_after: accessAfter ? "implicit" : "none" });
   });
@@ -790,16 +788,10 @@ export function createSpacesRouter() {
   // a team space and a personal one alike, and for all four package types:
   // there is no per-type activation route beside it.
   //
-  // Idempotent by construction: the placement row is upserted, so a second
-  // activation answers with the same body instead of a 409 and brings back
-  // every setting the space had chosen. 201 when this call put the package on,
-  // 200 when it already was — which covers a system integration, on with no row.
-  //
-  // When the package is neither HOMED nor SHARED here, this route can CREATE
-  // the share — but only for a caller holding `<type>:share` in its home
-  // (`assertPackageShareAccess`: 404 unreachable, 403 reachable but not theirs
-  // to hand out). Activating is therefore not a way around `share`. An API key
-  // never carries it, so a key activates the already-placed and nothing else.
+  // Idempotent upsert: 201 when this call put the package on, 200 when it
+  // already was. If not placed here it can place it, but only with
+  // `<type>:share` in the home (`assertPackageShareAccess`), so activation is no
+  // way around `share`; an API key never carries it.
   //
   // No permission guard is mounted: the gate below reads the package's own rows
   // (`gateSpacePackageWrite`, `assertPackageShareAccess`).
@@ -808,41 +800,24 @@ export function createSpacesRouter() {
     const spaceId = c.req.param("spaceId")!;
     const scope = { orgId, spaceId };
 
-    // Coarse gate FIRST, before the body is even parsed: it asks nothing about
-    // the package, so a caller holding none of the four activation grants is
-    // refused with the 403 the gate exists to give rather than a 400 about the
-    // shape of a payload they were never entitled to send.
+    // Coarse gate before the body is parsed: a caller with no grant gets the 403, not a 400.
     const ownSpace = await coarseSpacePackageGate(c, orgId, "activate");
     const data = await readJsonBody(c, activatePackageSchema);
     await gateSpacePackageWrite(c, orgId, data.packageId, "activate", { ownSpace });
 
-    // Read first, to decide whether the caller must ALSO prove `<type>:share`.
-    // The authoritative check is `activatePackage`'s, under the share row's
-    // lock, in the transaction that writes: a revoke racing this read makes the
-    // activation refuse rather than commit a placement nothing backs.
+    // Decides whether `<type>:share` is also needed; `activatePackage` re-checks under lock.
     const placed = await isPackageReadableInSpace(spaceId, data.packageId);
-    let activation;
-    if (placed) {
-      activation = await activatePackage(scope, data.packageId);
-    } else {
-      await assertPackageShareAccess(c, data.packageId);
-      activation = await activatePackage(scope, data.packageId, { shareBy: c.get("user").id });
-    }
-    // Whether this call is what put the package ON — the activation rule read
-    // before the write. A package the deployment already switches on with no
-    // row at all (a system package, an integration named by
-    // `SYSTEM_INTEGRATIONS`) was active before the click and stays active
-    // after it: the row it gains records a decision that changes nothing.
+    const activation = placed
+      ? await activatePackage(scope, data.packageId)
+      : await activatePackage(scope, data.packageId, {
+          placeAs: await callerPlacementAuthority(
+            c,
+            (await assertPackageShareAccess(c, data.packageId)).type,
+          ),
+        });
+    // True only if this call turned the package on (a default-on package was already active).
     const turnedOn = !activation.wasActive;
-    // The AUDIENCE changed — recorded off what the transaction actually wrote,
-    // not off the read above: a concurrent activation may have put the offer in
-    // first, and an entry naming an act that did not happen is worse than no
-    // entry.
-    //
-    // `targetKind: "space"` because that is what was named: this route takes a
-    // space id, never a person (a personal space's id stays off the wire, and
-    // it is not on this one either — it is the space the caller is already
-    // acting in).
+    // Audited off what the transaction wrote, not the earlier read (a concurrent call may have placed it).
     if (activation.shared) {
       await recordAuditFromContext(c, {
         action: "package.shared",
@@ -851,9 +826,7 @@ export function createSpacesRouter() {
         after: { spaceId, targetKind: "space" },
       });
     }
-    // Only a call that actually turned the package ON is an activation worth
-    // recording: a repeat says nothing new, and the audit trail of a toggle is
-    // unreadable when every poll writes to it.
+    // A repeat is not audited.
     if (turnedOn) {
       await recordAuditFromContext(c, {
         action: "package.activated",
@@ -930,7 +903,7 @@ export function createSpacesRouter() {
       const explicitModel =
         data.modelId !== undefined ? await assertExplicitModelExists(orgId, data.modelId) : null;
       const selectedModel =
-        explicitModel ?? (await resolveModel(orgId, packageId, effectiveModelId));
+        explicitModel ?? (await resolveModel(orgId, packageId, effectiveModelId, null));
 
       if (generationConfig && Object.keys(generationConfig).length > 0) {
         generationConfig = validateGenerationOverride(
@@ -995,19 +968,9 @@ export function createSpacesRouter() {
 
   // DELETE /api/spaces/:spaceId/packages/:packageId — DEACTIVATE it here.
   //
-  // The placement row and every setting on it stay, so switching a package off
-  // for a week costs nothing to undo. Two acts remove the row, and neither is
-  // this one: revoking the share that placed it (`DELETE …/shares/{target}`),
-  // and a home move that releases the space it left
-  // (`PUT …/home` with `keep_in_previous_home: false`).
-  //
-  // 204 when the space has a row, and when it has none but the package is ON by
-  // the DEPLOYMENT's default — there the row is MATERIALIZED saying `false`,
-  // the sticky opt-out. That default is the activation rule's, not a reading of
-  // `source`: a `system`-provenance integration this deployment does NOT offer
-  // is off already and falls into the case below. 404 for anything else with no
-  // row — an offer nobody has taken up is not on, and writing the row would
-  // turn it into "switched off", a decision its recipient never made.
+  // The row and its settings stay (only a share revocation or a home move
+  // withdraws it). 204 when the space has a row, or none but the package is on
+  // by the deployment default (the row is then created saying `false`); else 404.
   router.delete(`/:spaceId/packages/${SCOPED_PACKAGE_ROUTE}`, async (c) => {
     const spaceId = c.req.param("spaceId")!;
     const orgId = c.get("orgId");

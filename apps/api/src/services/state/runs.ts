@@ -19,6 +19,7 @@ import {
   type SQL,
   sql,
 } from "drizzle-orm";
+import { runListConditions } from "../../lib/run-list-filters.ts";
 import { db, type Db } from "@appstrate/db/client";
 import { toPgSafe } from "@appstrate/db/pg-safe";
 import {
@@ -37,7 +38,6 @@ import {
   chatSessions,
   type PricingStatus,
   type InferenceRoute,
-  type CredentialSource,
 } from "@appstrate/db/schema";
 import {
   activeRunStatusValues,
@@ -60,6 +60,7 @@ import { enqueueStorageDeletion } from "../storage-deletion.ts";
 import { runWorkspaceDeletionJobs } from "../run-workspace-storage.ts";
 import { normalizeScope } from "@appstrate/core/naming";
 import type { LlmUsageLedgerRow, ModelCost } from "@appstrate/core/module";
+import type { ModelPayer } from "@appstrate/core/model-payer";
 import {
   resolvedConnectionMapSchema,
   runIntegrationsUnboundSchema,
@@ -67,6 +68,9 @@ import {
   type ResolvedConnectionMap,
   type RunIntegrationUnbound,
 } from "@appstrate/core/integration";
+import type { z } from "zod";
+import { tokenUsageSchema, type TokenUsage } from "@appstrate/core/token-usage";
+import { runModelErrorWire } from "@appstrate/shared-types";
 import type { SpaceScope, OrgScope } from "../../lib/scope.ts";
 import {
   modelGenerationSettingsSchema,
@@ -169,6 +173,9 @@ const enrichedRunColumns = {
   artifacts: runs.artifacts,
   checkpoint: runs.checkpoint,
   error: runs.error,
+  modelErrorCategory: runs.modelErrorCategory,
+  modelErrorStatus: runs.modelErrorStatus,
+  modelErrorMessage: runs.modelErrorMessage,
   metadata: runs.metadata,
   startedAt: runs.startedAt,
   completedAt: runs.completedAt,
@@ -228,7 +235,7 @@ function enrichedRunSelect(actor: Actor | null) {
 
 /**
  * Per-recipient unread flag for the run's notification, computed as a
- * correlated EXISTS against the `notifications` table (issue #667). The
+ * correlated EXISTS against the `notifications` table. The
  * recipient is matched on the polymorphic `(recipientType, recipientId)`
  * tuple — the same match the notifications service uses — so a dashboard
  * user and an end-user never see each other's read-state. Read state lives
@@ -284,7 +291,7 @@ type EnrichedRunRow = {
  *     spread-the-whole-row mapper leaked the credential ciphertext.
  *
  * The DB TS field names stay camelCase (Better Auth blocker); universal
- * DB-convention fields (id, *Id, *At) stay camelCase on the wire per Phase 3.
+ * DB-convention fields (id, *Id, *At) stay camelCase on the wire (`docs/CASING_CONVENTIONS.md`).
  */
 // The explicit `: RunWireDto` return annotation is the drift guard: tsc fails
 // if the mapper produces a field not on the wire DTO (the original bug leaked
@@ -306,6 +313,11 @@ function runRowToWireDto(row: RunProjection): RunWireDto {
     artifacts: row.artifacts ?? null,
     checkpoint: row.checkpoint,
     error: row.error,
+    model_error: runModelErrorWire({
+      category: row.modelErrorCategory,
+      status: row.modelErrorStatus,
+      message: row.modelErrorMessage,
+    }),
     metadata: row.metadata,
     started_at: row.startedAt?.toISOString() ?? null,
     completed_at: row.completedAt?.toISOString() ?? null,
@@ -313,7 +325,7 @@ function runRowToWireDto(row: RunProjection): RunWireDto {
     cost: row.cost,
     cost_pricing_status: row.costPricingStatus,
     runNumber: row.runNumber,
-    token_usage: row.tokenUsage,
+    token_usage: readTokenUsage(row.tokenUsage, row.id),
     version_label: row.versionLabel,
     version_ref: row.versionRef,
     proxy_label: row.proxyLabel,
@@ -324,7 +336,7 @@ function runRowToWireDto(row: RunProjection): RunWireDto {
     runner_name: row.runnerName,
     runner_kind: row.runnerKind,
     // Stored bare on historical rows; emitted with the `@` sigil so every
-    // API surface uses the one canonical scope format (issue #629).
+    // API surface uses the one canonical scope format.
     agent_scope: row.agentScope ? normalizeScope(row.agentScope) : null,
     agent_name: row.agentName,
     runOrigin: row.runOrigin,
@@ -360,14 +372,43 @@ export function readResolvedConnections(raw: unknown): ResolvedConnectionMap | n
   return raw === null || raw === undefined ? null : resolvedConnectionMapSchema.parse(raw);
 }
 
-/** `runs.integrations_unbound` as read back from jsonb; null = not recorded. */
-function readIntegrationsUnbound(raw: unknown): RunIntegrationUnbound[] | null {
-  return raw === null || raw === undefined ? null : runIntegrationsUnboundSchema.parse(raw);
+/**
+ * The read policy of the `runs` jsonb columns a run only reports (`integrations_unbound`,
+ * `token_usage`), shared by REST, realtime and ingestion: a stored value that fails its
+ * schema reads as not recorded (`null`) and is logged, never thrown.
+ */
+function readReportedColumn<T>(
+  column: string,
+  schema: z.ZodType<T>,
+  raw: unknown,
+  runId: string,
+): T | null {
+  if (raw === null || raw === undefined) return null;
+  const parsed = schema.safeParse(raw);
+  if (parsed.success) return parsed.data;
+  logger.warn("runs jsonb column does not parse; read as not recorded", { runId, column });
+  return null;
 }
 
-function projectIntegrationsUnbound(raw: unknown): RunIntegrationUnboundWire[] | null {
+/** `runs.integrations_unbound`; null = not recorded. */
+export function readIntegrationsUnbound(
+  raw: unknown,
+  runId: string,
+): RunIntegrationUnbound[] | null {
+  return readReportedColumn("integrations_unbound", runIntegrationsUnboundSchema, raw, runId);
+}
+
+/** `runs.token_usage`; null = not recorded. */
+export function readTokenUsage(raw: unknown, runId: string): TokenUsage | null {
+  return readReportedColumn("token_usage", tokenUsageSchema, raw, runId);
+}
+
+function projectIntegrationsUnbound(
+  raw: unknown,
+  runId: string,
+): RunIntegrationUnboundWire[] | null {
   return (
-    readIntegrationsUnbound(raw)?.map((u) => ({
+    readIntegrationsUnbound(raw, runId)?.map((u) => ({
       integration_package_id: u.integrationId,
       code: u.code,
       source: u.source ?? null,
@@ -389,7 +430,7 @@ function mapEnrichedRun(r: EnrichedRunRow, canReadAgentInput: boolean): Enriched
     api_key_name: r.apiKeyName ?? null,
     schedule_name: r.scheduleName ?? null,
     connections_used: projectConnectionsUsed(snapshot),
-    integrations_unbound: projectIntegrationsUnbound(r.run.integrationsUnbound),
+    integrations_unbound: projectIntegrationsUnbound(r.run.integrationsUnbound, r.run.id),
     package_ephemeral: r.packageEphemeral ?? false,
     unread: r.unread,
     // INPUT = distinct `appfile://` ids referenced in the run's persisted
@@ -445,11 +486,9 @@ async function nextRunNumber(
  * object (every one threads `{ orgId, spaceId }` from `string`-typed pipeline
  * params); and the module contract (`PlatformServices` in
  * `@appstrate/core/module`) exposes no run-creation surface, so no out-of-tree
- * JS caller exists either. The sibling `ActorScope` deliberately carries NO
- * `orgId`, but it is not structurally assignable to `SpaceScope` — passing one
- * here is a compile error, not an `"undefined"` lock. The same reasoning
- * covers `orgRunConcurrencyLockKey` below. If a dynamically-typed caller is
- * ever added, a defined-key guard has to land WITH it.
+ * JS caller exists either. The same reasoning covers `orgRunConcurrencyLockKey`
+ * below. If a dynamically-typed caller is ever added, a defined-key guard has
+ * to land WITH it.
  */
 async function acquireRunNumberLock(tx: DbTx, scope: SpaceScope, packageId: string): Promise<void> {
   const lockKey = `run_number:${scope.orgId}:${scope.spaceId}:${packageId}`;
@@ -586,7 +625,7 @@ interface CreateRunParams {
   versionRef?: string;
   proxyLabel?: string;
   modelLabel?: string;
-  modelSource?: CredentialSource;
+  modelSource?: ModelPayer;
   /** The model the run launched with — see `runs.model_id`. */
   modelId: string | null;
   /** Who serves the run's inference — see `runs.inference_route`. Null on a remote-origin run. */
@@ -607,7 +646,7 @@ interface CreateRunParams {
   /** Snapshot of the agent's display name (manifest.display_name ?? name). */
   agentName?: string | null;
   /**
-   * Per-run dependency version overrides (#666) — the `{ "@scope/name":
+   * Per-run dependency version overrides — the `{ "@scope/name":
    * "draft" | "<spec>" }` map the caller passed on the run trigger (or a
    * schedule froze). Persisted verbatim on `runs.dependency_overrides` as the
    * audit trail so a run that consumed draft bytes is never mistaken for a
@@ -649,7 +688,7 @@ interface CreateRunParams {
   integrationsUnbound?: RunIntegrationUnbound[];
   /**
    * Snapshot of each declared integration's resolved manifest version at
-   * kickoff (#686). Persisted on `runs.resolved_integration_versions` so the
+   * kickoff. Persisted on `runs.resolved_integration_versions` so the
    * runtime credential path reads the SAME version the spawn resolver used.
    */
   resolvedIntegrationVersions?: Record<
@@ -663,6 +702,8 @@ interface CreateRunParams {
    * platform-origin runs whose model resolves to an OAuth provider.
    */
   modelCredentialId?: string | null;
+  /** The member whose own credential pays the run: see `runs.payer_user_id`. */
+  payerUserId?: string | null;
 }
 
 export async function createRun(scope: SpaceScope, params: CreateRunParams): Promise<void> {
@@ -765,6 +806,7 @@ export async function createRun(scope: SpaceScope, params: CreateRunParams): Pro
       runnerName: params.runnerName ?? null,
       runnerKind: params.runnerKind ?? null,
       modelCredentialId: params.modelCredentialId ?? null,
+      payerUserId: params.payerUserId ?? null,
       ...(params.connectionOverrides !== undefined
         ? { connectionOverrides: params.connectionOverrides }
         : {}),
@@ -954,11 +996,6 @@ const notRunnerMirrorSql = sql<boolean>`NOT (
   )
 )`;
 
-/** `runs.model_source` of a resolved model: whose credential its inference spends. */
-export function modelSourceOf(model: { isSystemModel: boolean }): CredentialSource {
-  return model.isSystemModel ? "system" : "org";
-}
-
 /**
  * Whether the platform LLM proxy serves a run's inference — and so writes its
  * ledger rows, leaving the runner none to report. `runs_proxy_route_has_model`
@@ -1054,7 +1091,7 @@ export async function getRunAttribution(
   packageId: string | null;
   status: RunStatus;
   runOrigin: "platform" | "remote";
-  modelSource: CredentialSource | null;
+  modelSource: ModelPayer | null;
   spaceId: string;
   userId: string | null;
   endUserId: string | null;
@@ -1565,7 +1602,7 @@ export async function deletePackageRuns(scope: SpaceScope, packageId: string): P
 
     // Now that admission is held, "no active runs" is a fact for the rest of
     // this transaction rather than a stale reading. This is the ONLY check —
-    // the route no longer pre-checks, because a non-transactional count that
+    // the route does not pre-check, because a non-transactional count that
     // the real guard has to repeat anyway is just a second place to drift.
     const active = await countActiveRunsForPackage(tx, scope, packageId);
     if (active > 0) {
@@ -1677,17 +1714,28 @@ export async function listPackageRuns(
     limit?: number;
     offset?: number;
     actor?: Actor | null;
+    status?: RunStatus[];
+    search?: string;
     /** Caller's run-read predicate (`lib/run-visibility.ts`); absent = `runs:read-all`. */
     visibility?: SQL;
     canReadAgentInput?: boolean;
   } = {},
 ) {
-  const { limit = 50, offset = 0, actor = null, visibility, canReadAgentInput = false } = options;
+  const {
+    limit = 50,
+    offset = 0,
+    actor = null,
+    status,
+    search,
+    visibility,
+    canReadAgentInput = false,
+  } = options;
   const conditions = [
     eq(runs.packageId, packageId),
     eq(runs.orgId, scope.orgId),
     eq(runs.spaceId, scope.spaceId),
   ];
+  conditions.push(...runListConditions({ status, search }));
   if (visibility) conditions.push(visibility);
   return listRunsWithFilter(and(...conditions)!, limit, offset, actor, canReadAgentInput);
 }
@@ -1710,16 +1758,20 @@ interface ListGlobalRunsOptions {
   offset?: number;
   kind?: GlobalRunKind;
   /**
-   * `RunStatus`, not `string`. This used to take a `string` and quietly drop
-   * anything outside the enum (`if (status && isRunStatus(status))`), which
-   * turned a typo into "no status filter" — the whole list, read as filtered.
-   * The route now rejects an unknown value with a 400; the narrow type is what
-   * keeps a future caller from re-opening that hole.
+   * Any of these statuses — "everything that broke" is `["failed", "timeout"]`.
+   * `RunStatus`, not `string`: the route refuses an unknown value with a 400,
+   * and the narrow type keeps a caller from turning a typo into no filter.
    */
-  status?: RunStatus;
+  status?: RunStatus[];
   startDate?: Date;
   endDate?: Date;
   chatSessionId?: string;
+  /**
+   * Free text: the agent a run executed (its scope and name, as stamped on the
+   * run) and the error it ended on; digits also match the run number
+   * (`runSearchCondition`). A substring match inside one space, unindexed.
+   */
+  search?: string;
   actor?: Actor | null;
   /** Caller's run-read predicate (`lib/run-visibility.ts`); absent = `runs:read-all`. */
   visibility?: SQL;
@@ -1738,6 +1790,7 @@ export async function listGlobalRuns(
     startDate,
     endDate,
     chatSessionId,
+    search,
     actor = null,
     visibility,
     canReadAgentInput = false,
@@ -1745,7 +1798,7 @@ export async function listGlobalRuns(
 
   const conditions = [eq(runs.orgId, scope.orgId), eq(runs.spaceId, scope.spaceId)];
   if (visibility) conditions.push(visibility);
-  if (status) conditions.push(eq(runs.status, status));
+  conditions.push(...runListConditions({ status, search }));
   if (startDate) conditions.push(gte(runs.startedAt, startDate));
   if (endDate) conditions.push(lte(runs.startedAt, endDate));
   if (chatSessionId) {
@@ -1791,16 +1844,29 @@ export async function listScheduleRuns(
     limit?: number;
     offset?: number;
     actor?: Actor | null;
+    status?: RunStatus[];
+    search?: string;
     visibility?: SQL;
     canReadAgentInput?: boolean;
   } = {},
 ) {
-  const { limit = 20, offset = 0, actor = null, visibility, canReadAgentInput = false } = options;
+  const {
+    limit = 20,
+    offset = 0,
+    actor = null,
+    status,
+    search,
+    visibility,
+    canReadAgentInput = false,
+  } = options;
+  const conditions = [eq(runs.scheduleId, scheduleId)];
+  conditions.push(...runListConditions({ status, search }));
+  if (visibility) conditions.push(visibility);
   return listRunsWithFilter(
     scopedWhere(runs, {
       orgId: scope.orgId,
       spaceId: scope.spaceId,
-      extra: [eq(runs.scheduleId, scheduleId), ...(visibility ? [visibility] : [])],
+      extra: conditions,
     })!,
     limit,
     offset,
@@ -1934,7 +2000,7 @@ export async function listRunLogs(args: {
  * `runs.result` is only written at finalize from the RunResult the runner
  * posts. Every platform-synthesised terminal (cancel, timeout, stall,
  * orphan sweep) therefore has to recover the deliverable from here, or it
- * drops a payload that is already on disk (issue #1020).
+ * drops a payload that is already on disk.
  *
  * Ordered by the append-only `run_logs.id` DESC: `output` has
  * replace-on-emit semantics, so the highest id is the payload the agent
@@ -2059,7 +2125,7 @@ const settledSql = sql<boolean>`(${llmUsage.source} <> 'runner' OR ${runs.status
 export async function listLlmUsage(args: {
   afterId?: number;
   limit?: number;
-  credentialSource?: "system" | "org";
+  credentialSource?: ModelPayer;
 }): Promise<LlmUsageLedgerRow[]> {
   const afterId = args.afterId ?? 0;
   const limit = Math.min(

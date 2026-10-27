@@ -8,6 +8,7 @@ import { requestId } from "../../src/middleware/request-id.ts";
 import { errorHandler } from "../../src/middleware/error-handler.ts";
 import { conflict } from "../../src/lib/errors.ts";
 import { getCache } from "../../src/infra/index.ts";
+import { idempotencyPrincipal } from "../../src/lib/idempotency.ts";
 import { flushRedis } from "../helpers/redis.ts";
 
 let callCount = 0;
@@ -16,9 +17,16 @@ function createApp() {
   const app = new Hono<AppEnv>();
   app.onError(errorHandler);
   app.use("*", requestId());
+  // The caller is read from test headers, so one app serves several principals.
   app.use("*", async (c, next) => {
-    c.set("user", { id: "u1", email: "t@t.com", name: "T" });
+    c.set("user", { id: c.req.header("X-Test-User") ?? "u1", email: "t@t.com", name: "T" });
     c.set("orgId", "org-1");
+    c.set("authMethod", c.req.header("X-Test-Auth-Method") ?? "session");
+    c.set("apiKeyId", c.req.header("X-Test-Api-Key") ?? null);
+    const clientId = c.req.header("X-Test-Client");
+    if (clientId) c.set("authExtra", { clientId });
+    const endUserId = c.req.header("X-Test-End-User");
+    if (endUserId) c.set("endUser", { id: endUserId, spaceId: "spc-1" });
     return next();
   });
   app.post("/test", idempotency(), async (c) => {
@@ -49,8 +57,14 @@ function createApp() {
   return app;
 }
 
-function post(app: Hono<AppEnv>, path: string, body: object, idempotencyKey?: string) {
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
+function post(
+  app: Hono<AppEnv>,
+  path: string,
+  body: object,
+  idempotencyKey?: string,
+  caller: Record<string, string> = {},
+) {
+  const headers: Record<string, string> = { "Content-Type": "application/json", ...caller };
   if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
   return app.request(path, {
     method: "POST",
@@ -113,7 +127,13 @@ describe("idempotency middleware", () => {
     const app = createApp();
     for (const status of ["processing", "completed"]) {
       const key = `unbound-${status}`;
-      const cacheKey = `idem:org-1:_org:${key}`;
+      const principal = idempotencyPrincipal({
+        authMethod: "session",
+        apiKeyId: null,
+        clientId: null,
+        actor: { type: "user", id: "u1" },
+      });
+      const cacheKey = `idem:org-1:_org:${principal}:${key}`;
       const stored = JSON.stringify({ status, bodyHash: "body-only", body: "{}", statusCode: 201 });
       await (await getCache()).set(cacheKey, stored, { ttlSeconds: 60 });
       const res = await post(app, "/test", { name: "Alice" }, key);
@@ -121,6 +141,36 @@ describe("idempotency middleware", () => {
       expect(callCount).toBe(0);
       expect(await (await getCache()).get(cacheKey)).toBe(stored);
     }
+  });
+
+  it("never replays a key to another principal: each one executes its own request", async () => {
+    const app = createApp();
+    const callers: Record<string, string>[] = [
+      {},
+      { "X-Test-User": "u2" },
+      { "X-Test-Auth-Method": "api_key", "X-Test-Api-Key": "key-a" },
+      { "X-Test-Auth-Method": "api_key", "X-Test-Api-Key": "key-b" },
+      { "X-Test-Auth-Method": "api_key", "X-Test-Api-Key": "key-a", "X-Test-End-User": "eu_1" },
+      { "X-Test-Auth-Method": "api_key", "X-Test-Api-Key": "key-a", "X-Test-End-User": "eu_2" },
+      { "X-Test-Auth-Method": "oauth2-dashboard", "X-Test-Client": "client-a" },
+      { "X-Test-Auth-Method": "oauth2-dashboard", "X-Test-Client": "client-b" },
+    ];
+    const first: number[] = [];
+    for (const caller of callers) {
+      const res = await post(app, "/test", { name: "Alice" }, "shared-key", caller);
+      expect(res.status).toBe(201);
+      expect(res.headers.get("Idempotent-Replayed")).toBeNull();
+      first.push(((await res.json()) as { callCount: number }).callCount);
+    }
+    expect(first).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+
+    // The same principal still gets its own stored response back.
+    for (const [i, caller] of callers.entries()) {
+      const res = await post(app, "/test", { name: "Alice" }, "shared-key", caller);
+      expect(res.headers.get("Idempotent-Replayed")).toBe("true");
+      expect(((await res.json()) as { callCount: number }).callCount).toBe(first[i]!);
+    }
+    expect(callCount).toBe(callers.length);
   });
 
   it("rejects key longer than 255 chars with 400", async () => {

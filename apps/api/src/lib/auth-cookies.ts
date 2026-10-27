@@ -23,7 +23,10 @@
 import type { Context } from "hono";
 import { deleteCookie } from "hono/cookie";
 import { getCookies } from "better-auth/cookies";
+import { eq } from "drizzle-orm";
 import { getAuth } from "@appstrate/db/auth";
+import { db } from "@appstrate/db/client";
+import { user as userTable } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 
 /** Every browser-facing session read forwards Better Auth's Set-Cookie (sliding refresh). */
@@ -45,6 +48,27 @@ export async function getSessionForwardingCookies(c: Context) {
   const { session, setCookies } = await readSessionWithCookies(c);
   appendSetCookies(c, setCookies);
   return session;
+}
+
+/**
+ * The realm of a cookie session's account: the value denormalized onto the session row at
+ * creation (`databaseHooks.session.create.before`, `packages/db/src/auth.ts`), else the user
+ * row's. `undefined` when neither exists. Every reader of a cookie session that grants platform
+ * access asks this: the auth pipeline for `requirePlatformRealm`, and the routes that read the
+ * session outside it.
+ */
+export async function sessionRealmOf(session: {
+  session: object;
+  user: { id: string };
+}): Promise<string | undefined> {
+  const onSession = (session.session as { realm?: unknown }).realm;
+  if (typeof onSession === "string") return onSession;
+  const [row] = await db
+    .select({ realm: userTable.realm })
+    .from(userTable)
+    .where(eq(userTable.id, session.user.id))
+    .limit(1);
+  return row?.realm;
 }
 
 /**

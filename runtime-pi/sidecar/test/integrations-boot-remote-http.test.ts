@@ -4,7 +4,13 @@ import { describe, it, expect } from "bun:test";
 import { connectRemoteHttpIntegration, type ConnectRemoteHttpDeps } from "../integrations-boot.ts";
 import { isOperatorTrustedEgressHost } from "../ssrf.ts";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
-import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
+import type { AppstrateMcpClient, AppstrateToolDefinition } from "@appstrate/mcp-transport";
+import {
+  handlerFetch,
+  legacyMcpHandler,
+  modernMcpHandler,
+  type McpHandler,
+} from "@appstrate/mcp-transport/testing";
 import type { IntegrationCredentialsSource } from "../integration-credentials-source.ts";
 import type { IntegrationCredentialsWire } from "@appstrate/connect";
 
@@ -340,6 +346,61 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     expect(fetchCalls).toBe(0);
   });
 
+  it("names only the origin of an endpoint outside the authorized URIs, never its path", async () => {
+    const initial = wire(
+      [{ authKey: "oauth", authType: "oauth2" }],
+      { oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: "TOKEN" } },
+      ["https://other.example.com/**"],
+    );
+    const { deps, source, getFetch } = makeDeps(initial, async () => true);
+    await connectRemoteHttpIntegration(spec(), source, deps);
+
+    let message = "";
+    await withGlobalFetch(
+      (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
+      async () => {
+        try {
+          await getFetch()(`${SERVER_URL}?k=v`, { method: "POST" });
+        } catch (err) {
+          message = String(err);
+        }
+      },
+    );
+    expect(message).toContain(new URL(SERVER_URL).origin);
+    expect(message).not.toContain(new URL(SERVER_URL).pathname);
+    expect(message).not.toContain("k=v");
+  });
+
+  // The runtime's own `Headers` TypeError quotes the value, and the boot report is agent-readable.
+  it("refuses a credential that is not a header value without quoting it", async () => {
+    const secret = "TOKEN\r\nX-Injected: 1";
+    const initial = wire([{ authKey: "oauth", authType: "oauth2" }], {
+      oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: secret },
+    });
+    const { deps, source, getFetch } = makeDeps(initial, async () => true);
+    await connectRemoteHttpIntegration(spec(), source, deps);
+
+    let fetchCalls = 0;
+    let message = "";
+    await withGlobalFetch(
+      (async () => {
+        fetchCalls += 1;
+        return new Response("{}", { status: 200 });
+      }) as unknown as typeof fetch,
+      async () => {
+        try {
+          await getFetch()(SERVER_URL, { method: "POST" });
+        } catch (err) {
+          message = String(err);
+        }
+      },
+    );
+    expect(fetchCalls).toBe(0);
+    expect(message).toContain('Header "Authorization" is not a valid HTTP field value');
+    expect(message).not.toContain("TOKEN");
+    expect(message).not.toContain("X-Injected");
+  });
+
   it("never follows a same-origin redirect off the authorized URIs with the credential", async () => {
     const initial = wire(
       [{ authKey: "oauth", authType: "oauth2" }],
@@ -497,6 +558,38 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     );
   });
 
+  // AFPS §7.2: an unauthenticated integration binds no connection, so the sidecar has no source.
+  it("connects without a credentials source: nothing injected, a 401 relayed", async () => {
+    const { deps, getFetch } = makeDeps(wire([], {}), async () => true);
+    const unauthenticated = { ...spec(), connection: undefined };
+    const { authKey } = await connectRemoteHttpIntegration(unauthenticated, null, deps);
+    expect(authKey).toBeNull();
+    const seen: Array<string | null> = [];
+    await withGlobalFetch(
+      (async (_input: unknown, init?: RequestInit) => {
+        seen.push(new Headers(init?.headers).get("authorization"));
+        return new Response("{}", { status: 401 });
+      }) as unknown as typeof fetch,
+      async () => {
+        expect((await getFetch()(SERVER_URL, { method: "POST" })).status).toBe(401);
+      },
+    );
+    expect(seen).toEqual([null]);
+  });
+
+  it("connects without a credentials source through the same egress guard", async () => {
+    const { deps, getFetch } = makeDeps(
+      wire([], {}),
+      async () => true,
+      async () => ["10.0.0.5"],
+    );
+    const unauthenticated = { ...spec(UNTRUSTED_SERVER_URL), connection: undefined };
+    await connectRemoteHttpIntegration(unauthenticated, null, deps);
+    await expect(getFetch()(UNTRUSTED_SERVER_URL, { method: "POST" })).rejects.toThrow(
+      /SSRF guard blocked outbound request/,
+    );
+  });
+
   it("throws when server.url is missing", async () => {
     const noUrl = {
       integrationId: "@vendor/remote",
@@ -543,5 +636,126 @@ describe("connectRemoteHttpIntegration — credential injection", () => {
     await expect(connectRemoteHttpIntegration(bad, source, deps)).rejects.toThrow(
       /unsupported source\.remote\.transport.*allowed: "streamable-http" \| "sse"/,
     );
+  });
+});
+
+/**
+ * The real Streamable HTTP client behind the credential closure, against a server of each
+ * protocol era (#2082): the sidecar speaks to a 2026-07-28 server statelessly, falls back to
+ * `initialize` for a legacy one, and the closure (credential, egress guard) sees every request.
+ */
+describe("connectRemoteHttpIntegration — protocol eras", () => {
+  const echo: AppstrateToolDefinition = {
+    descriptor: { name: "echo", inputSchema: { type: "object" } },
+    handler: async (args) => ({ content: [{ type: "text", text: JSON.stringify(args) }] }),
+  };
+  const cases: Array<[string, McpHandler, "modern" | "legacy"]> = [
+    ["legacy", legacyMcpHandler({ tools: [echo] }), "legacy"],
+    ["modern", modernMcpHandler({ tools: [echo] }), "modern"],
+    [
+      "dual",
+      modernMcpHandler({ tools: [echo], legacy: legacyMcpHandler({ tools: [echo] }) }),
+      "modern",
+    ],
+    ["retry", modernMcpHandler({ tools: [echo], refuseFirst: 1 }), "modern"],
+  ];
+
+  it.each(cases)(
+    "connects to a %s server through the credential closure",
+    async (label, handler, era) => {
+      const url = `https://mcp-${label}.example.com/mcp`;
+      const initial = wire(
+        [{ authKey: "oauth", authType: "oauth2" }],
+        { oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: "T" } },
+        [`https://mcp-${label}.example.com/**`],
+      );
+      const source = {
+        snapshot: () => initial,
+        refreshOnUnauthorized: async () => false,
+        reportUpstreamSuccess: () => {},
+      } as unknown as IntegrationCredentialsSource;
+      const seen: { method: string | undefined; auth: string | null }[] = [];
+      const serve = handlerFetch(handler);
+      await withGlobalFetch(
+        (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+          const request = new Request(String(input), init);
+          const text = request.method === "POST" ? await request.clone().text() : "";
+          seen.push({
+            method: text ? (JSON.parse(text) as { method?: string }).method : request.method,
+            auth: request.headers.get("authorization"),
+          });
+          return serve(request);
+        }) as typeof fetch,
+        async () => {
+          const { client } = await connectRemoteHttpIntegration(spec(url), source, {
+            resolveHost: async () => [PUBLIC_IP],
+          });
+          try {
+            expect(client.getProtocol()?.era).toBe(era);
+            const { tools } = await client.listTools();
+            expect(tools.map((t) => t.name)).toEqual(["echo"]);
+            const res = await client.callTool({ name: "echo", arguments: { q: 1 } });
+            expect(res.content).toEqual([{ type: "text", text: '{"q":1}' }]);
+          } finally {
+            await client.close();
+          }
+        },
+      );
+      expect(seen.every((s) => s.auth === "Bearer T")).toBe(true);
+      expect(seen.some((s) => s.method === "initialize")).toBe(era === "legacy");
+    },
+  );
+});
+
+describe("connectRemoteHttpIntegration — a modern call that outlasts its bound", () => {
+  it("unwinds a tools/call on timeout and on abort, through the credential closure", async () => {
+    const url = "https://mcp-slow.example.com/mcp";
+    const ended: string[] = [];
+    const slow: AppstrateToolDefinition = {
+      descriptor: { name: "slow", inputSchema: { type: "object" } },
+      // Waits until the request is abandoned: the client's abort reaches the server.
+      handler: (_args, extra) =>
+        new Promise((_, reject) => {
+          extra.signal.addEventListener("abort", () => {
+            ended.push("aborted");
+            reject(new Error("abandoned"));
+          });
+        }),
+    };
+    const initial = wire(
+      [{ authKey: "oauth", authType: "oauth2" }],
+      { oauth: { headerName: "Authorization", headerPrefix: "Bearer ", value: "T" } },
+      ["https://mcp-slow.example.com/**"],
+    );
+    const source = {
+      snapshot: () => initial,
+      refreshOnUnauthorized: async () => false,
+      reportUpstreamSuccess: () => {},
+    } as unknown as IntegrationCredentialsSource;
+    const serve = handlerFetch(modernMcpHandler({ tools: [slow] }));
+    await withGlobalFetch(
+      ((input: Parameters<typeof fetch>[0], init?: RequestInit) =>
+        serve(new Request(String(input), init))) as typeof fetch,
+      async () => {
+        const { client } = await connectRemoteHttpIntegration(spec(url), source, {
+          resolveHost: async () => [PUBLIC_IP],
+        });
+        try {
+          expect(client.getProtocol()?.era).toBe("modern");
+          const started = Date.now();
+          await expect(client.callTool({ name: "slow" }, { timeoutMs: 100 })).rejects.toThrow();
+          const ac = new AbortController();
+          const call = client.callTool({ name: "slow" }, { signal: ac.signal });
+          setTimeout(() => ac.abort(new Error("run cancelled")), 50);
+          await expect(call).rejects.toThrow();
+          expect(Date.now() - started).toBeLessThan(5_000);
+        } finally {
+          await client.close();
+        }
+      },
+    );
+    // Both requests were abandoned on the server side (the response stream closed).
+    await new Promise((r) => setTimeout(r, 20));
+    expect(ended).toEqual(["aborted", "aborted"]);
   });
 });

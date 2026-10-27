@@ -31,16 +31,15 @@ describe("applyConnectInputSubstitution", () => {
       {
         url: "https://api.example.com/login?u={{username}}",
         bodyText: '{"password":"{{password}}"}',
-        headers: { "X-Token": "{{token}}", "X-Static": "literal" },
+        headers: { "X-Token": "{{token}}", "content-type": "application/json" },
       },
       { username: "alice", password: "s3cret", token: "tok-123" },
     );
-    expect("failed" in result).toBe(false);
-    if ("failed" in result || "refused" in result) throw new Error("unexpected failure");
+    if (!("url" in result)) throw new Error("unexpected failure");
     expect(result.url).toBe("https://api.example.com/login?u=alice");
     expect(result.bodyText).toBe('{"password":"s3cret"}');
     expect(result.headers["X-Token"]).toBe("tok-123");
-    expect(result.headers["X-Static"]).toBe("literal");
+    expect(result.headers["content-type"]).toBe("application/json");
   });
 
   it("fails closed on an unknown placeholder", () => {
@@ -50,6 +49,19 @@ describe("applyConnectInputSubstitution", () => {
     );
     expect("failed" in result).toBe(true);
     if ("failed" in result) expect(result.failed).toBe("missing");
+  });
+
+  it("refuses a body with placeholders under a media type it has no encoder for", () => {
+    const password = '","admin":true,"z":"';
+    const unencodable: Record<string, string>[] = [{}, { "content-type": "application/graphql" }];
+    for (const headers of unencodable) {
+      const result = applyConnectInputSubstitution(
+        { url: "https://api.example.com/x", bodyText: '{"p":"{{password}}"}', headers },
+        { password },
+      );
+      expect(Object.keys(result)).toEqual(["unsubstitutable"]);
+      expect(JSON.stringify(result)).not.toContain("admin");
+    }
   });
 
   it("fails closed when a header keeps an unresolved placeholder", () => {
@@ -68,8 +80,7 @@ describe("applyConnectInputSubstitution", () => {
       headers: { Accept: "application/json" },
     };
     const result = applyConnectInputSubstitution(parts, { username: "alice" });
-    expect("failed" in result).toBe(false);
-    if ("failed" in result || "refused" in result) throw new Error("unexpected failure");
+    if (!("url" in result)) throw new Error("unexpected failure");
     expect(result.url).toBe(parts.url);
     expect(result.bodyText).toBe(parts.bodyText);
     expect(result.headers).toEqual(parts.headers);

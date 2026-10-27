@@ -8,7 +8,7 @@
  *
  * The sink serves BOTH storage backends: filesystem always PUTs here, and
  * the S3 backend does too in proxy mode (`S3_PUBLIC_ENDPOINT` unset — the
- * platform streams the body to the private bucket server-side, issue #829).
+ * platform streams the body to the private bucket server-side).
  * Only direct-presign S3 mode (`S3_PUBLIC_ENDPOINT` set) sends the PUT
  * straight at the blob store, bypassing this route.
  */

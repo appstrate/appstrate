@@ -53,8 +53,8 @@ async function startJwksServer() {
 
 async function mintToken(payload: Record<string, unknown>, audience?: string) {
   const env = process.env.APP_URL ?? "http://127.0.0.1";
-  // Default to the platform APP_URL — one of `getEndUserVerifyAudiences()`
-  // (`lib/audiences.ts`), which the production verifier enforces as `aud`.
+  // Default to the platform APP_URL — an `aud` `isEndUserVerifyAudience()`
+  // (`lib/audiences.ts`) accepts, which the production verifier enforces.
   return new jose.SignJWT(payload)
     .setProtectedHeader({ alg: "ES256", kid })
     .setIssuer(`${env}/api/auth`)
@@ -130,7 +130,7 @@ describe("verifyEndUserAccessToken", () => {
     expect(await verifyEndUserAccessToken(expired, { jwks: localJwks })).toBeNull();
   });
 
-  // C1 — audience must be one of `getEndUserVerifyAudiences()`.
+  // C1 — audience must be one `isEndUserVerifyAudience()` accepts.
   // Before the fix the verifier only checked `iss`, so a token minted for a
   // different audience (e.g. a rogue plugin update) would slip through.
   it("returns null when the audience does not match APP_URL", async () => {
@@ -151,6 +151,31 @@ describe("verifyEndUserAccessToken", () => {
     const claims = await verifyEndUserAccessToken(token, { jwks: localJwks });
     expect(claims).not.toBeNull();
     expect(claims!.endUserId).toBe("eu_abc");
+  });
+
+  it("returns claims for a token bound to a space of a known org", async () => {
+    const { verifyEndUserAccessToken } = await import("../../services/enduser-token.ts");
+    const { addMcpOrgVerifyAudience, removeMcpOrgVerifyAudience, getMcpSpaceResourceUri } =
+      await import("../../../../lib/audiences.ts");
+    const orgId = crypto.randomUUID();
+    const spaceUri = getMcpSpaceResourceUri(orgId, `spc_${crypto.randomUUID()}`);
+    addMcpOrgVerifyAudience(orgId);
+    try {
+      const token = await mintToken({ sub: "auth_user_1", actor_type: "user" }, spaceUri);
+      const claims = await verifyEndUserAccessToken(token, { jwks: localJwks });
+      expect(claims).not.toBeNull();
+      expect(claims!.audiences).toContain(spaceUri);
+    } finally {
+      removeMcpOrgVerifyAudience(orgId);
+    }
+  });
+
+  it("returns null for a token bound to a space of an org the verifier does not know", async () => {
+    const { verifyEndUserAccessToken } = await import("../../services/enduser-token.ts");
+    const { getMcpSpaceResourceUri } = await import("../../../../lib/audiences.ts");
+    const spaceUri = getMcpSpaceResourceUri(crypto.randomUUID(), `spc_${crypto.randomUUID()}`);
+    const token = await mintToken({ sub: "auth_user_1", actor_type: "user" }, spaceUri);
+    expect(await verifyEndUserAccessToken(token, { jwks: localJwks })).toBeNull();
   });
 
   it("returns null when the issuer does not match APP_URL", async () => {

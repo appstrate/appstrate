@@ -32,7 +32,7 @@ import {
 } from "@appstrate/core/permissions";
 import type { OrgRole, SpaceRolePreset, ViewAsOrgRole } from "@appstrate/core/permissions";
 import { ApiError } from "./errors.ts";
-import { isSpaceRoleId } from "./ids.ts";
+import { isSpaceId, isSpaceRoleId } from "./ids.ts";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
 import { effectivePermissions, orgPermissions, type Permission } from "./permissions.ts";
 import {
@@ -479,6 +479,29 @@ export async function callerSpaceAccessById(
   }
   const snapshot = await loadSpaceAccess(spaceId, orgId, c.get("user").id);
   return snapshot && { space: snapshot.space, member: snapshot.member };
+}
+
+/**
+ * The caller's effective set in ANY space of `orgId` (empty outside it), not only the request's:
+ * org role, space and membership read as one snapshot (RBAC spec §4.4), under the credential ceiling.
+ */
+export async function callerPermissionsInSpace(
+  c: Context<AppEnv>,
+  spaceId: string,
+  orgId: string,
+): Promise<Set<Permission>> {
+  const snapshot = isSpaceId(spaceId)
+    ? await loadSpaceAccess(spaceId, orgId, c.get("user")?.id ?? null)
+    : null;
+  if (!snapshot?.orgRole) return new Set<Permission>();
+  const persona = personaFor(c, orgId);
+  const ref = resolveSpaceRole(
+    persona?.orgRole ?? snapshot.orgRole,
+    snapshot.space,
+    persona ? personaSpaceMember(persona, spaceId) : snapshot.member,
+    callerPersonalOwnerId(c, orgId),
+  );
+  return effectiveInSpace(c, ref, orgHalfFor(c, orgId, snapshot.orgRole).orgPermissions);
 }
 
 /** The persona overlay for multi-space reads (the listing, `package-access`), so a preview never reads the caller's own rows. */

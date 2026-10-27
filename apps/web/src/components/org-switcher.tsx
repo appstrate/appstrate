@@ -1,174 +1,396 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Link, useNavigate } from "react-router-dom";
-import { useTranslation } from "react-i18next";
-import { ChevronsUpDown, Check, Plus, Library } from "lucide-react";
-import { useOrg } from "../hooks/use-org";
-import { useSpaces } from "../hooks/use-spaces";
-import { useCurrentSpaceId } from "../hooks/use-current-space";
-import { useCanManageOrgCatalog } from "../hooks/use-permissions";
-import { useCanReach } from "../hooks/use-can-reach";
-import { useCanCreateOrg } from "../hooks/use-auth";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from "@appstrate/ui/components/dropdown-menu";
-import {
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarMenuSkeleton,
-} from "@appstrate/ui/components/sidebar";
-import { useSidebar } from "@appstrate/ui/components/sidebar-context";
-import { cn } from "@appstrate/ui/cn";
-import { spaceLabel } from "../lib/space-label";
-import { SpaceMenuItems } from "./space-menu-items";
+import { requestScopeChange } from "../hooks/use-unsaved-changes";
 
-function OrgAvatar({ name, className }: { name: string; className?: string }) {
+/**
+ * Organization and workspace switcher, at the head of the header trail: two columns, the
+ * organizations and the workspaces OF THE ONE BEING EXPLORED (clicking an organization
+ * opens its workspaces, it does not switch to it). You are always in a workspace, never
+ * in an organization alone, so org + workspace are applied together. The current context
+ * keeps the coral fill and the only gear; the explored one is the highlighted row.
+ */
+import { useState, type ComponentProps, type ReactNode } from "react";
+import { Link } from "react-router-dom";
+import { useLandAfterOrgSwitch } from "../lib/modal-route";
+import { useTranslation } from "react-i18next";
+import { Check, ChevronRight, ChevronsUpDown, Plus, Settings, Star } from "lucide-react";
+import { useOrg } from "../hooks/use-org";
+import { useOrgSpaces, useSpaces } from "../hooks/use-spaces";
+import { spaceRoleLabel } from "../hooks/use-roles";
+import { usePermissions } from "../hooks/use-permissions";
+import { spaceLabel } from "../lib/space-label";
+import { orgTile, spaceTile } from "../lib/identity-tile-props";
+import { matchesSearch } from "../lib/strings";
+import { isSpaceEnterable, useCurrentSpaceId } from "../hooks/use-current-space";
+import { useEnterSpace } from "../hooks/use-enter-space";
+import { useCanCreateOrg, useViewer } from "../hooks/use-auth";
+import { Command, CommandInput } from "@appstrate/ui/components/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { useSidebar } from "@appstrate/ui/components/sidebar";
+import { cn } from "@appstrate/ui/cn";
+import { IdentityTile } from "@appstrate/ui/components/identity-tile";
+import { NEW_SPACE_PARAM } from "./space-create-modal";
+
+function ColumnHeader({
+  label,
+  onAdd,
+  addState,
+  addLabel,
+  onNavigate,
+}: {
+  label: string;
+  onAdd?: string;
+  addState?: unknown;
+  addLabel: string;
+  onNavigate: () => void;
+}) {
   return (
-    <div
-      className={cn(
-        "bg-sidebar-primary text-sidebar-primary-foreground flex items-center justify-center rounded-lg font-medium",
-        className,
+    <div className="flex items-center justify-between px-2 pt-1 pb-2">
+      <span className="text-muted-foreground text-[0.72rem] font-semibold tracking-[0.05em] uppercase">
+        {label}
+      </span>
+      {onAdd && (
+        <Link
+          to={onAdd}
+          state={addState}
+          onClick={onNavigate}
+          className="text-primary flex items-center gap-1 text-xs font-medium"
+        >
+          {addLabel}
+          <Plus size={13} />
+        </Link>
       )}
-    >
-      {name.charAt(0).toUpperCase()}
     </div>
   );
 }
 
-export function OrgSwitcher() {
-  const { t } = useTranslation(["common", "settings"]);
-  const navigate = useNavigate();
-  const { currentOrg, orgs, switchOrg, loading } = useOrg();
-  const { isMobile } = useSidebar();
-  const { data: spaces } = useSpaces();
+/** A pickable row: the pick on the left, and on the current one the gear to its settings. */
+function PickerRow({
+  rowClassName,
+  settings,
+  onNavigate,
+  className,
+  ...pick
+}: ComponentProps<"button"> & {
+  rowClassName?: string | false;
+  settings?: { to: string; label: string };
+  onNavigate: () => void;
+}) {
+  return (
+    <div className={cn("hover:bg-accent flex items-center rounded-md", rowClassName)}>
+      <button
+        type="button"
+        className={cn(
+          "flex min-w-0 flex-1 items-center justify-start gap-2.5 p-2 text-left disabled:cursor-not-allowed disabled:opacity-60",
+          className,
+        )}
+        {...pick}
+      />
+      {settings && (
+        <Link
+          to={settings.to}
+          onClick={onNavigate}
+          aria-label={settings.label}
+          className="text-muted-foreground hover:text-foreground shrink-0 p-2"
+        >
+          <Settings size={15} />
+        </Link>
+      )}
+    </div>
+  );
+}
+
+/** The trigger's box per shape, shared by the live control and its loading placeholder. */
+const TRIGGER_BOX = {
+  brand: "h-9 w-full",
+  mobile: "h-11 min-w-0 flex-1",
+};
+
+export function OrgSwitcher({ variant }: { variant: "brand" | "mobile" }) {
+  const { t } = useTranslation();
+  const landAfterOrgSwitch = useLandAfterOrgSwitch();
+  const { currentOrg, orgs, loading } = useOrg();
+  const { data: spaces, isPending: spacesPending } = useSpaces();
   const currentSpaceId = useCurrentSpaceId();
-  const canReach = useCanReach();
-  const canManageCatalog = useCanManageOrgCatalog();
+  const enterSpace = useEnterSpace();
+  const { isMobile, setOpenMobile } = useSidebar();
+  const { can } = usePermissions();
   const canCreateOrg = useCanCreateOrg();
+  const viewer = useViewer();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  // The organization whose workspaces column two shows; null = the one you are in (the panel always reopens there).
+  const [exploredOrgId, setExploredOrgId] = useState<string | null>(null);
 
   const currentSpace = spaces?.find((s) => s.id === currentSpaceId) ?? null;
-  const hasMultipleSpaces = (spaces?.length ?? 0) > 1;
+  const exploredId = exploredOrgId ?? currentOrg?.id ?? null;
+  const isExploringElsewhere = exploredId !== null && exploredId !== currentOrg?.id;
+  const mobilePresentation = variant === "mobile" || isMobile;
+  const closeSwitcherAndSidebar = () => {
+    setOpen(false);
+    setOpenMobile(false);
+  };
 
+  // Spaces of the EXPLORED organization; your own org shares `useSpaces()`'s cache entry.
+  const exploredSpaces = useOrgSpaces(open ? exploredId : null);
+
+  // The trigger's own box (avatar + name), so the column does not move when the org lands.
   if (loading) {
     return (
-      <SidebarMenu>
-        <SidebarMenuItem>
-          <SidebarMenuSkeleton showIcon />
-        </SidebarMenuItem>
-      </SidebarMenu>
+      <div className={cn("flex items-center gap-2 px-1.5", TRIGGER_BOX[variant])} aria-hidden>
+        <Skeleton className="size-6 shrink-0 rounded-md" />
+        <Skeleton className="h-4 w-32" />
+      </div>
     );
   }
-
   if (!currentOrg) return null;
 
+  const shownOrgs = orgs.filter((o) => matchesSearch(query, [o.name]));
+  // "Mon espace" sits above the team spaces, and is called by the reader's own
+  // word rather than the French the server stored once (`spaceLabel`): the wire
+  // deliberately never says whose space it is (RBAC spec §3.6).
+  const shownSpaces = (exploredSpaces.data ?? [])
+    .filter((a) => matchesSearch(query, [spaceLabel(a, t)]))
+    .sort((a, b) => Number(Boolean(b.personal)) - Number(Boolean(a.personal)));
+
+  /** The pick is applied whole (`useEnterSpace`); the current page may not exist in another organization, so `useLandAfterOrgSwitch` moves it. */
+  const applyContext = (orgId: string, spaceId: string) =>
+    requestScopeChange(() => {
+      if (enterSpace(orgId, spaceId)) landAfterOrgSwitch();
+      closeSwitcherAndSidebar();
+    });
+
+  const spaceName: ReactNode = currentSpace ? (
+    <span className="text-muted-foreground">
+      <IdentityTile
+        {...spaceTile(currentSpace, viewer)}
+        className="mr-1.5 inline-flex size-4 rounded-sm align-text-bottom"
+      />
+      {spaceLabel(currentSpace, t)}
+    </span>
+  ) : (
+    spacesPending && <Skeleton className="inline-block h-3.5 w-16 align-middle" />
+  );
+
   return (
-    <SidebarMenu>
-      <SidebarMenuItem>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <SidebarMenuButton
-              size="lg"
-              data-testid="org-switcher-button"
-              aria-label={t("switcher.orgAriaLabel")}
-              className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
-            >
-              <OrgAvatar name={currentOrg.name} className="aspect-square size-8 text-sm" />
-              <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-semibold">{currentOrg.name}</span>
-                {currentSpace && (
-                  <span className="text-muted-foreground truncate text-xs">
-                    {spaceLabel(currentSpace, t)}
-                  </span>
-                )}
-              </div>
-              <ChevronsUpDown className="ml-auto" />
-            </SidebarMenuButton>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent
-            className="w-(--radix-dropdown-menu-trigger-width) min-w-56 rounded-lg"
-            align="start"
-            side={isMobile ? "bottom" : "right"}
-            sideOffset={4}
-          >
-            <DropdownMenuLabel className="text-muted-foreground text-xs">
-              {t("switcher.orgAriaLabel")}
-            </DropdownMenuLabel>
-            {orgs.map((org) => {
-              const isActive = org.id === currentOrg.id;
-              return (
-                <DropdownMenuItem
-                  key={org.id}
-                  data-testid={`org-item-${org.id}`}
-                  className="flex items-center gap-2"
-                  onSelect={() => {
-                    if (!isActive) {
-                      switchOrg(org.id);
-                      navigate("/", { replace: true });
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) {
+          setExploredOrgId(null);
+          setQuery("");
+        }
+      }}
+    >
+      <PopoverTrigger asChild>
+        {/* Two shapes, one control: `brand` heads the sidebar, `mobile` the phone header. It
+            replaces the whole context, which the coloured avatar and the up/down chevron
+            (never a right chevron) say. The workspace stays visible even when there is only
+            one: a level nobody ever sees is a level nobody learns. */}
+        <button
+          type="button"
+          data-testid="org-switcher-button"
+          aria-label={t("switcher.orgAriaLabel")}
+          className={cn(
+            "flex items-center gap-2 rounded-md px-1.5 text-sm transition-colors",
+            TRIGGER_BOX[variant],
+            variant === "mobile"
+              ? "hover:bg-accent data-[state=open]:bg-accent"
+              : "hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent",
+          )}
+        >
+          <IdentityTile {...orgTile(currentOrg)} className="size-6 rounded-md" />
+          <span className="min-w-0 flex-1 truncate text-left">
+            <span className="font-semibold">{currentOrg.name}</span>
+            {spaceName && (
+              <>
+                <span className="text-border mx-1.5" aria-hidden>
+                  |
+                </span>
+                {spaceName}
+              </>
+            )}
+          </span>
+          <ChevronsUpDown className="text-muted-foreground size-3.5 shrink-0" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        side={mobilePresentation ? "bottom" : "right"}
+        sideOffset={variant === "mobile" ? 47 : 6}
+        className={cn(
+          "w-[540px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl p-0",
+          mobilePresentation && "max-h-[calc(100svh-4.5rem)] overflow-y-auto",
+          variant === "mobile" && "w-[calc(100vw-1rem)] max-w-none",
+          isMobile && variant !== "mobile" && "w-[calc(100vw-1rem)] max-w-[17rem]",
+        )}
+      >
+        {/* The lists filter themselves (`matchesSearch`); cmdk only supplies the field. */}
+        <Command shouldFilter={false} className="h-auto overflow-visible">
+          <CommandInput
+            autoFocus
+            value={query}
+            onValueChange={setQuery}
+            placeholder={t("switcher.searchPlaceholder")}
+            aria-label={t("switcher.searchAriaLabel")}
+          />
+
+          <div className={cn("grid grid-cols-2", mobilePresentation && "grid-cols-1")}>
+            <div className="p-2.5">
+              <ColumnHeader
+                label={t("switcher.orgsColumn")}
+                addLabel={t("btn.add")}
+                // Whether this user may create one is the server's rule, not a flag.
+                onAdd={canCreateOrg ? "/onboarding/create" : undefined}
+                // Without it the create step forwards a user who already has an org.
+                addState={{ fromSwitcher: true }}
+                onNavigate={closeSwitcherAndSidebar}
+              />
+              {shownOrgs.map((org) => {
+                const isCurrent = org.id === currentOrg.id;
+                const isExplored = org.id === exploredId;
+                return (
+                  // Opens this organization's workspaces beside it. It does NOT switch: you
+                  // are always in a workspace, so the pick is only complete one column to the
+                  // right. The gear is on the current org only: it configures what you are IN,
+                  // and switching org first is one honest click rather than a shortcut that
+                  // silently changes context.
+                  <PickerRow
+                    key={org.id}
+                    data-testid={`org-item-${org.id}`}
+                    aria-expanded={isExplored}
+                    onClick={() => setExploredOrgId(org.id)}
+                    rowClassName={cn(
+                      isExplored && "bg-accent",
+                      isCurrent && "bg-spark/10 hover:bg-spark/10",
+                    )}
+                    settings={
+                      isCurrent
+                        ? {
+                            to: "/org-settings",
+                            label: t("switcher.orgSettings", { org: org.name }),
+                          }
+                        : undefined
                     }
-                  }}
-                >
-                  <OrgAvatar name={org.name} className="size-6 rounded-md text-xs" />
-                  <span className="flex-1 truncate">{org.name}</span>
-                  {isActive && <Check size={14} strokeWidth={2.5} className="shrink-0" />}
-                </DropdownMenuItem>
-              );
-            })}
-            <DropdownMenuSeparator />
-            {hasMultipleSpaces && (
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger
-                  data-testid="space-submenu-trigger"
-                  className="flex items-center gap-2"
-                >
-                  <span className="flex-1 truncate">
-                    {currentSpace ? spaceLabel(currentSpace, t) : null}
-                  </span>
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="min-w-48 rounded-lg">
-                  <SpaceMenuItems />
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-            )}
-            {canCreateOrg && (
-              <DropdownMenuItem asChild>
-                <Link
-                  to="/onboarding/create"
-                  state={{ fromSwitcher: true }}
-                  className="text-primary flex items-center gap-2"
-                >
-                  <Plus size={14} />
-                  {t("switcher.createOrg")}
-                </Link>
-              </DropdownMenuItem>
-            )}
-            {canReach("/space/packages") && (
-              <DropdownMenuItem asChild>
-                <Link to="/space/packages" className="text-primary flex items-center gap-2">
-                  <Library size={14} />
-                  {t("library.spaceTitle")}
-                </Link>
-              </DropdownMenuItem>
-            )}
-            {canManageCatalog && (
-              <DropdownMenuItem asChild>
-                <Link to="/library" className="text-primary flex items-center gap-2">
-                  <Library size={14} />
-                  {t("nav.library")}
-                </Link>
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </SidebarMenuItem>
-    </SidebarMenu>
+                    onNavigate={closeSwitcherAndSidebar}
+                  >
+                    <IdentityTile {...orgTile(org)} className="size-[30px]" />
+                    <span className="flex min-w-0 flex-col">
+                      <span className="truncate text-sm font-medium">{org.name}</span>
+                      <span className="text-muted-foreground text-xs">
+                        {t(`switcher.role.${org.role}`)}
+                      </span>
+                    </span>
+                    {isCurrent && <Check size={15} className="text-spark ml-auto shrink-0" />}
+                    <ChevronRight
+                      className={cn(
+                        "text-muted-foreground shrink-0",
+                        isCurrent ? "ml-1" : "ml-auto",
+                        !isExplored && "opacity-0",
+                      )}
+                      size={15}
+                    />
+                  </PickerRow>
+                );
+              })}
+            </div>
+
+            <div className={cn("border-l p-2.5", mobilePresentation && "border-t border-l-0")}>
+              {/* Adding a workspace lands in the CURRENT org's settings, so the shortcut is
+                  offered only while you are looking at your own — elsewhere it would create it
+                  in the wrong place. Creating is `spaces:write`. */}
+              <ColumnHeader
+                label={t("switcher.workspacesColumn")}
+                addLabel={t("btn.add")}
+                onAdd={
+                  isExploringElsewhere || !can("spaces:write")
+                    ? undefined
+                    : `/org-settings/spaces?${NEW_SPACE_PARAM}=1`
+                }
+                onNavigate={closeSwitcherAndSidebar}
+              />
+              {exploredSpaces.isPending ? (
+                <div className="flex flex-col gap-1 p-2">
+                  <Skeleton className="h-5 w-2/3" />
+                  <Skeleton className="h-5 w-1/2" />
+                </div>
+              ) : exploredSpaces.isError ? (
+                <p className="text-destructive px-2 py-4 text-xs">{t("error.generic")}</p>
+              ) : shownSpaces.length === 0 ? (
+                <p className="text-muted-foreground px-2 py-4 text-xs">
+                  {t("switcher.workspacesEmpty")}
+                </p>
+              ) : (
+                shownSpaces.map((space, index) => {
+                  const isCurrent = space.id === currentSpaceId && !isExploringElsewhere;
+                  const enterable = isSpaceEnterable(space);
+                  // One heading per group, printed on the first row of each: the personal space
+                  // is a different KIND of place, not a space that sorts first.
+                  const heading =
+                    index === 0 && space.personal
+                      ? t("spaces.personal.badge", { ns: "settings" })
+                      : !space.personal && (index === 0 || shownSpaces[index - 1]?.personal)
+                        ? t("spaces.personal.teamGroup", { ns: "settings" })
+                        : null;
+                  return (
+                    <div key={space.id}>
+                      {heading && (
+                        <p className="text-muted-foreground px-2 pt-2 pb-1 text-[11px] font-semibold tracking-wide uppercase">
+                          {heading}
+                        </p>
+                      )}
+                      {/* The end of the pick: org AND workspace applied together. A closed space
+                          is listed but cannot be entered (and an orphaned personal one only
+                          managed): disabled, and says why. */}
+                      <PickerRow
+                        data-testid={`space-item-${space.id}`}
+                        disabled={!enterable}
+                        title={
+                          enterable ? undefined : t("spaces.requestAccess", { ns: "settings" })
+                        }
+                        onClick={() => applyContext(exploredId ?? currentOrg.id, space.id)}
+                        rowClassName={isCurrent && "bg-primary/10 hover:bg-primary/10"}
+                        settings={
+                          isCurrent
+                            ? {
+                                to: "/workspace-settings",
+                                label: t("workspaceSettings.pageTitle", { ns: "settings" }),
+                              }
+                            : undefined
+                        }
+                        onNavigate={closeSwitcherAndSidebar}
+                      >
+                        <IdentityTile {...spaceTile(space, viewer)} className="size-[30px]" />
+                        <span className="flex min-w-0 flex-col">
+                          <span className="flex items-center gap-1.5 truncate text-sm font-medium">
+                            {spaceLabel(space, t)}
+                            {space.isDefault && (
+                              <Star size={12} className="shrink-0 fill-amber-500 text-amber-500" />
+                            )}
+                          </span>
+                          {enterable && space.role && (
+                            <span className="text-muted-foreground truncate text-xs">
+                              {spaceRoleLabel(space.role, t)}
+                            </span>
+                          )}
+                        </span>
+                        {!enterable && (
+                          <span className="text-muted-foreground ml-auto shrink-0 text-xs">
+                            {t("switcher.spaceOnRequest")}
+                          </span>
+                        )}
+                        {isCurrent && <Check size={15} className="text-primary ml-auto shrink-0" />}
+                      </PickerRow>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }

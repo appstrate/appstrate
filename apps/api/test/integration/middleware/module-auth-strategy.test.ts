@@ -24,17 +24,31 @@ import { createTestContext, createTestOrg, type TestContext } from "../../helper
 import { seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { ensurePersonalSpaceFor } from "../../../src/services/spaces.ts";
 import { db } from "@appstrate/db/client";
-import { endUsers, integrationConnections } from "@appstrate/db/schema";
+import {
+  endUsers,
+  integrationConnectionShares,
+  integrationConnections,
+} from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
 import { prefixedId } from "@appstrate/db/ids";
 import type { AppstrateModule, AuthResolution, AuthStrategy } from "@appstrate/core/module";
 
 /**
  * Tokens that resolve to the `"valid"` shape carrying ONE deliberate defect in
- * its principal declaration. `principalKind` is required and must agree with
- * `endUser`, so the type system refuses each of them — which is precisely why
- * the pipeline's own runtime check has to be what answers.
+ * its principal or ceiling declaration. `principalKind` is required and must
+ * agree with `endUser`, and a resolution declares its ceiling in `permissions`
+ * inline or in `scopeCeiling` deferred, so the type system refuses each of them
+ * — which is precisely why the pipeline's own runtime check has to be what
+ * answers.
  */
-const MISDECLARED = ["no-kind", "kind-without-enduser", "enduser-without-kind"] as const;
+const MISDECLARED = [
+  "no-kind",
+  "kind-without-enduser",
+  "enduser-without-kind",
+  "inline-with-scope-ceiling",
+  "deferred-with-permissions",
+  "deferred-with-role",
+] as const;
 
 /** The external identity the `"admin"` token impersonates; seeded where a test needs the row. */
 const STUB_END_USER_ID = "eu_stub_admin_placeholder";
@@ -82,6 +96,23 @@ const stubStrategy: AuthStrategy = {
         authMethod: "stub-dashboard",
         principalKind: "delegate",
         permissions: ["agents:read", "spaces:read", "integrations:read", "runs:read"],
+      };
+    }
+    if (token === "dashboard-connect") {
+      // The `dashboard` delegate allowed to connect: still pinned to no space.
+      if (!currentCtx) throw new Error("currentCtx not seeded — test setup bug");
+      return {
+        user: {
+          id: currentCtx.user.id,
+          email: currentCtx.user.email,
+          name: currentCtx.user.name,
+        },
+        orgId: currentCtx.orgId,
+        orgSlug: currentCtx.org.slug,
+        orgRole: "admin",
+        authMethod: "stub-dashboard",
+        principalKind: "delegate",
+        permissions: ["integrations:read", "integrations:connect"],
       };
     }
     if (token === "dashboard-unbound") {
@@ -142,21 +173,23 @@ const stubStrategy: AuthStrategy = {
           : undefined,
     };
     if (!misdeclared) return resolution;
-    const defect: Record<string, unknown> =
-      misdeclared === "no-kind"
-        ? { principalKind: undefined }
-        : misdeclared === "kind-without-enduser"
-          ? { principalKind: "end_user", endUser: undefined }
-          : {
-              principalKind: "user",
-              endUser: {
-                id: "eu_stub_contract",
-                spaceId: currentCtx.defaultSpaceId,
-                name: "Contract",
-                email: "contract@test.com",
-              },
-            };
-    return { ...resolution, ...defect } as unknown as AuthResolution;
+    const defects: Record<(typeof MISDECLARED)[number], Record<string, unknown>> = {
+      "no-kind": { principalKind: undefined },
+      "kind-without-enduser": { principalKind: "end_user", endUser: undefined },
+      "enduser-without-kind": {
+        principalKind: "user",
+        endUser: {
+          id: "eu_stub_contract",
+          spaceId: currentCtx.defaultSpaceId,
+          name: "Contract",
+          email: "contract@test.com",
+        },
+      },
+      "inline-with-scope-ceiling": { scopeCeiling: ["agents:read"] },
+      "deferred-with-permissions": { orgRole: undefined, deferOrgResolution: true },
+      "deferred-with-role": { permissions: [], deferOrgResolution: true },
+    };
+    return { ...resolution, ...defects[misdeclared] } as unknown as AuthResolution;
   },
 };
 
@@ -334,6 +367,7 @@ describe("module auth strategy pipeline", () => {
         authKey: "primary",
         accountId: `acct-${crypto.randomUUID().slice(0, 8)}`,
         label: `acct-${crypto.randomUUID().slice(0, 8)}`,
+        orgId: opts.orgId,
         spaceId: opts.spaceId,
         userId: opts.endUserId ? null : currentCtx!.user.id,
         endUserId: opts.endUserId ?? null,
@@ -499,6 +533,50 @@ describe("module auth strategy pipeline", () => {
       // Org-bound, not space-bound: it pins no space, so the whole org answers.
       expect(await connectionIds("dashboard")).toEqual([here]);
     });
+
+    it("is bound to no space by the X-Space-Id it sends: it shares into another space", async () => {
+      const integrationId = "@strat/dash-share";
+      await seedPackage({
+        id: integrationId,
+        orgId: currentCtx!.orgId,
+        homeSpaceId: currentCtx!.defaultSpaceId,
+        type: "integration",
+        source: "local",
+      });
+      const [row] = await db
+        .insert(integrationConnections)
+        .values({
+          integrationId,
+          authKey: "primary",
+          accountId: "acct-dash-share",
+          label: "Dash",
+          orgId: currentCtx!.orgId,
+          spaceId: null,
+          originSpaceId: currentCtx!.defaultSpaceId,
+          userId: currentCtx!.user.id,
+          credentialsEncrypted: "x",
+          scopesGranted: [],
+        })
+        .returning({ id: integrationConnections.id });
+      const other = await seedSpace({ orgId: currentCtx!.orgId, name: "Other" });
+
+      const res = await app.request(
+        `/api/integrations/${integrationId}/connections/${row!.id}/shares/${other.id}`,
+        {
+          method: "PUT",
+          headers: {
+            "X-Test-Strategy": "dashboard-connect",
+            "X-Space-Id": currentCtx!.defaultSpaceId,
+          },
+        },
+      );
+      expect(res.status, await res.clone().text()).toBe(204);
+      const shares = await db
+        .select({ spaceId: integrationConnectionShares.spaceId })
+        .from(integrationConnectionShares)
+        .where(eq(integrationConnectionShares.connectionId, row!.id));
+      expect(shares).toEqual([{ spaceId: other.id }]);
+    });
   });
 
   // ── The delegate bound to nothing at all ──────────────────────────────────
@@ -607,6 +685,16 @@ describe("module auth strategy pipeline", () => {
     it("500s either half of an `end_user` disagreement", async () => {
       await expectProblem(await request("kind-without-enduser"), 500, { code: "internal_error" });
       await expectProblem(await request("enduser-without-kind"), 500, { code: "internal_error" });
+    });
+
+    it("500s a resolution declaring its ceiling in the other variant's field", async () => {
+      for (const token of [
+        "inline-with-scope-ceiling",
+        "deferred-with-permissions",
+        "deferred-with-role",
+      ]) {
+        await expectProblem(await request(token), 500, { code: "internal_error" });
+      }
     });
 
     it("tells the caller nothing about the throw", async () => {

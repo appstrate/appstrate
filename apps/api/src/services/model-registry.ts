@@ -244,7 +244,7 @@ export function initSystemModelProviderKeys(rawOverride?: unknown[]): void {
             );
           }
 
-          // Model-alias guards (issue #727, Threat A) — same invariants the
+          // Model-alias guards — same invariants the
           // POST /api/models route enforces for DB models. A misconfigured
           // alias would leak its backing rather than hide it, so skip it
           // (loud) instead of registering a half-working alias.

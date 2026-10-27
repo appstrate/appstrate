@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import i18n from "../i18n";
 import { schemaHasFileFields } from "@appstrate/core/form";
-import { client, type paths } from "../api/client";
+import { client } from "../api/client";
 import { splitPackageRef } from "../lib/package-paths";
 import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
@@ -13,21 +15,12 @@ import { useAgentModel } from "./use-models";
 import type { ModelGenerationSettings } from "@appstrate/core/model-generation";
 import { useAgentProxy } from "./use-proxies";
 import { scheduleKeys } from "../lib/query-keys";
+import type { ScheduleCreateBody, ScheduleUpdateBody } from "../lib/schedule-payload";
 import type { AgentDetail, EnrichedSchedule } from "@appstrate/shared-types";
 import { useLaunchWarningsToast } from "./use-launch-warnings-toast";
 
-// `useScheduleRuns` used to live here: the schedule CARD fetched a schedule's
-// runs purely to count active/unread/last-number, once per card. Those three
-// counters now ride on the schedule itself (`EnrichedSchedule.running_runs` /
-// `unread_count` / `last_run_number`), and the only remaining consumer of the
-// endpoint is `<RunList scheduleId>` on the schedule-detail page, which fetches
-// it through `usePaginatedRuns`. The `scheduleKeys.runs` cache key is still
-// invalidated by `use-global-run-sync` for that list.
-
-// Every schedules read requires `schedules:read`, which some space roles
-// (`runner`, and any custom role without it) do not hold. Gating here rather
-// than at each call site keeps a surface that shows schedules incidentally —
-// the dashboard — from firing a request the server is bound to refuse.
+// Some space roles (`runner`, custom roles) lack `schedules:read`: gate here so incidental
+// surfaces (the dashboard) never fire a request the server is bound to refuse.
 function useCanReadSchedules(): boolean {
   const { can } = usePermissions();
   return can("schedules:read");
@@ -38,8 +31,7 @@ export function useAllSchedules() {
   const spaceId = useCurrentSpaceId();
   const canRead = useCanReadSchedules();
   return useQuery({
-    // Key pinned to the legacy shape: use-global-run-sync invalidates by the
-    // ["schedules", orgId, spaceId] prefix on SSE events.
+    // Key pinned: use-global-run-sync invalidates by this prefix on SSE events.
     queryKey: scheduleKeys.list(orgId, spaceId),
     queryFn: async (): Promise<EnrichedSchedule[]> => {
       const { data } = await client.GET("/api/schedules");
@@ -53,10 +45,15 @@ export function useScheduleById(id: string | undefined) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
   const canRead = useCanReadSchedules();
+  const qc = useQueryClient();
   return useQuery({
-    // Key pinned to the legacy shape: use-global-run-sync invalidates
-    // ["schedule", orgId, spaceId, scheduleId] on SSE events.
+    // Key pinned: use-global-run-sync invalidates it on SSE events.
     queryKey: scheduleKeys.detail(orgId, spaceId, id),
+    // The list caches the same enriched rows: show the page from it while the detail loads.
+    placeholderData: () =>
+      qc
+        .getQueryData<EnrichedSchedule[]>(scheduleKeys.list(orgId, spaceId))
+        ?.find((s) => s.id === id),
     queryFn: async (): Promise<EnrichedSchedule> => {
       const { data } = await client.GET("/api/schedules/{id}", {
         params: { path: { id: id! } },
@@ -73,8 +70,7 @@ export function useSchedules(packageId: string | undefined) {
   const spaceId = useCurrentSpaceId();
   const canRead = useCanReadSchedules();
   return useQuery({
-    // Key pinned to the legacy shape (under the ["schedules", orgId,
-    // spaceId] prefix invalidated by use-global-run-sync).
+    // Key pinned (under the prefix use-global-run-sync invalidates).
     queryKey: scheduleKeys.listForAgent(orgId, spaceId, packageId),
     queryFn: async (): Promise<EnrichedSchedule[]> => {
       const { scope, name } = splitPackageRef(packageId!);
@@ -96,16 +92,17 @@ export function invalidateSchedules(qc: ReturnType<typeof useQueryClient>) {
   qc.invalidateQueries({ queryKey: scheduleKeys.detailAll });
 }
 
-type CreateScheduleBody =
-  paths["/api/agents/{scope}/{name}/schedules"]["post"]["requestBody"]["content"]["application/json"];
-type UpdateScheduleBody =
-  paths["/api/schedules/{id}"]["patch"]["requestBody"]["content"]["application/json"];
+/** Says how many schedules removing a pin or a space default disabled, and refetches them. */
+export function warnSchedulesDisabled(qc: ReturnType<typeof useQueryClient>, count: number) {
+  toast.warning(i18n.t("agents:schedule.disabledUnnamed", { count }));
+  invalidateSchedules(qc);
+}
 
 export function useCreateSchedule(packageId: string) {
   const qc = useQueryClient();
   const toastWarnings = useLaunchWarningsToast();
   return useMutation({
-    mutationFn: async (body: CreateScheduleBody) => {
+    mutationFn: async (body: ScheduleCreateBody) => {
       const { scope, name } = splitPackageRef(packageId);
       const { data: created } = await client.POST("/api/agents/{scope}/{name}/schedules", {
         params: { path: { scope, name } },
@@ -126,7 +123,7 @@ export function useUpdateSchedule() {
   const qc = useQueryClient();
   const toastWarnings = useLaunchWarningsToast();
   return useMutation({
-    mutationFn: async ({ id, ...body }: UpdateScheduleBody & { id: string }) => {
+    mutationFn: async ({ id, ...body }: ScheduleUpdateBody & { id: string }) => {
       const { data: updated } = await client.PATCH("/api/schedules/{id}", {
         params: { path: { id } },
         body,
@@ -152,63 +149,35 @@ export function useDeleteSchedule() {
     mutationFn: async (id: string) => {
       await client.DELETE("/api/schedules/{id}", { params: { path: { id } } });
     },
-    onSuccess: () => invalidateSchedules(qc),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: scheduleKeys.listAll });
+      // The page still showing the deleted schedule would re-read it, a 404: stale only.
+      qc.invalidateQueries({ queryKey: scheduleKeys.detailAll, refetchType: "none" });
+    },
   });
 }
 
 interface ScheduleFormDeps {
-  /**
-   * Full input wrapper (schema + ui_hints + file_constraints + property_order)
-   * — the launch surfaces feed this to `<SchemaForm>` so version-pinned input
-   * renders with full fidelity, not just the bare schema (#770). It also
-   * carries the per-space layers (`values` + `locked_fields`), so a
-   * consumer needing those reads them off this same object rather than a
-   * second prop that could drift from it.
-   */
+  /** Full input wrapper (schema + ui_hints + …) for `<SchemaForm>`; also carries the per-space layers (`values` + `locked_fields`). */
   inputWrapper: AgentDetail["input"];
   persistedModelId: string | null;
   persistedGenerationConfig: ModelGenerationSettings | null;
   persistedProxyId: string | null;
-  /**
-   * Whether the caller may write the package. The schedule form offers the
-   * `draft` version option only to them — `POST /api/schedules` answers
-   * `403 draft_not_writable` to everyone else.
-   */
+  /** Whether the caller may write the package: only they get the `draft` option (`403 draft_not_writable` otherwise). */
   homeWritable: boolean;
   hasFileInputs: boolean;
-  /**
-   * Agent's declared integration deps (#199) — drives the schedule
-   * connection-overrides picker. Empty when the agent has no
-   * integrations.
-   */
+  /** Agent's declared integration deps (connection-overrides picker). */
   agentIntegrations: Array<{ id: string; tools?: string[] | "*"; scopes?: string[] }>;
-  /**
-   * Agent's declared skill dependencies — drives the per-skill dependency
-   * override picker. Version-pinned when `version` is passed (#770).
-   * `homeWritable` is the dependency's OWN `home_writable`: the draft option
-   * is offered per skill, because the server gates it per skill.
-   */
+  /** Agent's skill deps (override picker). `homeWritable` is the dependency's OWN `home_writable`: the server gates `draft` per skill. */
   skills: Array<{ id: string; version?: string; name?: string; homeWritable: boolean }>;
 }
 
 /**
- * Aggregates the agent-detail / model / proxy lookups that both
- * `ScheduleCreatePage` and `ScheduleEditPage` feed into `<ScheduleForm>`.
- *
- * `deps` is `null` until the agent detail has landed — or when no agent is
- * selected — so a consumer can never mount a form on settings it does not have
- * yet. `error` is the agent-detail query's failure: a deleted agent or a
- * revoked permission never lets the detail land, so a page that only watched
- * `deps` would spin forever. They ride on ONE hook because they are two reads
- * of the same query — split across two hooks the arguments had to be kept in
- * sync by hand, and a `version` passed to one but not the other silently
- * reported the wrong query's error.
- *
- * `version` (#770) pins the agent-detail projection to a published version so
- * the input / integrations / skills the form renders match the version the run
- * will execute. Omitted → the projection the detail route renders by default:
- * the working copy for whoever can write the package, the latest published
- * version for everybody else.
+ * Aggregates the agent-detail / model / proxy lookups the schedule forms and run options need.
+ * `deps` is `null` until the agent detail lands, so no form mounts on settings it lacks; `error`
+ * is that query's failure (a deleted agent never lets it land). They share ONE hook so `version`
+ * cannot reach one read and not the other. `version` pins the projection to a published version;
+ * omitted → the detail route's default (working copy for writers, latest published otherwise).
  */
 export function useScheduleFormDeps(
   packageId: string | undefined,
@@ -217,17 +186,13 @@ export function useScheduleFormDeps(
   const { data: agentDetail, error } = usePackageDetail("agent", packageId, { version });
   const { data: agentModel } = useAgentModel(packageId);
   const { data: agentProxy } = useAgentProxy(packageId);
-  // The detail read gates itself, so a caller who may not see the agent gets
-  // neither data nor error: without this the page would wait forever.
+  // The detail read gates itself: a caller who may not see the agent gets neither data nor error.
   const { can, ready } = usePermissions();
   const denied = !!packageId && ready && !packageSightPermissions("agent").some(can);
 
-  // `deps` stays null until the AGENT DETAIL itself lands, not merely until an
-  // agent is picked: `ScheduleForm` seeds its input state once, in a `useState`
-  // initialiser, and a form mounted on empty settings would seed a field that
-  // has since been locked — unremovable through the UI and refused on save
-  // (400 `locked_input_field`). `key={schedule.id}` means no remount when the
-  // detail arrives, so the only safe answer while it is in flight is "not yet".
+  // Null until the AGENT DETAIL lands: the forms seed their input state once in a `useState`
+  // initialiser (no remount when it arrives), and one mounted early could seed a since-locked
+  // field, refused on save (400 `locked_input_field`).
   if (!packageId || !agentDetail) return { deps: null, error, denied };
 
   const integrationDeps = agentDetail.dependencies.integrations.map((d) => ({
@@ -235,8 +200,7 @@ export function useScheduleFormDeps(
     ...(d.tools ? { tools: d.tools } : {}),
     ...(d.scopes ? { scopes: d.scopes } : {}),
   }));
-  // `skills` is the one optional group — a summary read (`agents:run` without
-  // `agents:read`) omits it rather than emptying it.
+  // `skills` is optional: a summary read (`agents:run` without `agents:read`) omits it.
   const skillDeps = (agentDetail.dependencies.skills ?? []).map((s) => ({
     id: s.id,
     homeWritable: s.home_writable,
@@ -245,8 +209,7 @@ export function useScheduleFormDeps(
   }));
   return {
     deps: {
-      // The detail's own object — a fresh literal here would change identity on
-      // every render and defeat the launch form's memoized partition.
+      // The detail's own object: a fresh literal would defeat the launch form's memoized partition.
       inputWrapper: agentDetail.input,
       persistedModelId: agentModel?.modelId ?? null,
       persistedGenerationConfig: agentModel?.generation ?? null,

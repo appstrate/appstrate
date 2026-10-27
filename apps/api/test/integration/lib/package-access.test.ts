@@ -32,7 +32,6 @@ import type { AppEnv } from "../../../src/types/index.ts";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedSpacePackage, seedPackage, seedPackageShare, seedSpace } from "../../helpers/seed.ts";
-import { packageShares } from "@appstrate/db/schema";
 import { listOrgItems } from "../../../src/services/package-items/crud.ts";
 import { CONFIG_BY_TYPE } from "../../../src/services/package-items/config.ts";
 import { placementReadFilter } from "../../../src/services/package-placement.ts";
@@ -301,14 +300,11 @@ describe("placementGrantsRead ⇄ placementReadFilter — the TS rule and its SQ
    * this filter and then asks the space's switch on top — that composition is
    * `package-activation-parity.test.ts`'s subject. The filter's own readers —
    * the three space-package reads, the integration activation resolution and
-   * `activeHereSql` itself — all hand it the same two LEFT JOINs this query
-   * does, so pinning it here pins them.
+   * `activeHereSql` itself — all hand it the same LEFT JOIN this query does,
+   * so pinning it here pins them.
    *
-   * The rule has exactly TWO disjuncts — homed here, shared here. The
-   * `space_packages` ROW is deliberately a fixture dimension of its own below
-   * rather than a third: it must move neither reader, which is what decision 1
-   * of `docs/plans/package-placement-unification.md` removed and what a silent
-   * re-addition would look like.
+   * The rule has exactly TWO disjuncts beyond the system escape — homed here,
+   * a `space_packages` row here — and the row's `enabled` moves neither reader.
    */
 
   /** Does the SQL fragment read the package as PLACED in `spaceId`? */
@@ -320,19 +316,14 @@ describe("placementGrantsRead ⇄ placementReadFilter — the TS rule and its SQ
         spacePackages,
         and(eq(spacePackages.packageId, packages.id), eq(spacePackages.spaceId, spaceId)),
       )
-      .leftJoin(
-        packageShares,
-        and(eq(packageShares.packageId, packages.id), eq(packageShares.spaceId, spaceId)),
-      )
       .where(and(eq(packages.id, packageId), placementReadFilter(spaceId)));
     return rows.length > 0;
   }
   const placements = {
-    "with a row only": { row: true, share: false, home: false },
-    "shared only": { row: false, share: true, home: false },
-    "shared and with a row": { row: true, share: true, home: false },
-    "homed only": { row: false, share: false, home: true },
-    "placed in neither way here": { row: false, share: false, home: false },
+    "with a row switched on": { row: true, enabled: true, home: false },
+    "with a row switched off": { row: true, enabled: false, home: false },
+    "homed only": { row: false, enabled: false, home: true },
+    "placed in neither way here": { row: false, enabled: false, home: false },
   } as const;
 
   for (const [label, placement] of Object.entries(placements)) {
@@ -347,20 +338,15 @@ describe("placementGrantsRead ⇄ placementReadFilter — the TS rule and its SQ
         .update(packages)
         .set({ homeSpaceId: placement.home ? otherId : homeId })
         .where(eq(packages.id, SKILL));
-      if (placement.row) await seedSpacePackage(otherId, SKILL);
-      if (placement.share) {
-        await db.insert(packageShares).values({ packageId: SKILL, spaceId: otherId });
-      }
+      if (placement.row) await seedSpacePackage(otherId, SKILL, { enabled: placement.enabled });
 
-      // A `space_packages` row is NOT a term of the rule: "with a row only" is
-      // expected to read as unplaced, which is the whole point of this pin.
-      const expected = placement.share || placement.home;
+      const expected = placement.row || placement.home;
 
       // The TS reader, from the same facts the SQL sees.
       expect(
         placementGrantsRead(
           { homeSpaceId: placement.home ? otherId : homeId },
-          placement.share ? [otherId] : [],
+          placement.row ? [otherId] : [],
           new Set([otherId]),
         ),
         `placementGrantsRead on a package ${label}`,
@@ -376,12 +362,12 @@ describe("placementGrantsRead ⇄ placementReadFilter — the TS rule and its SQ
   it("is NOT what the type index page renders — that is the ACTIVE set", async () => {
     // The two rules deliberately DIVERGE, and the divergence is the whole of
     // decision 31: a page that says what this space can LAUNCH must not list a
-    // package it merely holds. Homed here AND offered here — the placement
-    // rule's strongest hand — and still absent from the index, because no row
-    // switches it on. A system package is on by the deployment's default
+    // package it merely holds. Homed here AND holding a row here — the
+    // placement rule's strongest hand — and still absent from the index,
+    // because the row says `false`. A system package is on by the deployment's default
     // instead, which `space-package-door-semantics` covers.
     await db.update(packages).set({ homeSpaceId: otherId }).where(eq(packages.id, SKILL));
-    await db.insert(packageShares).values({ packageId: SKILL, spaceId: otherId });
+    await seedPackageShare(otherId, SKILL);
     expect(await placedInSql(otherId, SKILL)).toBe(true);
 
     const index = await listOrgItems(ctx.orgId, CONFIG_BY_TYPE.skill, otherId);
@@ -398,7 +384,7 @@ describe("placementGrantsRead ⇄ placementReadFilter — the TS rule and its SQ
 describe("assertCatalogPackageAccess — the share half of the read rule", () => {
   it("reads a package that is only SHARED into a readable space", async () => {
     await assertDbCountZeroInstalls();
-    await db.insert(packageShares).values({ packageId: SKILL, spaceId: otherId });
+    await seedPackageShare(otherId, SKILL);
     const accessible: AccessibleSpaces = [space(otherId, ["skills:read"])];
     const pkg = await assertCatalogPackageAccess(
       caller({ orgRole: "member", permissions: ["skills:read"] }, accessible),
@@ -408,7 +394,7 @@ describe("assertCatalogPackageAccess — the share half of the read rule", () =>
   });
 
   it("still hides it from a space it is neither shared with nor homed in", async () => {
-    await db.insert(packageShares).values({ packageId: SKILL, spaceId: otherId });
+    await seedPackageShare(otherId, SKILL);
     const third = (await seedSpace({ orgId: ctx.orgId, name: "Third", visibility: "closed" })).id;
     const refused = await refusal(
       assertCatalogPackageAccess(

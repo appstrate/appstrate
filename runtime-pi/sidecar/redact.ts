@@ -150,7 +150,7 @@ export function filterSensitiveHeaders(
  * widening: it additionally admits a preceding percent-triplet. So the prose
  * protection `\b` bought is preserved intact — "risk-averse" still does not
  * match the `sk-…` family, "skeletons" and "pkgroots" stay readable — while
- * the encoded case is no longer a hole.
+ * the encoded case is not a hole.
  */
 const CRED_START = String.raw`(?<=^|%[0-9A-Fa-f]{2}|[^A-Za-z0-9_])`;
 
@@ -269,7 +269,7 @@ const KEYWORD_START = String.raw`(?<=^|%[0-9A-Fa-f]{2}|[^A-Za-z0-9])`;
  *
  * The cost is stated rather than hidden: a bare `token <value>` with no
  * assignment character anywhere — a third-party MCP server printing its own
- * credential in a shape the platform never produces — is no longer masked by
+ * credential in a shape the platform never produces — is not masked by
  * the keyword rule. The shape rules (`Bearer …`, `sk-…`, `ghp_…`, `eyJ…`,
  * `AKIA…`, `ya29.`) and the two userinfo rules still cover it whenever the
  * value is recognisable, and this rule was always the defence-in-depth half of
@@ -303,7 +303,7 @@ const ASSIGN_CHAR = String.raw`(?:["'=:]|%22|%27|%3D|%3A)`;
 /**
  * The separator, in BOTH tiers: whitespace may surround an assignment, never
  * replace it. `NAME = value` and `"name": "value"` both pass; `NAME word` does
- * not. See {@link BARE_KEYWORD} for why tier 2 no longer has one of its own.
+ * not. See {@link BARE_KEYWORD} for why tier 2 has none of its own.
  *
  * The padding admits AT MOST ONE line break, never a blank line. An earlier revision
  * padded with `[ \t]` alone, which looked equivalent and was not: two of the

@@ -50,7 +50,7 @@ function credentialsWire(
       auth_key: authKey,
       auth_type: "api_key",
       fields: { token: `${authKey}-${connectionId}-token` },
-      authorized_uris: ["https://www.googleapis.com/**"],
+      authorized_uris: ["https://www.googleapis.com/**", "https://files.googleapis.com/**"],
     })),
     delivery_plans: Object.fromEntries(
       authKeys.map((authKey) => [
@@ -424,6 +424,61 @@ describe("bootIntegrations — synthetic api_call surface", () => {
       await result.shutdown();
     }
   });
+
+  // Streamable HTTP: the endpoint's path and below it. SSE: the whole origin, since the server
+  // picks the path its messages are POSTed to.
+  for (const [transport, refusedTarget, sentTarget] of [
+    [
+      "streamable-http",
+      "https://www.googleapis.com/mcp/v1/",
+      "https://www.googleapis.com/drive/v3/files",
+    ],
+    ["sse", "https://www.googleapis.com/drive/v3/files", "https://files.googleapis.com/v1/items"],
+  ] as const) {
+    it(`refuses an api_call aimed at the integration's own ${transport} MCP endpoint`, async () => {
+      const sent: string[] = [];
+      const upstream = (async (url: string | URL) => {
+        sent.push(String(url));
+        return new Response("ok", { status: 200 });
+      }) as unknown as typeof fetch;
+      const deps: ApiCallToolDeps = {
+        ...apiCallDeps,
+        proxyDeps: {
+          ...apiCallDeps.proxyDeps,
+          cookieJar: new Map(),
+          reportedAuthFailures: new Set(),
+          fetchFn: upstream,
+          resolveHost: async () => ["203.0.113.7"],
+        },
+      };
+      const apiCalls = [
+        {
+          authKey: "primary",
+          toolName: "api_call",
+          authorizedUris: ["https://*.googleapis.com/**"],
+        },
+      ];
+      const spec = serverlessSpec(apiCalls);
+      spec.manifest = {
+        ...spec.manifest,
+        server: { url: "https://www.googleapis.com/mcp/v1", transport },
+      };
+      const result = await bootWith(deps, [spec]);
+      try {
+        const call = (target: string) =>
+          result.tools[0]!.handler({ target, method: "POST" }, {} as never);
+        const refused = await call(refusedTarget);
+        expect(refused.isError).toBe(true);
+        expect(JSON.stringify(refused.content)).toContain(
+          "its MCP endpoint is reached through its tools, not api_call",
+        );
+        await call(sentTarget);
+        expect(sent).toEqual([sentTarget]);
+      } finally {
+        await result.shutdown();
+      }
+    });
+  }
 
   it("keeps each connection's upstream session cookie to that connection", async () => {
     const cookiesSeen: (string | null)[] = [];

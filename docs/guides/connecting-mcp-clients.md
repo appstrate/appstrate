@@ -48,7 +48,12 @@ you the matching command).
   never exceed what the key could do over REST.
 
 Grant the key the permissions the work needs on top of those two: what the
-server declares follows the key's scopes (see "The tool surface").
+server declares follows the key's scopes (see "The tool surface"). Calling a
+third-party API through one of your connections takes `credential-proxy:call-own`
+(your own connections) or `credential-proxy:call` (every connection usable in the
+space, which implies `call-own`). A key carries either only from a creator who
+holds it (`call` for a space `admin` or `builder`, `call-own` for an `operator`,
+or a custom role that lists it).
 
 This is the recommended onboarding until you have HTTPS + the OAuth flow set up.
 
@@ -74,8 +79,10 @@ What happens under the hood:
    `WWW-Authenticate: Bearer resource_metadata="…", scope="mcp:read mcp:invoke"`
    (RFC 9728 §5.1).
 2. The client fetches the Protected Resource Metadata at
-   `/.well-known/oauth-protected-resource/api/mcp/o/<orgId>`, which points at
-   this instance's authorization server and advertises the per-org resource URI.
+   `/.well-known/oauth-protected-resource/api/mcp/o/<orgId>` (or
+   `…/s/<spc_…>` for a space's endpoint). It points at this instance's
+   authorization server and advertises the endpoint's own URL as `resource`
+   (RFC 9728 §3.3).
 3. The client identifies itself **without prior registration**, via one of:
    - **CIMD** (Client ID Metadata Documents, the MCP-spec-preferred default) —
      the client's `client_id` is an HTTPS URL the AS fetches and validates. The
@@ -84,20 +91,72 @@ What happens under the hood:
      that can't host a metadata document. Self-service registration is bounded
      to identity + MCP scopes and rate-limited.
 4. The user logs in and consents in the browser; the client receives an access
-   token **audience-bound** to `https://YOUR_INSTANCE/api/mcp/o/<orgId>`
-   (RFC 8707). The MCP server rejects any token not issued for this org's
-   endpoint, and the token is rejected on every OTHER platform route (and every
-   other org's MCP endpoint) — it can only ever drive `/api/mcp/o/<orgId>` for
-   the one org it was issued for.
+   token **audience-bound** to the resource it asked for (RFC 8707): the org's
+   endpoint, `https://YOUR_INSTANCE/api/mcp/o/<orgId>`, or one space's endpoint,
+   `https://YOUR_INSTANCE/api/mcp/o/<orgId>/s/<spc_…>`. Each endpoint rejects
+   any token not issued for it, and the token is rejected on every OTHER
+   platform route (and every other org's MCP endpoint).
 
 > **Organization & space context.** The organization is fixed by the
 > endpoint: the token is bound to the org in the URL, so an OAuth-onboarded
 > client needs **no** `X-Org-Id` header and there is no org-switch tool. To use
 > several organizations, add one MCP server entry per org (each runs its own
 > OAuth flow and gets its own org-bound token); the entries can be connected at
-> the same time. Within an org, calls run against that org's **default
-> space**. A client that needs a different space sends an
-> `X-Space-Id` header (it must belong to the org).
+> the same time.
+>
+> Within an org, one connection reaches **every space you hold a role in**.
+> Every tool that acts in a space requires a `space_id` argument, reads and
+> writes alike: there is no default space. The argument's schema lists your
+> spaces (name, `spc_…` id, your role there), since clients may truncate the
+> server instructions. Space names are not unique, so every machine field names
+> a space by its id: `granted_in` in results, and the bracketed ids in the
+> operation index (`createAgent [spc_…]`). Names appear in prose only, such as
+> `Available in: …` on a tool. A `resources/read` of an `appfile://` link needs
+> no argument: the file's own space is used. A file you cannot reach is the
+> JSON-RPC error `-32002` (resource not found), a malformed URI `-32602`.
+>
+> A refused tool call is a tool result with `isError: true` whose text is JSON
+> `{ code, error, … }`, not a JSON-RPC error. `missing_argument`,
+> `unknown_argument`, `invalid_argument`, `unknown_operation`, `unknown_space`
+> and `space_mismatch` mean the call itself is wrong: `arguments` names the
+> faulty arguments, `accepted` lists what is valid, and the call can be
+> retried. `not_granted` is final: your role in the space named by `space` does
+> not allow the action, `granted_in` lists the spaces where it does, and the
+> result asks the model to report the refusal rather than redo the action in
+> another space. Only an unknown tool name is a JSON-RPC `-32602`.
+>
+> A refusal is about the call itself. An operation the route answered with an
+> HTTP error (an `invoke_operation` call, or a `run_and_wait` launch the route
+> rejected) is an outcome, not a refusal: it comes back as `{ status, body }`
+> with `isError: true`, and `body` is the route's own problem document. The one
+> exception is an `invoke_operation` `403` that your permissions explain: it is
+> a `not_granted` refusal that also carries `status` and `body`.
+>
+> To confine a client to one space, use the space's URL,
+> `/api/mcp/o/<org>/s/<spc_…>`. It must name a space of the org where you hold
+> a role: the connection is then pinned, `space_id` is not declared, and every
+> call enters that space. An operation whose path names another space
+> (`updateSpace`, member management) still reaches it when your role there
+> allows it, exactly as over REST. The space's URL is its own OAuth resource.
+> A token for it is accepted on that URL only: not on the organization's
+> endpoint and not on another space's URL. A token for the organization is
+> accepted on every space URL of that organization. A space-bound token also
+> pins its space on the REST API, where a request naming another space is
+> refused, as it is for a space API key. It is also capped like a space API
+> key: an organization-level permission (member management, organization
+> settings) is out of its reach whatever your organization role, so use the
+> organization's URL for that work. The URL needs no other setup, and any
+> client can use it, a header-less one (a claude.ai connector) included.
+> Settings → General → "MCP connection" builds both URLs. The MCP endpoint
+> reads no `X-Space-Id`: a request carrying one is a `400` naming the URL form.
+> An API key is always pinned to its own space, and a URL naming another one is
+> a `403`.
+>
+> Appstrate's own clients use the organization's URL: the claude.ai connector,
+> and the Claude Code plugin installed by `appstrate code sync`. A plugin
+> command that launches an agent names its space; a free-form request names
+> none, so the model takes `space_id` from it or asks. The CLI's pinned space
+> (`appstrate space switch`) is the default of its REST commands only.
 
 ### Self-hosting requirements for Path B
 
@@ -113,15 +172,18 @@ What happens under the hood:
 
 ### Security notes
 
-- **Audience binding (RFC 8707), both directions, per organization:** tokens are
-  bound to one org's resource URI `<APP_URL>/api/mcp/o/<orgId>`. A token issued
-  for a different resource — including another org's MCP endpoint — is rejected
-  at `/api/mcp/o/<orgId>` with `401` (inbound); and an MCP token presented to any
-  other platform route is also rejected with `401` (outbound confinement). An
-  OAuth MCP client carries the connecting user's full authority but can exercise
-  it **only** through the MCP surface of the one org it authenticated for — the
-  token cannot be lifted and replayed against the rest of the REST API or against
-  another organization. Self-service (CIMD/DCR) clients are additionally
+- **Audience binding (RFC 8707), both directions, per organization and per
+  space:** a token is bound to one resource, either the org's
+  `<APP_URL>/api/mcp/o/<orgId>` or a space's
+  `<APP_URL>/api/mcp/o/<orgId>/s/<spc_…>`. The org endpoint accepts only the
+  org's token; a space endpoint accepts its own space's token or its org's
+  token. A token issued for any other resource (another org's endpoint, another
+  space's endpoint) is rejected with `401` (inbound), and an MCP token presented
+  to any other platform route is also rejected with `401` (outbound
+  confinement). An OAuth MCP client carries the connecting user's full authority
+  but can exercise it **only** through the MCP surface of the org, or the space,
+  it authenticated for — the token cannot be lifted and replayed against the
+  rest of the REST API or against another organization. Self-service (CIMD/DCR) clients are additionally
   forbidden at the token endpoint from requesting any audience other than a
   protected resource, so they can never obtain a platform-wide token in the first
   place. Cookie- and API-key-authenticated callers carry no token audience and
@@ -143,7 +205,8 @@ What happens under the hood:
 
 The server exposes a handful of tools rather than one per REST operation (which
 would blow past any client's tool budget): the progressive-disclosure triple
-over the whole API, plus shortcuts for the things clients otherwise get wrong.
+over the API's operations, plus shortcuts for the things clients otherwise get
+wrong and two tools for calling third-party APIs through your connections.
 `mcp:read` is the transport gate — every row asking for it alone is shown to
 anyone who can connect. The rows asking for more are **shown only when those
 grants hold**. The server reads those grants off the guards mounted on the
@@ -152,19 +215,21 @@ operation each tool dispatches to (for `import_package_file`, the
 guards require today. The package `:write` permissions are `agents:write`,
 `skills:write`, `integrations:write` and `mcp-servers:write` — any one will do.
 
-| Tool                       | Permission                                                   | What it does                                                                                                                                                                |
-| -------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_me`                   | `mcp:read`                                                   | Caller identity, org role, and already-connected integrations. **Call this first** — it grounds everything below. Dropped for a client that injects its own caller context. |
-| `search_operations`        | `mcp:read`                                                   | Find operations by keyword/tag → operationIds. A keyword search also returns `best_match` with its full input schema.                                                       |
-| `describe_operation`       | `mcp:read`                                                   | Full input schema for one operation (only needed when `best_match` didn't cover it).                                                                                        |
-| `read_file`                | `mcp:read`                                                   | Read one `appfile://` URI; the file's own ACL decides on the row.                                                                                                           |
-| `read_skill`               | `mcp:read`                                                   | A skill's `SKILL.md` and files; `skills:read`, or a skill the chat turn injected (see below).                                                                               |
-| `validate_package_file`    | `mcp:read`                                                   | Check an `.afps`/ZIP archive before importing it.                                                                                                                           |
-| `get_runtime_capabilities` | `mcp:read`                                                   | The MCP-server runtimes and manifest templates package authoring works from.                                                                                                |
-| `invoke_operation`         | `mcp:invoke`                                                 | Execute one operation (validated + authorized exactly as the equivalent REST call).                                                                                         |
-| `run_and_wait`             | `mcp:invoke` + `agents:run` + `runs:read` or `runs:read-all` | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and waits for its outcome (see below).                                         |
-| `list_files`               | `files:read`                                                 | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                                                  |
-| `import_package_file`      | `mcp:invoke` + a package `:write` permission; not end-users  | Import a validated archive as a package.                                                                                                                                    |
+| Tool                       | Permission                                                            | What it does                                                                                                                                                                |
+| -------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_me`                   | `mcp:read`                                                            | Caller identity, org role, and already-connected integrations. **Call this first** — it grounds everything below. Dropped for a client that injects its own caller context. |
+| `search_operations`        | `mcp:read`                                                            | Find operations by keyword/tag → operationIds. A keyword search also returns `best_match` with its full input schema.                                                       |
+| `describe_operation`       | `mcp:read`                                                            | Full input schema for one operation (only needed when `best_match` didn't cover it).                                                                                        |
+| `read_file`                | `mcp:read`                                                            | Read one `appfile://` URI; the file's own ACL decides on the row.                                                                                                           |
+| `read_skill`               | `mcp:read`                                                            | A skill's `SKILL.md` and files; `skills:read`, or a skill the chat turn injected (see below).                                                                               |
+| `validate_package_file`    | `mcp:read`                                                            | Check an `.afps`/ZIP archive before importing it.                                                                                                                           |
+| `get_runtime_capabilities` | `mcp:read`                                                            | The MCP-server runtimes and manifest templates package authoring works from.                                                                                                |
+| `invoke_operation`         | `mcp:invoke`                                                          | Execute one operation (validated + authorized exactly as the equivalent REST call).                                                                                         |
+| `run_and_wait`             | `mcp:invoke` + `agents:run` + `runs:read` or `runs:read-all`          | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and waits for its outcome (see below).                                         |
+| `list_files`               | `files:read`                                                          | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                                                  |
+| `import_package_file`      | `mcp:invoke` + a package `:write` permission; not end-users           | Import a validated archive as a package.                                                                                                                                    |
+| `list_connections`         | `mcp:invoke` + `credential-proxy:call-own` or `credential-proxy:call` | The connections you can call outside a run, with the ids and `authorized_uris` `api_call` takes (see below).                                                                |
+| `api_call`                 | `mcp:invoke` + `credential-proxy:call-own` or `credential-proxy:call` | Call third-party APIs with a connection's credential injected by the platform: one request or a batch (see below).                                                          |
 
 `read_skill` needs `skills:read`, except for a skill a chat turn injected:
 that turn's own bearer reads it at the definition injected (a draft only at the
@@ -206,6 +271,57 @@ server cannot match to the call) leaves the server waiting until the run ends,
 30 min at most; the run itself is unaffected, so read it back with `getRun`
 rather than launching it again.
 
+`list_connections` and `api_call` are the credential proxy
+(`/api/credential-proxy/*`) outside a run. The proxy route is not an operation
+of the catalog, so `invoke_operation` does not reach it: these two tools are the
+MCP path, and each request re-enters the route with your credential, so its
+permission check, rate limit and call journal apply as over REST. They are
+declared to a caller authenticated by a bearer (an API key or an OAuth token)
+who holds `mcp:invoke` and `credential-proxy:call-own` or `credential-proxy:call`;
+who holds each is stated in `docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.4.
+
+- **What you reach.** With `credential-proxy:call-own` alone, your OWN
+  connections usable in the space, never one another member shared: that one,
+  and every connection of an integration under an enforced organization default
+  (`call_permission_required` in the listing), is reached by an agent run (`run_and_wait`).
+  With `credential-proxy:call`, the connections usable in the space,
+  yours and those another member shared into it, under the space's
+  organization defaults. A shared connection is used when you name it
+  (`connection_id`) or an organization default designates it, and under an
+  enforced default only the connections it holds are reachable.
+  `list_connections` returns what a call would accept: per connection, the
+  `integration_package_id` and `connection_id` to pass, `owned_by_actor`
+  (`false` for another member's), the `authorized_uris` a target must match,
+  and `needs_reconnection`. It never carries a credential value: an entry that
+  depends on one reads `{$credential.<field>}`, and you target it by writing
+  `{{<field>}}` at that place in `target` (`{{webhook_url}}` for an entry that
+  is `{$credential.webhook_url}` alone, `https://{{host}}/v1/items` for
+  `https://{$credential.host}/**`); the platform fills it in.
+- **A call.** `requests` holds 1 to 50 requests, each naming an
+  `integration_package_id`, a `method` and a `target`, with optional `headers`, `body`,
+  `substitute_body` and `connection_id` (which connection, when several of the
+  integration are callable, or to use a shared one). The platform injects the credential: a
+  header of your own platform request (`Authorization`, `Cookie`, …) or one of
+  the proxy's control headers is refused in `headers`, and the whole call is
+  refused before anything is sent when an argument is malformed. Requests run
+  concurrently, three at a time and not in order, and each counts against the
+  proxy's rate limit.
+- **A result.** `{ session_id, results }`, one entry per request, in order. An
+  entry with `status` is the upstream's own answer, whatever the status, with a
+  few response headers and a text `body` cut at `max_response_bytes` (32 KiB by
+  default) and marked `truncated`; a non-text body is replaced by its size. All
+  bodies of one result share a 256 KiB budget. An entry with `error`
+  (`{ status, code, detail }`) is the platform's refusal of that request
+  (`call_permission_required`, `credential_not_found`, `must_choose_connection`,
+  `needs_reconnection`, `unauthorized_target`, `rate_limited`, …) and does not
+  stop the others. The result is `isError` only when no request succeeded.
+- **Sessions.** Pass a previous result's `session_id` to keep the cookies the
+  upstream set; omit it to start a session.
+
+The exact argument and result schemas are the tools' own; the access rule is in
+`docs/architecture/INTEGRATIONS_RUNTIME.md`, "AFPS Integrations — platform
+credential proxy (`/api/credential-proxy/*`)".
+
 The whole surface follows your permissions the same way: the tool list, the
 operation index in the server instructions, `search_operations` (matches you
 cannot invoke come back under `denied` with their `required_permissions`, never
@@ -226,16 +342,18 @@ for an operation authorized by ownership rather than a role, such as deleting
 your own connection. A session is never filtered on them; a delegated credential
 whose scopes omit one sees the operation as not granted, and its
 `search_operations` `denied[]` entry and `403` answer name them as
-`ceiling_permissions`. Otherwise `denied[].required_permissions` and the `403`
+`ceiling_permissions`. Otherwise `denied[].required_permissions` and the `not_granted`
 hint below carry the caller-space half alone. Enforcement itself never moves: `invoke_operation` always
 dispatches. A `403` attributable to a permission
-missing from your own space comes back with `required_permissions` and a hint to
-report it rather than retry; a refusal decided by the row, or by the space the
-path names, keeps the route's own error.
+missing from your own space comes back as a `not_granted` refusal (see above)
+with `required_permissions` and a hint to report it rather than retry; a
+refusal decided by the row, or by the space the path names, is the route's own
+`403`, returned as `status` and `body` of the tool result.
 
 This server advertises `tools: { listChanged: false }`, so a client that listed
 its tools before an upgrade — or before its role changed — is never told the set
-moved, and a name that is no longer registered answers `-32602 Unknown tool`.
+moved, and a name that is no longer registered answers the JSON-RPC error
+`-32602 Unknown tool`.
 **Re-list your tools after upgrading the platform or changing your
 permissions** — that is the supported recovery, and it is one round trip.
 
@@ -259,4 +377,5 @@ deterministic manifest and override every field, including a strict
 `runtime_tools`).
 
 Streaming/SSE operations (live logs, realtime) cannot be called through
-`invoke_operation` — use `run_and_wait`, fetch logs, or poll instead.
+`invoke_operation` — use `run_and_wait`, fetch logs, or poll instead. Nor can
+the credential proxy: use `api_call`.

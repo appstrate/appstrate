@@ -28,7 +28,7 @@ import { apiIntegrationManifest, httpHeaderDelivery } from "../../helpers/integr
 /** Service-level tests exercise the import itself; route guards are tested at the HTTP layer. */
 const noAuthorize = async () => {};
 /** No sharing authority: these cases are about the import, not about placing a root elsewhere. */
-const noShare = async () => false;
+const noShare = async () => null;
 
 const DOS_EPOCH_MS = Date.UTC(1980, 0, 2, 12, 0, 0);
 
@@ -96,6 +96,7 @@ function connectManifest(name: string, criterion: Record<string, unknown>) {
             request: {
               method: "POST",
               url: "https://api.example.com/login",
+              content_type: "application/x-www-form-urlencoded",
               body: "p={{password}}",
             },
             success_criteria: [criterion],

@@ -8,15 +8,17 @@
  *
  *   - validatePinTargets — cross-space / cross-integration / sharing /
  *     ownership rejection (the gate every pin write passes through)
- *   - listAccessibleConnections — own ∪ sharedWithOrg, deduped, scoped
- *     to (space, integration), filtered by actor
- *   - loadConnectionOwnership — owner projection used by RBAC checks
+ *   - listAccessibleConnections — own ∪ shared into the space, deduped,
+ *     scoped to (space, integration), filtered by actor
+ *   - renameConnection, shareConnection, unshareConnection — label and share edits, owner vs governor
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
+import { seedShares, testCaller } from "../../helpers/connection-shares.ts";
 import {
   createTestContext,
+  createTestOrg,
   createTestUser,
   addOrgMember,
   type TestContext,
@@ -24,47 +26,68 @@ import {
 import {
   seedEndUser,
   seedPackage,
+  seedSpacePackage,
   seedSchedule,
   seedSpace,
-  seedSpacePackage,
 } from "../../helpers/seed.ts";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import {
+  integrationConnectionShares,
   integrationConnections,
   integrationOauthClients,
+  integrationOrgDefaults,
   integrationPins,
   runs,
   schedules,
+  spacePackages,
 } from "@appstrate/db/schema";
 import type { SpaceScope } from "../../../src/lib/scope.ts";
+import type { Permission } from "../../../src/lib/permissions.ts";
 import {
+  deletePin,
   validatePinTargets,
   listAccessibleConnections,
   listAgentsConsumingIntegration,
-  loadConnectionOwnership,
   listIntegrationPins,
   upsertIntegrationPin,
   upsertMemberPin,
-  updateConnectionMetadata,
 } from "../../../src/services/integration-pins-service.ts";
 import {
-  deleteIntegrationConnection,
+  renameConnection,
+  shareConnection,
+  unshareConnection,
+} from "../../../src/services/connection-shares.ts";
+import type { ConnectionCaller } from "../../../src/services/connection-reach.ts";
+import type { ConnectionPrincipal } from "../../../src/lib/connection-principal.ts";
+import {
+  deleteOwnConnection,
   deleteIntegrationOAuthClient,
 } from "../../../src/services/integration-connections.ts";
-import { upsertOrgDefault } from "../../../src/services/integration-org-defaults-service.ts";
+import {
+  deleteOrgDefault,
+  getOrgDefault,
+  upsertOrgDefault,
+} from "../../../src/services/integration-org-defaults-service.ts";
 import { triggerScheduledRun } from "../../../src/services/scheduler.ts";
+import { deleteSpace } from "../../../src/services/spaces.ts";
 
 const INTEGRATION = "@official/gmail";
 const OTHER_INTEGRATION = "@official/clickup";
 
+/**
+ * A connection serving `spaceId` — of org scope connected from it when `orgScope`, else scoped to
+ * it — shared into it when `shared`, else into `sharedSpaceIds`.
+ */
 async function seedConnection(opts: {
   integrationId?: string;
   spaceId: string;
+  orgScope?: boolean;
   authKey?: string;
   accountId?: string;
   userId?: string | null;
   endUserId?: string | null;
-  sharedWithOrg?: boolean;
+  shared?: boolean;
+  sharedSpaceIds?: string[];
   label?: string;
 }): Promise<string> {
   const [row] = await db
@@ -73,17 +96,39 @@ async function seedConnection(opts: {
       integrationId: opts.integrationId ?? INTEGRATION,
       authKey: opts.authKey ?? "google",
       accountId: opts.accountId ?? `acct-${crypto.randomUUID().slice(0, 8)}`,
-      spaceId: opts.spaceId,
+      orgId: sql`(SELECT org_id FROM spaces WHERE id = ${opts.spaceId})`,
+      spaceId: opts.orgScope ? null : opts.spaceId,
+      originSpaceId: opts.orgScope ? opts.spaceId : null,
       userId: opts.userId ?? null,
       endUserId: opts.endUserId ?? null,
       credentialsEncrypted: "x",
       scopesGranted: ["openid", "email"],
-      sharedWithOrg: opts.sharedWithOrg ?? false,
       label: opts.label ?? `Connexion ${crypto.randomUUID().slice(0, 8)}`,
     })
     .returning({ id: integrationConnections.id });
+  await seedShares(row!.id, opts.sharedSpaceIds ?? (opts.shared ? [opts.spaceId] : []));
   return row!.id;
 }
+
+/** The spaces the connection is shared into, sorted. */
+async function sharesOf(id: string): Promise<string[]> {
+  const rows = await db
+    .select({ spaceId: integrationConnectionShares.spaceId })
+    .from(integrationConnectionShares)
+    .where(eq(integrationConnectionShares.connectionId, id));
+  return rows.map((row) => row.spaceId).sort();
+}
+
+const person = (id: string): ConnectionPrincipal => ({
+  kind: "person",
+  actor: { type: "user", id },
+});
+
+const CONNECT: ReadonlySet<Permission> = new Set<Permission>(["integrations:connect"]);
+const GOVERN: ReadonlySet<Permission> = new Set<Permission>([
+  "integrations:connect",
+  "integrations:configure",
+]);
 
 describe("integration-pins-service — DB access/ownership", () => {
   let ctx: TestContext;
@@ -105,6 +150,13 @@ describe("integration-pins-service — DB access/ownership", () => {
     memberId = member.id;
     await addOrgMember(ctx.orgId, member.id);
   });
+
+  const viewer = (id: string, governs = false): ConnectionCaller =>
+    testCaller(person(id), {
+      spaceId: scope.spaceId,
+      governs,
+      permissionsIn: async () => CONNECT,
+    });
 
   describe("validatePinTargets", () => {
     /** The refusal with the probed id masked — what a caller could compare across ids. */
@@ -128,18 +180,18 @@ describe("integration-pins-service — DB access/ownership", () => {
       const inOtherSpace = await seedConnection({
         spaceId: otherSpace.id,
         userId: memberId,
-        sharedWithOrg: true,
+        shared: true,
       });
       const ofOtherIntegration = await seedConnection({
         integrationId: OTHER_INTEGRATION,
         spaceId: scope.spaceId,
         userId: memberId,
-        sharedWithOrg: true,
+        shared: true,
       });
       const privateRow = await seedConnection({
         spaceId: scope.spaceId,
         userId: memberId,
-        sharedWithOrg: false,
+        shared: false,
       });
       const ids = [crypto.randomUUID(), inOtherSpace, ofOtherIntegration, privateRow];
 
@@ -154,7 +206,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       const shared = await seedConnection({
         spaceId: scope.spaceId,
         userId: memberId,
-        sharedWithOrg: true,
+        shared: true,
       });
       const unknown = crypto.randomUUID();
       const answer = await refusal([shared, unknown], unknown, {});
@@ -164,8 +216,8 @@ describe("integration-pins-service — DB access/ownership", () => {
 
     it("accepts a set of shared connections under the shared-only default", async () => {
       const ids = [
-        await seedConnection({ spaceId: scope.spaceId, userId: memberId, sharedWithOrg: true }),
-        await seedConnection({ spaceId: scope.spaceId, userId: ctx.user.id, sharedWithOrg: true }),
+        await seedConnection({ spaceId: scope.spaceId, userId: memberId, shared: true }),
+        await seedConnection({ spaceId: scope.spaceId, userId: ctx.user.id, shared: true }),
       ];
       await validatePinTargets(scope, INTEGRATION, ids, {});
     });
@@ -179,7 +231,7 @@ describe("integration-pins-service — DB access/ownership", () => {
     it("accepts allowOwnedBy for the caller's own row beside a shared one", async () => {
       const ids = [
         await seedConnection({ spaceId: scope.spaceId, userId: ctx.user.id }),
-        await seedConnection({ spaceId: scope.spaceId, userId: memberId, sharedWithOrg: true }),
+        await seedConnection({ spaceId: scope.spaceId, userId: memberId, shared: true }),
       ];
       await validatePinTargets(scope, INTEGRATION, ids, { allowOwnedBy: ctx.user.id });
     });
@@ -191,21 +243,18 @@ describe("integration-pins-service — DB access/ownership", () => {
       const sharedByMember = await seedConnection({
         spaceId: scope.spaceId,
         userId: memberId,
-        sharedWithOrg: true,
+        shared: true,
       });
       // Owned AND shared by the caller — must appear exactly once.
       const ownAndShared = await seedConnection({
         spaceId: scope.spaceId,
         userId: ctx.user.id,
-        sharedWithOrg: true,
+        shared: true,
       });
       // Another member's private connection — must NOT be visible.
       await seedConnection({ spaceId: scope.spaceId, userId: memberId });
 
-      const list = await listAccessibleConnections(scope, INTEGRATION, {
-        type: "user",
-        id: ctx.user.id,
-      });
+      const list = await listAccessibleConnections(scope, INTEGRATION, person(ctx.user.id));
       const ids = list.map((c) => c.id);
       expect(ids).toContain(own);
       expect(ids).toContain(sharedByMember);
@@ -228,13 +277,10 @@ describe("integration-pins-service — DB access/ownership", () => {
       await seedConnection({
         spaceId: otherSpace.id,
         userId: ctx.user.id,
-        sharedWithOrg: true,
+        shared: true,
       });
 
-      const list = await listAccessibleConnections(scope, INTEGRATION, {
-        type: "user",
-        id: ctx.user.id,
-      });
+      const list = await listAccessibleConnections(scope, INTEGRATION, person(ctx.user.id));
       expect(list.map((c) => c.id)).toEqual([visible]);
     });
   });
@@ -276,18 +322,30 @@ describe("integration-pins-service — DB access/ownership", () => {
         homeSpaceId: scope.spaceId,
         enabled: false,
       });
-      // ORPHAN: a row here, but homed elsewhere and offered to nobody.
-      await seedConsumingAgent("@pinsorg/orphan", { homeSpaceId: elsewhere.id });
+      // Placed here from another home and switched on: it runs here too.
+      await seedConsumingAgent("@pinsorg/placed-here", { homeSpaceId: elsewhere.id });
+      // Placed and switched on in ANOTHER space only: it runs nowhere here.
+      await seedPackage({
+        id: "@pinsorg/elsewhere",
+        orgId: ctx.orgId,
+        type: "agent",
+        homeSpaceId: elsewhere.id,
+        draftManifest: agentManifest("@pinsorg/elsewhere"),
+      });
+      await seedSpacePackage(elsewhere.id, "@pinsorg/elsewhere");
 
       const listed = await listAgentsConsumingIntegration(scope, INTEGRATION);
-      expect(listed.map((a) => a.agent_package_id)).toEqual(["@pinsorg/runs-here"]);
+      expect(listed.map((a) => a.agent_package_id)).toEqual([
+        "@pinsorg/placed-here",
+        "@pinsorg/runs-here",
+      ]);
     });
 
     it("a pin is refused for an agent this space does not RUN", async () => {
       const connectionId = await seedConnection({
         spaceId: scope.spaceId,
         userId: memberId,
-        sharedWithOrg: true,
+        shared: true,
       });
       await seedConsumingAgent("@pinsorg/pin-off", {
         homeSpaceId: scope.spaceId,
@@ -298,7 +356,7 @@ describe("integration-pins-service — DB access/ownership", () => {
         upsertIntegrationPin(scope, INTEGRATION, {
           agentPackageId: "@pinsorg/pin-off",
           connectionIds: [connectionId],
-          createdBy: ctx.user.id,
+          allowAdditionalConnections: false,
         }),
       ).rejects.toThrow(/not active in this space/i);
 
@@ -307,7 +365,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       const { pin } = await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: "@pinsorg/pin-off",
         connectionIds: [connectionId],
-        createdBy: ctx.user.id,
+        allowAdditionalConnections: false,
       });
       expect(pin.connection_ids).toEqual([connectionId]);
     });
@@ -319,9 +377,7 @@ describe("integration-pins-service — DB access/ownership", () => {
     async function seedSharedConnections(n: number): Promise<string[]> {
       const ids: string[] = [];
       for (let i = 0; i < n; i += 1) {
-        ids.push(
-          await seedConnection({ spaceId: scope.spaceId, userId: memberId, sharedWithOrg: true }),
-        );
+        ids.push(await seedConnection({ spaceId: scope.spaceId, userId: memberId, shared: true }));
       }
       return ids.sort();
     }
@@ -370,7 +426,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       const { pin } = await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: ids,
-        createdBy: ctx.user.id,
+        allowAdditionalConnections: false,
       });
       expect(pin.connection_ids).toEqual(ids);
 
@@ -379,20 +435,40 @@ describe("integration-pins-service — DB access/ownership", () => {
       expect(listed[0]!.connection_ids).toEqual(ids);
     });
 
+    it("says whether each pin's agent is active here; a write answers true", async () => {
+      const ids = await seedSharedConnections(1);
+      const { pin } = await upsertIntegrationPin(scope, INTEGRATION, {
+        agentPackageId: AGENT,
+        connectionIds: ids,
+        allowAdditionalConnections: false,
+      });
+      expect(pin.agent_active).toBe(true);
+      expect((await listIntegrationPins(scope, INTEGRATION))[0]!.agent_active).toBe(true);
+
+      // Deactivated: the pin stands, its agent runs nowhere here.
+      await db
+        .update(spacePackages)
+        .set({ enabled: false })
+        .where(and(eq(spacePackages.spaceId, scope.spaceId), eq(spacePackages.packageId, AGENT)));
+      const [listed] = await listIntegrationPins(scope, INTEGRATION);
+      expect(listed!.connection_ids).toEqual(ids);
+      expect(listed!.agent_active).toBe(false);
+    });
+
     it("a second write REPLACES the set rather than merging into it", async () => {
       const ids = await seedSharedConnections(3);
       const first = await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: ids,
-        createdBy: ctx.user.id,
+        allowAdditionalConnections: false,
       });
       expect(first.previous).toBeNull();
       const second = await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: [ids[2]!],
-        createdBy: ctx.user.id,
+        allowAdditionalConnections: false,
       });
-      expect(second.previous).toEqual(ids);
+      expect(second.previous).toEqual({ connectionIds: ids, allowAdditionalConnections: false });
       const listed = await listIntegrationPins(scope, INTEGRATION);
       expect(listed).toHaveLength(1);
       expect(listed[0]!.connection_ids).toEqual([ids[2]!]);
@@ -405,7 +481,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       const { pin } = await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: reversed.map((id) => id.toUpperCase()),
-        createdBy: ctx.user.id,
+        allowAdditionalConnections: false,
       });
       expect(pin.connection_ids).toEqual(reversed);
       expect((await listIntegrationPins(scope, INTEGRATION))[0]!.connection_ids).toEqual(
@@ -418,7 +494,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: ids,
-        createdBy: ctx.user.id,
+        allowAdditionalConnections: false,
       });
       await db.delete(integrationConnections).where(eq(integrationConnections.id, ids[1]!));
       expect((await listIntegrationPins(scope, INTEGRATION))[0]!.connection_ids).toEqual(ids);
@@ -429,15 +505,26 @@ describe("integration-pins-service — DB access/ownership", () => {
       await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: ids,
-        createdBy: ctx.user.id,
+        allowAdditionalConnections: false,
       });
       await expect(
-        updateConnectionMetadata(ids[1]!, { sharedWithOrg: false }),
+        unshareConnection({
+          connectionId: ids[1]!,
+          spaceId: scope.spaceId,
+          integrationId: INTEGRATION,
+          caller: viewer(memberId),
+        }),
       ).rejects.toMatchObject({ status: 409, code: "connection_pinned" });
       // Control: a shared connection outside the set unshares freely.
       const [outside] = await seedSharedConnections(1);
-      const { connection } = await updateConnectionMetadata(outside!, { sharedWithOrg: false });
-      expect(connection.sharedWithOrg).toBe(false);
+      const { removed } = await unshareConnection({
+        connectionId: outside!,
+        spaceId: scope.spaceId,
+        integrationId: INTEGRATION,
+        caller: viewer(memberId),
+      });
+      expect(removed).toBe(true);
+      expect(await sharesOf(outside!)).toEqual([]);
     });
 
     it("returns the written pin even when the row is deleted right after the write", async () => {
@@ -457,7 +544,7 @@ describe("integration-pins-service — DB access/ownership", () => {
         const { pin } = await upsertIntegrationPin(scope, INTEGRATION, {
           agentPackageId: AGENT,
           connectionIds: ids,
-          createdBy: ctx.user.id,
+          allowAdditionalConnections: false,
         });
         expect(pin.connection_ids).toEqual(ids);
         expect(Number.isNaN(Date.parse(pin.createdAt))).toBe(false);
@@ -472,10 +559,10 @@ describe("integration-pins-service — DB access/ownership", () => {
       await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: ids,
-        createdBy: ctx.user.id,
+        allowAdditionalConnections: false,
       });
-      const owner = { type: "user" as const, id: memberId };
-      await expect(deleteIntegrationConnection(scope, ids[1]!, owner)).rejects.toMatchObject({
+      const owner = person(memberId);
+      await expect(deleteOwnConnection(owner, ids[1]!)).rejects.toMatchObject({
         status: 409,
         code: "connection_pinned",
       });
@@ -486,7 +573,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       expect(still?.id).toBe(ids[1]);
       // Control: a connection outside every set deletes freely.
       const [outside] = await seedSharedConnections(1);
-      await deleteIntegrationConnection(scope, outside!, owner);
+      await deleteOwnConnection(owner, outside!);
     });
 
     it("a member pin — the owner's own or a colleague's — blocks neither delete nor unshare", async () => {
@@ -505,11 +592,17 @@ describe("integration-pins-service — DB access/ownership", () => {
           userId: ctx.user.id,
         });
       }
-      const owner = { type: "user" as const, id: memberId };
-      await deleteIntegrationConnection(scope, ownPinned!, owner);
-      await deleteIntegrationConnection(scope, colleaguePinned!, owner);
-      const { connection } = await updateConnectionMetadata(toUnshare!, { sharedWithOrg: false });
-      expect(connection.sharedWithOrg).toBe(false);
+      const owner = person(memberId);
+      await deleteOwnConnection(owner, ownPinned!);
+      await deleteOwnConnection(owner, colleaguePinned!);
+      const { removed } = await unshareConnection({
+        connectionId: toUnshare!,
+        spaceId: scope.spaceId,
+        integrationId: INTEGRATION,
+        caller: viewer(memberId),
+      });
+      expect(removed).toBe(true);
+      expect(await sharesOf(toUnshare!)).toEqual([]);
       const left = await db
         .select({ id: integrationConnections.id })
         .from(integrationConnections)
@@ -519,7 +612,7 @@ describe("integration-pins-service — DB access/ownership", () => {
 
     describe("deleting a connection its owner pinned", () => {
       const OTHER_AGENT = "@pinsorg/other-agent";
-      const owner = () => ({ type: "user" as const, id: memberId });
+      const owner = () => person(memberId);
 
       async function memberPinSet(userId: string, agent = AGENT): Promise<string[] | null> {
         const [row] = await db
@@ -562,7 +655,7 @@ describe("integration-pins-service — DB access/ownership", () => {
         await pinAs(memberId, [a!, b!, c!]);
         await pinAs(memberId, [b!, a!], OTHER_AGENT);
 
-        await deleteIntegrationConnection(scope, b!, owner());
+        await deleteOwnConnection(owner(), b!);
 
         expect(await memberPinSet(memberId)).toEqual([a!, c!]);
         expect(await memberPinSet(memberId, OTHER_AGENT)).toEqual([a!]);
@@ -573,7 +666,7 @@ describe("integration-pins-service — DB access/ownership", () => {
         await pinAs(memberId, [a!]);
         await pinAs(memberId, [a!, b!], OTHER_AGENT);
 
-        await deleteIntegrationConnection(scope, a!, owner());
+        await deleteOwnConnection(owner(), a!);
 
         expect(await memberPinSet(memberId)).toBeNull();
         expect(await memberPinSet(memberId, OTHER_AGENT)).toEqual([b!]);
@@ -583,7 +676,7 @@ describe("integration-pins-service — DB access/ownership", () => {
         const [a, b] = await seedSharedConnections(2);
         await pinAs(ctx.user.id, [a!, b!]);
 
-        await deleteIntegrationConnection(scope, b!, owner());
+        await deleteOwnConnection(owner(), b!);
 
         expect(await memberPinSet(ctx.user.id)).toEqual([a!, b!]);
       });
@@ -617,7 +710,7 @@ describe("integration-pins-service — DB access/ownership", () => {
         const nulls = await scheduleWith({ [INTEGRATION]: [b!] });
         const untouched = await scheduleWith({ [INTEGRATION]: [a!] });
 
-        await deleteIntegrationConnection(scope, b!, owner());
+        await deleteOwnConnection(owner(), b!);
 
         expect(await overridesOf(shrinks)).toEqual({ [INTEGRATION]: [a!] });
         expect(await overridesOf(dropsKey)).toEqual({ [OTHER_INTEGRATION]: [c!] });
@@ -647,7 +740,7 @@ describe("integration-pins-service — DB access/ownership", () => {
           connectionOverrides: { [INTEGRATION]: [a!, b!] },
         });
 
-        const { disabledScheduleIds } = await deleteIntegrationConnection(scope, b!, owner());
+        const { disabledScheduleIds } = (await deleteOwnConnection(owner(), b!))!;
 
         expect(disabledScheduleIds).toEqual([colleague.id]);
         const [row] = await db.select().from(schedules).where(eq(schedules.id, colleague.id));
@@ -676,7 +769,7 @@ describe("integration-pins-service — DB access/ownership", () => {
           connectionOverrides: { [INTEGRATION]: [a!] },
         });
 
-        const { disabledScheduleIds } = await deleteIntegrationConnection(scope, a!, owner());
+        const { disabledScheduleIds } = (await deleteOwnConnection(owner(), a!))!;
 
         expect(disabledScheduleIds).toEqual([foreign.id]);
         const [row] = await db.select().from(schedules).where(eq(schedules.id, foreign.id));
@@ -699,7 +792,7 @@ describe("integration-pins-service — DB access/ownership", () => {
           connectionOverrides: { [INTEGRATION]: [a!] },
         });
 
-        const { disabledScheduleIds } = await deleteIntegrationConnection(scope, a!, owner());
+        const { disabledScheduleIds } = (await deleteOwnConnection(owner(), a!))!;
 
         expect(disabledScheduleIds).toEqual([]);
         const [row] = await db.select().from(schedules).where(eq(schedules.id, paused.id));
@@ -717,7 +810,15 @@ describe("integration-pins-service — DB access/ownership", () => {
         // A member's schedule naming the same id is not the end user's to rewrite.
         const member = await scheduleWith({ [INTEGRATION]: [id] });
 
-        await deleteIntegrationConnection(scope, id, { type: "end_user", id: endUser.id });
+        await deleteOwnConnection(
+          {
+            kind: "delegated",
+            actor: { type: "end_user", id: endUser.id },
+            orgId: ctx.orgId,
+            spaceId: null,
+          },
+          id,
+        );
 
         expect(await overridesOf(own)).toBeNull();
         expect(await overridesOf(member)).toEqual({ [INTEGRATION]: [id] });
@@ -798,11 +899,9 @@ describe("integration-pins-service — DB access/ownership", () => {
         const [a, b] = await seedSharedConnections(2);
         await pinAs(memberId, [a!, b!]);
         const schedule = await scheduleWith({ [INTEGRATION]: [a!, b!] });
-        const stranger = { type: "user" as const, id: ctx.user.id };
+        const stranger = person(ctx.user.id);
 
-        await expect(deleteIntegrationConnection(scope, b!, stranger)).rejects.toMatchObject({
-          status: 404,
-        });
+        expect(await deleteOwnConnection(stranger, b!)).toBeNull();
 
         expect(await memberPinSet(memberId)).toEqual([a!, b!]);
         expect(await overridesOf(schedule)).toEqual({ [INTEGRATION]: [a!, b!] });
@@ -815,15 +914,19 @@ describe("integration-pins-service — DB access/ownership", () => {
         await upsertOrgDefault(scope, INTEGRATION, {
           connectionIds: [toDelete!, toUnshare!],
           enforce,
-          createdBy: ctx.user.id,
         });
-        const owner = { type: "user" as const, id: memberId };
-        await expect(deleteIntegrationConnection(scope, toDelete!, owner)).rejects.toMatchObject({
+        const owner = person(memberId);
+        await expect(deleteOwnConnection(owner, toDelete!)).rejects.toMatchObject({
           status: 409,
           code: "connection_pinned",
         });
         await expect(
-          updateConnectionMetadata(toUnshare!, { sharedWithOrg: false }),
+          unshareConnection({
+            connectionId: toUnshare!,
+            spaceId: scope.spaceId,
+            integrationId: INTEGRATION,
+            caller: viewer(memberId),
+          }),
         ).rejects.toMatchObject({ status: 409, code: "connection_pinned" });
         const left = await db
           .select({ id: integrationConnections.id })
@@ -839,7 +942,7 @@ describe("integration-pins-service — DB access/ownership", () => {
       await upsertIntegrationPin(scope, INTEGRATION, {
         agentPackageId: AGENT,
         connectionIds: ids,
-        createdBy: ctx.user.id,
+        allowAdditionalConnections: false,
       });
       await expect(
         deleteIntegrationOAuthClient(scope, INTEGRATION, clientId),
@@ -856,28 +959,489 @@ describe("integration-pins-service — DB access/ownership", () => {
       const personal = await seedConnection({
         spaceId: scope.spaceId,
         userId: memberId,
-        sharedWithOrg: false,
+        shared: false,
       });
       await expect(
         upsertIntegrationPin(scope, INTEGRATION, {
           agentPackageId: AGENT,
           connectionIds: [shared!, personal],
-          createdBy: ctx.user.id,
+          allowAdditionalConnections: false,
         }),
       ).rejects.toMatchObject({ status: 404, code: "not_found" });
       expect(await listIntegrationPins(scope, INTEGRATION)).toEqual([]);
     });
   });
 
-  describe("renaming — a label is unique per (space, integration)", () => {
-    it("refuses a label another owner's connection holds (409 connection_label_taken)", async () => {
-      await seedConnection({ spaceId: scope.spaceId, userId: memberId, label: "prod" });
+  describe("additions — an admin pin open to the run's selection (#2043)", () => {
+    const AGENT = "@pinsorg/additions-agent";
+    const OTHER_AGENT = "@pinsorg/additions-other";
+
+    async function seedAgent(id: string): Promise<void> {
+      await seedPackage({
+        id,
+        orgId: ctx.orgId,
+        type: "agent",
+        homeSpaceId: scope.spaceId,
+        draftManifest: {
+          type: "agent",
+          schema_version: "0.1",
+          name: id,
+          version: "1.0.0",
+          display_name: id,
+          prompt: "x",
+          dependencies: { integrations: { [INTEGRATION]: "^1.0.0" } },
+        },
+      });
+      await seedSpacePackage(scope.spaceId, id, { enabled: true });
+    }
+
+    const shared = () => seedConnection({ spaceId: scope.spaceId, userId: memberId, shared: true });
+
+    const adminPin = (connectionIds: string[], allowAdditionalConnections: boolean) =>
+      upsertIntegrationPin(scope, INTEGRATION, {
+        agentPackageId: AGENT,
+        connectionIds,
+        allowAdditionalConnections,
+      });
+
+    /** A member pin row written straight to the table: the controls live outside the pin doors' reach. */
+    async function memberPinRow(opts: {
+      userId: string;
+      spaceId?: string;
+      agent?: string;
+      integrationId?: string;
+    }): Promise<string[]> {
+      const connectionIds = [crypto.randomUUID()];
+      await db.insert(integrationPins).values({
+        spaceId: opts.spaceId ?? scope.spaceId,
+        packageId: opts.agent ?? AGENT,
+        integrationId: opts.integrationId ?? INTEGRATION,
+        userId: opts.userId,
+        connectionIds,
+      });
+      return connectionIds;
+    }
+
+    /** Every member pin, as `space|agent|integration|user`, sorted. */
+    async function memberPins(): Promise<string[]> {
+      const rows = await db
+        .select()
+        .from(integrationPins)
+        .where(sql`${integrationPins.userId} IS NOT NULL`);
+      return rows.map((r) => `${r.spaceId}|${r.packageId}|${r.integrationId}|${r.userId}`).sort();
+    }
+
+    beforeEach(async () => {
+      await seedAgent(AGENT);
+      await seedAgent(OTHER_AGENT);
+    });
+
+    it("persists the flag, returns it, and lists it; a member pin is never open", async () => {
+      const id = await shared();
+      const { pin } = await adminPin([id], true);
+      expect(pin.allow_additional_connections).toBe(true);
+      expect((await listIntegrationPins(scope, INTEGRATION))[0]!.allow_additional_connections).toBe(
+        true,
+      );
+
+      const member = await upsertMemberPin(scope, {
+        agentPackageId: AGENT,
+        integrationId: INTEGRATION,
+        connectionIds: [id],
+        userId: memberId,
+      });
+      expect(member.pin.allow_additional_connections).toBe(false);
+
+      const closed = await adminPin([id], false);
+      expect(closed.previous?.allowAdditionalConnections).toBe(true);
+      expect(closed.pin.allow_additional_connections).toBe(false);
+      expect((await listIntegrationPins(scope, INTEGRATION))[0]!.allow_additional_connections).toBe(
+        false,
+      );
+    });
+
+    it("the database refuses an open member pin and an open empty floor (CHECK)", async () => {
+      const id = await shared();
+      const insert = async (userId: string | null, connectionIds: string[]) => {
+        await db.insert(integrationPins).values({
+          spaceId: scope.spaceId,
+          packageId: AGENT,
+          integrationId: INTEGRATION,
+          userId,
+          connectionIds,
+          allowAdditionalConnections: true,
+        });
+      };
+      /** The constraint a refused insert names, wherever the driver puts it. */
+      const violated = async (write: Promise<void>): Promise<string> => {
+        const error = await write.then(
+          () => null,
+          (err: unknown) => err,
+        );
+        expect(error).not.toBeNull();
+        const cause = (error as { cause?: { message?: string; constraint?: string } }).cause;
+        return `${(error as Error).message} ${cause?.message ?? ""} ${cause?.constraint ?? ""}`;
+      };
+      expect(await violated(insert(memberId, [id]))).toContain(
+        "integration_pins_additions_admin_only",
+      );
+      expect(await violated(insert(null, []))).toContain("integration_pins_additions_need_imposed");
+      // Control: the same row is accepted as an admin pin over a non-empty floor.
+      await insert(null, [id]);
+      expect((await listIntegrationPins(scope, INTEGRATION))[0]!.allow_additional_connections).toBe(
+        true,
+      );
+    });
+
+    /**
+     * Every admin pin transition: the pin before (none / open / closed) and the write or delete.
+     * A member pin survives only where it was live before AND after (none → open, open → open,
+     * open → deleted); every transition into or out of a closed pin purges.
+     */
+    const transitions: Array<{
+      before: "none" | "open" | "closed";
+      act: "open" | "closed" | "delete";
+      purges: boolean;
+    }> = [
+      { before: "none", act: "closed", purges: true },
+      { before: "none", act: "open", purges: false },
+      { before: "open", act: "open", purges: false },
+      { before: "open", act: "closed", purges: true },
+      { before: "closed", act: "closed", purges: true },
+      { before: "closed", act: "open", purges: true },
+      { before: "closed", act: "delete", purges: true },
+      { before: "open", act: "delete", purges: false },
+    ];
+
+    for (const { before, act, purges } of transitions) {
+      it(`${before} → ${act === "delete" ? "deleted" : act} ${purges ? "purges" : "keeps"} the member pins of its (space, agent, integration) only`, async () => {
+        const id = await shared();
+        const colleague = (await createTestUser()).id;
+        await addOrgMember(ctx.orgId, colleague);
+        const elsewhere = await seedSpace({ orgId: ctx.orgId, name: "Elsewhere" });
+        if (before !== "none") await adminPin([id], before === "open");
+        const mine = await memberPinRow({ userId: memberId });
+        const theirs = await memberPinRow({ userId: colleague });
+        await memberPinRow({ userId: memberId, agent: OTHER_AGENT });
+        await memberPinRow({ userId: memberId, integrationId: OTHER_INTEGRATION });
+        await memberPinRow({ userId: memberId, spaceId: elsewhere.id });
+        const controls = [
+          `${scope.spaceId}|${OTHER_AGENT}|${INTEGRATION}|${memberId}`,
+          `${scope.spaceId}|${AGENT}|${OTHER_INTEGRATION}|${memberId}`,
+          `${elsewhere.id}|${AGENT}|${INTEGRATION}|${memberId}`,
+        ];
+        const triple = [
+          `${scope.spaceId}|${AGENT}|${INTEGRATION}|${memberId}`,
+          `${scope.spaceId}|${AGENT}|${INTEGRATION}|${colleague}`,
+        ];
+
+        const { memberPinsCleared } =
+          act === "delete"
+            ? await deletePin(scope, AGENT, INTEGRATION, null)
+            : await adminPin([id], act === "open");
+
+        expect(await memberPins()).toEqual((purges ? controls : [...controls, ...triple]).sort());
+        const cleared = [
+          { userId: memberId, agentPackageId: AGENT, connectionIds: mine },
+          { userId: colleague, agentPackageId: AGENT, connectionIds: theirs },
+        ].sort((a, b) => a.userId.localeCompare(b.userId));
+        expect(memberPinsCleared).toEqual(purges ? cleared : []);
+      });
+    }
+
+    describe("a member pin is written only where it binds (#2043 B)", () => {
+      const memberPin = (connectionIds: string[]) =>
+        upsertMemberPin(scope, {
+          agentPackageId: AGENT,
+          integrationId: INTEGRATION,
+          connectionIds,
+          userId: memberId,
+        });
+
+      /** An enforced default row written straight to the table, past the 409 beside an open pin. */
+      async function enforcedDefaultRow(connectionIds: string[]): Promise<void> {
+        await db.insert(integrationOrgDefaults).values({
+          spaceId: scope.spaceId,
+          integrationId: INTEGRATION,
+          connectionIds,
+          enforce: true,
+        });
+      }
+
+      const governances: Array<{ name: string; impose: (id: string) => Promise<unknown> }> = [
+        { name: "a closed admin pin", impose: (id) => adminPin([id], false) },
+        { name: "a closed empty admin pin", impose: () => adminPin([], false) },
+        {
+          name: "an enforced org default",
+          impose: (id) =>
+            upsertOrgDefault(scope, INTEGRATION, { connectionIds: [id], enforce: true }),
+        },
+        {
+          name: "an open admin pin under an enforced default",
+          impose: async (id) => {
+            await adminPin([id], true);
+            await enforcedDefaultRow([id]);
+          },
+        },
+      ];
+
+      for (const { name, impose } of governances) {
+        it(`under ${name}: 409 connection_additions_blocked, nothing stored, DELETE allowed`, async () => {
+          const id = await shared();
+          await impose(id);
+          // A row of the colleague's, masked: the refusal purges nothing either.
+          const colleague = (await createTestUser()).id;
+          await addOrgMember(ctx.orgId, colleague);
+          await memberPinRow({ userId: colleague });
+          const before = await memberPins();
+
+          // Even naming only imposed ids, or `[]`: there it binds nothing.
+          for (const set of [[id], [], [id.toUpperCase()]]) {
+            await expect(memberPin(set)).rejects.toMatchObject({
+              status: 409,
+              code: "connection_additions_blocked",
+            });
+          }
+          expect(await memberPins()).toEqual(before);
+          await expect(deletePin(scope, AGENT, INTEGRATION, memberId)).resolves.toMatchObject({
+            previous: null,
+          });
+        });
+      }
+
+      it("under an open admin pin: accepted up to the cap, 409 connection_set_too_large past it", async () => {
+        const own = await seedConnection({ spaceId: scope.spaceId, userId: memberId });
+        // A floor of 20 straight to the table: the pin door would want each to be a shared row.
+        const floor = Array.from({ length: 20 }, () => crypto.randomUUID());
+        await db.insert(integrationPins).values({
+          spaceId: scope.spaceId,
+          packageId: AGENT,
+          integrationId: INTEGRATION,
+          userId: null,
+          connectionIds: floor,
+          allowAdditionalConnections: true,
+        });
+        await expect(memberPin([own])).rejects.toMatchObject({
+          status: 409,
+          code: "connection_set_too_large",
+        });
+        expect(await memberPins()).toEqual([]);
+
+        // Nineteen imposed plus one addition is the cap, accepted.
+        await db
+          .update(integrationPins)
+          .set({ connectionIds: floor.slice(1) })
+          .where(sql`${integrationPins.userId} IS NULL`);
+        expect((await memberPin([own])).pin.connection_ids).toEqual([own]);
+      });
+
+      it("ungoverned, or under a soft default: written as before", async () => {
+        const id = await shared();
+        expect((await memberPin([id])).pin.connection_ids).toEqual([id]);
+        await upsertOrgDefault(scope, INTEGRATION, { connectionIds: [id], enforce: false });
+        expect((await memberPin([])).pin.connection_ids).toEqual([]);
+      });
+    });
+
+    it("deleting an OPEN admin pin purges the member pins strictly narrowing its floor only (#2043 A, H)", async () => {
+      const [id, second, addition] = [await shared(), await shared(), await shared()];
+      await adminPin([id, second], true);
+      const users = await Promise.all(
+        Array.from({ length: 5 }, async () => {
+          const user = (await createTestUser()).id;
+          await addOrgMember(ctx.orgId, user);
+          return user;
+        }),
+      );
+      // Narrowing: `[]` and a strict subset. Kept: the whole floor in another order (it binds the
+      // same ungoverned), and every set adding a connection.
+      const sets = [[], [id.toUpperCase()], [second, id], [id, addition], [addition]];
+      for (const [i, connectionIds] of sets.entries()) {
+        await db.insert(integrationPins).values({
+          spaceId: scope.spaceId,
+          packageId: AGENT,
+          integrationId: INTEGRATION,
+          userId: users[i]!,
+          connectionIds,
+        });
+      }
+
+      const { memberPinsCleared } = await deletePin(scope, AGENT, INTEGRATION, null);
+
+      expect(memberPinsCleared.map((p) => p.userId).sort()).toEqual([users[0]!, users[1]!].sort());
+      expect(await memberPins()).toEqual(
+        users
+          .slice(2)
+          .map((u) => `${scope.spaceId}|${AGENT}|${INTEGRATION}|${u}`)
+          .sort(),
+      );
+    });
+
+    it("deleting an OPEN admin pin under an enforced default purges every member pin of its triple", async () => {
+      const [id, addition] = [await shared(), await shared()];
+      await adminPin([id], true);
+      // Past the 409 beside an open pin (an inactive agent's pin does not refuse it).
+      await db.insert(integrationOrgDefaults).values({
+        spaceId: scope.spaceId,
+        integrationId: INTEGRATION,
+        connectionIds: [id],
+        enforce: true,
+      });
+      const users = await Promise.all(
+        Array.from({ length: 2 }, async () => {
+          const user = (await createTestUser()).id;
+          await addOrgMember(ctx.orgId, user);
+          return user;
+        }),
+      );
+      // One adding a connection, one narrowing: the default masks both once the pin is gone.
+      for (const [i, connectionIds] of [[id, addition], []].entries()) {
+        await db.insert(integrationPins).values({
+          spaceId: scope.spaceId,
+          packageId: AGENT,
+          integrationId: INTEGRATION,
+          userId: users[i]!,
+          connectionIds,
+        });
+      }
+      // Control: another agent's member pin of the same integration.
+      await memberPinRow({ userId: users[0]!, agent: OTHER_AGENT });
+
+      const { memberPinsCleared } = await deletePin(scope, AGENT, INTEGRATION, null);
+
+      expect(memberPinsCleared.map((p) => p.userId).sort()).toEqual([...users].sort());
+      expect(await memberPins()).toEqual([
+        `${scope.spaceId}|${OTHER_AGENT}|${INTEGRATION}|${users[0]!}`,
+      ]);
+    });
+
+    it("refuses to open under an ENFORCED default (409), and writes nothing", async () => {
+      const id = await shared();
+      await adminPin([id], false);
+      await upsertOrgDefault(scope, INTEGRATION, { connectionIds: [id], enforce: true });
+      // Past the write rule: the refused write must leave even a masked member pin in place.
+      await memberPinRow({ userId: memberId });
+
+      await expect(adminPin([id], true)).rejects.toMatchObject({
+        status: 409,
+        code: "connection_additions_conflict",
+      });
+      expect((await listIntegrationPins(scope, INTEGRATION))[0]!.allow_additional_connections).toBe(
+        false,
+      );
+      expect(await memberPins()).toHaveLength(1);
+      // A closed pin under the same default is accepted.
+      expect((await adminPin([id], false)).pin.allow_additional_connections).toBe(false);
+    });
+
+    it("opens under a SOFT default", async () => {
+      const id = await shared();
+      await upsertOrgDefault(scope, INTEGRATION, { connectionIds: [id], enforce: false });
+      expect((await adminPin([id], true)).pin.allow_additional_connections).toBe(true);
+    });
+
+    it("two concurrent conflicting writes: exactly one wins, the pair never coexists", async () => {
+      // PGlite serialises transactions, so this discriminates only on PostgreSQL (the CI tiers),
+      // where it fails without lockIntegrationGovernance (verified).
+      const id = await shared();
+      for (let round = 0; round < 5; round++) {
+        // Fired together, in both orders: the loser must read the winner's committed row.
+        const writes =
+          round % 2 === 0
+            ? [
+                adminPin([id], true),
+                upsertOrgDefault(scope, INTEGRATION, { connectionIds: [id], enforce: true }),
+              ]
+            : [
+                upsertOrgDefault(scope, INTEGRATION, { connectionIds: [id], enforce: true }),
+                adminPin([id], true),
+              ];
+        const settled = await Promise.allSettled(writes);
+
+        expect(settled.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+        const refused = settled.find((r) => r.status === "rejected") as PromiseRejectedResult;
+        expect(refused.reason).toMatchObject({
+          status: 409,
+          code: "connection_additions_conflict",
+        });
+        const pinOpen =
+          (await listIntegrationPins(scope, INTEGRATION)).at(0)?.allow_additional_connections ??
+          false;
+        const enforced = (await getOrgDefault(scope, INTEGRATION))?.enforce ?? false;
+        expect(pinOpen && enforced).toBe(false);
+        expect(pinOpen || enforced).toBe(true);
+
+        await db.delete(integrationPins);
+        await deleteOrgDefault(scope, INTEGRATION);
+      }
+    });
+
+    it("a member pin write racing a write that closes the set never survives it", async () => {
+      // As above: PGlite serialises transactions, so this discriminates only on PostgreSQL.
+      const [floor, addition] = [await shared(), await shared()];
+      const memberPin = () =>
+        upsertMemberPin(scope, {
+          agentPackageId: AGENT,
+          integrationId: INTEGRATION,
+          connectionIds: [addition],
+          userId: memberId,
+        });
+      const closers: Array<{
+        name: string;
+        before: () => Promise<unknown>;
+        close: () => Promise<unknown>;
+      }> = [
+        {
+          name: "closing the open admin pin",
+          before: () => adminPin([floor], true),
+          close: () => adminPin([floor], false),
+        },
+        {
+          name: "enforcing the default",
+          before: async () => {
+            await db.delete(integrationPins);
+            await upsertOrgDefault(scope, INTEGRATION, { connectionIds: [floor], enforce: false });
+          },
+          close: () =>
+            upsertOrgDefault(scope, INTEGRATION, { connectionIds: [floor], enforce: true }),
+        },
+      ];
+      for (const { name, before, close } of closers) {
+        for (let round = 0; round < 4; round++) {
+          await before();
+          // Fired together, in both orders: written first it is purged, second it is refused.
+          const settled = await Promise.allSettled(
+            round % 2 === 0 ? [memberPin(), close()] : [close(), memberPin()],
+          );
+          const [memberWrite, closing] = round % 2 === 0 ? settled : [settled[1]!, settled[0]!];
+
+          expect(closing.status, name).toBe("fulfilled");
+          if (memberWrite.status === "rejected") {
+            expect(memberWrite.reason, name).toMatchObject({
+              status: 409,
+              code: "connection_additions_blocked",
+            });
+          }
+          expect(await memberPins(), name).toEqual([]);
+          await db.delete(integrationPins);
+          await deleteOrgDefault(scope, INTEGRATION);
+        }
+      }
+    });
+  });
+
+  describe("renaming — a label is unique per owner (#1622)", () => {
+    const rename = (connectionId: string, label: string, by = ctx.user.id) =>
+      renameConnection({ connectionId, integrationId: INTEGRATION, caller: viewer(by), label });
+
+    it("refuses a label another of the owner's connections holds (409 connection_label_taken)", async () => {
+      await seedConnection({ spaceId: scope.spaceId, userId: ctx.user.id, label: "prod" });
       const mine = await seedConnection({
         spaceId: scope.spaceId,
         userId: ctx.user.id,
         label: "staging",
       });
-      await expect(updateConnectionMetadata(mine, { label: "prod" })).rejects.toMatchObject({
+      await expect(rename(mine, "prod")).rejects.toMatchObject({
         status: 409,
         code: "connection_label_taken",
       });
@@ -886,6 +1450,12 @@ describe("integration-pins-service — DB access/ownership", () => {
         .from(integrationConnections)
         .where(eq(integrationConnections.id, mine));
       expect(row!.label).toBe("staging");
+    });
+
+    it("takes a label a colleague's connection holds: theirs is not disclosed by a refusal", async () => {
+      await seedConnection({ spaceId: scope.spaceId, userId: memberId, label: "prod" });
+      const mine = await seedConnection({ spaceId: scope.spaceId, userId: ctx.user.id });
+      expect((await rename(mine, "prod")).label).toBe("prod");
     });
 
     it("keeps its own label, and takes one that differs only by case or lives elsewhere", async () => {
@@ -901,34 +1471,419 @@ describe("integration-pins-service — DB access/ownership", () => {
         label: "Prod",
       });
       // Control for the refusal above: the row's own label is not "another" row's.
-      expect((await updateConnectionMetadata(mine, { label: "prod" })).connection.label).toBe(
-        "prod",
-      );
+      expect((await rename(mine, "prod")).label).toBe("prod");
       // Verbatim comparison, the sidecar's enum: `Prod` is a second address.
-      await seedConnection({ spaceId: scope.spaceId, userId: memberId, label: "staging" });
-      expect((await updateConnectionMetadata(mine, { label: "Staging" })).connection.label).toBe(
-        "Staging",
-      );
+      await seedConnection({ spaceId: scope.spaceId, userId: ctx.user.id, label: "staging" });
+      expect((await rename(mine, "Staging")).label).toBe("Staging");
       // `Prod` is taken on the OTHER integration only.
-      expect((await updateConnectionMetadata(mine, { label: "Prod" })).connection.label).toBe(
-        "Prod",
-      );
+      expect((await rename(mine, "Prod")).label).toBe("Prod");
+    });
+
+    it("a label of one scope does not collide with the owner's row of the other", async () => {
+      await seedConnection({ spaceId: scope.spaceId, userId: ctx.user.id, label: "prod" });
+      const orgRow = await seedConnection({
+        spaceId: scope.spaceId,
+        orgScope: true,
+        userId: ctx.user.id,
+      });
+      expect((await rename(orgRow, "prod")).label).toBe("prod");
     });
   });
 
-  describe("loadConnectionOwnership", () => {
-    it("projects the owner columns for an existing connection", async () => {
-      const id = await seedConnection({ spaceId: scope.spaceId, userId: ctx.user.id });
-      const ownership = await loadConnectionOwnership(id);
-      expect(ownership).toEqual({
-        spaceId: scope.spaceId,
+  describe("org-scope rows — reach of the pickers", () => {
+    let other: string;
+    beforeEach(async () => {
+      other = (await seedSpace({ orgId: ctx.orgId, name: "Other" })).id;
+    });
+
+    it("lists the actor's own org row connected elsewhere, and a colleague's only once shared here", async () => {
+      const mine = await seedConnection({ spaceId: other, orgScope: true, userId: ctx.user.id });
+      const sharedHere = await seedConnection({
+        spaceId: other,
+        orgScope: true,
+        userId: memberId,
+        sharedSpaceIds: [other, scope.spaceId],
+      });
+      await seedConnection({
+        spaceId: other,
+        orgScope: true,
+        userId: memberId,
+        sharedSpaceIds: [other],
+      });
+      const list = await listAccessibleConnections(scope, INTEGRATION, person(ctx.user.id));
+      expect(list.map((c) => c.id).sort()).toEqual([mine, sharedHere].sort());
+      const byId = new Map(list.map((c) => [c.id, c]));
+      // The owner sees every target and the origin; a colleague only "shared here".
+      expect(byId.get(mine)).toMatchObject({
+        scope: "org",
+        shared_space_ids: [],
+        origin_space_id: other,
+      });
+      expect(byId.get(sharedHere)).toMatchObject({ scope: "org", shared_here: true });
+      expect(byId.get(sharedHere)).not.toHaveProperty("shared_space_ids");
+    });
+
+    it("pins an org row shared here, never one shared only elsewhere", async () => {
+      const sharedHere = await seedConnection({
+        spaceId: other,
+        orgScope: true,
+        userId: memberId,
+        sharedSpaceIds: [scope.spaceId],
+      });
+      const sharedElsewhere = await seedConnection({
+        spaceId: other,
+        orgScope: true,
+        userId: memberId,
+        sharedSpaceIds: [other],
+      });
+      await validatePinTargets(scope, INTEGRATION, [sharedHere]);
+      await expect(validatePinTargets(scope, INTEGRATION, [sharedElsewhere])).rejects.toMatchObject(
+        { status: 404 },
+      );
+      // A member pin takes the member's own org row, connected from any space.
+      const ownElsewhere = await seedConnection({
+        spaceId: other,
+        orgScope: true,
         userId: ctx.user.id,
-        endUserId: null,
+      });
+      await validatePinTargets(scope, INTEGRATION, [ownElsewhere], { allowOwnedBy: ctx.user.id });
+    });
+
+    it("a member pin refuses the member's own row made elsewhere in a space blocking user connections", async () => {
+      await seedSpacePackage(scope.spaceId, INTEGRATION, { blockUserConnections: true });
+      const own = await seedConnection({ spaceId: other, orgScope: true, userId: ctx.user.id });
+      const ownShared = await seedConnection({
+        spaceId: other,
+        orgScope: true,
+        userId: ctx.user.id,
+        sharedSpaceIds: [scope.spaceId],
+      });
+      const madeHere = await seedConnection({ spaceId: scope.spaceId, userId: ctx.user.id });
+      await validatePinTargets(scope, INTEGRATION, [madeHere], { allowOwnedBy: ctx.user.id });
+      await expect(
+        validatePinTargets(scope, INTEGRATION, [own], { allowOwnedBy: ctx.user.id }),
+      ).rejects.toMatchObject({ status: 404 });
+      await validatePinTargets(scope, INTEGRATION, [ownShared], { allowOwnedBy: ctx.user.id });
+    });
+  });
+
+  describe("shares and withdrawals — connection targets", () => {
+    let other: string;
+    beforeEach(async () => {
+      other = (await seedSpace({ orgId: ctx.orgId, name: "Other" })).id;
+    });
+
+    /** The owner on the account surface unless a space is named: shares and withdraws. */
+    const ownerOn = (spaceId: string | null = null): ConnectionCaller =>
+      testCaller(person(memberId), { spaceId, permissionsIn: async () => CONNECT });
+    const shareInto = (connectionId: string, spaceId: string, caller = ownerOn()) =>
+      shareConnection({ connectionId, spaceId, integrationId: INTEGRATION, caller });
+    const withdrawFrom = (connectionId: string, spaceId: string, caller = ownerOn()) =>
+      unshareConnection({ connectionId, spaceId, integrationId: INTEGRATION, caller });
+
+    it("the owner shares into several spaces and withdraws one, from any surface", async () => {
+      const id = await seedConnection({ spaceId: other, orgScope: true, userId: memberId });
+      expect((await shareInto(id, scope.spaceId)).added).toBe(true);
+      expect((await shareInto(id, other)).added).toBe(true);
+      expect((await shareInto(id, scope.spaceId)).added).toBe(false);
+      expect(await sharesOf(id)).toEqual([other, scope.spaceId].sort());
+      expect(await withdrawFrom(id, scope.spaceId, ownerOn(scope.spaceId))).toMatchObject({
+        removed: true,
+        disabledScheduleIds: [],
+      });
+      expect(await sharesOf(id)).toEqual([other]);
+    });
+
+    it("refuses a target outside the org, and a space-scoped row targeting another space (400)", async () => {
+      const { defaultSpaceId: foreign } = await createTestOrg(memberId);
+      const orgRow = await seedConnection({ spaceId: other, orgScope: true, userId: memberId });
+      const spaceRow = await seedConnection({ spaceId: scope.spaceId, userId: memberId });
+      for (const [id, target] of [
+        [orgRow, foreign],
+        [orgRow, "spc_unknown"],
+        [spaceRow, other],
+      ] as const) {
+        await expect(shareInto(id, target)).rejects.toMatchObject({
+          status: 400,
+          code: "invalid_share_target",
+        });
+      }
+      await shareInto(spaceRow, scope.spaceId);
+      expect(await sharesOf(spaceRow)).toEqual([scope.spaceId]);
+      expect(await sharesOf(orgRow)).toEqual([]);
+    });
+
+    it("refuses sharing an end user's connection (409)", async () => {
+      const endUser = await seedEndUser({
+        orgId: ctx.orgId,
+        spaceId: scope.spaceId,
+        externalId: "ext-eu-share",
+      });
+      const id = await seedConnection({ spaceId: scope.spaceId, endUserId: endUser.id });
+      await expect(
+        shareInto(id, scope.spaceId, {
+          ...viewer(memberId),
+          principal: {
+            kind: "delegated",
+            actor: { type: "end_user", id: endUser.id },
+            orgId: ctx.orgId,
+            spaceId: null,
+          },
+        }),
+      ).rejects.toMatchObject({ status: 409, code: "end_user_connection_not_shareable" });
+    });
+
+    it("a target blocking user connections takes a sharer governing it there (403 otherwise)", async () => {
+      await seedSpacePackage(other, INTEGRATION, { blockUserConnections: true });
+      const id = await seedConnection({ spaceId: scope.spaceId, orgScope: true, userId: memberId });
+      await expect(shareInto(id, other)).rejects.toMatchObject({
+        status: 403,
+        code: "connection_blocked_by_admin",
+      });
+      expect(await sharesOf(id)).toEqual([]);
+
+      const asked: string[] = [];
+      const governor: ConnectionCaller = {
+        ...ownerOn(),
+        permissionsIn: async (spaceId) => {
+          asked.push(spaceId);
+          return spaceId === other ? GOVERN : CONNECT;
+        },
+      };
+      expect((await shareInto(id, other, governor)).added).toBe(true);
+      expect(asked).toEqual([other]);
+      // Keeping a share there does not: an existing share is answered before any refusal.
+      expect((await shareInto(id, other, ownerOn())).added).toBe(false);
+    });
+
+    it("a governor withdraws a share its space's own OAuth client hides", async () => {
+      const id = await seedConnection({
+        spaceId: other,
+        orgScope: true,
+        userId: memberId,
+        sharedSpaceIds: [scope.spaceId],
+      });
+      await db.insert(integrationOauthClients).values({
+        orgId: ctx.orgId,
+        spaceId: scope.spaceId,
+        integrationId: INTEGRATION,
+        authKey: "google",
+        clientId: "byo-app",
+        clientSecretEncrypted: "x",
+        isDefault: true,
+      });
+      const { removed } = await withdrawFrom(id, scope.spaceId, viewer(ctx.user.id, true));
+      expect(removed).toBe(true);
+      expect(await sharesOf(id)).toEqual([]);
+    });
+
+    it("accepts a target defaulting to its own OAuth client", async () => {
+      await db.insert(integrationOauthClients).values({
+        orgId: ctx.orgId,
+        spaceId: other,
+        integrationId: INTEGRATION,
+        authKey: "google",
+        clientId: "byo-app",
+        clientSecretEncrypted: "x",
+        isDefault: true,
+      });
+      const madeHere = await seedConnection({
+        spaceId: scope.spaceId,
+        orgScope: true,
+        userId: memberId,
+      });
+      expect((await shareInto(madeHere, other)).added).toBe(true);
+    });
+
+    it("refuses a target deleted after the edit was read, under the lock (400)", async () => {
+      const doomed = (await seedSpace({ orgId: ctx.orgId, name: "Doomed" })).id;
+      // The edit asks about it before its transaction: the space goes in between.
+      const id = await seedConnection({ spaceId: scope.spaceId, orgScope: true, userId: memberId });
+      await expect(
+        shareInto(id, doomed, {
+          ...viewer(memberId),
+          spaceId: null,
+          permissionsIn: async (spaceId) => {
+            await deleteSpace(ctx.orgId, spaceId);
+            return GOVERN;
+          },
+        }),
+      ).rejects.toMatchObject({ status: 400, code: "invalid_share_target" });
+      expect(await sharesOf(id)).toEqual([]);
+    });
+
+    it("a credential bound to a space shares and withdraws that space's share only, and renames only a row of it", async () => {
+      const boundPrincipal: ConnectionPrincipal = {
+        kind: "delegated",
+        actor: { type: "user", id: memberId },
+        orgId: ctx.orgId,
+        spaceId: scope.spaceId,
+      };
+      const bound: ConnectionCaller = {
+        ...ownerOn(),
+        principal: boundPrincipal,
+      };
+      const orgRow = await seedConnection({
+        spaceId: other,
+        orgScope: true,
+        userId: memberId,
+        sharedSpaceIds: [other],
+      });
+      // Its shares are read as its own space's: `other` is neither named nor touched.
+      expect((await shareInto(orgRow, scope.spaceId, bound)).added).toBe(true);
+      await expect(shareInto(orgRow, other, bound)).rejects.toMatchObject({ status: 403 });
+      await expect(
+        renameConnection({
+          connectionId: orgRow,
+          integrationId: INTEGRATION,
+          caller: bound,
+          label: "renamed",
+        }),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(await sharesOf(orgRow)).toEqual([other, scope.spaceId].sort());
+      expect(await withdrawFrom(orgRow, scope.spaceId, bound)).toMatchObject({ removed: true });
+      expect(await sharesOf(orgRow)).toEqual([other]);
+
+      const spaceRow = await seedConnection({ spaceId: scope.spaceId, userId: memberId });
+      const connection = await renameConnection({
+        connectionId: spaceRow,
+        integrationId: INTEGRATION,
+        caller: bound,
+        label: "renamed",
+      });
+      expect(connection.label).toBe("renamed");
+
+      // Deleting: a row of the bound space, never one serving the whole organization.
+      await expect(deleteOwnConnection(boundPrincipal, orgRow)).rejects.toMatchObject({
+        status: 403,
+      });
+      await deleteOwnConnection(boundPrincipal, spaceRow);
+      const left = await db
+        .select({ id: integrationConnections.id })
+        .from(integrationConnections)
+        .where(inArray(integrationConnections.id, [orgRow, spaceRow]));
+      expect(left.map((row) => row.id)).toEqual([orgRow]);
+    });
+
+    it("withdrawing is refused only by a pin or default OF that target", async () => {
+      const id = await seedConnection({
+        spaceId: other,
+        orgScope: true,
+        userId: memberId,
+        sharedSpaceIds: [scope.spaceId, other],
+      });
+      await upsertOrgDefault({ orgId: ctx.orgId, spaceId: other }, INTEGRATION, {
+        connectionIds: [id],
+        enforce: false,
+      });
+      await expect(withdrawFrom(id, other)).rejects.toMatchObject({
+        status: 409,
+        code: "connection_pinned",
+      });
+      expect((await withdrawFrom(id, scope.spaceId)).removed).toBe(true);
+    });
+
+    it("disables a colleague's schedule of the withdrawn target only", async () => {
+      const AGENT = "@pinsorg/share-agent";
+      await seedPackage({ id: AGENT, orgId: ctx.orgId, type: "agent", homeSpaceId: scope.spaceId });
+      const id = await seedConnection({
+        spaceId: other,
+        orgScope: true,
+        userId: memberId,
+        sharedSpaceIds: [scope.spaceId, other],
+      });
+      const scheduleIn = (spaceId: string) =>
+        seedSchedule({
+          packageId: AGENT,
+          orgId: ctx.orgId,
+          spaceId,
+          userId: ctx.user.id,
+          connectionOverrides: { [INTEGRATION]: [id] },
+        });
+      const here = await scheduleIn(scope.spaceId);
+      const there = await scheduleIn(other);
+
+      const { disabledScheduleIds } = await withdrawFrom(id, scope.spaceId);
+
+      expect(disabledScheduleIds).toEqual([here.id]);
+      const rows = await db
+        .select({ id: schedules.id, enabled: schedules.enabled })
+        .from(schedules)
+        .where(inArray(schedules.id, [here.id, there.id]));
+      expect(Object.fromEntries(rows.map((r) => [r.id, r.enabled]))).toEqual({
+        [here.id]: false,
+        [there.id]: true,
       });
     });
 
-    it("returns null for an unknown connection id", async () => {
-      expect(await loadConnectionOwnership(crypto.randomUUID())).toBeNull();
+    describe("a governor of this space", () => {
+      const governor = (): ConnectionCaller => viewer(ctx.user.id, true);
+
+      it("withdraws this space only, never another space's share", async () => {
+        const id = await seedConnection({
+          spaceId: other,
+          orgScope: true,
+          userId: memberId,
+          sharedSpaceIds: [scope.spaceId, other],
+        });
+        await expect(withdrawFrom(id, other, governor())).rejects.toMatchObject({ status: 403 });
+        expect(await withdrawFrom(id, scope.spaceId, governor())).toMatchObject({
+          removed: true,
+        });
+        expect(await sharesOf(id)).toEqual([other]);
+      });
+
+      it("may not share, nor rename an org row (403), but renames a row of this space", async () => {
+        const orgRow = await seedConnection({
+          spaceId: other,
+          orgScope: true,
+          userId: memberId,
+          sharedSpaceIds: [scope.spaceId],
+        });
+        await expect(shareInto(orgRow, scope.spaceId, governor())).rejects.toMatchObject({
+          status: 403,
+        });
+        await expect(
+          renameConnection({
+            connectionId: orgRow,
+            integrationId: INTEGRATION,
+            caller: governor(),
+            label: "renamed",
+          }),
+        ).rejects.toMatchObject({ status: 403 });
+        const spaceRow = await seedConnection({ spaceId: scope.spaceId, userId: memberId });
+        const connection = await renameConnection({
+          connectionId: spaceRow,
+          integrationId: INTEGRATION,
+          caller: governor(),
+          label: "renamed",
+        });
+        expect(connection.label).toBe("renamed");
+      });
+
+      it("cannot see a colleague's org row not shared here (404), nor withdraw without governing (403)", async () => {
+        const privateRow = await seedConnection({
+          spaceId: other,
+          orgScope: true,
+          userId: memberId,
+        });
+        await expect(withdrawFrom(privateRow, scope.spaceId, governor())).rejects.toMatchObject({
+          status: 404,
+        });
+        const sharedHere = await seedConnection({
+          spaceId: other,
+          orgScope: true,
+          userId: memberId,
+          sharedSpaceIds: [scope.spaceId],
+        });
+        await expect(
+          withdrawFrom(sharedHere, scope.spaceId, viewer(ctx.user.id, false)),
+        ).rejects.toMatchObject({ status: 403 });
+        // The account surface (no space) is the owner's alone.
+        await expect(
+          withdrawFrom(sharedHere, scope.spaceId, { ...viewer(ctx.user.id, true), spaceId: null }),
+        ).rejects.toMatchObject({ status: 404 });
+      });
     });
   });
 });

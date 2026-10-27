@@ -19,6 +19,7 @@ import { activatePackage, deactivatePackage } from "../../../src/services/space-
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import { seedAgent, seedPackage } from "../../helpers/seed.ts";
+import { seedShares } from "../../helpers/connection-shares.ts";
 import {
   httpHeaderDelivery,
   localIntegrationManifest,
@@ -88,16 +89,18 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
         integrationId: INTEG,
         authKey: over.authKey ?? "primary",
         accountId: `acct-${seq}`,
-        spaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        spaceId: null,
+        originSpaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         endUserId: null,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "k" } }),
         scopesGranted: [],
         needsReconnection: over.dead ?? false,
-        sharedWithOrg: true,
         label: `conn-${seq}`,
       })
       .returning({ id: integrationConnections.id });
+    await seedShares(row!.id, [ctx.defaultSpaceId]);
     return row!.id;
   }
 
@@ -124,7 +127,7 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
     const readiness = await resolveAgentConnectionReadiness({
       scope,
       agentPackageId: AGENT,
-      actor: { type: "user", id: ctx.user.id },
+      principal: { kind: "person", actor: { type: "user", id: ctx.user.id } },
       canConnect: true,
       canConfigureIntegrations: true,
       version: "draft",
@@ -341,6 +344,50 @@ describe("resolveAgentConnectionReadiness — { source, error_code } per verdict
         error_code: null,
         warning: { code: "integration_not_active" },
         resolved_connection_ids: [],
+      });
+    });
+
+    it("an unauthenticated integration switched off in the space still warns integration_not_active", async () => {
+      const OPEN = "@verdictorg/open";
+      const { auths: _auths, ...openManifest } = localIntegrationManifest({
+        name: OPEN,
+        serverName: "@verdictorg/open-server",
+        version: "1.0.0",
+        auths: {},
+        tools_policy: { search: {} },
+      }) as unknown as Record<string, unknown>;
+      await seedPackage({
+        id: OPEN,
+        orgId: ctx.orgId,
+        type: "integration",
+        source: "local",
+        draftManifest: openManifest,
+      });
+      await activatePackage(scope, OPEN);
+      await seedAgent({
+        id: AGENT,
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        draftManifest: {
+          name: AGENT,
+          version: "1.0.0",
+          type: "agent",
+          schema_version: "0.2",
+          display_name: "Verdict Agent",
+          dependencies: { integrations: { [OPEN]: "^1.0.0" } },
+          integrations_configuration: { [OPEN]: TOOLS },
+        },
+      });
+      await activatePackage(scope, AGENT);
+      await deactivatePackage(scope, OPEN);
+      const entry = await entryOf(OPEN);
+      expect(entry.run_blocking).toBe(false);
+      expect(entry.resolution).toMatchObject({
+        source: null,
+        error_code: null,
+        warning: { code: "integration_not_active" },
+        resolved_connection_ids: [],
+        candidates: [],
       });
     });
   });

@@ -10,7 +10,7 @@
  * - L1 — Loader: ZIP parsing, required files, path sanitisation
  * - L2 — Render: logic-less Mustache semantics + sanitization
  * - L3 — Signing: Ed25519 direct + chain verification
- * - L4 — Execution (Phase 10): event emission contract
+ * - L4 — Execution: event emission contract (optional per adapter)
  */
 
 import { BUILT_IN_CASES, type ConformanceCase, type ConformanceLevel } from "./cases.ts";

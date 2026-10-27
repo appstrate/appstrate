@@ -1033,16 +1033,47 @@ describe("Packages API", () => {
             type: "integration",
             schema_version: "0.1",
             display_name: "Bad",
-            description: "No auths declared",
+            description: "An empty auths map: absence is the only spelling (AFPS §7.2)",
             source: {
               kind: "remote",
               remote: { url: "https://example.com/mcp/v1", transport: "streamable-http" },
+            },
+            auths: {},
+          },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+    });
+
+    it("refuses variables on an integration without auths: no connection holds them", async () => {
+      const res = await app.request("/api/packages/integrations", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: {
+            name: "@pkgorg/open-integration",
+            version: "1.0.0",
+            type: "integration",
+            schema_version: "0.3",
+            display_name: "Open",
+            source: {
+              kind: "remote",
+              remote: { url: "{$variable.base_url}/mcp", transport: "streamable-http" },
+            },
+            variables: {
+              schema: {
+                type: "object",
+                properties: { base_url: { type: "string" } },
+                required: ["base_url"],
+              },
             },
           },
         }),
       });
 
       expect(res.status).toBe(400);
+      expect(JSON.stringify(await res.json())).toContain("cannot declare variables");
     });
 
     it("updates an integration manifest under If-Match", async () => {
@@ -2173,6 +2204,68 @@ describe("Packages API", () => {
       expect((await publish("@pkgorg/publish-auth-fit")).status).toBe(201);
     });
 
+    // AFPS §4.4 MUST: an unauthenticated integration (§7.2) has no auth for `auth_key` to name.
+    describe("auth_key on an unauthenticated integration", () => {
+      async function seedUnauthenticatedIntegration() {
+        const manifest = gmailIntegrationManifest({
+          source: {
+            kind: "remote",
+            remote: { url: "https://mcp.example.com/mcp", transport: "streamable-http" },
+          },
+          tools_policy: { list_messages: {} },
+        });
+        delete manifest.auths;
+        await seedPackage({
+          id: integrationId,
+          orgId: ctx.orgId,
+          type: "integration",
+          draftManifest: manifest,
+        });
+        await seedPackageVersion({ packageId: integrationId, version: "1.0.0", manifest });
+      }
+      const publish = (name: string) =>
+        app.request(`/api/packages/agents/${name}/versions`, {
+          method: "POST",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify({}),
+        });
+      const authKeyError = {
+        code: "auth_key_on_unauthenticated_integration",
+        field: `integrations_configuration.${integrationId}.auth_key`,
+      };
+
+      it("draft POST refuses a configuration that is only an auth_key", async () => {
+        await seedUnauthenticatedIntegration();
+        const body = buildAgentBody({ version: "^1.0.0" }, "unauth-auth-key-only");
+        body.manifest.integrations_configuration = { [integrationId]: { auth_key: "primary" } };
+        const res = await app.request("/api/packages/agents", {
+          method: "POST",
+          headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+          body: JSON.stringify(body),
+        });
+        expect(res.status).toBe(400);
+        const json = (await res.json()) as { errors?: { code: string; field: string }[] };
+        expect(json.errors).toContainEqual(expect.objectContaining(authKeyError));
+      });
+
+      it("publish refuses an auth_key beside an explicit tool, and accepts the tool alone", async () => {
+        await seedUnauthenticatedIntegration();
+        await seedDraftDeclaring("@pkgorg/publish-unauth-auth-key", {
+          tools: ["list_messages"],
+          auth_key: "primary",
+        });
+        const res = await publish("@pkgorg/publish-unauth-auth-key");
+        expect(res.status).toBe(400);
+        const json = (await res.json()) as { errors?: { code: string; field: string }[] };
+        expect(json.errors).toContainEqual(expect.objectContaining(authKeyError));
+
+        await seedDraftDeclaring("@pkgorg/publish-unauth-no-auth-key", {
+          tools: ["list_messages"],
+        });
+        expect((await publish("@pkgorg/publish-unauth-no-auth-key")).status).toBe(201);
+      });
+    });
+
     it("publish refuses a draft whose declared integration selects no tool", async () => {
       await seedGmailIntegration();
       await seedDraftDeclaring("@pkgorg/publish-empty-tools", { tools: [] });
@@ -2865,7 +2958,7 @@ describe("Packages API", () => {
       });
     });
 
-    // The dashboard's resource-section ".afps import" (useUploadPackage) routes
+    // The dashboard's resource-section ".afps import" (useImportPackage) routes
     // skill/integration/agent ZIPs here — the per-type create endpoints are
     // JSON-only. Cover a non-agent type so type-detection on this path is
     // guarded.
@@ -4167,9 +4260,9 @@ describe("Packages API", () => {
       const targetId = "@pkgorg/documented";
       await forkInto(sourceId, targetId);
 
-      // The column the runtime reads (`fetchIntegrationPromptDocs`) — it was
-      // `""`, so the fork silently stopped contributing its docs to every
-      // agent's platform prompt.
+      // The column a draft run's bundle takes its INTEGRATION.md from
+      // (`applyDraftOverlay`) — it was `""`, so the fork's docs silently
+      // vanished from every run of its draft.
       expect(await draftContentOf(targetId)).toBe(INTEGRATION_DOC);
 
       // …and what the explorer serves. The ZIP entry was always there; the

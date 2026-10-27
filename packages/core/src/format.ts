@@ -80,3 +80,33 @@ export function formatDuration(ms: number): string {
   const rest = Math.round(seconds - minutes * 60);
   return `${minutes}m ${rest}s`;
 }
+
+/** The coarsest unit a timestamp's age rounds down to; `now` is under a minute. */
+export type RelativeAgeUnit = "now" | "minute" | "hour" | "day" | "month" | "year";
+
+/**
+ * How long ago an ISO timestamp was, as of `now` (epoch ms), in the coarsest
+ * unit that fits: minutes under an hour, hours under a day, days under 30,
+ * months (30 days) under 12, then years. Each level rounds the level below, so
+ * 90 s reads as 2 minutes. `null` for an unparseable timestamp. The count is
+ * clamped at 0, so a clock-skewed future timestamp reads as `now`. Language is
+ * the caller's: it maps the unit to its own wording.
+ */
+export function relativeAge(
+  iso: string,
+  now: number,
+): { unit: RelativeAgeUnit; count: number } | null {
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return null;
+  const seconds = Math.max(0, Math.round((now - then) / 1000));
+  if (seconds < 60) return { unit: "now", count: 0 };
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return { unit: "minute", count: minutes };
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return { unit: "hour", count: hours };
+  const days = Math.round(hours / 24);
+  if (days < 30) return { unit: "day", count: days };
+  const months = Math.round(days / 30);
+  if (months < 12) return { unit: "month", count: months };
+  return { unit: "year", count: Math.round(days / 365) };
+}

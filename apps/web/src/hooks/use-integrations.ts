@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * React Query hooks for the AFPS integration marketplace (Phase 1.3).
- *
- * Hooks backed by `/api/integrations/*` through the typed OpenAPI client.
- * Query keys are the openapi-react-query `[method, path, init]` triples; the
- * spec-declared `X-Org-Id`/`X-Space-Id` headers ride in `init` so the
- * keys stay org/space-scoped — switching org or space refetches instead
- * of serving another scope's cached page.
+ * React Query hooks backed by `/api/integrations/*`. The `X-Org-Id`/`X-Space-Id` headers ride in
+ * the query key's `init`, so switching org or space refetches instead of serving another scope's page.
  */
 
-import { useMutation, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+} from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import type {
@@ -21,23 +22,26 @@ import type {
   IntegrationPin,
 } from "@appstrate/shared-types";
 import { $api, client, type paths } from "../api/client";
+import { invalidatePaths } from "../lib/query-keys";
 import { splitPackageRef } from "../lib/package-paths";
 
-// Spec-pinned narrowing for the integration detail endpoint. It takes the
-// generated OpenAPI response shape verbatim (so a rename/removal of any
-// non-`manifest` field breaks compilation) and narrows only the freeform AFPS
-// `manifest` JSON to IntegrationManifestView — the single trust boundary the
-// legacy `api<IntegrationSummary>()` cast drew.
+// Spec-pinned: the generated response shape verbatim (a rename/removal of any non-`manifest`
+// field breaks compilation), narrowing only the freeform AFPS `manifest` to IntegrationManifestView.
+type RawIntegrationSummary = NonNullable<
+  paths["/api/integrations"]["get"]["responses"]["200"]["content"]["application/json"]["data"]
+>[number];
+export type IntegrationSummaryWire = Omit<RawIntegrationSummary, "manifest"> &
+  // `?fields=` projection makes the spec mark these optional; this hook never projects, so
+  // re-require what consumers read (`active` too: a missing one would read `undefined` silently).
+  Required<Pick<RawIntegrationSummary, "id" | "orgId" | "source" | "active">> & {
+    manifest: IntegrationManifestView;
+  };
 type RawIntegrationDetail =
   paths["/api/integrations/{packageId}"]["get"]["responses"]["200"]["content"]["application/json"];
-type IntegrationDetailWire = Omit<RawIntegrationDetail, "manifest"> & {
+export type IntegrationDetailWire = Omit<RawIntegrationDetail, "manifest"> & {
   manifest: IntegrationManifestView;
 };
-/**
- * One OAuth client offered for connecting an integration auth — a space or org
- * custom (BYO-app) client or a platform-provided system client. Spec-derived so
- * a rename/removal of any wire field breaks compilation. Secrets never present.
- */
+/** One OAuth client offered for an integration auth: a space/org custom (BYO-app) or system client. Secrets never present. */
 export type IntegrationClient = NonNullable<
   paths["/api/integrations/{packageId}/auths/{authKey}/clients"]["get"]["responses"]["200"]["content"]["application/json"]["data"]
 >[number];
@@ -45,14 +49,9 @@ import { useCurrentOrgId } from "./use-org";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgOnlyScope, useOrgScope } from "./use-org-scope";
 import { usePermissions } from "./use-permissions";
-import { invalidateSchedules } from "./use-schedules";
+import { invalidateSchedules, warnSchedulesDisabled } from "./use-schedules";
 
-// Re-export wire types for component consumers — canonical definitions
-// live in `@appstrate/shared-types/integrations.ts`.
-// NB: the integration detail READ shape is NOT re-exported from shared-types —
-// consumers must use the spec-derived IntegrationDetailWire (above), the exact
-// shape the hook returns, so a spec rename/removal of any non-`manifest` field
-// breaks compilation.
+// The detail READ shape is NOT re-exported from shared-types: consumers use IntegrationDetailWire.
 export type {
   AgentIntegrationEntry,
   IntegrationAuthStatus,
@@ -66,31 +65,23 @@ export type {
 // ─────────────────────────────────────────────
 // Typed-client plumbing
 // ─────────────────────────────────────────────
-// Scoped package ids (`@scope/name`) in path params keep their raw `@` and
-// `/` on the wire — handled globally by the client's pathSerializer.
 
 /**
- * Invalidate every cached integrations read (list, detail, connections,
- * pins, org default, agent resolutions, OAuth clients) and the caller's
- * cross-org connection list, whose `locked_by` moves with pins and defaults.
- * Typed keys are `[method, "/api/integrations…", init]` — a key-prefix
- * invalidation can't span sibling path strings, so match on the path element.
+ * Invalidate every cached integrations read plus the caller's cross-org connection list
+ * (`locked_by` moves with pins and defaults). Typed keys are `[method, path, init]`, so a
+ * key-prefix invalidation can't span sibling paths: match on the path element.
  */
 export function invalidateIntegrationQueries(qc: QueryClient): Promise<void> {
   return qc.invalidateQueries({
     predicate: (query) => {
       const path = query.queryKey[1];
       if (typeof path !== "string") return false;
-      // The integration index is keyed `["packages","integrations",…]` and lists
-      // the ACTIVE set, which is exactly what activation changes — so a row that
-      // just got switched on (or off) has to stop being served from cache.
-      // Without this, activating left every index still omitting it.
+      // The index lists the ACTIVE set, which activation changes.
       if (query.queryKey[0] === "packages" && path === "integrations") return true;
       return (
         path.startsWith("/api/integrations") ||
         path === "/api/me/connections" ||
-        // The per-agent connection-readiness query lives under /api/agents but
-        // is driven entirely by connection state, so refresh it here too.
+        // Lives under /api/agents but is driven entirely by connection state.
         path === "/api/agents/{scope}/{name}/connection-readiness"
       );
     },
@@ -110,11 +101,7 @@ function useIntegrationsReadScope() {
 
 type IntegrationNameOf = (integrationId: string) => string;
 
-/**
- * Display names of `integrationIds`, each from its own detail query — the one
- * {@link useIntegrationDetail} caches — fetched when uncached and readable. The
- * id stands in for any name that cannot be read.
- */
+/** Display names of `integrationIds` from the detail query cache (fetched when uncached and readable); the id stands in for an unreadable name. */
 export async function loadIntegrationNames(
   qc: QueryClient,
   scope: { header: ReturnType<typeof useOrgScope>["header"]; enabled: boolean },
@@ -145,6 +132,50 @@ export function useIntegrationNames(): (
   return (integrationIds) => loadIntegrationNames(qc, scope, integrationIds);
 }
 
+/** `GET /api/integrations` answers at most this many ids per request (its `id` filter's bound). */
+const IDS_PER_REQUEST = 100;
+
+/** The list rows of `ids` for the current space, chunked by {@link IDS_PER_REQUEST}. An id not placed here has no row; `undefined` until every request answered. */
+export function useIntegrationsById(
+  ids: readonly string[],
+  options?: { enabled?: boolean },
+): { data: IntegrationSummaryWire[] | undefined; isLoading: boolean; error: unknown } {
+  const scope = useIntegrationsReadScope();
+  // Sorted and unique, so the same set is the same keys whatever order it came in.
+  const unique = [...new Set(ids)].sort();
+  const chunks: string[][] = [];
+  for (let i = 0; i < unique.length; i += IDS_PER_REQUEST) {
+    chunks.push(unique.slice(i, i + IDS_PER_REQUEST));
+  }
+  const orgId = scope.header["X-Org-Id"];
+  const spaceId = scope.header["X-Space-Id"];
+  const query = useQuery({
+    queryKey: ["get", "/api/integrations", "by-id", orgId, spaceId, unique],
+    queryFn: async ({ signal }) => {
+      const responses = await Promise.all(
+        chunks.map((chunk) =>
+          client.GET("/api/integrations", {
+            params: { query: { id: chunk, limit: IDS_PER_REQUEST }, header: scope.header },
+            signal,
+          }),
+        ),
+      );
+      return responses.flatMap((response) => response.data!.data as IntegrationSummaryWire[]);
+    },
+    enabled: scope.enabled && (options?.enabled ?? true),
+    // One observer retains the combined result; useQueries cannot retain changed keys.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[3] === orgId && previousQuery?.queryKey[4] === spaceId
+        ? previous
+        : undefined,
+  });
+  return {
+    data: unique.length === 0 ? [] : query.data,
+    isLoading: unique.length > 0 && query.isLoading,
+    error: query.error,
+  };
+}
+
 export function useIntegrationDetail(packageId: string | undefined) {
   const scope = useIntegrationsReadScope();
   return $api.useQuery(
@@ -159,6 +190,21 @@ export function useIntegrationDetail(packageId: string | undefined) {
       select: (data) => data as IntegrationDetailWire,
     },
   );
+}
+
+/** The detail of each of `packageIds`, in order. `active` and `block_user_connections` are read here: the list is paginated and would misreport them past 100 integrations. */
+export function useIntegrationDetails(packageIds: readonly string[]) {
+  const scope = useIntegrationsReadScope();
+  return useQueries({
+    queries: packageIds.map((packageId) => ({
+      ...$api.queryOptions("get", "/api/integrations/{packageId}", {
+        params: { path: { packageId }, header: scope.header },
+      }),
+      enabled: scope.enabled,
+      // Spec-pinned (see IntegrationDetailWire): only `manifest` is narrowed.
+      select: (data: RawIntegrationDetail) => data as IntegrationDetailWire,
+    })),
+  });
 }
 
 export function useIntegrationConnections(packageId: string | undefined) {
@@ -176,11 +222,7 @@ export function useIntegrationConnections(packageId: string | undefined) {
   );
 }
 
-/**
- * Query options for an (integration, agent) resolution verdict, shared by the
- * picker ({@link useIntegrationReadinessEntry}) and the launch-badge readiness
- * hook: one key, so the badge and the Connexions tab cannot disagree.
- */
+/** Query options of an agent's connection readiness: readers of the same version share one key, so they cannot disagree. */
 function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, version?: string) {
   const orgId = useCurrentOrgId();
   const spaceId = useCurrentSpaceId();
@@ -188,9 +230,7 @@ function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, 
   const { scope, name } = agentPackageId
     ? splitPackageRef(agentPackageId)
     : { scope: "", name: "" };
-  // The `version` selector rides in the key: an explicit `draft` and the
-  // published version resolve different manifests, so their verdicts must not
-  // share one cache entry.
+  // `version` rides in the key: `draft` and the published version resolve different manifests.
   return $api.queryOptions(
     "get",
     "/api/agents/{scope}/{name}/connection-readiness",
@@ -209,31 +249,25 @@ function useAgentConnectionReadinessOptions(agentPackageId: string | undefined, 
 }
 
 /**
- * Bulk connection readiness for an agent — ONE call that drives the launch
- * badge, the Connexions tab pickers, and the pre-run check. `blocks_run` /
- * `errors` mirror the run-kickoff 409 (run semantics); `integrations[]` carries
- * every declared integration's management verdict (includeInert) + a
- * `run_blocking` flag. Replaces the former N per-integration round-trips.
+ * Bulk connection readiness for an agent: ONE call driving the launch badge and the pickers.
+ * `blocks_run`/`errors` mirror the run-kickoff 409; `integrations[]` carries every declared
+ * integration's management verdict plus a `run_blocking` flag.
  */
-export function useAgentConnectionReadiness(agentPackageId: string | undefined) {
-  return useQuery(useAgentConnectionReadinessOptions(agentPackageId));
+export function useAgentConnectionReadiness(agentPackageId: string | undefined, version?: string) {
+  return useQuery(useAgentConnectionReadinessOptions(agentPackageId, version));
 }
 
 type AgentConnectionReadiness =
   paths["/api/agents/{scope}/{name}/connection-readiness"]["get"]["responses"]["200"]["content"]["application/json"];
 
-/** One integration's verdict out of the bulk readiness payload. */
-function resolutionOf(data: AgentConnectionReadiness, integrationId: string | undefined) {
-  return (
-    data.integrations.find((i) => i.integration_package_id === integrationId)?.resolution ?? null
-  );
+/** The declared integrations whose connection refuses a launch (the server's `run_blocking`). */
+export function blockingIntegrationIds(data: AgentConnectionReadiness): string[] {
+  return data.integrations.filter((i) => i.run_blocking).map((i) => i.integration_package_id);
 }
 
 /**
- * Reader of the {@link useIntegrationReadinessEntry} verdict as the cache holds
- * it NOW, for a handler running after something already awaited the readiness
- * refetch (the connect popup does): the fresh value, without a second request.
- * Throws when that refetch failed — the cache then still holds the old verdict.
+ * Reader of the readiness verdict as the cache holds it NOW, for a handler running after the
+ * readiness refetch was awaited (the connect popup). Throws when that refetch failed.
  */
 export function useReadIntegrationResolution(
   integrationId: string,
@@ -245,14 +279,14 @@ export function useReadIntegrationResolution(
   return () => {
     const state = qc.getQueryState<AgentConnectionReadiness>(queryKey);
     if (state?.status === "error") throw state.error;
-    return state?.data ? resolutionOf(state.data, integrationId) : null;
+    return (
+      state?.data?.integrations.find((i) => i.integration_package_id === integrationId)
+        ?.resolution ?? null
+    );
   };
 }
 
-/**
- * One declared integration's readiness entry (`resolution`, `run_blocking`, `required`), selected
- * out of the single bulk readiness query so the picker, badge, and modal share one cache entry.
- */
+/** One declared integration's readiness entry (`resolution`, `run_blocking`, `required`), selected out of the bulk query. */
 export function useIntegrationReadinessEntry(
   integrationId: string | undefined,
   agentPackageId: string | undefined,
@@ -267,31 +301,10 @@ export function useIntegrationReadinessEntry(
   });
 }
 
-/**
- * Mint a hosted-connect-portal session (issue #769). Auth-type-agnostic: the
- * returned `connect_url` dispatches server-side to the provider OAuth screen or
- * the hosted credential form, so the caller never branches on the auth type.
- * Same body as the OAuth initiate (scopes / force_account_select / connection_id)
- * — scope-union + reconnect semantics are identical.
- */
+/** Mint a hosted-connect-portal session. Auth-type-agnostic: `connect_url` dispatches server-side to the OAuth screen or credential form. */
 export function useInitiateIntegrationConnect() {
-  return useMutation({
+  return $api.useMutation("post", "/api/integrations/{packageId}/auths/{authKey}/connect/session", {
     meta: { errorHandledByCaller: true },
-    mutationFn: async (vars: {
-      params: { path: { packageId: string; authKey: string } };
-      body: {
-        scopes?: string[];
-        force_account_select?: boolean;
-        connection_id?: string;
-      };
-    }) => {
-      const { data } = await client.POST(
-        "/api/integrations/{packageId}/auths/{authKey}/connect/session",
-        vars,
-      );
-      if (!data) throw new Error("empty response");
-      return data;
-    },
   });
 }
 
@@ -321,22 +334,17 @@ type UpdateOAuthClientBody =
 type SetDefaultClientBody =
   paths["/api/integrations/{packageId}/auths/{authKey}/default-client"]["put"]["requestBody"]["content"]["application/json"];
 
-/** Refreshes both lists: an org change re-badges the space list and can move its default. */
-function useClientMutationSuccess(messageKey: string) {
+/** Refreshes both lists (an org change re-badges the space list). No toast when the table already shows the effect. */
+function useClientMutationSuccess(messageKey?: string) {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
   return () => {
-    toast.success(t(messageKey));
-    for (const path of [SPACE_CLIENTS, ORG_CLIENTS, "/api/integrations/{packageId}"]) {
-      void qc.invalidateQueries({ queryKey: ["get", path] });
-    }
+    if (messageKey) toast.success(t(messageKey));
+    void invalidatePaths(qc, [SPACE_CLIENTS, ORG_CLIENTS, "/api/integrations/{packageId}"]);
   };
 }
 
-/**
- * A tier's own clients plus the one default it inherits (org or system). New
- * connections always use the default — there is no per-connect picker.
- */
+/** A tier's own clients plus the default it inherits (org or system). New connections always use the default. */
 export function useIntegrationClients(
   tier: IntegrationClientTier,
   packageId: string | undefined,
@@ -408,12 +416,9 @@ export function useUpdateIntegrationOAuthClient(tier: IntegrationClientTier) {
   });
 }
 
-/**
- * Choose the tier's default OAuth client for new connections. Existing
- * connections keep the client that minted them.
- */
+/** Choose the tier's default OAuth client for new connections; existing ones keep the client that minted them. */
 export function useSetDefaultIntegrationClient(tier: IntegrationClientTier) {
-  const onSuccess = useClientMutationSuccess("integration.clients.setDefault.success");
+  const onSuccess = useClientMutationSuccess();
   return useMutation({
     mutationFn: async (vars: { params: AuthPath; body: SetDefaultClientBody }) => {
       const { data } =
@@ -432,28 +437,22 @@ export function useSetDefaultIntegrationClient(tier: IntegrationClientTier) {
   });
 }
 
-/**
- * Move one of the space's own clients to the org tier, inherited by every
- * space. Its id is unchanged, so existing connections keep working.
- */
+/** Move a space client to the org tier. Its id is unchanged, so existing connections keep working. */
 export function usePromoteIntegrationOAuthClient() {
   const onSuccess = useClientMutationSuccess("integration.clients.promote.success");
-  return useMutation({
-    mutationFn: async (vars: { params: ClientPath }) => {
-      const { data } = await client.POST(
-        "/api/integrations/{packageId}/oauth-clients/{clientId}/promote",
-        vars,
-      );
-      return data;
+  return $api.useMutation(
+    "post",
+    "/api/integrations/{packageId}/oauth-clients/{clientId}/promote",
+    {
+      onSuccess,
     },
-    onSuccess,
-  });
+  );
 }
 
 /** Also deletes the connections it minted — in every space for an org client. */
 export function useDeleteIntegrationOAuthClient(tier: IntegrationClientTier) {
   const qc = useQueryClient();
-  const clientsChanged = useClientMutationSuccess("integration.oauthClient.delete.success");
+  const clientsChanged = useClientMutationSuccess();
   return useMutation({
     mutationFn: async (vars: { params: ClientPath }) => {
       if (tier === "space") {
@@ -491,11 +490,7 @@ export function useIntegrationPins(packageId: string | undefined) {
   );
 }
 
-/**
- * R2 — the space's agents that declare this integration as a dependency. Used
- * by the centralised pin management table to populate the "pin a new agent"
- * picker.
- */
+/** The space's agents that declare this integration as a dependency (feeds the "pin a new agent" picker). */
 export function useAgentsConsumingIntegration(packageId: string | undefined) {
   const scope = useIntegrationsReadScope();
   return $api.useQuery(
@@ -514,21 +509,10 @@ export function useAgentsConsumingIntegration(packageId: string | undefined) {
 export function useUpdateIntegrationSettings() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  return useMutation({
-    // 200 + the bare integration detail resource (#657) — the toggled
-    // gate is the resource's `block_user_connections` field.
-    mutationFn: async (vars: {
-      params: { path: { packageId: string } };
-      body: { block_user_connections: boolean };
-    }) => {
-      const { data } = await client.PATCH("/api/integrations/{packageId}/settings", {
-        ...vars,
-      });
-      return data;
-    },
+  return $api.useMutation("patch", "/api/integrations/{packageId}/settings", {
     onSuccess: () => {
       toast.success(t("integration.admin.blockUserConnections.updated"));
-      void qc.invalidateQueries({ queryKey: ["get", "/api/integrations/{packageId}"] });
+      void invalidatePaths(qc, ["/api/integrations/{packageId}"]);
     },
   });
 }
@@ -536,17 +520,9 @@ export function useUpdateIntegrationSettings() {
 export function useUpsertIntegrationPin() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: {
-      params: { path: { packageId: string; agentPackageId: string } };
-      /** The WHOLE pinned set — this write replaces it. */
-      body: { connection_ids: string[] };
-    }) => {
-      const { data } = await client.PUT("/api/integrations/{packageId}/pins/{agentPackageId}", {
-        ...vars,
-      });
-      return data;
-    },
+  // The body is the WHOLE pin, its set and its additions flag (built by `pinDraftVerdict`): this write
+  // replaces both, an absent flag closing the pin.
+  return $api.useMutation("put", "/api/integrations/{packageId}/pins/{agentPackageId}", {
     onSuccess: () => {
       toast.success(t("integration.admin.pin.upserted"));
       // Admin pins top the resolver cascade: every readiness verdict moves with them.
@@ -558,16 +534,10 @@ export function useUpsertIntegrationPin() {
 export function useDeleteIntegrationPin() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: {
-      params: { path: { packageId: string; agentPackageId: string } };
-    }) => {
-      await client.DELETE("/api/integrations/{packageId}/pins/{agentPackageId}", {
-        ...vars,
-      });
-    },
-    onSuccess: () => {
-      toast.success(t("integration.admin.pin.deleted"));
+  return $api.useMutation("delete", "/api/integrations/{packageId}/pins/{agentPackageId}", {
+    onSuccess: ({ schedules_disabled_count: disabledCount }) => {
+      if (disabledCount > 0) warnSchedulesDisabled(qc, disabledCount);
+      else toast.success(t("integration.admin.pin.deleted"));
       void invalidateIntegrationQueries(qc);
     },
   });
@@ -585,8 +555,7 @@ export function useIntegrationOrgDefault(packageId: string | undefined) {
     },
     {
       enabled: scope.enabled && !!packageId,
-      // Bare resource, or a 204 when no default is set — openapi-react-query
-      // maps the empty body to null for the existing null-means-unset consumers.
+      // A 204 (no default set) maps to null.
       select: (data): IntegrationOrgDefault | null => data ?? null,
     },
   );
@@ -595,21 +564,13 @@ export function useIntegrationOrgDefault(packageId: string | undefined) {
 export function useUpsertIntegrationOrgDefault() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: {
-      params: { path: { packageId: string } };
-      /** The WHOLE default set — this write replaces it. */
-      body: { connection_ids: string[]; enforce: boolean };
-    }) => {
-      const { data } = await client.PUT("/api/integrations/{packageId}/default", {
-        ...vars,
-      });
-      return data;
-    },
-    onSuccess: () => {
-      toast.success(t("integration.admin.orgDefault.updated"));
-      // Picker verdicts on agent pages depend on the org default —
-      // invalidate every integrations read, not just the default itself.
+  // The body is the WHOLE default set — this write replaces it.
+  return $api.useMutation("put", "/api/integrations/{packageId}/default", {
+    onSuccess: ({ schedules_disabled_count: disabledCount }) => {
+      // An enforced default turned soft disables the schedules whose overrides only narrowed it.
+      if (disabledCount > 0) warnSchedulesDisabled(qc, disabledCount);
+      else toast.success(t("integration.admin.orgDefault.updated"));
+      // Agent-page picker verdicts depend on the org default.
       void invalidateIntegrationQueries(qc);
     },
   });
@@ -618,41 +579,68 @@ export function useUpsertIntegrationOrgDefault() {
 export function useDeleteIntegrationOrgDefault() {
   const { t } = useTranslation("settings");
   const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (vars: { params: { path: { packageId: string } } }) => {
-      await client.DELETE("/api/integrations/{packageId}/default", {
-        ...vars,
-      });
-    },
-    onSuccess: () => {
-      toast.success(t("integration.admin.orgDefault.deleted"));
+  return $api.useMutation("delete", "/api/integrations/{packageId}/default", {
+    onSuccess: ({ schedules_disabled_count: disabledCount }) => {
+      if (disabledCount > 0) warnSchedulesDisabled(qc, disabledCount);
+      else toast.success(t("integration.admin.orgDefault.deleted"));
       void invalidateIntegrationQueries(qc);
     },
   });
 }
 
-export function useUpdateIntegrationConnection() {
-  const { t } = useTranslation("settings");
+export function useRenameIntegrationConnection() {
+  const qc = useQueryClient();
+  return $api.useMutation("patch", "/api/integrations/{packageId}/connections/{connectionId}", {
+    // A label shows on every picker and readiness view, not just the connection list.
+    onSuccess: () => invalidateIntegrationQueries(qc),
+  });
+}
+
+/**
+ * Share a connection into a space (idempotent) or withdraw it, through the space's door
+ * (`packageId` set) or the account's. The mutation stays pending until the refetched sharing
+ * lands, so the share editor never re-enables on stale state. Withdrawing disables other
+ * actors' schedules naming the connection.
+ */
+export function useConnectionShare(op: "share" | "unshare", packageId?: string) {
   const qc = useQueryClient();
   return useMutation({
-    // 200 + the bare connection resource (#657) — same serializer as the
-    // connections list.
-    mutationFn: async (vars: {
-      params: { path: { packageId: string; connectionId: string } };
-      body: { label?: string; shared_with_org?: boolean };
-    }) => {
-      const { data } = await client.PATCH(
-        "/api/integrations/{packageId}/connections/{connectionId}",
-        vars,
-      );
-      return data;
+    mutationFn: async ({ connectionId, spaceId }: { connectionId: string; spaceId: string }) => {
+      if (packageId) {
+        const path = "/api/integrations/{packageId}/connections/{connectionId}/shares/{spaceId}";
+        const init = { params: { path: { packageId, connectionId, spaceId } } };
+        await (op === "share" ? client.PUT(path, init) : client.DELETE(path, init));
+      } else {
+        const path = "/api/me/connections/{connectionId}/shares/{spaceId}";
+        const init = { params: { path: { connectionId, spaceId } } };
+        await (op === "share" ? client.PUT(path, init) : client.DELETE(path, init));
+      }
     },
-    onSuccess: (_data, vars) => {
-      toast.success(t("integration.connection.updated"));
-      // A label shows on every picker and readiness view, not just the connection list.
-      void invalidateIntegrationQueries(qc);
-      // Unsharing disables other people's schedules naming the connection.
-      if (vars.body.shared_with_org === false) invalidateSchedules(qc);
+    onSuccess: () => {
+      if (op === "unshare") invalidateSchedules(qc);
+      return invalidateIntegrationQueries(qc);
     },
+  });
+}
+
+/** Explicit policy, atomically saved with current team-space shares by the server. */
+export function useConnectionShareAllSpaces(packageId?: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ connectionId, enabled }: { connectionId: string; enabled: boolean }) => {
+      const body = { share_all_spaces: enabled };
+      if (packageId) {
+        await client.PUT("/api/integrations/{packageId}/connections/{connectionId}/shares", {
+          params: { path: { packageId, connectionId } },
+          body,
+        });
+      } else {
+        await client.PUT("/api/me/connections/{connectionId}/shares", {
+          params: { path: { connectionId } },
+          body,
+        });
+      }
+    },
+    onSuccess: () => invalidateIntegrationQueries(qc),
   });
 }

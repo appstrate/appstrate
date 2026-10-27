@@ -5,6 +5,8 @@ import { z } from "zod";
 import type { AppEnv } from "../types/index.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
+import { idempotency } from "../middleware/idempotency.ts";
+import { clearResolvedModelCache } from "../services/resolved-model-cache.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { isSystemModel, getSystemModelProviderCredentials } from "../services/model-registry.ts";
 import { modelCostSchema, modelInputModalitySchema } from "@appstrate/core/module";
@@ -16,15 +18,16 @@ import {
   updateOrgModel,
   deleteOrgModel,
   setDefaultModel,
+  writeDefaultModel,
   seedOrgModelsForCredential,
   testModelConnection,
   testModelConfig,
   deriveModelLabel,
   projectAliasedModel,
   resolveCatalogDefaults,
-  type CatalogDefaults,
 } from "../services/org-models.ts";
 import { getModelProvider, isOAuthModelProvider } from "../services/model-providers/registry.ts";
+import { requestPayerUserId } from "../services/model-providers/credential-chain.ts";
 import { checkAliasInvariants, type AliasInvariantViolation } from "@appstrate/core/model-swap";
 import {
   listCatalogModels,
@@ -33,9 +36,17 @@ import {
 } from "../services/model-catalog.ts";
 import type { CatalogModelEntry } from "@appstrate/shared-types";
 import {
+  createApiKeyCredential,
+  dedupeCredentialLabel,
+  deriveCredentialLabel,
+  loadCredentialBinding,
   loadInferenceCredentials,
-  loadCredentialMetadata,
+  resolveCredentialOwner,
 } from "../services/model-providers/credentials.ts";
+import { createSchema as createCredentialSchema } from "./model-provider-credentials.ts";
+import { db } from "@appstrate/db/client";
+import { orgModels } from "@appstrate/db/schema";
+import { and, eq, isNull } from "drizzle-orm";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { logger } from "../lib/logger.ts";
 import {
@@ -44,6 +55,8 @@ import {
   notFound,
   internalError,
   systemEntityForbidden,
+  validationFailed,
+  type ValidationFieldError,
 } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { recordAuditFromContext } from "../services/audit.ts";
@@ -61,12 +74,15 @@ export const createModelSchema = z
     // `org_models.credential_id` is a strict UUID FK to
     // `model_provider_credentials.id` — built-in (system) credentials live
     // in `SYSTEM_PROVIDER_KEYS` env, NOT in that table, and identify as
-    // slugs (e.g. "anthropic"). Validating as UUID here turns the
-    // legacy 500 ("invalid input syntax for type uuid") into a clean 400
+    // slugs (e.g. "anthropic"). Validating as UUID here turns a
+    // 500 ("invalid input syntax for type uuid") into a clean 400
     // and lets the route handler emit a hint that points operators at the
     // right knob (either update SYSTEM_PROVIDER_KEYS or create a custom
-    // credential).
-    credentialId: z.uuid({ message: "credentialId must be a valid UUID" }),
+    // credential). `null`: each member serves the model with their own
+    // credential for `providerId`.
+    credentialId: z.uuid({ message: "credentialId must be a valid UUID" }).nullable(),
+    /** The provider of a model without a credential. A bound model takes its credential's. */
+    providerId: z.string().min(1).optional(),
     /**
      * Catalog-derivable overrides. Omit (or send null on update) to let the
      * read path fall back to the catalog — keeps existing rows in sync with
@@ -99,13 +115,62 @@ export const createModelSchema = z
     // edge so the runtime never derives a reserve that swallows the window.
     (d) => d.maxTokens == null || d.contextWindow == null || d.maxTokens < d.contextWindow,
     { message: "maxTokens must be strictly less than contextWindow", path: ["maxTokens"] },
-  );
+  )
+  .refine((d) => d.credentialId !== null || d.providerId !== undefined, {
+    message: "providerId is required when credentialId is null",
+    path: ["providerId"],
+  });
+
+/** One model of a choice to create: what `POST /api/models` takes, minus the shared binding. */
+const choiceModelSchema = z
+  .object({
+    label: z.string().min(1).optional(),
+    modelId: z.string().min(1, "modelId is required"),
+    input: z.array(modelInputModalitySchema).optional(),
+    contextWindow: z.number().int().positive().optional(),
+    maxTokens: z.number().int().positive().optional(),
+    reasoning: z.boolean().optional(),
+    cost: modelCostSchema.strict().optional(),
+  })
+  .strict()
+  .refine((d) => d.maxTokens == null || d.contextWindow == null || d.maxTokens < d.contextWindow, {
+    message: "maxTokens must be strictly less than contextWindow",
+    path: ["maxTokens"],
+  });
+
+/**
+ * A model-provider choice, applied as one write: the credential its models run on (an existing
+ * one, a new organization API key, or none — each member's own), the models to create, the ones
+ * to switch on and off, and the default.
+ */
+export const applyModelChoiceSchema = z
+  .object({
+    credential: z
+      .union([
+        z.object({ id: z.uuid({ message: "credential.id must be a valid UUID" }) }).strict(),
+        createCredentialSchema.omit({ owner_type: true }),
+      ])
+      .nullable(),
+    /** The service of a choice without a credential; a credential names its own. */
+    providerId: z.string().min(1).optional(),
+    add: z.array(choiceModelSchema).max(100).default([]),
+    enable: z.array(z.uuid()).max(200).default([]),
+    disable: z.array(z.uuid()).max(200).default([]),
+    /** The `modelId` (upstream id) of a model of this choice to make the organization's default. */
+    default_model_id: z.string().min(1).optional(),
+  })
+  .strict()
+  .refine((d) => d.credential !== null || d.providerId !== undefined, {
+    message: "providerId is required when credential is null",
+    path: ["providerId"],
+  });
 
 export const updateModelSchema = z
   .object({
     label: z.string().min(1).optional(),
     modelId: z.string().min(1).optional(),
-    credentialId: z.uuid({ message: "credentialId must be a valid UUID" }).optional(),
+    credentialId: z.uuid({ message: "credentialId must be a valid UUID" }).nullable().optional(),
+    providerId: z.string().min(1).optional(),
     enabled: z.boolean().optional(),
     input: z.array(modelInputModalitySchema).nullable().optional(),
     contextWindow: z.number().int().positive().nullable().optional(),
@@ -156,7 +221,7 @@ export const testInlineSchema = z
 
 /**
  * Map an alias-invariant violation to its 400 — shared by the create and
- * update handlers so PATCH cannot accept a state POST rejects (issue #727).
+ * update handlers so PATCH cannot accept a state POST rejects.
  */
 function throwOnAliasViolation(violation: AliasInvariantViolation | null): void {
   // 1. Require an explicit label. The derive-from-catalog fallback (POST) —
@@ -219,13 +284,54 @@ function throwOnModelOutsideOffer(providerId: string, modelId: string): void {
   }
 }
 
+/** The fields of a model to create that a binding does not decide. */
+type ModelCreateFields = Omit<z.infer<typeof createModelSchema>, "credentialId" | "providerId">;
+
+/**
+ * The checks a model to create passes and the label it is written with — shared by
+ * `POST /api/models` and `POST /api/models/apply`, once each has settled the binding
+ * (`providerId` is the binding's provider). Reads only, so it runs before any write.
+ */
+async function prepareModelCreate(
+  orgId: string,
+  providerId: string,
+  data: ModelCreateFields,
+  pendingLabels: readonly string[] = [],
+): Promise<{ label: string; capabilities: Parameters<typeof createOrgModel>[5] }> {
+  const { modelId, input, contextWindow, maxTokens, reasoning, cost, aliased } = data;
+  throwOnModelOutsideOffer(providerId, modelId);
+  // Model-alias guards — shared invariant rule:
+  if (aliased) {
+    throwOnAliasViolation(
+      checkAliasInvariants({
+        label: data.label,
+        authMode: isOAuthModelProvider(providerId) ? "oauth2" : "api_key",
+      }),
+    );
+  }
+  // Token-budget invariant on the EFFECTIVE state: an override omitted
+  // from the payload falls back to the live catalog at read/run time, so
+  // a lone `maxTokens` (or a lone `contextWindow`) must be checked
+  // against the catalog value it will be paired with.
+  const catalogDefaults = resolveCatalogDefaults(providerId, modelId);
+  throwOnTokenBudgetViolation(
+    maxTokens ?? catalogDefaults.maxTokens,
+    contextWindow ?? catalogDefaults.contextWindow,
+  );
+  // Label is optional on the wire — derive from the catalog when the
+  // caller omits it. Needs the provider to pick the right catalog
+  // (handles `catalogProviderId` for OAuth wrappers).
+  const label = data.label ?? (await deriveModelLabel(orgId, providerId, modelId, pendingLabels));
+  return { label, capabilities: { input, contextWindow, maxTokens, reasoning, cost, aliased } };
+}
+
 export function createModelsRouter() {
   const router = new Hono<AppEnv>();
 
   // GET /api/models — list all models (system + DB)
   router.get("/", requirePermission("models", "read"), async (c) => {
     const orgId = c.get("orgId");
-    const models = await listOrgModels(orgId);
+    const models = await listOrgModels(orgId, requestPayerUserId(c));
     // Strip the backing of any model alias before it reaches the dashboard user
     // (Threat A) — see projectAliasedModel. Non-aliased models pass through.
     //
@@ -248,8 +354,7 @@ export function createModelsRouter() {
     const data = await readJsonBody(c, createModelSchema);
 
     try {
-      const { modelId, credentialId, input, contextWindow, maxTokens, reasoning, cost, aliased } =
-        data;
+      const { modelId, credentialId } = data;
       // Block built-in (env-driven) credentials at the route boundary.
       // `org_models.credential_id` is a UUID FK to `model_provider_credentials.id`;
       // system keys live in `SYSTEM_PROVIDER_KEYS` env and are never present in
@@ -257,7 +362,7 @@ export function createModelsRouter() {
       // (the operator can declare a UUID in env if they want), then fails at
       // the Postgres FK with a 500 the caller can't act on. Pointing them at
       // the env var instead is the actionable fix.
-      if (getSystemModelProviderCredentials().has(credentialId)) {
+      if (credentialId !== null && getSystemModelProviderCredentials().has(credentialId)) {
         throw invalidRequest(
           "Cannot add custom models against a built-in credential — declare the model in the " +
             "SYSTEM_PROVIDER_KEYS env var (models[] field), or create a custom credential via " +
@@ -275,47 +380,28 @@ export function createModelsRouter() {
       // exists to explain a model that WENT dead, not to license minting one
       // dead on arrival — such a row could never run, and could not even
       // become the org default.
-      const creds = await loadInferenceCredentials(orgId, credentialId);
-      if (!creds) {
+      const creds =
+        credentialId === null ? null : await loadInferenceCredentials(orgId, credentialId);
+      if (credentialId !== null && !creds) {
         throw invalidRequest(
           "credentialId is unreachable — the credential needs reconnection or no longer exists",
           "credentialId",
         );
       }
-      throwOnModelOutsideOffer(creds.providerId, modelId);
-      // Model-alias guards (issue #727, Threat A) — shared invariant rule:
-      if (aliased) {
-        throwOnAliasViolation(
-          checkAliasInvariants({
-            label: data.label,
-            authMode: isOAuthModelProvider(creds.providerId) ? "oauth2" : "api_key",
-          }),
-        );
+      // A bound model takes its credential's provider; an unbound one names it.
+      const providerId = creds ? creds.providerId : data.providerId;
+      if (!providerId || !getModelProvider(providerId)) {
+        throw invalidRequest("providerId must name a registered provider", "providerId");
       }
-      // Token-budget invariant on the EFFECTIVE state: an override omitted
-      // from the payload falls back to the live catalog at read/run time, so
-      // a lone `maxTokens` (or a lone `contextWindow`) must be checked
-      // against the catalog value it will be paired with.
-      const catalogDefaults = resolveCatalogDefaults(creds.providerId, modelId);
-      throwOnTokenBudgetViolation(
-        maxTokens ?? catalogDefaults.maxTokens,
-        contextWindow ?? catalogDefaults.contextWindow,
+      const { label, capabilities } = await prepareModelCreate(orgId, providerId, data);
+      const id = await createOrgModel(
+        orgId,
+        label,
+        modelId,
+        user.id,
+        { credentialId, providerId: data.providerId },
+        capabilities,
       );
-      // Label is optional on the wire — derive from the catalog when the
-      // caller omits it. Needs the credential's providerId to pick the
-      // right catalog (handles `catalogProviderId` for OAuth wrappers).
-      let label = data.label;
-      if (!label) {
-        label = await deriveModelLabel(orgId, creds.providerId, modelId);
-      }
-      const id = await createOrgModel(orgId, label, modelId, user.id, credentialId, {
-        input,
-        contextWindow,
-        maxTokens,
-        reasoning,
-        cost,
-        aliased,
-      });
       await recordAuditFromContext(c, {
         action: "model.created",
         resourceType: "model",
@@ -323,10 +409,10 @@ export function createModelsRouter() {
         after: { label, modelId, credentialId },
       });
       // Return the bare created resource (same shape as GET/list) so callers
-      // see the resolved state without a follow-up fetch (#657). The row was
+      // see the resolved state without a follow-up fetch. The row was
       // just inserted — failing to re-project it (e.g. credential became
       // unreachable mid-request) is a server-side inconsistency.
-      const model = await getOrgModel(orgId, id);
+      const model = await getOrgModel(orgId, id, requestPayerUserId(c));
       if (!model) throw internalError();
       return c.json(model, 201);
     } catch (err) {
@@ -421,9 +507,9 @@ export function createModelsRouter() {
       // Return the bare *effective* default model resource — `is_default` is
       // recomputed by listOrgModels (DB flag, or the system-default fallback
       // when no DB row is flagged) — so callers see the resulting state
-      // without a follow-up GET (#657). When no default remains in effect
+      // without a follow-up GET. When no default remains in effect
       // (cleared with no system fallback) there is no resource: 204.
-      const all = await listOrgModels(orgId);
+      const all = await listOrgModels(orgId, requestPayerUserId(c));
       const def = all.find((m) => m.is_default);
       // Project in case the effective default is a model alias (Threat A).
       return def ? c.json(projectAliasedModel(def)) : c.body(null, 204);
@@ -437,6 +523,260 @@ export function createModelsRouter() {
       throw internalError();
     }
   });
+
+  // POST /api/models/apply — a model-provider choice in one transaction
+  // The rate limit is the one of `POST /api/model-provider-credentials`, whose key this may mint.
+  router.post(
+    "/apply",
+    rateLimit(10),
+    requirePermission("models", "write"),
+    idempotency(),
+    async (c) => {
+      const orgId = c.get("orgId");
+      const user = c.get("user");
+      const data = await readJsonBody(c, applyModelChoiceSchema);
+      const minting = data.credential !== null && !("id" in data.credential);
+      // The creation rule of `POST /api/model-provider-credentials` for an organization key.
+      if (minting) resolveCredentialOwner(c, "org");
+
+      // 1. The binding, settled before any write: reads only.
+      let credentialId: string | null = null;
+      let providerId: string;
+      let newCredential: {
+        label: string;
+        providerId: string;
+        apiKey: string;
+        baseUrlOverride: string | null;
+      } | null = null;
+      if (data.credential === null) {
+        providerId = data.providerId!;
+        if (!getModelProvider(providerId)) {
+          throw invalidRequest("providerId must name a registered provider", "providerId");
+        }
+      } else if ("id" in data.credential) {
+        credentialId = data.credential.id;
+        if (getSystemModelProviderCredentials().has(credentialId)) {
+          throw invalidRequest("A built-in credential takes no custom models", "credential.id");
+        }
+        const creds = await loadInferenceCredentials(orgId, credentialId);
+        if (!creds) {
+          throw invalidRequest(
+            "credential.id is unreachable — the credential needs reconnection or no longer exists",
+            "credential.id",
+          );
+        }
+        providerId = creds.providerId;
+      } else {
+        const cfg = getModelProvider(data.credential.providerId);
+        if (!cfg) {
+          throw invalidRequest(
+            `Unknown providerId: ${data.credential.providerId}`,
+            "credential.providerId",
+          );
+        }
+        if (cfg.authMode !== "api_key") {
+          throw invalidRequest(
+            `Provider ${cfg.providerId} requires OAuth; use the OAuth pairing flow instead`,
+            "credential.providerId",
+          );
+        }
+        providerId = cfg.providerId;
+        const baseUrlOverride = data.credential.base_url_override ?? null;
+        newCredential = {
+          label: await dedupeCredentialLabel(
+            orgId,
+            data.credential.label?.trim() || deriveCredentialLabel(cfg, baseUrlOverride),
+            null,
+          ),
+          providerId,
+          apiKey: data.credential.api_key,
+          baseUrlOverride,
+        };
+      }
+
+      // 2. Every model judged before any write, each refusal kept against its entry.
+      const refusals: ValidationFieldError[] = [];
+      const refuse = (field: string, err: unknown) => {
+        if (!(err instanceof ApiError)) throw err;
+        refusals.push({ field, code: err.code, message: err.message });
+      };
+      const prepared: {
+        modelId: string;
+        label: string;
+        capabilities: Parameters<typeof createOrgModel>[5];
+      }[] = [];
+      for (const [index, entry] of data.add.entries()) {
+        try {
+          const ready = await prepareModelCreate(
+            orgId,
+            providerId,
+            entry,
+            prepared.map((p) => p.label),
+          );
+          prepared.push({ modelId: entry.modelId, ...ready });
+        } catch (err) {
+          refuse(`add.${index}`, err);
+        }
+      }
+      if (refusals.length > 0) throw validationFailed(refusals);
+
+      // 3. One transaction: the key, the models, the switches, the default — all or nothing.
+      const sameBinding = (row: { credentialId: string | null; providerId: string }) =>
+        credentialId === null && !minting
+          ? row.credentialId === null && row.providerId === providerId
+          : row.credentialId === credentialId;
+      const outcome = await db.transaction(async (tx) => {
+        const boundTo = newCredential
+          ? await createApiKeyCredential(
+              {
+                orgId,
+                userId: user.id,
+                ownerUserId: null,
+                label: newCredential.label,
+                providerId: newCredential.providerId,
+                apiKey: newCredential.apiKey,
+                baseUrlOverride: newCredential.baseUrlOverride,
+              },
+              tx,
+            )
+          : credentialId;
+        credentialId = boundTo;
+        const created = new Map<string, string>();
+        for (const [index, model] of prepared.entries()) {
+          try {
+            const id = await createOrgModel(
+              orgId,
+              model.label,
+              model.modelId,
+              user.id,
+              { credentialId: boundTo, ...(boundTo === null ? { providerId } : {}) },
+              model.capabilities,
+              tx,
+            );
+            created.set(model.modelId, id);
+          } catch (err) {
+            refuse(`add.${index}`, err);
+          }
+        }
+        // A switch only moves a model of this choice.
+        const switchModel = async (field: string, id: string, enabled: boolean) => {
+          const row = await getOrgModelRow(orgId, id, tx);
+          if (!row || !sameBinding(row)) {
+            refusals.push({
+              field,
+              code: "model_not_in_choice",
+              message: "This model does not run on the choice's credential",
+            });
+            return;
+          }
+          try {
+            await updateOrgModel(orgId, id, { enabled }, tx);
+          } catch (err) {
+            refuse(field, err);
+          }
+        };
+        for (const [index, id] of data.enable.entries())
+          await switchModel(`enable.${index}`, id, true);
+        let defaultId: string | null = null;
+        if (data.default_model_id !== undefined) {
+          defaultId = created.get(data.default_model_id) ?? null;
+          if (!defaultId) {
+            const [existing] = await tx
+              .select({ id: orgModels.id })
+              .from(orgModels)
+              .where(
+                and(
+                  eq(orgModels.orgId, orgId),
+                  eq(orgModels.modelId, data.default_model_id),
+                  eq(orgModels.aliased, false),
+                  // The choice's own binding: the same modelId may run under another key.
+                  credentialId === null
+                    ? and(isNull(orgModels.credentialId), eq(orgModels.providerId, providerId))
+                    : eq(orgModels.credentialId, credentialId),
+                ),
+              );
+            defaultId = existing?.id ?? null;
+          }
+          if (!defaultId) {
+            refusals.push({
+              field: "default_model_id",
+              code: "model_not_in_choice",
+              message: `No model '${data.default_model_id}' runs on the choice's credential`,
+            });
+          } else {
+            try {
+              await writeDefaultModel(tx, orgId, defaultId, true);
+            } catch (err) {
+              refuse("default_model_id", err);
+            }
+          }
+        }
+        for (const [index, id] of data.disable.entries()) {
+          await switchModel(`disable.${index}`, id, false);
+        }
+        // Any refusal rolls the whole choice back: nothing is half-applied.
+        if (refusals.length > 0) throw validationFailed(refusals);
+        return { credentialId: boundTo, created, defaultId };
+      });
+      // `updateOrgModel` clears the cache before this transaction commits; clear it again once the
+      // rows are visible so no resolution in between keeps serving the previous state.
+      clearResolvedModelCache();
+
+      if (newCredential && outcome.credentialId) {
+        await recordAuditFromContext(c, {
+          action: "model_provider_credential.created",
+          resourceType: "model_provider_credential",
+          resourceId: outcome.credentialId,
+          after: {
+            label: newCredential.label,
+            providerId: newCredential.providerId,
+            baseUrlOverride: newCredential.baseUrlOverride,
+            ownerType: "org",
+          },
+        });
+      }
+      for (const [modelId, id] of outcome.created) {
+        await recordAuditFromContext(c, {
+          action: "model.created",
+          resourceType: "model",
+          resourceId: id,
+          after: { modelId, credentialId: outcome.credentialId },
+        });
+      }
+      for (const [enabled, ids] of [
+        [true, data.enable],
+        [false, data.disable],
+      ] as const) {
+        for (const id of ids) {
+          await recordAuditFromContext(c, {
+            action: "model.updated",
+            resourceType: "model",
+            resourceId: id,
+            after: { enabled },
+          });
+        }
+      }
+      if (outcome.defaultId) {
+        await recordAuditFromContext(c, {
+          action: "model.default_set",
+          resourceType: "model",
+          resourceId: outcome.defaultId,
+        });
+      }
+
+      const payer = requestPayerUserId(c);
+      const touched = [...outcome.created.values(), ...data.enable, ...data.disable];
+      const models = (
+        await Promise.all(touched.map((id) => getOrgModel(orgId, id, payer)))
+      ).flatMap((model) => (model ? [projectAliasedModel(model)] : []));
+      return c.json({
+        object: "model_choice" as const,
+        credential_id: outcome.credentialId,
+        models,
+        default_model_id: outcome.defaultId,
+      });
+    },
+  );
 
   // GET /api/models/openrouter — search OpenRouter models (proxy)
   router.get("/openrouter", rateLimit(10), requirePermission("models", "read"), async (c) =>
@@ -456,7 +796,12 @@ export function createModelsRouter() {
     if (getSystemModelProviderCredentials().has(data.credentialId)) {
       throw systemEntityForbidden("model provider credential", data.credentialId, "test");
     }
-    const creds = await loadInferenceCredentials(orgId, data.credentialId);
+    // A model binds organization credentials only; a personal one is probed on its own route.
+    const binding = await loadCredentialBinding(orgId, data.credentialId);
+    const creds =
+      binding?.ownerUserId === null
+        ? await loadInferenceCredentials(orgId, data.credentialId)
+        : null;
     if (!creds) {
       throw notFound("Credential not found");
     }
@@ -504,7 +849,7 @@ export function createModelsRouter() {
     // `aliased` is already public on the projection, so a 400 here discloses
     // nothing new; the message names no binding detail. Non-aliased models are
     // untouched — their contract is reaching the provider, not hiding it.
-    const existing = await getOrgModel(orgId, modelId);
+    const existing = await getOrgModel(orgId, modelId, requestPayerUserId(c));
     if (existing?.aliased) {
       throw invalidRequest("Connection testing is not available for a managed model.");
     }
@@ -549,8 +894,7 @@ export function createModelsRouter() {
     // that can no longer serve inference is a deliberate move into a broken
     // state: the row would come back flagged `needs_reconnection`, refuse to
     // become the org default, and fail every run. Reject before the write.
-    // `newCreds` is also what the alias invariants and the catalog defaults
-    // below are established against.
+    // `newCreds` is what the offer and catalog checks below run against.
     let newCreds: Awaited<ReturnType<typeof loadInferenceCredentials>> = null;
     if (data.credentialId) {
       newCreds = await loadInferenceCredentials(orgId, data.credentialId);
@@ -562,7 +906,7 @@ export function createModelsRouter() {
       }
     }
 
-    // Model-alias guards on the EFFECTIVE post-update state (issue #727) —
+    // Model-alias guards on the EFFECTIVE post-update state —
     // without this, PATCH is a bypass of every invariant POST enforces: flip
     // `aliased` on an oauth-subscription or non-backing row, or re-point an
     // aliased row to such a credential, and the row becomes a state creation
@@ -571,16 +915,11 @@ export function createModelsRouter() {
     if (!current) {
       throw notFound("Model not found");
     }
+    // The provider after this write: a new credential's, else the row's own
+    // (kept when the binding is removed). Stored on the row, so it reads
+    // without decrypting — a dead credential still names its provider.
+    const providerId = newCreds?.providerId ?? data.providerId ?? current.providerId;
     if (data.aliased ?? current.aliased) {
-      const creds = newCreds ?? (await loadInferenceCredentials(orgId, current.credentialId));
-      if (!creds) {
-        // Keeping the current (dead) credential while the row is/becomes
-        // aliased: the invariants can't be established — reject the write.
-        throw invalidRequest(
-          "The model's credential is unreachable — reconnect it before updating an aliased model",
-          "credentialId",
-        );
-      }
       throwOnAliasViolation(
         checkAliasInvariants({
           // A false→true flip must carry a fresh explicit label: the row's
@@ -588,7 +927,7 @@ export function createModelsRouter() {
           // already-aliased row's label is explicit by construction (POST
           // enforced it), so it stays valid when this PATCH omits `label`.
           label: data.label ?? (current.aliased ? current.label : undefined),
-          authMode: isOAuthModelProvider(creds.providerId) ? "oauth2" : "api_key",
+          authMode: isOAuthModelProvider(providerId) ? "oauth2" : "api_key",
         }),
       );
     }
@@ -598,18 +937,14 @@ export function createModelsRouter() {
     // be disabled or relabelled. The Zod refine only sees the payload: a lone
     // `maxTokens` can exceed the stored (or catalog) contextWindow, and a
     // binding change swaps the catalog defaults under a kept override.
-    const rebinds = data.modelId !== undefined || data.credentialId !== undefined;
+    const rebinds =
+      data.modelId !== undefined ||
+      data.credentialId !== undefined ||
+      data.providerId !== undefined;
     if (rebinds || data.maxTokens !== undefined || data.contextWindow !== undefined) {
       const effectiveModelId = data.modelId ?? current.modelId;
-      // Metadata-only (no decrypt): works even when the row's credential is
-      // dead. A gone credential/provider yields no catalog defaults.
-      const providerId =
-        newCreds?.providerId ??
-        (await loadCredentialMetadata(current.credentialId, orgId))?.providerId;
-      if (rebinds && providerId) throwOnModelOutsideOffer(providerId, effectiveModelId);
-      const catalogDefaults: CatalogDefaults = providerId
-        ? resolveCatalogDefaults(providerId, effectiveModelId)
-        : {};
+      if (rebinds) throwOnModelOutsideOffer(providerId, effectiveModelId);
+      const catalogDefaults = resolveCatalogDefaults(providerId, effectiveModelId);
       throwOnTokenBudgetViolation(
         (data.maxTokens === undefined ? current.maxTokens : data.maxTokens) ??
           catalogDefaults.maxTokens,
@@ -626,7 +961,7 @@ export function createModelsRouter() {
         resourceId: modelId,
         after: data,
       });
-      // Return the bare updated resource (#657), projected for a model alias
+      // Return the bare updated resource, projected for a model alias
       // (Threat A) — the same projection the list and effective-default paths
       // apply.
       //
@@ -639,7 +974,7 @@ export function createModelsRouter() {
       // — it rejects env-declared models, while an alias is an ordinary DB row
       // — so without this projection the update route is a read oracle for
       // every backing an org admin (or a `models:write` API key) can name.
-      const model = await getOrgModel(orgId, modelId);
+      const model = await getOrgModel(orgId, modelId, requestPayerUserId(c));
       if (!model) throw notFound("Model not found");
       return c.json(projectAliasedModel(model));
     } catch (err) {

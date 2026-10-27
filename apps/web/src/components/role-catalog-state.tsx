@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription } from "@appstrate/ui/components/alert";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { errorMessage } from "../lib/mutation-error";
+import { TextSkeleton } from "./loading-skeletons";
 
 /**
  * What a role catalog (`useSpaceRoleOptions`) says when it has no usable list:
@@ -21,16 +23,17 @@ export function RoleCatalogState({
   rolesKnown = true,
   error,
   refetch,
-  loadingMessage,
   emptyMessage,
+  pending,
   className,
 }: {
   isLoading: boolean;
   rolesKnown?: boolean;
   error: unknown;
   refetch: () => void;
-  loadingMessage?: string;
   emptyMessage: string | null;
+  /** What stands in while the catalog loads; `null` when the caller draws its own wait. */
+  pending?: ReactNode;
   className?: string;
 }) {
   const { t } = useTranslation(["settings", "common"]);
@@ -49,11 +52,7 @@ export function RoleCatalogState({
     );
 
   if (isLoading || !rolesKnown)
-    return (
-      <p role="status" className={cn("text-muted-foreground text-sm", className)}>
-        {loadingMessage ?? t("spaceMembers.rolesLoading")}
-      </p>
-    );
+    return pending === undefined ? <TextSkeleton lines={2} className={className} /> : pending;
 
   if (emptyMessage)
     return <p className={cn("text-muted-foreground text-sm", className)}>{emptyMessage}</p>;

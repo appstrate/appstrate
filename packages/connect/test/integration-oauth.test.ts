@@ -178,6 +178,54 @@ describe("initiateIntegrationOAuth", () => {
     expect(new URL(result.authUrl).searchParams.get("prompt")).toBe("consent");
   });
 
+  describe("authorizationParams encoding", () => {
+    const authorizeUrlWith = async (authorizationParams: Record<string, unknown>) => {
+      const result = await initiateIntegrationOAuth(store, {
+        packageId: "@x/y",
+        authKey: "a",
+        authorizationEndpoint: "https://idp/authorize",
+        tokenEndpoint: "https://idp/token",
+        clientId: "c",
+        clientRef: "client-ref",
+        authorizationParams,
+        redirectUri: "http://localhost:3000/cb",
+        orgId: "o",
+        spaceId: "a",
+        actor: { type: "user", id: "u" },
+      });
+      return new URL(result.authUrl);
+    };
+
+    it("passes string values through unchanged", async () => {
+      const url = await authorizeUrlWith({ login_hint: "a b@x.io" });
+      expect(url.searchParams.get("login_hint")).toBe("a b@x.io");
+    });
+
+    it("encodes numbers and booleans as JSON scalars", async () => {
+      const url = await authorizeUrlWith({ max_age: 0, silent: true });
+      expect(url.searchParams.get("max_age")).toBe("0");
+      expect(url.searchParams.get("silent")).toBe("true");
+    });
+
+    it("serializes an object value (OIDC claims) as JSON", async () => {
+      const claims = { id_token: { email: { essential: true } } };
+      const url = await authorizeUrlWith({ claims });
+      expect(JSON.parse(url.searchParams.get("claims")!)).toEqual(claims);
+    });
+
+    it("serializes an array value as JSON", async () => {
+      const url = await authorizeUrlWith({ acr_values: ["a", "b"] });
+      expect(JSON.parse(url.searchParams.get("acr_values")!)).toEqual(["a", "b"]);
+    });
+
+    it("skips null and undefined values", async () => {
+      const url = await authorizeUrlWith({ a: null, b: undefined, c: "ok" });
+      expect(url.searchParams.has("a")).toBe(false);
+      expect(url.searchParams.has("b")).toBe(false);
+      expect(url.searchParams.get("c")).toBe("ok");
+    });
+  });
+
   it("captures end_user actor", async () => {
     const { state } = await initiateIntegrationOAuth(store, {
       packageId: "@x/y",
@@ -728,6 +776,50 @@ describe("handleIntegrationOAuthCallback", () => {
     expect(result.scopesRequested).toEqual(["openid", "email", "profile"]);
   });
 
+  describe("scopes the response proves without echoing them", () => {
+    const granted = async (requested: string[], response: Record<string, unknown>) => {
+      const { state } = await seedState({ scopes: requested });
+      const stub = (async () =>
+        new Response(JSON.stringify({ access_token: "AT", token_type: "Bearer", ...response }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })) as unknown as typeof fetch;
+      const result = await handleIntegrationOAuthCallback(
+        store,
+        resolverFor(),
+        "CODE",
+        state,
+        stub,
+      );
+      return result.scopesGranted;
+    };
+
+    it("counts a requested offline_access as granted when a refresh token came back", async () => {
+      expect(
+        await granted(["Mail.Read", "offline_access"], { scope: "Mail.Read", refresh_token: "RT" }),
+      ).toEqual(["Mail.Read", "offline_access"]);
+    });
+
+    it("counts a requested openid as granted when an id_token came back", async () => {
+      expect(
+        await granted(["openid", "Mail.Read"], { scope: "Mail.Read", id_token: "a.b.c" }),
+      ).toEqual(["Mail.Read", "openid"]);
+    });
+
+    it("leaves them out when the response carries neither token, or they were not requested", async () => {
+      expect(
+        await granted(["openid", "Mail.Read", "offline_access"], { scope: "Mail.Read" }),
+      ).toEqual(["Mail.Read"]);
+      expect(
+        await granted(["Mail.Read"], {
+          scope: "Mail.Read",
+          refresh_token: "RT",
+          id_token: "a.b.c",
+        }),
+      ).toEqual(["Mail.Read"]);
+    });
+  });
+
   it("reports the requested scopes as granted when the token response omits `scope` (RFC 6749 §5.1)", async () => {
     const { state } = await seedState({ scopes: ["openid", "email", "profile"] });
     const stub = (async () =>
@@ -829,7 +921,13 @@ describe("integration OAuth mix-up defence (RFC 9207, RFC 9700 §4.4)", () => {
     });
   }
 
-  async function initiate(opts: { issSupported?: boolean; redirectTag?: string } = {}) {
+  async function initiate(
+    opts: {
+      issSupported?: boolean;
+      redirectTag?: string;
+      authorizationServer?: { issuer: string; issParameterSupported: boolean };
+    } = {},
+  ) {
     return initiateIntegrationOAuth(store, {
       packageId: "@org/forge",
       authKey: "oauth",
@@ -843,6 +941,7 @@ describe("integration OAuth mix-up defence (RFC 9207, RFC 9700 §4.4)", () => {
       discover: discoverFor(opts.issSupported ?? false),
       variables: { base_url: ISSUER },
       ...(opts.redirectTag ? { redirectTag: opts.redirectTag } : {}),
+      ...(opts.authorizationServer ? { authorizationServer: opts.authorizationServer } : {}),
     });
   }
 
@@ -873,6 +972,84 @@ describe("integration OAuth mix-up defence (RFC 9207, RFC 9700 §4.4)", () => {
       redirectTag: "T".repeat(22),
       variables: { base_url: ISSUER },
     });
+  });
+
+  it("takes the issuer and the iss requirement from the caller's binding, not a second discovery", async () => {
+    // The client was chosen on metadata requiring `iss`; this call's discovery (a cache expiry,
+    // a server answering differently) says otherwise and names nothing new: the binding wins.
+    const { state } = await initiate({
+      issSupported: false,
+      authorizationServer: { issuer: ISSUER, issParameterSupported: true },
+    });
+    expect(store._data.get(state)?.integration).toMatchObject({
+      issuer: ISSUER,
+      issParameterSupported: true,
+    });
+    const before = tokenStub.calls.length;
+    await refusal(
+      handleIntegrationOAuthCallback(store, resolverFor(), "CODE", state, tokenStub.impl, {
+        redirectTag: null,
+      }),
+    );
+    expect(tokenStub.calls.length).toBe(before);
+  });
+
+  it("a discovery advertising iss still adds the requirement to a binding without it", async () => {
+    const withIt = await initiate({
+      issSupported: true,
+      authorizationServer: { issuer: ISSUER, issParameterSupported: false },
+    });
+    expect(store._data.get(withIt.state)?.integration?.issParameterSupported).toBe(true);
+    const without = await initiate({
+      issSupported: false,
+      authorizationServer: { issuer: ISSUER, issParameterSupported: false },
+    });
+    expect(store._data.get(without.state)?.integration?.issParameterSupported).toBeUndefined();
+  });
+
+  it("refuses a response on a document's redirect URI for a state that requires no iss", async () => {
+    // A state carrying a `cimd/` tag without the issuer + RFC 9207 requirement (a row's redirect URI
+    // on the documents' path): the tag matches, an honest server's iss is present — still refused.
+    for (const opts of [
+      // Issuer recorded, requirement not: even a matching iss does not complete it.
+      { issSupported: false, redirectTag: "cimd/" + "T".repeat(22), iss: ISSUER },
+      // No issuer at all: the iss compare would be skipped.
+      {
+        issSupported: true,
+        redirectTag: "cimd/" + "T".repeat(22),
+        noIssuer: true,
+        iss: "https://honest-b.example.com",
+      },
+    ]) {
+      const { state } = await initiateIntegrationOAuth(store, {
+        packageId: "@org/forge",
+        authKey: "oauth",
+        ...(opts.noIssuer ? {} : { issuer: ISSUER }),
+        authorizationEndpoint: `${ISSUER}/oauth/authorize`,
+        tokenEndpoint: `${ISSUER}/oauth/token`,
+        clientId: "client-id",
+        clientRef: "client-ref",
+        redirectUri: `http://localhost:3000/api/integrations/callback/${opts.redirectTag}`,
+        orgId: "org_1",
+        spaceId: "spc_1",
+        actor: { type: "user", id: "u_1" },
+        discover: opts.noIssuer
+          ? async () => ({
+              authorizationEndpoint: `${ISSUER}/oauth/authorize`,
+              tokenEndpoint: `${ISSUER}/oauth/token`,
+            })
+          : discoverFor(opts.issSupported),
+        redirectTag: opts.redirectTag,
+      });
+      const before = tokenStub.calls.length;
+      await refusal(
+        handleIntegrationOAuthCallback(store, resolverFor(), "CODE", state, tokenStub.impl, {
+          iss: opts.iss,
+          redirectTag: opts.redirectTag,
+        }),
+      );
+      expect(tokenStub.calls.length).toBe(before);
+    }
   });
 
   it("accepts a matching iss and returns the issuer and variables", async () => {

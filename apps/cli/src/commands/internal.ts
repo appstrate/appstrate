@@ -2,7 +2,7 @@
 
 /**
  * Hidden subcommands used by `appstrate doctor` to introspect other
- * `appstrate` binaries on `$PATH` (issue #249, phase 3).
+ * `appstrate` binaries on `$PATH`.
  *
  * `doctor` fork-execs each candidate it finds and parses the JSON output to
  * report the stamped install source. Older binaries (pre-phase-1) won't

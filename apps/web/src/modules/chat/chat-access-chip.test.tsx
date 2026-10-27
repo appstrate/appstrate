@@ -61,6 +61,8 @@ function spaceFixture(role: { kind: "preset" | "custom"; key: string; name: stri
     id: SPACE_ID,
     orgId: ORG_ID,
     name: "Espace",
+    icon: null,
+    color: null,
     isDefault: true,
     settings: {},
     visibility: role ? ("open" as const) : ("closed" as const),
@@ -78,7 +80,7 @@ function spaceFixture(role: { kind: "preset" | "custom"; key: string; name: stri
 /**
  * Render the chip. `seedSpaces: false` leaves `GET /api/spaces` unresolved,
  * which is the loading case — `usePermissions().ready` is false and the chip
- * must render nothing.
+ * must hold its box as a skeleton, never a verdict.
  */
 function chip(options: {
   seedSpaces: boolean;
@@ -126,10 +128,12 @@ function chip(options: {
 }
 
 describe("the chat access chip", () => {
-  it("renders nothing while the permission sets are still loading", () => {
+  it("holds its box as a skeleton while the permission sets are still loading", () => {
     // The flash guard. Without it every hard reload paints "you may do
     // nothing" for as long as `GET /api/spaces` takes.
-    expect(chip({ seedSpaces: false })).toBe("");
+    const html = chip({ seedSpaces: false });
+    expect(html).toContain("animate-pulse");
+    expect(html).not.toContain("<button");
   });
 
   it("labels itself with the caller's role in THIS space", () => {
@@ -154,7 +158,7 @@ describe("the chat access chip", () => {
     // A closed space the caller has not joined: no space role to show, but
     // there is still a truthful thing to say about who they are.
     const html = chip({ seedSpaces: true, spaceRole: null });
-    expect(html).toContain(i18n.t("settings:orgSettings.roleMember"));
+    expect(html).toContain(i18n.t("common:switcher.role.member"));
   });
 
   it("names its trigger with the visible role, not a label that hides it", () => {
@@ -207,8 +211,8 @@ describe("the capability list", () => {
   it("marks a row the composer switch turns off, without calling it refused", () => {
     const create = (verdict: "granted" | "off") => [
       {
-        id: "createAgents",
-        labelKey: "access.capability.createAgents",
+        id: "createPackages",
+        labelKey: "access.capability.createPackages",
         held: () => true,
         verdict,
       },

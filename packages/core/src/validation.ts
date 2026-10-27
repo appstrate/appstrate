@@ -17,6 +17,8 @@ import { mcpServerManifestSchema, type McpServerManifest } from "./mcp-server.ts
 import { SELECTABLE_RUNTIME_TOOLS, canonicalizeRuntimeToolIds } from "./runtime-tools-catalog.ts";
 import { findRetiredDependencyKeys } from "./dependencies.ts";
 import { parseSkillFrontmatter } from "@appstrate/afps-shared/companion-files";
+import { asRecord } from "./safe-json.ts";
+import { isAppearanceColor, type AppearanceColor } from "./appearance.ts";
 
 export { integrationManifestSchema, type IntegrationManifest };
 export { mcpServerManifestSchema, type McpServerManifest };
@@ -158,7 +160,7 @@ export const META_NAMESPACE_KEY_REGEX: RegExp = /^([a-z0-9-]+(\.[a-z0-9-]+)+\/)?
  * namespaces are accepted (consumers MUST NOT reject them per §10.1); malformed
  * keys and reserved prefixes are hard-rejected (a malformed `_meta` key makes the
  * package malformed per §2). The earlier local soft-fail layer is gone — appstrate
- * no longer owns any `_meta` policy.
+ * does not own any `_meta` policy.
  */
 export const metaSchema = afpsMetaSchema;
 
@@ -215,6 +217,26 @@ export type Manifest = z.infer<typeof manifestSchema>;
 /** Appstrate vendor-extension key for optional agent resource hints. */
 export const AGENT_RESOURCES_META_KEY = "dev.appstrate/resources";
 
+/** Appstrate vendor-extension key for an agent's presentation: `color`, read by Appstrate surfaces only. */
+export const AGENT_UI_META_KEY = "dev.appstrate/ui";
+
+/**
+ * An agent's identity tile: the AFPS manifest `icon` (its grammar is
+ * `@appstrate/core/appearance`; a picked icon is `lucide:<name>`), and the
+ * `color` held under `_meta[AGENT_UI_META_KEY]`. Both are always present:
+ * `icon` is any non-empty string, read leniently (a surface parses it), and
+ * `color` a palette key — anything else, a `#rrggbb` included, reads as
+ * `null`, i.e. derived from the agent id.
+ */
+export function readAgentAppearance(manifest: Record<string, unknown>): {
+  icon: string | null;
+  color: AppearanceColor | null;
+} {
+  const icon = typeof manifest.icon === "string" && manifest.icon !== "" ? manifest.icon : null;
+  const ui = asRecord(asRecord(manifest._meta)[AGENT_UI_META_KEY]);
+  return { icon, color: isAppearanceColor(ui.color) ? ui.color : null };
+}
+
 /**
  * Agent-authored resource hints read from `_meta["dev.appstrate/resources"]`.
  *
@@ -269,7 +291,7 @@ function refineAgentResourceHints(metaValue: unknown, ctx: z.RefinementCtx): voi
 
 /**
  * Zod schema for agent manifests — extends AFPS with relaxed optional metadata for local drafts
- * AND the Phase 1.0 `dependencies.integrations` map (proposal §4.2.3).
+ * AND the `dependencies.integrations` map.
  */
 const agentManifestObjectSchema = afpsAgentManifestObjectSchema.extend({
   // All standard fields (name, version, schema_version, dependencies,
@@ -290,7 +312,7 @@ const agentManifestObjectSchema = afpsAgentManifestObjectSchema.extend({
   // maps + §4.4 per-integration config, including the rule that every
   // `integrations_configuration` key matches a declared integration dep).
   // We do not override those fields here to avoid drifting from the spec.
-  // The §4.4 `tools` wildcard (`string[] | "*"`, issue #547) is supported by
+  // The §4.4 `tools` wildcard (`string[] | "*"`) is supported by
   // the canonical schema as of @afps-spec/schema@0.5.0; no local widening is
   // needed — the inherited shape already matches the Appstrate runtime
   // contract (`dependencies.ts` `ToolsWildcard` / `isToolsWildcard`).
@@ -312,6 +334,9 @@ const agentManifestObjectSchema = afpsAgentManifestObjectSchema.extend({
   // generated AFPS JSON Schema and erases the enum.
   runtime_tools: z.array(z.enum(SELECTABLE_RUNTIME_TOOLS)).optional(),
 });
+
+/** The issue code of the agent rule "an output schema needs the `output` runtime tool". */
+export const OUTPUT_TOOL_REQUIRED = "output_tool_required";
 
 /**
  * `output` is opt-in like every runtime tool (none is auto-injected). But an
@@ -347,6 +372,8 @@ export const agentManifestSchema = agentManifestObjectSchema.superRefine((m, ctx
     ctx.addIssue({
       code: "custom",
       path: ["runtime_tools"],
+      // Its own code: the one rule on `runtime_tools` a reader is told in their language.
+      params: { code: OUTPUT_TOOL_REQUIRED },
       message:
         "The 'output' runtime tool must be enabled when an output schema is defined — " +
         "an agent that declares an output schema must be able to return its result.",
@@ -428,7 +455,25 @@ export type ValidateManifestResult =
        */
       droppedRuntimeTools: string[];
     }
-  | { valid: false; errors: string[]; manifest?: undefined; droppedRuntimeTools?: undefined };
+  | {
+      valid: false;
+      errors: string[];
+      /**
+       * The same failures, structured: `path` dotted, and `code` set on a rule that carries its
+       * own (e.g. {@link OUTPUT_TOOL_REQUIRED}). Absent on a dispatcher-level failure
+       * (unknown type, retired keys), which only `errors` states.
+       */
+      issues?: ManifestIssue[];
+      manifest?: undefined;
+      droppedRuntimeTools?: undefined;
+    };
+
+/** One structured manifest validation failure. */
+export interface ManifestIssue {
+  path: string;
+  message: string;
+  code?: string;
+}
 
 function parseWithSchema(
   schema:
@@ -447,8 +492,16 @@ function parseWithSchema(
   // reserved `_meta` key already surfaces as a `safeParse` failure below.
   const result = schema.safeParse(raw);
   if (!result.success) {
-    const errors = result.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`);
-    return { valid: false, errors };
+    const issues = result.error.issues.map((issue): ManifestIssue => {
+      const code = (issue as { params?: { code?: unknown } }).params?.code;
+      return {
+        path: issue.path.join("."),
+        message: issue.message,
+        ...(typeof code === "string" ? { code } : {}),
+      };
+    });
+    const errors = issues.map((issue) => `${issue.path}: ${issue.message}`);
+    return { valid: false, errors, issues };
   }
 
   return { valid: true, errors: [], manifest: result.data, droppedRuntimeTools };
@@ -474,7 +527,7 @@ function parseWithSchema(
  * Purely structural — no Zod round-trip. Key order, unknown fields and the
  * absence of schema defaults are preserved exactly, because the version
  * snapshot path serialises the result into an integrity-hashed artifact: a
- * re-parse that reordered keys would silently defeat publish dedup (#896).
+ * re-parse that reordered keys would silently defeat publish dedup.
  * Returns the input untouched (same reference) when nothing needs dropping.
  *
  * **When a drop empties the list, the key is REMOVED, not left as `[]`.** AFPS
@@ -524,7 +577,7 @@ export function dropRetiredRuntimeTools(manifest: Record<string, unknown>): {
  * this manifest author input, or something already persisted?") and splitting
  * them into two flags would let a future call site set one and forget the
  * other, which is precisely how the author-input rejection was lost once
- * already (#1021):
+ * already:
  *
  *   1. `runtime_tools` ids the platform retired (or an author mistyped).
  *   2. `dependencies` keys AFPS 2.0 retired — `tools` (now `mcp_servers`) and
@@ -595,7 +648,7 @@ export function validateManifest(
   const type = obj.type;
 
   // AFPS 1.x retired dependency vocabulary: on the author direction, reject
-  // and name the replacement key (#1021). See {@link RetiredRuntimeToolsPolicy}
+  // and name the replacement key. See {@link RetiredRuntimeToolsPolicy}
   // for why the keys still parse. Checked before the type dispatch because
   // every package type may declare `dependencies`.
   if (options?.retiredRuntimeTools !== "drop") {

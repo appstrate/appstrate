@@ -6,9 +6,9 @@ End-User Identity Provider for Appstrate spaces. Turns each space into an OAuth 
 
 When an embedding app needs to delegate end-user authentication to Appstrate, this module provides the server-side Authorization Code + PKCE flow. The resulting access token is an ES256-signed JWT carrying `sub` (Better Auth user id), `endUserId`, and `spaceId` claims, accepted as `Authorization: Bearer ey…` on core routes. Core's strict end-user run-visibility filter applies automatically (the strategy sets `endUser` in context).
 
-## Phase 1 status
+## Status
 
-Phase 1 is **complete**. Token-issuance plugin wiring via `@better-auth/oauth-provider`, CSRF-hardened login + consent POST handlers, discovery alias endpoints, per-space email branding, and the end-to-end Authorization Code + PKCE test suite are all in place. The module is a fully functional OAuth 2.1 / OIDC authorization server for Appstrate spaces.
+The module is a fully functional OAuth 2.1 / OIDC authorization server for Appstrate spaces.
 
 ## Owned tables
 
@@ -27,7 +27,7 @@ The core `end_users` table is NEVER modified by this module — all OIDC-specifi
 
 ### The `oidc_end_user_profiles` shadow table
 
-Core's `end_users` table has zero OIDC vocabulary by design (Phase 0 invariant — no `authUserId`, no `emailVerified`, no OIDC status). Every OIDC-specific field the module needs to track about an end-user lives on this shadow table, keyed by `end_user_id`:
+Core's `end_users` table has zero OIDC vocabulary by design (no `authUserId`, no `emailVerified`, no OIDC status). Every OIDC-specific field the module needs to track about an end-user lives on this shadow table, keyed by `end_user_id`:
 
 ```
 oidc_end_user_profiles
@@ -76,7 +76,7 @@ The resulting realm is written into `user.realm` before the row is inserted. Pro
 
 ### Enforcement — two guards in defense-in-depth
 
-1. **Request-time realm guard** (`middleware/realm-guard.ts`, wired in `lib/auth-pipeline.ts`). Runs after BA's cookie-session auth. For cookie sessions (`authMethod === "session"`), the pipeline reads `user.realm` via one indexed PK lookup and sets it on `c.sessionRealm`. The guard then rejects any cookie session whose realm is not `"platform"` when the request targets platform routes — except `/api/oauth/*` (OIDC entry pages legitimately accept end-user sessions) and `/api/auth/*` (BA's own endpoints for sign-out, email change, etc.). Returns 403 `problem+json`.
+1. **Request-time realm guard** (`middleware/realm-guard.ts`, wired in `lib/auth-pipeline.ts`). Runs after BA's cookie-session auth. For cookie sessions (`authMethod === "session"`), the pipeline reads `user.realm` via one indexed PK lookup and sets it on `c.sessionRealm`. The guard then rejects any cookie session whose realm is not `"platform"` when the request targets platform routes — except `/api/auth/*` (BA's own endpoints for sign-out, email change, etc.). The OIDC entry pages under `/api/oauth/*` are public paths and never reach the guard; the OAuth client administration (`/api/oauth/clients*`, `/api/oauth/scopes`) does, and is refused like any platform route. Returns 403 `problem+json`. The same question is asked where the pipeline is not in the way: by both writers of `organization_members` (`isPlatformAccount`, `@appstrate/db/provision-org`: `provisionMember` answers `403 not_a_platform_account` on an invitation accept or an OIDC auto-join), by the SSE cookie branch (`routes/realtime.ts`), and by Better Auth's magic-link verify and social callback, which neither sign in nor link an identity to an account outside the transaction's realm (`assertSignInAudience`, `packages/db/src/auth.ts`). Better Auth's ID-token sign-in (`POST /api/auth/sign-in/social` with `idToken`) is not covered: no hosted page or dashboard flow uses it.
 
 2. **Token-mint realm guard** (`auth/plugins.ts::assertUserRealm`). Runs inside each claim builder (`buildInstanceLevelClaims`, `buildOrgLevelClaims`, `buildSpaceLevelClaims`) at `/oauth2/token` exchange:
    - Instance + org builders require `realm === "platform"` — end-user sessions cannot mint dashboard tokens.
@@ -94,7 +94,7 @@ If the product later needs cross-space shared end-user identities, the composite
 
 ### Test coverage
 
-`test/integration/routes/realm-isolation.test.ts` covers the default-platform assignment, platform session accepted on `/api/orgs`, end-user session rejected with 403 on `/api/orgs`, end-user session accepted on `/api/oauth/*`, session-realm denormalization, plus two token-mint cross-audience rejections (platform user → space client, end-user of space A → space B client). The happy-path space-level flow is covered end-to-end in `test/integration/services/oauth-flows.test.ts`.
+`test/integration/routes/realm-isolation.test.ts` covers the default-platform assignment, platform session accepted on `/api/orgs`, end-user session rejected with 403 on `/api/orgs`, end-user session accepted on the `/api/oauth/*` entry pages and refused on the client administration, on an invitation accept, on an org-level auto-join and on the SSE cookie branch, session-realm denormalization, plus two token-mint cross-audience rejections (platform user → space client, end-user of space A → space B client). The happy-path space-level flow is covered end-to-end in `test/integration/services/oauth-flows.test.ts`.
 
 ## Feature flag
 
@@ -163,7 +163,7 @@ The OAuth 2.1 / OIDC protocol endpoints themselves (`/api/auth/oauth2/authorize`
 
 `oauth-clients` is a core RBAC resource added to `apps/api/src/lib/permissions.ts` in the same PR (per AGENTS.md: modules that introduce new RBAC resources must edit `permissions.ts` alongside).
 
-### Authorized devices — CLI sessions (PR #269)
+### Authorized devices — CLI sessions
 
 The OIDC module also owns the lifecycle of CLI refresh-token families that back `appstrate login` (RFC 8628 device flow handled by `auth/cli-plugin.ts`). Five endpoints sit on top of the head-of-family metadata captured on `cli_refresh_tokens` (`device_name`, `user_agent`, `created_ip`, `last_used_ip`, `last_used_at`). UA / device_name are captured at issuance only — never re-captured at refresh — so the row remains a stable identity for the device.
 
@@ -181,7 +181,7 @@ A password change or reset revokes every family of the account too (reason `pass
 
 ## Auth strategy contributed
 
-A single strategy (`oidc-enduser-jwt`) matching `Authorization: Bearer ey…` (fast-path rejection on any other prefix, per Phase 0 discipline rule). It verifies the JWT against the local JWKS (`APP_URL/api/auth/jwks`), looks up the end-user via `lookupEndUser`, resolves the owning org via `spaces.orgId`, fetches the Better Auth user row for name/email, maps OAuth scopes to core RBAC permissions, and emits a full `AuthResolution` with `endUser` in context. Core's strict run-visibility filter then scopes everything to the end-user automatically — no core edit, no RBAC bypass.
+A single strategy (`oidc-enduser-jwt`) matching `Authorization: Bearer ey…` (fast-path rejection on any other prefix). It verifies the JWT against the local JWKS (`APP_URL/api/auth/jwks`), looks up the end-user via `lookupEndUser`, resolves the owning org via `spaces.orgId`, fetches the Better Auth user row for name/email, maps OAuth scopes to core RBAC permissions, and emits a full `AuthResolution` with `endUser` in context. Core's strict run-visibility filter then scopes everything to the end-user automatically — no core edit, no RBAC bypass.
 
 Refuses when:
 
@@ -368,11 +368,11 @@ A `scope` declared at registration is **validated** against the ceiling and then
 
 The module keeps that behaviour rather than intersecting the declaration back in, for one reason: the declaration is client-controlled. A registrant that wanted the whole ceiling would simply declare it (DCR re-registers; CIMD edits its own document), so narrowing buys no confinement — while it would break every MCP client that publishes a minimal `scope` and then requests what the protected-resource metadata advertises. What actually bounds a self-service client is the ceiling itself, the single-audience rule at `/oauth2/token`, the consent screen, and the caller's live org role.
 
-Corollary: `markClientSelfService` writes `level` and `self_service` and nothing else. A scope backfill there would hand the client control of the ceiling `/authorize` enforces; it was removed in #1287 and must not come back.
+Corollary: `markClientSelfService` writes `level` and `self_service` and nothing else. A scope backfill there would hand the client control of the ceiling `/authorize` enforces; it must not exist.
 
 ### What the consent screen promises
 
-For `org` and `space` clients the listed scopes are a real ceiling — an `org` token's claim is intersected with the live role, a `space` token gets exactly the claim. For an `instance` client (which is what every self-service registrant is) the token carries `actor_type: "user"`, `scopesToPermissions` returns an empty set and the pipeline writes no `scopeCeiling`: the request is served with whatever the user's live org role allows, inside the one MCP resource the token is bound to. The consent page says so explicitly for that level instead of letting the scope list imply a cap it does not have.
+For `org` and `space` clients the listed scopes are a real ceiling — an `org` token's claim is intersected with the live role, a `space` token gets exactly the claim. For an `instance` client (which is what every self-service registrant is) the token carries `actor_type: "user"`, `scopesToPermissions` returns an empty set and the pipeline writes no `scopeCeiling`: the request is served with whatever the user's live org role allows, inside the one MCP resource the token is bound to. A token bound to a space resource (`/api/mcp/o/:org/s/:space`) is the exception: its ceiling is the API-key scope allowlist, the cap a space API key carries, so organization-only permissions stay out of its reach. The consent page says so explicitly for that level instead of letting the scope list imply a cap it does not have.
 
 Making that a real ceiling — minting instance tokens with the consented scope claim as `scopeCeiling` — would also change the CLI and the dashboard SPA, which are instance clients too. That is a product decision, not a bug fix, and is deliberately not taken here.
 
@@ -382,7 +382,7 @@ Making that a real ceiling — minting instance tokens with the consented scope 
 - **Client secret hashing**: secrets are stored as 64-char hex SHA-256 hashes; the plaintext is returned exactly once on create and rotate. No "show secret" UI — lose it and rotate.
 - **Unverified email guard**: `resolveOrCreateEndUser` throws `UnverifiedEmailConflictError` when an auth identity with an unverified email clashes with an existing `end_users` row in the same space. This prevents silent account takeover via SMTP verification being disabled or an auth provider reporting `emailVerified: false`.
 - **`reference_id` → `spaceId` invariant**: every OAuth client row carries a `reference_id` matching an existing `spaces.id`. The admin route enforces this on create, and the auth strategy double-checks `endUser.spaceId === claims.spaceId` on every request.
-- **Admin bypass is not shipped**: Phase 0 made core runs filtering strict with no hook. Embedding apps that want an "admin sees all runs" view authenticate admins via API key (no `endUser` in context), not via an OIDC JWT. See `apps/api/src/modules/README.md` for the end-user run-visibility contract.
+- **Admin bypass is not shipped**: core runs filtering is strict, with no hook. Embedding apps that want an "admin sees all runs" view authenticate admins via API key (no `endUser` in context), not via an OIDC JWT. See `apps/api/src/modules/README.md` for the end-user run-visibility contract.
 - **Production guards plugin** (`auth/guards.ts`): a small Better Auth plugin mounted before `@better-auth/oauth-provider` that uses `hooks.before` on `/oauth2/token` to enforce RFC 8707 resource indicators, and rate-limits the endpoints that have no upstream rule — the device-flow and CLI-token routes — via the shared `rate-limiter-flexible` backend. The `/oauth2/*` endpoints themselves are limited per IP by the oauth-provider's own `rateLimit` config (`auth/plugins.ts`): token 20/min, authorize 30/min, introspect 60/min, revoke 30/min, register 5/min, enforced by Better Auth against the same shared limiter. The login POST also has a per-email limit of 5 attempts / 15 min. Rejections surface as `better-call` `APIError` → OAuth2-shaped 400/429 bodies.
 
 ## Per-space social auth

@@ -134,9 +134,7 @@ function mint(
  *
  * Every production caller takes the default 60 s TTL: the proxy binding re-mints
  * on every provider call (`chat-stream.ts` + `pi-chat/model-binding.ts`), so no
- * inference token ever has to outlive one request. The longer-lived case this
- * once served — one token held across a whole multi-step AI-SDK turn, minutes of
- * blocking run long-polls — died with that loop in #1173; the platform-MCP
+ * inference token ever has to outlive one request. The platform-MCP
  * bearer has its own minter and its own `ENGINE_LOOPBACK_TTL_MS`.
  *
  * `ttlMs` therefore survives as a test seam, not a production knob: it is how a
@@ -159,7 +157,7 @@ export function mintLoopbackToken(
 
 /**
  * Mint the platform-MCP loopback bearer handed to the in-process Pi engine for
- * its own `/api/mcp/o/:org` connection.
+ * its own `/api/mcp/o/:org/s/:space` connection.
  *
  * `permissions` MUST be the caller's already-resolved permission set (from
  * `c.get("permissions")`): the MCP meta-tools re-enter the platform in-process

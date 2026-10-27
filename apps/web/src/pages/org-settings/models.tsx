@@ -1,607 +1,347 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
+/**
+ * Settings › Models: the organization's providers, in two tabs. A connected provider makes its
+ * models available (`lib/model-providers.ts`).
+ *
+ * - **Clés org**: the organization's keys, and the instance's own models. An organization key
+ *   serves the models bound to it, the instance serves the ones it ships.
+ * - **Clés perso**: the setting that lets people use a key or a subscription of their own, one
+ *   row per service open to them (its models, and who plugged a key in), then the personal keys
+ *   themselves, each with what the server lets the caller do with it (`allowed_actions`).
+ *
+ * A model's own deeds (test, delete, its finer settings) are in its form, opened from « Choose the
+ * models »; the instance's models are tested from its row, and the aliases the organization added
+ * to it deleted there.
+ *
+ * The tab lives in the URL (`?tab=personal`), like the roles page's.
+ */
+
+import { useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useStore } from "zustand";
 import { toast } from "sonner";
-import { BrainCircuit, KeyRound, Pencil, Trash2 } from "lucide-react";
-import { Button } from "@appstrate/ui/components/button";
-import { Badge } from "@appstrate/ui/components/badge";
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableRow,
-  TableHead,
-  TableCell,
-} from "@appstrate/ui/components/table";
-import { Tabs, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
+import { Plus } from "lucide-react";
+import { cn } from "@appstrate/ui/cn";
 import { usePermissions } from "../../hooks/use-permissions";
 import {
-  useModels,
   useDeleteModel,
+  useModels,
   useSetDefaultModel,
-  useTestModel,
-  useModelFormHandler,
   type OrgModelInfo,
 } from "../../hooks/use-models";
 import {
   useModelProviderCredentials,
-  useCreateModelProviderCredential,
-  useUpdateModelProviderCredential,
-  useDeleteModelProviderCredential,
-  useTestModelProviderCredential,
   useProvidersRegistry,
-  deduplicateLabel,
+  useUpdateModelProviderCredential,
   type ModelProviderCredentialInfo,
 } from "../../hooks/use-model-provider-credentials";
-import { useConnectionTest } from "../../hooks/use-connection-test";
+import { useOrgSettings } from "../../hooks/use-org-settings";
+import { useUrlModal, useUrlModalTarget } from "../../hooks/use-url-modal";
 import { ModelFormModal } from "../../components/model-form-modal";
 import { CredentialFormModal } from "../../components/credential-form-modal";
-import { getModelIcon, getProviderIcon } from "../../components/icons";
-import { resolveProviderEntry } from "../../lib/provider-registry-helpers";
-import { formatDateField } from "../../lib/format-date";
+import { DeleteKeyConfirm } from "../../components/delete-key-confirm";
 import { ConfirmModal } from "../../components/confirm-modal";
-import { LoadingState, ErrorState, EmptyState } from "../../components/page-states";
-import { Spinner } from "../../components/spinner";
-import { TestResultSpan } from "../../components/test-result-span";
-import { SourceBadge } from "../../components/source-badge";
-import { ModelUnavailableBadge } from "../../components/model-availability-badge";
-import { DefaultCell } from "../../components/default-cell";
-import { isModelUnpriced } from "./model-pricing";
+import { CollectionTabs } from "../../components/detail-tabs";
+import { PreferencesModelsLink } from "../../components/preferences-models-link";
+import { EmptyStateAction } from "../../components/page-states";
+import { ProvidersTable } from "../../components/providers-table";
+import { PersonalServicesTable } from "../../components/personal-services-table";
+import { ProviderAddFlow } from "../../components/provider-add-flow";
+import { PersonalModelsModal, ProviderModelsModal } from "../../components/model-choice-dialog";
+import { SettingsPageActions } from "../../components/settings/settings-page-actions";
+import { PersonalCredentialsSetting } from "../../components/settings/personal-credentials-setting";
+import { SettingsGroup } from "../../components/settings/setting-row";
+import type { MenuAction } from "../../lib/menu-action";
+import { TextSkeleton } from "../../components/loading-skeletons";
+import { credentialUpdateBody } from "../../lib/personal-model-credentials";
+import {
+  isSystemModel,
+  personalModelServices,
+  personalServiceRows,
+  providerRows,
+  type ProviderRow,
+} from "../../lib/model-providers";
+import { authStore } from "../../stores/auth-store";
 
-function ModelsList({
-  models,
-  isLoading,
-  error,
-  onCreate,
-  onEdit,
-  onDelete,
-  onSetDefault,
-  canWrite,
-  canDelete,
-}: {
-  models: OrgModelInfo[] | undefined;
-  isLoading: boolean;
-  error: unknown;
-  onCreate: () => void;
-  onEdit: (m: OrgModelInfo) => void;
-  onDelete: (m: OrgModelInfo) => void;
-  onSetDefault: (m: OrgModelInfo) => void;
-  canWrite: boolean;
-  canDelete: boolean;
-}) {
-  const { t } = useTranslation(["settings", "common"]);
-  const testMutation = useTestModel();
-  const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
-  // Provider icons are a nicety: a member reading the model list may not hold
-  // the registry's permission, and then gets none.
-  const { data: registry } = useProvidersRegistry();
-
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState error={error} />;
-
-  return (
-    <>
-      {canWrite && (
-        <div className="mb-4 flex items-center justify-end gap-2">
-          <Button onClick={onCreate}>{t("models.add")}</Button>
-        </div>
-      )}
-
-      {models && models.length > 0 ? (
-        <div className="overflow-hidden rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="text-xs">{t("models.col.source")}</TableHead>
-                <TableHead className="text-xs">{t("models.col.model")}</TableHead>
-                <TableHead className="text-xs">{t("models.col.default")}</TableHead>
-                <TableHead className="w-px text-right text-xs">{t("models.col.actions")}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {models.map((m) => {
-                const isBuiltIn = m.source === "built-in";
-                // Pre-spend counterpart of the run's `cost_pricing_status`,
-                // which only reports after the fact. Rule + exclusions live in
-                // `model-pricing.ts`, where they are covered.
-                const isUnpriced = isModelUnpriced(m);
-                const ProviderIcon = getModelIcon(m, registry ?? []);
-                return (
-                  <TableRow key={m.id} data-testid={`model-row-${m.id}`}>
-                    <TableCell>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <SourceBadge source={m.source} />
-                        {m.aliased && <Badge variant="secondary">{t("models.alias")}</Badge>}
-                        {!isBuiltIn && !m.enabled && (
-                          <Badge variant="secondary" className="opacity-60">
-                            {t("models.disabled")}
-                          </Badge>
-                        )}
-                        {m.needs_reconnection && <ModelUnavailableBadge />}
-                        {isUnpriced && (
-                          <Badge variant="warning" title={t("models.unpricedHint")}>
-                            {t("models.unpriced")}
-                          </Badge>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        {ProviderIcon && <ProviderIcon className="size-4 shrink-0" />}
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-medium">{m.label}</div>
-                          <div className="text-muted-foreground font-mono text-[0.65rem]">
-                            {m.aliased ? t("models.aliasHidden") : `${m.apiShape} / ${m.modelId}`}
-                          </div>
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {/* Shown but disabled, not hidden: `PUT /api/models/default`
-                          answers 409 (`model_needs_reconnection`, `model_disabled`)
-                          for such a row, and a control that silently vanishes is
-                          what made this state impossible to reason about. The why
-                          is on the row's badge (first cell). */}
-                      <DefaultCell
-                        isDefault={m.is_default}
-                        defaultLabel={t("models.default")}
-                        setLabel={t("models.setDefault")}
-                        onSetDefault={() => onSetDefault(m)}
-                        canSetDefault={canWrite}
-                        // A switched-off system model stays eligible: the server
-                        // resolves it, and refuses only a disabled custom row.
-                        disabled={m.needs_reconnection || (!isBuiltIn && !m.enabled)}
-                        testId={`set-default-model-${m.id}`}
-                      />
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {/* Aliases expose no connection test. The result
-                            (`{ ok, latency, status }`) is measured against the
-                            hidden backing, so it would report that vendor's
-                            round-trip time and upstream status to a user who is
-                            never told which vendor it is. The route refuses it
-                            server-side too (400) — this only keeps the UI from
-                            offering a button that cannot work. Same posture as
-                            the edit button below. */}
-                        {!m.aliased && canWrite && (
-                          <>
-                            {testResults[m.id] && (
-                              <TestResultSpan
-                                result={testResults[m.id]!}
-                                successKey="models.testSuccess"
-                                failedKey="models.testFailed"
-                              />
-                            )}
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 text-xs"
-                              onClick={() => handleTest(m.id)}
-                              disabled={testingId === m.id}
-                            >
-                              {testingId === m.id ? <Spinner /> : t("models.test")}
-                            </Button>
-                          </>
-                        )}
-                        {!isBuiltIn && (
-                          <>
-                            {/* Aliases hide their real binding (modelId etc.),
-                                so the edit form can't round-trip them — the
-                                projected modelId is null and would fail
-                                validation. Edit env/API-side; delete still
-                                works (by id). */}
-                            {!m.aliased && canWrite && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 w-7 p-0"
-                                onClick={() => onEdit(m)}
-                                aria-label={t("models.edit")}
-                              >
-                                <Pencil size={14} />
-                              </Button>
-                            )}
-                            {canDelete && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 w-7 p-0"
-                                onClick={() => onDelete(m)}
-                                aria-label={t("models.delete")}
-                              >
-                                <Trash2 size={14} className="text-destructive" />
-                              </Button>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      ) : (
-        <EmptyState message={t("models.empty")} icon={BrainCircuit} compact>
-          {canWrite && <Button onClick={onCreate}>{t("models.add")}</Button>}
-        </EmptyState>
-      )}
-    </>
-  );
-}
-
-function CredentialsSection({
-  credentials,
-  isLoading,
-  error,
-  onCreate,
-  onEdit,
-  onDelete,
-  onConnectOAuth,
-  canWrite,
-  canDelete,
-}: {
-  credentials: ModelProviderCredentialInfo[] | undefined;
-  isLoading: boolean;
-  error: unknown;
-  onCreate: () => void;
-  onEdit: (pk: ModelProviderCredentialInfo) => void;
-  onDelete: (pk: ModelProviderCredentialInfo) => void;
-  onConnectOAuth: (credential: ModelProviderCredentialInfo) => void;
-  canWrite: boolean;
-  canDelete: boolean;
-}) {
-  const { t } = useTranslation(["settings", "common"]);
-  const testMutation = useTestModelProviderCredential();
-  const { testingId, testResults, handleTest } = useConnectionTest(testMutation);
-  const { data: registry } = useProvidersRegistry();
-
-  if (isLoading) return <LoadingState />;
-  if (error) return <ErrorState error={error} />;
-
-  // Single entry point — the unified modal handles both API-key and OAuth
-  // flows. Removing a module from `MODULES` hides its OAuth tile from the
-  // in-modal provider picker with zero UI footprint here.
-  const addButton = canWrite ? <Button onClick={onCreate}>{t("credentials.add")}</Button> : null;
-
-  return (
-    <div className="mb-8">
-      <div className="mb-4 flex items-center justify-end gap-2">{addButton}</div>
-
-      {credentials && credentials.length > 0 ? (
-        <div className="overflow-hidden rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="text-xs">{t("credentials.col.provider")}</TableHead>
-                <TableHead className="text-xs">{t("credentials.col.auth")}</TableHead>
-                <TableHead className="text-xs">{t("credentials.col.created")}</TableHead>
-                <TableHead className="text-xs">{t("credentials.col.status")}</TableHead>
-                <TableHead className="w-px text-right text-xs">
-                  {t("credentials.col.actions")}
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {credentials.map((pk) => {
-                const ProviderIcon = getProviderIcon(resolveProviderEntry(pk, registry ?? []));
-                const isOauth = pk.authMode === "oauth2";
-                return (
-                  <TableRow key={pk.id} data-testid={`credential-row-${pk.id}`}>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        {ProviderIcon && (
-                          <ProviderIcon className="text-muted-foreground size-4 shrink-0" />
-                        )}
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-medium">{pk.label}</div>
-                          {isOauth && pk.oauth_email && (
-                            <div className="text-muted-foreground truncate text-[0.65rem]">
-                              {t("credentials.oauth.connectedAs", { email: pk.oauth_email })}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {isOauth ? (
-                        <Badge variant="secondary">{t("credentials.oauth.badgeOauth")}</Badge>
-                      ) : (
-                        <SourceBadge source={pk.source} />
-                      )}
-                    </TableCell>
-                    <TableCell className="text-muted-foreground text-xs">
-                      {pk.createdAt ? formatDateField(pk.createdAt) : "—"}
-                    </TableCell>
-                    <TableCell>
-                      {pk.needs_reconnection ? (
-                        // The flag also fires on a stored secret that no longer
-                        // decrypts, which reaches api-key credentials — where
-                        // the fix is to re-enter the key (Edit), not to
-                        // reconnect an account.
-                        <Badge variant="destructive">
-                          {isOauth
-                            ? t("credentials.oauth.needsReconnection")
-                            : t("models.credentialUnavailable")}
-                        </Badge>
-                      ) : pk.source === "built-in" ? (
-                        <span className="text-muted-foreground text-xs">{t("source.builtIn")}</span>
-                      ) : (
-                        <span className="text-muted-foreground text-xs">—</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        {testResults[pk.id] && (
-                          <TestResultSpan
-                            result={testResults[pk.id]!}
-                            successKey="credentials.testSuccess"
-                            failedKey="credentials.testFailed"
-                          />
-                        )}
-                        {!isOauth && pk.source === "custom" && canWrite && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 text-xs"
-                            onClick={() => handleTest(pk.id)}
-                            disabled={testingId === pk.id}
-                          >
-                            {testingId === pk.id ? <Spinner /> : t("credentials.test")}
-                          </Button>
-                        )}
-                        {pk.source === "custom" && !isOauth && (
-                          <>
-                            {canWrite && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 w-7 p-0"
-                                onClick={() => onEdit(pk)}
-                                aria-label={t("credentials.edit")}
-                              >
-                                <Pencil size={14} />
-                              </Button>
-                            )}
-                            {canDelete && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 w-7 p-0"
-                                onClick={() => onDelete(pk)}
-                                aria-label={t("credentials.delete")}
-                              >
-                                <Trash2 size={14} className="text-destructive" />
-                              </Button>
-                            )}
-                          </>
-                        )}
-                        {isOauth && (
-                          <>
-                            {pk.needs_reconnection && pk.providerId && canWrite && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 text-xs"
-                                onClick={() => onConnectOAuth(pk)}
-                              >
-                                {t("credentials.oauth.reconnect")}
-                              </Button>
-                            )}
-                            {canDelete && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 w-7 p-0"
-                                onClick={() => onDelete(pk)}
-                                aria-label={t("credentials.oauth.disconnect")}
-                              >
-                                <Trash2 size={14} className="text-destructive" />
-                              </Button>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      ) : (
-        <EmptyState
-          message={t("credentials.empty")}
-          hint={t("credentials.emptyHint")}
-          icon={KeyRound}
-          compact
-        >
-          {addButton}
-        </EmptyState>
-      )}
-    </div>
-  );
-}
+type ModelsTab = "org" | "personal";
 
 export function OrgSettingsModelsPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { can } = usePermissions();
+  const userId = useStore(authStore, (s) => s.user?.id);
 
   const canWriteModels = can("models:write");
   const canDeleteModels = can("models:delete");
   const canReadCredentials = can("model-provider-credentials:read");
   const canWriteCredentials = can("model-provider-credentials:write");
-  const canDeleteCredentials = can("model-provider-credentials:delete");
+  const canConnect = can("model-provider-credentials:connect");
 
-  const [subTab, setSubTab] = useState<"models-list" | "credentials">("models-list");
-  const [confirmState, setConfirmState] = useState<{
-    type: "deleteModel" | "deleteCredential";
-    label: string;
-    id: string;
-  } | null>(null);
-
-  const [modelModalOpen, setModelModalOpen] = useState(false);
-  const [editModel, setEditModel] = useState<OrgModelInfo | null>(null);
   const { data: models, isLoading: modelsLoading, error: modelsError } = useModels();
-  const deleteModelMutation = useDeleteModel();
-  const setDefaultModelMutation = useSetDefaultModel();
-  const modelForm = useModelFormHandler({
-    editModel,
-    onSuccess: () => setModelModalOpen(false),
-  });
-
-  const [pkModalOpen, setPkModalOpen] = useState(false);
-  const [editPk, setEditPk] = useState<ModelProviderCredentialInfo | null>(null);
   const { data: credentials, isLoading: pkLoading, error: pkError } = useModelProviderCredentials();
-  // The credentials tab has its own resource; `models:read` alone does not open it.
-  const activeTab = canReadCredentials ? subTab : "models-list";
-  const createPkMutation = useCreateModelProviderCredential();
-  const updatePkMutation = useUpdateModelProviderCredential();
-  const deletePkMutation = useDeleteModelProviderCredential();
+  // A row is a key and its models: either read failing leaves the table wrong, so both surface.
+  const tableError = modelsError ?? pkError;
+  const { data: registry } = useProvidersRegistry();
+  const { data: orgSettings, isLoading: settingsLoading } = useOrgSettings();
 
-  // `org_models.credential_id` is ON DELETE RESTRICT (409 `credential_in_use`):
-  // the dialog says so before asking the server.
-  const modelsOnCredential =
-    confirmState?.type === "deleteCredential"
-      ? (models ?? []).filter((m) => m.credentialId === confirmState.id).length
-      : 0;
+  const [addingProvider, setAddingProvider] = useState(false);
+  const editKey = useUrlModalTarget("editCredential", credentials);
+  const chooseModels = useUrlModalTarget("models", credentials);
+  const personalModels = useUrlModal("personalModels");
+  // The form edits what a list offers: never a model the instance ships.
+  const [editModelId, setEditModelId] = useState<string | null>(null);
+  const editTarget = useMemo(
+    () => models?.find((m) => m.id === editModelId && !isSystemModel(m)),
+    [models, editModelId],
+  );
 
-  const closeConfirm = () => setConfirmState(null);
+  // The tab is a place: `?tab=personal` opens it, and the first one leaves the URL alone.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab: ModelsTab = searchParams.get("tab") === "personal" ? "personal" : "org";
+  const setTab = (next: ModelsTab) =>
+    setSearchParams((prev) => {
+      const out = new URLSearchParams(prev);
+      if (next === "org") out.delete("tab");
+      else out.set("tab", next);
+      return out;
+    });
+
+  const [confirmDelete, setConfirmDelete] = useState<ModelProviderCredentialInfo | null>(null);
+  const [deletingModel, setDeletingModel] = useState<OrgModelInfo | null>(null);
+  const updateCredential = useUpdateModelProviderCredential();
+  const setDefault = useSetDefaultModel();
+  const deleteModel = useDeleteModel();
+
+  const { orgRows, personalRows } = useMemo(() => {
+    const rows = providerRows(models ?? [], credentials ?? [], registry ?? [], userId);
+    const isOrg = (row: ProviderRow) => row.kind === "org-key" || row.kind === "system";
+    return { orgRows: rows.filter(isOrg), personalRows: rows.filter((row) => !isOrg(row)) };
+  }, [models, credentials, registry, userId]);
+  const serviceRows = useMemo(
+    () => personalServiceRows(models ?? [], credentials ?? [], registry ?? [], userId),
+    [models, credentials, registry, userId],
+  );
+  const personalServices = personalModelServices(registry ?? []);
+  // « Open a service » starts on one that is not open yet.
+  const nextService = (
+    personalServices.find((s) => !serviceRows.some((r) => r.id === s.providerId)) ??
+    personalServices[0]
+  )?.providerId;
+
+  const personalAllowed = orgSettings?.personal_model_credentials === true;
+  // Known off: the table stays, greyed. Unknown (the setting did not load) is not off.
+  const personalOff = orgSettings?.personal_model_credentials === false;
+
+  /** A key's menu, the organization's or a person's: the row offers what the server allows. */
+  const keyDeeds = {
+    onRename: async (pk: ModelProviderCredentialInfo, label: string) => {
+      // A refusal is toasted by the mutation cache; the rejection keeps the label being typed.
+      await updateCredential.mutateAsync({ params: { path: { id: pk.id } }, body: { label } });
+    },
+    onChangeKey: (pk: ModelProviderCredentialInfo) => editKey.open(pk.id),
+    onReconnect: (pk: ModelProviderCredentialInfo) => editKey.open(pk.id),
+    onDelete: setConfirmDelete,
+  };
+
+  const addCredential: MenuAction = {
+    id: "create-credential",
+    icon: Plus,
+    label: t("credentials.add"),
+    onSelect: () => setAddingProvider(true),
+    hidden: !canWriteCredentials,
+  };
+  // The deed of the tab in view; a member who may write nothing has no menu.
+  const allowPersonalModels: MenuAction = {
+    id: "open-personal-service",
+    icon: Plus,
+    label: t("providers.allowPersonalModels"),
+    onSelect: () => nextService && personalModels.open(nextService),
+    hidden: !canWriteModels || !nextService,
+  };
+
+  const emptyOrg = {
+    message: t("providers.empty"),
+    hint: canWriteCredentials ? undefined : t("providers.emptyAskAdmin"),
+    action: <EmptyStateAction action={addCredential} />,
+  };
 
   return (
     <>
-      <Tabs value={activeTab} onValueChange={(v) => setSubTab(v as "models-list" | "credentials")}>
-        <TabsList className="mb-4">
-          <TabsTrigger value="models-list">{t("models.tabTitle")}</TabsTrigger>
-          {canReadCredentials && (
-            <TabsTrigger value="credentials">{t("credentials.title")}</TabsTrigger>
+      <SettingsPageActions actions={[tab === "org" ? addCredential : allowPersonalModels]} />
+
+      <div className="mb-6">
+        <CollectionTabs
+          value={tab}
+          label={t("providers.tabTitle")}
+          onChange={setTab}
+          options={[
+            { value: "org", label: t("providers.tabOrg") },
+            { value: "personal", label: t("providers.tabPersonal") },
+          ]}
+        />
+      </div>
+
+      {tab === "org" && (
+        <div className="mb-8">
+          <ProvidersTable
+            tableId="org-model-keys"
+            label={t("providers.tabOrg")}
+            rows={orgRows}
+            isLoading={modelsLoading || (canReadCredentials && pkLoading)}
+            error={tableError}
+            empty={emptyOrg}
+            canWriteModels={canWriteModels}
+            {...keyDeeds}
+            onChooseModels={(pk) => chooseModels.open(pk.id)}
+            onSetDefault={(m: OrgModelInfo) =>
+              setDefault.mutate(
+                { body: { modelId: m.id } },
+                { onSuccess: () => toast.success(t("models.defaultSet", { name: m.label })) },
+              )
+            }
+            onDeleteModel={canDeleteModels ? setDeletingModel : undefined}
+          />
+        </div>
+      )}
+
+      {tab === "personal" && (
+        <>
+          {(can("org:settings") || canWriteModels) && (
+            <SettingsGroup className="mb-6">
+              <PersonalCredentialsSetting />
+            </SettingsGroup>
           )}
-        </TabsList>
-      </Tabs>
+          {settingsLoading ? (
+            <TextSkeleton lines={4} />
+          ) : (
+            <>
+              {personalOff && (
+                <p className="text-muted-foreground mb-3 text-sm">{t("providers.personalOff")}</p>
+              )}
+              <div inert={personalOff} className={cn("mb-6", personalOff && "opacity-50")}>
+                <PersonalServicesTable
+                  rows={serviceRows}
+                  isLoading={modelsLoading || (canReadCredentials && pkLoading)}
+                  error={tableError}
+                  canWriteModels={canWriteModels}
+                  onChooseModels={(row) => personalModels.open(row.id)}
+                />
+              </div>
+              {/* Outside the greyed table: a key already held is deleted whatever the setting says. */}
+              {canReadCredentials && personalRows.length > 0 && (
+                <section className="mb-6">
+                  <h3 className="mb-3 text-sm font-semibold">{t("providers.memberKeys")}</h3>
+                  <ProvidersTable
+                    tableId="member-model-keys"
+                    label={t("providers.memberKeys")}
+                    rows={personalRows}
+                    showType
+                    isLoading={false}
+                    error={null}
+                    empty={{ message: t("modelCredentials.empty") }}
+                    canWriteModels={false}
+                    {...keyDeeds}
+                  />
+                </section>
+              )}
+              {canConnect && personalAllowed && (
+                <p className="text-muted-foreground text-sm">
+                  {t("providers.personalFooter")}{" "}
+                  <PreferencesModelsLink>{t("providers.personalFooterLink")}</PreferencesModelsLink>
+                </p>
+              )}
+            </>
+          )}
+        </>
+      )}
 
-      {activeTab === "models-list" && (
-        <ModelsList
-          models={models}
-          isLoading={modelsLoading}
-          error={modelsError}
-          onCreate={() => {
-            setEditModel(null);
-            setModelModalOpen(true);
+      {canWriteCredentials && addingProvider && (
+        <ProviderAddFlow credentials={credentials ?? []} onClose={() => setAddingProvider(false)} />
+      )}
+
+      {editKey.target && (
+        <CredentialFormModal
+          key={editKey.target.id}
+          onClose={editKey.close}
+          credential={editKey.target}
+          isPending={updateCredential.isPending}
+          onSubmit={(data) => {
+            // The PATCH body only accepts mutable fields: the protocol and endpoint are pinned
+            // by `providerId` at create time.
+            updateCredential.mutate(
+              {
+                params: { path: { id: editKey.target!.id } },
+                body: credentialUpdateBody(editKey.target!, data),
+              },
+              { onSuccess: editKey.close },
+            );
           }}
-          onEdit={(m) => {
-            setEditModel(m);
-            setModelModalOpen(true);
-          }}
-          onDelete={(m) => setConfirmState({ type: "deleteModel", label: m.label, id: m.id })}
-          onSetDefault={(m) =>
-            setDefaultModelMutation.mutate(
-              { body: { modelId: m.id } },
-              { onSuccess: () => toast.success(t("models.defaultSet", { name: m.label })) },
-            )
-          }
-          canWrite={canWriteModels}
-          canDelete={canDeleteModels}
         />
       )}
 
-      {activeTab === "credentials" && (
-        <CredentialsSection
-          credentials={credentials}
-          isLoading={pkLoading}
-          error={pkError}
-          onCreate={() => {
-            setEditPk(null);
-            setPkModalOpen(true);
+      {chooseModels.target && (
+        <ProviderModelsModal
+          credential={chooseModels.target}
+          onClose={chooseModels.close}
+          // The model form replaces the list: two never stack.
+          onAdvanced={(id) => {
+            chooseModels.close();
+            setEditModelId(id);
           }}
-          onEdit={(pk) => {
-            setEditPk(pk);
-            setPkModalOpen(true);
-          }}
-          onDelete={(pk) =>
-            setConfirmState({ type: "deleteCredential", label: pk.label, id: pk.id })
-          }
-          onConnectOAuth={(credential) => {
-            setEditPk(credential);
-            setPkModalOpen(true);
-          }}
-          canWrite={canWriteCredentials}
-          canDelete={canDeleteCredentials}
         />
       )}
 
-      <ModelFormModal
-        open={modelModalOpen}
-        onClose={() => setModelModalOpen(false)}
-        model={editModel}
-        isPending={modelForm.isPending}
-        onSubmit={modelForm.onSubmit}
-      />
+      {personalModels.value !== null && (
+        <PersonalModelsModal
+          services={personalServices}
+          providerId={personalModels.value}
+          onChangeService={(id) => personalModels.open(id)}
+          onClose={personalModels.close}
+          onAdvanced={(id) => {
+            personalModels.close();
+            setEditModelId(id);
+          }}
+        />
+      )}
 
-      <CredentialFormModal
-        open={pkModalOpen}
-        onClose={() => setPkModalOpen(false)}
-        credential={editPk}
-        isPending={createPkMutation.isPending || updatePkMutation.isPending}
-        onSubmit={(data) => {
-          if (editPk) {
-            // The PATCH body only accepts mutable fields — the protocol and
-            // endpoint are pinned by `providerId` at create time. Strip them
-            // here even though the form disables those inputs on edit.
-            updatePkMutation.mutate(
-              {
-                params: { path: { id: editPk.id } },
-                body: { label: data.label, ...(data.apiKey ? { api_key: data.apiKey } : {}) },
-              },
-              { onSuccess: () => setPkModalOpen(false) },
-            );
-          } else {
-            const uniqueLabel = deduplicateLabel(data.label, credentials ?? []);
-            createPkMutation.mutate(
-              {
-                body: {
-                  label: uniqueLabel,
-                  providerId: data.providerId,
-                  api_key: data.apiKey ?? "",
-                  ...(data.baseUrlOverride ? { base_url_override: data.baseUrlOverride } : {}),
-                },
-              },
-              { onSuccess: () => setPkModalOpen(false) },
-            );
-          }
-        }}
-      />
+      {editTarget && (
+        <ModelFormModal
+          onClose={() => setEditModelId(null)}
+          model={editTarget}
+          onDelete={canDeleteModels ? () => setDeletingModel(editTarget) : undefined}
+        />
+      )}
 
+      {/* Over the model form (or the instance's row), which closes with it once the model is gone. */}
       <ConfirmModal
-        open={!!confirmState}
-        onClose={closeConfirm}
-        title={t("btn.confirm", { ns: "common" })}
-        description={
-          confirmState?.type === "deleteModel"
-            ? t("models.deleteConfirm", { label: confirmState.label })
-            : confirmState?.type === "deleteCredential"
-              ? modelsOnCredential > 0
-                ? t("credentials.deleteInUse", {
-                    label: confirmState.label,
-                    count: modelsOnCredential,
-                  })
-                : t("credentials.deleteConfirm", { label: confirmState.label })
-              : ""
-        }
-        confirmDisabled={modelsOnCredential > 0}
-        isPending={deleteModelMutation.isPending || deletePkMutation.isPending}
+        open={deletingModel !== null}
+        onClose={() => setDeletingModel(null)}
+        title={t("models.deleteTitle")}
+        confirmLabel={t("btn.delete", { ns: "common" })}
+        description={deletingModel ? t("models.deleteConfirm", { label: deletingModel.label }) : ""}
+        isPending={deleteModel.isPending}
         onConfirm={() => {
-          if (!confirmState) return;
-          const params = { path: { id: confirmState.id } };
-          if (confirmState.type === "deleteModel") {
-            deleteModelMutation.mutate({ params }, { onSuccess: closeConfirm });
-          } else {
-            deletePkMutation.mutate({ params }, { onSuccess: closeConfirm });
-          }
+          if (!deletingModel) return;
+          deleteModel.mutate(
+            { params: { path: { id: deletingModel.id } } },
+            {
+              onSuccess: () => {
+                setDeletingModel(null);
+                setEditModelId(null);
+              },
+            },
+          );
         }}
       />
+
+      {confirmDelete && (
+        <DeleteKeyConfirm
+          credential={confirmDelete}
+          models={models ?? []}
+          onClose={() => setConfirmDelete(null)}
+        />
+      )}
     </>
   );
 }

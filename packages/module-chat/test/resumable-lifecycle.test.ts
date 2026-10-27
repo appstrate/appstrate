@@ -21,7 +21,7 @@
  * "shutdown closed it" observable rather than inferred.
  */
 
-import { describe, it, expect, afterAll } from "bun:test";
+import { describe, it, expect, afterAll, spyOn } from "bun:test";
 import type Redis from "ioredis";
 import chatModule from "../src/index.ts";
 import { drainTurns } from "../src/inflight.ts";
@@ -30,7 +30,9 @@ import {
   configureResumableStore,
   createResumableRedis,
   getResumableContext,
+  releaseRecording,
 } from "../src/resumable.ts";
+import { logger } from "../src/logger.ts";
 
 /** Nothing listens here — connecting is refused immediately. */
 const DEAD_REDIS = "redis://127.0.0.1:1";
@@ -138,6 +140,38 @@ describe("resumable store lifecycle", () => {
       // …and it is genuinely the Redis tier, not merely a second in-memory one.
       expect(opened).toHaveLength(1);
     } finally {
+      await closeResumableStore();
+      for (const redis of opened) redis.disconnect();
+    }
+  });
+
+  it("closing cancels the recording releases still waiting out their grace", async () => {
+    // A release is a timer holding the context it was scheduled on. Left armed
+    // past the close, it fires its `delete` through the client `quit()` ended —
+    // "Connection is closed", seconds after the module went down, inside
+    // whatever the process runs next (in CI: another suite's test).
+    const opened: Redis[] = [];
+    configureResumableStore(DEAD_REDIS, (url) => {
+      const redis = createResumableRedis(url);
+      opened.push(redis);
+      return redis;
+    });
+    const warn = spyOn(logger, "warn");
+    try {
+      getResumableContext();
+      expect(opened).toHaveLength(1);
+      const get = spyOn(opened[0]!, "get");
+
+      releaseRecording(crypto.randomUUID(), { graceMs: 20 });
+      await closeResumableStore();
+      await Bun.sleep(150);
+
+      expect(get).not.toHaveBeenCalled();
+      expect(
+        warn.mock.calls.filter((c) => c[0] === "chat resumable recording release failed"),
+      ).toHaveLength(0);
+    } finally {
+      warn.mockRestore();
       await closeResumableStore();
       for (const redis of opened) redis.disconnect();
     }

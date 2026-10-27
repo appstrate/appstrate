@@ -240,7 +240,8 @@ export const responses = {
       "a declared integration blocks the launch: `errors[]` carries one item per integration " +
       "(`field: integrations.<id>`), and a `must_choose_connection` item lists " +
       "`candidate_connections` to pick from via `connection_overrides`. What does not block is " +
-      "a `warnings[]` item of the success response (see LaunchWarnings).",
+      "a `warnings[]` item of the success response (see LaunchWarnings). Or `model_credential_required` — " +
+      "the model is unbound and the caller has no usable personal credential for it.",
     headers: REQUEST_ID_ONLY_HEADERS,
     content: {
       "application/problem+json": {
@@ -294,7 +295,7 @@ export const responses = {
   /** The 409 of `POST /api/models` — one row per binding (`PATCH` words the same rule inline). */
   ModelAlreadyAdded: {
     description:
-      "`model_already_added` — this organization already has a model row for this `(credentialId, modelId)` pair. One row per binding: `llm_usage` attributes spend to the model row's id, so a second row would split that model's reporting across the two. The problem body carries `existing_model_id`, the row that already holds the binding. Managed (`aliased`) models are exempt — an alias is a deliberate public identity over a backing model, so several may share one binding.",
+      "`model_already_added` — this organization already has a model row for this `(credentialId, modelId)` pair, or, for a model each member serves with their own credential (`credentialId` null), for this `(providerId, modelId)` pair. One row per binding: `llm_usage` attributes spend to the model row's id, so a second row would split that model's reporting across the two. The problem body carries `existing_model_id`, the row that already holds the binding. Managed (`aliased`) models are exempt — an alias is a deliberate public identity over a backing model, so several may share one binding.",
     content: {
       "application/problem+json": {
         schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -321,7 +322,7 @@ export const responses = {
       },
     },
   },
-  /** A stored credential the operation needs is under a key id the keyring lacks (#1768). */
+  /** A stored credential the operation needs is under a key id the keyring lacks. */
   EncryptionKeyUnavailable: {
     description:
       "`encryption_key_unavailable` — a stored credential this operation needs is encrypted under a key id missing from the platform's keyring. Operator configuration, not a dead credential: nothing is flagged for reconnection, the platform logs the missing kid as an error, and the same request succeeds once the key is restored.",
@@ -350,7 +351,7 @@ export const responses = {
   /**
    * A STORED package artifact cannot be served: it could not be expanded within
    * the platform's decompression ceiling, or the selected published version's
-   * archive is gone (#1533). Shared by the file-explorer and download operations,
+   * archive is gone. Shared by the file-explorer and download operations,
    * which all read the caller's own package and share one remedy (republish).
    *
    * `POST .../fork` deliberately does NOT `$ref` this: its 422 carries two

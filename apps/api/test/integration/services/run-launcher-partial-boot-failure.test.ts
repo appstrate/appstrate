@@ -162,7 +162,7 @@ function buildRunPlan(): AppstrateRunPlan {
       modelId: "claude-3-5-sonnet-latest",
       apiKey: "sk-test-secret",
       label: "Test Model",
-      isSystemModel: false,
+      credentialSource: "org",
       aliased: false,
       aliasId: "claude-3-5-sonnet-latest",
     },

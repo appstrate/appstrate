@@ -107,8 +107,8 @@ export function planPublishVersion(
 
 /**
  * Wrap a version in npm's default caret range form (`^X.Y.Z`).
- * Used wherever the platform needs to write a dependency entry whose
- * version was previously left as the `"*"` wildcard — same recommendation
+ * Used wherever the platform needs to write a dependency entry with
+ * no version of its own — same recommendation
  * `npm install foo` writes (auto-receive non-breaking fixes within the
  * current major, opt-in major bumps).
  */

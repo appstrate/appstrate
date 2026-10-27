@@ -51,7 +51,7 @@ describe("pickModel liveness", () => {
     // credential is gone, and that is the fix to name.
     expect(() =>
       pickModel([model("preset_dead", { needs_reconnection: true })], "preset_dead"),
-    ).toThrow(/re-established/i);
+    ).toThrow(/must be reconnected/i);
   });
 
   it("fails clearly when every model is dead", () => {
@@ -62,7 +62,7 @@ describe("pickModel liveness", () => {
         model("preset_a", { is_default: true, needs_reconnection: true }),
         model("preset_b", { needs_reconnection: true }),
       ]),
-    ).toThrow(/re-established/i);
+    ).toThrow(/must be reconnected/i);
   });
 
   it("keeps the family fallback for a configured but unusable family", () => {

@@ -13,6 +13,9 @@ export function TranslatedUiLabels({ children }: { children: ReactNode }) {
       sidebar: t("nav.sidebar"),
       sidebarDescription: t("nav.sidebarDescription"),
       toggleSidebar: t("nav.toggleSidebar"),
+      copy: t("btn.copy"),
+      copied: t("btn.copied"),
+      copyFailed: t("error.copyFailed"),
     }),
     [t],
   );

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `appstrate -V/--version`, answered before the command word only (#1516).
+ * `appstrate -V/--version`, answered before the command word only.
  * Registered with `.version()` it would be a program option, which commander
  * parses anywhere on the line, shadowing a subcommand's own `--version`.
  */

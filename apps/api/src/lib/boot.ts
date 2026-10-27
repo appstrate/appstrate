@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { db, isEmbeddedDb, reservePgConnection, toRows } from "@appstrate/db/client";
+import type { SQL } from "drizzle-orm";
 import { CURRENT_API_VERSION, listSupportedVersions } from "./api-versions.ts";
 import { listOrgsWithUnsupportedApiVersion } from "../services/organizations.ts";
 import { expireOldInvitations } from "../services/invitations.ts";
@@ -64,6 +65,7 @@ import { installPermissionAuditLogger } from "./permission-audit.ts";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { countByKid, type KidCount } from "@appstrate/db/encrypted-columns";
 import { keyringKids, opensWithKeyring } from "@appstrate/connect";
+import { warnOnUnreadEnvKeys } from "./unread-env-keys.ts";
 
 /**
  * Max concurrent orphan stop+finalize pairs at boot. See the call site — kept
@@ -87,6 +89,10 @@ const ORPHAN_CLEANUP_CONCURRENCY = 6;
  * {@link bootBackground}, behind the readiness gate in `index.ts`.
  */
 export async function bootCritical(): Promise<void> {
+  // First, so the unread-key line is logged even if a later boot step fails.
+  // Namespace rule and limits: docs/ENV.md § Unread keys (docs/NO_TRANSITIONAL_CODE.md §4).
+  warnOnUnreadEnvKeys();
+
   // Register RBAC denial audit handler BEFORE modules load. Every guard
   // created from this point on — core routes via `requirePermission`,
   // module routes via `requireModulePermission`/`requireCorePermission` —
@@ -117,9 +123,20 @@ export async function bootCritical(): Promise<void> {
   // Detection only; the fold is an operator task, see the function's doc comment.
   await assertSelfServiceFoldApplied();
 
+  // Refuse to boot while connection shares still sit in `shared_space_ids`, where nothing reads
+  // them. Detection only; the copy is an operator task, see the function's doc comment.
+  const embeddedDataDir = isEmbeddedDb
+    ? (await import("node:path")).resolve(env.PGLITE_DATA_DIR)
+    : null;
+  await assertConnectionSharesCopied(embeddedDataDir);
+
+  // Refuse to boot while a package share has no `space_packages` row, where nothing reads it.
+  // Detection only; the fold is an operator task, see the function's doc comment.
+  await assertPackageSharesFolded(embeddedDataDir);
+
   await assertKeyringCoversCiphertexts();
 
-  // Bootstrap-token reconciliation (#344). If the env still carries an
+  // Bootstrap-token reconciliation. If the env still carries an
   // AUTH_BOOTSTRAP_TOKEN but at least one org exists, the token is dead —
   // flip the in-memory consumed flag so the per-request `bootstrapTokenPending`
   // boolean in AppConfig reports `false` immediately. Otherwise an operator
@@ -171,7 +188,7 @@ export async function bootCritical(): Promise<void> {
   // OAuth client so the onward /authorize redirect completes.
   setBeforeSignupHook((email, ctx) => callAllHooks("beforeSignup", email, ctx));
   setAfterSignupHook((user, ctx) => callAllHooks("afterSignup", user, ctx));
-  // Self-hosting bootstrap side effects (issue #228). Fires only when
+  // Self-hosting bootstrap side effects. Fires only when
   // `createBootstrapOrg` actually inserted the org row. Mirrors the post-
   // create sequence in `routes/organizations.ts` so the bootstrap owner
   // lands on a usable workspace (default app + hello-world agent) AND so
@@ -640,6 +657,107 @@ async function unfoldedSelfServiceClientCount(): Promise<number> {
 }
 
 /**
+ * Refuse to boot while a connection's shares are still in `integration_connections.shared_space_ids`
+ * — i.e. while `scripts/migration/0044-connection-shares.ts` has not been run on this database.
+ *
+ * Drizzle `0089` creates `integration_connection_shares` empty and leaves the column standing,
+ * read only by `0044` and this guard. Every share lives in the table, so until `0044` copies the
+ * column into it every existing share is invisible: the members of the target space no longer
+ * reach the connection, and a schedule naming it is disabled at its next fire, for good.
+ *
+ * Refusing rather than warning, for the reason {@link assertOAuthResourceColumnsPresent} does.
+ *
+ * The predicate is EXACTLY the `WHERE` with which `0044` empties the column, so the script always
+ * clears it: a target space it skips (deleted, or of another organization) is emptied all the same.
+ * A fresh install never writes the column, and a database `0044` has run on holds it empty.
+ *
+ * The command it names targets the database this process runs on: `DATABASE_URL`, or, on an
+ * embedded database (`embeddedDataDir`), that directory named through `PGLITE_DATA_DIR`, which the
+ * script requires so that a run with a forgotten `.env` never opens the default one.
+ *
+ * §4: delete this and its tests in the release that drops `shared_space_ids`.
+ *
+ * `pendingCopies` is injected for tests — production reads the live database.
+ */
+export async function assertConnectionSharesCopied(
+  embeddedDataDir: string | null,
+  pendingCopies: () => Promise<number> = uncopiedShareConnectionCount,
+): Promise<void> {
+  const pending = await pendingCopies();
+  if (pending === 0) return;
+
+  const script = "bun scripts/migration/0044-connection-shares.ts";
+  const command =
+    embeddedDataDir === null
+      ? `\`${script}\` (dry run), then \`${script} --apply\`, with this DATABASE_URL`
+      : `\`PGLITE_DATA_DIR=${embeddedDataDir} ${script}\` (dry run), then the same with ` +
+        "`--apply`, from the platform's directory while it is stopped (an embedded database " +
+        "opens in one process at a time)";
+  throw new Error(
+    `Connection shares not copied: ${pending} connection(s) still hold space ids in ` +
+      "integration_connections.shared_space_ids, so migration 0089 has been applied and " +
+      "scripts/migration/0044-connection-shares.ts has not. Until it runs, every one of those " +
+      "shares is invisible: the spaces they reach lose the connection, and each schedule naming " +
+      `one is disabled at its next fire. Refusing to boot: run ${command}, then restart.`,
+  );
+}
+
+/** `database` is injected for tests that probe a second embedded database. */
+export async function uncopiedShareConnectionCount(
+  database: { execute(query: SQL): PromiseLike<unknown> } = db,
+): Promise<number> {
+  const { sql: rawSql } = await import("drizzle-orm");
+  const [row] = toRows<{ pending: number }>(
+    await database.execute(rawSql`
+      SELECT count(*)::int AS pending
+      FROM integration_connections
+      WHERE cardinality(shared_space_ids) > 0
+    `),
+  );
+  return row?.pending ?? 0;
+}
+
+/**
+ * Refuse to boot while `package_shares` holds a row, i.e. until
+ * `scripts/migration/0048-fold-package-shares.ts` has run: unfolded shares would
+ * vanish from the spaces they were shared with. Refuses rather than warns, like
+ * {@link assertOAuthResourceColumnsPresent}. Delete with the release that drops
+ * `package_shares` (§4). `pendingFolds` is injected for tests.
+ */
+export async function assertPackageSharesFolded(
+  embeddedDataDir: string | null,
+  pendingFolds: () => Promise<number> = unfoldedPackageShareCount,
+): Promise<void> {
+  const pending = await pendingFolds();
+  if (pending === 0) return;
+
+  const script = "bun scripts/migration/0048-fold-package-shares.ts";
+  const command =
+    embeddedDataDir === null
+      ? `\`${script}\` (dry run), then \`${script} --apply\`, with this DATABASE_URL`
+      : `\`PGLITE_DATA_DIR=${embeddedDataDir} ${script}\` (dry run), then the same with ` +
+        "`--apply`, from the platform's directory while it is stopped (an embedded database " +
+        "opens in one process at a time)";
+  throw new Error(
+    `Package shares not folded: package_shares still holds ${pending} row(s), so migration 0100 ` +
+      "has been applied and scripts/migration/0048-fold-package-shares.ts has not. Until it " +
+      "runs, every package shared but never activated is gone from the space it was shared " +
+      `with. Refusing to boot: run ${command}, then restart.`,
+  );
+}
+
+/** `database` is injected for tests that probe a second embedded database. */
+export async function unfoldedPackageShareCount(
+  database: { execute(query: SQL): PromiseLike<unknown> } = db,
+): Promise<number> {
+  const { sql: rawSql } = await import("drizzle-orm");
+  const [row] = toRows<{ pending: number }>(
+    await database.execute(rawSql`SELECT count(*)::int AS pending FROM package_shares`),
+  );
+  return row?.pending ?? 0;
+}
+
+/**
  * Refuse to boot while the database holds a ciphertext under a key id absent from the keyring
  * (a retired key dropped before `scripts/rekey-encrypted-columns.ts` re-encrypted its rows, a
  * misspelt kid): every read of those rows would fail. The inventory is the rekey script's.
@@ -832,7 +950,7 @@ async function warnOnUnserveableApiVersionPins(): Promise<void> {
 }
 
 /**
- * Boot-time reachability probe for `USERCONTENT_URL` (issue #1001).
+ * Boot-time reachability probe for `USERCONTENT_URL`.
  *
  * The platform *signs* preview URLs (`services/files.ts` → `mintPreviewUrl`)
  * but never fetches them — so if `USERCONTENT_URL` is set to a host the browser

@@ -1,10 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
-import { ORG_SETTINGS_PROPERTIES } from "../schemas.ts";
+import {
+  APPEARANCE_PROPERTIES,
+  EMOJI_ICON_WRITE_RULE,
+  ORG_SETTINGS_PROPERTIES,
+} from "../schemas.ts";
 
 import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
 import { ORG_ROLES } from "@appstrate/core/permissions";
+import {
+  APPEARANCE_COLORS,
+  ICON_IMAGE_MAX_BYTES,
+  ICON_IMAGE_MAX_SIZE,
+  ICON_IMAGE_TYPES,
+  ICON_MAX_LENGTH,
+} from "@appstrate/core/appearance";
+
+/** The two doors that write an organization slug document it once. */
+const SLUG_DESCRIPTION =
+  "Kebab-case. The scope the organization's uploads, forks and starter agent are created under (`@<slug>/<name>`). The platform's own scopes, `appstrate` (system packages) and `inline` (inline runs' shadow packages), are refused with `400 slug_reserved`; a slug another organization holds with `400 slug_taken`.";
 
 /** Request-body shape of one space assignment — mirrors the `SpaceAssignment` component. */
 const SPACE_ASSIGNMENTS_BODY = {
@@ -48,6 +63,8 @@ export const organizationsPaths = {
                     id: "550e8400-e29b-41d4-a716-446655440000",
                     name: "Acme Corp",
                     slug: "acme-corp",
+                    icon: null,
+                    color: null,
                     role: "owner",
                     permissions: ["org:read", "org:update", "members:invite"],
                     createdAt: "2026-01-10T08:00:00Z",
@@ -79,7 +96,11 @@ export const organizationsPaths = {
               required: ["name"],
               properties: {
                 name: { type: "string", minLength: 1 },
-                slug: { type: "string", pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" },
+                slug: {
+                  type: "string",
+                  pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+                  description: SLUG_DESCRIPTION,
+                },
               },
               additionalProperties: false,
             },
@@ -94,11 +115,12 @@ export const organizationsPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["id", "name", "slug", "role", "createdAt"],
+                required: ["id", "name", "slug", "icon", "color", "role", "createdAt"],
                 properties: {
                   id: { type: "string", format: "uuid" },
                   name: { type: "string" },
                   slug: { type: "string" },
+                  ...APPEARANCE_PROPERTIES,
                   role: { type: "string", enum: ["owner"] },
                   createdAt: { type: "string", format: "date-time" },
                 },
@@ -107,6 +129,8 @@ export const organizationsPaths = {
                 id: "550e8400-e29b-41d4-a716-446655440001",
                 name: "New Organization",
                 slug: "new-org",
+                icon: null,
+                color: null,
                 role: "owner",
                 createdAt: "2026-01-15T10:30:00Z",
               },
@@ -141,6 +165,8 @@ export const organizationsPaths = {
                 id: "550e8400-e29b-41d4-a716-446655440000",
                 name: "Acme Corp",
                 slug: "acme-corp",
+                icon: null,
+                color: null,
                 members: [
                   {
                     userId: "usr_abc123",
@@ -148,6 +174,14 @@ export const organizationsPaths = {
                     email: "alice@acme.com",
                     role: "owner",
                     joinedAt: "2026-01-10T08:00:00Z",
+                    spaces: [
+                      {
+                        id: "spc_default",
+                        name: "Default",
+                        source: "org_role",
+                        role: { kind: "preset", key: "admin", name: "admin" },
+                      },
+                    ],
                   },
                   {
                     userId: "usr_def456",
@@ -155,6 +189,14 @@ export const organizationsPaths = {
                     email: "bob@acme.com",
                     role: "member",
                     joinedAt: "2026-01-12T10:00:00Z",
+                    spaces: [
+                      {
+                        id: "spc_default",
+                        name: "Default",
+                        source: "open_space",
+                        role: { kind: "preset", key: "operator", name: "operator" },
+                      },
+                    ],
                   },
                 ],
                 invitations: [],
@@ -172,7 +214,7 @@ export const organizationsPaths = {
       tags: ["Organizations"],
       summary: "Update organization",
       description:
-        "Update organization name and/or slug. Owner only. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one.",
+        "Update organization name, slug, icon and/or colour. Requires `org:update`. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears a nullable one. An uploaded image travels as the `icon` itself, a base64 WebP or PNG data URI; the audit log records the first 16 hex digits of its SHA-256 digest, never its bytes.",
       parameters: [{ name: "orgId", in: "path", required: true, schema: { type: "string" } }],
       requestBody: {
         required: true,
@@ -182,7 +224,22 @@ export const organizationsPaths = {
               type: "object",
               properties: {
                 name: { type: "string", minLength: 1 },
-                slug: { type: "string", pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$" },
+                slug: {
+                  type: "string",
+                  pattern: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$",
+                  description: SLUG_DESCRIPTION,
+                },
+                icon: {
+                  type: ["string", "null"],
+                  maxLength: ICON_MAX_LENGTH,
+                  description: `\`lucide:<name>\`, \`emoji:<one emoji>\`, or ${ICON_IMAGE_TYPES.map((type) => `\`data:${type};base64,…\``).join(" or ")} (at most ${ICON_IMAGE_MAX_BYTES} bytes and ${ICON_IMAGE_MAX_SIZE}×${ICON_IMAGE_MAX_SIZE} px); \`null\` clears it. ${EMOJI_ICON_WRITE_RULE}`,
+                },
+                color: {
+                  type: ["string", "null"],
+                  enum: [...APPEARANCE_COLORS, null],
+                  description:
+                    "A palette key; `null` clears it, the colour then derived from the organization id.",
+                },
               },
               additionalProperties: false,
             },
@@ -339,6 +396,14 @@ export const organizationsPaths = {
                 email: "bob@acme.com",
                 role: "admin",
                 joinedAt: "2026-01-12T10:00:00Z",
+                spaces: [
+                  {
+                    id: "spc_default",
+                    name: "Default",
+                    source: "org_role",
+                    role: { kind: "preset", key: "admin", name: "admin" },
+                  },
+                ],
               },
             },
           },
@@ -487,6 +552,7 @@ export const organizationsPaths = {
               schema: { $ref: "#/components/schemas/OrgSettings" },
               example: {
                 api_version: "2026-03-21",
+                personal_model_credentials: true,
               },
             },
           },

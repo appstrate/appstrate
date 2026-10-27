@@ -170,6 +170,27 @@ describe("full persona invariants", () => {
     expect(FULL).toContain('"@appstrate/gmail": { "tools": ["api_call"], "required": true }');
   });
 
+  // #1923: a default can be an integration's whole surface, write tools included, and a run can
+  // call every tool it is given. Selecting is the rule; inheriting is for a task that needs it all.
+  it("tells an inline composer to select the tools the task needs, whatever the default's size", () => {
+    expect(FULL).toContain("list the exact tool names the task needs");
+    expect(FULL).toContain(
+      "omit the entry to inherit the integration's `default_tools` (shown per integration in your context) only when the task needs that whole default",
+    );
+    expect(FULL).toContain("never give it more than the task needs");
+    expect(REDUCED).not.toContain("list the exact tool names the task needs");
+  });
+
+  // `describe_operation` answers with the operation's definition; the integration comes from the call.
+  it("reads an integration's tool names with invoke_operation, naming the field that holds each", () => {
+    expect(FULL).toContain(
+      'read the integration with `invoke_operation` (`operation_id: "getIntegration"`, `GET /api/integrations/{packageId}`)',
+    );
+    expect(FULL).toContain(
+      "its `default_tools` holds the default's names, its `tool_catalog` every tool you may select",
+    );
+  });
+
   // #1830: a started run's `integration_not_active` warning is fixed per space, not by connecting.
   it("routes an `integration_not_active` warning to activation, never to connecting", () => {
     for (const persona of [FULL, REDUCED]) {
@@ -572,5 +593,36 @@ describe("the persona of a turn that can look but not act", () => {
     expect(DISCOVERY).toContain("The context lists the permissions this turn holds");
     expect(DISCOVERY).not.toContain("instead of attempting it");
     expect(FULL).toContain("instead of attempting it");
+  });
+});
+
+describe("the persona and package authoring", () => {
+  const CREATES = "To create a package — an agent, a skill, an integration or a local MCP server";
+  const FORBIDS = "Do not create, import or modify any package";
+
+  it("teaches creating every package type on a write on any one of them", () => {
+    for (const write of [
+      "agents:write",
+      "skills:write",
+      "integrations:write",
+      "mcp-servers:write",
+    ]) {
+      const prompt = promptFor([...MCP, write]);
+      expect(prompt).toContain(CREATES);
+      expect(prompt).toContain("`import_package_file`");
+      expect(prompt).not.toContain(FORBIDS);
+    }
+  });
+
+  it("forbids it when the turn holds no package write — the switch off", () => {
+    const prompt = promptFor([...MCP, "agents:run", "runs:read", "skills:read"]);
+    expect(prompt).toContain(FORBIDS);
+    expect(prompt).not.toContain(CREATES);
+  });
+
+  it("says nothing of it to a turn that cannot dispatch", () => {
+    const prompt = promptFor(["mcp:read", "agents:write"]);
+    expect(prompt).not.toContain(CREATES);
+    expect(prompt).not.toContain(FORBIDS);
   });
 });

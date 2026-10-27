@@ -51,7 +51,7 @@ import {
   waitForRunPipelineSettled,
 } from "../../helpers/run-connection-fixtures.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
-import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
+import { seedPackage, seedPublishedVersion } from "../../helpers/seed.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import { localIntegrationManifest } from "../../helpers/integration-manifests.ts";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
@@ -337,28 +337,31 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
       expect(row!.resolvedConnections).toEqual({ [INTEGRATION]: [] });
     });
 
-    it.each(["/api/runs/inline", "/api/runs/inline/validate"])(
-      "400s on %s when the integration is required",
-      async (path) => {
-        await seedIntegration(INTEGRATION);
-        await seedConnection(INTEGRATION);
+    // Not a static refusal of the key: resolution judges `[]` (under an imposed set it adds
+    // nothing), so both doors answer the resolver's verdict, the launch as its 409.
+    it.each([
+      ["/api/runs/inline", 409, "missing_integration_connection"],
+      ["/api/runs/inline/validate", 400, "validation_failed"],
+    ])("refuses on %s when the integration is required (%i)", async (path, status, code) => {
+      await seedIntegration(INTEGRATION);
+      await seedConnection(INTEGRATION);
 
-        const res = await post(path, {
-          manifest: inlineManifest([INTEGRATION], { required: [INTEGRATION] }),
-          prompt: "do the thing",
-          connection_overrides: { [INTEGRATION]: [] },
-        });
+      const res = await post(path, {
+        manifest: inlineManifest([INTEGRATION], { required: [INTEGRATION] }),
+        prompt: "do the thing",
+        connection_overrides: { [INTEGRATION]: [] },
+      });
 
-        expect(res.status).toBe(400);
-        const body = (await res.json()) as ProblemDetails;
-        // One item, fail-fast or accumulated: readiness judges the launch without the refused key.
-        expect(body.code).toBe("validation_failed");
-        expect(body.errors!.map((e) => [e.field, e.code])).toEqual([
-          [`connection_overrides.${INTEGRATION}`, "required_integration_unbound"],
-        ]);
-        expect(await db.select().from(runs)).toHaveLength(0);
-      },
-    );
+      expect(res.status).toBe(status);
+      const body = (await res.json()) as Omit<ProblemDetails, "errors"> & {
+        errors: { field: string; code: string; source?: string }[];
+      };
+      expect(body.code).toBe(code);
+      expect(body.errors.map((e) => [e.field, e.code, e.source])).toEqual([
+        [`integrations.${INTEGRATION}`, "required_integration_unbound", "run_override"],
+      ]);
+      expect(await db.select().from(runs)).toHaveLength(0);
+    });
   });
 
   // An empty connection id is falsy at the resolver's `resolveOne`, so the
@@ -450,11 +453,7 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
         source: "local",
         draftManifest: oauthManifest(),
       });
-      await seedPackageVersion({
-        packageId: OAUTH_INTEGRATION,
-        version: "1.0.0",
-        manifest: oauthManifest(),
-      });
+      await seedPublishedVersion(OAUTH_INTEGRATION, "1.0.0", { manifest: oauthManifest() });
       await activatePackage({ orgId: ctx.orgId, spaceId: ctx.defaultSpaceId }, OAUTH_INTEGRATION);
     }
 
@@ -573,16 +572,17 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
 
       const original = await launchAs(ctx, { [RUN_CONNECT_OFFERS_HEADER]: "1" });
       expect(original.status).toBe(201);
-      const minted = await warningOf(original);
+      const { id, ...originalBody } = (await original.json()) as {
+        id: string;
+        warnings: ValidationFieldError[];
+      };
+      const minted = originalBody.warnings.find((w) => w.field === field)!;
       expect(minted.connect_url).toStartWith("http");
       expect(minted.expiresAt).toBeDefined();
 
-      for (const [who, headers] of [
-        [ctx, {}],
-        [ctx, { [RUN_CONNECT_OFFERS_HEADER]: "1" }],
-        [admin, {}],
-      ] as const) {
-        const replay = await launchAs(who, headers);
+      const replayHeaders: Record<string, string>[] = [{}, { [RUN_CONNECT_OFFERS_HEADER]: "1" }];
+      for (const headers of replayHeaders) {
+        const replay = await launchAs(ctx, headers);
         expect(replay.status).toBe(201);
         expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
         const warning = await warningOf(replay);
@@ -591,7 +591,13 @@ describe("POST /api/runs/inline — connection_overrides disambiguation", () => 
         expect(warning).not.toHaveProperty("expiresAt");
         expect(warning).not.toHaveProperty("packageId");
       }
-      expect(await db.select().from(runs)).toHaveLength(1);
+
+      // The key is the first caller's: another member sending it launches a run of their own.
+      const theirs = await launchAs(admin, {});
+      expect(theirs.status).toBe(201);
+      expect(theirs.headers.get("Idempotent-Replayed")).toBeNull();
+      expect(((await theirs.json()) as { id: string }).id).not.toBe(id);
+      expect(await db.select().from(runs)).toHaveLength(2);
     });
 
     it("stores no 409: a key reuser is judged again and never handed the first caller's link", async () => {

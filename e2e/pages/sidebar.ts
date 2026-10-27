@@ -3,61 +3,76 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
 /**
- * Page Object for the sidebar navigation — org/space switcher and nav links.
+ * Page Object for the organisation and workspace switcher (`OrgSwitcher`).
+ *
+ * The switcher is a two-column popover: organisations on the left, the
+ * workspaces of the organisation being explored on the right. Clicking an
+ * organisation only explores it; a pick ends on a workspace, and org and
+ * workspace are applied together.
  */
 export class Sidebar {
   constructor(private page: Page) {}
 
+  /**
+   * The shell mounts the switcher twice (the sidebar's `brand` row and the
+   * header's `mobile` chip, one of them hidden by the breakpoint), so only the
+   * one on screen counts.
+   */
   get switcherButton() {
-    return this.page.getByTestId("org-switcher-button");
+    return this.page.getByTestId("org-switcher-button").locator("visible=true");
   }
 
-  /** The dropdown menu container (for scoped locators). */
+  /** The switcher popover (for scoped locators). */
   get dropdownMenu() {
-    return this.page.locator("[role='menu']");
+    return this.page.getByRole("dialog").filter({ has: this.page.getByTestId(/^org-item-/) });
   }
 
-  get spaceSubmenuTrigger() {
-    return this.page.getByTestId("space-submenu-trigger");
-  }
-
-  /** Open the org/space switcher dropdown and wait for it to render. */
+  /** Open the switcher and wait for it to render. */
   async openSwitcher() {
     await this.switcherButton.click();
-    await expect(this.page.locator("[role='menu']")).toBeVisible();
+    await expect(this.dropdownMenu).toBeVisible();
   }
 
-  /** Click an org by name in the switcher dropdown. */
-  async switchOrg(orgName: string) {
+  /** Explore an organisation by name, then pick one of its workspaces (the seeded "Default" one unless named). */
+  async switchOrg(orgName: string, spaceName = "Default") {
     await this.openSwitcher();
-    await this.page.getByText(orgName).click();
+    await this.dropdownMenu
+      .getByTestId(/^org-item-/)
+      .filter({ has: this.page.getByText(orgName, { exact: true }) })
+      .click();
+    await this.dropdownMenu
+      .getByTestId(/^space-item-/)
+      .filter({ has: this.page.getByText(spaceName, { exact: true }) })
+      .click();
+    await expect(this.dropdownMenu).toHaveCount(0);
     // Organization changes always return to the dashboard.
     await expect(this.page).toHaveURL("/");
   }
 
-  /** Open the space submenu and click a space by name. */
+  /** Open the switcher and click a workspace of the current org by name. */
   async switchSpace(spaceName: string) {
-    // The item's accessible name appends the role label, so match the name on
-    // its own element, exactly: "Default" must not pick "Default 2" or "My Default".
+    // Match the name on its own element, exactly: "Default" must not pick
+    // "Default 2" or "My Default".
     await this.clickSpaceItem(
-      this.page
-        .getByRole("menuitem")
+      this.dropdownMenu
+        .getByTestId(/^space-item-/)
         .filter({ has: this.page.getByText(spaceName, { exact: true }) }),
     );
   }
 
-  /** Open the space submenu and click a space by id. */
-  async switchSpaceById(spaceId: string) {
-    await this.clickSpaceItem(this.page.getByTestId(`space-item-${spaceId}`));
-  }
-
   private async clickSpaceItem(item: Locator) {
     await this.openSwitcher();
-    // Click, not hover: a pointer already resting on the trigger when the menu
-    // opens fires no `pointerenter`, and the sub-content never appears.
-    await this.spaceSubmenuTrigger.click();
     await expect(item).toBeVisible();
     await item.click();
     await expect(this.dropdownMenu).toHaveCount(0);
+  }
+
+  /**
+   * Switch workspace from inside the settings overlay. The overlay covers the
+   * sidebar, so its rail carries the same choice as a context selector.
+   */
+  async switchSpaceInSettings(spaceName: string) {
+    await this.page.getByRole("combobox", { name: "Choisir un espace de travail" }).click();
+    await this.page.getByRole("option", { name: spaceName, exact: true }).click();
   }
 }

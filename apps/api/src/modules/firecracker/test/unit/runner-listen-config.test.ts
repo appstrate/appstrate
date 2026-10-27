@@ -12,6 +12,7 @@ import { describe, it, expect, afterEach } from "bun:test";
 import {
   getRunnerEnv,
   resolveListenConfig,
+  runnerEnvSchema,
   _resetRunnerEnvCacheForTesting,
 } from "../../runner/env.ts";
 
@@ -105,5 +106,28 @@ describe("resolveListenConfig", () => {
     // (systemd vs installer vs manual) — refuse instead of surprising.
     setEnv({ FIRECRACKER_RUNNER_SOCKET: "run/runner.sock" });
     expect(() => getRunnerEnv()).toThrow(/absolute path/);
+  });
+});
+
+// The daemon forwards its own EGRESS_ALLOW_INTERNAL_HOSTS to every guest sidecar.
+describe("EGRESS_ALLOW_INTERNAL_HOSTS", () => {
+  const REQUIRED = {
+    FIRECRACKER_RUNNER_TOKEN: "0123456789abcdef",
+    FIRECRACKER_RUNNER_PLATFORM_URL: "http://10.0.0.5:3000",
+  };
+  const parse = (raw: string | undefined) =>
+    runnerEnvSchema.parse({ ...REQUIRED, EGRESS_ALLOW_INTERNAL_HOSTS: raw });
+
+  it("accepts an unset, empty or well-formed list", () => {
+    for (const raw of [undefined, "", "keycloak.internal, 10.0.0.7,"]) {
+      expect(() => parse(raw)).not.toThrow();
+    }
+  });
+
+  it("refuses a malformed list, naming each refused entry", () => {
+    const malformed = () => parse("keycloak.internal,https://a.internal,b.internal:8443");
+    expect(malformed).toThrow(/EGRESS_ALLOW_INTERNAL_HOSTS/);
+    expect(malformed).toThrow(/https:\/\/a\.internal/);
+    expect(malformed).toThrow(/b\.internal:8443/);
   });
 });

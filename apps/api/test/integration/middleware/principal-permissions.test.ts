@@ -3,7 +3,7 @@
 /**
  * Per-principal org-level grants, end to end (RBAC spec §4.2).
  *
- * A stub module declares `principalPermissions` and grants two session-only
+ * A stub module declares `principalPermissions` and grants session-only
  * org-level strings to ONE user of the org. The assertions prove the four
  * properties the surface exists for: the grant reaches that user's session
  * through both permission-resolution paths (the `X-Org-Id` pipeline and the
@@ -36,10 +36,13 @@ const principalModule: AppstrateModule = {
   manifest: { id: "stub-principal-grants", name: "Stub Principal Grants", version: "1.0.0" },
   async init() {},
   principalPermissions: {
-    // Both org-level and both session-only: `model-provider-credentials:read`
-    // gates a route reached through `X-Org-Id`, `org:settings` one reached
-    // through `/api/orgs/:orgId`, so the two resolution paths are both covered.
-    mayGrant: ["model-provider-credentials:read", "org:settings"],
+    // All org-level and all session-only (absent from the API-key and end-user
+    // allowlists, which the loader enforces). `roles:delete` gates a route reached
+    // through `X-Org-Id` (DELETE /api/roles/:id); `org:settings` one reached
+    // through `/api/orgs/:orgId` (PATCH …/settings), so both resolution paths are
+    // covered. `model-provider-credentials:read` backs the listing and
+    // scope-refusal tests below.
+    mayGrant: ["model-provider-credentials:read", "org:settings", "roles:delete"],
     async resolve({ orgId, userId }) {
       resolverCalls.push(`${orgId}:${userId}`);
       if (resolverThrows) throw new Error("stub resolver is down");
@@ -53,6 +56,17 @@ const app = getTestApp({ modules: [...getDiscoveredModules(), principalModule] }
 /** Session headers for a user other than the context's owner. */
 function headersFor(ctx: TestContext, cookie: string): Record<string, string> {
   return { Cookie: cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": ctx.defaultSpaceId };
+}
+
+/**
+ * `DELETE` of a role that does not exist: past the `roles:delete` guard it can
+ * only answer 404, so a 403 is the guard alone.
+ */
+function deleteMissingRole(ctx: TestContext, cookie: string) {
+  return app.request(`/api/roles/srl_${crypto.randomUUID()}`, {
+    method: "DELETE",
+    headers: headersFor(ctx, cookie),
+  });
 }
 
 describe("per-principal org permissions", () => {
@@ -69,19 +83,20 @@ describe("per-principal org permissions", () => {
     plain = await createTestUser();
     await addOrgMember(ctx.orgId, granted.id, "member");
     await addOrgMember(ctx.orgId, plain.id, "member");
-    answers.set(`${ctx.orgId}:${granted.id}`, ["model-provider-credentials:read", "org:settings"]);
+    answers.set(`${ctx.orgId}:${granted.id}`, [
+      "model-provider-credentials:read",
+      "org:settings",
+      "roles:delete",
+    ]);
   });
 
   it("grants the permission on an org route to the named principal only", async () => {
-    const ok = await app.request("/api/model-provider-credentials", {
-      headers: headersFor(ctx, granted.cookie),
-    });
-    expect(ok.status).toBe(200);
+    const ok = await deleteMissingRole(ctx, granted.cookie);
+    expect(ok.status).toBe(404);
 
-    const denied = await app.request("/api/model-provider-credentials", {
-      headers: headersFor(ctx, plain.cookie),
-    });
+    const denied = await deleteMissingRole(ctx, plain.cookie);
     expect(denied.status).toBe(403);
+    expect(((await denied.json()) as { detail: string }).detail).toContain("roles:delete");
   });
 
   it("grants it on the /api/orgs/:orgId path resolver too", async () => {
@@ -172,21 +187,15 @@ describe("per-principal org permissions", () => {
   });
 
   it("keeps the answer until the module invalidates it", async () => {
-    const first = await app.request("/api/model-provider-credentials", {
-      headers: headersFor(ctx, granted.cookie),
-    });
-    expect(first.status).toBe(200);
+    const first = await deleteMissingRole(ctx, granted.cookie);
+    expect(first.status).toBe(404); // past the guard
 
     answers.set(`${ctx.orgId}:${granted.id}`, []);
-    const stale = await app.request("/api/model-provider-credentials", {
-      headers: headersFor(ctx, granted.cookie),
-    });
-    expect(stale.status).toBe(200); // cached — the module has not said otherwise
+    const stale = await deleteMissingRole(ctx, granted.cookie);
+    expect(stale.status).toBe(404); // cached — the module has not said otherwise
 
     invalidatePrincipalPermissions(ctx.orgId, granted.id);
-    const fresh = await app.request("/api/model-provider-credentials", {
-      headers: headersFor(ctx, granted.cookie),
-    });
+    const fresh = await deleteMissingRole(ctx, granted.cookie);
     expect(fresh.status).toBe(403);
   });
 

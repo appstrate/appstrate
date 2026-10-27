@@ -12,7 +12,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { spaces } from "@appstrate/db/schema";
+import { oauthClient, spaces } from "@appstrate/db/schema";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { createTestUser, createTestOrg } from "../../../../../../test/helpers/auth.ts";
 import {
@@ -148,12 +148,17 @@ describe("resolveSpaceBranding", () => {
 });
 
 describe("resolveBrandingForClient — instance-level", () => {
-  // Instance-level clients don't touch the DB so these cases need no seeding.
   // They guard the end-user-visible brand for OIDC_INSTANCE_CLIENTS entries:
   // the operator-declared `name` MUST surface under the logo on the login
-  // page instead of the generic "Appstrate" platform default.
+  // page instead of the generic "Appstrate" platform default — and a
+  // self-registered client's name never does.
+  beforeEach(async () => {
+    await truncateAll();
+  });
+
   it("uses the client name when present", async () => {
     const resolved = await resolveBrandingForClient({
+      clientId: "oauth_operator_declared",
       level: "instance",
       name: "Mon Admin Dashboard",
       referencedOrgId: null,
@@ -167,11 +172,40 @@ describe("resolveBrandingForClient — instance-level", () => {
 
   it("falls back to platform default name when client.name is null", async () => {
     const resolved = await resolveBrandingForClient({
+      clientId: "oauth_operator_declared",
       level: "instance",
       name: null,
       referencedOrgId: null,
       referencedSpaceId: null,
     });
+    expect(resolved.name).toBe(PLATFORM_DEFAULT_BRANDING.name);
+    expect(resolved.fromName).toBe(PLATFORM_DEFAULT_BRANDING.fromName);
+  });
+
+  it("never brands the pages after a self-registered (DCR) client's own name", async () => {
+    const client = {
+      clientId: "oauth_dcr_self_named",
+      level: "instance",
+      name: "Appstrate Sécurité",
+      referencedOrgId: null,
+      referencedSpaceId: null,
+    };
+    const now = new Date();
+    await db.insert(oauthClient).values({
+      id: "oac_dcr_branding_test_000000001",
+      clientId: client.clientId,
+      name: client.name,
+      redirectUris: ["http://127.0.0.1:53998/callback"],
+      scopes: ["mcp:read"],
+      level: "instance",
+      selfService: true,
+      tokenEndpointAuthMethod: "none",
+      grantTypes: ["authorization_code"],
+      responseTypes: ["code"],
+      createdAt: now,
+      updatedAt: now,
+    });
+    const resolved = await resolveBrandingForClient(client);
     expect(resolved.name).toBe(PLATFORM_DEFAULT_BRANDING.name);
     expect(resolved.fromName).toBe(PLATFORM_DEFAULT_BRANDING.fromName);
   });

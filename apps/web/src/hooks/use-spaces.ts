@@ -1,8 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "react-i18next";
 import { $api } from "../api/client";
+import { invalidatePaths } from "../lib/query-keys";
+import { useInvalidatePaths } from "./use-invalidate-paths";
 import { queryClient } from "../lib/query-client";
+import { spaceLabel } from "../lib/space-label";
 import { getCurrentOrgId } from "../stores/org-store";
 import { orgOnlyHeader, useOrgOnlyScope } from "./use-org-scope";
 import { invalidateIntegrationQueries } from "./use-integrations";
@@ -21,12 +25,20 @@ export function useSpaces(enabled = true) {
   });
 }
 
+/** What to call a space of the listing, by id; `undefined` for one the caller does not reach. */
+export function useSpaceLabelOf(): (id: string | null | undefined) => string | undefined {
+  const { t } = useTranslation();
+  const { data: spaces } = useSpaces();
+  return (id) => {
+    const space = spaces?.find((s) => s.id === id);
+    return space && spaceLabel(space, t);
+  };
+}
+
 /**
- * Start the listing at boot (`main.tsx`): every space-scoped request waits on it,
- * so waiting for the layout to mount would cost each a round trip. Keyed on the
- * remembered org, and only once the boot org list still names it: a caller
- * removed from that org would otherwise open the app on a 403. A failure is not
- * cached, `useSpaces` refetches on mount.
+ * Start the listing at boot (`main.tsx`): every space-scoped request waits on it. Only once the
+ * boot org list still names the remembered org (a removed caller would open the app on a 403).
+ * A failure is not cached; `useSpaces` refetches on mount.
  */
 export function primeSpaceList(orgs: Promise<readonly { id: string }[]>): void {
   orgs.then(
@@ -41,6 +53,14 @@ export function primeSpaceList(orgs: Promise<readonly { id: string }[]>): void {
   );
 }
 
+/** The listing of an org the caller belongs to, current or not: same key as `useSpaces` for the current one. */
+export function useOrgSpaces(orgId: string | null) {
+  return $api.useQuery("get", "/api/spaces", spacesListInit(orgOnlyHeader(orgId)), {
+    enabled: !!orgId,
+    select: (e) => e.data,
+  });
+}
+
 export function useSpace(spaceId: string) {
   const scope = useOrgOnlyScope();
   return $api.useQuery(
@@ -51,21 +71,15 @@ export function useSpace(spaceId: string) {
   );
 }
 
-/**
- * openapi-react-query keys are [method, path, init] with the literal spec
- * path — list and detail live under different path strings, so both need
- * invalidating after a write.
- */
-function useInvalidateSpaces() {
-  const qc = useQueryClient();
-  return () => {
-    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces"] });
-    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}"] });
-    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}/roles"] });
-    // Visibility and the default role determine implicit member rows and roles.
-    void qc.invalidateQueries({ queryKey: ["get", "/api/spaces/{id}/members"] });
-  };
-}
+/** List and detail are different path strings; visibility and the default role determine implicit member rows, which each org member also carries (`/api/orgs/{orgId}`). */
+const useInvalidateSpaces = () =>
+  useInvalidatePaths(
+    "/api/spaces",
+    "/api/spaces/{id}",
+    "/api/spaces/{id}/roles",
+    "/api/spaces/{id}/members",
+    "/api/orgs/{orgId}",
+  );
 
 export function useCreateSpace() {
   const invalidate = useInvalidateSpaces();
@@ -89,10 +103,19 @@ export function useUpdateSpace() {
 }
 
 export function useDeleteSpace() {
-  const invalidate = useInvalidateSpaces();
+  const qc = useQueryClient();
   return $api.useMutation("delete", "/api/spaces/{id}", {
     meta: { errorHandledByCaller: true },
-    onSuccess: invalidate,
+    onSuccess: () => {
+      // Each org member lists the spaces they reach.
+      void invalidatePaths(qc, ["/api/spaces", "/api/orgs/{orgId}"]);
+      // The page still showing the deleted space would re-read it, a 404: stale only.
+      void invalidatePaths(
+        qc,
+        ["/api/spaces/{id}", "/api/spaces/{id}/roles", "/api/spaces/{id}/members"],
+        "none",
+      );
+    },
   });
 }
 

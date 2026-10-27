@@ -13,9 +13,9 @@ import { STD_RESPONSE_HEADERS } from "../headers.ts";
  * placements narrowed to that space and its rows widened to what the caller
  * could still put there in one click.
  *
- * There is no `shared` section in either: an offer nobody has taken up is a
- * placement with `state: "none"`, on the package's own row and behind the same
- * switch as every other space — one act, one control.
+ * There is no `shared` section in either: a package placed here and not yet
+ * switched on is a placement with `state: "inactive"`, on the package's own row
+ * and behind the same switch as every other space — one act, one control.
  */
 
 /** The spaces the two listings project — identical in both shapes. */
@@ -73,9 +73,21 @@ const PACKAGES_EXAMPLE = {
         {
           space_id: "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
           via: "shared",
-          state: "none",
+          state: "inactive",
           chat_enforced: false,
           shared_by: { user_id: "usr_1", name: "Alex" },
+        },
+      ],
+      activation: [
+        {
+          spaceId: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+          activate: "allowed",
+          deactivate: "allowed",
+        },
+        {
+          spaceId: "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+          activate: "allowed",
+          deactivate: "forbidden",
         },
       ],
     },
@@ -110,6 +122,18 @@ const PACKAGES_EXAMPLE = {
           shared_by: null,
         },
       ],
+      activation: [
+        {
+          spaceId: "spc_3e6f8a1b-2c4d-4e70-8f92-a1b3c5d7e9f0",
+          activate: "allowed",
+          deactivate: "allowed",
+        },
+        {
+          spaceId: "spc_7f0a2c4e-6b81-4d3f-9e57-c2a4b6d8e0f1",
+          activate: "forbidden",
+          deactivate: "forbidden",
+        },
+      ],
     },
   ],
 } as const;
@@ -124,16 +148,20 @@ const organizationLibraryPaths = {
     get: {
       operationId: "getLibrary",
       tags: ["Library"],
-      summary: "Organization library — the placement map (owners and admins)",
+      summary: "Organization library — the placement map, graded by caller",
       description:
         "Returns every package the organization can see (org-owned + system), grouped by type, each carrying its " +
         "`placements`: one entry per space the package is placed in and the caller reads, saying WHY it is there " +
         "(`via`: home, shared, system) and whether that space runs it (`state`: active, inactive, none). " +
-        "Members, guests and delegated credentials cannot access this administrative " +
-        "endpoint. Ephemeral packages are excluded. The spaces list and the placements include only spaces the " +
-        "caller can enter, and each package type also requires that type's read permission in the space. " +
+        "Graded by the caller: the spaces list and the placements include only the spaces whose own library " +
+        "(`GET /api/spaces/{spaceId}/library`) the caller reads — spaces it can enter and holds `spaces:read` in — " +
+        "and each package type also requires that type's read permission in the space. So the response is the union " +
+        "of those per-space libraries: an owner's or admin's whole map, a member's or guest's own spaces. A package " +
+        "with no placement the caller reads is listed, with empty `placements`, when its home grants the caller " +
+        "`<type>:share` and a team space read here could receive it. Delegated credentials (API keys, pinned to one " +
+        "space) receive 403. Ephemeral packages are excluded. " +
         "Acting on the map is the same pair of doors as anywhere else: `POST /api/spaces/{spaceId}/packages` " +
-        "activates a package in a space — creating the offer that places it when the caller holds `<type>:share` " +
+        "activates a package in a space — placing it there when the caller holds `<type>:share` " +
         "in its home — and `DELETE /api/spaces/{spaceId}/packages/{scope}/{name}` deactivates it there.",
       parameters: [
         // `/api/library` is org-scoped, not space-scoped — no X-Space-Id.
@@ -177,7 +205,7 @@ export const libraryPaths = {
       tags: ["Library"],
       summary: "One space's placements, and what the caller could still place there",
       description:
-        "Accessible to readers of the target space. Every row carries its `placements`, narrowed to this space: a package homed here, offered here, or shipped with the platform, with `state` saying whether the space runs it — `none` is exactly a pending offer, taken up with `POST /api/spaces/{spaceId}/packages` like any other activation. The rows also include what the caller could still PLACE here, so the listing never proposes a package that door would refuse: for a TEAM destination, a package whose home grants them the type's `share` permission (`home_shareable`, since activating then creates the offer); for a PERSONAL destination, nothing beyond what is already placed — an offer into somebody's own space is somebody else's act. Such a candidate carries an EMPTY `placements` array. Each package type requires read permission in the target space. Activation remains subject to the target space's permissions, waived in the caller's own personal space. Personal spaces remain private and API keys remain pinned to their space.",
+        "Accessible to readers of the target space. Every row carries its `placements`, narrowed to this space: a package homed here, holding a `space_packages` row here, or shipped with the platform, with `state` saying whether the space runs it — a placement switched off reads `inactive` and is switched on with `POST /api/spaces/{spaceId}/packages` like any other activation. The rows also include what the caller could still PLACE here, so the listing never proposes a package that door would refuse: for a TEAM destination, a package whose home grants them the type's `share` permission (`home_shareable`, since activating then places it); for a PERSONAL destination, nothing beyond what is already placed — placing into somebody's own space is somebody else's act. Such a candidate carries an EMPTY `placements` array. Each package type requires read permission in the target space. Activation remains subject to the target space's permissions, waived in the caller's own personal space. Personal spaces remain private and API keys remain pinned to their space.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { name: "spaceId", in: "path", required: true, schema: { type: "string" } },

@@ -3,12 +3,17 @@
 import type { Context, Next } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { getPackage } from "../services/package-catalog.ts";
+import { isInlineShadowPackageId } from "../services/inline-run.ts";
 import {
   agentExecutionBlock,
   assertPackageMutationAccess,
+  isInlineShadowRunReadable,
   isPackageReadableInSpace,
 } from "../lib/package-access.ts";
+import { canReadRuns } from "@appstrate/core/permissions";
+import { callerPermissions } from "../lib/permissions.ts";
 import { ApiError, forbidden, invalidRequest } from "../lib/errors.ts";
+import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { hasHandlerMarker, markHandler } from "./handler-marker.ts";
 import { PERMISSION_GUARD } from "./require-permission.ts";
 
@@ -22,8 +27,8 @@ const AGENT_LOOKUP = Symbol.for("appstrate.agentLookup");
  *  contract, and it is three. */
 const ACTIVE_AGENT_GATE = Symbol.for("appstrate.activeAgentGate");
 
-/** True when `handler` is a middleware produced by {@link requireAgent} — i.e.
- *  it can 404 on an unreachable agent. */
+/** True when `handler` is a middleware produced by {@link requireAgent} or
+ *  {@link requireAgentOrInlineRun} — i.e. it can 404 on an unreachable agent. */
 export function isAgentLookup(handler: unknown): boolean {
   return hasHandlerMarker(handler, AGENT_LOOKUP);
 }
@@ -36,7 +41,7 @@ export function isActiveAgentGate(handler: unknown): boolean {
 /**
  * Middleware: load an agent by route param and set it on context, or 404.
  *
- * The rule is PLACEMENT — the agent is homed in this space, offered to it, or
+ * The rule is PLACEMENT — the agent is homed in this space, placed in it, or
  * shipped with the deployment ({@link isPackageReadableInSpace}) — and nothing
  * else. An agent placed here and switched OFF is loaded like any other: reading
  * an agent, listing its runs, choosing its model and asking what is blocking it
@@ -52,15 +57,54 @@ export function isActiveAgentGate(handler: unknown): boolean {
  */
 export function requireAgent() {
   return markHandler(async (c: Context<AppEnv>, next: Next) => {
-    const scope = c.req.param("scope");
-    const name = c.req.param("name");
-    const packageId = `${scope}/${name}`;
+    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
+    const agent = await loadPlacedAgent(packageId, c.get("orgId"), c.get("spaceId"));
+    if (!agent) throw agentNotFound(packageId);
+    c.set("package", agent);
+    return next();
+  }, AGENT_LOOKUP);
+}
+
+/** The placement rule, written once: the agent of this org, readable in this
+ *  space ({@link isPackageReadableInSpace}) — or `null`. */
+async function loadPlacedAgent(packageId: string, orgId: string, spaceId: string) {
+  const agent = await getPackage(packageId, orgId);
+  if (!agent) return null;
+  return (await isPackageReadableInSpace(spaceId, packageId)) ? agent : null;
+}
+
+/** The shadow of a run the caller may read: `GET /api/runs/:id`'s rule — the
+ *  runs permission, then ownership — or `null`. */
+async function loadReadableShadow(c: Context<AppEnv>, packageId: string) {
+  if (!canReadRuns((p) => callerPermissions(c).has(p))) return null;
+  const orgId = c.get("orgId");
+  if (
+    !(await isInlineShadowRunReadable(orgId, c.get("spaceId"), packageId, runVisibilityFilter(c)))
+  )
+    return null;
+  return getPackage(packageId, orgId, { includeEphemeral: true });
+}
+
+/**
+ * Middleware: {@link requireAgent}, widened to an inline run's shadow
+ * (`@inline/r-<uuid>`) when the caller may read a run of it in this space
+ * ({@link isInlineShadowRunReadable}, under the run read rule). The shadow is
+ * never placed, yet its run files `note` / `pin` rows under its id. Mounted on
+ * ONE route: the persistence read of the run page.
+ */
+export function requireAgentOrInlineRun() {
+  return markHandler(async (c: Context<AppEnv>, next: Next) => {
+    const packageId = `${c.req.param("scope")}/${c.req.param("name")}`;
     const orgId = c.get("orgId");
     const spaceId = c.get("spaceId");
 
-    const agent = await getPackage(packageId, orgId);
+    // An `@inline/` id is a shadow and nothing else: no organization package can
+    // be created under a reserved scope (`assertPackageScopeNotReserved`), so
+    // there is no placed `@inline/` agent to fall back to.
+    const agent = isInlineShadowPackageId(packageId)
+      ? await loadReadableShadow(c, packageId)
+      : await loadPlacedAgent(packageId, orgId, spaceId);
     if (!agent) throw agentNotFound(packageId);
-    if (!(await isPackageReadableInSpace(spaceId, packageId))) throw agentNotFound(packageId);
     c.set("package", agent);
     return next();
   }, AGENT_LOOKUP);
@@ -163,10 +207,9 @@ export function requirePackageInOrg(action: "write" | "delete" = "write") {
  *  param does not match the key's bound org. Sessions are passed through
  *  unchanged — they legitimately see every org they belong to.
  *
- *  Why: issue #172. API keys carry an `orgId` scope but `/api/orgs/*`
- *  handlers historically resolved membership from the creator's `user.id`,
- *  letting a key issued in org A read/mutate other orgs the creator is a
- *  member of. Pin every `:orgId` route to the key's bound org. */
+ *  Why: an API key carries an `orgId` scope, while a `/api/orgs/*` handler
+ *  that resolves membership from the creator's `user.id` would let a key
+ *  issued in org A read/mutate other orgs the creator is a member of. Pin every `:orgId` route to the key's bound org. */
 export async function apiKeyOrgScopeGuard(c: Context<AppEnv>, next: Next) {
   if (c.get("authMethod") !== "api_key") return next();
   const paramOrgId = c.req.param("orgId");
@@ -189,7 +232,7 @@ export async function apiKeyOrgScopeGuard(c: Context<AppEnv>, next: Next) {
  *  end-user token pins a space too, and carries no `orgRole`, so
  *  `applySpacePermissions` returns early for it (RBAC spec §7.2) and nothing
  *  downstream compares the path space to the pinned one — an end-user of space
- *  A read space B's `run-config`, private spaces included (issue #1313). Both
+ *  A read space B's `run-config`, private spaces included. Both
  *  pinned kinds are confined here, once, instead of per route. */
 export async function pinnedSpaceScopeGuard(c: Context<AppEnv>, next: Next) {
   const pinnedSpaceId = c.get("spaceId");

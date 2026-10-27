@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * HMAC-signed event ingestion routes. Both platform containers (Phase 5)
+ * HMAC-signed event ingestion routes. Both platform containers
  * and remote CLIs post here — the auth model, the wire format, and the
  * handler logic are identical.
  *
@@ -360,7 +360,7 @@ export function createRunsEventsRouter() {
   // startup. This replaces the old seed-via-helper-volume delivery, whose
   // correctness depended on the run volume's driver — a tmpfs-backed `local`
   // volume is not shared between the seed helper and the agent container, so
-  // the bundle silently vanished and skills never materialised (issue #549).
+  // the bundle silently vanished and skills never materialised.
   // All three carry the same HMAC auth as the event routes: the runner proves
   // it is the run via a signature over the (empty) GET body, so no user
   // principal is involved.
@@ -406,7 +406,7 @@ export function createRunsEventsRouter() {
     return c.json(manifest);
   });
 
-  // POST /api/runs/:runId/files — agent-published run output (Phase 2).
+  // POST /api/runs/:runId/files — agent-published run output.
   //
   // The agent container streams a file it produced (an HTML report, a CSV, …)
   // here, either via the `publish_file` runtime tool or the entrypoint's

@@ -532,17 +532,14 @@ describe("runner preset", () => {
     const credentialId = await createApiKeyCredential({
       orgId: owner.orgId,
       userId: owner.user.id,
+      ownerUserId: null,
       label: "runner credential",
       providerId: "openai",
       apiKey: "sk-test-not-a-real-key",
     });
-    const modelDbId = await createOrgModel(
-      owner.orgId,
-      "Runner GPT",
-      "gpt-5.5",
-      owner.user.id,
+    const modelDbId = await createOrgModel(owner.orgId, "Runner GPT", "gpt-5.5", owner.user.id, {
       credentialId,
-    );
+    });
     await setDefaultModel(owner.orgId, modelDbId);
 
     // A run of the same agent, launched by someone else: the runner holds

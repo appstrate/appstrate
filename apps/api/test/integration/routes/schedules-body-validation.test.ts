@@ -42,13 +42,7 @@ import {
   createTestUser,
   type TestContext,
 } from "../../helpers/auth.ts";
-import {
-  seedEndUser,
-  seedPackage,
-  seedSchedule,
-  seedSpace,
-  seedSpaceMember,
-} from "../../helpers/seed.ts";
+import { seedPackage, seedSchedule, seedSpace, seedSpaceMember } from "../../helpers/seed.ts";
 
 /** A skill the fixture agent DECLARES and this caller writes (homed in their space). */
 const DECLARED_SKILL = "@schedbodyorg/dep-skill";
@@ -171,7 +165,9 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
     expect(row!.connectionOverrides).toEqual({ [INTEGRATION]: [] });
   });
 
-  it("rejects an EMPTY connection_overrides set on a required integration with 400", async () => {
+  // Not a static 400: under an imposed set `[]` adds nothing, so the resolver judges it — here,
+  // with nothing imposed, the schedule's own empty set on a required integration.
+  it("refuses an EMPTY connection_overrides set on a required integration nothing imposes (409)", async () => {
     const required = "@schedbodyorg/required-agent";
     await seedSchedulableAgent({
       id: required,
@@ -198,14 +194,14 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
         connection_overrides: { [INTEGRATION]: [] },
       }),
     });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(409);
     const problem = (await res.json()) as {
       code?: string;
-      errors?: { field: string; code: string }[];
+      errors?: { field: string; code: string; source?: string }[];
     };
-    expect(problem.code).toBe("validation_failed");
-    expect(problem.errors?.map((e) => [e.field, e.code])).toEqual([
-      [`connection_overrides.${INTEGRATION}`, "required_integration_unbound"],
+    expect(problem.code).toBe("missing_integration_connection");
+    expect(problem.errors?.map((e) => [e.field, e.code, e.source])).toEqual([
+      [`integrations.${INTEGRATION}`, "required_integration_unbound", "schedule_override"],
     ]);
     expect(await db.select().from(schedules)).toHaveLength(0);
   });
@@ -276,10 +272,14 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
       connection_overrides: { "@schedbodyorg/typo": await ownConnections(1) },
     });
     expect(res.status).toBe(400);
-    const problem = (await res.json()) as { code?: string; param?: string; detail?: string };
-    expect(problem.code).toBe("invalid_request");
-    expect(problem.param).toBe("connection_overrides");
-    expect(problem.detail).toContain("@schedbodyorg/typo");
+    const problem = (await res.json()) as { code?: string; errors?: unknown[] };
+    expect(problem.code).toBe("validation_failed");
+    expect(problem.errors).toEqual([
+      expect.objectContaining({
+        field: "connection_overrides.@schedbodyorg/typo",
+        code: "undeclared_connection_override",
+      }),
+    ]);
     expect(await db.select().from(schedules)).toHaveLength(0);
   });
 
@@ -304,9 +304,14 @@ describe("POST /api/agents/:scope/:name/schedules — body validation", () => {
       dependency_overrides: { "@schedbodyorg/undeclared": "draft" },
     });
     expect(res.status).toBe(400);
-    const problem = (await res.json()) as { code?: string; detail?: string };
-    expect(problem.code).toBe("invalid_request");
-    expect(problem.detail).toContain("@schedbodyorg/undeclared");
+    const problem = (await res.json()) as { code?: string; errors?: unknown[] };
+    expect(problem.code).toBe("validation_failed");
+    expect(problem.errors).toEqual([
+      expect.objectContaining({
+        field: "dependency_overrides.@schedbodyorg/undeclared",
+        code: "undeclared_dependency_override",
+      }),
+    ]);
   });
 
   it('accepts "draft" and a semver spec as dependency_overrides values (control)', async () => {
@@ -364,9 +369,14 @@ describe("PATCH /api/schedules/:id — body validation", () => {
   it("rejects a connection_overrides key the fired agent does not declare, and keeps the row", async () => {
     const res = await put({ connection_overrides: { "@schedputorg/typo": [crypto.randomUUID()] } });
     expect(res.status).toBe(400);
-    const problem = (await res.json()) as { code?: string; detail?: string };
-    expect(problem.code).toBe("invalid_request");
-    expect(problem.detail).toContain("@schedputorg/typo");
+    const problem = (await res.json()) as { code?: string; errors?: unknown[] };
+    expect(problem.code).toBe("validation_failed");
+    expect(problem.errors).toEqual([
+      expect.objectContaining({
+        field: "connection_overrides.@schedputorg/typo",
+        code: "undeclared_connection_override",
+      }),
+    ]);
     const [row] = await db.select().from(schedules).where(eq(schedules.id, scheduleId));
     expect(row!.connectionOverrides).toBeNull();
   });
@@ -472,14 +482,19 @@ describe("schedule writes — `dependency_overrides` draft authority", () => {
   });
 
   /** A member holding `builder` in each of `spaceIds`, and nothing anywhere else. */
-  async function builderOf(...spaceIds: string[]): Promise<Record<string, string>> {
+  async function builder(...spaceIds: string[]) {
     const user = await createTestUser();
     await addOrgMember(ctx.orgId, user.id, "member");
     for (const spaceId of spaceIds) {
       await seedSpaceMember({ spaceId, userId: user.id, presetRole: "builder" });
     }
-    return { Cookie: user.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": teamId };
+    return {
+      userId: user.id,
+      headers: { Cookie: user.cookie, "X-Org-Id": ctx.orgId, "X-Space-Id": teamId },
+    };
   }
+
+  const builderOf = async (...spaceIds: string[]) => (await builder(...spaceIds)).headers;
 
   /** Writes the schedules AND the agent; holds nothing in the skill's home. */
   const scheduleWriter = () => builderOf(teamId);
@@ -501,18 +516,21 @@ describe("schedule writes — `dependency_overrides` draft authority", () => {
     });
 
   /**
-   * A schedule armed by the skill's author — the only principal allowed to freeze `draft`. It
-   * runs as an end user: one running as another MEMBER is written by org owners/admins only,
-   * which would refuse the schedule writer before the override is judged.
+   * A schedule holding what the skill's author froze, running as the schedule writer who patches
+   * it. A schedule running as anyone else is written by org owners/admins (an end user's, by an
+   * API key too), which would refuse the writer before the override is judged.
    */
-  async function armedSchedule(dependencyOverrides?: Record<string, string>): Promise<string> {
-    const endUser = await seedEndUser({ orgId: ctx.orgId, spaceId: teamId });
-    const res = await postSchedule(await skillAuthor(), {
-      actor: { endUserId: endUser.id },
-      ...(dependencyOverrides ? { dependency_overrides: dependencyOverrides } : {}),
+  async function armedSchedule(dependencyOverrides?: Record<string, string>) {
+    const writer = await builder(teamId);
+    const row = await seedSchedule({
+      packageId: AGENT,
+      orgId: ctx.orgId,
+      spaceId: teamId,
+      userId: writer.userId,
+      cronExpression: "0 9 * * 1-5",
+      dependencyOverrides: dependencyOverrides ?? null,
     });
-    expect(res.status, await res.clone().text()).toBe(201);
-    return ((await res.json()) as { id: string }).id;
+    return { id: row.id, writer: writer.headers };
   }
 
   const storedRows = () => db.select().from(schedules).where(eq(schedules.packageId, AGENT));
@@ -544,8 +562,8 @@ describe("schedule writes — `dependency_overrides` draft authority", () => {
   });
 
   it("refuses a PATCH that ADDS the `draft` override to a schedule that did not hold it", async () => {
-    const id = await armedSchedule();
-    const res = await put(await scheduleWriter(), id, {
+    const { id, writer } = await armedSchedule();
+    const res = await put(writer, id, {
       dependency_overrides: { [SKILL]: "draft" },
     });
     expect(res.status, await res.clone().text()).toBe(403);
@@ -561,8 +579,8 @@ describe("schedule writes — `dependency_overrides` draft authority", () => {
     // reads the row and posts every field back, so a cron change arrives
     // carrying the override its author already proved. A stored value is not an
     // act — `movedDependencyOverrides` is what says so.
-    const id = await armedSchedule({ [SKILL]: "draft" });
-    const res = await put(await scheduleWriter(), id, {
+    const { id, writer } = await armedSchedule({ [SKILL]: "draft" });
+    const res = await put(writer, id, {
       cron_expression: "0 4 * * *",
       dependency_overrides: { [SKILL]: "draft" },
     });
@@ -578,8 +596,8 @@ describe("schedule writes — `dependency_overrides` draft authority", () => {
     // caller writes the AGENT (so the selector itself is theirs to move) but
     // holds nothing in the skill's home, so a route that re-judged the stored
     // `draft` entry's authority would answer 403 here.
-    const id = await armedSchedule({ [SKILL]: "draft" });
-    const res = await put(await scheduleWriter(), id, { version_override: "draft" });
+    const { id, writer } = await armedSchedule({ [SKILL]: "draft" });
+    const res = await put(writer, id, { version_override: "draft" });
     expect(res.status, await res.clone().text()).toBe(200);
     const [row] = await storedRows();
     expect(row?.versionOverride).toBe("draft");
@@ -590,8 +608,8 @@ describe("schedule writes — `dependency_overrides` draft authority", () => {
     // Taking a working copy away needs no authority at all — and an operator
     // who cannot undo a draft override is an operator who has to delete the
     // schedule to stop it.
-    const id = await armedSchedule({ [SKILL]: "draft" });
-    const res = await put(await scheduleWriter(), id, { dependency_overrides: {} });
+    const { id, writer } = await armedSchedule({ [SKILL]: "draft" });
+    const res = await put(writer, id, { dependency_overrides: {} });
     expect(res.status, await res.clone().text()).toBe(200);
     const [row] = await storedRows();
     expect(row?.dependencyOverrides).toEqual({});
@@ -696,11 +714,16 @@ describe("PATCH /api/schedules/:id — `dependency_overrides` keys vs. a MOVED m
     // pinned skill is not a declared dependency at all.
     const res = await put(id, { version_override: "draft" });
     expect(res.status, await res.clone().text()).toBe(400);
-    const problem = (await res.json()) as { code?: string; detail?: string };
-    expect(problem.code).toBe("invalid_request");
+    const problem = (await res.json()) as { code?: string; errors?: unknown[] };
+    expect(problem.code).toBe("validation_failed");
     // Naming the key is the whole value of refusing here rather than at the
     // tick: the author has to know WHICH pin their draft edit orphaned.
-    expect(problem.detail).toContain(SKILL);
+    expect(problem.errors).toEqual([
+      expect.objectContaining({
+        field: `dependency_overrides.${SKILL}`,
+        code: "undeclared_dependency_override",
+      }),
+    ]);
     // Still armed on the selector it was written with — a refused patch
     // applies nothing.
     const [row] = await db.select().from(schedules).where(eq(schedules.id, id));

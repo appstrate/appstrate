@@ -14,7 +14,9 @@
 import { describe, it, expect } from "bun:test";
 import { z } from "zod";
 import {
+  API_CALL_BODY_FROM_FILE_RULE,
   apiCallRequestSchema,
+  apiCallTargetJsonSchema,
   makeApiCallTool,
   ABSOLUTE_MAX_RESPONSE_SIZE,
 } from "../../src/resolvers/http-call-core.ts";
@@ -52,6 +54,14 @@ function makeTool() {
 // ─── Schema parse tests ───────────────────────────────────────────────────────
 
 describe("apiCallRequestSchema — valid inputs", () => {
+  it("accepts a templated port, as the published JSON schema does", () => {
+    const result = apiCallRequestSchema.safeParse({
+      method: "GET",
+      target: "https://a.com:{{port}}/x",
+    });
+    expect(result.success).toBe(true);
+  });
+
   it("parses a minimal request (method + target only)", () => {
     const result = apiCallRequestSchema.safeParse({
       method: "GET",
@@ -331,6 +341,56 @@ describe("apiCallRequestSchema — invalid inputs", () => {
 // The schema rejects them at parse time so the transport layer never has
 // to think about it.
 
+describe("apiCallRequestSchema — target", () => {
+  const accepts = (target: string) =>
+    apiCallRequestSchema.safeParse({ method: "GET", target }).success;
+
+  it("accepts an http(s) URL with {{field}}s in the path, query or host", () => {
+    expect(accepts("https://share.garmin.com/feed/share/{{mapshare_id}}")).toBe(true);
+    expect(accepts("https://api.example.com/x?id={{id}}&k={{ key }}")).toBe(true);
+    expect(accepts("https://{{tenant}}.example.com/x")).toBe(true);
+    expect(accepts("HTTPS://api.example.com/x")).toBe(true);
+    expect(accepts("{{base_url}}/x")).toBe(true);
+  });
+
+  it("accepts a base-URL {{field}} followed by a query or a fragment", () => {
+    expect(accepts("{{base_url}}?d1=2026-01-01")).toBe(true);
+    expect(accepts("{{base_url}}#f")).toBe(true);
+    expect(accepts("{{base_url}}")).toBe(true);
+  });
+
+  it("rejects a {{field}} that does not stand for a whole base URL", () => {
+    for (const target of [
+      "{{base_url}}x",
+      "{{base_url}}.evil.com",
+      "{{a}}{{b}}",
+      "x{{base_url}}",
+    ]) {
+      expect(accepts(target)).toBe(false);
+    }
+  });
+
+  it("rejects a non-http(s) scheme, an empty host and garbage", () => {
+    for (const target of [
+      "ftp://api.example.com/x",
+      "javascript:alert(1)",
+      "https://",
+      "not a url",
+    ]) {
+      expect(accepts(target)).toBe(false);
+    }
+  });
+
+  it("rejects a backslash in the authority: WHATWG reads it as a path delimiter", () => {
+    expect(accepts("https://api.x.com\\{{seg}}")).toBe(false);
+    expect(accepts("https://api.x.com/a\\b")).toBe(true);
+  });
+
+  it("publishes no `format: uri`, which refuses `{` and `}`", () => {
+    expect(JSON.stringify(apiCallTargetJsonSchema)).not.toContain('"format"');
+  });
+});
+
 describe("apiCallRequestSchema — multipart header-injection guard", () => {
   const baseRequest = (
     part: Record<string, unknown>,
@@ -583,5 +643,11 @@ describe("generated JSON schema structure", () => {
     const body = props["body"] as Record<string, unknown>;
     expect(typeof body.description).toBe("string");
     expect((body.description as string).length).toBeGreaterThan(0);
+  });
+
+  it("states the write-the-body-to-a-file rule on the body field", () => {
+    const props = schema.properties as Record<string, unknown>;
+    const body = props["body"] as Record<string, unknown>;
+    expect(body.description as string).toContain(API_CALL_BODY_FROM_FILE_RULE);
   });
 });

@@ -1,40 +1,42 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { Link } from "react-router-dom";
+import { Globe, Plus } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { Checkbox } from "@appstrate/ui/components/checkbox";
 import { Label } from "@appstrate/ui/components/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
-import { LazySchemaForm as SchemaForm } from "../lazy-schema-form";
+import { SelectItem } from "@appstrate/ui/components/select";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { useSchemaFormLabels } from "../../hooks/use-schema-form-labels";
 import { useUploadClient } from "../../hooks/use-upload";
-import { getModelIcon } from "../icons";
-import { useProvidersRegistry } from "../../hooks/use-model-provider-credentials";
 import {
   useModels,
   useAgentModel,
   useSetAgentModel,
   type OrgModelInfo,
 } from "../../hooks/use-models";
-import { isModelPinUnavailable, isModelSelectable } from "../../lib/model-selectability";
-import { ModelUnselectableNote } from "../model-availability-badge";
+import { isModelPinUnavailable } from "../../lib/model-selectability";
+import { ModelSelect } from "../model-select";
 import { useProxies, useAgentProxy, useSetAgentProxy } from "../../hooks/use-proxies";
+import { useCanReach } from "../../hooks/use-can-reach";
+import { usePermissions } from "../../hooks/use-permissions";
+import { EmptyState } from "../page-states";
 import { usePackageDetail } from "../../hooks/use-packages";
 import { useSaveInputSettings } from "../../hooks/use-mutations";
+import { useSettingDraft } from "../../hooks/use-setting-draft";
+import { ManualSave } from "../settings/manual-save";
 import { authorDefaults, getOrderedKeys, type SchemaWrapper } from "@appstrate/core/form";
-import { formatInputValue, hasInputFields, subsetWrapper } from "../../lib/agent-input";
+import { formatInputValue, hasInputFields } from "../../lib/agent-input";
 import {
   reconcileModelGenerationSettings,
   type ModelGenerationSettings,
 } from "@appstrate/core/model-generation";
+import { JsonView } from "../json-view";
+import { SettingsSkeleton } from "../loading-skeletons";
+import { SettingRow } from "../settings/setting-row";
+import { SaveFeedback } from "../settings/save-feedback";
+import { InputFieldRow } from "../settings/input-field-row";
 import { ModelGenerationFields } from "../model-generation-fields";
 
 // ─── Input Settings Section ─────────────────────────────────────────
@@ -53,6 +55,8 @@ import { ModelGenerationFields } from "../model-generation-fields";
  * legitimate and means "ask it at launch". Locking a required field with
  * nothing behind it is the one refused combination (400
  * `locked_required_field_empty`), surfaced as a toast naming the field.
+ *
+ * Save sends the values and locks together after explicit confirmation.
  */
 function InputSettingsSection({
   packageId,
@@ -67,33 +71,34 @@ function InputSettingsSection({
   initialLocked: string[];
   isHistorical?: boolean;
 }) {
-  const { t } = useTranslation(["agents", "common"]);
   const mutation = useSaveInputSettings(packageId);
   const labels = useSchemaFormLabels();
   const upload = useUploadClient();
-  const [values, setValues] = useState<Record<string, unknown>>(initialValues);
-  const [locked, setLocked] = useState<string[]>(initialLocked);
+  const draft = useSettingDraft({ values: initialValues, locked_fields: initialLocked });
+  const { values, locked_fields: locked } = draft.value;
 
   const defaults = authorDefaults(wrapper.schema);
   const keys = getOrderedKeys(wrapper.schema, wrapper.property_order);
 
   const setFieldValue = (key: string, next: unknown) => {
-    setValues((prev) => {
-      const out = { ...prev };
-      if (next === undefined) delete out[key];
-      else out[key] = next;
-      return out;
+    draft.set((previous) => {
+      const values = { ...previous.values };
+      if (next === undefined) delete values[key];
+      else values[key] = next;
+      return { ...previous, values };
     });
   };
-
   const toggleLock = (key: string, on: boolean) =>
-    setLocked((prev) => (on ? [...prev, key] : prev.filter((k) => k !== key)));
+    draft.set((previous) => ({
+      ...previous,
+      locked_fields: on
+        ? [...previous.locked_fields, key]
+        : previous.locked_fields.filter((field) => field !== key),
+    }));
 
   return (
-    <div className="border-border bg-card space-y-3 rounded-lg border p-4">
-      <h3 className="text-sm font-medium">{t("detail.inputSettings.title")}</h3>
-      <p className="text-muted-foreground text-xs">{t("detail.inputSettings.hint")}</p>
-      <div className="space-y-4">
+    <div className="flex flex-col gap-3 py-4">
+      <div className="flex flex-col gap-4">
         {keys.map((key) => (
           <InputSettingRow
             key={key}
@@ -102,7 +107,7 @@ function InputSettingsSection({
             value={values[key]}
             authorDefault={defaults[key]}
             locked={locked.includes(key)}
-            disabled={isHistorical}
+            disabled={isHistorical || mutation.isPending}
             labels={labels}
             upload={upload}
             onValueChange={(next) => setFieldValue(key, next)}
@@ -110,15 +115,15 @@ function InputSettingsSection({
           />
         ))}
       </div>
-      <div className="flex justify-end pt-2">
-        <Button
-          onClick={() => mutation.mutate({ values, locked_fields: locked })}
-          disabled={mutation.isPending || isHistorical}
-          size="sm"
-        >
-          {mutation.isPending ? "..." : t("btn.save")}
-        </Button>
-      </div>
+      <ManualSave
+        dirty={draft.dirty}
+        onDiscard={draft.reset}
+        onSave={async () => {
+          const sent = draft.value;
+          await mutation.mutateAsync(sent);
+          draft.accept(sent);
+        }}
+      />
     </div>
   );
 }
@@ -147,33 +152,21 @@ function InputSettingRow({
   onLockChange: (locked: boolean) => void;
 }) {
   const { t } = useTranslation(["agents"]);
-  const subset = subsetWrapper(wrapper, [fieldKey]);
-  if (!subset) return null;
-  // `required` is dropped exactly as the server drops it: an empty value here
-  // means "not decided — ask at launch", not "invalid".
-  const fieldWrapper: SchemaWrapper = {
-    ...subset,
-    schema: { type: "object", properties: subset.schema.properties },
-  };
-
   return (
-    <div className="space-y-1.5" data-testid={`input-setting-${fieldKey}`}>
-      <SchemaForm
-        wrapper={fieldWrapper}
-        formData={value === undefined ? {} : { [fieldKey]: value }}
-        upload={upload}
-        labels={labels}
-        disabled={disabled}
-        onChange={(e) => onValueChange((e.formData as Record<string, unknown>)[fieldKey])}
-      />
-      <div className="flex items-center justify-between gap-3">
-        {authorDefault !== undefined ? (
-          <p className="text-muted-foreground text-xs">
-            {t("detail.inputSettings.authorDefault", { value: formatInputValue(authorDefault) })}
-          </p>
-        ) : (
-          <span />
-        )}
+    <InputFieldRow
+      fieldKey={fieldKey}
+      wrapper={wrapper}
+      value={value}
+      disabled={disabled}
+      labels={labels}
+      upload={upload}
+      onValueChange={onValueChange}
+      hint={
+        authorDefault !== undefined
+          ? t("detail.inputSettings.authorDefault", { value: formatInputValue(authorDefault) })
+          : undefined
+      }
+      control={
         <div className="flex items-center gap-1.5">
           <Checkbox
             id={`lock-${fieldKey}`}
@@ -189,28 +182,23 @@ function InputSettingRow({
             {t("detail.inputSettings.lock")}
           </Label>
         </div>
-      </div>
-    </div>
+      }
+    />
   );
 }
 
 // ─── Model Section ──────────────────────────────────────────────────
 
 function ModelSection({ packageId }: { packageId: string }) {
-  const { data: orgModels } = useModels();
-  const { data: agentModel } = useAgentModel(packageId);
+  const { data: orgModels, isLoading: modelsLoading } = useModels();
+  const { data: agentModel, isLoading: agentModelLoading } = useAgentModel(packageId);
+  if (modelsLoading || agentModelLoading) return <SettingsSkeleton rows={3} />;
   if (!orgModels || orgModels.length === 0 || !agentModel) return null;
 
   const generation = agentModel.generation ?? {};
-  const editorKey = [
-    agentModel.modelId ?? "inherit",
-    generation.temperature ?? "inherit",
-    generation.reasoning_level ?? "inherit",
-  ].join(":");
 
   return (
     <ModelSectionEditor
-      key={editorKey}
       packageId={packageId}
       orgModels={orgModels}
       initialModelId={agentModel.modelId}
@@ -231,10 +219,9 @@ function ModelSectionEditor({
   initialGeneration: ModelGenerationSettings;
 }) {
   const { t } = useTranslation(["settings", "agents"]);
-  const { data: registry } = useProvidersRegistry();
   const setAgentModel = useSetAgentModel(packageId);
-  const [modelId, setModelId] = useState<string | null>(initialModelId);
-  const [generation, setGeneration] = useState<ModelGenerationSettings>(initialGeneration);
+  const draft = useSettingDraft({ modelId: initialModelId, generation: initialGeneration });
+  const { modelId, generation } = draft.value;
 
   // Unfiltered on purpose — see the same call in `run-overrides-panel.tsx`:
   // the inherited default must be named even when it is unusable.
@@ -242,115 +229,134 @@ function ModelSectionEditor({
   const resolvedModel = modelId ? orgModels.find((m) => m.id === modelId) : orgDefaultModel;
 
   return (
-    <div className="border-border bg-card space-y-3 rounded-lg border p-4">
-      <h3 className="text-sm font-medium">{t("models.tabTitle", { ns: "settings" })}</h3>
-      <Select
-        value={modelId ?? "__inherit__"}
-        onValueChange={(value) => {
-          const nextModelId = value === "__inherit__" ? null : value;
-          const nextModel = nextModelId
-            ? orgModels.find((model) => model.id === nextModelId)
-            : orgDefaultModel;
-          setModelId(nextModelId);
-          setGeneration((current) =>
-            reconcileModelGenerationSettings(current, nextModel?.generation),
-          );
-        }}
-        disabled={setAgentModel.isPending}
+    <>
+      <SettingRow
+        label={t("detail.configuration.modelChoice", { ns: "agents" })}
+        description={
+          <>
+            {t("detail.configuration.modelDescription", { ns: "agents" })}
+            {isModelPinUnavailable(orgModels, modelId) && (
+              <span className="text-warning block" data-testid="agent-model-pin-unavailable">
+                {t("input.modelPinUnavailable", { ns: "agents" })}
+              </span>
+            )}
+          </>
+        }
       >
-        <SelectTrigger>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="__inherit__">
-            <span className="inline-flex items-center gap-1.5">
-              {orgDefaultModel
-                ? t("models.agent.inherit", { ns: "settings", name: orgDefaultModel.label })
-                : t("models.agent.inheritNoDefault", { ns: "settings" })}
-              {orgDefaultModel && <ModelUnselectableNote model={orgDefaultModel} />}
-            </span>
-          </SelectItem>
-          {orgModels.map((m) => {
-            const MIcon = getModelIcon(m, registry ?? []);
-            return (
-              <SelectItem key={m.id} value={m.id} disabled={!isModelSelectable(m)}>
-                <span className="inline-flex items-center gap-1.5">
-                  {MIcon && <MIcon className="size-3.5" />}
-                  {m.label}
-                  <ModelUnselectableNote model={m} />
-                </span>
-              </SelectItem>
+        <ModelSelect
+          models={orgModels}
+          value={modelId}
+          inherit={{
+            label: orgDefaultModel
+              ? t("models.agent.inherit", { ns: "settings", name: orgDefaultModel.label })
+              : t("models.agent.inheritNoDefault", { ns: "settings" }),
+            modelId: orgDefaultModel?.id ?? null,
+          }}
+          onChange={(nextModelId) => {
+            const nextModel = nextModelId
+              ? orgModels.find((model) => model.id === nextModelId)
+              : orgDefaultModel;
+            const nextGeneration = reconcileModelGenerationSettings(
+              generation,
+              nextModel?.generation,
             );
-          })}
-        </SelectContent>
-      </Select>
-      {isModelPinUnavailable(orgModels, modelId) && (
-        <p className="text-warning text-xs" data-testid="agent-model-pin-unavailable">
-          {t("input.modelPinUnavailable", { ns: "agents" })}
-        </p>
-      )}
-      <ModelGenerationFields
-        value={generation}
-        model={resolvedModel}
-        onChange={setGeneration}
-        disabled={setAgentModel.isPending}
-      />
-      <div className="flex justify-end">
-        <Button
-          size="sm"
+            draft.set({ modelId: nextModelId, generation: nextGeneration });
+          }}
           disabled={setAgentModel.isPending}
-          onClick={() =>
-            setAgentModel.mutate(
-              { modelId, generation: Object.keys(generation).length > 0 ? generation : null },
-              { onSuccess: () => toast.success(t("models.agent.saved")) },
-            )
-          }
-        >
-          {t("models.generation.save")}
-        </Button>
-      </div>
-    </div>
+        />
+      </SettingRow>
+
+      <ModelGenerationFields
+        model={resolvedModel}
+        value={generation}
+        disabled={setAgentModel.isPending}
+        onChange={(nextGeneration) => {
+          draft.set({ modelId, generation: nextGeneration });
+        }}
+      />
+      <ManualSave
+        dirty={draft.dirty}
+        onDiscard={draft.reset}
+        onSave={async () => {
+          const sent = draft.value;
+          await setAgentModel.mutateAsync({
+            modelId: sent.modelId,
+            generation: Object.keys(sent.generation).length ? sent.generation : null,
+          });
+          draft.accept(sent);
+        }}
+      />
+    </>
   );
 }
 
 // ─── Proxy Section ──────────────────────────────────────────────────
 
+/** The organization has no proxy to route through: the button opens the proxy creation itself. */
+function NoProxyState() {
+  const { t } = useTranslation(["agents", "settings"]);
+  const canReach = useCanReach();
+  const { can } = usePermissions();
+  return (
+    <EmptyState
+      icon={Globe}
+      compact
+      message={t("detail.configuration.proxyEmpty")}
+      hint={t("detail.configuration.proxyEmptyHint")}
+    >
+      {canReach("/org-settings/proxies") && can("proxies:write") && (
+        <Button asChild variant="outline" size="sm">
+          <Link to="/org-settings/proxies?newProxy=1">
+            <Plus />
+            {t("proxies.add", { ns: "settings" })}
+          </Link>
+        </Button>
+      )}
+    </EmptyState>
+  );
+}
+
 function ProxySection({ packageId }: { packageId: string }) {
   const { t } = useTranslation(["agents", "settings"]);
-  const { data: orgProxies } = useProxies();
-  const { data: agentProxy } = useAgentProxy(packageId);
+  const { data: orgProxies, isLoading: orgProxiesLoading } = useProxies();
+  const { data: agentProxy, isLoading: agentProxyLoading } = useAgentProxy(packageId);
   const setAgentProxy = useSetAgentProxy(packageId);
-  if (!orgProxies || orgProxies.length === 0) return null;
+  if (orgProxiesLoading || agentProxyLoading) return <SettingsSkeleton rows={1} />;
+  if (!orgProxies) return null;
+  if (orgProxies.length === 0) return <NoProxyState />;
 
   const agentProxyId = agentProxy?.proxyId;
   const orgDefaultProxy = orgProxies.find((p) => p.is_default && p.enabled);
 
   return (
-    <div className="border-border bg-card space-y-3 rounded-lg border p-4">
-      <h3 className="text-sm font-medium">{t("detail.configSectionProxy")}</h3>
-      <Select
-        value={agentProxyId ?? "__inherit__"}
-        onValueChange={(v) => setAgentProxy.mutate(v === "__inherit__" ? null : v)}
-        disabled={setAgentProxy.isPending}
+    <>
+      <SettingRow
+        label={t("detail.configuration.proxyRoute")}
+        description={t("detail.configuration.proxyDescription")}
       >
-        <SelectTrigger>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="__inherit__">
-            {orgDefaultProxy
-              ? t("proxies.agent.inherit", { ns: "settings", name: orgDefaultProxy.label })
-              : t("proxies.agent.inheritNoDefault", { ns: "settings" })}
-          </SelectItem>
-          <SelectItem value="none">{t("proxies.agent.none", { ns: "settings" })}</SelectItem>
-          {orgProxies.map((p) => (
-            <SelectItem key={p.id} value={p.id}>
-              {p.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
+        <OptionSelect
+          value={agentProxyId ?? "__inherit__"}
+          onValueChange={(v) => setAgentProxy.mutate(v === "__inherit__" ? null : v)}
+          disabled={setAgentProxy.isPending}
+          leading={
+            <>
+              <SelectItem value="__inherit__">
+                {orgDefaultProxy
+                  ? t("proxies.agent.inherit", { ns: "settings", name: orgDefaultProxy.label })
+                  : t("models.default", { ns: "settings" })}
+              </SelectItem>
+              <SelectItem value="none">{t("proxies.agent.none", { ns: "settings" })}</SelectItem>
+            </>
+          }
+          options={orgProxies.map((p) => ({ value: p.id, label: p.label }))}
+        />
+      </SettingRow>
+      <SaveFeedback
+        pending={setAgentProxy.isPending}
+        success={setAgentProxy.isSuccess}
+        error={setAgentProxy.isError}
+      />
+    </>
   );
 }
 
@@ -360,11 +366,14 @@ export function AgentConfigurationTab({
   packageId,
   inputWrapperOverride,
   isHistorical,
+  section,
 }: {
   packageId: string;
   /** The pinned version's input wrapper — the schema a historical view edits against. */
   inputWrapperOverride?: SchemaWrapper;
   isHistorical?: boolean;
+  /** One section per settings entry: the rail decides which, this renders it. */
+  section: "model" | "proxy" | "inputs";
 }) {
   const { t } = useTranslation(["agents"]);
   const { data: detail } = usePackageDetail("agent", packageId);
@@ -372,26 +381,41 @@ export function AgentConfigurationTab({
   const wrapper = inputWrapperOverride ?? detail?.input;
   const showInputSettings = hasInputFields(wrapper);
 
-  return (
-    <div className="space-y-4">
-      <p className="text-muted-foreground text-sm">{t("detail.tabConfigurationHint")}</p>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <ModelSection packageId={packageId} />
-        <ProxySection packageId={packageId} />
+  if (section === "model") return <ModelSection packageId={packageId} />;
+  if (section === "proxy") return <ProxySection packageId={packageId} />;
+
+  // section === "inputs" — a pinned version has no editable defaults: the
+  // settings belong to the installation, not to the frozen bundle.
+  if (isHistorical) {
+    return (
+      <div className="flex flex-col gap-4">
+        <p className="text-muted-foreground text-sm">
+          {t("detail.configuration.historicalDefaultsUnavailable")}
+        </p>
+        {showInputSettings && wrapper && (
+          <div className="rounded-lg border p-4">
+            <h3 className="mb-3 text-sm font-medium">{t("detail.bundle.inputSchema")}</h3>
+            <JsonView data={wrapper.schema} />
+          </div>
+        )}
       </div>
-      {showInputSettings && wrapper && detail && (
-        <InputSettingsSection
-          // Remounted when the saved settings change, so the editor's local
-          // state restarts from what the server now holds rather than from a
-          // stale snapshot taken before the write.
-          key={JSON.stringify([detail.input.values, detail.input.locked_fields])}
-          packageId={packageId}
-          wrapper={wrapper}
-          initialValues={detail.input.values}
-          initialLocked={detail.input.locked_fields}
-          isHistorical={isHistorical}
-        />
-      )}
-    </div>
+    );
+  }
+
+  if (!detail) return null;
+  if (!showInputSettings || !wrapper) {
+    return <p className="text-muted-foreground text-sm">{t("detail.emptyConfig")}</p>;
+  }
+
+  return (
+    <InputSettingsSection
+      // Not remounted when the saved settings change: the draft keeps unsaved
+      // edits across refetches, and a remount would take the focus away mid-typing.
+      packageId={packageId}
+      wrapper={wrapper}
+      initialValues={detail.input.values}
+      initialLocked={detail.input.locked_fields}
+      isHistorical={isHistorical}
+    />
   );
 }

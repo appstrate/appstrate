@@ -1,138 +1,164 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { useRef, useState, useEffect, useCallback } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { createPath, useBlocker, useLocation, type BlockerFunction } from "react-router-dom";
+import { leavesEditor, type EditorPlace } from "../lib/editor-place";
 
 export interface UnsavedBlocker {
   state: "blocked" | "unblocked";
+  /** Other forms are dirty too: leaving discards them all, so "save and leave" is not offered. */
+  othersDirty: boolean;
   proceed: () => void;
   reset: () => void;
 }
 
-// Capture the real push/replaceState once at module load, before any patching.
-const originalPushState = history.pushState.bind(history);
-const originalReplaceState = history.replaceState.bind(history);
+export const EditorPlaceContext = createContext<EditorPlace>(() => "");
+
+interface Guard {
+  id: symbol;
+  /** The location the form renders at (under an overlay, the page beneath it). */
+  path: string;
+  place: EditorPlace;
+  dirty: boolean;
+  /** `allowNavigation`, or a scope change the user agreed to: the draft is let go. */
+  skip: boolean;
+  /** Drops the draft, so a form that outlives a scope change is clean and guarded again. */
+  discard: () => void;
+}
+
+/** A leave decision waiting on the user, shown by the one form it names. */
+interface Ask {
+  id: symbol;
+  othersDirty: boolean;
+  proceed: () => void;
+  reset: () => void;
+}
+
+const guards = new Map<symbol, Guard>();
+const dirtyGuards = () => [...guards.values()].filter((guard) => guard.dirty && !guard.skip);
+
+let ask: Ask | null = null;
+const listeners = new Set<() => void>();
+function setAsk(next: Ask | null) {
+  ask = next;
+  for (const listener of listeners) listener();
+}
+const subscribeAsk = (listener: () => void) => {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+};
+const getAsk = () => ask;
+
+/** The form a blocked navigation would discard first, chosen when the router asks. */
+let leaving: Omit<Ask, "proceed" | "reset"> | null = null;
+
+const shouldBlock: BlockerFunction = ({ nextLocation }) => {
+  const dirty = dirtyGuards();
+  const to = new URL(createPath(nextLocation), window.location.origin);
+  const guard = dirty.find((g) => leavesEditor(new URL(g.path, to), to, g.place));
+  leaving = guard ? { id: guard.id, othersDirty: dirty.length > 1 } : null;
+  return leaving !== null;
+};
 
 /**
- * Blocks all in-app navigation (Link, navigate(), pushState, popstate, tab close)
- * when `isDirty` is true.  Works with BrowserRouter — no data router needed.
- *
- * Monkey-patches `history.pushState` while active so that every SPA navigation
- * is intercepted regardless of source (Link, navigate(), sidebar, logo, modals…).
- * The patch is removed on cleanup or when `isDirty` becomes false.
+ * The app's one router blocker (React Router allows one): a navigation that unmounts a
+ * dirty form asks once for every dirty form. Mount once, inside the data router.
  */
-export function useUnsavedChanges(isDirty: boolean) {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const skipRef = useRef(false);
-  const [blocked, setBlocked] = useState(false);
-  const pendingPath = useRef<string | null>(null);
-
-  // Keep isDirty in a ref so the patched pushState reads the latest value
-  // without needing to re-patch on every change.
-  const dirtyRef = useRef(isDirty);
-
-  // Reset the skip flag and sync dirtyRef whenever dirty state changes.
+export function UnsavedChangesGuard() {
+  const blocker = useBlocker(shouldBlock);
   useEffect(() => {
-    dirtyRef.current = isDirty;
-    skipRef.current = false;
-  }, [isDirty]);
-
-  // ── Monkey-patch history.push/replaceState ─────────────────────────
-  // Both are patched: `navigate(path, { replace: true })` (and the router's
-  // redirect/replace flows) go through replaceState, which the old
-  // push-only patch let slip through, silently discarding unsaved edits.
-  useEffect(() => {
-    if (!isDirty) return;
-
-    const patch =
-      (original: typeof history.pushState) =>
-      (data: unknown, unused: string, url?: string | URL | null) => {
-        if (skipRef.current || !dirtyRef.current) {
-          original(data, unused, url);
-          return;
-        }
-        const target = url ? new URL(url.toString(), window.location.origin).pathname : null;
-        if (target && target !== location.pathname) {
-          pendingPath.current = target;
-          setBlocked(true);
-          return; // navigation blocked
-        }
-        // Same pathname (hash/search change only) — let through.
-        original(data, unused, url);
-      };
-
-    history.pushState = patch(originalPushState);
-    history.replaceState = patch(originalReplaceState);
-
+    if (blocker.state !== "blocked" || !leaving) return;
+    const mine: Ask = { ...leaving, proceed: blocker.proceed, reset: blocker.reset };
+    setAsk(mine);
     return () => {
-      history.pushState = originalPushState;
-      history.replaceState = originalReplaceState;
+      if (ask === mine) setAsk(null);
     };
-  }, [isDirty, location.pathname]);
-
-  // ── Intercept browser back/forward ─────────────────────────────────
+  }, [blocker]);
   useEffect(() => {
-    if (!isDirty) return;
-
-    const handler = () => {
-      if (skipRef.current) return;
-      // The browser already changed the URL — push current path back to undo.
-      pendingPath.current = window.location.pathname;
-      originalPushState(null, "", location.pathname);
-      setBlocked(true);
+    const unload = (event: BeforeUnloadEvent) => {
+      if (dirtyGuards().length === 0) return;
+      event.preventDefault();
+      event.returnValue = "";
     };
+    window.addEventListener("beforeunload", unload);
+    return () => window.removeEventListener("beforeunload", unload);
+  }, []);
+  return null;
+}
 
-    window.addEventListener("popstate", handler);
-    return () => window.removeEventListener("popstate", handler);
-  }, [isDirty, location.pathname]);
+/** Store scope changes can unmount editors without changing the URL. Guard before mutating stores. */
+export function requestScopeChange(action: () => void): void {
+  const dirty = dirtyGuards();
+  if (dirty.length === 0) {
+    action();
+    return;
+  }
+  setAsk({
+    id: dirty[0]!.id,
+    othersDirty: dirty.length > 1,
+    proceed: () => {
+      setAsk(null);
+      // "Leave without saving" drops every draft. `skip` covers the navigation the change
+      // may start before the forms re-render clean; a clean form clears it and is guarded
+      // again (a form that stays mounted, such as an account preference, included).
+      for (const guard of dirtyGuards()) {
+        guard.skip = true;
+        guard.discard();
+      }
+      action();
+    },
+    reset: () => setAsk(null),
+  });
+}
 
-  // ── Warn on browser tab close / refresh ────────────────────────────
-  useEffect(() => {
+const noop = () => {};
+
+export function useUnsavedChanges(
+  isDirty: boolean,
+  discard: () => void,
+): {
+  blocker: UnsavedBlocker;
+  allowNavigation: (allowed?: boolean) => void;
+} {
+  const location = useLocation();
+  const place = useContext(EditorPlaceContext);
+  const [id] = useState(() => Symbol());
+  const guard = useRef<Guard>({ id, path: "", place, dirty: isDirty, skip: false, discard });
+  const path = createPath(location);
+  useLayoutEffect(() => {
+    Object.assign(guard.current, { path, place, dirty: isDirty, discard });
+    if (!isDirty) guard.current.skip = false;
+  }, [path, place, isDirty, discard]);
+  useLayoutEffect(() => {
     if (!isDirty) return;
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      // Legacy browsers (and some Chromium versions) only raise the native
-      // "leave site?" prompt when `returnValue` is set, so preventDefault
-      // alone is not enough to guarantee the confirmation dialog.
-      e.returnValue = "";
+    guards.set(id, guard.current);
+    return () => {
+      guards.delete(id);
     };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [isDirty]);
-
-  /**
-   * Open the blocker for a navigation the editor itself is about to make (the
-   * redirect a successful submit ends on), and close it again when that
-   * navigation does not happen. A save that fails leaves the edits in the page,
-   * so the blocker has to be armed again: `allowNavigation(false)` is that,
-   * because the flag otherwise stays open until `isDirty` changes — which a
-   * failed save does not do.
-   */
+  }, [id, isDirty]);
   const allowNavigation = useCallback((allowed = true) => {
-    skipRef.current = allowed;
+    guard.current.skip = allowed;
   }, []);
-
-  const proceed = useCallback(() => {
-    setBlocked(false);
-    const path = pendingPath.current;
-    pendingPath.current = null;
-    if (path) {
-      skipRef.current = true;
-      navigate(path);
-    }
-  }, [navigate]);
-
-  const reset = useCallback(() => {
-    setBlocked(false);
-    pendingPath.current = null;
-  }, []);
-
-  const blocker: UnsavedBlocker = {
-    state: blocked ? "blocked" : "unblocked",
-    proceed,
-    reset,
+  const asked = useSyncExternalStore(subscribeAsk, getAsk, getAsk);
+  const mine = asked?.id === id ? asked : null;
+  return {
+    blocker: {
+      state: mine ? "blocked" : "unblocked",
+      othersDirty: mine?.othersDirty ?? false,
+      proceed: mine?.proceed ?? noop,
+      reset: mine?.reset ?? noop,
+    },
+    allowNavigation,
   };
-
-  return { blocker, allowNavigation };
 }

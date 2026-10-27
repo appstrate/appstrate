@@ -38,7 +38,10 @@ const host: ChatHost = {
   useFileImageSrc: () => null,
   t: (key) => key,
   can: () => false,
+  personalModelCredentials: true,
+  modelCredentials: [],
   formatBytes: String,
+  onPackagesChanged: () => {},
 };
 
 function Card({ expiresAt }: { expiresAt?: string }) {

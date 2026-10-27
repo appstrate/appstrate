@@ -2,11 +2,12 @@
 
 # Subscription Credential Compliance Posture
 
-**Last reviewed: 2026-07-08** (code half rewritten for the single Pi execution
-engine). The third-party-subscription ToS landscape shifted repeatedly through
-2026 (ban → enforce → reverse → pause for Anthropic; unblocked but unendorsed for
-OpenAI). **Re-verify the current vendor terms before relying on this document** —
-the policy half is volatile; the code half is stable.
+**Last reviewed: 2026-10-10.** The Anthropic facts come from Anthropic's primary
+page (§2.1); the OpenAI facts come from OpenAI's developer and help pages
+(§2.2). The third-party-subscription ToS landscape shifted repeatedly through
+2026 (ban → enforce → reverse → pause for Anthropic; a plan-usage sharing scope
+for OpenAI). **Re-verify the current vendor terms before relying on this
+document** — the policy half is volatile; the code half is stable.
 
 This document records exactly how Appstrate uses model-provider **subscription**
 credentials (Claude Pro/Max via `claude-code`, ChatGPT Plus/Pro/Business via
@@ -17,8 +18,7 @@ credentials (Claude Pro/Max via `claude-code`, ChatGPT Plus/Pro/Business via
 > (`@earendil-works/pi-coding-agent`). API-key providers **and** OAuth
 > subscription providers (Claude Pro/Max, ChatGPT Codex) all execute on it —
 > there is no "official binary" run path, no Claude Agent SDK engine, no
-> `RunEngine` / `subscriptionEngine` provider→engine binding (that vocabulary
-> was removed). Both subscription providers (`claude-code`, `codex`) are
+> `RunEngine` / `subscriptionEngine` provider→engine binding. Both subscription providers (`claude-code`, `codex`) are
 > **executable** for agent runs and share the **identical** delivery mechanism
 > (below). They remain **opt-in** modules — not in the `MODULES` default.
 
@@ -69,8 +69,8 @@ sidecar `/llm` path). There is no per-provider engine or handler anywhere.
 Both subscription providers share **one** delivery mechanism. The agent
 container is handed a **placeholder** bearer; the real subscription token never
 crosses the isolation boundary. Pi in the container calls the sidecar's `/llm`
-endpoint, and the sidecar's OAuth branch resolves the user's **own** real
-subscription token **server-side** and swaps it onto the outbound request
+endpoint, and the sidecar's OAuth branch resolves the real token of the
+subscription pinned to the run **server-side** and swaps it onto the outbound request
 (`applyOauthBearerSwap` from `@appstrate/core/oauth-bearer-swap`): it forces the
 real bearer onto `authorization`, drops any stray `x-api-key`, and forwards
 **every other header Pi signed verbatim** (`runtime-pi/sidecar/app.ts`, oauth
@@ -88,8 +88,11 @@ mode does the alias↔real body swap.
 
 The one honest narrowing: the upstream TLS request is made by the **sidecar's
 `fetch`** carrying Pi's forwarded headers, not by a vendor binary — so we do not
-claim transport-level client identity. The token is genuine and per-user/org
-(never pooled across tenants); no impersonation of another client, no forging.
+claim transport-level client identity. The token is genuine: it is the vendor
+account of the one person who connected it. It is never shared across
+organizations (tenants). Inside its organization, who spends it follows §1.5:
+its owner alone for a personal subscription, every caller of a bound model for
+an organization one. No impersonation of another client, no forging.
 
 Subscription runs require an isolating orchestrator (docker / firecracker): the
 plain `process` adapter runs the agent and its sidecar as host processes of one
@@ -103,9 +106,10 @@ Two paths that historically would have (connection test + per-model discovery)
 are now **offline**:
 
 - **Connection test** (`POST /api/models/test`, `/api/models/:id/test`): for a
-  provider that declares `credentialValidation: "offline"` the platform runs the
-  module's `validateCredential` hook — a **structural, offline** check (decode +
-  required claims + expiry), no network. Codex decodes the access JWT and
+  provider that defines the `validateCredential` hook, the platform runs that
+  hook instead of any network call — a **structural, offline** check (decode +
+  required claims + expiry). There is no flag to set: the hook's presence is the
+  signal (`packages/core/src/module.ts`). Codex decodes the access JWT and
   confirms it carries `chatgpt_account_id` and has a verifiable, unexpired expiry
   (the row's `expiresAt` or the token's `exp` claim); Claude (whose OAuth tokens
   are not JWTs) confirms the bearer is well-formed and the credential row carries
@@ -134,12 +138,12 @@ are now **offline**:
   per-model availability surfaces at the first agent run, not via a
   platform-side request.
 
-The `validateCredential` hook + `credentialValidation` flag are provider-agnostic
-core contracts (`packages/core/src/module.ts`): the platform asks "does this
-provider validate offline?" by data, never by hardcoding `codex` / `claude-code`.
-API-key providers leave the flag unset and keep the empirical `/models` probe,
-except a `publicModelListing` provider (its listing ignores the key), which is
-checked with one minimal chat completion instead.
+The `validateCredential` hook is a provider-agnostic core contract
+(`packages/core/src/module.ts`): the platform asks "does this provider validate
+offline?" by checking for the hook, never by hardcoding `codex` / `claude-code`.
+API-key providers omit the hook and keep the empirical `/models` probe, except a
+`publicModelListing` provider (its listing ignores the key), which is checked
+with one minimal chat completion instead.
 
 This keeps §1.1's "zero platform-side subscription API calls" claim literally
 true for the test/discovery paths, not just the run path. The earlier hand-built
@@ -147,6 +151,43 @@ true for the test/discovery paths, not just the run path. The earlier hand-built
 `originator: "pi"` client id and sent the subscription bearer directly from the
 platform process) have been **deleted**, along with the now-unused
 `buildInferenceProbe` / `InferenceProbeRequest` / `runInferenceProbe` machinery.
+
+### 1.5 A subscription follows the ownership rule of every model credential
+
+A subscription is an organization credential or a member's personal one, by the
+rule of an API key (`model_provider_credentials.owner_user_id`):
+`docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.7 states ownership, creation,
+reconnection and what an organization exit removes;
+`docs/architecture/MODEL_ALIASES.md`, "Who pays", states whom a credential
+serves and what the sidecar token door checks.
+
+The auth mode decides the transport, not the owner. What stays specific to a
+subscription, organization or personal:
+
+- inference goes through the sidecar bearer-swap (§1.3), never through the
+  platform LLM proxy;
+- no model alias (§1.3);
+- an isolating orchestrator is required (§1.3);
+- validation is offline (§1.4);
+- its token is refreshed by the platform, and a refresh the vendor refuses flags
+  it for reconnection;
+- it is created through a pairing (`connect-helper`), never by pasting a secret;
+- in a member's personal chain it ranks before an API key.
+
+**What an organization subscription is.** It is one person's vendor account
+(Claude Pro/Max, ChatGPT Plus/Pro/Business), signed in once by that person and
+then spent by every member of the organization and by calls with no user at
+all: schedules, API keys, end users. The vendor sees one account. The code
+places no per-person limit on it. It keeps serving after that person leaves the
+organization: the account is still theirs, and they end its use by revoking the
+access at the vendor, which flags the credential for reconnection. This is
+several people and unattended automation sharing one subscription, the use the
+vendors' terms are furthest from (§2). It aggravates the grey zone this
+document describes; it does not narrow it. An administrator who binds a model
+to a subscription makes that choice for the whole organization.
+
+A personal subscription, spent by its owner alone, removes that aggravation.
+It does **not** make the `claude-code` path compliant (§2.1).
 
 ---
 
@@ -156,42 +197,91 @@ platform process) have been **deleted**, along with the now-unused
 determination, not a code property, and the 2026 terms are volatile. Operators
 opt into subscription providers deliberately (via `MODULES`) and own that choice.
 
-### 2.1 Anthropic / `claude-code` — currently aligned, historically volatile
+### 2.1 Anthropic / `claude-code` — not permitted by the vendor's terms
+
+Primary source: Anthropic's
+[Legal and compliance](https://code.claude.com/docs/en/legal-and-compliance)
+page, read 2026-10-09:
+
+- OAuth sign-in is intended for purchasers of Free, Pro, Max, Team and Enterprise
+  plans, using Claude Code and Anthropic's own applications. Developers building
+  products use API keys.
+- Third-party developers may not offer claude.ai login in their products, may not
+  route requests through Free, Pro or Max credentials on behalf of their users, and
+  may not collect, store or intermediate claude.ai credentials or session tokens.
+- The one hosted path the page admits: run the **unmodified** Claude Code binary,
+  where each end user signs in with their own subscription, and the customer does
+  not pay for, resell or intermediate that usage.
+
+Appstrate does what that text excludes. `connect-helper` POSTs the subscription
+token, the platform stores it, and Pi — not Claude Code — presents it on the run
+path through the sidecar bearer-swap (§1.3). The module is therefore outside the
+admitted path, whoever owns the credential:
+
+- A personal subscription (§1.5) is spent by its owner alone. That removes the
+  aggravation of several people sharing one subscription; it does not make the
+  path compliant.
+- An organization subscription (§1.5) is one person's sign-in spent by other
+  members, schedules, API keys and end users. The admitted path has each end
+  user sign in with their own subscription; here the others never sign in, and
+  some calls have no user. This is routing requests through one person's
+  credentials on behalf of others, the case the page names, and team automation
+  on a subscription, for which Anthropic recommends API-key billing.
 
 - 2026 timeline: **Feb 20** banned subscription-OAuth in third-party tools →
   **Apr 4** billing enforcement → **May 13** reversal explicitly re-allowing
   third-party apps to authenticate via the Agent SDK → a **June 15** credit-pool
   change was **paused**.
-- As of 2026-06-21 this path is aligned with Anthropic's stated position, but it
-  flipped four times this year.
+- The June 2026 reading ("aligned with Anthropic's stated position") no longer
+  holds: the October page above excludes this path.
 - For production/team automation Anthropic itself recommends **API-key billing**.
 
-> **Anthropic's own Agent SDK docs (quoted verbatim, observed 2026-06-22):**
+> **Earlier wording, Anthropic's Agent SDK docs (quoted verbatim, observed 2026-06-22):**
 >
 > "Unless previously approved, Anthropic does not allow third party developers to
 > offer claude.ai login or rate limits for their products, including agents built
 > on the Claude Agent SDK. Please use the API key authentication methods described
 > in this document instead."
 
-This is the crux: an operator pointing Appstrate's chat/runner at a **personal**
-Claude subscription is acting as a third-party product offering claude.ai login —
-which Anthropic permits only with **prior approval**. Appstrate forges no client
+This is the crux: an operator pointing Appstrate's chat/runner at a Claude
+subscription, as a personal or an organization credential, is doing what the
+page excludes. Appstrate forges no client
 identity (Pi's SDK emits the subscription fingerprint, same as any Pi CLI user),
-but that does NOT confer approval. Treat the subscription providers as an
-operator-owned grey-zone choice, not a sanctioned integration, and re-verify the
-quote against the live docs (§4) before relying on it — the wording and policy
-have changed repeatedly.
+but that confers no approval. Treat `claude-code` as a risk an operator takes
+by enabling the module, not as a sanctioned integration. Re-verify the live page
+(§4) before relying on this reading.
 
-### 2.2 OpenAI / `codex` — a documented grey zone
+### 2.2 OpenAI / `codex` — a plan-usage program exists for registered apps; the Codex client path is outside it
 
+- **OpenAI's primary documentation** separates two permissions: identity
+  sign-in, and optional use of the user's ChatGPT plan through the
+  `chatgpt.tokens.use.direct` scope. The developer cookbook
+  (`developers.openai.com/cookbook/articles/sign-in-with-chatgpt`) states that
+  a successful identity sign-in alone "does not grant permission to use the
+  user's ChatGPT plan". At launch, plan usage is open to open-source projects,
+  personal projects that run locally and selected private apps; commercial
+  developers apply through an interest form. The help article "Using your
+  ChatGPT plan in other apps and sites"
+  (`help.openai.com/en/articles/20001542`) describes the user side: plan use is
+  opt-in per app. The Sign in with ChatGPT Terms
+  (`openai.com/policies/sign-in-with-chatgpt-terms`) limit plan use to the
+  application the user connected.
+- `module-codex` uses the Codex CLI's fixed `client_id` and scopes, and a
+  synthesized `auth.json`. That is outside the registered program above, so it
+  stays in the grey zone described below.
 - OpenAI has **not** banned subscription-OAuth in third-party/headless tools
-  (unlike Anthropic in Feb), and it works.
-- But there is **no official endorsement** for automated/third-party use. The
-  path relies on the Codex `client_id` OAuth flow plus a synthesized `auth.json`
+  (unlike Anthropic in Feb), and it works. But outside the registered program
+  there is **no official endorsement** for automated/third-party use. The path
+  relies on the Codex `client_id` OAuth flow plus a synthesized `auth.json`
   outside the official login. This is policy-fragile and could be closed at any
   time, as Anthropic did.
 - This grey-zone status is self-documented in `packages/module-codex/src/index.ts`.
 - For headless/automated work, OpenAI's clean contract is **API-key billing**.
+- An organization subscription (§1.5) is headless, automated and multi-person
+  use of one user's plan: other members, schedules, API keys and end users
+  spend it. The pages above describe a user opting their own plan into an app
+  they connected; this path has no endorsement, and it sits further from that
+  description than a personal subscription spent by its owner.
 
 ---
 
@@ -201,7 +291,10 @@ For automated / headless / team workloads on **either** vendor, the contractuall
 unambiguous option is an **API-key** model provider (OpenAI Platform / Anthropic
 API), billed pay-as-you-go. The subscription providers (`claude-code`, `codex`)
 are a convenience/grey-zone option chosen per-operator; they are not the
-recommended substrate for production automation.
+recommended substrate for production automation. A personal subscription spent
+by its owner alone (§1.5) is the narrowest use of this path, and it is still not
+the clean one. An organization subscription is team and automated use of one
+person's account: the workload this section sends to an API key.
 
 ---
 
@@ -210,11 +303,13 @@ recommended substrate for production automation.
 Before depending on a subscription provider in production, confirm against the
 **current** vendor docs:
 
-- [ ] Anthropic Consumer Terms + Usage Policy + Help Center (Agent SDK /
-      `claude -p` / third-party app authentication, and whether subscription
-      quotas still apply or a separate programmatic credit is in force).
+- [ ] Anthropic [Legal and compliance](https://code.claude.com/docs/en/legal-and-compliance)
+      page, Consumer Terms, Usage Policy and Help Center (third-party app
+      authentication, `claude -p`, Agent SDK, and whether subscription quotas still
+      apply or a separate programmatic credit is in force).
 - [ ] OpenAI Service Terms + Usage Policies ("Sign in with ChatGPT" in
-      third-party/forked clients; automated/headless use).
+      third-party/forked clients; the plan-usage sharing scope of §2.2, checked on
+      OpenAI's own page; automated/headless use).
 - [ ] Whether either vendor has since blocked the third-party OAuth path
       (technical break) — a `410`/`401` storm on the relevant credential is the
       operational signal.

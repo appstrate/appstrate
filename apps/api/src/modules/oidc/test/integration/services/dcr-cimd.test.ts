@@ -24,7 +24,6 @@ import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { oauthClient, oauthResource } from "@appstrate/db/schema";
 import { _rebuildAuthForTesting } from "@appstrate/db/auth";
-import { decodeJwt } from "jose";
 import { getTestApp } from "../../../../../../test/helpers/app.ts";
 import { truncateAll } from "../../../../../../test/helpers/db.ts";
 import { createTestOrg, createTestUser } from "../../../../../../test/helpers/auth.ts";
@@ -36,12 +35,18 @@ import {
   snapshotProtectedResources,
   restoreProtectedResources,
 } from "../../../../../lib/protected-resources.ts";
-import { getMcpOrgResourceUri, orgIdFromMcpAudience } from "../../../../../lib/audiences.ts";
+import {
+  MCP_RESOURCE_PREFIX,
+  deriveMcpResourceUri,
+  getMcpOrgResourceUri,
+  parseMcpResourceUri,
+} from "../../../../../lib/audiences.ts";
 import { getEnv } from "@appstrate/env";
 import { OIDC_IDENTITY_SCOPES } from "../../../auth/scopes.ts";
 import oidcModule from "../../../index.ts";
 import { APPSTRATE_CLI_CLIENT_ID, ensureCliClient } from "../../../services/ensure-cli-client.ts";
 import { markClientSelfService } from "../../../services/oauth-admin.ts";
+import { authorizationCodeFlow } from "../../helpers/authorization-code-flow.ts";
 
 const app = getTestApp({ modules: [oidcModule] });
 
@@ -77,26 +82,10 @@ async function register(body: Record<string, unknown>) {
 function registerMcpOrgFamily(): void {
   resetProtectedResources();
   registerProtectedResourceFamily({
-    prefix: "/api/mcp/o",
-    deriveUri: (path) => {
-      const prefix = "/api/mcp/o/";
-      if (!path.startsWith(prefix)) return undefined;
-      const orgId = path.slice(prefix.length).split("/")[0] ?? "";
-      return orgId.length === 0 ? undefined : getMcpOrgResourceUri(orgId);
-    },
-    ownsUri: (uri) => orgIdFromMcpAudience(uri) !== undefined,
+    prefix: MCP_RESOURCE_PREFIX,
+    deriveUri: deriveMcpResourceUri,
+    ownsUri: (uri) => parseMcpResourceUri(uri) !== undefined,
   });
-}
-
-function base64url(bytes: Uint8Array): string {
-  let binary = "";
-  for (const b of bytes) binary += String.fromCharCode(b);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-
-async function challengeFor(verifier: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
-  return base64url(new Uint8Array(digest));
 }
 
 async function signUpPlatformUser(email: string): Promise<string> {
@@ -110,109 +99,6 @@ async function signUpPlatformUser(email: string): Promise<string> {
   const match = setCookie.match(/better-auth\.session_token=([^;]+)/);
   if (!match) throw new Error(`no session cookie: ${setCookie}`);
   return `better-auth.session_token=${match[1]}`;
-}
-
-interface AuthorizationCodeFlowInput {
-  cookie: string;
-  clientId: string;
-  redirectUri: string;
-  scope: string;
-  resource: string;
-}
-
-interface AuthorizationCodeFlowResult {
-  /** Whether the consent screen stood between authorize and the code. */
-  consentShown: boolean;
-  /** The `/oauth2/token` JSON response. */
-  token: Record<string, unknown>;
-  /** The decoded access token. */
-  claims: Record<string, unknown>;
-}
-
-/**
- * Full authorization-code + PKCE exchange as a signed-in platform user:
- * authorize → consent (unless a stored consent short-circuits it) → token.
- */
-async function authorizationCodeFlow(
-  input: AuthorizationCodeFlowInput,
-): Promise<AuthorizationCodeFlowResult> {
-  const { cookie, clientId, redirectUri, scope, resource } = input;
-  const verifier = base64url(crypto.getRandomValues(new Uint8Array(32)));
-  const authorizeQuery = new URLSearchParams({
-    response_type: "code",
-    client_id: clientId,
-    redirect_uri: redirectUri,
-    scope,
-    state: "authorization-code-flow",
-    code_challenge: await challengeFor(verifier),
-    code_challenge_method: "S256",
-    resource,
-  });
-  const authorized = await app.request(`/api/auth/oauth2/authorize?${authorizeQuery}`, {
-    headers: { cookie, accept: "text/html" },
-    redirect: "manual",
-  });
-  expect(authorized.status).toBe(302);
-  const authorizeTarget = new URL(authorized.headers.get("location")!, "http://localhost");
-  // An `error` here is the provider bouncing the request back to the client
-  // (`invalid_scope`, `invalid_target`, …) — name it instead of failing on the
-  // missing code below.
-  expect(authorizeTarget.searchParams.get("error")).toBeNull();
-
-  // A stored consent short-circuits the consent screen and the authorization
-  // response comes straight back on the callback.
-  const consentShown = authorizeTarget.pathname === "/api/oauth/consent";
-  let callback = authorizeTarget;
-  if (consentShown) {
-    const consentPage = await app.request(authorizeTarget.pathname + authorizeTarget.search, {
-      headers: { cookie, accept: "text/html" },
-    });
-    expect(consentPage.status).toBe(200);
-    const csrfCookie = (consentPage.headers.get("set-cookie") ?? "")
-      .split(",")
-      .map((c) => c.trim())
-      .find((c) => c.startsWith("oidc_csrf="))!
-      .split(";")[0]!;
-    const csrfToken = (await consentPage.text()).match(/name="_csrf" value="([^"]+)"/)![1]!;
-
-    const consented = await app.request(authorizeTarget.pathname + authorizeTarget.search, {
-      method: "POST",
-      headers: {
-        cookie: `${cookie}; ${csrfCookie}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-        accept: "application/json",
-        origin: "http://localhost:3000",
-      },
-      body: new URLSearchParams({ _csrf: csrfToken, accept: "true" }).toString(),
-      redirect: "manual",
-    });
-    expect([200, 302]).toContain(consented.status);
-    const location = consented.headers.get("location");
-    callback = location
-      ? new URL(location, redirectUri)
-      : new URL(String(((await consented.json()) as { url?: string }).url));
-  }
-  expect(callback.searchParams.get("error")).toBeNull();
-  const code = callback.searchParams.get("code");
-  expect(code).toBeTruthy();
-
-  const tokenRes = await app.request("/api/auth/oauth2/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code: code!,
-      client_id: clientId,
-      redirect_uri: redirectUri,
-      code_verifier: verifier,
-      resource,
-    }).toString(),
-  });
-  const token = (await tokenRes.json()) as Record<string, unknown>;
-  expect(token).not.toHaveProperty("error");
-  expect(tokenRes.status).toBe(200);
-  const claims = decodeJwt(String(token.access_token)) as Record<string, unknown>;
-  return { consentShown, token, claims };
 }
 
 describe("authorization-server discovery — DCR + CIMD", () => {
@@ -490,7 +376,7 @@ describe("CIMD first authorization — the request Claude Code sends (#1269)", (
   it("reaches consent and mints the MCP-scoped token on the first resolution", async () => {
     const cookie = await signUpPlatformUser("claude-code-first@satellite.example.com");
 
-    const { consentShown, token, claims } = await authorizationCodeFlow({
+    const { consentShown, token, claims } = await authorizationCodeFlow(app, {
       cookie,
       clientId,
       redirectUri: REDIRECT_URI,
@@ -1003,7 +889,7 @@ describe("CIMD refresh keeps the platform stamp", () => {
 
   /** Full authorization-code + PKCE exchange, returning the decoded access token. */
   async function mintAccessToken(cookie: string): Promise<Record<string, unknown>> {
-    const { claims } = await authorizationCodeFlow({
+    const { claims } = await authorizationCodeFlow(app, {
       cookie,
       clientId,
       redirectUri,

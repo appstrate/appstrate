@@ -10,8 +10,15 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import { createTestContext, orgOnlyHeaders, type TestContext } from "../../helpers/auth.ts";
-import { MCP_ACCEPT, mcpPath, sseMessages, type JsonRpcEnvelope } from "../../helpers/mcp.ts";
+import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import {
+  MCP_ACCEPT,
+  mcpHeaders,
+  mcpPath,
+  sseMessages,
+  type JsonRpcEnvelope,
+  mcpAuthHeaders,
+} from "../../helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
 import {
   createFakeOrchestrator,
@@ -37,7 +44,7 @@ function toolCall(
 ): RequestInit {
   return {
     method: "POST",
-    headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+    headers: { ...mcpHeaders(headers), "content-type": "application/json", Accept: MCP_ACCEPT },
     body: JSON.stringify({
       jsonrpc: "2.0",
       id: 1,
@@ -92,7 +99,8 @@ afterAll(() => {
 beforeEach(async () => {
   await truncateAll();
   ctx = await createTestContext();
-  headers = orgOnlyHeaders(ctx);
+  // Pinned: this suite is about the transport, not the space a call names.
+  headers = mcpAuthHeaders(ctx);
 });
 
 // Launched runs are fire-and-forget: let them land before the next truncate.
@@ -126,7 +134,7 @@ describe("mcp transport: SSE only when progress is asked for", () => {
   it("answers an unparseable body as JSON, through the SDK's own parse error", async () => {
     const res = await app.request(mcpPath(headers), {
       method: "POST",
-      headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+      headers: { ...mcpHeaders(headers), "content-type": "application/json", Accept: MCP_ACCEPT },
       body: '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"_meta":{"progressToken":"x"',
     });
     expect(res.status).toBe(400);

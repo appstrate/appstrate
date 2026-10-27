@@ -11,7 +11,8 @@
 
 /**
  * Principal that minted the proxy call — mirrors credential-proxy. A `run` is a
- * platform run's own sidecar, authenticated by its run token.
+ * platform run's own sidecar, authenticated by its run token; its model is the
+ * one the run launched with, served by the credential frozen at launch.
  */
 export type LlmProxyPrincipal =
   | { kind: "api_key"; apiKeyId: string; orgId: string; userId: string }

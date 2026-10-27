@@ -122,7 +122,9 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
       integrationId: INTEG,
       authKey: "primary",
       accountId: "acct-readiness",
-      spaceId: ctx.defaultSpaceId,
+      orgId: ctx.orgId,
+      spaceId: null,
+      originSpaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       endUserId: null,
       credentialsEncrypted: encryptCredentialEnvelope({ outputs: { access_token: "tok" } }),
@@ -147,7 +149,7 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
     const readiness = await resolveAgentConnectionReadiness({
       scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       agentPackageId: AGENT,
-      actor: { type: "user", id: ctx.user.id },
+      principal: { kind: "person", actor: { type: "user", id: ctx.user.id } },
       canConnect: true,
       canConfigureIntegrations: true,
       // The selector is the ROUTER's decision now, and the service takes it as
@@ -197,7 +199,7 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
     const base = {
       scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
       agentPackageId: AGENT,
-      actor: { type: "user", id: ctx.user.id } as const,
+      principal: { kind: "person", actor: { type: "user", id: ctx.user.id } } as const,
       canConnect: true,
       canConfigureIntegrations: true,
     };
@@ -234,7 +236,9 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
         integrationId: INTEG,
         authKey: "primary",
         accountId: "acct-readiness-full",
-        spaceId: ctx.defaultSpaceId,
+        orgId: ctx.orgId,
+        spaceId: null,
+        originSpaceId: ctx.defaultSpaceId,
         userId: ctx.user.id,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { access_token: "tok" } }),
         scopesGranted: ["read", "write"],
@@ -252,7 +256,7 @@ describe("resolveAgentConnectionReadiness — integration manifests are read at 
     const readiness = await resolveAgentConnectionReadiness({
       scope,
       agentPackageId: AGENT,
-      actor: { type: "user", id: ctx.user.id },
+      principal: { kind: "person", actor: { type: "user", id: ctx.user.id } },
       canConnect: true,
       canConfigureIntegrations: true,
       version: "draft",

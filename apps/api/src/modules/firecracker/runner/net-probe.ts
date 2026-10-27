@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Self-verified guest→platform networking (issue #819, phase 5).
+ * Self-verified guest→platform networking.
  *
  * The incident this exists to prevent: guest→platform sink traffic was
  * silently dropped by the daemon's own nft table because Docker's DNAT

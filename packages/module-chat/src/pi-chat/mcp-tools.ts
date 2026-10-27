@@ -46,7 +46,7 @@ interface PiToolResult {
    * CONTRACT: pi-agent-core preserves unknown result fields across the
    * `afterToolCall` hook — `finalizeExecutedToolCall` SPREADS the original
    * result (`{...result, content, details, usage, terminate}`, `agent-loop.js`),
-   * so a configured hook can no longer strip this field. Verified against the
+   * so a configured hook cannot strip this field. Verified against the
    * pinned `@earendil-works/pi-agent-core@1.0.4`; re-check on an SDK bump,
    * because `details` is redacted and nothing would fall back.
    */
@@ -145,10 +145,12 @@ export interface PiTurnBudget {
 }
 
 interface BuildPlatformMcpToolsOptions {
-  /** Platform MCP endpoint (`/api/mcp/o/:org?context=injected`). */
+  /** Platform MCP endpoint, pinned to the space (`/api/mcp/o/:org/s/:space?context=injected`). */
   url: string;
-  /** Auth + scoping headers (short-lived MCP loopback bearer + org/space ids). */
+  /** Auth + org headers (short-lived MCP loopback bearer + org id). */
   headers: Record<string, string>;
+  /** The space the URL pins; `run_and_wait`'s REST hops name it in `X-Space-Id`. */
+  spaceId: string;
   /** Emits a UI chunk into the live turn stream (used for run_and_wait cards). */
   writeChunk: (chunk: UIMessageChunk) => void;
   /** Cancellation for tool calls + the run_and_wait poll loop. */
@@ -157,8 +159,9 @@ interface BuildPlatformMcpToolsOptions {
   turnBudget: PiTurnBudget;
   /**
    * Transport for every platform hop the tool layer makes. Production passes the
-   * platform's in-process dispatch, so the MCP handshake (`initialize` /
-   * `tools/list`) AND each `run_and_wait`'s launch
+   * platform's in-process dispatch, so the MCP handshake (`initialize` / `tools/list`,
+   * no era probe: the platform's server is legacy by construction)
+   * AND each `run_and_wait`'s launch
    * POST + poll loop re-enter the Hono app directly instead of opening real
    * loopback TCP connections to this same process. `run_and_wait` is the heavier
    * half by far — the handshake is at most two hops per turn, a single run is one
@@ -185,7 +188,7 @@ interface BuildPlatformMcpToolsOptions {
  * the cache still hits.
  *
  * The note lands in `content`, which the UI parses too (nothing reads `details`),
- * so the payload stops being the only text part. `unwrapResult` on the UI side is
+ * so the payload stops being the only text part. `unwrapMcpResult` (`@appstrate/core/mcp-result`) on the UI side is
  * deliberately tolerant of trailing non-payload text — do not append here without
  * checking it still is.
  */
@@ -238,6 +241,8 @@ export async function buildPlatformMcpTools(
   const connect = () =>
     createMcpHttpClient(opts.url, {
       clientInfo: { name: "appstrate-chat-pi", version: "1.0" },
+      // The platform's MCP module is on the v1 SDK, legacy by construction: no era probe.
+      era: "legacy",
       extraHeaders: opts.headers,
       // `initialize` re-enters this process and can wedge: the turn's signal (not a
       // tool call's — a lazy connect is shared) keeps stop and deadline live.
@@ -255,7 +260,7 @@ export async function buildPlatformMcpTools(
     const opened = await connect();
     try {
       const listed = await opened.listTools({ signal: opts.signal });
-      surface = { tools: listed.tools, instructions: opened.client.getInstructions() };
+      surface = { tools: listed.tools, instructions: opened.getInstructions() };
     } catch (err) {
       await opened.close().catch(() => {});
       throw err;
@@ -282,7 +287,7 @@ export async function buildPlatformMcpTools(
     tool.name === RUN_AND_WAIT_TOOL
       ? makeRunAndWaitExtension(tool, {
           origin: runOrigin,
-          headers: opts.headers,
+          headers: { ...opts.headers, "x-space-id": opts.spaceId },
           // Same seam as the handshake above, and this is the tool that needs
           // it most: every `run_and_wait` is a launch POST plus a poll loop.
           fetch: opts.fetch ?? fetch,

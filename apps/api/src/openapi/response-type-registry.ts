@@ -72,6 +72,11 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     description: "OrgPackageItem",
   },
   {
+    specSchemaName: "IntegrationIndexItem",
+    sharedTypeName: "IntegrationIndexItem",
+    description: "IntegrationIndexItem",
+  },
+  {
     specSchemaName: "OrgPackageItemDetail",
     sharedTypeName: "OrgPackageItemDetail",
     description: "OrgPackageItemDetail",
@@ -210,6 +215,11 @@ export const responseTypeRegistry: ResponseTypeEntry[] = [
     sharedTypeName: "OrganizationMember",
     description: "OrgMember ↔ OrganizationMember",
   },
+  {
+    specSchemaName: "OrgMemberSpace",
+    sharedTypeName: "OrganizationMemberSpace",
+    description: "OrgMemberSpace ↔ OrganizationMemberSpace (OrgMember.spaces entry)",
+  },
   { specSchemaName: "OrgSettings", sharedTypeName: "OrgSettings", description: "OrgSettings" },
   // --- Module wire shapes (faithful shared-type twins; already aligned) ---
   {
@@ -260,6 +270,8 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
     "ResolutionFieldError narrowed to the 409 resolution codes; canonical type in @appstrate/core/api-errors, no shared-type",
   ConnectionResolutionWarning:
     "ResolutionFieldError narrowed to the warning codes; canonical type in @appstrate/core/api-errors, no shared-type",
+  ScheduleIdsProblem:
+    "ProblemDetail with the `model_scheduled` extension; RFC 9457 envelope, never read through a shared-type",
   MissingIntegrationConnectionProblem:
     "ProblemDetail narrowed to `missing_integration_connection`; RFC 9457 envelope, never read through a shared-type",
   LaunchWarnings:

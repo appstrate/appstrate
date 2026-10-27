@@ -1,6 +1,6 @@
 {
   "name": "@appstrate/core",
-  "version": "15.0.0",
+  "version": "16.0.0",
   "description": "Shared validation, storage, and utility library for Appstrate packages",
   "license": "Apache-2.0",
   "type": "module",
@@ -84,6 +84,7 @@
     "./module": "./src/module.ts",
     "./telemetry": "./src/telemetry.ts",
     "./permissions": "./src/permissions.ts",
+    "./model-payer": "./src/model-payer.ts",
     "./principal-permissions": "./src/principal-permissions.ts",
     "./platform-types": "./src/platform-types.ts",
     "./token-usage": "./src/token-usage.ts",
@@ -96,6 +97,7 @@
     "./dedupe-label": "./src/dedupe-label.ts",
     "./chat-contract": "./src/chat-contract.ts",
     "./file-uri": "./src/file-uri.ts",
+    "./appearance": "./src/appearance.ts",
     "./chat-turn-metadata": "./src/chat-turn-metadata.ts",
     "./model-error": "./src/model-error.ts",
     "./bearer": "./src/bearer.ts",
@@ -104,10 +106,13 @@
     "./run-and-wait-client": "./src/run-and-wait-client.ts",
     "./run-status": "./src/run-status.ts",
     "./log-line": "./src/log-line.ts",
-    "./connect-handshake": "./src/connect-handshake.ts"
+    "./connect-handshake": "./src/connect-handshake.ts",
+    "./mcp-result": "./src/mcp-result.ts",
+    "./realtime-url": "./src/realtime-url.ts",
+    "./model-selectable": "./src/model-selectable.ts"
   },
   "dependencies": {
-    "@afps-spec/schema": "^0.9.0",
+    "@afps-spec/schema": "^0.12.0",
     "@appstrate/afps-shared": "^0.13.0",
     "@types/json-schema": "7.0.15",
     "@types/semver": "^7.8.0",
@@ -116,7 +121,7 @@
     "fflate": "^0.8.3",
     "pino": "^10.4.0",
     "semver": "^7.8.4",
-    "zod": "^4.6.5"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@types/mime-db": "^1.43.6",

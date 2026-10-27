@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Closed-mode landing page (issue #228). Displayed by `OrgGate` when
+// Closed-mode landing page. Displayed by `OrgGate` when
 // `AUTH_DISABLE_ORG_CREATION=true` and the signed-in user has no
 // organization membership. Self-hosters get a calm "wait for invitation"
 // screen instead of a broken /onboarding/create flow.
@@ -8,6 +8,8 @@
 import { Navigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "@appstrate/ui/components/button";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { TextSkeleton } from "../../components/loading-skeletons";
 import { useAuth, useCanCreateOrg } from "../../hooks/use-auth";
 import { useOrg } from "../../hooks/use-org";
 import { waitingStepRedirect } from "../../lib/onboarding-entry";
@@ -19,15 +21,25 @@ export function OnboardingWaitingStep() {
   const canCreateOrg = useCanCreateOrg();
   const { orgs, loading } = useOrg();
 
-  if (loading) return null;
+  // The page's own frame while the organizations load, not a blank screen.
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-4">
+        <div className="flex w-full max-w-md flex-col items-center gap-6">
+          <Skeleton className="size-12 rounded-full" />
+          <TextSkeleton lines={3} className="w-full" />
+        </div>
+      </div>
+    );
+  }
   const redirect = waitingStepRedirect({ canCreateOrg, hasOrg: orgs.length > 0 });
   if (redirect) return <Navigate to={redirect} replace />;
 
   return (
     <div className="flex min-h-screen items-center justify-center px-4">
       <div className="flex max-w-md flex-col items-center gap-6 text-center">
-        <div className="bg-muted flex h-12 w-12 items-center justify-center rounded-full">
-          <Mail className="text-muted-foreground h-6 w-6" aria-hidden />
+        <div className="bg-muted flex size-12 items-center justify-center rounded-full">
+          <Mail className="text-muted-foreground size-6" aria-hidden />
         </div>
         <div className="flex flex-col gap-2">
           <h1 className="text-2xl font-semibold tracking-tight">{t("onboarding.waitingTitle")}</h1>

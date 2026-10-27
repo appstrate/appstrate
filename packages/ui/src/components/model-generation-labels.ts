@@ -39,11 +39,9 @@ export function buildGenerationLabels(
       ? `${reasoningHint} ${t("models.generation.reasoningOffSendsNothingHint")}`
       : reasoningHint,
     inherit: t("models.generation.inherit"),
-    inheritShort: t("models.generation.inheritShort"),
     reasoningInherit: t("models.generation.reasoningInherit", defaultLevel),
     unsupported: t("models.generation.unsupported"),
     unsupportedShort: t("models.generation.unsupportedShort"),
     levels: mapModelReasoningLevels(levelLabel),
-    shortLevels: mapModelReasoningLevels((level) => t(`models.generation.levelsShort.${level}`)),
   };
 }

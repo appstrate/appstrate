@@ -44,15 +44,23 @@ APPSTRATE_VERSION=pr-482 docker compose pull
 With the images already local, the Coolify deploy only has to restart
 containers and finishes well inside the timeout.
 
+Staging itself tracks `main` and redeploys on every merge
+([STAGING.md](./STAGING.md)): a preview tag set there holds until you set
+`APPSTRATE_VERSION` back to `main`, and staging stops following `main` meanwhile.
+
 ## 3. Roll back
 
 Preview tags are additive — nothing is overwritten. To roll back, set
-`APPSTRATE_VERSION` back to the version you were on (the previous `pr-<n>`, a
-released `vX.Y.Z`, or `latest`) and redeploy:
+`APPSTRATE_VERSION` back to the version you were on (the previous `pr-<n>`, or
+a released version written **without the `v`** — GHCR tags carry none) and
+redeploy:
 
 ```sh
-APPSTRATE_VERSION=v1.4.0   # or the previous preview tag
+APPSTRATE_VERSION=1.0.0-beta.66   # or the previous preview tag
 ```
+
+A prerelease has no `latest` to fall back on: `latest` is only ever moved by a
+stable release.
 
 ## Notes
 

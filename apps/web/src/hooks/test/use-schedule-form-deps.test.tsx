@@ -3,7 +3,7 @@
 /**
  * `useScheduleFormDeps` — the null contract the schedule editor depends on.
  *
- * `ScheduleForm` seeds its input state ONCE, in a `useState` initialiser, from
+ * A schedule form seeds its input state ONCE, in a `useState` initialiser, from
  * the agent's stored values + locks. A locked field seeded into that state can
  * never leave it (the launch form only ever deletes prompted / pre-filled keys)
  * and the save is then refused with 400 `locked_input_field` — an unsaveable
@@ -15,7 +15,7 @@
  * The web test runner has no DOM, so the form is stood in for by a probe doing
  * the same two steps the page and the `useState` initialiser do: bail on `null`
  * deps, otherwise seed with `initialInputValues` — the very function
- * `ScheduleForm` calls, whose result is what the form submits when the user
+ * the schedule forms call, whose result is what the form submits when the user
  * edits nothing but the cron.
  */
 
@@ -60,7 +60,7 @@ function Probe() {
   const { deps } = useScheduleFormDeps(PACKAGE_ID);
   // The page renders its loading state until the deps resolve.
   if (!deps) return <>loading</>;
-  // What `ScheduleForm`'s `useState` initialiser computes on mount — and what
+  // What the schedule form's `useState` initialiser computes on mount — and what
   // the form submits when the user changes nothing but the cron.
   const settings: AgentInputSettings = deps.inputWrapper ?? EMPTY_SETTINGS;
   const seed = initialInputValues(deps.inputWrapper, settings, STORED_SCHEDULE_INPUT);

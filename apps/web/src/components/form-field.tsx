@@ -1,33 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Label } from "@appstrate/ui/components/label";
+import type { ComponentProps, ReactNode } from "react";
+import { FormItem } from "@/components/app-ui/form-item";
 import { Input } from "@appstrate/ui/components/input";
+import { OptionSelect } from "@/components/app-ui/option-select";
 import { Textarea } from "@appstrate/ui/components/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@appstrate/ui/components/select";
-
-type FormFieldType =
-  | "text"
-  | "number"
-  | "textarea"
-  | "email"
-  | "url"
-  | "date"
-  | "datetime-local"
-  | "time"
-  | "color"
-  | "password";
 
 interface FormFieldProps {
   id: string;
   label: string;
   required?: boolean;
-  type?: FormFieldType;
+  type?: ComponentProps<typeof Input>["type"] | "textarea";
   value: string;
   onChange: (value: string) => void;
   onBlur?: () => void;
@@ -38,6 +21,10 @@ interface FormFieldProps {
   enumLabel?: (value: string) => string;
   disabled?: boolean;
   min?: number;
+  /** Shown beside the label (e.g. a discovery provenance badge). */
+  badge?: ReactNode;
+  /** The field's error; nothing when it is valid. */
+  error?: ReactNode;
 }
 
 export function FormField({
@@ -54,31 +41,26 @@ export function FormField({
   enumLabel,
   disabled,
   min,
+  badge,
+  error,
 }: FormFieldProps) {
-  const describedBy = description ? `hint-${id}` : undefined;
-
   const renderInput = () => {
     if (enumValues) {
       return (
-        <Select value={value} onValueChange={onChange}>
-          <SelectTrigger id={id} aria-describedby={describedBy}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {enumValues.map((opt) => (
-              <SelectItem key={opt} value={opt}>
-                {enumLabel ? enumLabel(opt) : opt}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <OptionSelect
+          value={value}
+          onValueChange={onChange}
+          options={enumValues.map((opt) => ({
+            value: opt,
+            label: enumLabel ? enumLabel(opt) : opt,
+          }))}
+        />
       );
     }
 
     if (type === "textarea") {
       return (
         <Textarea
-          id={id}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
@@ -86,30 +68,12 @@ export function FormField({
           disabled={disabled}
           required={required}
           rows={4}
-          aria-describedby={describedBy}
-        />
-      );
-    }
-
-    if (type === "color") {
-      return (
-        <Input
-          id={id}
-          type="color"
-          value={value || "#000000"}
-          onChange={(e) => onChange(e.target.value)}
-          onBlur={onBlur}
-          disabled={disabled}
-          required={required}
-          aria-describedby={describedBy}
-          className="h-10 w-20 cursor-pointer p-1"
         />
       );
     }
 
     return (
       <Input
-        id={id}
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -118,23 +82,28 @@ export function FormField({
         disabled={disabled}
         required={required}
         min={min}
-        aria-describedby={describedBy}
       />
     );
   };
 
+  const text = required ? `${label} *` : label;
   return (
-    <div className="space-y-2">
-      <Label htmlFor={id}>
-        {label}
-        {required ? " *" : ""}
-      </Label>
+    <FormItem
+      id={id}
+      label={
+        badge ? (
+          <span className="inline-flex items-center gap-2">
+            {text}
+            {badge}
+          </span>
+        ) : (
+          text
+        )
+      }
+      hint={description}
+      error={error}
+    >
       {renderInput()}
-      {description && (
-        <p id={describedBy} className="text-muted-foreground text-sm">
-          {description}
-        </p>
-      )}
-    </div>
+    </FormItem>
   );
 }

@@ -20,6 +20,7 @@ import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { usePermissions } from "../../hooks/use-permissions";
 import { errorMessage, toastError } from "../../lib/mutation-error";
 import { agentScopes, type ScopeTarget } from "./connect-scope-choice";
+import { TextSkeleton } from "../loading-skeletons";
 
 type PickState = "idle" | "picking" | "nothing";
 
@@ -87,12 +88,12 @@ export function AgentQuickFillMenu({
   const id = `connect-scopes-agent-${authKey}`;
 
   return (
-    <div className="space-y-1">
+    <div className="flex flex-col gap-1">
       <p id={`${id}-heading`} className="text-xs font-medium">
         {t("integration.auth.scopeChoice.forAgent")}
       </p>
       {list.isLoading ? (
-        <p className="text-muted-foreground text-xs">{t("common:loading")}</p>
+        <TextSkeleton lines={1} />
       ) : list.error ? (
         <p className="text-destructive text-xs" data-testid={`${id}-error`}>
           {errorMessage(list.error)}
@@ -104,12 +105,13 @@ export function AgentQuickFillMenu({
               type="button"
               variant="outline"
               size="sm"
+              className="self-start"
               disabled={state === "picking"}
               aria-describedby={`${id}-heading`}
               data-testid={id}
             >
               {t("integration.auth.scopeChoice.forAgentPlaceholder")}
-              <ChevronDown className="ml-1 size-3" />
+              <ChevronDown className="ml-1" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start">

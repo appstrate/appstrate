@@ -52,17 +52,25 @@ export interface BuildApiCallExtensionFactoryOptions {
   emitEvent: RuntimeEventEmitter;
 }
 
+export interface ApiCallExtensions {
+  factories: ExtensionFactory[];
+  /** Integrations at least one factory was built for: the ones the agent can call. */
+  integrationIds: ReadonlySet<string>;
+}
+
+const NO_EXTENSIONS: ApiCallExtensions = { factories: [], integrationIds: new Set() };
+
 /**
  * Resolve every apiCall integration declared in the bundle's manifest and
  * expose each api_call tool the agent SELECTED as a `{ns}__api_call` Pi tool.
- * Returns an empty array when the bundle declares none — safe to splice
+ * Returns no factories when the bundle declares none — safe to splice
  * unconditionally into the factory list.
  */
 export async function buildApiCallExtensionFactory(
   opts: BuildApiCallExtensionFactoryOptions,
-): Promise<ExtensionFactory[]> {
+): Promise<ApiCallExtensions> {
   const refs = readIntegrationRefs(opts.bundle);
-  if (refs.length === 0) return [];
+  if (refs.length === 0) return NO_EXTENSIONS;
   const root = opts.bundle.packages.get(opts.bundle.root)?.manifest;
   const agentTools = new Map(
     parseManifestIntegrations((root ?? {}) as Record<string, unknown>).map((e) => [e.id, e.tools]),
@@ -89,21 +97,23 @@ export async function buildApiCallExtensionFactory(
       perTool.push({ integrationId: ref.name, selected: selected.has(meta.toolName) });
     }
   }
-  if (refsWithApiCall.length === 0) return [];
+  if (refsWithApiCall.length === 0) return NO_EXTENSIONS;
 
   const tools = await opts.integrationResolver.resolve(refsWithApiCall, opts.bundle);
-  if (tools.length === 0) return [];
+  if (tools.length === 0) return NO_EXTENSIONS;
 
   // The resolver yields tools in the same (ref, auth) order we flattened
   // above — pair each AFPS tool with its owning integration id by index.
   const factories: ExtensionFactory[] = [];
+  const integrationIds = new Set<string>();
   for (let i = 0; i < tools.length; i++) {
     const tool = tools[i]!;
     if (perTool[i]?.selected === false) continue;
     const integrationId = perTool[i]?.integrationId ?? tool.name;
     factories.push(makeApiCallExtension(tool, integrationId, opts));
+    integrationIds.add(integrationId);
   }
-  return factories;
+  return { factories, integrationIds };
 }
 
 /**

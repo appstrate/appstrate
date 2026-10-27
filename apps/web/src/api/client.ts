@@ -23,7 +23,7 @@ import createFetchClient, { type Middleware } from "openapi-fetch";
 import createReactQueryClient from "openapi-react-query";
 import type { components, paths } from "./schema";
 import { ApiError } from "./errors";
-import { buildScopingHeaders } from "../lib/scoping-headers";
+import { missingScopingHeaders } from "../lib/scoping-headers";
 import { noteViewAsRefusal } from "../lib/view-as-refusal";
 import { noteStaleAuthority } from "../lib/stale-authority";
 
@@ -79,8 +79,8 @@ function encodeSegment(segment: string): string {
 
 const orgContext: Middleware = {
   onRequest({ request }) {
-    for (const [k, v] of Object.entries(buildScopingHeaders())) {
-      if (!request.headers.has(k)) request.headers.set(k, v);
+    for (const [k, v] of Object.entries(missingScopingHeaders(request.headers))) {
+      request.headers.set(k, v);
     }
     return request;
   },
@@ -137,12 +137,21 @@ const problemDetailErrors: Middleware = {
 };
 
 /**
+ * How an array query parameter goes on the wire: comma-separated under one key
+ * (`status=failed,timeout`), the `style: form, explode: false` every array query
+ * parameter of the spec declares. openapi-fetch does not read the spec at run
+ * time and defaults to repeated keys.
+ */
+export const QUERY_SERIALIZER = { array: { style: "form", explode: false } } as const;
+
+/**
  * Raw typed fetch client. Spec paths already include the `/api` prefix, so
  * no baseUrl is needed — requests stay same-origin.
  */
 export const client = createFetchClient<paths>({
   credentials: "include",
   pathSerializer,
+  querySerializer: QUERY_SERIALIZER,
 });
 client.use(orgContext, problemDetailErrors);
 

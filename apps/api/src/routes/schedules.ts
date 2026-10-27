@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Hono } from "hono";
+import { assertIfMatch, setEtag } from "../lib/conditional-request.ts";
 import type { Context } from "hono";
 import { z } from "zod";
 import {
@@ -45,7 +46,8 @@ import { getOrgMember } from "../services/organizations.ts";
 import { getEndUser } from "../services/end-users.ts";
 import {
   assertExplicitModelExists,
-  resolveModel,
+  requireBoundModel,
+  resolveModelCascade,
   validateGenerationOverride,
 } from "../services/org-models.ts";
 import { getSpacePackageSettings, type SpacePackageSettings } from "../services/space-packages.ts";
@@ -54,7 +56,9 @@ import { getPackage } from "../services/package-catalog.ts";
 import { resolveAgentRunVersion } from "../services/agent-version-resolver.ts";
 import {
   assertScheduleConnectionsChosen,
+  withScheduleFallback,
   assertScheduleOverridesReachable,
+  readScheduleGovernance,
   sameRecord,
   sameSet,
 } from "../services/schedule-connections.ts";
@@ -69,6 +73,7 @@ import { listScheduleRuns } from "../services/state/runs.ts";
 import { requireRunsRead, runVisibilityFilter } from "../lib/run-visibility.ts";
 import { auditDiff, recordAuditFromContext } from "../services/audit.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
+import { parseRunListFilters } from "../lib/run-list-filters.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { scheduleInputSchema } from "../lib/jsonb-schemas.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
@@ -276,10 +281,10 @@ async function loadScheduleOr404(c: Context<AppEnv>, id: string, scope: SpaceSco
   return schedule;
 }
 
-// #738: schedule execution identity, chosen by an admin from the form.
+// Schedule execution identity, chosen by an admin from the form.
 // XOR — exactly one of userId / endUserId. Omitted at create → defaults to
 // the caller (`getActor`). Omitted at update → actor left untouched. The actor
-// can never be cleared (preserves #735: a schedule always has an identity).
+// can never be cleared (a schedule always has an identity).
 // `strictObject` BEFORE `.refine()` — `.refine()` returns a ZodPipe on which
 // `.strict()` is no longer chainable, and the enclosing bodies' own `.strict()`
 // only closes their ROOT. Without it, `{ actor: { userId, endUserIds } }`
@@ -296,34 +301,59 @@ const actorSchema = z
   });
 
 /**
- * A schedule running as ANOTHER member fires with that member's reach, so naming such an actor and
- * writing such a schedule is an org owner/admin act on their own credential: a delegate (API key,
- * third-party OAuth client) is refused. `memberId` is `null` for an end-user actor.
+ * A schedule fires with its actor's reach, so naming another identity as actor and writing such a
+ * schedule is an act of authority over that identity. `actor` is `null` when the write names none.
+ *
+ * - Another MEMBER: an org owner/admin on their own credential, and no delegate (API key,
+ *   third-party OAuth client).
+ * - An END USER: whoever may already borrow one. That is an API key, which does with
+ *   `Appstrate-User`, and a caller holding `api-keys:create` here, who could mint that key: the
+ *   same answer on both doors for the same person.
  */
-function mayGovernMemberSchedule(c: Context<AppEnv>, memberId: string | null | undefined): boolean {
-  if (!memberId) return true;
+function mayGovernScheduleActor(c: Context<AppEnv>, actor: Actor | null): boolean {
+  if (!actor) return true;
   const caller = getActor(c);
-  if (caller.type === "user" && caller.id === memberId) return true;
+  if (caller.type === actor.type && caller.id === actor.id) return true;
+  if (actor.type === "end_user") {
+    return (
+      c.get("authMethod") === "api_key" || (c.get("permissions")?.has("api-keys:create") ?? false)
+    );
+  }
   return (
     isUserPrincipal(c) &&
     (ORG_ROLES_WITH_FULL_ACCESS as readonly OrgRole[]).includes(callerOrgRole(c))
   );
 }
 
-const CHOOSE_MEMBER_ACTOR =
-  "Only an organization owner or admin, on their own credential, can make another member a schedule's actor.";
-const WRITE_MEMBER_SCHEDULE =
-  "Only an organization owner or admin, on their own credential, can change a schedule that runs as another member.";
+/** The refusal worded for the actor it is about. */
+function governRefusal(actor: Actor, act: "name" | "write"): string {
+  if (actor.type === "end_user") {
+    return act === "name"
+      ? "Making an end user a schedule's actor takes an API key, or the `api-keys:create` permission in this space."
+      : "Changing a schedule that runs as an end user takes an API key, or the `api-keys:create` permission in this space.";
+  }
+  return act === "name"
+    ? "Only an organization owner or admin, on their own credential, can make another member a schedule's actor."
+    : "Only an organization owner or admin, on their own credential, can change a schedule that runs as another member.";
+}
 
-/** 403 unless {@link mayGovernMemberSchedule}. */
-function assertMayGovern(
-  c: Context<AppEnv>,
-  memberId: string | null | undefined,
-  detail: string,
-  param?: string,
-): void {
-  if (mayGovernMemberSchedule(c, memberId)) return;
-  throw new ApiError({ status: 403, code: "forbidden", title: "Forbidden", detail, param });
+/** 403 unless {@link mayGovernScheduleActor}; `param` set when the write NAMES the actor. */
+function assertMayGovern(c: Context<AppEnv>, actor: Actor | null, act: "name" | "write"): void {
+  if (!actor || mayGovernScheduleActor(c, actor)) return;
+  throw new ApiError({
+    status: 403,
+    code: "forbidden",
+    title: "Forbidden",
+    detail: governRefusal(actor, act),
+    ...(act === "name" ? { param: "actor" } : {}),
+  });
+}
+
+/** The actor a write body names, unresolved: `null` when it names none. */
+function selectedActor(
+  selected: { userId?: string; endUserId?: string } | undefined,
+): Actor | null {
+  return actorFromIds(selected?.userId ?? null, selected?.endUserId ?? null);
 }
 
 /**
@@ -365,7 +395,7 @@ async function resolveScheduleActor(
 }
 
 /**
- * `.strict()` (#1187's rule, extended to this surface): an unknown field is a
+ * `.strict()`: an unknown field is a
  * 400, never a silent drop. A schedule is the strongest case for it — the other
  * launch surfaces mis-execute ONE run, whereas a schedule freezes exactly these
  * fields onto `package_schedules` and replays them on every fire, so a stripped
@@ -402,10 +432,19 @@ export const updateScheduleSchema = z
     version_override: z.string().nullable().optional(),
     connection_overrides: connectionOverridesSchema.nullable().optional(),
     dependency_overrides: dependencyOverridesSchema.nullable().optional(),
-    // No `.nullable()` — the actor can be re-pointed but never cleared (#735).
+    // No `.nullable()` — the actor can be re-pointed but never cleared.
     actor: actorSchema.optional(),
   })
   .strict();
+
+/**
+ * A schedule's version for `ETag` / `If-Match`: its `updated_at`, which every write of its
+ * governed state bumps (a fire's bookkeeping does not), in milliseconds — the precision the
+ * write's compare-and-set compares at.
+ */
+function scheduleVersion(schedule: { updatedAt: string }): number {
+  return Date.parse(schedule.updatedAt);
+}
 
 export function createSchedulesRouter() {
   const router = new Hono<AppEnv>();
@@ -483,30 +522,39 @@ export function createSchedulesRouter() {
       );
 
       // Before resolving the actor, so a refused caller cannot probe who is a member.
-      assertMayGovern(c, data.actor?.userId, CHOOSE_MEMBER_ACTOR, "actor");
+      assertMayGovern(c, selectedActor(data.actor), "name");
       const actor = await resolveScheduleActor(scope, data.actor, getActor(c));
 
       // Reject a `model_id_override` that references no real model up front, so
       // a bad id fails at schedule-create time instead of silently each tick.
-      const explicitModel = await assertExplicitModelExists(scope.orgId, data.model_id_override);
+      // Kept for its 404: the cascade below falls through silently on an unknown id.
+      await assertExplicitModelExists(scope.orgId, data.model_id_override);
+      // A schedule has no payer: its EFFECTIVE model (override, else the agent's model here,
+      // else the org default) must be bound to an organization credential.
+      const scheduled = await resolveModelCascade(
+        scope.orgId,
+        agent.id,
+        data.model_id_override ?? packageSettings.modelId ?? null,
+        null,
+      );
+      if (scheduled) requireBoundModel(scheduled.model, null);
       let generationConfigOverride = data.generation_config_override;
       if (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) {
-        const selectedModel =
-          explicitModel ??
-          (await resolveModel(
-            scope.orgId,
-            agent.id,
-            data.model_id_override ?? packageSettings.modelId,
-          ));
         generationConfigOverride = validateGenerationOverride(
           generationConfigOverride,
-          selectedModel,
+          scheduled?.model ?? null,
           "generation_config_override",
         );
       }
 
-      // Armed: its actor must be able to fire it, and its connection choice is made now.
+      // Armed: its actor must be able to fire it, and its connection choice is made now — under
+      // the governance read here, which the insert re-checks.
       await assertScheduleActorValid(actor, scope.orgId, scope.spaceId);
+      const judgedGovernance = await readScheduleGovernance(
+        scope.spaceId,
+        agent.id,
+        actor.type === "user" ? actor.id : null,
+      );
       await assertScheduleOverridesReachable({
         spaceId: scope.spaceId,
         actor,
@@ -514,13 +562,22 @@ export function createSchedulesRouter() {
         connectionOverrides: data.connection_overrides ?? null,
         storedOverrides: null,
       });
-      const warnings = await assertScheduleConnectionsChosen({
+      const connectionOverrides = await withScheduleFallback({
         agent: effectiveAgent,
         orgId: scope.orgId,
         spaceId: scope.spaceId,
         actor,
         caller: getActor(c),
         connectionOverrides: data.connection_overrides ?? null,
+        dependencyOverrides: data.dependency_overrides ?? null,
+      });
+      const warnings = await assertScheduleConnectionsChosen({
+        agent: effectiveAgent,
+        orgId: scope.orgId,
+        spaceId: scope.spaceId,
+        actor,
+        caller: getActor(c),
+        connectionOverrides,
         dependencyOverrides: data.dependency_overrides ?? null,
       });
 
@@ -533,8 +590,9 @@ export function createSchedulesRouter() {
         generationConfigOverride: generationConfigOverride ?? null,
         proxyIdOverride: data.proxy_id_override ?? null,
         versionOverride: data.version_override ?? null,
-        connectionOverrides: data.connection_overrides ?? null,
+        connectionOverrides,
         dependencyOverrides: data.dependency_overrides ?? null,
+        judgedGovernance,
       });
       await recordAuditFromContext(c, {
         action: "schedule.created",
@@ -556,6 +614,7 @@ export function createSchedulesRouter() {
           actorId: actor.id,
         },
       });
+      setEtag(c, scheduleVersion(schedule));
       return c.json({ ...schedule, warnings }, 201);
     },
   );
@@ -564,6 +623,7 @@ export function createSchedulesRouter() {
   router.get("/schedules/:id", requirePermission("schedules", "read"), async (c) => {
     const id = c.req.param("id")!;
     const schedule = await loadScheduleOr404(c, id, getSpaceScope(c));
+    setEtag(c, scheduleVersion(schedule));
     return c.json(schedule);
   });
 
@@ -574,7 +634,10 @@ export function createSchedulesRouter() {
     const id = c.req.param("id")!;
     const scope = getSpaceScope(c);
     const existing = await loadScheduleOr404(c, id, scope);
-    assertMayGovern(c, existing.userId, WRITE_MEMBER_SCHEDULE);
+    assertMayGovern(c, actorFromIds(existing.userId, existing.endUserId), "write");
+    // Optional: a client holding the row's ETag refuses to overwrite a write it has not seen.
+    // The compare-and-set in `updateSchedule` still guards the window inside this request.
+    assertIfMatch(c, scheduleVersion(existing));
 
     const data = await readJsonBody(c, updateScheduleSchema);
 
@@ -653,9 +716,9 @@ export function createSchedulesRouter() {
     // re-points the row at a definition that may no longer declare the skill
     // the stored map pins, so the map has to be re-judged against the new
     // target even though not one of its entries moved. Gated on `movedDeps`
-    // it was not: the row answered 200 and then 400-ed in
-    // `freezeRunSpawnDependencies` at every tick, forever, exactly the silent
-    // permanent failure `assertScheduleTargetValid` exists to prevent. So the
+    // alone, the write would answer 200 and the row would 400 in
+    // `freezeRunSpawnDependencies` at every tick: the silent permanent
+    // failure `assertScheduleTargetValid` exists to prevent. So the
     // form half runs whenever EITHER half of the pair moves, over the WHOLE
     // effective map — the one the row will replay, not the patch's delta.
     //
@@ -696,24 +759,32 @@ export function createSchedulesRouter() {
     }
 
     // Reject a `model_id_override` that references no real model (no-op when
-    // the field isn't part of this patch).
-    const explicitModel = await assertExplicitModelExists(scope.orgId, data.model_id_override);
+    // the field isn't part of this patch). Kept for its 404: the cascade below
+    // falls through silently on an unknown id.
+    await assertExplicitModelExists(scope.orgId, data.model_id_override);
     let generationConfigOverride = data.generation_config_override;
-    if (
+    const reconcilesGeneration =
       (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) ||
       (generationConfigOverride === undefined &&
         data.model_id_override !== undefined &&
-        existing.generation_config_override)
-    ) {
-      const effectiveModelOverride =
-        data.model_id_override !== undefined ? data.model_id_override : existing.model_id_override;
-      const selectedModel =
-        explicitModel ??
-        (await resolveModel(
-          scope.orgId,
-          existing.packageId,
-          effectiveModelOverride ?? packageSettings.modelId,
-        ));
+        !!existing.generation_config_override);
+    // Judged when the patch moves the model or arms the row; a patch that only reduces
+    // what the row does stays applicable.
+    const judgesModel = data.model_id_override !== undefined || data.enabled === true;
+    const effectiveModelOverride =
+      data.model_id_override !== undefined ? data.model_id_override : existing.model_id_override;
+    const scheduled =
+      judgesModel || reconcilesGeneration
+        ? await resolveModelCascade(
+            scope.orgId,
+            existing.packageId,
+            effectiveModelOverride ?? packageSettings.modelId ?? null,
+            null,
+          )
+        : null;
+    if (judgesModel && scheduled) requireBoundModel(scheduled.model, null);
+    if (reconcilesGeneration) {
+      const selectedModel = scheduled?.model ?? null;
 
       if (generationConfigOverride && Object.keys(generationConfigOverride).length > 0) {
         generationConfigOverride = validateGenerationOverride(
@@ -729,9 +800,9 @@ export function createSchedulesRouter() {
       }
     }
 
-    // #738: re-point the actor when the caller selected one (validated against
+    // Re-point the actor when the caller selected one (validated against
     // this org/space scope). `undefined` leaves the existing actor untouched.
-    assertMayGovern(c, data.actor?.userId, CHOOSE_MEMBER_ACTOR, "actor");
+    assertMayGovern(c, selectedActor(data.actor), "name");
     const actor = data.actor ? await resolveScheduleActor(scope, data.actor) : undefined;
 
     // Only a *real* identity change invalidates frozen connection picks. Picking
@@ -744,11 +815,11 @@ export function createSchedulesRouter() {
     // On a real change, frozen `connection_overrides` reference the previous
     // identity's connections — reset them unless this patch supplies fresh
     // picks, forcing a re-pick under the new identity.
-    const connectionOverrides =
+    let connectionOverrides =
       actorChanged && data.connection_overrides === undefined ? null : data.connection_overrides;
 
     const nextActor = actor ?? existingActor;
-    const nextOverrides =
+    let nextOverrides =
       connectionOverrides !== undefined ? connectionOverrides : existing.connection_overrides;
     // FORM, on the same trigger as the dependency map above: either half of the
     // (map, fired manifest) pair moving re-judges the whole map the row replays.
@@ -762,6 +833,12 @@ export function createSchedulesRouter() {
         nextOverrides,
       );
     }
+    // Read before any judgment of the set: the update re-checks it when it leaves the row armed.
+    const judgedGovernance = await readScheduleGovernance(
+      scope.spaceId,
+      existing.packageId,
+      nextActor.type === "user" ? nextActor.id : null,
+    );
     // On EVERY write: a disabled row must not store a pick that arming it later would trust.
     await assertScheduleOverridesReachable({
       spaceId: scope.spaceId,
@@ -770,7 +847,7 @@ export function createSchedulesRouter() {
       connectionOverrides: nextOverrides,
       storedOverrides: actorChanged ? null : existing.connection_overrides,
     });
-    // Armed: re-judged on every write, since a new connection can make the choice ambiguous.
+    // Armed: re-judged on every write, since a connection made after the last can open the choice.
     // `warnings` stays `null` unless this write moves what a fire resolves with: a disabled
     // schedule fires nothing, and an unrelated edit has no news to report.
     const resolutionMoved =
@@ -788,6 +865,18 @@ export function createSchedulesRouter() {
         throw err;
       });
       if (definition) {
+        // The fallback named here, not by the client: a write that adds nothing stores
+        // what it was sent, so a patch of another field leaves the set as it is.
+        const named = await withScheduleFallback({
+          agent: definition,
+          orgId: scope.orgId,
+          spaceId: scope.spaceId,
+          actor: nextActor,
+          caller: getActor(c),
+          connectionOverrides: nextOverrides,
+          dependencyOverrides: effectiveDependencyOverrides ?? null,
+        });
+        if (named !== nextOverrides) connectionOverrides = nextOverrides = named;
         const judged = await assertScheduleConnectionsChosen({
           agent: definition,
           orgId: scope.orgId,
@@ -817,6 +906,7 @@ export function createSchedulesRouter() {
         versionOverride: data.version_override,
         connectionOverrides,
         dependencyOverrides: data.dependency_overrides,
+        judgedGovernance,
         actor,
       },
       // `actor` above is the schedule's (possibly re-pointed) execution
@@ -849,6 +939,7 @@ export function createSchedulesRouter() {
         ...diff,
       });
     }
+    setEtag(c, scheduleVersion(schedule));
     return c.json({ ...schedule, warnings });
   });
 
@@ -856,7 +947,8 @@ export function createSchedulesRouter() {
   router.delete("/schedules/:id", requirePermission("schedules", "delete"), async (c) => {
     const id = c.req.param("id")!;
     const scope = getSpaceScope(c);
-    assertMayGovern(c, (await loadScheduleOr404(c, id, scope)).userId, WRITE_MEMBER_SCHEDULE);
+    const existing = await loadScheduleOr404(c, id, scope);
+    assertMayGovern(c, actorFromIds(existing.userId, existing.endUserId), "write");
     await deleteSchedule(scope, id);
     await recordAuditFromContext(c, {
       action: "schedule.deleted",
@@ -883,7 +975,9 @@ export function createSchedulesRouter() {
       // `schedules:read` is space-wide, so the schedule itself is readable to
       // every member — but its RUNS are runs, and follow the run predicate:
       // without `runs:read-all` a colleague's schedule lists nothing.
+      const filters = parseRunListFilters({ status: c.req.query("status"), q: c.req.query("q") });
       const result = await listScheduleRuns(scope, scheduleId, {
+        ...filters,
         limit,
         offset,
         actor: getActor(c),

@@ -7,7 +7,6 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { PACKAGE_FILE_INLINE_MAX_BYTES } from "@appstrate/core/package-files";
@@ -219,16 +218,22 @@ describe("read_skill", () => {
     await expect(call({ id: "@acme/tone" })).rejects.toThrow("storage down");
   });
 
-  it("refuses a missing id or a non-string path as invalid params, before any read", async () => {
+  it("refuses a missing id or a non-string path as a tool result, before any read", async () => {
     let reads = 0;
     const { call } = tool(async () => {
       reads++;
       return snapshot(files);
     });
-    for (const args of [{}, { id: "" }, { id: 3 }, { id: "@acme/tone", path: 1 }]) {
-      const refusal = await call(args).catch((err: unknown) => err);
-      expect(refusal).toBeInstanceOf(McpError);
-      expect((refusal as McpError).code).toBe(ErrorCode.InvalidParams);
+    const cases: Array<[Record<string, unknown>, string]> = [
+      [{}, "missing_argument"],
+      [{ id: "" }, "missing_argument"],
+      [{ id: 3 }, "missing_argument"],
+      [{ id: "@acme/tone", path: 1 }, "invalid_argument"],
+    ];
+    for (const [args, code] of cases) {
+      const refusal = await call(args);
+      expect(refusal.isError).toBe(true);
+      expect(JSON.parse((refusal.content[0] as { text: string }).text)).toMatchObject({ code });
     }
     expect(reads).toBe(0);
   });

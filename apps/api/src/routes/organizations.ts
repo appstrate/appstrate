@@ -7,7 +7,14 @@ import type { AppEnv } from "../types/index.ts";
 import { requirePermission } from "../middleware/require-permission.ts";
 import { auditSpaceAssignments, spaceAssignmentSchema } from "../lib/space-role-assignment.ts";
 import { listedOrgIdentityForCaller } from "../lib/principal-permissions.ts";
-import { resolveListingViewAs } from "../lib/view-as.ts";
+import {
+  callerOrgRole,
+  callerPersonalOwnerId,
+  effectiveInSpace,
+  personaFor,
+  personaMemberships,
+  resolveListingViewAs,
+} from "../lib/view-as.ts";
 import { isUserPrincipal } from "../lib/principal.ts";
 import {
   createOrganization,
@@ -27,7 +34,7 @@ import {
   orgSettingsPatchSchema,
 } from "../services/organizations.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { toSlug, SLUG_REGEX } from "@appstrate/core/naming";
+import { toSlug, SLUG_REGEX, isReservedScope } from "@appstrate/core/naming";
 import { ApiError, forbidden, invalidRequest, notFound, unauthorized } from "../lib/errors.ts";
 import {
   CURRENT_API_VERSION,
@@ -49,12 +56,15 @@ import { provisionDefaultAgentForOrg } from "../services/default-agent.ts";
 import { effectiveOrgStorageLimit } from "../services/files.ts";
 import { getEnv } from "@appstrate/env";
 import { mayCreateOrganization } from "@appstrate/db/auth-policy";
-import { createDefaultSpace } from "../services/spaces.ts";
+import { createDefaultSpace, listSpacesForPrincipal } from "../services/spaces.ts";
+import { listSpacesOfMembers } from "../services/space-members.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { logger } from "../lib/logger.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
-import { ASSIGNABLE_ORG_ROLES } from "@appstrate/shared-types";
+import { recordSharesRemoved } from "../services/connection-shares.ts";
+import { ASSIGNABLE_ORG_ROLES, type OrganizationMemberSpace } from "@appstrate/shared-types";
 import { ORG_ROLES } from "@appstrate/core/permissions";
+import { appearanceColorSchema, appearanceIconSchema } from "@appstrate/core/appearance";
 
 export const createOrgSchema = z
   .object({
@@ -67,8 +77,35 @@ export const updateOrgSchema = z
   .object({
     name: z.string().min(1).optional(),
     slug: z.string().regex(SLUG_REGEX, "Invalid slug (kebab-case required)").optional(),
+    icon: appearanceIconSchema(["lucide", "emoji", "image"]).nullable().optional(),
+    color: appearanceColorSchema.nullable().optional(),
   })
   .strict();
+
+/**
+ * An organization's slug is the scope its uploads, forks and starter agent are
+ * created under (`@<slug>/…`), so a slug must be neither one
+ * the platform owns (`isReservedScope`) nor another organization's. Checked on
+ * create and on rename — the only two doors that write a slug.
+ */
+async function assertSlugClaimable(slug: string): Promise<void> {
+  if (isReservedScope(slug)) {
+    throw new ApiError({
+      status: 400,
+      code: "slug_reserved",
+      title: "Bad Request",
+      detail: `Slug '${slug}' is reserved by the platform`,
+    });
+  }
+  if (!(await isSlugAvailable(slug))) {
+    throw new ApiError({
+      status: 400,
+      code: "slug_taken",
+      title: "Bad Request",
+      detail: `Slug '${slug}' is already in use`,
+    });
+  }
+}
 
 export const addMemberSchema = z
   .object({
@@ -95,6 +132,15 @@ export const updateInvitationSchema = z
     space_assignments: z.array(spaceAssignmentSchema).optional(),
   })
   .strict();
+
+/**
+ * An icon as the audit log records it: an uploaded image (a `data:` URI, whatever its type) by
+ * the first 16 hex digits of its SHA-256 digest, never its bytes.
+ */
+function auditedIcon(icon: string): string {
+  if (!icon.startsWith("data:")) return icon;
+  return `sha256:${new Bun.CryptoHasher("sha256").update(icon).digest("hex").slice(0, 16)}`;
+}
 
 /** The service re-reads the actor's role under its lock; only the transport is passed. */
 function memberActor(c: Context<AppEnv>) {
@@ -133,6 +179,8 @@ router.get("/", async (c) => {
             id: o.id,
             name: o.name,
             slug: o.slug,
+            icon: o.icon,
+            color: o.color,
             role: identity.role,
             permissions: identity.permissions,
             createdAt: o.createdAt,
@@ -150,7 +198,7 @@ router.post("/", async (c) => {
     throw forbidden("Only the user's own credential can create organizations");
   }
   const user = c.get("user");
-  // Self-hosting closed mode (issue #228): when org creation is disabled
+  // Self-hosting closed mode: when org creation is disabled
   // platform-wide, only platform admins (AUTH_PLATFORM_ADMIN_EMAILS) may
   // create new organizations. The OrgGate webapp branch surfaces a
   // "waiting for invitation" page to non-admin users with no org.
@@ -169,14 +217,7 @@ router.post("/", async (c) => {
     throw invalidRequest("Invalid slug (kebab-case required)");
   }
 
-  if (!(await isSlugAvailable(slug))) {
-    throw new ApiError({
-      status: 400,
-      code: "slug_taken",
-      title: "Bad Request",
-      detail: `Slug '${slug}' is already in use`,
-    });
-  }
+  await assertSlugClaimable(slug);
 
   const org = await createOrganization(data.name.trim(), slug, user.id);
 
@@ -210,6 +251,8 @@ router.post("/", async (c) => {
       id: org.id,
       name: org.name,
       slug: org.slug,
+      icon: org.icon,
+      color: org.color,
       role: "owner",
       createdAt: org.createdAt,
     },
@@ -219,14 +262,45 @@ router.post("/", async (c) => {
 
 // --- Routes below require org context (orgId from params, verified via membership) ---
 
+/**
+ * The spaces each org member reaches, among those whose member list the caller
+ * may read: `GET /api/spaces/{id}/members`'s own guard, applied per space —
+ * `space-members:read` there opens the explicit rows, `members:read` on top the
+ * implicit ones — over the spaces the caller reaches, the one a pinned
+ * credential is bound to only. So the member payload discloses no more than the
+ * per-space reads it replaces.
+ */
+async function memberSpacesForCaller(
+  c: Context<AppEnv>,
+  orgId: string,
+): Promise<Map<string, OrganizationMemberSpace[]>> {
+  const entries = await listSpacesForPrincipal(
+    orgId,
+    callerOrgRole(c, orgId),
+    c.get("user").id,
+    callerPersonalOwnerId(c, orgId),
+    personaMemberships(personaFor(c, orgId)),
+  );
+  const pinnedSpaceId = c.get("spaceId");
+  const readable = entries.flatMap(({ space, role }) => {
+    if (pinnedSpaceId && space.id !== pinnedSpaceId) return [];
+    const permissions = effectiveInSpace(c, role);
+    if (!permissions.has("space-members:read")) return [];
+    return [{ spaceId: space.id, includeImplicit: permissions.has("members:read") }];
+  });
+  return listSpacesOfMembers(orgId, readable);
+}
+
 // OrgDetail serializer — shared by GET /:orgId and PATCH /:orgId so the update
 // response is the exact same resource shape as the detail read.
 async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
   const permissions = c.get("permissions");
-  const [org, members, invitations] = await Promise.all([
+  const readsMembers = permissions?.has("members:read") ?? false;
+  const [org, members, invitations, memberSpaces] = await Promise.all([
     getOrgById(orgId),
-    permissions?.has("members:read") ? getOrgMembers(orgId) : Promise.resolve([]),
+    readsMembers ? getOrgMembers(orgId) : Promise.resolve([]),
     permissions?.has("members:invite") ? getOrgInvitations(orgId) : Promise.resolve([]),
+    readsMembers ? memberSpacesForCaller(c, orgId) : Promise.resolve(new Map()),
   ]);
   if (!org) {
     throw notFound("Organization not found");
@@ -246,6 +320,8 @@ async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
     id: org.id,
     name: org.name,
     slug: org.slug,
+    icon: org.icon,
+    color: org.color,
     createdAt: org.createdAt,
     deleting_at: org.deletingAt,
     storage: {
@@ -259,6 +335,7 @@ async function buildOrgDetail(c: Context<AppEnv>, orgId: string) {
       joinedAt: m.joinedAt,
       displayName: m.displayName,
       email: m.email,
+      spaces: memberSpaces.get(m.userId) ?? [],
     })),
     invitations: invitations.map((inv) => ({
       id: inv.id,
@@ -284,32 +361,26 @@ router.get("/:orgId", async (c) => {
   return c.json(await buildOrgDetail(c, orgId));
 });
 
-// PATCH /api/orgs/:orgId — update name/slug (owner only — org routes skip org context)
+// PATCH /api/orgs/:orgId — update name/slug/icon/color (org routes skip org context)
 router.patch("/:orgId", requirePermission("org", "update"), async (c) => {
   const orgId = c.req.param("orgId")!;
   const data = await readJsonBody(c, updateOrgSchema);
 
-  if (data.slug) {
-    if (!(await isSlugAvailable(data.slug))) {
-      throw new ApiError({
-        status: 400,
-        code: "slug_taken",
-        title: "Bad Request",
-        detail: `Slug '${data.slug}' is already in use`,
-      });
-    }
-  }
+  if (data.slug) await assertSlugClaimable(data.slug);
 
-  await updateOrganization(orgId, {
+  const updates = {
     ...(data.name?.trim() ? { name: data.name.trim() } : {}),
     ...(data.slug ? { slug: data.slug } : {}),
-  });
+    ...(data.icon !== undefined ? { icon: data.icon } : {}),
+    ...(data.color !== undefined ? { color: data.color } : {}),
+  };
+  if (Object.keys(updates).length > 0) await updateOrganization(orgId, updates);
 
   await recordAuditFromContext(c, {
     action: "org.updated",
     resourceType: "org",
     resourceId: orgId,
-    after: data,
+    after: { ...data, ...(data.icon ? { icon: auditedIcon(data.icon) } : {}) },
     orgIdOverride: orgId,
   });
 
@@ -497,7 +568,7 @@ router.patch(
     });
 
     // Bare updated resource — same serializer as the invitations list in
-    // GET /orgs/:orgId (issue #657).
+    // GET /orgs/:orgId.
     return c.json({
       id: updated.id,
       email: updated.email,
@@ -517,11 +588,8 @@ router.delete("/:orgId/members/:userId", requirePermission("members", "remove"),
   const orgId = c.req.param("orgId")!;
   const targetUserId = c.req.param("userId")!;
 
-  const { orphanedSpaceIds, revokedApiKeyIds, unsharedConnectionIds } = await removeMember(
-    orgId,
-    targetUserId,
-    memberActor(c),
-  );
+  const { orphanedSpaceIds, revokedApiKeyIds, unsharedShares, deletedModelCredentialIds } =
+    await removeMember(orgId, targetUserId, memberActor(c));
   await recordAuditFromContext(c, {
     action: "org.member_removed",
     resourceType: "member",
@@ -531,8 +599,9 @@ router.delete("/:orgId/members/:userId", requirePermission("members", "remove"),
     // §3.6). Named here because this is the event an owner comes back to when
     // deciding whether to convert one or sweep it: the sweeper's own log line
     // arrives 30 days later, and by then the space is gone.
-    after: { orphanedSpaceIds, revokedApiKeyIds, unsharedConnectionIds },
+    after: { orphanedSpaceIds, revokedApiKeyIds, deletedModelCredentialIds },
   });
+  await recordSharesRemoved(c, orgId, unsharedShares, "access_lost");
   return c.body(null, 204);
 });
 
@@ -546,7 +615,7 @@ router.put("/:orgId/members/:userId", requirePermission("members", "change-role"
 
   // Promoting to owner/admin drops the member's explicit space grants; the audit
   // is the only record of what a later demotion will NOT restore.
-  const { previousRole, revoked, unsharedConnectionIds } = await updateMemberRole(
+  const { previousRole, revoked, unsharedShares } = await updateMemberRole(
     orgId,
     targetUserId,
     data.role,
@@ -564,22 +633,25 @@ router.put("/:orgId/members/:userId", requirePermission("members", "change-role"
         customRoleId: row.customRoleId,
       })),
     },
-    after: { role: data.role, unsharedConnectionIds },
+    after: { role: data.role },
     orgIdOverride: orgId,
   });
+  await recordSharesRemoved(c, orgId, unsharedShares, "access_lost");
 
   // Bare updated resource — same serializer as the members list in
-  // GET /orgs/:orgId (issue #657).
+  // GET /orgs/:orgId.
   const updated = await getOrgMemberWithProfile(orgId, targetUserId);
   if (!updated) {
     throw notFound("Member not found");
   }
+  const memberSpaces = await memberSpacesForCaller(c, orgId);
   return c.json({
     userId: updated.userId,
     role: updated.role,
     joinedAt: updated.joinedAt,
     displayName: updated.displayName,
     email: updated.email,
+    spaces: memberSpaces.get(targetUserId) ?? [],
   });
 });
 
@@ -598,17 +670,16 @@ router.post("/:orgId/leave", async (c) => {
 
   if (!c.get("orgRole")) throw forbidden("Not a member of this organization");
 
-  const { orphanedSpaceIds, revokedApiKeyIds, unsharedConnectionIds } = await leaveOrganization(
-    orgId,
-    user.id,
-  );
+  const { orphanedSpaceIds, revokedApiKeyIds, unsharedShares, deletedModelCredentialIds } =
+    await leaveOrganization(orgId, user.id);
   await recordAuditFromContext(c, {
     action: "org.member_left",
     resourceType: "member",
     resourceId: user.id,
     orgIdOverride: orgId,
-    after: { orphanedSpaceIds, revokedApiKeyIds, unsharedConnectionIds },
+    after: { orphanedSpaceIds, revokedApiKeyIds, deletedModelCredentialIds },
   });
+  await recordSharesRemoved(c, orgId, unsharedShares, "access_lost");
   return c.body(null, 204);
 });
 

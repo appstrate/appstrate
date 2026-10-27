@@ -2,7 +2,7 @@
 
 /**
  * Resolve which agent definition a run executes — the mutable draft or a
- * published `package_versions` snapshot (#636).
+ * published `package_versions` snapshot.
  *
  * Selector grammar (snake_case wire value of `?version=` on the run route
  * and `version_override` on schedules):
@@ -12,9 +12,9 @@
  *   - `"published"` → execute the version selected by the `latest` dist-tag.
  *                     404 `no_published_version` when nothing is published.
  *   - anything else → 3-step resolution (exact version → dist-tag → semver
- *                     range) via {@link getVersionDetail}. 404 when nothing
+ *                     range) via {@link getVersionRow}. 404 when nothing
  *                     matches.
- *   - omitted       → `"published"` (#636). There is no third answer: an
+ *   - omitted       → `"published"`. There is no third answer: an
  *                     placement carries no version, so a space runs what its
  *                     author last published unless the caller asks for
  *                     something else.
@@ -38,23 +38,25 @@
  *
  * Scope: this resolver pins the agent's OWN definition (manifest + prompt) to
  * the selected version. It derives nothing: the readiness gate projects the
- * declared skills off the effective manifest itself (#878). The transitive
+ * declared skills off the effective manifest itself. The transitive
  * skill closure that ships to the container is pinned separately, on the run
- * hot path, by `RunPackageCatalog` (#666) — it resolves each
+ * hot path, by `RunPackageCatalog` — it resolves each
  * `dependencies.skills` entry against PUBLISHED versions honoring the manifest
  * pin, so a dependency's mutable draft never leaks into a run. Integration /
  * mcp-server spawns are frozen by the shared run-pipeline dependency resolver
- * before the sidecar receives its spawn plan (#686).
+ * before the sidecar receives its spawn plan.
  */
 
 import { ApiError, notFound } from "../lib/errors.ts";
 import {
   getLatestVersionInfo,
-  getVersionDetail,
+  getVersionRow,
+  readVersionArchive,
   requirePublishedPrompt,
   type VersionDetail,
 } from "./package-versions.ts";
 import type { AgentManifest, LoadedPackage } from "../types/index.ts";
+import type { DbOrTx } from "../lib/db-helpers.ts";
 
 // Both keywords are reserved names (`isProtectedTag` in
 // `@appstrate/core/dist-tags`): they resolve here BEFORE any dist-tag lookup,
@@ -72,6 +74,8 @@ export function versionRefOf(overrideVersionLabel: string | undefined): string {
   return overrideVersionLabel ?? VERSION_SELECTOR_DRAFT;
 }
 
+type VersionRow = Omit<VersionDetail, "content">;
+
 interface ResolvedRunAgent {
   /** The agent definition the run will execute (draft or version snapshot). */
   agent: LoadedPackage;
@@ -88,7 +92,7 @@ interface ResolvedRunAgent {
  *
  * A `LoadedPackage` carries only what the definition SAYS (manifest + prompt),
  * so swapping those two fields swaps the definition wholesale — nothing
- * derived from the draft manifest rides along (#878).
+ * derived from the draft manifest rides along.
  */
 function substituteVersion(
   agent: LoadedPackage,
@@ -106,26 +110,28 @@ function substituteVersion(
 }
 
 /**
- * Resolve the `version` selector for a run trigger into the effective agent
- * definition. Throws `ApiError` (404) when an explicit selector cannot be
- * satisfied — never silently falls back to the draft — and 422
- * `version_artifact_unavailable` when the selected version's archive is unreadable.
+ * The version `selector` picks for `agent`: its catalog row (manifest included, archive not
+ * read), or `null` when the loaded definition itself runs (a system agent, or `"draft"`).
+ * Throws `ApiError` (404) when a published selection cannot be satisfied — never a silent
+ * draft fallback. The one selection {@link resolveAgentRunVersion} and
+ * {@link resolveAgentRunManifest} share.
  */
-export async function resolveAgentRunVersion(
+async function selectRunVersion(
   agent: LoadedPackage,
   selector: string | undefined,
-): Promise<ResolvedRunAgent> {
+  executor?: DbOrTx,
+): Promise<VersionRow | null> {
   // System agents ship their definition with the platform — no published
   // versions exist, the selector is ignored (pre-existing route behavior).
-  if (agent.source === "system") return { agent };
+  if (agent.source === "system") return null;
 
   // Empty string ⇒ treated as omitted (query params arrive as "" easily).
   const sel = selector?.trim() || undefined;
 
-  if (sel === VERSION_SELECTOR_DRAFT) return { agent };
+  if (sel === VERSION_SELECTOR_DRAFT) return null;
 
   if (sel === undefined || sel === VERSION_SELECTOR_PUBLISHED) {
-    const latest = await getLatestVersionInfo(agent.id).catch(() => null);
+    const latest = await getLatestVersionInfo(agent.id, executor).catch(() => null);
     if (!latest) {
       // Nothing published — no silent draft fallback. An agent run without a
       // selector is an explicit error, not a surprise draft execution; the
@@ -137,17 +143,53 @@ export async function resolveAgentRunVersion(
         detail: `Agent '${agent.id}' has no published version — publish one or run with version=draft`,
       });
     }
-    const detail = await getVersionDetail(agent.id, latest.version, { forExecution: true });
-    if (!detail) {
+    const row = await getVersionRow(agent.id, latest.version, executor);
+    if (!row) {
       throw notFound(`Version '${latest.version}' of '${agent.id}' is not available`);
     }
-    return substituteVersion(agent, detail);
+    return row;
   }
 
   // Explicit spec: exact version → dist-tag → semver range.
-  const detail = await getVersionDetail(agent.id, sel, { forExecution: true });
-  if (!detail) {
+  const row = await getVersionRow(agent.id, sel, executor);
+  if (!row) {
     throw notFound(`Version '${sel}' not found`);
   }
-  return substituteVersion(agent, detail);
+  return row;
+}
+
+/**
+ * Resolve the `version` selector for a run trigger into the effective agent
+ * definition. Throws `ApiError` (404) when an explicit selector cannot be
+ * satisfied — never silently falls back to the draft — and 422
+ * `version_artifact_unavailable` when the selected version's archive is unreadable.
+ */
+export async function resolveAgentRunVersion(
+  agent: LoadedPackage,
+  selector: string | undefined,
+  executor?: DbOrTx,
+): Promise<ResolvedRunAgent> {
+  const row = await selectRunVersion(agent, selector, executor);
+  if (!row) return { agent };
+  // The version will run: its bytes go through the AFPS signature policy.
+  const content = await readVersionArchive(agent.id, row.version, { forExecution: true });
+  return substituteVersion(agent, { ...row, content });
+}
+
+/**
+ * {@link resolveAgentRunVersion}'s selection, same 404s, for a caller that only reads what the
+ * definition DECLARES: the selected version's manifest replaces the draft's, and its archive is
+ * never read — no download, no signature check, so no prompt (and no 422 for an unreadable one).
+ */
+export async function resolveAgentRunManifest(
+  agent: LoadedPackage,
+  selector: string | undefined,
+  executor?: DbOrTx,
+): Promise<{ agent: Omit<LoadedPackage, "prompt">; overrideVersionLabel?: string }> {
+  const row = await selectRunVersion(agent, selector, executor);
+  if (!row) return { agent };
+  return {
+    agent: { ...agent, manifest: row.manifest as unknown as AgentManifest },
+    overrideVersionLabel: row.version,
+  };
 }

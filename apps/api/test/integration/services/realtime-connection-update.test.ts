@@ -2,13 +2,15 @@
 
 /**
  * Integration test for the `connection_update` SSE channel fan-out in
- * `services/realtime.ts`. Validates the four filter branches added by
- * the connection-renewal-flow PR:
+ * `services/realtime.ts`. Validates its filter branches:
  *
- *   1. space_id mismatch  → skip (cross-space isolation)
- *   2. userId match              → forward (own dashboard rows)
- *   3. userId mismatch           → skip (cross-actor isolation)
- *   4. no actor on subscriber    → skip (anti-leak default)
+ *   1. org_id mismatch           → skip (tenant isolation)
+ *   2. space_id mismatch         → skip, unless the row is org-scoped
+ *                                  (`space_id` NULL reaches every space of its org,
+ *                                  whatever OAuth client the space registers)
+ *   3. userId match              → forward (own dashboard rows)
+ *   4. userId mismatch           → skip (cross-actor isolation)
+ *   5. no actor on subscriber    → skip (anti-leak default)
  *
  * The trigger half (pg_notify emission) is covered by
  * `notify-triggers.test.ts`; this file exercises the LISTEN side.
@@ -17,7 +19,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, mock } from "bun:test";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
-import { seedPackage } from "../../helpers/seed.ts";
+import { seedPackage, seedSpace } from "../../helpers/seed.ts";
 import { eventData } from "../../helpers/sse.ts";
 import { activatePackage } from "../../../src/services/space-packages.ts";
 import {
@@ -26,7 +28,7 @@ import {
   initRealtime,
   type RealtimeEvent,
 } from "../../../src/services/realtime.ts";
-import { integrationConnections } from "@appstrate/db/schema";
+import { integrationConnections, integrationOauthClients } from "@appstrate/db/schema";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import { createNotifyTriggers } from "@appstrate/db/notify";
 import {
@@ -133,15 +135,22 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
    * Helper: insert a connection row for a given owner and wait for the
    * trigger → NOTIFY → LISTEN round-trip to flush.
    */
-  async function insertConnection(opts: { userId: string; spaceId: string }) {
+  async function insertConnection(opts: {
+    userId: string;
+    spaceId: string | null;
+    orgId?: string;
+    originSpaceId?: string;
+  }) {
     const [row] = await db
       .insert(integrationConnections)
       .values({
         integrationId: INTEG,
         authKey: "primary",
         accountId: `acct-${opts.userId.slice(0, 6)}`,
-        label: `acct-${opts.userId.slice(0, 6)}`,
+        label: `acct-${opts.userId.slice(0, 6)}-${crypto.randomUUID().slice(0, 4)}`,
+        orgId: opts.orgId ?? ctx.orgId,
         spaceId: opts.spaceId,
+        originSpaceId: opts.originSpaceId ?? null,
         userId: opts.userId,
         endUserId: null,
         credentialsEncrypted: encryptCredentialEnvelope({ outputs: { api_key: "v1" } }),
@@ -175,6 +184,7 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
     const evt = send.mock.calls[0]![0]!;
     expect(evt.event).toBe("connection_update");
     expect(eventData(evt, "connection_update")).toMatchObject({
+      orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       userId: ctx.user.id,
       integrationPackageId: INTEG,
@@ -211,7 +221,7 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("skips a subscriber on a different space (tenant isolation)", async () => {
+  it("skips a subscriber of another org (tenant isolation)", async () => {
     const send = mock((_e: RealtimeEvent) => {});
     const subId = "sub-other-space";
     trackSubscriber(subId);
@@ -224,6 +234,92 @@ describe("realtime — connection_update channel (actor + tenant filter)", () =>
         isAdmin: true,
         userId: ctx.user.id,
       },
+      send,
+    });
+
+    await insertConnection({ userId: ctx.user.id, spaceId: ctx.defaultSpaceId });
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("forwards an org-scoped row to its owner in any space of the org", async () => {
+    const spaceB = await seedSpace({ orgId: ctx.orgId, name: "B" });
+    const send = mock((_e: RealtimeEvent) => {});
+    const subId = "sub-org-row";
+    trackSubscriber(subId);
+    addSubscriber({
+      id: subId,
+      filter: { readAll: true, orgId: ctx.orgId, spaceId: spaceB.id, userId: ctx.user.id },
+      send,
+    });
+
+    await insertConnection({ userId: ctx.user.id, spaceId: null });
+    await waitFor(() => send.mock.calls.length >= 1);
+
+    expect(eventData(send.mock.calls[0]![0]!, "connection_update")).toMatchObject({
+      orgId: ctx.orgId,
+      spaceId: null,
+      userId: ctx.user.id,
+    });
+  });
+
+  it("never forwards an org-scoped row to a subscriber of another org", async () => {
+    const send = mock((_e: RealtimeEvent) => {});
+    const subId = "sub-org-row-other-org";
+    trackSubscriber(subId);
+    addSubscriber({
+      id: subId,
+      filter: {
+        readAll: true,
+        orgId: ctxOther.orgId,
+        spaceId: ctxOther.defaultSpaceId,
+        userId: ctx.user.id,
+      },
+      send,
+    });
+
+    await insertConnection({ userId: ctx.user.id, spaceId: null });
+
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("forwards an org-scoped row to a space defaulting to its own OAuth client", async () => {
+    const { id: spaceB } = await seedSpace({ orgId: ctx.orgId, name: "Own client" });
+    await db.insert(integrationOauthClients).values({
+      orgId: ctx.orgId,
+      spaceId: spaceB,
+      integrationId: INTEG,
+      authKey: "primary",
+      clientId: "byo-app",
+      clientSecretEncrypted: "x",
+      isDefault: true,
+    });
+    const send = mock((_e: RealtimeEvent) => {});
+    trackSubscriber("sub-own-client");
+    addSubscriber({
+      id: "sub-own-client",
+      filter: { readAll: true, orgId: ctx.orgId, spaceId: spaceB, userId: ctx.user.id },
+      send,
+    });
+
+    await insertConnection({
+      userId: ctx.user.id,
+      spaceId: null,
+      originSpaceId: ctx.defaultSpaceId,
+    });
+    await waitFor(() => send.mock.calls.length >= 1);
+
+    expect(eventData(send.mock.calls[0]![0]!, "connection_update").operation).toBe("INSERT");
+  });
+
+  it("skips a space-scoped row on the owner's subscriber of another space of the org", async () => {
+    const spaceB = await seedSpace({ orgId: ctx.orgId, name: "B" });
+    const send = mock((_e: RealtimeEvent) => {});
+    const subId = "sub-space-row-other-space";
+    trackSubscriber(subId);
+    addSubscriber({
+      id: subId,
+      filter: { readAll: true, orgId: ctx.orgId, spaceId: spaceB.id, userId: ctx.user.id },
       send,
     });
 

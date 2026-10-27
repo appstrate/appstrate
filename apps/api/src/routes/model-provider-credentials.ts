@@ -12,18 +12,26 @@ import {
 } from "../lib/list-query.ts";
 import { setOffsetLinkHeader } from "../lib/pagination-link.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
-import { requirePermission } from "../middleware/require-permission.ts";
+import { requireAnyPermission, requirePermission } from "../middleware/require-permission.ts";
 import { isSystemModelProviderCredential } from "../services/model-registry.ts";
 import {
+  mayProbeCredential,
   createApiKeyCredential,
+  credentialOwnerTypeSchema,
   dedupeCredentialLabel,
   deriveCredentialLabel,
   deleteModelProviderCredential,
   getOrgModelProviderCredential,
   listOrgModelProviderCredentials,
   loadInferenceCredentials,
+  MANAGE_CREDENTIALS,
+  personalCredentialCustomEndpoint,
+  requestModelCredentialCaller,
+  resolveCredentialOwner,
   updateModelProviderCredential,
+  type ModelCredentialCaller,
 } from "../services/model-providers/credentials.ts";
+import { providerAllowsPersonalCredentials } from "../services/model-providers/credential-chain.ts";
 import { getModelProvider, listModelProviders } from "../services/model-providers/registry.ts";
 import { hasLiveModelSearch } from "../services/model-search.ts";
 import { listServedModels } from "../services/model-providers/model-listing.ts";
@@ -49,6 +57,14 @@ import { recordAuditFromContext } from "../services/audit.ts";
 /** Not `z.httpUrl()`: that one refuses the IP or `localhost` of a self-hosted endpoint. */
 const endpointUrlSchema = z.url({ protocol: /^https?$/ });
 
+/** Read the credential list, the pickers and the probes: an org reader or a member with its own key. */
+const VIEW_CREDENTIALS = ["model-provider-credentials:read", "model-provider-credentials:connect"];
+/** Remove: an org manager, or a member for its own (`connect`). */
+const REMOVE_CREDENTIALS = [
+  "model-provider-credentials:delete",
+  "model-provider-credentials:connect",
+];
+
 export const createSchema = z
   .object({
     /**
@@ -67,6 +83,7 @@ export const createSchema = z
      * and then refused by every call made against it.
      */
     base_url_override: endpointUrlSchema.optional().nullable(),
+    owner_type: credentialOwnerTypeSchema,
   })
   .strict();
 
@@ -120,7 +137,7 @@ function assertEnumerableProvider(cfg: ModelProviderDefinition, param: string): 
 
 /** Resolve the `POST /discover` body into the endpoint to enumerate. */
 async function resolveDiscoverTarget(
-  orgId: string,
+  caller: ModelCredentialCaller,
   body: z.infer<typeof discoverSchema>,
 ): Promise<DiscoverTarget> {
   const inline =
@@ -138,7 +155,11 @@ async function resolveDiscoverTarget(
     if (isSystemModelProviderCredential(body.credentialId)) {
       throw systemEntityForbidden("model provider credential", body.credentialId);
     }
-    const creds = await loadInferenceCredentials(orgId, body.credentialId);
+    // Another member's personal credential reads as absent, as on the test probes.
+    if (!(await mayProbeCredential(caller, body.credentialId))) {
+      throw notFound("Model provider credential not found");
+    }
+    const creds = await loadInferenceCredentials(caller.orgId, body.credentialId);
     if (!creds) throw notFound("Model provider credential not found");
     const cfg = getModelProvider(creds.providerId);
     if (!cfg) throw invalidRequest(`Unknown providerId: ${creds.providerId}`, "credentialId");
@@ -194,7 +215,7 @@ const sameBaseUrl = (a: string, b: string) => a.replace(/\/+$/, "") === b.replac
  * stored one only with a caller-supplied key on a `baseUrlOverridable` provider.
  */
 async function resolveTestTarget(
-  orgId: string,
+  caller: ModelCredentialCaller,
   body: z.infer<typeof testInlineSchema>,
 ): Promise<DiscoverTarget & { accountId?: string; expiresAt?: number | null }> {
   const callerKey = body.api_key || undefined;
@@ -202,7 +223,9 @@ async function resolveTestTarget(
     if (isSystemModelProviderCredential(body.credentialId)) {
       throw systemEntityForbidden("model provider credential", body.credentialId, "test");
     }
-    const creds = await loadInferenceCredentials(orgId, body.credentialId);
+    // A credential the caller may not see reads as absent: the inline target then applies.
+    const visible = await mayProbeCredential(caller, body.credentialId);
+    const creds = visible ? await loadInferenceCredentials(caller.orgId, body.credentialId) : null;
     if (creds) {
       const overridable = getModelProvider(creds.providerId)?.baseUrlOverridable === true;
       if (!sameBaseUrl(body.base_url, creds.baseUrl) && !(callerKey && overridable)) {
@@ -218,6 +241,11 @@ async function resolveTestTarget(
   if (!callerKey) throw invalidRequest("API key is required", "api_key");
   const cfg = getModelProvider(body.providerId);
   if (!cfg) throw invalidRequest(`Unknown providerId: ${body.providerId}`, "providerId");
+  // Same line as creation: a custom endpoint is an organization credential, so only
+  // its managers may point a probe at a host of their choosing.
+  if (!providerAllowsPersonalCredentials(cfg) && !caller.writesOrg) {
+    throw personalCredentialCustomEndpoint(cfg.providerId, "providerId");
+  }
   if (!cfg.baseUrlOverridable && !sameBaseUrl(body.base_url, cfg.defaultBaseUrl)) {
     throw invalidRequest(
       `Provider ${cfg.providerId} does not accept a base URL override`,
@@ -248,10 +276,9 @@ export function createModelProviderCredentialsRouter() {
 
   // GET /api/model-provider-credentials/registry — surfaces the in-code
   // MODEL_PROVIDERS registry so the UI can render a provider picker without
-  // hard-coding the catalog client-side. Read-only; admin-only because it
-  // sits behind the same `model-provider-credentials:read` permission as
-  // the rest of this resource (the catalog itself is non-sensitive metadata
-  // — the gate is for surface uniformity, not the data).
+  // hard-coding the catalog client-side. Read-only, behind the same `read` or
+  // `connect` permission as the listing (the catalog itself is non-sensitive
+  // metadata — the gate is for surface uniformity, not the data).
   // Allowlisted projection keys for the `fields` selector. `models` is the
   // heavy field — the full per-provider catalog offer (hundreds of models
   // across the registry). A caller asking only "which providers exist" can request
@@ -266,12 +293,13 @@ export function createModelProviderCredentialsRouter() {
     "defaultBaseUrl",
     "baseUrlOverridable",
     "authMode",
+    "personal_allowed",
     "featured",
     "live_model_search",
     "models",
   ] as const;
 
-  router.get("/registry", requirePermission("model-provider-credentials", "read"), (c) => {
+  router.get("/registry", requireAnyPermission(VIEW_CREDENTIALS), (c) => {
     const fields = parseFieldSelection(c, REGISTRY_FIELDS);
     const pagination = parseListPagination(c, { defaultLimit: 100 });
     // Only pay the catalog serialization cost when `models` is actually
@@ -288,6 +316,7 @@ export function createModelProviderCredentialsRouter() {
       defaultBaseUrl: p.defaultBaseUrl,
       baseUrlOverridable: p.baseUrlOverridable,
       authMode: p.authMode,
+      personal_allowed: providerAllowsPersonalCredentials(p),
       featured: p.featured ?? false,
       live_model_search: hasLiveModelSearch(p.providerId),
       models: includeModels ? serializeProviderModels(p) : [],
@@ -300,18 +329,18 @@ export function createModelProviderCredentialsRouter() {
   });
 
   // GET /api/model-provider-credentials
-  router.get("/", requirePermission("model-provider-credentials", "read"), async (c) => {
-    const orgId = c.get("orgId");
-    const keys = await listOrgModelProviderCredentials(orgId);
+  router.get("/", requireAnyPermission(VIEW_CREDENTIALS), async (c) => {
+    const keys = await listOrgModelProviderCredentials(requestModelCredentialCaller(c));
     return c.json(listResponse(keys));
   });
 
   // POST /api/model-provider-credentials
-  router.post("/", requirePermission("model-provider-credentials", "write"), async (c) => {
-    const orgId = c.get("orgId");
+  router.post("/", rateLimit(10), requireAnyPermission(MANAGE_CREDENTIALS), async (c) => {
+    const caller = requestModelCredentialCaller(c);
     const user = c.get("user");
     const data = await readJsonBody(c, createSchema);
     const { providerId, api_key: apiKey, base_url_override: baseUrlOverride } = data;
+    const ownerUserId = resolveCredentialOwner(c, data.owner_type);
 
     const cfg = getModelProvider(providerId);
     if (!cfg) {
@@ -327,29 +356,36 @@ export function createModelProviderCredentialsRouter() {
     // Always dedupe — a user-supplied label is suffixed on collision too, so
     // labels stay unique within the org (same scheme as org models).
     const label = await dedupeCredentialLabel(
-      orgId,
+      caller.orgId,
       data.label?.trim() || deriveCredentialLabel(cfg, baseUrlOverride),
+      ownerUserId,
     );
 
     try {
       const id = await createApiKeyCredential({
-        orgId,
+        orgId: caller.orgId,
         userId: user.id,
         label,
         providerId,
         apiKey,
         baseUrlOverride: baseUrlOverride ?? null,
+        ownerUserId,
       });
       await recordAuditFromContext(c, {
         action: "model_provider_credential.created",
         resourceType: "model_provider_credential",
         resourceId: id,
-        after: { label, providerId, baseUrlOverride: baseUrlOverride ?? null },
+        after: {
+          label,
+          providerId,
+          baseUrlOverride: baseUrlOverride ?? null,
+          ownerType: data.owner_type,
+        },
       });
       // Return the bare created resource — the public, non-secret
       // `ModelProviderCredentialInfo` projection (same as GET/list). The api
-      // key is NEVER echoed back (#657).
-      const credential = await getOrgModelProviderCredential(orgId, id);
+      // key is NEVER echoed back.
+      const credential = await getOrgModelProviderCredential(caller, id);
       if (!credential) throw internalError();
       return c.json(credential, 201);
     } catch (err) {
@@ -362,26 +398,21 @@ export function createModelProviderCredentialsRouter() {
   });
 
   // POST /api/model-provider-credentials/test — inline test (before saving)
-  router.post(
-    "/test",
-    rateLimit(5),
-    requirePermission("model-provider-credentials", "read"),
-    async (c) => {
-      const target = await resolveTestTarget(
-        c.get("orgId"),
-        await readJsonBody(c, testInlineSchema),
-      );
-      try {
-        const result = await testModelConfig({ ...target, modelId: "_test" });
-        return c.json(result);
-      } catch (err) {
-        logger.error("Model provider credential inline test failed", {
-          error: getErrorMessage(err),
-        });
-        throw internalError();
-      }
-    },
-  );
+  router.post("/test", rateLimit(5), requireAnyPermission(VIEW_CREDENTIALS), async (c) => {
+    const target = await resolveTestTarget(
+      requestModelCredentialCaller(c),
+      await readJsonBody(c, testInlineSchema),
+    );
+    try {
+      const result = await testModelConfig({ ...target, modelId: "_test" });
+      return c.json(result);
+    } catch (err) {
+      logger.error("Model provider credential inline test failed", {
+        error: getErrorMessage(err),
+      });
+      throw internalError();
+    }
+  });
 
   // POST /api/model-provider-credentials/discover — what an endpoint serves,
   // described from its listing and the catalog, BEFORE a credential exists.
@@ -394,9 +425,9 @@ export function createModelProviderCredentialsRouter() {
     rateLimit(6),
     requirePermission("model-provider-credentials", "write"),
     async (c) => {
-      const orgId = c.get("orgId");
+      const caller = requestModelCredentialCaller(c);
       const body = await readJsonBody(c, discoverSchema);
-      const target = await resolveDiscoverTarget(orgId, body);
+      const target = await resolveDiscoverTarget(caller, body);
       const listing = await listServedModels(target);
       // The probe spends a key on an operator-supplied URL, so it leaves the
       // same trail the create/update/delete routes do — the endpoint reached
@@ -448,57 +479,62 @@ export function createModelProviderCredentialsRouter() {
   );
 
   // POST /api/model-provider-credentials/:id/test
-  router.post(
-    "/:id/test",
-    rateLimit(5),
-    requirePermission("model-provider-credentials", "read"),
-    async (c) => {
-      const orgId = c.get("orgId");
-      const id = c.req.param("id")!;
-      try {
-        const creds = await loadInferenceCredentials(orgId, id);
-        if (!creds) {
-          throw notFound("Model provider credential not found");
-        }
-        // OAuth providers reject the dummy `_test` model id: probe a featured one.
-        const modelId = getModelProvider(creds.providerId)?.featuredModels[0] ?? "_test";
-        const result = await testModelConfig({ ...creds, modelId });
-        return c.json(result);
-      } catch (err) {
-        // Don't swallow our own structured errors — `notFound()` thrown
-        // above must reach the global error handler as 404, not get
-        // remapped to 500.
-        if (err instanceof ApiError) throw err;
-        logger.error("Model provider credential test failed", {
-          id,
-          error: getErrorMessage(err),
-        });
-        throw internalError();
+  router.post("/:id/test", rateLimit(5), requireAnyPermission(VIEW_CREDENTIALS), async (c) => {
+    const caller = requestModelCredentialCaller(c);
+    const id = c.req.param("id")!;
+    try {
+      // A built-in key spends the platform's money: only an org reader may probe it.
+      const visible = isSystemModelProviderCredential(id)
+        ? caller.readsOrg
+        : await mayProbeCredential(caller, id);
+      if (!visible) throw notFound("Model provider credential not found");
+      const creds = await loadInferenceCredentials(caller.orgId, id);
+      if (!creds) {
+        throw notFound("Model provider credential not found");
       }
-    },
-  );
+      // OAuth providers reject the dummy `_test` model id: probe a featured one.
+      const modelId = getModelProvider(creds.providerId)?.featuredModels[0] ?? "_test";
+      const result = await testModelConfig({ ...creds, modelId });
+      return c.json(result);
+    } catch (err) {
+      // Don't swallow our own structured errors — `notFound()` thrown
+      // above must reach the global error handler as 404, not get
+      // remapped to 500.
+      if (err instanceof ApiError) throw err;
+      logger.error("Model provider credential test failed", {
+        id,
+        error: getErrorMessage(err),
+      });
+      throw internalError();
+    }
+  });
 
   // PATCH /api/model-provider-credentials/:id
-  router.patch("/:id", requirePermission("model-provider-credentials", "write"), async (c) => {
-    const orgId = c.get("orgId");
+  router.patch("/:id", requireAnyPermission(MANAGE_CREDENTIALS), async (c) => {
+    const caller = requestModelCredentialCaller(c);
     const id = c.req.param("id")!;
     if (isSystemModelProviderCredential(id)) {
       throw systemEntityForbidden("model provider credential", id);
     }
     const data = await readJsonBody(c, updateSchema);
     try {
-      const { api_key: apiKey, ...auditData } = data;
-      await updateModelProviderCredential(orgId, id, { ...auditData, apiKey });
+      await updateModelProviderCredential(caller, id, {
+        label: data.label,
+        apiKey: data.api_key,
+      });
       await recordAuditFromContext(c, {
         action: "model_provider_credential.updated",
         resourceType: "model_provider_credential",
         resourceId: id,
-        after: auditData,
+        after: {
+          ...(data.label !== undefined ? { label: data.label } : {}),
+          ...(data.api_key !== undefined ? { rotated: true } : {}),
+        },
       });
       // Return the bare updated resource (non-secret
       // `ModelProviderCredentialInfo` projection, same as GET/list). The api
-      // key is NEVER echoed back (#657).
-      const credential = await getOrgModelProviderCredential(orgId, id);
+      // key is NEVER echoed back.
+      const credential = await getOrgModelProviderCredential(caller, id);
       if (!credential) throw notFound("Model provider credential not found");
       return c.json(credential);
     } catch (err) {
@@ -512,24 +548,34 @@ export function createModelProviderCredentialsRouter() {
   });
 
   // DELETE /api/model-provider-credentials/:id
-  router.delete("/:id", requirePermission("model-provider-credentials", "delete"), async (c) => {
-    const orgId = c.get("orgId");
+  router.delete("/:id", requireAnyPermission(REMOVE_CREDENTIALS), async (c) => {
+    const caller = requestModelCredentialCaller(c);
     const id = c.req.param("id")!;
     if (isSystemModelProviderCredential(id)) {
       throw systemEntityForbidden("model provider credential", id, "delete");
     }
     try {
-      await deleteModelProviderCredential(orgId, id);
+      const deleted = await deleteModelProviderCredential(caller, id);
       await recordAuditFromContext(c, {
         action: "model_provider_credential.deleted",
         resourceType: "model_provider_credential",
         resourceId: id,
+        before: {
+          ownerType: deleted.ownerUserId === null ? "org" : "user",
+          ownerId: deleted.ownerUserId,
+          providerId: deleted.providerId,
+          label: deleted.label,
+          ...(deleted.ownerUserId !== null && deleted.ownerUserId !== caller.userId
+            ? { breakGlass: true }
+            : {}),
+        },
       });
       return c.body(null, 204);
     } catch (err) {
       // `org_models.credential_id` has ON DELETE RESTRICT — surface the
       // PG `foreign_key_violation` (23503) as a 409 with an actionable
       // message rather than a generic 500.
+      if (err instanceof ApiError) throw err;
       if (isForeignKeyViolation(err)) {
         throw conflict(
           "credential_in_use",

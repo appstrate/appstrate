@@ -1293,6 +1293,134 @@ describe("handlePiMessagesRequest", () => {
     // terminated it with an `error` frame above.
     expect(Date.now() - started).toBeGreaterThan(idleTimeoutMs);
   });
+
+  // --- client cancel ---
+  //
+  // A body cancel closes the controller and does NOT abort `request.signal`:
+  // the stream must stop writing without warning and release the backing at once.
+
+  /** A backing whose events see the signal the handler passed it, exposed as `seen.signal`. */
+  function backingFrom(events: (signal: AbortSignal) => AsyncGenerator<AssistantMessageEvent>) {
+    const seen: { signal?: AbortSignal } = {};
+    const backing: BackingStreamFn = (_model, _context, options) => {
+      seen.signal = options.signal;
+      return {
+        [Symbol.asyncIterator]: () => events(options.signal!),
+      } as unknown as ReturnType<BackingStreamFn>;
+    };
+    return { backing, seen };
+  }
+
+  /** Read the first frame, then cancel the body the way a departing client does. */
+  async function readOneFrameThenCancel(deps: PiMessagesBackendDeps): Promise<void> {
+    const res = handlePiMessagesRequest(
+      deps,
+      new Request("http://sidecar:8080/llm/messages", { method: "POST" }),
+      CLIENT_BODY,
+    );
+    const reader = res.body!.getReader();
+    await reader.read();
+    await reader.cancel();
+  }
+
+  it("stops quietly and releases the backing when the client cancels mid-stream", async () => {
+    let resume!: () => void;
+    const resumed = new Promise<void>((r) => (resume = r));
+    let finish!: () => void;
+    const finished = new Promise<void>((r) => (finish = r));
+    const { backing, seen } = backingFrom(async function* () {
+      try {
+        yield { type: "start", partial: partialMessage([]) } as AssistantMessageEvent;
+        await resumed;
+        // Already in flight when the client left: the next write would hit
+        // the closed controller.
+        yield {
+          type: "text_delta",
+          contentIndex: 0,
+          delta: "hi",
+          partial: partialMessage([{ type: "text", text: "hi" }]),
+        } as AssistantMessageEvent;
+      } finally {
+        finish();
+      }
+    });
+
+    const warnings = await captureWarnings(async () => {
+      await readOneFrameThenCancel(depsFor(BACKINGS[0]!, backing));
+      // Released by the cancel itself, not by the loop's next wake-up.
+      expect(seen.signal?.aborted).toBe(true);
+      resume();
+      await finished;
+    });
+
+    expect(warnings).toEqual([]);
+  });
+
+  // pi-ai yields an `error` event on abort; a backing may also just throw.
+  for (const onAbort of ["yields its error event", "throws"] as const) {
+    it(`releases a backing that ${onAbort} on cancel, before the idle bound`, async () => {
+      let finish!: () => void;
+      const finished = new Promise<void>((r) => (finish = r));
+      const { backing, seen } = backingFrom(async function* (signal) {
+        try {
+          yield { type: "start", partial: partialMessage([]) } as AssistantMessageEvent;
+          // Silent until aborted.
+          await new Promise((r) => signal.addEventListener("abort", r, { once: true }));
+          if (onAbort === "throws") throw signal.reason;
+          yield {
+            type: "error",
+            reason: "aborted",
+            error: { ...partialMessage([]), stopReason: "aborted", errorMessage: "aborted" },
+          } as AssistantMessageEvent;
+        } finally {
+          finish();
+        }
+      });
+
+      const warnings = await captureWarnings(async () => {
+        // Far above the test's span: only the cancel can end this stream in time.
+        await readOneFrameThenCancel({
+          ...depsFor(BACKINGS[0]!, backing),
+          llmStreamIdleTimeoutMs: 5_000,
+        });
+        expect(seen.signal?.aborted).toBe(true);
+        await finished;
+        // The throw reaches the handler's catch through microtasks only; one
+        // macrotask lets it run before the log sink is removed.
+        await new Promise((r) => setTimeout(r, 0));
+      });
+
+      // Neither "went silent" nor "threw": the client left, the backing did not fail.
+      expect(warnings).toEqual([]);
+    });
+  }
+
+  it("stays quiet when a backing ignores the cancel and outlasts the idle bound", async () => {
+    const idleTimeoutMs = 100;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const { backing: deaf } = backingFrom(async function* () {
+      yield { type: "start", partial: partialMessage([]) } as AssistantMessageEvent;
+      // Deaf to its signal: silent until the test lets it end.
+      await gate;
+    });
+
+    try {
+      const warnings = await captureWarnings(async () => {
+        await readOneFrameThenCancel({
+          ...depsFor(BACKINGS[0]!, deaf),
+          llmStreamIdleTimeoutMs: idleTimeoutMs,
+        });
+        // Long enough for the idle race to settle on the pending `next()`.
+        await new Promise((r) => setTimeout(r, idleTimeoutMs * 3));
+      });
+
+      // The idle bound fired after the client left: not a stall worth reporting.
+      expect(warnings).toEqual([]);
+    } finally {
+      release();
+    }
+  });
 });
 
 /**

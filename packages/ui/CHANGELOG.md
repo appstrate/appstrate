@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `schema-form`: the select widget renders `Combobox` and the multi-select a checkbox
+  per option, instead of `react-select` (no longer a peer dependency). `Combobox`
+  gains `placeholder`, `clearable` and option `keywords`.
+
 ### Removed
 
 - `./vite` export and its `src/vite.js` implementation — the preset had no

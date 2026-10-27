@@ -211,7 +211,7 @@ export function attachStdoutBridge(opts: StdoutBridgeOptions): StdoutBridgeHandl
     }
     const candidate = withParsedMetricUsage(parsed);
     if (!isStdoutEventLine(candidate)) return false;
-    // Override `runId` with the bridge-configured value: the legacy
+    // Override `runId` with the bridge-configured value: the
     // stdout-JSONL protocol stamps `runId` from `process.env.AGENT_RUN_ID`
     // which may be absent or stale (e.g. a CLI that didn't set the env
     // var). The bridge owns the canonical run identity here.

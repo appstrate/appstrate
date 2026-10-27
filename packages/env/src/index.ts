@@ -6,6 +6,7 @@ import {
   findRuntimeImageTagMismatch,
   type RuntimeImageTagMismatch,
 } from "@appstrate/core/image-ref";
+import { parseEgressAllowInternalHosts } from "@appstrate/afps-shared/ssrf";
 
 // Boolean-from-string env transform: `"true"`/`"1"` (case-insensitive) → true,
 // anything else → false. Shared by every on/off flag so the parse semantics
@@ -112,8 +113,8 @@ const describeRuntimeImageMismatch = (m: RuntimeImageTagMismatch): string => {
 // defaults. When adding or changing a `.default(...)` value below, mirror
 // the entry in `scripts/verify-compose-defaults.ts:CODE_DEFAULTS` so the
 // compose-drift guard can still detect duplicated/stale YAML defaults
-// (root cause of #513 — MODULES drifted in compose vs. schema, every CLI
-// self-host shipped with zero model providers for weeks). The script's
+// (a `MODULES` default drifting in compose vs. schema ships a self-host
+// with zero model providers). The script's
 // hand-maintained table is intentional: Zod defaults are entangled with
 // transforms/refinements that don't extract cleanly via static analysis.
 
@@ -186,11 +187,11 @@ export const envSchema = z
       .refine((v) => v.split(",").every((k) => k.length >= 16), {
         message: "UPLOAD_SIGNING_SECRET: each comma-separated key must be at least 16 chars",
       }),
-    // Dedicated HMAC secret for hosted-connect-portal session tokens (issue
-    // #769) — short-lived capability tokens that gate the unified integration
+    // Dedicated HMAC secret for hosted-connect-portal session tokens
+    // — short-lived capability tokens that gate the unified integration
     // connect flow. Required: the hosted portal is the primary UI surface for
     // connecting integrations, so a deployment without this secret would boot
-    // "successfully" with its main connect button dead (issue #905). The
+    // "successfully" with its main connect button dead. The
     // installer generates it, upgrades backfill it via `mergeEnv`, and the
     // self-hosting compose templates loud-fail without it. Same comma-separated
     // keyring rotation as the upload secret; each key ≥16 chars. Keep separate
@@ -407,6 +408,16 @@ export const envSchema = z
     INTEGRATION_REFRESH_MAX_FAILURES: z.coerce.number().int().positive().default(5),
     INTEGRATION_REFRESH_GRACE_SECONDS: z.coerce.number().int().nonnegative().default(3600),
 
+    // How an auto-provisioned integration OAuth client (remote MCP, public
+    // client) is acquired from an authorization server advertising
+    // `client_id_metadata_document_supported`:
+    //   - "on"  — this instance's Client ID Metadata Document, when `APP_URL`
+    //             is public https (else DCR, as for a server without CIMD);
+    //   - "off" — always RFC 7591 dynamic registration: for an instance whose
+    //             `APP_URL` the authorization servers cannot fetch (internal
+    //             hostname, split DNS, access proxy) or refuse.
+    INTEGRATION_OAUTH_CIMD: z.enum(["on", "off"]).default("on"),
+
     // Modules (comma-separated specifiers). LLM calls go through the run's
     // sidecar `/llm` proxy — retry is handled by the Pi SDK natively
     // (Retry-After honoring + jitter). The default set is the
@@ -426,7 +437,7 @@ export const envSchema = z
     // pattern).
     MODULES: z.string().default("oidc,webhooks,mcp,core-providers,@appstrate/module-chat"),
     // Boot policy when a loaded module declares an `@appstrate/core` range this
-    // platform's `CORE_VERSION` does not satisfy (issue #973):
+    // platform's `CORE_VERSION` does not satisfy:
     //   - `fail` (default) — refuse to boot, naming the module and both versions.
     //   - `warn` — log the mismatch and boot anyway. The escape hatch for an
     //     operator running a module that has not been republished against the
@@ -464,9 +475,14 @@ export const envSchema = z
         }
         return url.origin;
       }),
+    // Origins trusted beyond `APP_URL`'s own, for three uses: CORS with
+    // credentials, Better Auth's trusted origins, and the SPA's post-login
+    // `?redirect=` allowlist. Unset or empty adds none: same-origin calls need
+    // no CORS grant, Better Auth always trusts its own `baseURL`, and the
+    // redirect allowlist always holds `APP_URL`.
     TRUSTED_ORIGINS: z
       .string()
-      .default("http://localhost:3000,http://localhost:5173")
+      .default("")
       .transform((s) =>
         s
           .split(",")
@@ -639,7 +655,7 @@ export const envSchema = z
     ORG_STORAGE_QUOTA_BYTES: z.coerce.number().int().positive().optional(),
 
     // Ceiling on the total bytes of files a single run may publish as
-    // output (Phase 2 ingestion). Default 256 MiB.
+    // output. Default 256 MiB.
     RUN_MAX_OUTPUT_BYTES: z.coerce
       .number()
       .int()
@@ -659,8 +675,8 @@ export const envSchema = z
     // must never be abandoned). 60s balances purge latency against DB churn.
     STORAGE_DELETION_WORKER_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
 
-    // Separate origin for serving untrusted agent-generated HTML previews
-    // (Phase 4 / D5). When set, `GET /api/files/:id` mints its
+    // Separate origin for serving untrusted agent-generated HTML previews.
+    // When set, `GET /api/files/:id` mints its
     // `preview_url` on THIS origin instead of `APP_URL` — the operator points a
     // second registrable domain (eTLD+1) at the same server. A distinct
     // registrable domain is the strongest isolation: the browser gives the
@@ -673,8 +689,8 @@ export const envSchema = z
     //
     // ENFORCED (boot fails, loudly): an absolute URL whose HOST differs from
     // `APP_URL`'s — plus https:// in production, the same rule `APP_URL`
-    // carries. This is not stylistic, even though the preview route no longer
-    // grants a configured value any behavioural exemption:
+    // carries. This is not stylistic, even though the preview route
+    // grants a configured value no behavioural exemption:
     // `mayServeActiveHtml()` reads the loading context and nothing else, so
     // agent HTML is ACTIVE only for a proven `Sec-Fetch-Dest: iframe` load in
     // every mode.
@@ -732,7 +748,17 @@ export const envSchema = z
     // upstreams, org proxies, model tests, credential-proxy targets, remote MCP
     // servers, and the sidecar's own gates) skips ONLY the host blocklist for
     // these hosts so self-hosted deployments can reach internal upstreams.
-    EGRESS_ALLOW_INTERNAL_HOSTS: z.string().optional(),
+    // Entries are bare hostnames or IPv4 addresses (grammar in
+    // `parseEgressAllowInternalHosts`). A refused entry fails boot with one
+    // issue per entry, so the parsed value is a Set of exact hostnames.
+    EGRESS_ALLOW_INTERNAL_HOSTS: z
+      .string()
+      .optional()
+      .transform((raw, ctx) => {
+        const { hosts, invalid } = parseEgressAllowInternalHosts(raw);
+        for (const message of invalid) ctx.addIssue({ code: "custom", message });
+        return hosts;
+      }),
 
     // Run token signing (required). Dedicated HMAC secret for run bearer
     // tokens — without a key, `Bun.CryptoHasher("sha256", undefined)`
@@ -948,7 +974,7 @@ export const envSchema = z
   // protocol to each other, and both speak a container boundary to the
   // platform, and all of it changes in the same commit. A trio that disagrees
   // boots fine and then fails runs with an opaque upstream error naming none of
-  // the three (#1195 for the pair, #1177 for the platform boundary). Detectable
+  // the three. Detectable
   // here, before anything starts. The rule itself, both carve-outs and the
   // worked examples live with the comparison in `@appstrate/core/image-ref`.
   //
@@ -1047,3 +1073,4 @@ const { getEnv, resetCache } = createEnvGetter(envSchema);
 
 export { getEnv };
 export const _resetCacheForTesting = resetCache;
+export { INFRA_ENV_KEYS, findUnreadEnvKeys } from "./env-key-inventory.ts";

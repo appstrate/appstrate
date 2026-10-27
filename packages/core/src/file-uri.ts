@@ -17,23 +17,12 @@
  * for local resources. An opaque platform id under that scheme is ambiguous to
  * the model and to every MCP client, so the platform claims its own scheme.
  *
- * ## Why the pre-#1177 `document://` spelling is NOT read
+ * ## One spelling
  *
- * The scheme was `document://` until issue #1177, and it was kept parseable
- * afterwards so historical `runs.input` rows, persisted chat attachments and
- * model-authored prompts stayed resolvable. That compatibility became
- * unreachable when the rename was finished at the physical layer: every URI
- * ever written under the old scheme addresses a `doc_` id, and
- * {@link FILE_ID_RE} accepts only `file_`. So the pair `document://` +
- * `file_xxx` — the only thing the accept-path could still have matched — is a
- * form nothing has ever emitted, and a genuine `document://doc_xxx` fails on
- * the id, not the scheme. One spelling is read and one is written, and they
- * are the same one.
+ * One spelling is read and one is written, and they are the same one: a
+ * `document://` URI is not parsed, and {@link FILE_ID_RE} accepts only `file_`.
  *
- * The row id prefix is `file_`, minted by `prefixedId("file")`. It was `doc_`
- * until the rename was finished at the physical layer; nothing reads the old
- * spelling any more, which is exactly why the old scheme has nothing left to
- * address.
+ * The row id prefix is `file_`, minted by `prefixedId("file")`.
  *
  * Dependency-free on purpose (no DB/storage imports) so the MCP tool layer,
  * the chat module, and the runtime can import it without pulling in the files
@@ -67,7 +56,7 @@ export const PUBLISHED_FILE_LOG_EVENT = "file";
  * is a member of the two-value wire enum in TYPE position
  * (`"user_upload" | "agent_output"` in `lib/files.ts` and `hooks/use-files.ts`),
  * an i18n key suffix in the gallery filter domain
- * (`components/file-list-panel.tsx`, where `files:filter.<value>` is looked up
+ * (`components/document-list-panel.tsx`, where `files:filter.<value>` is looked up
  * and `"all"` sits beside the two wire values), a generated `api/schema.d.ts`,
  * or a test fixture asserting the wire value. In all four, swapping one member
  * for a constant while its sibling stays a literal reads worse than the pair —

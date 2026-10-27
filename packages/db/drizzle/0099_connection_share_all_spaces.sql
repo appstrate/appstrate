@@ -1,0 +1,2 @@
+ALTER TABLE "integration_connections" ADD COLUMN "share_all_spaces" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "integration_connections" ADD CONSTRAINT "integration_connections_share_all_spaces_org_scoped_user" CHECK (NOT share_all_spaces OR (user_id IS NOT NULL AND space_id IS NULL));

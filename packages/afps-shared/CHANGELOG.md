@@ -14,8 +14,28 @@ consumer's publish rather than the first user's `npm install`.
 
 ## [Unreleased]
 
+### Fixed
+
+- **`urlTemplateAuthority`** ends the authority at a backslash: WHATWG reads `\` as a
+  path delimiter for http(s), so a target such as `https://a.com\@evil.com/` yields
+  `https://a.com` instead of `https://a.com\@evil.com` (#2063).
+
+## [0.13.0] — 2026-10-12
+
+Shipped before `@appstrate/core` 16.0.0, which requires `^0.13.0`.
+
 ### Added
 
+- **`CompanionFileViolation.position`** and **`SkillFrontmatter.position`**: on a
+  `SKILL_INVALID_FRONTMATTER` caused by a YAML syntax error, where the parser stopped —
+  `{ line, column }`, 1-based, in SKILL.md's own lines (the opening `---` is line 1).
+  Consumers no longer read the position out of the English message.
+- **`jsonText`** (`./json-text`): a string passes through, any other JSON
+  value is `JSON.stringify`-ed — the one rule for rendering a JSON value as
+  text. Its parameter is `NonNullable<unknown> | null`: `undefined` does not
+  typecheck. **`jsonTextMap`** applies it to each value of a bag, a `null` or
+  `undefined` one left out.
+  (#1896, #1913)
 - **`parseTokenUsage`** (`./token-usage`): the one `TokenUsage` rule, returning
   `{ usage, tiersDropped }`. `usage` is null when the value is not an object or
   a counter fails `isTokenCount`; keys other than the four counters and `tiers`
@@ -30,9 +50,32 @@ consumer's publish rather than the first user's `npm install`.
   replaces the host blocklist on both the literal and the resolved-address
   layer of every hop, keeping resolution and the address pin (`allowHost`
   skips both). (#1819)
+- **`parseEgressAllowInternalHosts`** (`./ssrf`): the one parser of
+  `EGRESS_ALLOW_INTERNAL_HOSTS`, returning `{ hosts, invalid }`. Entries are
+  comma-separated, trimmed and lowercased; empty items are skipped. A bare
+  hostname or dotted IPv4 already in normalized form is kept; any other entry
+  (a URL, path, port, wildcard, userinfo, whitespace, trailing dot,
+  non-canonical form, or an IPv6 literal, refused because the per-run bridge
+  is IPv4-only) is reported in `invalid`. The result type is
+  `EgressAllowlistParse`. Hosts match `URL.hostname`
+  exactly. (#1912)
+
+- **`./request-template`**: what the `{{name}}` request substitution
+  (`@appstrate/afps-runtime`) and `loginBlockIssues` share. `PLACEHOLDER` and
+  `placeholderKeys` (the grammar), `headerNamed`, `urlTemplateAuthority`
+  (what precedes a URL template's path), and `placeholderBodyEncoding`: how a
+  text body's values are encoded under a `Content-Type` (`BodyEncoding`:
+  `json`, `form`, `xml`, `multipart` with its boundary, `text` for
+  `text/plain`), or the issue when it has no encoder or holds a placeholder
+  itself. (#1915)
 
 ### Changed
 
+- **BREAKING: `loginBlockIssues`** (`./runtime-expression`) reports a
+  `request.body` holding a `{{name}}` whose `Content-Type` header, else
+  `content_type`, `placeholderBodyEncoding` refuses (absent, no encoder, or
+  holding a `{{name}}`), and a header name written twice in different case.
+  `LoginBlockView.request` reads `content_type`. (#1915)
 - **BREAKING: `isTokenCount`** (`./token-usage`) accepts only a non-negative
   safe integer (was any finite non-negative number), the `integer` the AFPS
   spec and the `llm_usage` columns declare. `isTokenUsageTiers` follows: a band

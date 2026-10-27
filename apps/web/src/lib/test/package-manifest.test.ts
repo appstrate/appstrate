@@ -11,7 +11,6 @@
 
 import { describe, it, expect } from "bun:test";
 import {
-  readIntegrationDetails,
   readIntegrationSource,
   readManifestOverview,
   readMcpServerDetails,
@@ -154,13 +153,12 @@ describe("readIntegrationSource", () => {
     expect(
       readIntegrationSource({
         kind: "local",
-        server: { name: "@acme/gh-mcp", version: "1.2.3", vendored: true },
+        server: { name: "@acme/gh-mcp", version: "1.2.3" },
       }),
     ).toEqual({
       kind: "local",
       serverName: "@acme/gh-mcp",
       serverVersion: "1.2.3",
-      vendored: true,
     });
   });
 
@@ -189,41 +187,6 @@ describe("readIntegrationSource", () => {
     expect(readIntegrationSource({ kind: "local", server: { name: "@a/b" } })).toBeUndefined();
     expect(readIntegrationSource({ kind: "smtp" })).toBeUndefined();
     expect(readIntegrationSource(undefined)).toBeUndefined();
-  });
-});
-
-describe("readIntegrationDetails", () => {
-  it("reads the auths with their default scopes", () => {
-    const details = readIntegrationDetails({
-      ...MINIMAL,
-      type: "integration",
-      source: { kind: "none" },
-      auths: {
-        oauth: { type: "oauth2", default_scopes: ["repo"], issuer: "https://acme.test" },
-        pat: { type: "api_key" },
-      },
-    });
-
-    expect(details.auths).toEqual([
-      { id: "oauth", type: "oauth2", defaultScopes: ["repo"] },
-      { id: "pat", type: "api_key", defaultScopes: [] },
-    ]);
-    expect(details.isEmpty).toBe(false);
-  });
-
-  it("is empty for a manifest that declares no integration tail", () => {
-    const details = readIntegrationDetails(MINIMAL);
-
-    expect(details).toEqual({ auths: [], allowUndeclaredTools: false, isEmpty: true });
-  });
-
-  it("reports the wildcard opt-in only when it is literally true", () => {
-    expect(readIntegrationDetails({ allow_undeclared_tools: true }).allowUndeclaredTools).toBe(
-      true,
-    );
-    expect(readIntegrationDetails({ allow_undeclared_tools: "true" }).allowUndeclaredTools).toBe(
-      false,
-    );
   });
 });
 
@@ -258,11 +221,10 @@ describe("readMcpServerDetails", () => {
     expect(details.userConfig).toEqual([
       { key: "token", title: "Token", type: "string", required: true, sensitive: true },
     ]);
-    expect(details.isEmpty).toBe(false);
   });
 
-  it("is empty for a manifest that declares no server tail", () => {
-    expect(readMcpServerDetails(MINIMAL).isEmpty).toBe(true);
+  it("reads no server from a manifest that declares none", () => {
+    expect(readMcpServerDetails(MINIMAL)).toEqual({ tools: [], userConfig: [] });
     expect(readMcpServerDetails({ server: {} }).server).toBeUndefined();
   });
 
@@ -361,15 +323,5 @@ describe("author-controlled arrays are reproduced verbatim", () => {
       { name: "list_repos", description: "first" },
       { name: "whoami" },
     ]);
-  });
-
-  it("keeps a repeated default scope", () => {
-    const details = readIntegrationDetails({
-      ...MINIMAL,
-      type: "integration",
-      auths: { google: { type: "oauth2", default_scopes: ["drive.readonly", "drive.readonly"] } },
-    });
-
-    expect(details.auths[0]!.defaultScopes).toEqual(["drive.readonly", "drive.readonly"]);
   });
 });

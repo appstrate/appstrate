@@ -1,0 +1,197 @@
+// SPDX-License-Identifier: Apache-2.0
+
+/**
+ * The index page of a package type the space runs: agents, skills, MCP
+ * servers. One page for the three, so a fix to one (an error state, the
+ * keywords the search reads, the actions menu) lands on all of them.
+ * Integrations keep their own page: execution tabs, protocol filter, columns.
+ */
+
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
+import { LibraryBig, Plus, Upload } from "lucide-react";
+import type { PackageType } from "@appstrate/core/validation";
+import { packagePermission, spacePackagePermission } from "@appstrate/core/permissions";
+import { useAgents, usePackageList } from "../hooks/use-packages";
+import { useUnreadCountsByAgent } from "../hooks/use-notifications";
+import { useListParams } from "../lib/list-params";
+import { catalogueHref } from "../lib/catalogue-link";
+import { PACKAGE_TYPE_ICON } from "../lib/package-type-icon";
+import { agentCardItem, packageCardItem, type CardItem } from "../lib/package-card-item";
+import { PageHeader } from "../components/page-header";
+import { PackageCollection } from "../components/package-collection";
+import { usePackageColumns } from "../components/package-columns";
+import { EmptyStateAction } from "../components/page-states";
+import { PageActionsMenu } from "../components/page-actions-menu";
+import type { MenuAction } from "../lib/menu-action";
+import { useListView } from "../stores/list-view-store";
+import { useColumnVisibility } from "../stores/column-visibility-store";
+import { ImportModal } from "../components/import-modal";
+import { SpaceLibraryHint } from "../components/space-library-hint";
+import { usePermissions } from "../hooks/use-permissions";
+import { CreatePackageModal } from "../components/create-package-modal";
+import { CreationHandoffModal } from "../components/creation-handoff-modal";
+import { useIntegrationDetail } from "../hooks/use-integrations";
+import { useCreationHandoff } from "../hooks/use-creation-handoff";
+
+type IndexType = Extract<PackageType, "agent" | "skill" | "mcp-server">;
+
+/** The page's words for its type. */
+function presentation(type: IndexType, t: TFunction) {
+  if (type === "agent") {
+    return {
+      title: t("common:nav.agents"),
+      empty: t("list.empty", { ns: "agents" }),
+      create: t("list.create", { ns: "agents" }),
+    };
+  }
+  const typeLabel = t(`packages.type.${type}`, { ns: "settings" });
+  return {
+    title: t(`packages.type.${type}s`, { ns: "settings" }),
+    empty: t("packages.emptyItems", { ns: "settings", type: typeLabel }),
+    create: t("list.createItem", { ns: "agents", type: typeLabel }),
+  };
+}
+
+export function PackageIndexPage({ type }: { type: IndexType }) {
+  return type === "agent" ? <AgentIndex /> : <PackageIndex type={type} />;
+}
+
+/** Agents also carry their unread runs. */
+function AgentIndex() {
+  const { data: agents, isLoading, error } = useAgents();
+  const { data: unreadCounts } = useUnreadCountsByAgent();
+  const items = agents?.map((agent) => agentCardItem(agent, unreadCounts?.[agent.id]));
+  return <PackageIndexBody type="agent" items={items} isLoading={isLoading} error={error} />;
+}
+
+function PackageIndex({ type }: { type: Exclude<IndexType, "agent"> }) {
+  // What works in THIS space; the rest of the org is one action away.
+  const { data: rows, isLoading, error } = usePackageList(type);
+  const items = rows?.map((row) => packageCardItem(row, type));
+  return <PackageIndexBody type={type} items={items} isLoading={isLoading} error={error} />;
+}
+
+function PackageIndexBody({
+  type,
+  items,
+  isLoading,
+  error,
+}: {
+  type: IndexType;
+  items: CardItem[] | undefined;
+  isLoading: boolean;
+  error: Error | null;
+}) {
+  const { t } = useTranslation(["agents", "settings", "common"]);
+  const { can } = usePermissions();
+  const [importing, setImporting] = useState(false);
+  const [creating, setCreating] = useState<{ integrationId: string | null } | null>(null);
+  const list = useListParams(["origin", "activity"]);
+  const [view, setView] = useListView(type);
+  const { columns, menu } = useColumnVisibility(`packages-${type}`, usePackageColumns(type));
+  // Creating — by hand, with the chat or by import — is a write on the package
+  // type, as its routes are. The import names the type, so the server refuses
+  // an archive of another one.
+  const canCreate = can(packagePermission(type, "write"));
+  const canActivate = can(spacePackagePermission(type, "activate"));
+  const creation = useCreationHandoff(type, canCreate);
+  // An id that resolves to nothing (typo, out of reach) is not offered: the draft stays plain.
+  const integrationDetail = useIntegrationDetail(
+    creation.isOpen ? (creation.integrationId ?? undefined) : undefined,
+  ).data;
+  const integration =
+    integrationDetail && creation.integrationId
+      ? {
+          id: creation.integrationId,
+          name: integrationDetail.manifest.display_name ?? creation.integrationId,
+        }
+      : undefined;
+  const words = presentation(type, t);
+  const createAction: MenuAction = {
+    id: "create",
+    label: words.create,
+    icon: Plus,
+    onSelect: creation.open,
+    hidden: !canCreate,
+  };
+
+  return (
+    <>
+      <PageHeader
+        title={words.title}
+        variant="collection"
+        breadcrumbs={[{ label: words.title }]}
+        actions={
+          canCreate || canActivate ? (
+            <PageActionsMenu
+              actions={[
+                {
+                  id: "catalogue",
+                  label: t("catalogue.browse", { ns: "settings" }),
+                  icon: LibraryBig,
+                  to: catalogueHref(type),
+                  hidden: !canActivate,
+                },
+                {
+                  id: "import",
+                  label: t("nav.import", { ns: "common" }),
+                  icon: Upload,
+                  onSelect: () => setImporting(true),
+                  hidden: !canCreate,
+                },
+                createAction,
+              ]}
+            />
+          ) : undefined
+        }
+      />
+      <PackageCollection
+        columns={columns}
+        columnMenu={menu}
+        tableId={`packages-${type}`}
+        items={items}
+        isLoading={isLoading}
+        error={error}
+        holds={type}
+        entity={words.title}
+        emptyMessage={words.empty}
+        emptyHint={<SpaceLibraryHint type={type} />}
+        emptyIcon={PACKAGE_TYPE_ICON[type]}
+        emptyAction={<EmptyStateAction action={createAction} />}
+        list={list}
+        view={view}
+        onViewChange={setView}
+      />
+      {importing && canCreate && <ImportModal type={type} onClose={() => setImporting(false)} />}
+      {creating !== null && canCreate && type !== "mcp-server" && (
+        <CreatePackageModal
+          type={type}
+          integrationId={creating.integrationId ?? undefined}
+          onClose={() => setCreating(null)}
+        />
+      )}
+      {creation.isOpen && (
+        <CreationHandoffModal
+          resource={type}
+          onClose={creation.close}
+          onManual={
+            type === "mcp-server"
+              ? undefined
+              : () => {
+                  creation.close();
+                  setCreating({ integrationId: creation.integrationId });
+                }
+          }
+          onImport={() => {
+            creation.close();
+            setImporting(true);
+          }}
+          onChat={creation.openChat}
+          integration={integration}
+        />
+      )}
+    </>
+  );
+}

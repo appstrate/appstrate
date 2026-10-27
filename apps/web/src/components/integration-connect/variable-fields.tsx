@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import { useTranslation } from "react-i18next";
+import { FieldError } from "@appstrate/ui/components/field";
 import { Input } from "@appstrate/ui/components/input";
+import { cn } from "@appstrate/ui/cn";
 import { Label } from "@appstrate/ui/components/label";
 import type { VariableField } from "./connection-variables-schema";
 
@@ -41,8 +43,11 @@ export function VariableFields({
           .filter(Boolean)
           .join(" ");
         return (
-          <div key={field.name} className="space-y-1">
-            <Label htmlFor={id} className={field.title ? "text-xs" : "font-mono text-xs"}>
+          <div key={field.name} className="flex flex-col gap-1">
+            <Label
+              htmlFor={id}
+              className={cn("mb-0", field.title ? "text-xs" : "font-mono text-xs")}
+            >
               {field.title ?? field.name}
             </Label>
             <Input
@@ -70,13 +75,9 @@ export function VariableFields({
               </p>
             )}
             {error && (
-              <p
-                id={`${id}-error`}
-                className="text-xs text-red-400"
-                data-testid={`variable-error-${field.name}`}
-              >
+              <FieldError id={`${id}-error`} data-testid={`variable-error-${field.name}`}>
                 {error}
-              </p>
+              </FieldError>
             )}
           </div>
         );

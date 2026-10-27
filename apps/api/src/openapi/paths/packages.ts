@@ -6,14 +6,18 @@ import {
   REQUEST_ID_ONLY_HEADERS,
 } from "../headers.ts";
 
+/** Every door that creates an organization package under a caller-chosen id refuses the platform's scopes. */
+const SCOPE_RESERVED_RULE =
+  "A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization.";
+
 /**
  * Shared tail of the four per-type list descriptions (skills / agents /
  * integrations / mcp-servers) — only the leading noun differs.
  */
 const listPackagesSharedDescription =
   "ACTIVE in the current space (`X-Space-Id`) — the set it can launch: a system " +
-  "package, or one placed here (homed or offered) and switched on. A package placed " +
-  "here and switched OFF, and an offer nobody has taken up, are NOT on it — that is " +
+  "package, or one placed here (homed here, or holding a row here) and switched on. A " +
+  "package placed here and switched OFF is NOT on it — that is " +
   "the space library's subject (`GET /api/spaces/{spaceId}/library`), which names " +
   "each placement's origin and state and carries the switch that activates it. For " +
   "the organization-wide map of placements, use `GET /api/library`.";
@@ -78,7 +82,7 @@ const PACKAGE_DETAIL_DEFINITION_RESPONSES = {
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mutation response schemas (issue #657)
+// Mutation response schemas
 //
 // Mutating package endpoints return the affected resource BARE — the exact
 // shape of the corresponding GET detail, `$ref`'d directly. No operation
@@ -162,6 +166,16 @@ const fileOperationsProperty = {
     "Ordered file edits saved with the manifest. On creation they are validated before creating the package and included in its initial version. Updates are guarded by the same `If-Match` as the manifest; a stale draft returns 412 without applying the batch. manifest.json is edited through manifest; required content cannot be deleted or moved. Executable file edits validate bundle references. There is no cap on the number of operations, so a whole working folder can be written in one atomic request: the bounds are bytes — the global request body limit (`API_BODY_LIMIT_BYTES`), 1 MiB per written file (`413 file_too_large`), and 50 MB / 10,000 entries for the resulting tree (`413 tree_too_large`). Legacy content, when supplied, is applied before operations.",
 } as const;
 
+/** `?type=` on the three import doors: refuse an archive of another package type before writing. */
+const importTypeParameter = {
+  name: "type",
+  in: "query",
+  required: false,
+  description:
+    "The package type the import is made for. When set, an archive whose package (for a bundle, its root) is another type is refused with 400 `unexpected_package_type` before anything is written.",
+  schema: { type: "string", enum: ["agent", "skill", "mcp-server", "integration"] },
+} as const;
+
 export const packagesPaths = {
   "/api/packages/import-bundle": {
     post: {
@@ -173,6 +187,7 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
+        importTypeParameter,
       ],
       requestBody: {
         required: true,
@@ -212,6 +227,7 @@ export const packagesPaths = {
                   "root_active",
                   "root_package_id",
                   "root_version",
+                  "root_type",
                   "warnings",
                 ],
                 properties: {
@@ -246,10 +262,15 @@ export const packagesPaths = {
                   root_active: {
                     type: "boolean",
                     description:
-                      "Whether the root package is ACTIVE in the calling space after the import. False when the root lives in another space and the caller may not offer it out of that home — the import still landed every package it carried.",
+                      "Whether the root package is ACTIVE in the calling space after the import. False when the root lives in another space and the caller may not place it outside that home — the import still landed every package it carried.",
                   },
                   root_package_id: { type: "string" },
                   root_version: { type: "string" },
+                  root_type: {
+                    type: "string",
+                    enum: ["agent", "skill", "mcp-server", "integration"],
+                    description: "The root package's type.",
+                  },
                   warnings: {
                     type: "array",
                     items: { type: "string" },
@@ -263,7 +284,8 @@ export const packagesPaths = {
         },
         "400": {
           description:
-            "Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, or `post_install_failed`. A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy.",
+            "Validation error or a post-install/version-creation failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `unexpected_package_type` (the root is not the `type` asked for), or `post_install_failed`. A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. " +
+            SCOPE_RESERVED_RULE,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -295,6 +317,7 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
+        importTypeParameter,
         {
           name: "force",
           in: "query",
@@ -356,7 +379,8 @@ export const packagesPaths = {
         },
         "400": {
           description:
-            "Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `type_mismatch` (existing package has a different type), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy.",
+            "Validation error or import failure. RFC 9457 problem+json with `code` one of `validation_failed`, `invalid_request`, `type_mismatch` (existing package has a different type), `unexpected_package_type` (the archive is not the `type` asked for), `post_install_failed`, or a ZIP parse code (e.g. `missing_manifest`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. " +
+            SCOPE_RESERVED_RULE,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -388,6 +412,7 @@ export const packagesPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
+        importTypeParameter,
       ],
       requestBody: {
         required: true,
@@ -441,7 +466,8 @@ export const packagesPaths = {
         },
         "400": {
           description:
-            "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`type_mismatch`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy.",
+            "Validation error or GitHub import error (invalid URL, repo too large, rate limited, etc.) or an import failure after fetch. RFC 9457 problem+json. `code` is a GitHub-fetch code (`INVALID_URL`, `NOT_FOUND`, `RATE_LIMITED`, `GITHUB_ERROR`, `REPO_TOO_LARGE`, `EMPTY_PATH`, `TOO_MANY_FILES`, `TOO_LARGE`, `FILE_TOO_LARGE`, `DOWNLOAD_FAILED`), a validation code (`validation_failed`, `invalid_request`), or an import code (`type_mismatch`, `unexpected_package_type`, `post_install_failed`). A skill whose SKILL.md violates AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`; for a bundle the rule applies to the ROOT package only, never to a carried dependency copy. " +
+            SCOPE_RESERVED_RULE,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -906,8 +932,8 @@ export const packagesPaths = {
               // An unknown field is a 400, never a silent drop: the create /
               // update bodies are `.strict()` in `routes/packages.ts`, so a
               // client still sending the retired `source_code` learns it is
-              // gone instead of getting a 201 without it. Same rule the four
-              // launch surfaces took in #1187.
+              // gone instead of getting a 201 without it. Same rule as the four
+              // launch surfaces.
               additionalProperties: false,
             },
           },
@@ -926,7 +952,8 @@ export const packagesPaths = {
         "400": {
           $ref: "#/components/responses/ValidationError",
           description:
-            "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`.",
+            "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`. " +
+            SCOPE_RESERVED_RULE,
         },
         "404": {
           $ref: "#/components/responses/NotFound",
@@ -1057,7 +1084,7 @@ export const packagesPaths = {
         "400": {
           $ref: "#/components/responses/ValidationError",
           description:
-            "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`.",
+            "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`.",
         },
         "412": { $ref: "#/components/responses/PreconditionFailed" },
         "401": { $ref: "#/components/responses/Unauthorized" },
@@ -1109,7 +1136,7 @@ export const packagesPaths = {
         "400": {
           $ref: "#/components/responses/ValidationError",
           description:
-            "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`.",
+            "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`.",
         },
         "412": { $ref: "#/components/responses/PreconditionFailed" },
         "401": { $ref: "#/components/responses/Unauthorized" },
@@ -1254,7 +1281,7 @@ export const packagesPaths = {
         "400": {
           $ref: "#/components/responses/ValidationError",
           description:
-            "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter`, `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`.",
+            "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`.",
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -1379,7 +1406,10 @@ export const packagesPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: "Validation error. " + SCOPE_RESERVED_RULE,
+        },
         "404": {
           $ref: "#/components/responses/NotFound",
           description: "A file operation refers to a missing file.",
@@ -1419,7 +1449,7 @@ export const packagesPaths = {
           required: false,
           schema: { type: "string" },
           description:
-            "Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). Omitted follows authority WITHOUT ever refusing a readable agent: the draft for a caller who may WRITE it, the latest published version for everybody else, and the draft in read-only when nothing is published at all — reading is not executing, and a package the listing shows must have a page. The response's `definition` says which of the two was projected. Explicit `draft` is a different act: naming the working copy requires that write authority and answers `403 draft_not_writable` otherwise. A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes (issue #770) — so the run-with-options modal stays consistent with the selected version. Ignored for system agents.",
+            "Which agent definition to project: `draft` (the live editor working copy), `published` (latest published), or a version spec (exact version, dist-tag, or semver range). Omitted follows authority WITHOUT ever refusing a readable agent: the draft for a caller who may WRITE it, the latest published version for everybody else, and the draft in read-only when nothing is published at all — reading is not executing, and a package the listing shows must have a page. The response's `definition` says which of the two was projected. Explicit `draft` is a different act: naming the working copy requires that write authority and answers `403 draft_not_writable` otherwise. A concrete version returns `input` / `output` / `dependencies` from that published manifest — the same definition the run executes — so the run-with-options modal stays consistent with the selected version. Ignored for system agents.",
         },
       ],
       responses: {
@@ -1756,7 +1786,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Locate a package: its type, its home and the spaces you read it from",
       description:
-        "Resolve a package by id alone, across EVERY space the caller reaches — not only the one in `X-Space-Id`, which is what every other package read answers from. A package homed in the caller's personal space and offered nowhere is invisible from each team space's detail route; this is where a client that holds only the id (a CLI pointed at a working folder, for instance) learns the package's `type`, whether it may author it (`home_writable`, `home_deletable`, `home_shareable`), and which space to send its next request from (`read_space_ids`). `home_space_id` follows the same projection as on every package shape: `null` when the home is not a space the caller reaches, even when an offer makes the package readable. Answers 404 exactly when the package is not reachable: no space where the caller holds the type's read and the placement (home or offer) grants it — a system package is readable wherever that read is held. Read-only.",
+        "Resolve a package by id alone, across EVERY space the caller reaches — not only the one in `X-Space-Id`, which is what every other package read answers from. A package homed in the caller's personal space and placed nowhere else is invisible from each team space's detail route; this is where a client that holds only the id (a CLI pointed at a working folder, for instance) learns the package's `type`, whether it may author it (`home_writable`, `home_deletable`, `home_shareable`), and which space to send its next request from (`read_space_ids`). `home_space_id` follows the same projection as on every package shape: `null` when the home is not a space the caller reaches, even when a placement elsewhere makes the package readable. Answers 404 exactly when the package is not reachable: no space where the caller holds the type's read and the placement (home or row) grants it — a system package is readable wherever that read is held. Read-only.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1787,7 +1817,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Move a package to another home space",
       description:
-        "Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. The destination can never be a PERSONAL space (`409 home_move_into_personal_space`): a personal space homes only what is created or forked in it, and every member but a guest holds `admin` (hence `<type>:write`) in their own, so the move would otherwise put a team's package beyond every administrator's reach (RBAC spec §3.6 gives no admin a way in) for as long as its owner stays a member. `POST /api/packages/{scope}/{name}/fork` is the private copy. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. It also reconciles PLACEMENT in the same transaction: every space that holds the package and is not the new home gains the `package_shares` row that now places it there (a package is present in a space through its home or a share, never through its `space_packages` row alone), the destination's own share, if any, is dropped since a package is not offered to the space it lives in, and the destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would, and refuses the whole move with `422 bundle_invalid` for an mcp-server whose `latest` archive is not executable. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. Those reconciling shares carry `shared_by: null` — nobody offered them, the home did until this call — so `GET /api/packages/{scope}/{name}/shares` lists them with a null sharer, and revoking one removes the package from that space like any other revocation. The draft itself is edited through `PATCH /api/packages/{type}/{scope}/{name}`, under its `If-Match`.",
+        "Change the package's home space — the space whose `<type>:write` authorizes editing, publishing, renaming and deleting it. The caller must hold that permission in BOTH the current home and the destination space, which must be one the caller can reach; an unreachable destination answers 404 rather than confirming it exists. The destination can never be a PERSONAL space (`409 home_move_into_personal_space`): a personal space homes only what is created or forked in it, and every member but a guest holds `admin` (hence `<type>:write`) in their own, so the move would otherwise put a team's package beyond every administrator's reach (RBAC spec §3.6 gives no admin a way in) for as long as its owner stays a member. `POST /api/packages/{scope}/{name}/fork` is the private copy. `home_space_id` is required and cannot be null: every package of the organization is homed in one of its spaces, and one that belongs to no team is homed in the organization's default space. Every other space keeps its `space_packages` row, which goes on placing the package there; the old home keeps the package through its own row unless `keep_in_previous_home` is `false`. The destination is ACTIVATED through the activation door itself — a package lives where it is written, exactly as creating one activates it at home — which writes the same `package.activated` audit entry a click on the switch would, and refuses the whole move with `422 bundle_invalid` for an mcp-server whose `latest` archive is not executable. A destination that had deliberately switched the package OFF keeps that decision: the move transfers authority over a package, not a verdict about what a space runs. The row the old home keeps now places the package outside its home, so `GET /api/packages/{scope}/{name}/shares` lists it (with a null sharer when nobody had placed it there), and revoking it removes the package from that space like any other revocation. The draft itself is edited through `PATCH /api/packages/{type}/{scope}/{name}`, under its `If-Match`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1811,7 +1841,7 @@ export const packagesPaths = {
                   type: "boolean",
                   default: true,
                   description:
-                    "Does the space being LEFT keep the package? `true` (the default) leaves it the authorless `package_shares` offer described above, so it goes on reading and running it and nothing it had scheduled stops. `false` completes the move: that offer and that space's `space_packages` row are removed together, in the same transaction — together, because withdrawing the offer alone would leave a placement row nothing places, which no page shows and no execution door honours. It asks no authority beyond the move's own `<type>:write` in both homes; requiring `<type>:share` as well would mean a caller holding `write` and not `share` could never move a package cleanly, only leave a copy behind, and withdrawing an access is the safe direction. It governs a space that was RUNNING the package: a space that held no `space_packages` row is left behind whatever the flag says, because the backfill exists to preserve what was running and an offer written to a space that never switched the package on would widen what it sees. The audit entry `package.home_space_changed` records it as `keptInPreviousHome`.",
+                    "Does the space being LEFT keep the package? `true` (the default) leaves its `space_packages` row in place, so it goes on reading and running the package and nothing it had scheduled stops. `false` completes the move: that row is removed, settings and all, and every enabled schedule of the package in that space is disabled (`disabled_reason: package_removed`, jobs removed), in the same transaction. It asks no authority beyond the move's own `<type>:write` in both homes; requiring `<type>:share` as well would mean a caller holding `write` and not `share` could never move a package cleanly, only leave a copy behind, and withdrawing an access is the safe direction. An old home that held no row is left behind whatever the flag says: nothing places the package there once the home has moved, so its schedules there are disabled all the same. The audit entry `package.home_space_changed` records it as `keptInPreviousHome`.",
                 },
               },
               additionalProperties: false,
@@ -1883,7 +1913,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "List the spaces a package is shared with",
       description:
-        "The package's AUDIENCE — the spaces it is offered to. Requires the package type's `share` permission in its home space; a package the caller cannot reach at all answers 404. A personal-space target is rendered as its OWNER, never as a space id.",
+        "The package's AUDIENCE — the spaces it is placed in outside its home, each with its `enabled` state there. Requires the package type's `share` permission in its home space; a package the caller cannot reach at all answers 404. A personal-space target is rendered as its OWNER, never as a space id.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1924,7 +1954,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Share a package with a person or a space",
       description:
-        "Offer the package to a space — its AUDIENCE, never its activation, which stays the recipient's own act (`POST /api/spaces/{spaceId}/packages`). Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so an offer with nothing published is an offer of nothing. Idempotent: sharing the same pair twice answers 200 with the same entry.",
+        "Place the package in a space outside its home — one `space_packages` row, the same placement `POST /api/spaces/{spaceId}/packages` creates when it activates a package that is not there yet. The row lands switched ON when the caller may activate in the target (their own personal space, or a space where they hold the type's activation grant) and OFF otherwise: the package runs with the target's credentials, so its members switch it on themselves through `POST /api/spaces/{spaceId}/packages`. Requires the package type's `share` permission in the package's home space; `share` is carried by the `admin` and `builder` presets and by no API key. A `user` target additionally requires `members:read` and is resolved server-side to that member's personal space, created if they have none (never by a share that is refused) — the sharer never learns its id. A `space` target must be a space the caller can reach, so another member's personal space is not targetable by id (404). Sharing a package with the space it already lives in is `409 share_target_is_home`. EVERY target requires the package to have a published version (`409 package_has_no_version`): outside its home a package runs its latest published version, so a placement with nothing published places nothing runnable. A share landing ON is an activation: an mcp-server whose `latest` archive does not parse is refused (`422 bundle_invalid`), and the row it creates is audited `package.activated` as the activation door audits one. Idempotent: sharing the same pair twice answers 200 with the same entry and leaves an existing row's state as it stands.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1946,7 +1976,7 @@ export const packagesPaths = {
       },
       responses: {
         "200": {
-          description: "The share, new or already present.",
+          description: "The placement, new or already present.",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
@@ -1960,7 +1990,17 @@ export const packagesPaths = {
         "404": { $ref: "#/components/responses/NotFound" },
         "409": {
           description:
-            "The target space is the package's own home (`share_target_is_home`), or the package has no published version to offer (`package_has_no_version` — publish one, then share). RFC 9457 problem+json.",
+            "The target space is the package's own home (`share_target_is_home`), or the package has no published version to place (`package_has_no_version` — publish one, then share). RFC 9457 problem+json.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
+        "422": {
+          description:
+            "The share would land ON and the package is an mcp-server whose `latest` published archive is missing or does not parse (`bundle_invalid`). RFC 9457 problem+json.",
+          headers: REQUEST_ID_ONLY_HEADERS,
           content: {
             "application/problem+json": {
               schema: { $ref: "#/components/schemas/ProblemDetail" },
@@ -1976,7 +2016,7 @@ export const packagesPaths = {
       tags: ["Packages"],
       summary: "Withdraw a package share",
       description:
-        "Remove the offer AND the placement it backs, in one transaction: a package left running in a space that may no longer see it is the failure the two-table split exists to prevent. Same authority as sharing — the package type's `share` in its home space. 404 when the package is not shared with that target.",
+        "Remove the placement: the target's `space_packages` row is deleted, its settings with it, and the package is no longer readable or runnable there. In the same transaction, every enabled schedule of the package in that space is disabled (`disabled_reason: package_removed`, jobs removed). Either side may withdraw: the home side, holding the package type's `share` in its home space, or the recipient side, holding the type's deactivation permission in the target space (waived in the caller's own personal space). 404 when the package is not placed in that target outside its home, or when the target is another member's personal space addressed by its space id. Audited as `package.unshared`, with `authority` (`home` or `recipient`) naming the side that withdrew it.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1988,11 +2028,14 @@ export const packagesPaths = {
           required: true,
           schema: { type: "string" },
           description:
-            "The share's target exactly as `GET …/shares` published it: a space id (`spc_…`) for a `space` target, or the member's user id for a `user` target. The two are told apart by the space-id shape. There is no third spelling: the id of another member's personal space is never on the wire, so it cannot be the handle here.",
+            "The share's target exactly as `GET …/shares` published it: a space id (`spc_…`) for a `space` target, or the member's user id for a `user` target. A recipient names the space they act in: a team space by its id, their own personal space by its id or by their user id. The two are told apart by the space-id shape. The id of another member's personal space is never on the wire, so it is not a handle here: it answers 404.",
         },
       ],
       responses: {
-        "204": { description: "Share (and any placement behind it) removed." },
+        "204": {
+          description:
+            "Placement removed, with its settings; the package's schedules in that space are disabled (`package_removed`).",
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
@@ -2040,7 +2083,7 @@ export const packagesPaths = {
               schema: {
                 // The forked package resource, bare — same shape as the new
                 // package's GET detail, selected by the source package type at
-                // runtime (issue #657). Fields vary by type, so the response is
+                // runtime. Fields vary by type, so the response is
                 // a `oneOf`. Fork provenance is resource state: `forked_from`
                 // is part of both detail DTOs.
                 oneOf: [
@@ -2122,7 +2165,7 @@ export const packagesPaths = {
                   object: { type: "string", enum: ["list"] },
                   data: {
                     type: "array",
-                    items: { $ref: "#/components/schemas/OrgPackageItem" },
+                    items: { $ref: "#/components/schemas/IntegrationIndexItem" },
                   },
                   hasMore: { type: "boolean" },
                 },
@@ -2163,6 +2206,12 @@ export const packagesPaths = {
                   type: "string",
                   description: "Primary package file content (manifest file).",
                 },
+                publish: {
+                  type: "boolean",
+                  default: true,
+                  description:
+                    "`false` skips the initial version snapshot of `manifest.version`: the package is created as a draft only (`version_count: 0`), and still activated in its home space (the current space), so it can be connected and its draft synchronized from its server. The manifest is validated exactly as with `true`, `version` included. Until a version is published, a run declaring the integration fails with `422 dependency_unresolved`. Omitted or `true`, the version is published when the manifest allows it, and the package is activated only when it was.",
+                },
               },
               additionalProperties: false,
             },
@@ -2179,7 +2228,10 @@ export const packagesPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: "Validation error. " + SCOPE_RESERVED_RULE,
+        },
         "404": {
           $ref: "#/components/responses/NotFound",
           description: "A file operation refers to a missing file.",
@@ -2619,7 +2671,10 @@ export const packagesPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          $ref: "#/components/responses/ValidationError",
+          description: "Validation error. " + SCOPE_RESERVED_RULE,
+        },
         "409": {
           description: "A package with this name already exists (`code: name_collision`).",
           content: {

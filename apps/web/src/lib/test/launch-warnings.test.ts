@@ -7,12 +7,15 @@
  */
 
 import { afterAll, describe, expect, it } from "bun:test";
-import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
+import {
+  CONNECTION_RESOLUTION_SOURCES,
+  CONNECTION_RESOLUTION_WARNING_CODES,
+} from "@appstrate/core/integration";
 import i18n, { i18nReady } from "../../i18n.ts";
 import {
   isViewersLaunch,
   launchWarningsToast,
-  NONE_CHOOSING_SOURCES,
+  noneChosenBy,
   warnedIntegrationIds,
   type LaunchWarning,
 } from "../launch-warnings.ts";
@@ -38,6 +41,8 @@ const SHARED = {
   account_id: "team@acme.test",
   owned_by_actor: false,
   needs_reconnection: false,
+  scopes_granted: [],
+  missing_scopes: [],
 };
 
 describe("launchWarningsToast", () => {
@@ -166,7 +171,14 @@ describe("launchWarningsToast — why", () => {
       "Aucune connexion n'est choisie pour elle (choix pour ce run) ; l'agent en est informé.",
     );
     expect(toast?.connectable).toBe(false);
-    const bySource = NONE_CHOOSING_SOURCES.map(
+    const choosingNone = CONNECTION_RESOLUTION_SOURCES.filter((s) => noneChosenBy(s) !== null);
+    expect([...choosingNone].sort()).toEqual([
+      "admin_pin",
+      "member_pin",
+      "run_override",
+      "schedule_override",
+    ]);
+    const bySource = choosingNone.map(
       (source) =>
         describeOf([warning("@acme/gmail", { code: "integration_unbound", source })])?.description,
     );

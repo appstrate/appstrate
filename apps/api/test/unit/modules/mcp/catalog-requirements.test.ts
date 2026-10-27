@@ -154,6 +154,10 @@ const TERMINAL_CATCH_ALLS: ReadonlyArray<{ route: string; why: string }> = [
   { route: "GET /api/auth/*", why: "Better Auth's handler answers its whole family" },
   { route: "POST /api/auth/*", why: "Better Auth's handler answers its whole family" },
   { route: "ALL /api/mcp/o/:org", why: "405 `Allow: POST` for every verb the POST route leaves" },
+  {
+    route: "ALL /api/mcp/o/:org/s/:space",
+    why: "405 `Allow: POST` for every verb the POST route leaves",
+  },
   { route: "ALL /api/credential-proxy/proxy", why: "forwards the caller's method upstream" },
 ];
 
@@ -194,6 +198,10 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
     why: "the per-authorization-server OAuth redirect (AFPS §7.3) — the echoed `state` is the credential, and its tag must match",
   },
   {
+    path: "/api/integrations/callback/cimd/{tag}",
+    why: "the OAuth redirect a client metadata document lists — the echoed `state` is the credential; its tag and iss must match",
+  },
+  {
     path: "/api/model-providers-oauth/pair/redeem",
     why: "the one-shot pairing token minted for `npx @appstrate/connect-helper`",
   },
@@ -226,6 +234,11 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
   // Exact: every other route under `/api/orgs/…` IS guarded.
   { path: "/api/orgs", why: "the caller's own orgs, listed or created outside any org context" },
   { path: "/api/orgs/{orgId}", why: "membership (`orgRole`) is the gate, and every role reads" },
+  {
+    methods: ["GET"],
+    path: "/api/org-roles",
+    why: "membership is the gate: the four roles' grants, the same for every caller",
+  },
   { path: "/api/orgs/{orgId}/settings", why: "membership (`orgRole`) is the gate, every role" },
   {
     path: "/api/orgs/{orgId}/leave",
@@ -234,7 +247,7 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
 
   // ── The row the handler loads decides, and refuses with the route's own error.
   // Method-precise: the other methods at these paths carry a mounted guard.
-  ...rowDecided("the caller's own org role (owner/admin), read in the handler", [
+  ...rowDecided("the caller's own credential, then each space's own guards, read in the handler", [
     [["GET"], "/api/library"],
   ]),
   ...rowDecided("`gateSpacePackageWrite`: the per-type permission in the path's space", [
@@ -256,6 +269,10 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
     [["POST"], "/api/webhooks/{id}/rotate"],
     [["GET"], "/api/webhooks/{id}/deliveries"],
   ]),
+  ...rowDecided(
+    "write authority on the package's home; `credential-proxy:call-own` only when the draft declares auths",
+    [[["POST"], "/api/integrations/{packageId}/discover"]],
+  ),
   ...rowDecided("the package's home space", [
     [["GET", "PUT"], "/api/packages/{scope}/{name}/home"],
   ]),

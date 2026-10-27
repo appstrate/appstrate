@@ -7,6 +7,7 @@ import type { runs, runLogs, schedules, packagePersistence } from "./runs.ts";
 import type { spaces, endUsers } from "./spaces.ts";
 import type { integrationConnections } from "./integrations.ts";
 import type { integrationPins } from "./integration-pins.ts";
+import type { connectionCalls } from "./connection-calls.ts";
 import type { user } from "./auth.ts";
 import type { organizations, modelProviderCredentials, orgModels } from "./organizations.ts";
 
@@ -39,3 +40,5 @@ export type PackagePersistenceRow = InferSelectModel<typeof packagePersistence>;
 export type IntegrationConnectionRow = InferSelectModel<typeof integrationConnections>;
 
 export type IntegrationPinRow = InferSelectModel<typeof integrationPins>;
+
+export type ConnectionCallRow = InferSelectModel<typeof connectionCalls>;

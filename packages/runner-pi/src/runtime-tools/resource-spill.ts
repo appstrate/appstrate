@@ -27,6 +27,18 @@
  *
  * Always spills (no size threshold): the whole point is to keep file bytes
  * out of the LLM context, so even small resources are written out.
+ *
+ * `image` blocks are written too, so the agent can reuse the exact bytes
+ * through its tools (`fromFile`, commit, convert). The block stays inline iff
+ * the sniffer Pi's `read` tool uses recognises the bytes (PNG, JPEG, GIF, WebP,
+ * BMP; not animated PNG); the file is then named, and the block labelled, by
+ * the sniffed mime. Anything else — including TIFF, ICO and APNG, which Pi's
+ * tool-result normalizer might have converted — is pointer-only, on purpose:
+ * inline and `read` follow one rule, and a format the provider rejects fails
+ * the whole conversation. No resizing here: Pi downsizes tool-result images
+ * itself (`normalizeToolResultImages`). Like binary `api_call` bodies, every
+ * image is written with no cap, so screenshot-heavy tools grow `resources/`
+ * on the workspace tmpfs.
  */
 
 import { promises as fs } from "node:fs";
@@ -34,6 +46,7 @@ import * as path from "node:path";
 import { resolveSafePath } from "@appstrate/afps-runtime/resolvers";
 import { extensionForMime } from "@appstrate/core/naming";
 import type { CallToolResult } from "@appstrate/mcp-transport";
+import { loadPiCodingAgentSdk } from "../pi-sdk.ts";
 import type { RuntimeEventEmitter } from "./mcp-forward.ts";
 
 /** Workspace-relative directory spilled resources land in. */
@@ -54,12 +67,15 @@ export interface ResourceSpillOptions {
    * provided, each link is resolved via MCP `resources/read` and spilled to a
    * file just like an embedded resource, so the agent can grep / head / tail /
    * read-with-offset it instead of receiving an unreadable `appstrate://` URI.
-   * Omitted ⇒ links are passed through untouched (legacy behaviour).
+   * Omitted ⇒ links are passed through untouched.
    */
   readResource?: (uri: string) => Promise<{
     contents: Array<{ uri: string; mimeType?: string; text?: string; blob?: string }>;
   }>;
 }
+
+/** Per-call spill state: the options plus every workspace path already handed out. */
+type SpillContext = ResourceSpillOptions & { taken: Set<string> }; // lowercased paths
 
 type EmbeddedResource = {
   uri?: string;
@@ -77,10 +93,13 @@ type EmbeddedResource = {
  *   - `resource_link` blocks (URI only) are spilled when {@link
  *     ResourceSpillOptions.readResource} is provided — the bytes are fetched
  *     via MCP `resources/read` first. Without a fetcher they pass through.
+ *   - `image` blocks (base64 `data`) are always spilled; the block stays
+ *     inline, with Pi's sniffed mime, only when Pi recognises the format.
  *
- * Each spilled block is replaced by a short `text` pointer naming the workspace
- * file (with a mime-derived extension so `jq` / `grep` work), so the agent uses
- * its native filesystem tools (read with offset, grep, head/tail) on it.
+ * Each spilled resource is replaced by a short `text` pointer naming the
+ * workspace file (with a mime-derived extension so `jq` / `grep` work), so the
+ * agent uses its native filesystem tools (read with offset, grep, head/tail)
+ * on it; a spilled image is followed by that pointer.
  *
  * Never throws: a fetch/write failure falls back to leaving the original block
  * in place so {@link callToolResultToPi} renders it as before.
@@ -93,19 +112,61 @@ export async function spillResourcesToWorkspace(
   const canFetchLinks = typeof opts.readResource === "function";
   if (
     !Array.isArray(blocks) ||
-    !blocks.some((c) => c.type === "resource" || (canFetchLinks && c.type === "resource_link"))
+    !blocks.some(
+      (c) =>
+        c.type === "resource" ||
+        c.type === "image" ||
+        (canFetchLinks && c.type === "resource_link"),
+    )
   ) {
     return result;
   }
 
+  const ctx: SpillContext = { ...opts, taken: new Set() };
   const out: CallToolResult["content"] = [];
   let index = 0;
   for (const block of blocks) {
+    // Image — spill the bytes; keep the block inline when Pi can show it.
+    if (block.type === "image") {
+      const bytes = resourceBytes({ blob: block.data });
+      if (!bytes) {
+        out.push(block);
+        continue;
+      }
+      const n = index;
+      const written = await writeSpill(ensureExtension(`image-${n}`, block.mimeType), bytes, ctx);
+      if (!written) {
+        out.push(block);
+        continue;
+      }
+      index++;
+      let rel = written.rel;
+      const sniffed = await sniffImageMime(written.abs);
+      if (sniffed && extensionForMime(sniffed) !== extensionForMime(block.mimeType)) {
+        // Mislabelled bytes: the file takes the extension of what it really is.
+        const sniffedRel = spillRel(ensureExtension(`image-${n}`, sniffed), ctx);
+        try {
+          await fs.rename(written.abs, await resolveSafePath(ctx.workspace, sniffedRel));
+          rel = sniffedRel;
+        } catch {
+          // Keep the declared name — the bytes are on disk either way.
+        }
+      }
+      emitSpilled(undefined, rel, bytes, ctx);
+      if (sniffed) out.push({ ...block, mimeType: sniffed });
+      const text = sniffed
+        ? pointerText("image", rel, bytes, sniffed, { readHint: "read it to view it again" })
+        : pointerText("image", rel, bytes, block.mimeType, {
+            note: " — this image format can't be shown inline",
+          });
+      out.push({ type: "text", text });
+      continue;
+    }
     // Embedded resource — content is inline.
     if (block.type === "resource") {
       const inner = block.resource as EmbeddedResource;
       const bytes = resourceBytes(inner);
-      const replaced = bytes ? await writeAndPointer(inner, bytes, index, opts) : null;
+      const replaced = bytes ? await writeAndPointer(inner, bytes, index, ctx) : null;
       if (replaced) index++;
       out.push(replaced ?? block);
       continue;
@@ -133,7 +194,7 @@ export async function spillResourcesToWorkspace(
           // Fetch failed — leave the link untouched (degraded, not dropped).
         }
       }
-      const replaced = inner && bytes ? await writeAndPointer(inner, bytes, index, opts) : null;
+      const replaced = inner && bytes ? await writeAndPointer(inner, bytes, index, ctx) : null;
       if (replaced) index++;
       out.push(replaced ?? block);
       continue;
@@ -153,24 +214,87 @@ async function writeAndPointer(
   inner: EmbeddedResource,
   bytes: Uint8Array,
   index: number,
-  opts: ResourceSpillOptions,
+  ctx: SpillContext,
 ): Promise<{ type: "text"; text: string } | null> {
   const base = ensureExtension(basenameFromUri(inner.uri, index), inner.mimeType);
-  const rel = `${SPILL_DIR}/${sanitizeSegment(opts.toolCallId)}-${base}`;
+  const written = await writeSpill(base, bytes, ctx);
+  if (!written) return null;
+  emitSpilled(inner.uri, written.rel, bytes, ctx);
+  let preview = "";
+  if (typeof inner.text === "string") {
+    const firstLine = inner.text.split("\n", 1)[0]!.slice(0, 120);
+    if (firstLine) preview = ` — first line: ${JSON.stringify(firstLine)}`;
+  }
+  return {
+    type: "text",
+    text: pointerText(`resource ${inner.uri ?? "(no uri)"}`, written.rel, bytes, inner.mimeType, {
+      note: preview,
+    }),
+  };
+}
+
+/**
+ * Reserve the workspace-relative path of a spilled file,
+ * `resources/<toolCallId>-<base>`. Every block of a call gets its own path:
+ * a name already handed out in this call (an image's `image-0.png` against a
+ * resource's URI basename, two URIs with the same tail, a post-sniff rename)
+ * becomes `<stem>-2.<ext>`, `-3`, … so no spilled file overwrites another.
+ * Compared case-insensitively, since the workspace may sit on a
+ * case-insensitive FS (macOS); names are ASCII-sanitised, so lowercasing is enough.
+ */
+function spillRel(base: string, ctx: SpillContext): string {
+  const prefix = `${SPILL_DIR}/${sanitizeSegment(ctx.toolCallId)}-`;
+  const ext = /\.[A-Za-z0-9]{1,8}$/.exec(base)?.[0] ?? "";
+  const stem = base.slice(0, base.length - ext.length);
+  let rel = `${prefix}${base}`;
+  for (let n = 2; ctx.taken.has(rel.toLowerCase()); n++) rel = `${prefix}${stem}-${n}${ext}`;
+  ctx.taken.add(rel.toLowerCase());
+  return rel;
+}
+
+/**
+ * Write `bytes` to {@link spillRel}. Returns the workspace-relative and
+ * absolute paths, or `null` on any failure.
+ */
+async function writeSpill(
+  base: string,
+  bytes: Uint8Array,
+  ctx: SpillContext,
+): Promise<{ rel: string; abs: string } | null> {
+  const rel = spillRel(base, ctx);
   try {
-    const abs = await resolveSafePath(opts.workspace, rel);
+    const abs = await resolveSafePath(ctx.workspace, rel);
     await fs.mkdir(path.dirname(abs), { recursive: true });
     await fs.writeFile(abs, bytes);
-    opts.emit?.({
-      type: "resource.spilled",
-      runId: opts.runId,
-      toolCallId: opts.toolCallId,
-      uri: inner.uri,
-      path: rel,
-      bytes: bytes.byteLength,
-      timestamp: Date.now(),
-    });
-    return { type: "text", text: pointerText(inner, rel, bytes) };
+    return { rel, abs };
+  } catch {
+    return null;
+  }
+}
+
+/** Emit `resource.spilled` for a file at its final workspace path. */
+function emitSpilled(
+  uri: string | undefined,
+  rel: string,
+  bytes: Uint8Array,
+  opts: ResourceSpillOptions,
+): void {
+  opts.emit?.({
+    type: "resource.spilled",
+    runId: opts.runId,
+    toolCallId: opts.toolCallId,
+    uri,
+    path: rel,
+    bytes: bytes.byteLength,
+    timestamp: Date.now(),
+  });
+}
+
+/** Pi's own image sniffer on the written file; a sniff failure counts as unknown. */
+async function sniffImageMime(abs: string): Promise<string | null> {
+  try {
+    const { detectSupportedImageMimeTypeFromFile } = await loadPiCodingAgentSdk();
+    return await detectSupportedImageMimeTypeFromFile(abs);
   } catch {
     return null;
   }
@@ -216,7 +340,7 @@ function decodeUriComponentSafe(s: string): string {
 /**
  * Append a mime-derived extension when the basename has none, so the agent's
  * `jq` / `grep` / editor tooling recognises the file type. Blob URIs like
- * `appstrate://api-response/{runId}/{ulid}` have an extensionless ULID
+ * `appstrate://tool-output/{runId}/{ulid}` have an extensionless ULID
  * tail, so without this an `application/json` response would land as a bare
  * `<ulid>` file.
  */
@@ -238,18 +362,18 @@ function sanitizeSegment(s: string): string {
     .slice(0, 128);
 }
 
-/** Build the LLM-facing pointer that replaces the inline resource. */
-function pointerText(inner: EmbeddedResource, rel: string, bytes: Uint8Array): string {
+/** Build the LLM-facing pointer naming the spilled workspace file. */
+function pointerText(
+  subject: string,
+  rel: string,
+  bytes: Uint8Array,
+  mimeType: string | undefined,
+  { note = "", readHint = "read it directly" }: { note?: string; readHint?: string } = {},
+): string {
   const parts = [`${bytes.byteLength} bytes`];
-  if (inner.mimeType) parts.push(inner.mimeType);
-  let preview = "";
-  if (typeof inner.text === "string") {
-    const firstLine = inner.text.split("\n", 1)[0]!.slice(0, 120);
-    if (firstLine) preview = ` — first line: ${JSON.stringify(firstLine)}`;
-  }
+  if (mimeType) parts.push(mimeType);
   return (
-    `[resource ${inner.uri ?? "(no uri)"} → saved to workspace file ${rel} ` +
-    `(${parts.join(", ")})${preview}. ` +
-    `Pass ${rel} as fromFile to upload it, or read it directly.]`
+    `[${subject} → saved to workspace file ${rel} (${parts.join(", ")})${note}. ` +
+    `Pass ${rel} as fromFile to upload it, or ${readHint}.]`
   );
 }

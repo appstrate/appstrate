@@ -29,11 +29,14 @@ import {
 } from "@appstrate/runner-pi";
 import { parsePiLoopEnv, type PiLoopOptions } from "@appstrate/runner-pi/loop-env";
 import { getErrorMessage } from "@appstrate/core/errors";
+import type { ConnectionOverrides } from "@appstrate/core/integration";
 import {
   readBundleFromBuffer,
   readBundleFromFile,
   buildPlatformPromptInputs,
   renderPlatformPrompt,
+  type Bundle,
+  type PlatformPromptOptions,
 } from "@appstrate/afps-runtime/bundle";
 import type { ExecutionContext } from "@appstrate/afps-runtime/types";
 import { resolveActiveProfileOrNull } from "../lib/config.ts";
@@ -117,9 +120,10 @@ export interface RunCommandOptions {
   json?: boolean;
   apiKey?: string;
   /**
-   * Stream telemetry back to the Appstrate instance via a signed sink.
-   * `auto` (default): on when a profile + app are available, off otherwise.
-   * `true`: force on, fail if no context. `false`: console-only.
+   * Register the run on the Appstrate instance and stream telemetry back via a signed sink.
+   * `auto` (default): on when a profile or API key is available, off otherwise.
+   * `true`: force on, fail if no context. `false`: console-only — the run's
+   * credential-proxy calls are then made outside a run.
    */
   report?: ReportMode;
   /**
@@ -136,6 +140,8 @@ export interface RunCommandOptions {
    * platform applies the override to the spawned container.
    */
   proxy?: string;
+  /** `--connection`, folded per integration: the launch body's `connection_overrides`. */
+  connectionOverrides?: ConnectionOverrides | undefined;
   /**
    * When true, ignore the per-space `run-config` (model / proxy /
    * generation / stored inputs) and rely only on flags + env vars + defaults. Useful
@@ -271,7 +277,6 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   const reportSession = await resolveReportSession(opts, bundle, bundleSource, resolverInputs);
 
   // ─── 3b. Build the integration api_call resolver ──────────────────
-  // Thread X-Run-Id into credential-proxy calls when reporting is on.
   // Serverless `apiCall` integrations (the unified integration
   // surface) get credential-injected HTTP calls; the resolver yields one
   // `{ns}__api_call` tool per integration.
@@ -301,14 +306,14 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   validateLocalInput(bundle, input);
 
   // ─── 6. ExecutionContext + prompt inputs ──────────────────────────
-  // Derive the full platform prompt (tools / skills / schemas / output)
-  // from the bundle. The runtime `output` tool receives the output schema as
+  // Derive the full platform prompt (skills / integrations / schemas /
+  // output) from the bundle. The runtime `output` tool receives the output schema as
   // a parameter (`buildRuntimeToolExtensions({ outputSchema })` below), not
   // via the environment.
   //
   // `--snapshot` seeds `memories` / `history` / `state` onto the
-  // context so dev-loop replays (previously served by `afps run`) keep
-  // working — agent authors can re-use the same fixture files.
+  // context so dev-loop replays
+  // work — agent authors can re-use the same fixture files.
   const runId = opts.runId ?? `cli_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
   const baseContext: ExecutionContext = {
     runId,
@@ -319,11 +324,6 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   const context = mergeSnapshotIntoContext(baseContext, snapshot);
   // The integrations the platform bound this run to none of: told to the agent, tools withheld.
   const unavailable = unavailableIntegrations(reportSession?.warnings ?? []);
-  const promptInputs = buildPlatformPromptInputs(bundle, context, {
-    platformName: "Appstrate CLI",
-    ...(unavailable.length > 0 ? { unavailableIntegrations: unavailable } : {}),
-  });
-  const systemPrompt = renderPlatformPrompt(promptInputs);
 
   // System tools (`@appstrate/output`, `@appstrate/log`, …) read
   // `AGENT_RUN_ID` from the env when stamping their stdout-JSONL events.
@@ -348,22 +348,26 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // `{ns}__api_call` MCP tool, so prompts are identical regardless of
   // execution mode. Pure MCP-server integrations are skipped here (no
   // generic call surface in-process).
-  const apiCallFactories = await buildApiCallExtensionFactory({
-    bundle: withoutIntegrations(
-      bundle,
-      unavailable.map((entry) => entry.id),
-    ),
-    integrationResolver,
-    runId,
-    workspace: workspaceDir,
-    emitEvent: () => {
-      // Events are swallowed in the CLI — the run-result aggregate is
-      // assembled from stdout CloudEvents, not from these telemetry hooks.
-    },
-  });
+  const { factories: apiCallFactories, integrationIds: wiredIntegrationIds } =
+    await buildApiCallExtensionFactory({
+      bundle: withoutIntegrations(
+        bundle,
+        unavailable.map((entry) => entry.id),
+      ),
+      integrationResolver,
+      runId,
+      workspace: workspaceDir,
+      emitEvent: () => {
+        // Events are swallowed in the CLI — the run-result aggregate is
+        // assembled from stdout CloudEvents, not from these telemetry hooks.
+      },
+    });
   if (!opts.json && apiCallFactories.length > 0) {
     process.stderr.write(`→ wired ${apiCallFactories.length} integration api_call tool(s)\n`);
   }
+  // Built once the tools are wired: the catalog lists only integrations the agent can call.
+  const promptInputs = cliPromptInputs(bundle, context, unavailable, wiredIntegrationIds);
+  const systemPrompt = renderPlatformPrompt(promptInputs);
 
   // ─── 7b. Platform runtime tools (output/log/note/pin) ──────────
   // Selected via `manifest.runtime_tools`. With no sidecar (the CLI always
@@ -697,6 +701,7 @@ async function runCommandRemote(
       input,
       ...(opts.model != null ? { modelId: opts.model } : {}),
       ...(opts.proxy != null ? { proxyId: opts.proxy } : {}),
+      ...(opts.connectionOverrides ? { connectionOverrides: opts.connectionOverrides } : {}),
       idempotencyKey,
       json: opts.json ?? false,
       ...(opts.output != null ? { outputPath: opts.output } : {}),
@@ -852,6 +857,24 @@ async function resolveProfileNameForPreset(opts: RunCommandOptions): Promise<str
   return resolved.profileName;
 }
 
+/**
+ * Prompt inputs of a local run. The integrations catalog lists only the ones
+ * the run wired tools for (none under `--integrations none`), so the agent is
+ * never pointed at the doc of an integration it cannot call.
+ */
+export function cliPromptInputs(
+  bundle: Bundle,
+  context: ExecutionContext,
+  unavailable: ReadonlyArray<{ id: string; reason: string }>,
+  wiredIntegrationIds: ReadonlySet<string>,
+): PlatformPromptOptions {
+  return buildPlatformPromptInputs(bundle, context, {
+    platformName: "Appstrate CLI",
+    ...(unavailable.length > 0 ? { unavailableIntegrations: unavailable } : {}),
+    availableIntegrationIds: wiredIntegrationIds,
+  });
+}
+
 async function buildResolverInputs(
   mode: IntegrationMode,
   opts: RunCommandOptions,
@@ -1004,7 +1027,51 @@ function safeParseJson(raw: string, source: string): Record<string, unknown> {
 // --report wiring
 // ---------------------------------------------------------------------------
 
+/**
+ * The run registered on the instance, or null for a console-only run: reporting off, or a
+ * failed registration `--report-fallback console` degrades. `--connection` is refused on a
+ * console-only run, with the failure when there was one: its credential-proxy calls are made
+ * outside a run, where nothing carries the pick.
+ */
 async function resolveReportSession(
+  opts: RunCommandOptions,
+  bundle: Awaited<ReturnType<typeof readBundleFromFile>>,
+  bundleSource: BundleSource,
+  resolverInputs: SpacedRemoteResolverInputs | LocalResolverInputs | null,
+): Promise<ReportSession | null> {
+  let session: ReportSession | null = null;
+  let failure: ReportConfigError | ReportStartError | null = null;
+  try {
+    session = await registerReportSession(opts, bundle, bundleSource, resolverInputs);
+  } catch (err) {
+    if (!(err instanceof ReportConfigError || err instanceof ReportStartError)) throw err;
+    if (opts.reportFallback !== "console") throw err;
+    failure = err;
+  }
+  if (!session && opts.connectionOverrides) {
+    const integrations = parseIntegrationMode(opts.integrations);
+    throw new ReportConfigError(
+      "--connection names a connection for the run registered on the instance, and no run is registered",
+      failure
+        ? `Cause: ${failure.message}`
+        : integrations === "remote"
+          ? "Run with reporting on (a profile or API key, no --report=false), or drop --connection."
+          : `Cause: --integrations ${integrations} resolves no connection on the instance, so --connection has nothing to name. Drop --integrations or drop --connection.`,
+    );
+  }
+  if (failure && !opts.json) {
+    if (failure instanceof ReportConfigError) {
+      process.stderr.write(`warn: ${failure.message} — reporting disabled\n`);
+    } else {
+      process.stderr.write(`warn: remote reporting failed — falling back to console-only\n`);
+      process.stderr.write(`  ${failure.message}\n`);
+    }
+  }
+  return session;
+}
+
+/** Null when reporting is off; throws what {@link resolveReportSession} may degrade. */
+async function registerReportSession(
   opts: RunCommandOptions,
   bundle: Awaited<ReturnType<typeof readBundleFromFile>>,
   bundleSource: BundleSource,
@@ -1023,20 +1090,7 @@ async function resolveReportSession(
         } satisfies ReportContext)
       : null;
 
-  let enabled: boolean;
-  try {
-    enabled = shouldReport(mode, reportCtx);
-  } catch (err) {
-    if (err instanceof ReportConfigError) {
-      if (fallback === "console") {
-        if (!opts.json) process.stderr.write(`warn: ${err.message} — reporting disabled\n`);
-        return null;
-      }
-      throw err;
-    }
-    throw err;
-  }
-  if (!enabled || !reportCtx) return null;
+  if (!shouldReport(mode, reportCtx) || !reportCtx) return null;
 
   // The bundle is sourced one of two ways:
   //   - From a local file (path mode) → we have no registry handle, so
@@ -1056,28 +1110,21 @@ async function resolveReportSession(
         }
       : { kind: "inline", bundle };
 
-  const identity = bundleIdentity(bundle);
-  try {
-    return await startReportSession(
-      reportSource,
-      reportCtx,
-      { mode, fallback, ttlSeconds: opts.sinkTtl },
-      {
-        os: `${process.platform} ${process.arch}`,
-        cliVersion: process.env.APPSTRATE_CLI_VERSION ?? "dev",
-        bundle: identity,
-      },
-    );
-  } catch (err) {
-    if (err instanceof ReportStartError && fallback === "console") {
-      if (!opts.json) {
-        process.stderr.write(`warn: remote reporting failed — falling back to console-only\n`);
-        process.stderr.write(`  ${err.message}\n`);
-      }
-      return null;
-    }
-    throw err;
-  }
+  return startReportSession(
+    reportSource,
+    reportCtx,
+    {
+      mode,
+      fallback,
+      ttlSeconds: opts.sinkTtl,
+      connectionOverrides: opts.connectionOverrides,
+    },
+    {
+      os: `${process.platform} ${process.arch}`,
+      cliVersion: process.env.APPSTRATE_CLI_VERSION ?? "dev",
+      bundle: bundleIdentity(bundle),
+    },
+  );
 }
 
 function appendResolverHeaders(
@@ -1229,6 +1276,17 @@ export async function _buildResolverInputsForTesting(
   opts: RunCommandOptions,
 ): Promise<RemoteResolverInputs | LocalResolverInputs | null> {
   return buildResolverInputs(mode, opts);
+}
+
+/**
+ * Test-only access to the report-session resolution. Exercised by
+ * `apps/cli/test/run-report-source.test.ts` for the `--connection` rule on
+ * every path that ends with no registered run.
+ */
+export function _resolveReportSessionForTesting(
+  ...args: Parameters<typeof resolveReportSession>
+): Promise<ReportSession | null> {
+  return resolveReportSession(...args);
 }
 
 /**

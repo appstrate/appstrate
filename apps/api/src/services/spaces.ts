@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { and, asc, desc, eq, isNotNull, isNull, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, or } from "drizzle-orm";
 import type { InferSelectModel } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@appstrate/db/client";
 import {
   files,
+  integrationConnections,
+  integrationConnectionShares,
   organizations,
   packages,
   runs,
@@ -16,15 +18,19 @@ import {
 } from "@appstrate/db/schema";
 import { conflict, invalidRequest, notFound } from "../lib/errors.ts";
 import { prefixedId } from "@appstrate/db/ids";
-import { scopedWhere, type DbOrTx } from "../lib/db-helpers.ts";
+import { lockOrganizationRow, scopedWhere, type DbOrTx } from "../lib/db-helpers.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { enqueueStorageDeletion, type StorageDeletionJobInput } from "./storage-deletion.ts";
 import { decrementOrgFileBytes, storageKeyToDeletionJob } from "./files.ts";
 import { runWorkspaceDeletionJobs } from "./run-workspace-storage.ts";
 import { packageStorageDeletionJobs } from "./package-storage-deletion.ts";
-import { isPlacedElsewhere, reconcilePlacementsAfterRehome } from "./package-placement.ts";
+import { isPlacedElsewhere } from "./package-placement.ts";
 import { countInProgressRuns } from "./state/runs.ts";
-import { nothingUnshared, unshareConnectionsOfOwnersWithoutAccess } from "./space-members.ts";
+import {
+  nothingUnshared,
+  unshareConnectionsOfOwnersWithoutAccess,
+  type ConnectionShare,
+} from "./space-members.ts";
 import { DEFAULT_SPACE_NAME, ensurePersonalSpace } from "@appstrate/db/provision-org";
 import type { OrgRole, SpaceRolePreset, SpaceVisibility } from "@appstrate/core/permissions";
 import {
@@ -36,6 +42,11 @@ import {
   type SpaceMemberRow,
   type SpaceRoleRef,
 } from "../lib/space-role.ts";
+
+import {
+  shareConnectionsWithNewSpace,
+  recordAllSpacesShares,
+} from "./connection-all-spaces-shares.ts";
 
 type SpaceRow = InferSelectModel<typeof spaces>;
 
@@ -111,19 +122,25 @@ export async function createSpace(
   createdBy?: string,
 ) {
   const id = prefixedId("spc");
-  const [space] = await db
-    .insert(spaces)
-    .values({
-      id,
-      orgId,
-      name: params.name,
-      isDefault: params.isDefault ?? false,
-      settings: params.settings ?? {},
-      createdBy: createdBy ?? null,
-    })
-    .returning();
+  const result = await db.transaction(async (tx) => {
+    await lockOrganizationRow(tx, orgId);
+    const [space] = await tx
+      .insert(spaces)
+      .values({
+        id,
+        orgId,
+        name: params.name,
+        isDefault: params.isDefault ?? false,
+        settings: params.settings ?? {},
+        createdBy: createdBy ?? null,
+      })
+      .returning();
 
-  return space!;
+    const added = await shareConnectionsWithNewSpace(tx, orgId, id);
+    return { space: space!, added };
+  });
+  await recordAllSpacesShares(orgId, id, result.added);
+  return result.space;
 }
 
 /**
@@ -233,8 +250,8 @@ export async function assertSpaceInScope(scope: SpaceScope): Promise<void> {
  * Update a space. Throws 404 if not found. `judged` is the row the request was
  * authorized on (`c.get("space")`): a `visibility` / `default_role` change is
  * written only while the row still holds both, else 409 `space_access_changed`
- * (RBAC spec §4.4). Returns the connections a close unshared, for the audit, and the schedules
- * that disabled, whose jobs the caller removes.
+ * (RBAC spec §4.4). Returns the connection shares a close withdrew, for the audit, and the
+ * schedules that disabled, whose jobs the caller removes.
  */
 export async function updateSpace(
   orgId: string,
@@ -244,28 +261,29 @@ export async function updateSpace(
     settings?: SpaceSettings;
     visibility?: SpaceVisibility;
     defaultRole?: SpaceRolePreset;
+    icon?: string | null;
+    color?: string | null;
   },
   judged: Pick<SpaceRow, "visibility" | "defaultRole" | "ownerUserId" | "isDefault">,
 ) {
   const changesAccess = params.visibility !== undefined || params.defaultRole !== undefined;
-  // Both rules are DB CHECKs too, but a named 4xx beats a 23514.
-  if (changesAccess) {
-    if (judged.ownerUserId !== null) {
-      // A personal space is `private` with one member by construction; there is
-      // no visibility to choose and no implicit member to give a default role
-      // to (RBAC spec §3.6). `name` stays editable, and `is_default` is not a
-      // field of this route at all.
-      throw conflict(
-        "personal_space_immutable",
-        "A personal space is always private and has no implicit members: only its name can be changed.",
-      );
-    }
-    if (params.visibility !== undefined && params.visibility !== "open" && judged.isDefault) {
-      throw invalidRequest(
-        "The default space must stay open — every org member lands there.",
-        "visibility",
-      );
-    }
+  const changesAppearance = params.icon !== undefined || params.color !== undefined;
+  // A personal space is `private` with one member by construction; there is no
+  // visibility to choose and no implicit member to give a default role to
+  // (RBAC spec §3.6), nor an icon or colour to set. `name` stays editable, and
+  // `is_default` is not a field of this route at all. The access rules are DB
+  // CHECKs too, but a named 4xx beats a 23514.
+  if ((changesAccess || changesAppearance) && judged.ownerUserId !== null) {
+    throw conflict(
+      "personal_space_immutable",
+      "A personal space is always private, has no implicit members and no icon or colour of its own: only its name can be changed.",
+    );
+  }
+  if (params.visibility !== undefined && params.visibility !== "open" && judged.isDefault) {
+    throw invalidRequest(
+      "The default space must stay open — every org member lands there.",
+      "visibility",
+    );
   }
   const { space, unshared } = await db.transaction(async (tx) => {
     const [updated] = await tx
@@ -275,6 +293,8 @@ export async function updateSpace(
         ...(params.settings !== undefined && { settings: params.settings }),
         ...(params.visibility !== undefined && { visibility: params.visibility }),
         ...(params.defaultRole !== undefined && { defaultRole: params.defaultRole }),
+        ...(params.icon !== undefined && { icon: params.icon }),
+        ...(params.color !== undefined && { color: params.color }),
         updatedAt: new Date(),
       })
       .where(
@@ -300,7 +320,7 @@ export async function updateSpace(
   if (space) {
     return {
       space,
-      unsharedConnectionIds: unshared.connectionIds,
+      unsharedShares: unshared.shares,
       disabledScheduleIds: unshared.disabledScheduleIds,
     };
   }
@@ -353,18 +373,17 @@ function spaceHasActiveRuns() {
  * so emptying and deleting are one atomic act. Every other caller omits it and
  * gets its own — a non-transactional handle would run the
  * enumerate-enqueue-delete sequence unatomically.
+ *
+ * Returns the connection shares the space held, which the cascade drops, for the caller's audit.
  */
 export async function deleteSpace(
   orgId: string,
   spaceId: string,
   actor: "request" | "sweeper" = "request",
   tx?: DbOrTx,
-) {
-  if (tx) {
-    await deleteSpaceInTx(tx, orgId, spaceId, actor);
-    return;
-  }
-  await db.transaction(async (inner) => deleteSpaceInTx(inner, orgId, spaceId, actor));
+): Promise<{ removedShares: ConnectionShare[] }> {
+  if (tx) return deleteSpaceInTx(tx, orgId, spaceId, actor);
+  return db.transaction(async (inner) => deleteSpaceInTx(inner, orgId, spaceId, actor));
 }
 
 async function deleteSpaceInTx(
@@ -372,7 +391,7 @@ async function deleteSpaceInTx(
   orgId: string,
   spaceId: string,
   actor: "request" | "sweeper",
-) {
+): Promise<{ removedShares: ConnectionShare[] }> {
   // Use the same org-first lock order as file/upload writes, then lock the
   // parent space before enumerating its children. The parent lock
   // prevents a concurrent FK insert from being cascade-deleted without a
@@ -468,11 +487,37 @@ async function deleteSpaceInTx(
   const bytes = docRows.reduce((sum, row) => sum + row.size, 0);
   if (bytes > 0) await decrementOrgFileBytes(tx, orgId, bytes);
 
+  // The shares are rows with an FK to this space, so the delete below cascades them. They are read
+  // first for the caller's audit, and their connections are bumped under the same id-ordered row
+  // locks an access loss takes, so the realtime refresh reaches the owners.
+  const removedShares = await tx
+    .select({
+      connectionId: integrationConnectionShares.connectionId,
+      spaceId: integrationConnectionShares.spaceId,
+    })
+    .from(integrationConnectionShares)
+    .where(eq(integrationConnectionShares.spaceId, spaceId))
+    .orderBy(asc(integrationConnectionShares.connectionId));
+  if (removedShares.length > 0) {
+    const connectionIds = [...new Set(removedShares.map((share) => share.connectionId))];
+    await tx
+      .select({ id: integrationConnections.id })
+      .from(integrationConnections)
+      .where(inArray(integrationConnections.id, connectionIds))
+      .orderBy(asc(integrationConnections.id))
+      .for("update");
+    await tx
+      .update(integrationConnections)
+      .set({ updatedAt: new Date() })
+      .where(inArray(integrationConnections.id, connectionIds));
+  }
+
   const deleted = await tx
     .delete(spaces)
     .where(scopedWhere(spaces, { orgId, extra: [eq(spaces.id, spaceId)] }))
     .returning({ id: spaces.id });
   if (deleted.length === 0) throw notFound("Space not found");
+  return { removedShares };
 }
 
 // ─── Personal spaces: the two administrative acts and the sweeper ───────
@@ -645,7 +690,8 @@ export async function convertPersonalSpaceToTeam(
   orgId: string,
   spaceId: string,
 ): Promise<SpaceRow> {
-  return db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
+    await lockOrganizationRow(tx, orgId);
     const [current] = await tx
       .select({
         id: spaces.id,
@@ -672,8 +718,11 @@ export async function convertPersonalSpaceToTeam(
       .set({ ownerUserId: null, orphanedAt: null, updatedAt: new Date() })
       .where(eq(spaces.id, spaceId))
       .returning();
-    return space!;
+    const added = await shareConnectionsWithNewSpace(tx, orgId, spaceId);
+    return { space: space!, added };
   });
+  await recordAllSpacesShares(orgId, spaceId, result.added);
+  return result.space;
 }
 
 /** How long an orphaned personal space is kept before the sweeper empties it. */
@@ -694,17 +743,14 @@ export async function listSweepablePersonalSpaces(now = new Date()) {
  *
  * A homed package's write authority is this space (§6.9), so it cannot follow
  * the space out and `deleteSpace` refuses while one exists. The question is
- * PLACED ELSEWHERE, by the ONE predicate that answers it everywhere else
- * ({@link placementReadFilter}, `services/package-placement.ts`). The home is
- * the placement that is leaving, so it is excluded rather than consulted:
+ * PLACED ELSEWHERE ({@link isPlacedElsewhere}, `services/package-placement.ts`).
+ * The home is the placement that is leaving, so it is excluded rather than
+ * consulted:
  *
- *   - yes → re-homed to the organization's DEFAULT space, AND given the offer
- *     that keeps each of the other spaces placed
- *     ({@link reconcilePlacementsAfterRehome}). The default space is where a
- *     package that belongs to no team lives, and it needs no offer of its own
- *     because it HOSTS the package from here on. The offer to the others is not
- *     a courtesy: a row without one is a placement nothing places, and the space
- *     would lose the package from every page while its schedules failed.
+ *   - yes → re-homed to the organization's DEFAULT space, where a package that
+ *     belongs to no team lives. Every other space keeps the `space_packages`
+ *     row that places it there, so nothing else is written: each keeps the
+ *     package on every page, and its schedules keep firing.
  *
  *     What this HANDS OVER is deliberate: the package — draft included —
  *     becomes readable and writable from the default space, under its own
@@ -715,12 +761,12 @@ export async function listSweepablePersonalSpaces(now = new Date()) {
  *     It was placed in that one space and nowhere else, so it was private to a
  *     person who is gone.
  *
- *     An OFFER counts as a placement here, like everywhere else — asking for a
- *     `space_packages` row instead would destroy a published package its author
- *     had offered to a colleague who had not switched it on yet. "Taken up" is
- *     nobody's axis: Drive splits a departing user's files on SHARED versus not,
- *     Figma keeps a shared draft readable by everyone it was shared with, and
- *     n8n makes transfer-or-delete an operator's choice.
+ *     A row switched off counts as a placement here, like everywhere else —
+ *     asking for `enabled` instead would destroy a published package its author
+ *     had shared with a colleague who had not switched it on yet. "Switched on"
+ *     is nobody's axis: Drive splits a departing user's files on SHARED versus
+ *     not, Figma keeps a shared draft readable by everyone it was shared with,
+ *     and n8n makes transfer-or-delete an operator's choice.
  *
  * ONE transaction, and every refusal comes BEFORE the first package mutation.
  * Both are load-bearing: `deleteSpace` can still refuse (a run went in flight),
@@ -739,7 +785,10 @@ export async function listSweepablePersonalSpaces(now = new Date()) {
 export async function emptyAndDeletePersonalSpace(
   orgId: string,
   spaceId: string,
-): Promise<{ rehomedPackages: number; deletedPackages: number }> {
+): Promise<{
+  counts: { rehomedPackages: number; deletedPackages: number };
+  removedShares: ConnectionShare[];
+}> {
   return db.transaction(async (tx) => {
     const [org] = await tx
       .select({ id: organizations.id })
@@ -798,9 +847,7 @@ export async function emptyAndDeletePersonalSpace(
     let deletedPackages = 0;
     for (const pkg of homed) {
       // PLACED elsewhere — the ONE placement rule, asked of every space but the
-      // one being emptied, by the module that owns it. An offer places the
-      // package exactly as a row does, so "present elsewhere" is never read
-      // twice.
+      // one being emptied, by the module that owns it.
       if (await isPlacedElsewhere(tx, { packageId: pkg.id, exceptSpaceId: spaceId })) {
         if (!defaultSpace) {
           throw conflict(
@@ -818,26 +865,6 @@ export async function emptyAndDeletePersonalSpace(
           .update(packages)
           .set({ homeSpaceId: defaultSpace.id })
           .where(eq(packages.id, pkg.id));
-        // Re-homing MOVES one of the two placements, and every space that
-        // still holds a `space_packages` row needs the other or it is left
-        // with a placement nothing places. The same reconciliation the home
-        // MOVE runs, called for the same reason — see
-        // `reconcilePlacementsAfterRehome`. It also drops the destination's own
-        // offer if one existed: the default space now HOMES the package, and a
-        // package is not offered to the space it lives in. Every space still
-        // running the package keeps it on every page, and its schedules keep
-        // firing.
-        //
-        // A package placed elsewhere by an OFFER alone reaches this branch too,
-        // and for it the reconciliation is a no-op on the insert half: the offer
-        // that placed it is untouched by the move and keeps placing it. Only its
-        // delete half can fire, and only if the departing author had offered the
-        // package to the default space — which now HOMES it.
-        await reconcilePlacementsAfterRehome(tx, {
-          packageId: pkg.id,
-          orgId,
-          newHomeSpaceId: defaultSpace.id,
-        });
         rehomedPackages++;
         continue;
       }
@@ -857,7 +884,7 @@ export async function emptyAndDeletePersonalSpace(
 
     // Inside the same transaction, so the space and the packages it homed
     // commit or roll back together.
-    await deleteSpace(orgId, spaceId, "sweeper", tx);
-    return { rehomedPackages, deletedPackages };
+    const { removedShares } = await deleteSpace(orgId, spaceId, "sweeper", tx);
+    return { counts: { rehomedPackages, deletedPackages }, removedShares };
   });
 }

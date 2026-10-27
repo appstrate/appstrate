@@ -1,21 +1,52 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { useTranslation } from "react-i18next";
-import { usePermissions } from "../../hooks/use-permissions";
-import type { IntegrationAuthStatus, IntegrationManifestAuth } from "../../hooks/use-integrations";
-import { AuthHeader } from "./auth-header";
+import { acquiresByConnectLogin } from "@appstrate/core/integration";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { CopyBlock } from "../copy-block";
+import { SettingValue } from "../settings/setting-row";
+import {
+  useIntegrationClients,
+  useIntegrationDetail,
+  type IntegrationAuthStatus,
+  type IntegrationManifestAuth,
+} from "../../hooks/use-integrations";
 import { ClientsTable } from "./clients-table";
 
-// ─────────────────────────────────────────────
-// Configuration tab — per-auth metadata + OAuth clients
-// ─────────────────────────────────────────────
+/** The redirect URI an admin registers at the provider, once per auth. */
+function AuthTechnicalSettings({ packageId, authKey }: { packageId: string; authKey: string }) {
+  const { t } = useTranslation("settings");
+  const { data: clients, isLoading: clientsLoading } = useIntegrationClients(
+    "space",
+    packageId,
+    authKey,
+  );
+  const { data: detail } = useIntegrationDetail(packageId);
+  // What connect will ACTUALLY send: `OAuth2Strategy.begin` prefers the default client's own
+  // `redirect_uri` over the platform callback (`clientRedirectUri ?? redirectUri`).
+  const redirectUri =
+    clients?.find((c) => c.is_default)?.redirect_uri || detail?.platform_redirect_uri;
+  if (!clientsLoading && !redirectUri) return null;
+  return (
+    <section className="mt-8">
+      <h4 className="mb-4 text-sm font-medium">{t("integration.presentation.technicalDetails")}</h4>
+      {redirectUri && (
+        <div className="mb-4 flex flex-col gap-2">
+          <p className="text-muted-foreground text-sm">
+            {t("integration.oauthClient.platformRedirectUri")}
+          </p>
+          {clientsLoading || !redirectUri ? (
+            <Skeleton className="h-9 w-full" />
+          ) : (
+            <CopyBlock value={redirectUri} testId={`platform-redirect-uri-${authKey}`} />
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
 
-/**
- * Per-auth admin configuration: the declared auth metadata (scopes, resource,
- * authorized URIs) plus the OAuth clients table (system + custom) and the
- * registration form to add/edit/delete the org's own (BYO-app) client.
- * Separated from the runtime connections view (see {@link ConnectAuthBlock}).
- */
+/** Per-auth admin configuration: manifest pins, the OAuth clients table and the redirect URI to register. */
 export function ConfigAuthBlock({
   packageId,
   status,
@@ -26,65 +57,48 @@ export function ConfigAuthBlock({
   authDecl: IntegrationManifestAuth;
 }) {
   const { t } = useTranslation("settings");
-  const { can } = usePermissions();
   const isOAuth = status.type === "oauth2";
+  const authorizedUris = authDecl.authorized_uris ?? [];
 
   return (
-    <div className="bg-card rounded-lg border p-4" data-testid={`auth-config-${status.auth_key}`}>
-      <AuthHeader status={status} />
-
-      {/* Scopes / resource (RFC 8707 — `resource` in AFPS §7.3) */}
-      {(status.scopes.length > 0 ||
-        status.resource ||
-        (authDecl.authorized_uris?.length ?? 0) > 0) && (
-        <div className="text-muted-foreground mb-3 grid gap-1 text-xs">
-          {status.scopes.length > 0 && (
-            <p>
-              <span className="font-semibold">{t("integration.auth.scopes")}:</span>{" "}
-              <span className="font-mono">{status.scopes.join(", ")}</span>
-            </p>
-          )}
+    <section data-testid={`auth-config-${status.auth_key}`}>
+      <p className="text-muted-foreground mb-5 text-sm">
+        {t(
+          isOAuth
+            ? "integration.presentation.oauthDescription"
+            : "integration.presentation.credentialsDescription",
+        )}
+      </p>
+      {(status.resource || authorizedUris.length > 0) && (
+        <dl className="mb-6">
           {status.resource && (
-            <p>
-              <span className="font-semibold">{t("integration.auth.resource")}:</span>{" "}
-              <span className="font-mono">{status.resource}</span>
-            </p>
+            <SettingValue label={t("integration.auth.resource")}>
+              <CopyBlock value={status.resource} />
+            </SettingValue>
           )}
-          {(authDecl.authorized_uris?.length ?? 0) > 0 && (
-            <p className="truncate">
-              <span className="font-semibold">{t("integration.auth.authorizedUris")}:</span>{" "}
-              <span className="font-mono text-[0.7rem]">
-                {authDecl.authorized_uris!.slice(0, 3).join(", ")}
-                {authDecl.authorized_uris!.length > 3 &&
-                  ` (+${authDecl.authorized_uris!.length - 3})`}
-              </span>
-            </p>
+          {authorizedUris.length > 0 && (
+            <SettingValue label={t("integration.structure.addresses")}>
+              <div className="flex flex-col gap-2">
+                {authorizedUris.map((uri) => (
+                  <CopyBlock key={uri} value={uri} />
+                ))}
+              </div>
+            </SettingValue>
           )}
-        </div>
+        </dl>
       )}
-
-      {/* OAuth clients (system + org + space) — list, register, edit, delete, default. */}
       {isOAuth && (
         <ClientsTable
-          tier="space"
           packageId={packageId}
           authKey={status.auth_key}
           authDecl={authDecl}
           autoProvisioned={status.client_auto_provisioned}
         />
       )}
-      {isOAuth && !status.client_auto_provisioned && can("org-integrations:configure") && (
-        <ClientsTable
-          tier="org"
-          packageId={packageId}
-          authKey={status.auth_key}
-          authDecl={authDecl}
-          autoProvisioned={false}
-        />
+      {/* A token acquired by connect.login is never redirected: no redirect URI to register. */}
+      {isOAuth && !acquiresByConnectLogin(authDecl) && (
+        <AuthTechnicalSettings packageId={packageId} authKey={status.auth_key} />
       )}
-      {!isOAuth && (
-        <p className="text-muted-foreground text-xs">{t("integration.config.noOAuthClient")}</p>
-      )}
-    </div>
+    </section>
   );
 }

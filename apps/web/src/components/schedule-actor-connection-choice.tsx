@@ -1,12 +1,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { Card } from "@appstrate/ui/components/card";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Label } from "@appstrate/ui/components/label";
+import { CheckboxField } from "@/components/app-ui/checkbox-field";
 import { useIntegrationConnections } from "../hooks/use-integrations";
-import type { ConnectionChoice } from "../lib/connection-choice";
-import type { ConnectionSet } from "../lib/connection-set";
+import { useIntegrationName } from "../hooks/use-integration-name";
+import { candidateDescription, type ConnectionChoice } from "../lib/connection-choice";
+import { toggleCapped, type ConnectionSet } from "../lib/connection-set";
 import { ClearChoiceButton } from "./integration-connect/clear-choice-button";
-import { ConnectionSetChecklist } from "./integration-detail/connection-set-checklist";
 
 /**
  * The connection section of a schedule running as someone other than the viewer, whose own
@@ -14,14 +17,18 @@ import { ConnectionSetChecklist } from "./integration-detail/connection-set-chec
  * control instead — only connections the viewer reaches too, so the list can be empty: the
  * actor's private connections are theirs (or an admin's) to pin. Why each was refused is said
  * once, by the form-level `ScheduleConnectionRefusals`. Stored picks nothing refused are shown
- * read-only, each integration's clearable. "No connection" (`[]`) is offered for each integration
- * the agent does not require.
+ * read-only, each integration's clearable. "No connection" (`[]`) is a box of its own for each
+ * integration the agent does not require; nothing ticked is no choice (`null`).
+ *
+ * Where nothing was refused, no choice is the actor's own resolution, which is said. A refusal is
+ * the server saying that resolution cannot decide, so there no choice is no answer.
  */
 export function ScheduleActorConnectionChoice({
   choices,
   integrations,
   value,
   onChange,
+  showContext = true,
 }: {
   /** What the last save was refused over — kept on screen while it is answered. */
   choices: readonly ConnectionChoice[];
@@ -29,42 +36,41 @@ export function ScheduleActorConnectionChoice({
   integrations: readonly { id: string; required?: boolean }[];
   value: Readonly<Record<string, string[]>>;
   onChange: (integrationId: string, connectionIds: ConnectionSet) => void;
+  /** Says the connections are resolved for the actor; a form that just named it leaves it out. */
+  showContext?: boolean;
 }) {
   const { t } = useTranslation(["agents"]);
   const optional = new Set(integrations.filter((i) => i.required !== true).map((i) => i.id));
   const refused = (integrationId: string) => choices.some((c) => c.integrationId === integrationId);
   const others = [...new Set([...Object.keys(value), ...optional])].filter((id) => !refused(id));
   return (
-    <div className="space-y-2" data-testid="schedule-actor-connections">
-      <Label>{t("schedule.connectionOverrides.label")}</Label>
-      <p className="text-muted-foreground text-xs">
-        {t("schedule.connectionOverrides.otherActor")}
-      </p>
+    <div className="flex flex-col gap-2" data-testid="schedule-actor-connections">
+      <Label className="mb-0">{t("connectionOverrides.label")}</Label>
+      {showContext && (
+        <p className="text-muted-foreground text-xs">
+          {t("schedule.connectionOverrides.otherActor")}
+        </p>
+      )}
       {choices.map((choice) => (
-        <div
+        <IntegrationChoiceBox
           key={choice.integrationId}
-          className="border-border bg-card space-y-1.5 rounded-md border p-3"
-          data-testid={`schedule-actor-choice-${choice.integrationId}`}
+          integrationId={choice.integrationId}
+          testId={`schedule-actor-choice-${choice.integrationId}`}
         >
-          <div className="font-mono text-xs font-medium">{choice.integrationId}</div>
-          <ConnectionSetChecklist
-            // A dead connection fails the fire it is picked for; unticking stays open.
-            options={choice.candidates.map((c) => ({
-              id: c.id,
-              disabled: c.needs_reconnection,
-              label: <CandidateLabel candidate={c} />,
-            }))}
+          <ScheduleCandidatePicker
+            choice={choice}
             value={value[choice.integrationId] ?? null}
-            onChange={(next) => onChange(choice.integrationId, next)}
-            idPrefix={`sched-choice-${choice.integrationId}`}
             allowNone={optional.has(choice.integrationId)}
+            onChange={(next) => onChange(choice.integrationId, next)}
           />
           {/* No candidates travel with an unreachable pick: clearing it lets
               the next save resolve again, and ask again if it must. */}
           {choice.candidates.length === 0 && value[choice.integrationId] !== undefined && (
-            <ClearChoiceButton onClick={() => onChange(choice.integrationId, null)} />
+            <div>
+              <ClearChoiceButton onClick={() => onChange(choice.integrationId, null)} />
+            </div>
           )}
-        </div>
+        </IntegrationChoiceBox>
       ))}
       {others.map((integrationId) =>
         (value[integrationId]?.length ?? 0) > 0 ? (
@@ -75,46 +81,114 @@ export function ScheduleActorConnectionChoice({
             onClear={() => onChange(integrationId, null)}
           />
         ) : (
-          <div
+          <IntegrationChoiceBox
             key={integrationId}
-            className="border-border bg-card space-y-1.5 rounded-md border p-3"
-            data-testid={`schedule-actor-none-${integrationId}`}
+            integrationId={integrationId}
+            testId={`schedule-actor-none-${integrationId}`}
           >
-            <div className="font-mono text-xs font-medium">{integrationId}</div>
-            <ConnectionSetChecklist
-              options={[]}
+            <NoneBox
+              integrationId={integrationId}
               value={value[integrationId] ?? null}
               onChange={(next) => onChange(integrationId, next)}
-              idPrefix={`sched-choice-${integrationId}`}
-              allowNone
             />
-          </div>
+            {value[integrationId] === undefined && (
+              <p className="text-muted-foreground text-xs">
+                {t("schedule.connectionOverrides.inheritActor")}
+              </p>
+            )}
+          </IntegrationChoiceBox>
         ),
       )}
     </div>
   );
 }
 
-/** A refused save's candidate: own or shared by another member, and whether it is dead. */
-function CandidateLabel({ candidate: c }: { candidate: ConnectionChoice["candidates"][number] }) {
+/** One integration of the section: its display name, then what answers for it. */
+function IntegrationChoiceBox({
+  integrationId,
+  testId,
+  children,
+}: {
+  integrationId: string;
+  testId: string;
+  children: ReactNode;
+}) {
+  const name = useIntegrationName(integrationId);
+  return (
+    <Card className="flex flex-col gap-1.5 rounded-md p-3" data-testid={testId}>
+      <div className="text-sm font-medium">{name}</div>
+      {children}
+    </Card>
+  );
+}
+
+/** A refused save's candidates as boxes: own or shared by another member, and whether it is dead. */
+function ScheduleCandidatePicker({
+  choice,
+  value,
+  allowNone,
+  onChange,
+}: {
+  choice: ConnectionChoice;
+  value: ConnectionSet;
+  allowNone: boolean;
+  onChange: (next: ConnectionSet) => void;
+}) {
+  const { t } = useTranslation(["agents"]);
+  const picked = value ?? [];
+  const labels = {
+    sharedByOther: t("schedule.connectionOverrides.sharedByOther"),
+    needsReconnection: t("schedule.connectionOverrides.needsReconnection"),
+  };
+  return (
+    <div role="group" className="flex flex-col gap-3">
+      {choice.candidates.map((c) => {
+        const checked = picked.includes(c.id);
+        return (
+          <CheckboxField
+            key={c.id}
+            id={`sched-choice-pick-option-${c.id}`}
+            data-testid={`sched-choice-pick-option-${c.id}`}
+            label={c.label}
+            description={candidateDescription(c, labels)}
+            checked={checked}
+            // A dead connection fails the fire it is picked for; unticking stays open.
+            disabled={!checked && c.needs_reconnection}
+            onCheckedChange={() => {
+              // Unticking the last box is no choice at this layer, never « no connection ».
+              const next = toggleCapped(picked, c.id);
+              onChange(next.length > 0 ? next : null);
+            }}
+          />
+        );
+      })}
+      {allowNone && (
+        <NoneBox integrationId={choice.integrationId} value={value} onChange={onChange} />
+      )}
+    </div>
+  );
+}
+
+/** « Aucune connexion » (`[]`), for an integration the agent does not require; unticked, no choice. */
+function NoneBox({
+  integrationId,
+  value,
+  onChange,
+}: {
+  integrationId: string;
+  value: ConnectionSet;
+  onChange: (next: ConnectionSet) => void;
+}) {
   const { t } = useTranslation(["agents"]);
   return (
-    <>
-      {c.label}
-      <span className="text-muted-foreground"> · {c.account_id}</span>
-      {!c.owned_by_actor && (
-        <span className="text-muted-foreground">
-          {" "}
-          · {t("schedule.connectionOverrides.sharedByOther")}
-        </span>
-      )}
-      {c.needs_reconnection && (
-        <span className="text-muted-foreground">
-          {" "}
-          · {t("schedule.connectionOverrides.needsReconnection")}
-        </span>
-      )}
-    </>
+    <CheckboxField
+      id={`sched-choice-pick-none-${integrationId}`}
+      data-testid={`sched-choice-pick-none-${integrationId}`}
+      label={t("detail.integrationMemberPicker.none")}
+      description={t("detail.integrationMemberPicker.noneHint")}
+      checked={value?.length === 0}
+      onCheckedChange={(checked) => onChange(checked === true ? [] : null)}
+    />
   );
 }
 
@@ -131,16 +205,17 @@ function StoredChoice({
   const { t } = useTranslation(["agents"]);
   const { data: visible } = useIntegrationConnections(integrationId);
   const labelOf = (id: string) =>
-    visible?.find((c) => c.id === id && c.shared_with_org)?.label ??
+    visible?.find((c) => c.id === id && c.shared_here)?.label ??
     t("schedule.connectionOverrides.privateConnection");
   return (
-    <div
-      className="border-border bg-card space-y-1.5 rounded-md border p-3"
-      data-testid={`schedule-actor-stored-${integrationId}`}
+    <IntegrationChoiceBox
+      integrationId={integrationId}
+      testId={`schedule-actor-stored-${integrationId}`}
     >
-      <div className="font-mono text-xs font-medium">{integrationId}</div>
       <p className="text-xs">{connectionIds.map(labelOf).join(" · ")}</p>
-      <ClearChoiceButton onClick={onClear} />
-    </div>
+      <div>
+        <ClearChoiceButton onClick={onClear} />
+      </div>
+    </IntegrationChoiceBox>
   );
 }
