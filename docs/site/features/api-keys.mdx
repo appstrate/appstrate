@@ -22,7 +22,7 @@ Only people holding `api-keys:create` in the space can mint keys: the `admin` sp
 
 ## Creating a key
 
-In the web app, open **Organization settings > Space > API Keys** and create a key with a name, scopes and an optional expiry. The key is shown **once**.
+In the web app, open **Settings**, go to the **Workspace** section and choose **API Keys**, then create a key with a name, scopes and an optional expiry. The key is shown **once**.
 
 Through the API, in the space you are acting in:
 
@@ -83,5 +83,6 @@ curl -X DELETE https://your-instance/api/api-keys/<id> \
 - One key per integration or environment, with the narrowest scopes that work and an expiry.
 - Store keys in a secret manager. Never ship one to a browser or a mobile app. For an app used by your customers, keep the key on your backend and act for each customer with `Appstrate-User`.
 - Remember that a key follows its creator. If the person who minted a production key leaves the organization, the key is revoked, so mint production keys from an account that will stay.
-- Scopes such as `credential-proxy:call` (use the space's credentials from a remote runner) and `llm-proxy:call` (use the organization's models) are powerful. A key created without `scopes` already carries them when its creator holds them, so list the scopes you want to keep them off.
+- A key never spends its creator's personal model credential: it uses the organization's models only.
+- Scopes such as `credential-proxy:call` (use the space's credentials from a remote runner or outside a run; `credential-proxy:call-own` is the narrower scope, limited to the creator's own connections) and `llm-proxy:call` (use the organization's models) are powerful. A key created without `scopes` already carries them when its creator holds them, so list the scopes you want to keep them off.
 - Creating and revoking a key are written to the platform's audit trail, an append-only `audit_events` table. It is not exposed through the API today.

@@ -31,6 +31,7 @@ Other cross-field checks that stop the boot:
 - **`RUN_ADAPTER` names a backend nobody registered.** The error lists the registered ones. `firecracker` needs the `firecracker` module in `MODULES`.
 - **A model in `SYSTEM_PROVIDER_KEYS`** is outside its provider's offer, or a provider needs an API shape the platform does not serve. The error names the entry.
 - **`Missing encryption key(s)`.** The database holds credentials encrypted under a key id that no configured key carries, usually an old key removed from `CONNECTION_ENCRYPTION_KEYS` before the re-encryption script ran. The error names each key id and the columns that use it. Put the key back and restart; the rotation procedure is in [Environment Variables](/self-hosting/environment-variables).
+- **`EGRESS_ALLOW_INTERNAL_HOSTS` holds a malformed entry.** An entry must be a bare hostname or IPv4 address: a port, a scheme, a path, a wildcard or an IPv6 literal refuses boot, and the error names the entry.
 - **A migration refuses and names a script under `scripts/migration/`.** Some migrations check the data before they change the schema. Follow the release's operator notes: stop the app, take a dump, run the named script, then deploy again.
 
 ## A variable in `.env` has no effect
@@ -38,7 +39,7 @@ Other cross-field checks that stop the boot:
 Two common causes:
 
 - **Compose does not forward it.** The container only receives the variables named under `appstrate.environment` in the Compose file. Add a bare `- NAME` line. Even the current files do not list every variable (`LLM_PROXY_LIMITS` and `FILE_MAX_BYTES` are two that they do not), and a file from before 1.0.0-beta.65 lacks more. See [Compose forwards only what it lists](/self-hosting/docker-compose#compose-forwards-only-what-it-lists).
-- **The name is wrong.** Appstrate does not recognise renamed variables, and an unknown key is stripped without a warning. Compare the spelling with [Environment Variables](/self-hosting/environment-variables) and the operator notes of the release.
+- **The name is wrong.** Appstrate does not recognise renamed variables, and an unknown key is stripped. The boot logs one warning naming a set key whose prefix the platform reads, so look for it in the first log lines ([Unread keys](/self-hosting/environment-variables#unread-keys)). A key with another prefix is not reported. Compare the spelling with [Environment Variables](/self-hosting/environment-variables) and the operator notes of the release.
 
 ## Database connection refused
 

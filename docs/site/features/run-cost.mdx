@@ -7,12 +7,12 @@ Every run reports what it consumed. The figures come from one place, a usage led
 
 ## What a run exposes
 
-| Field                         | Meaning                                                                                                                      |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `cost`                        | Total cost in US dollars. It is stored only when greater than zero, so a run with no priced usage has `null`.                |
-| `cost_pricing_status`         | How much of `cost` is backed by real rates: `priced`, `partial`, `unpriced`, or `null`.                                      |
-| `token_usage`                 | `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`.                                   |
-| `model_label`, `model_source` | The model the run used, and whether it came from the platform (`system`) or from the organization's own credentials (`org`). |
+| Field                         | Meaning                                                                                                                                                              |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cost`                        | Total cost in US dollars. It is stored only when greater than zero, so a run with no priced usage has `null`.                                                        |
+| `cost_pricing_status`         | How much of `cost` is backed by real rates: `priced`, `partial`, `unpriced`, or `null`.                                                                              |
+| `token_usage`                 | `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `cache_read_input_tokens`.                                                                           |
+| `model_label`, `model_source` | The model the run used, and who paid for it: the platform (`system`), an organization credential (`org`) or the launching member's own personal credential (`user`). |
 
 `GET /api/runs/{id}` and the run list return them. While the run is in flight, the same figures stream over [realtime](/features/realtime) as `run_metric` events (`costSoFar`, `tokenUsage`, `costPricingStatus`), throttled per run.
 

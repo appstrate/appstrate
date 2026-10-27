@@ -26,24 +26,24 @@ Every permission belongs to exactly one level, organization or space. A space-le
 
 ## Organization roles
 
-| Role                                 | Grants                                                                                                                                                                             |
-| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `owner`                              | Every organization-level permission, including deleting the organization and changing its name.                                                                                    |
-| `admin`                              | Every organization-level permission except deleting or renaming the organization. Admin in every space.                                                                            |
-| `member` (displayed _Standard user_) | Read the organization, its members, spaces, roles, models and proxies, and call the organization's models (`llm-proxy:call`). Enters `open` spaces with each space's default role. |
-| `guest`                              | Read the organization, spaces, models and proxies, and call models. No directory access, and **no implicit access to any space**: a guest sees only the spaces they were added to. |
+| Role                                 | Grants                                                                                                                                                                                                                                                       |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `owner`                              | Every organization-level permission, including deleting the organization and changing its name.                                                                                                                                                              |
+| `admin`                              | Every organization-level permission except deleting or renaming the organization. Admin in every space.                                                                                                                                                      |
+| `member` (displayed _Standard user_) | Read the organization, its members, spaces, roles, models and proxies, call the organization's models (`llm-proxy:call`) and attach a personal model credential (`model-provider-credentials:connect`). Enters `open` spaces with each space's default role. |
+| `guest`                              | Read the organization, spaces, models and proxies, call models and attach a personal model credential. No directory access, and **no implicit access to any space**: a guest sees only the spaces they were added to.                                        |
 
 An organization can have several owners and always keeps at least one. See [Organizations](/features/organizations).
 
 ## Space role presets
 
-| Preset     | Intent               | Holds                                                                                                                                                                                                           |
-| ---------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `admin`    | Run the space        | Every space-level permission.                                                                                                                                                                                   |
-| `builder`  | Author and operate   | Everything except space settings, space members and API keys.                                                                                                                                                   |
-| `operator` | Use what is built    | Read agents, skills and MCP servers, **run** agents, read and cancel your own runs, read files, schedules and memory, browse the integration catalog and manage your own connections, read and write end-users. |
-| `runner`   | Launch, nothing else | Run agents and see only your own runs, their files and memory. A runner cannot read an agent's content, skills, schedules or end-users.                                                                         |
-| `viewer`   | Look                 | The read permissions of `operator`.                                                                                                                                                                             |
+| Preset     | Intent               | Holds                                                                                                                                                                                                                                                                                            |
+| ---------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `admin`    | Run the space        | Every space-level permission.                                                                                                                                                                                                                                                                    |
+| `builder`  | Author and operate   | Everything except space settings, space members and API keys.                                                                                                                                                                                                                                    |
+| `operator` | Use what is built    | Read agents, skills and MCP servers, **run** agents, read and cancel your own runs, read files, schedules and memory, browse the integration catalog and manage your own connections, call the credential proxy on your own connections (`credential-proxy:call-own`), read and write end-users. |
+| `runner`   | Launch, nothing else | Run agents and see only your own runs, their files and memory. A runner cannot read an agent's content, skills, schedules or end-users.                                                                                                                                                          |
+| `viewer`   | Look                 | The read permissions of `operator`.                                                                                                                                                                                                                                                              |
 
 `runner` and `viewer` are not ordered: a runner launches what it cannot read, a viewer reads what it cannot launch. `chat:read` and `mcp:read` go to all five presets, `chat:write` and `mcp:invoke` to all but `viewer` (see [Chat](/using-appstrate/chat) and [MCP server](/using-appstrate/mcp-clients)). `webhooks:*` goes to `admin` and `builder` (see [Webhooks](/features/webhooks)).
 
@@ -51,15 +51,16 @@ An organization can have several owners and always keeps at least one. See [Orga
 
 ### Organization level
 
-| Resource                                          | Actions                                   |
-| ------------------------------------------------- | ----------------------------------------- |
-| `org`                                             | `read`, `update`, `settings`, `delete`    |
-| `members`                                         | `read`, `invite`, `remove`, `change-role` |
-| `roles`                                           | `read`, `write`, `delete`                 |
-| `spaces`                                          | `read`, `write`, `delete`                 |
-| `models`, `model-provider-credentials`, `proxies` | `read`, `write`, `delete`                 |
-| `llm-proxy`                                       | `call`                                    |
-| `org-integrations`                                | `configure`                               |
+| Resource                     | Actions                                   |
+| ---------------------------- | ----------------------------------------- |
+| `org`                        | `read`, `update`, `settings`, `delete`    |
+| `members`                    | `read`, `invite`, `remove`, `change-role` |
+| `roles`                      | `read`, `write`, `delete`                 |
+| `spaces`                     | `read`, `write`, `delete`                 |
+| `models`, `proxies`          | `read`, `write`, `delete`                 |
+| `model-provider-credentials` | `read`, `write`, `delete`, `connect`      |
+| `llm-proxy`                  | `call`                                    |
+| `org-integrations`           | `configure`                               |
 
 Modules add more: `org-webhooks`, `oauth-clients` and `cli-sessions` (owners and admins only), and the optional billing module adds `billing` with `read` (owners, admins and members) and `manage` (owners and admins).
 
@@ -78,13 +79,15 @@ Modules add more: `org-webhooks`, `oauth-clients` and `cli-sessions` (owners and
 | `api-keys`              | `read`, `create`, `revoke`                                                                       |
 | `space-settings`        | `write`                                                                                          |
 | `space-members`         | `read`, `invite`, `remove`, `change-role`                                                        |
-| `credential-proxy`      | `call`                                                                                           |
+| `credential-proxy`      | `call`, `call-own`                                                                               |
 
 Notes on the less obvious ones:
 
 - `runs:read` shows the runs you launched (including those of your own schedules). `runs:read-all` shows every run of the space and implies `runs:read`.
 - `agents:write` authors an agent, `agents:configure` activates it and sets its per-space model, proxy and input values, `agents:run` launches it. Composing and running an [inline agent](/features/runs) needs `agents:write` and `agents:run`.
 - `share` offers a package to another space. It decides who runs a package with whose credentials, so API keys never carry it. The same goes for `integrations:configure`.
+- `credential-proxy:call` reaches every connection usable in the space and a run's own connections. `credential-proxy:call-own` is the narrower grant, limited to the caller's own connections outside a run, and `call` implies it. A `viewer` holds neither.
+- `model-provider-credentials:connect` lets a member attach a personal model credential, `write` manages the organization's.
 - `agents:run` alone gives a summary view of an agent (identity, input form, integrations), without its prompt or skills.
 - Editing a package is governed by its **home space**, not by the space you are browsing from. See [Library and sharing](/features/library).
 
@@ -132,7 +135,7 @@ An owner or admin can preview the platform as a lesser role before assigning it.
 
 ## Rules that sit on top
 
-- **Schedules.** A schedule that runs as another member needs the organization role `owner` or `admin`, on a user session (see [Scheduling](/features/scheduling)).
+- **Schedules.** A schedule that runs as another member needs the organization role `owner` or `admin`, on a user session, and one that runs as an end-user needs an API key or `api-keys:create` (see [Scheduling](/features/scheduling)).
 - **Ownership changes.** Making someone an owner, demoting or removing an owner, and leaving the organization require the dashboard session. API keys, OAuth clients, MCP clients and CLI tokens are refused, even when their user is an owner.
 - **Personal spaces** are private to their owner, whatever the organization role.
 - **Run input.** Without `agents:read`, run responses hide the stored input of registered agents.

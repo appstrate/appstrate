@@ -7,10 +7,10 @@ description: Connect ClickUp to your Appstrate agents, with the direct API integ
 
 ClickUp is a project management platform. Appstrate ships two ClickUp integrations, as separate packages.
 
-| Integration              | Source     | How the agent reaches ClickUp                                                                   |
-| ------------------------ | ---------- | ----------------------------------------------------------------------------------------------- |
-| `@appstrate/clickup`     | `api_call` | Calls the ClickUp REST API (v2) directly. Needs an OAuth client registered by an administrator. |
-| `@appstrate/clickup-mcp` | Remote MCP | Uses ClickUp's hosted MCP server. The OAuth client is registered automatically at connect time. |
+| Integration              | Source     | How the agent reaches ClickUp                                                                    |
+| ------------------------ | ---------- | ------------------------------------------------------------------------------------------------ |
+| `@appstrate/clickup`     | `api_call` | Calls the ClickUp REST API (v2) directly. Needs an OAuth client registered by an administrator.  |
+| `@appstrate/clickup-mcp` | Remote MCP | Uses ClickUp's hosted MCP server. The OAuth client is provisioned automatically at connect time. |
 
 The token carries the permissions of the member who authorizes: ClickUp's own workspace role is the only access control behind it. In the MCP integration, `clickup_execute_operator` and `clickup_get_operators` are hidden from agents, because they run whatever operators ClickUp enables server-side, which a per-tool selection cannot bound. ClickUp applies its own rate limits to the MCP server.
 

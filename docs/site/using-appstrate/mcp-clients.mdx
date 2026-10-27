@@ -3,7 +3,7 @@ title: MCP clients
 description: Connect Claude Code, Claude Desktop, Cursor, Codex or any MCP client to an Appstrate organization.
 ---
 
-Every organization on an instance has its own **Model Context Protocol** endpoint. A generic MCP client (Claude Code, Claude Desktop, Cursor, VS Code, Codex, Windsurf) that connects to it can discover and call the Appstrate API, and launch agents and wait for their results, with the permissions of the person or key that connected and confined to that one organization. It is the same surface the dashboard [chat](/using-appstrate/chat) uses.
+Every organization on an instance has its own **Model Context Protocol** endpoint. A generic MCP client (Claude Code, Claude Desktop, Cursor, VS Code, Codex, Windsurf) that connects to it can discover and call the Appstrate API, and launch agents and wait for their results, with the permissions of the person or key that connected and confined to that one organization. By default one connection reaches every space where you hold a role. It is the same surface the dashboard [chat](/using-appstrate/chat) uses.
 
 ```
 https://<your-instance>/api/mcp/o/<orgId>
@@ -11,9 +11,15 @@ https://<your-instance>/api/mcp/o/<orgId>
 
 `<orgId>` is the organization's id, a UUID. Any other value, such as the organization's slug, is not found (`404`). The endpoint is served by the `mcp` module, which is in the default `MODULES`. It uses the Streamable HTTP transport and accepts POST requests only. To use several organizations, add one server entry per organization. There is no switch inside a session, on purpose.
 
+To confine a connection to one space, append the space to the URL:
+
+```
+https://<your-instance>/api/mcp/o/<orgId>/s/<spaceId>
+```
+
 ## Get the connection details
 
-The dashboard builds them for you. Open **Organization settings → General** and find **MCP connection**. It shows the exact URL for the current organization and ready-made snippets:
+The dashboard builds them for you. Open the user menu, choose **Preferences**, then **MCP access** (**Settings → Account → MCP access**). Under **Connect an MCP client**, the **Connection scope** menu picks **All my spaces** or one space, and the page shows the exact URL for the current organization and ready-made snippets:
 
 - the `claude mcp add` command for Claude Code
 - a generic `mcpServers` JSON block, for Claude Desktop, Windsurf, Cline and similar clients
@@ -29,20 +35,20 @@ claude mcp add --transport http appstrate-acme https://appstrate.example.com/api
 # then, in Claude Code: /mcp, select the server, Authenticate
 ```
 
-The token you get is bound to that one organization's endpoint. It is refused everywhere else on the platform, including on another organization's MCP endpoint, so it cannot be reused against the rest of the REST API.
+The token you get is bound to that one organization's MCP endpoint (and to the endpoints of its spaces). It is refused everywhere else on the platform, including on another organization's MCP endpoint, so it cannot be reused against the rest of the REST API. A token issued for one space's URL works on that URL only.
 
 Self-hosting, this flow needs the instance to be reachable over **HTTPS** at its public `APP_URL` (an `http://localhost` instance is for development only), and the `oidc` module, which is in the default `MODULES`.
 
 ## Connect with an API key
 
-Without a browser, create an API key and send it as a bearer token. In the dashboard, open **Organization settings**, go to the space section, and choose **API Keys**. Create a key in the space you want, with at least the `mcp:read` and `mcp:invoke` scopes plus whatever your task needs.
+Without a browser, create an API key and send it as a bearer token. In the dashboard, open **Settings**, go to the **Workspace** section, and choose **API Keys**. Create a key in the space you want, with at least the `mcp:read` and `mcp:invoke` scopes plus whatever your task needs.
 
 ```bash
 claude mcp add --transport http appstrate-acme https://appstrate.example.com/api/mcp/o/0b9f3c6e-6a1d-4b8e-9c3f-2f1a7d5e8b40 \
   --header "Authorization: Bearer apst_xxx"
 ```
 
-The key's own organization must match the one in the URL.
+The key's own organization must match the one in the URL. A key is always pinned to its own space: a URL naming another space is refused (`403`).
 
 ## Codex
 
@@ -53,7 +59,9 @@ codex mcp login appstrate
 
 ## Which space it acts in
 
-The organization comes from the URL. Inside it, calls run in the organization's **default space**. A client that must target another space sends an `X-Space-Id` header (the space has to belong to the organization). `get_me` names the space a call resolved to, so an empty list can be told from a wrong space. For Claude Code, add `--header "X-Space-Id: spc_..."` to the command above. The [Claude Code plugin](/using-appstrate/skill) sets this header to your pinned space for you.
+The organization comes from the URL. On the organization's URL, every tool that acts in a space takes a required `space_id` argument, reads and writes alike: there is no default space. The argument's schema lists the spaces you hold a role in, with their ids and your role in each, so the model picks one from your request or asks you. Your role differs per space, so a refusal in one space is final for that task: the client is told to report it, not to redo the action in another space. `get_me` names the space it answered for.
+
+A space's URL (`/api/mcp/o/<orgId>/s/<spaceId>`) pins the connection to that space: `space_id` is no longer declared and every call enters that space. The endpoint reads no `X-Space-Id` header, and a request carrying one is refused with `400`; the header remains the REST API's way to select a space. For access truly restricted to one space, use an API key of that space. The [Claude Code plugin](/using-appstrate/skill) uses the organization's URL, so it reaches every space.
 
 ## The tools
 
@@ -69,7 +77,8 @@ The server does not declare one tool per API operation. It exposes a small set t
 | `read_skill`                                   | Read a skill's `SKILL.md` and files                                                                                                         |
 | `validate_package_file`, `import_package_file` | Check and import a package archive                                                                                                          |
 | `get_runtime_capabilities`                     | The MCP server runtimes and manifest templates for authoring packages                                                                       |
+| `list_connections`, `api_call`                 | List the connections you can use outside a run and call a third-party API through one, with the credential injected by the platform         |
 
-`mcp:read` lets a client connect and use the read-only tools, except `list_files`, which needs `files:read`. `mcp:invoke` adds `invoke_operation`, and `run_and_wait` further needs `agents:run` and a run-read permission. `import_package_file` needs `mcp:invoke` plus a package write permission. An operation your role cannot perform is not shown, and every call is checked again when it runs, so a client can never do more than the same credentials could over REST. If your role changes or the platform is upgraded, re-list the tools in your client.
+`mcp:read` lets a client connect and use the read-only tools, except `list_files`, which needs `files:read`. `mcp:invoke` adds `invoke_operation`, and `run_and_wait` further needs `agents:run` and a run-read permission. `import_package_file` needs `mcp:invoke` plus a package write permission. `list_connections` and `api_call` need `mcp:invoke` and `credential-proxy:call-own`. An operation your role cannot perform is not shown, and every call is checked again when it runs, so a client can never do more than the same credentials could over REST. If your role changes or the platform is upgraded, re-list the tools in your client.
 
 The full permission matrix, the security model (audience binding, SSRF protection of client registration) and the inline-run options are in the [connecting MCP clients guide](https://github.com/appstrate/appstrate/blob/main/docs/guides/connecting-mcp-clients.md).

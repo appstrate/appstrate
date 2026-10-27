@@ -6,10 +6,10 @@ description: Bring your spaces' skills and agents into Claude Code and Codex wit
 Coding agents such as Claude Code and Codex can work with Appstrate in three ways, and they combine: the skills carry your team's conventions, the CLI or MCP is the hands.
 
 - **Your skills, locally.** `appstrate code sync` copies the [skills](/features/skills) of the spaces you belong to into the agent's skill directories, and keeps them current.
-- **Your agents, as commands.** In Claude Code, every agent active in your pinned space becomes a `/appstrate:run-<agent>` command that launches it through the organization's MCP server.
+- **Your agents, as commands.** In Claude Code, every agent active in a space where you may run agents becomes a `/appstrate:run-<agent>` command that launches it, in its own space, through the organization's MCP server.
 - **The CLI and the API.** A coding agent can call the platform through `appstrate api` without ever seeing a token. The repository ships an operating manual for exactly that: [`apps/cli/AGENTS.md`](https://github.com/appstrate/appstrate/blob/main/apps/cli/AGENTS.md). An agent without the CLI can use the organization's MCP server instead, as described in [MCP clients](/using-appstrate/mcp-clients).
 
-What you need first: an instance and the [CLI](/using-appstrate/cli), signed in (`appstrate login`) with an organization and a space pinned. Login pins them for you when there is only one choice.
+What you need first: an instance and the [CLI](/using-appstrate/cli), signed in (`appstrate login`) with an organization pinned. Login pins it for you when there is only one choice. `code sync` does not read the pinned space.
 
 ## Claude Code
 
@@ -23,23 +23,23 @@ claude plugin install appstrate@appstrate
 
 What you get in Claude Code:
 
-| What                                      | How it appears                                                          |
-| ----------------------------------------- | ----------------------------------------------------------------------- |
-| Skills of every space you are a member of | `/appstrate:<skill>`                                                    |
-| Agents active in your pinned space        | `/appstrate:run-<agent>`                                                |
-| The organization's MCP server             | A server named `plugin:appstrate:appstrate`, bound to your pinned space |
+| What                                      | How it appears                                                                       |
+| ----------------------------------------- | ------------------------------------------------------------------------------------ |
+| Skills of every space you are a member of | `/appstrate:<skill>`                                                                 |
+| Agents active in the spaces you can run   | `/appstrate:run-<agent>`                                                             |
+| The organization's MCP server             | A server named `plugin:appstrate:appstrate`, reaching every space you hold a role in |
 
 The plugin carries no token. Open `/mcp`, select `plugin:appstrate:appstrate` and complete the browser login once. That login is separate from `appstrate login`.
 
-Agent commands take your request in plain words, for example `/appstrate:run-invoice-extractor extract the totals from ~/Downloads/march-invoice.pdf`. Claude builds the input from the agent's launch form and launches it with the MCP tool `run_and_wait`. Nothing is pre-approved: Claude Code asks before the metered run starts and shows the exact input. You need the permissions to run agents and read runs in the space, which the `runner` space role includes. To pass a file, keep it in the session's working directory or start Claude Code with `--add-dir`.
+Agent commands take your request in plain words, for example `/appstrate:run-invoice-extractor extract the totals from ~/Downloads/march-invoice.pdf`. Claude builds the input from the agent's launch form and launches it with the MCP tool `run_and_wait`. Nothing is pre-approved: Claude Code asks before the metered run starts and shows the exact input. You need the permissions to run agents and read runs in the agent's space, which the `runner` space role includes. The same agent active in two spaces gives two commands, `run-<agent>` and `run-<space>-<agent>`, each launching in its own space. To pass a file, keep it in the session's working directory or start Claude Code with `--add-dir`.
 
 Installing the plugin on a fresh machine is the only step that has to come first. Without a signed-in profile it installs a setup skill that tells you what is missing.
 
 The plugin has one `SessionStart` hook, which prints a notice at the start of a session when the last sync could not complete: a lost login, a missing profile, no pinned organization or space, or a revoked organization. The notice gives the time of the failed sync and the command that fixes it, which you can ask Claude to run; then `claude plugin update appstrate@appstrate` and a new session load the result. A sync without such a problem removes the notice, and one that fails on a network or server error leaves it as it is.
 
-### After switching organization or space
+### After switching organization
 
-The plugin follows your profile. After `appstrate org switch` or `appstrate space switch`, refresh it and start a new Claude Code session, because a running session can keep the old endpoint:
+The plugin follows your profile's organization. After `appstrate org switch`, refresh it and start a new Claude Code session, because a running session can keep the old endpoint. `appstrate space switch` changes the default space of the CLI's REST commands only, not the plugin:
 
 ```bash
 claude plugin update appstrate@appstrate
@@ -70,7 +70,7 @@ appstrate code sync --target codex --space spc_prod         # only these spaces,
 - `--target` is required and repeatable: `claude-plugin`, `codex` or `claude-user`.
 - By default a sync takes the active skills of **every space you are a member of** and can read skills in. Being added to a space puts its skills on your machine at the next sync, and being removed takes them off. `--space`, or `syncSpaces` in your profile, narrows that set and never widens it.
 - It installs the organization's latest published version of each skill. `--source draft` syncs working copies instead, for authors, and needs write access to the skill.
-- The MCP connection and the agent commands come from the **pinned** space only.
+- The MCP connection is the organization's: it reaches every space you hold a role in, and a free-form request names its space (`space_id`) or Claude asks you which one. Agent commands come from the same selected spaces as skills, wherever you may run agents.
 - A sync never deletes or overwrites a directory it did not create. A name already taken by your own skill is reported and skipped.
 - Installed skills are generated copies. Editing them does not change anything in Appstrate.
 

@@ -42,18 +42,18 @@ The repository ships an operating manual written for a coding agent: [`apps/cli/
 
 ## Commands
 
-| Command                                                              | Purpose                                               |
-| -------------------------------------------------------------------- | ----------------------------------------------------- |
-| `install`, `start`, `stop`, `restart`, `logs`, `status`, `uninstall` | Install an instance and manage its Docker stack       |
-| `login`, `logout`, `whoami`, `token`                                 | Sessions                                              |
-| `org`, `space`                                                       | Pin the organization and space that commands act in   |
-| `api`, `openapi`                                                     | Call the REST API, explore its schema                 |
-| `run`                                                                | Run an agent, on the instance or locally              |
-| `models`                                                             | List the model presets an instance exposes            |
-| `packages`                                                           | Edit a package in a local folder, push it, publish it |
-| `code`                                                               | Sync skills and agents into Claude Code and Codex     |
-| `self-update`, `doctor`                                              | Maintain the CLI itself                               |
-| `runner`                                                             | Install the Firecracker runner daemon on a KVM host   |
+| Command                                                              | Purpose                                                     |
+| -------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `install`, `start`, `stop`, `restart`, `logs`, `status`, `uninstall` | Install an instance and manage its Docker stack             |
+| `login`, `logout`, `whoami`, `token`                                 | Sessions                                                    |
+| `org`, `space`                                                       | Pin the organization and the default space of REST commands |
+| `api`, `openapi`                                                     | Call the REST API, explore its schema                       |
+| `run`                                                                | Run an agent, on the instance or locally                    |
+| `models`                                                             | List the model presets an instance exposes                  |
+| `packages`                                                           | Edit a package in a local folder, push it, publish it       |
+| `code`                                                               | Sync skills and agents into Claude Code and Codex           |
+| `self-update`, `doctor`                                              | Maintain the CLI itself                                     |
+| `runner`                                                             | Install the Firecracker runner daemon on a KVM host         |
 
 <Accordions type="multiple">
 
@@ -76,7 +76,7 @@ appstrate install --yes --app-url https://appstrate.example.com
 | `--app-url <url>`                             | Public origin for a deployment behind a reverse proxy (also `APPSTRATE_APP_URL`). Enables `TRUST_PROXY` automatically for non-local URLs |
 | `-y`, `--yes`                                 | Accept the defaults without prompting (also `APPSTRATE_YES=1`)                                                                           |
 | `--force`                                     | Skip the check for another Compose project running under the same name                                                                   |
-| `--run-adapter <docker\|firecracker>`         | Agent execution backend. `firecracker` needs a KVM host with the runner daemon, on Docker tiers                                          |
+| `--run-adapter <docker\|firecracker>`         | Agent execution backend. `firecracker` (early preview) needs a KVM host with the runner daemon, on Docker tiers                          |
 | `--runner-url`, `--runner-token`, `--host-ip` | Firecracker topology options                                                                                                             |
 | `--upgrade-compose`                           | Maintenance: clean stale defaults out of an existing `docker-compose.yml`                                                                |
 
@@ -126,7 +126,7 @@ appstrate login --profile prod --instance https://app.example.com
 
 The CLI prints a short code and a URL, opens the URL in your browser, and waits while you sign in on the instance and approve. The result is a 15-minute access token and a 30-day rotating refresh token, kept in your OS keyring. The CLI refreshes them on its own. Run `appstrate login` again only if the session was revoked or the 30 days passed without use.
 
-After the token exchange, login pins what you work in. One organization is pinned automatically, several give a picker, none offers to create one. Then the organization's default space is pinned. Every later call sends them as `X-Org-Id` and `X-Space-Id`. You can see and revoke your CLI sessions under **Preferences → Devices**, and admins can see everyone's under **Organization settings → CLI sessions**.
+After the token exchange, login pins what you work in. One organization is pinned automatically, several give a picker, none offers to create one. Then the organization's default space is pinned. Every later call sends them as `X-Org-Id` and `X-Space-Id`. You can see and revoke your CLI sessions under **Settings → Account → Devices**, and admins can see everyone's under **Settings → Organization → CLI sessions**.
 
 </Accordion>
 
@@ -144,7 +144,7 @@ appstrate logout          # revokes the session on the instance, wipes local cre
 
 <Accordion title="appstrate org, appstrate space">
 
-Change the organization and the space the active profile acts in.
+Change the organization the active profile acts in, and its default space for REST commands (`api`, `run`, `packages`).
 
 ```bash
 appstrate org list              # the pinned one is marked *
@@ -158,7 +158,7 @@ appstrate space current
 appstrate space create "Staging"
 ```
 
-Switching organization re-pins that organization's default space, so space-scoped calls keep working. Spaces are identified by id only.
+Switching organization re-pins that organization's default space, so space-scoped calls keep working. Spaces are identified by id only. The pinned space does not affect Claude Code, whose plugin reaches every space you hold a role in.
 
 </Accordion>
 
@@ -214,7 +214,7 @@ appstrate run ./triage-1.2.0.afps-bundle --integrations local --creds-file ./cre
 
 Pass parameters with `--input <json>` or `--input-file <path>`. A platform run sends them as is and the instance validates them. Other useful flags: `--no-inherit` (a remote run ignores the space's stored run configuration; a platform run ignores the flag), `--proxy <id>`, `--json` (events as JSON lines), `--output <path>` (write the final result), `-v` and `-q` (more or less tool output).
 
-A platform run outlives the CLI. In an interactive terminal, Ctrl-C cancels the run on the instance. In a script (`--json`, or no TTY on stdin), a signal detaches instead and the run keeps going, which you can force either way with `--cancel-on-exit` or `--no-cancel-on-exit`. A run that needs an integration without a healthy connection is refused with `409 missing_integration_connection`: connect it from the dashboard first.
+A platform run outlives the CLI. In an interactive terminal, Ctrl-C cancels the run on the instance. In a script (`--json`, or no TTY on stdin), a signal detaches instead and the run keeps going, which you can force either way with `--cancel-on-exit` or `--no-cancel-on-exit`. A run that needs an integration without a healthy connection is refused with `409 missing_integration_connection`: connect it from the dashboard first. When several of your connections could serve an integration, the refusal lists them, each with the flag that names it. Re-run with `--connection <integration>=<connection-id>` (repeatable) to choose one.
 
 Most flags that only make sense in one mode are refused in the other, with a message that names them. The environment variables, the flags of a remote run and a CI example are in [Headless and CI runs](#headless-and-ci-runs).
 
@@ -243,7 +243,7 @@ appstrate packages publish my-skill         # the draft becomes a version every 
 
 <Accordion title="appstrate code sync">
 
-Copies the skills of the spaces you belong to, and the agents of your pinned space as commands, into Claude Code and Codex. It runs unattended once the Claude Code plugin is installed.
+Copies the skills of the spaces you belong to, and the agents you can run there as commands, into Claude Code and Codex. It runs unattended once the Claude Code plugin is installed.
 
 ```bash
 appstrate code sync --target claude-plugin --target codex
@@ -267,7 +267,7 @@ appstrate doctor [--json]             # every appstrate on PATH, its channel and
 
 <Accordion title="appstrate runner">
 
-Installs and manages the Firecracker runner daemon (`install`, `doctor`, `update`, `status`, `logs`, `uninstall`) on a Linux host with KVM, as root. Only needed for the opt-in Firecracker backend. See [Firecracker](https://github.com/appstrate/appstrate/blob/main/docs/architecture/FIRECRACKER.md).
+Installs and manages the Firecracker runner daemon (`install`, `doctor`, `update`, `status`, `logs`, `uninstall`) on a Linux host with KVM, as root. Only needed for the opt-in Firecracker backend, which is an early preview. See [Firecracker](https://github.com/appstrate/appstrate/blob/main/docs/architecture/FIRECRACKER.md).
 
 </Accordion>
 
@@ -351,7 +351,7 @@ When you run a package id with `--local`, the CLI also reads the space's run con
 
 A remote run has no sidecar on the platform, so the CLI reaches the organization's models and the space's connections through two routes of the instance, the same ones the GitHub Action uses. They are the plumbing of remote runs, not an API to build on.
 
-- With `--integrations remote`, every `api_call` of an integration goes through the **credential proxy**, which injects the connection's credential on the platform and checks the target against the integration's `authorized_uris`. A remote runner addresses one connection per integration: when the space binds several connections to one integration, the run is refused with `remote_binds_one_connection`. Narrow it to one connection with a member pin, or run the agent on the platform.
+- With `--integrations remote`, every `api_call` of an integration goes through the **credential proxy**, which injects the connection's credential on the platform and checks the target against the integration's `authorized_uris`. A remote runner addresses one connection per integration: when the space binds several connections to one integration, the run is refused with `remote_binds_one_connection`. Name one with `--connection`, or run the agent on the platform.
 - With `--model-source preset`, model calls go through the **LLM proxy**, which resolves the organization's model preset, adds the provider key and meters the usage. With `--model-source env`, the CLI calls your provider directly.
 
 The CLI never holds a provider key or an integration credential. A key with `llm-proxy:call` spends the organization's model budget, and one with `credential-proxy:call` uses the space's connected accounts, so give these scopes only to keys that run agents remotely. A key created without an explicit `scopes` list carries both when its creator holds them. Both proxies are rate-limited (see [Rate limits](/self-hosting/rate-limits)).

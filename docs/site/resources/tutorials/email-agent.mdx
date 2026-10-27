@@ -18,7 +18,7 @@ It uses two **integrations** (Gmail and Slack), a prompt, an input, an output sc
 ## Prerequisites
 
 - A running Appstrate instance and an account in it ([Get Started quickstart](/get-started/quickstart)).
-- A model the agent can run on. In **Organization settings**, open **Models**, add one with **Add model**, and make it the default with **Set as default**.
+- A model the agent can run on. In **Settings → Organization → Models**, add a provider key with **Add key**, enable a model, and make it the default (onboarding does the same).
 - A Google account for Gmail and a Slack workspace where you may add an app.
 - The **Gmail (API)** and **Slack (API)** integrations active in your space, with an OAuth client for each. On a deployment that ships shared OAuth apps, such as Appstrate Cloud, there is nothing to configure. On a self-hosted instance, an administrator registers an OAuth client per integration, as in step 2.
 
@@ -30,7 +30,7 @@ It uses two **integrations** (Gmail and Slack), a prompt, an input, an output sc
 
 ### Check the integrations
 
-Open **Integrations** in the sidebar. It lists the integrations active in your space. Look for **Gmail (API)** and **Slack (API)**. If one is missing or marked inactive, a space administrator has to activate it (the **Activate** button, or the package library). Each integration has its own page, with tabs such as **Connections**, **Configuration**, and **Tools**.
+Open **Integrations** in the sidebar. It lists the integrations active in your space. Look for **Gmail (API)** and **Slack (API)**. If one is missing or marked inactive, a space administrator has to activate it (the **Activate** button, or the **Catalog** in the sidebar footer). Each integration has its own page, with the tabs **Overview**, **Connections** and **Configuration**.
 
 </Step>
 
@@ -46,11 +46,9 @@ An OAuth integration needs a client registered with the vendor. If the integrati
 
 ### Create the agent
 
-Click **New agent** in the **Agents** list. In the editor, fill the tabs below. The **JSON** tab shows the manifest these choices produce, if you want to check your work.
+Open **Agents**, then **Actions → New agent** and choose **Create manually**. Fill the short form: the **Display name** `Email daily digest`, the **Identifier (slug)** `email-daily-digest`, a short description and the **Prompt**. The package scope is your organization's, set automatically, so the agent's id becomes `@your-org/email-daily-digest`.
 
-**General**: set the **Identifier (slug)** to `email-daily-digest`, the **Display name** to `Email daily digest`, and a short **Description**. The package scope is your organization's, set automatically, so the agent's id becomes `@your-org/email-daily-digest`.
-
-**Files**: write the agent's prompt in `prompt.md`:
+The prompt (it is stored in `prompt.md`, which you can edit later under **Settings → Files**):
 
 ```markdown
 You summarize unread emails and post a digest to Slack.
@@ -74,11 +72,13 @@ If there are no unread emails, post "No unread emails in the last 24h" and
 return emailCount 0.
 ```
 
-**Schemas**: under **Input**, click **+ Add field**. Set **key** to `channel`, **default** to `daily-digest`, and a **description** such as _Slack channel to post in_. The output schema comes in step 6.
+Then set the rest in the agent's **Settings** tab, in the **AFPS package** group of its left rail. Each section has a save bar: click **Save** when you change something.
 
-**Integrations**: at the top of this tab, the **Runtime tools** group lists the platform tools by id. Tick `output` (it is required for an output schema) and, if you like, `log`, which lets the agent report progress in real time. Below it, tick **Gmail (API)** and **Slack (API)**. For each, tick **Generic API call (api_call)**, which lets the agent call the vendor's HTTP API with the credential injected for it. For Slack, also open **Advanced: pin extra scopes** and pin **Send messages** (`chat:write`): the integration's default scopes only read channels and users. Gmail needs nothing extra, because its default scopes already include read access (its consent screen also lists permission to send mail, which this agent never uses).
+**Schemas**: under **Input**, click **Add a field**. Set the **Key** to `channel`, a default of `daily-digest`, and a **Description** such as _Slack channel to post in_. The output schema comes in step 6.
 
-Click **Create** to save the agent. If the editor reports that the initial version could not be published, fix what it names and publish from the agent page with **Create version**.
+**Tools**: tick `output` (it is required for an output schema) and, if you like, `log`, which lets the agent report progress in real time.
+
+**Integrations**: add **Gmail (API)** and **Slack (API)**. For each, use **Edit allowed tools** and tick **Generic API call (api_call)**, which lets the agent call the vendor's HTTP API with the credential injected for it. For Slack, also open **Advanced: pin extra scopes** and pin **Send messages** (`chat:write`): the integration's default scopes only read channels and users. Gmail needs nothing extra, because its default scopes already include read access (its consent screen also lists permission to send mail, which this agent never uses). Confirm with **Apply**.
 
 </Step>
 
@@ -86,7 +86,7 @@ Click **Create** to save the agent. If the editor reports that the initial versi
 
 ### Connect your accounts
 
-Open the agent. Its **Connections** tab lists the integrations it depends on. Click **Connect** next to Gmail, sign in with Google, and approve read access. Do the same for Slack and choose your workspace. In Slack, invite the app to the channel you will post in (`/invite @your-app` in the channel), or the post is refused.
+Open the agent, then **Settings → Configuration → Connections**, which lists the integrations it depends on. Click **Connect** next to Gmail, sign in with Google, and approve read access. Do the same for Slack and choose your workspace. In Slack, invite the app to the channel you will post in (`/invite @your-app` in the channel), or the post is refused.
 
 You can also start a connection from the API. This returns a short-lived hosted link to open in a browser:
 
@@ -106,12 +106,9 @@ Repeat for `@appstrate/slack`, this time with `{ "scopes": ["chat:write"] }` so 
 
 ### Run it
 
-On the agent page, click **Run**. The parameters dialog shows the `channel` input. Confirm, and the run starts. Open it to follow along:
+On the agent page, click **Run**. The parameters dialog shows the `channel` input. Confirm, and the run starts. Open it to follow along: the run page shows the logs live, each tool call with its arguments and result, then the structured output and any files.
 
-- **Execution** shows the logs live: each tool call, with its arguments and result.
-- **Outcome** shows the structured output and any files.
-
-The run executes in its own sandbox with its own sidecar (a container, or a microVM on the Firecracker backend; a plain host subprocess on the default `process` backend), and that sandbox is torn down when the run ends. If a connection is missing or lacks a scope, **Run** opens a dialog that names it and lets you fix it, then re-run.
+The run executes in its own sandbox with its own sidecar (a container, or a microVM on the early preview Firecracker backend; a plain host subprocess on the default `process` backend), and that sandbox is torn down when the run ends. If a connection is missing or lacks a scope, **Run** opens a dialog that names it and lets you fix it, then re-run.
 
 From the API, replace `@your-org` with your organization's scope:
 
@@ -136,7 +133,7 @@ curl -N "http://localhost:3000/api/realtime/runs/$RUN_ID?token=$APPSTRATE_KEY"
 
 ### Add an output schema
 
-An output schema makes the result structured and validated. Open the editor's **JSON** tab, add an `output` member at the top level of the manifest, and click **Apply to form**. Excerpt of the agent manifest:
+An output schema makes the result structured and validated. Open **Settings → Files**, edit `manifest.json`, add an `output` member at the top level of the manifest, apply it and save. Excerpt of the agent manifest:
 
 ```json
 "output": {
@@ -164,7 +161,7 @@ An output schema makes the result structured and validated. Open the editor's **
 }
 ```
 
-The agent returns it through the `output` runtime tool. If the result does not match the schema, the run is marked **failed** and the validation errors are in the run's error. The value appears as `result.output` on the run and in the **Outcome** tab. Publish a new version after changing the agent.
+The agent returns it through the `output` runtime tool. If the result does not match the schema, the run is marked **failed** and the validation errors are in the run's error. The value appears as `result.output` on the run and in its outcome. Publish a new version after changing the agent.
 
 </Step>
 
@@ -172,7 +169,7 @@ The agent returns it through the `output` runtime tool. If the result does not m
 
 ### Schedule it
 
-On the agent page, open the actions menu and choose **New schedule** (an agent with no schedule also shows **Add** in its **Schedules** tab). The form preselects the first agent of the space, so pick **Email daily digest** in it. Set a **Name** (optional), the **Cron expression** `0 8 * * 1-5`, and your **Timezone**. The page also offers presets, such as _Mon-Fri 9am_. The schedule shows its **Next run**.
+On the agent page, open the **Actions** menu and choose **New schedule** (an agent with no schedule also offers it under **Settings → Configuration → Schedules**). Check that the form targets **Email daily digest**. Set a **Name** (optional), the **Cron expression** `0 8 * * 1-5`, and your **Timezone**. The page also offers presets, such as _Mon-Fri 9am_. The schedule shows its **Next run**.
 
 From the API:
 
@@ -212,7 +209,7 @@ curl -X POST "http://localhost:3000/api/webhooks" \
   }'
 ```
 
-Save the `whsec_...` secret from the response and verify signatures on your side. See [Webhooks](/features/webhooks). The dashboard has a **Webhooks** page for the same thing.
+Save the `whsec_...` secret from the response and verify signatures on your side. See [Webhooks](/features/webhooks). The dashboard has the same thing under **Settings → Workspace → Webhooks**.
 
 </Step>
 

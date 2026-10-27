@@ -15,7 +15,7 @@ Organization (UUID)
 │   ├── Space members (role per person) and visibility
 │   ├── Packages placed here and which are active (agents, skills, integrations)
 │   ├── Runs, files, schedules, memory, notifications
-│   ├── Integration connections (per member or per end-user)
+│   ├── Integration connections usable here (a member's, shared into the space, or an end-user's)
 │   ├── End-users eu_xxx
 │   ├── API keys apst_xxx
 │   └── Webhooks (space level)
@@ -54,7 +54,7 @@ Sessions carry a **realm**. Dashboard users have the realm `platform`. When the 
 
 ## Credential isolation
 
-Credentials (OAuth tokens, API keys, custom fields) are encrypted at rest with `CONNECTION_ENCRYPTION_KEY` and stay scoped to a space and to their owner, a member or an end-user. At run time the agent never receives a credential. The run's sidecar injects it on outbound requests (see [Sandbox and Sidecar](/features/sandbox-and-sidecar)). A member's connection is theirs. Others in the space use it only when it is explicitly shared or pinned by an admin. The details are in [Isolation and Security](/self-hosting/isolation-and-security).
+Credentials (OAuth tokens, API keys, custom fields) are encrypted at rest with `CONNECTION_ENCRYPTION_KEY` and belong to their owner, a member or an end-user. A member's connection is organization-wide, and usable in every space the member works in, unless it was made through a space's own OAuth client. That one, and an end-user's connection, stay confined to their space. At run time the agent never receives a credential. The run's sidecar injects it on outbound requests (see [Sandbox and Sidecar](/features/sandbox-and-sidecar)). A member's connection is theirs. Others use it only when its owner shares it into their space. The details are in [Isolation and Security](/self-hosting/isolation-and-security).
 
 ## Audit
 

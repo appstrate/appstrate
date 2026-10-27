@@ -84,17 +84,22 @@ curl -X POST https://your-instance/api/orgs/<org id>/leave -H "Cookie: ..."
 
 A member who leaves or is removed loses their explicit space roles and notifications in the organization, their schedules there are disabled, their API keys there are revoked, and their personal space enters a 30-day offboarding window. The last owner cannot leave (`409 last_owner`): promote someone else first or delete the organization. A JWT access token is not revocable and stays valid until it expires, but every request is checked against live membership.
 
-In the web app, **Organization settings > Users** manages members and invitations, and **Organization settings > Roles** manages custom roles.
+In the web app, **Settings** has an **Organization** section: **Users** manages members and invitations, and **Roles** manages custom roles.
+
+## Icon and color
+
+An organization has an `icon` and a `color`, shown in the navigation and the organization switcher (**Icon and colour** in the organization settings). `PATCH /api/orgs/{orgId}` writes them with `org:update`: `icon` is a Lucide icon (`lucide:<name>`), an emoji (`emoji:<emoji>`) or a small WebP or PNG image sent as a base64 data URI, `color` is a palette key, and `null` clears either.
 
 ## Organization settings
 
 `GET /api/orgs/{orgId}/settings` is readable by any member. `PATCH /api/orgs/{orgId}/settings` needs `org:settings` (owner or admin) and merges the keys you send:
 
-| Key                     | Effect                                                                                                                                                                                   |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `api_version`           | Pins the organization to an API version (`YYYY-MM-DD`). A version the server cannot serve is a `400`.                                                                                    |
-| `dashboard_sso_enabled` | Allows organization-level OAuth clients and shows the **Team SSO** tab. Default `false`. Requires the `oidc` module.                                                                     |
-| `restrict_package_copy` | When `true`, forking, downloading or exporting a package requires `share` in its home space. Default `false`. See [Packages](/features/packages). Skills and system packages are exempt. |
+| Key                          | Effect                                                                                                                                                                                                                                          |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `api_version`                | Pins the organization to an API version (`YYYY-MM-DD`). A version the server cannot serve is a `400`.                                                                                                                                           |
+| `dashboard_sso_enabled`      | Allows organization-level OAuth clients and shows the **Team SSO** tab. Default `false`. Requires the `oidc` module.                                                                                                                            |
+| `restrict_package_copy`      | When `true`, forking, downloading or exporting a package requires `share` in its home space. Default `false`. See [Packages](/features/packages). Skills and system packages are exempt.                                                        |
+| `personal_model_credentials` | Whether members may bring their own model key or subscription. Default `true`. When `false`, adding one is refused (`403 personal_model_credentials_disabled`) and the existing ones serve nothing. See [LLM Models](/integrations/llm-models). |
 
 ## Deleting an organization
 
@@ -108,7 +113,7 @@ Each organization is also reachable as its own [MCP server](/using-appstrate/mcp
 
 ## What belongs to the organization
 
-- **Models and provider credentials**, **proxies** and the **default** of each. See [LLM Models](/integrations/llm-models) and [Proxies](/features/proxies).
+- **Models and provider credentials** (members can also bring personal ones, for the models the organization leaves to them), **proxies** and the **default** of each. See [LLM Models](/integrations/llm-models) and [Proxies](/features/proxies).
 - The **package catalog**: agents, skills, integrations and MCP servers are owned by the organization and placed in spaces. See [Library and sharing](/features/library).
 - **Custom roles** and the OAuth clients registered at the organization level.
 - **Organization-wide integration OAuth clients**, inherited by every space.

@@ -29,7 +29,7 @@ With `--yes` the tier is **Tier 2** (PostgreSQL + Redis) when Docker is reachabl
 
 | Tier | Host needs                                                                                        | Services                   | Storage            |
 | ---- | ------------------------------------------------------------------------------------------------- | -------------------------- | ------------------ |
-| 0    | Bun 1.3.14 or later (the installer fetches Bun if it is missing, but does not check its version)  | None (PGlite in-process)   | Filesystem         |
+| 0    | Bun 1.4.2 or later (the installer fetches Bun if it is missing, but does not check its version)   | None (PGlite in-process)   | Filesystem         |
 | 1    | Docker Engine 20+ with Compose v2 (not checked by the installer), and access to the Docker socket | PostgreSQL                 | Filesystem         |
 | 2    | Same as Tier 1                                                                                    | PostgreSQL + Redis         | Filesystem         |
 | 3    | Same as Tier 1                                                                                    | PostgreSQL + Redis + MinIO | S3 (bundled MinIO) |
@@ -70,7 +70,7 @@ The full matrix of options (domain restrictions, platform admins, magic links) i
 
 ### Behind a reverse proxy
 
-For a server reached on a public domain, give the installer the public origin so OAuth redirects, CORS and email links are correct:
+For a server reached on a public domain, give the installer the public origin so OAuth redirects, the sign-in origin and email links are correct:
 
 ```bash
 curl -fsSL https://get.appstrate.dev | bash -s -- --yes --app-url https://appstrate.example.com
@@ -111,7 +111,7 @@ The CLI uses a device flow: it prints a code and a URL, you approve in the brows
 
 ### Coding agents and MCP clients
 
-`appstrate code sync` brings your spaces' skills and agents into Claude Code and Codex ([Skills and coding agents](/using-appstrate/skill)). Any MCP client can also connect to an organization's MCP endpoint ([MCP clients](/using-appstrate/mcp-clients)).
+`appstrate code sync` brings your spaces' skills into Claude Code and Codex, and your agents into Claude Code ([Skills and coding agents](/using-appstrate/skill)). Any MCP client can also connect to an organization's MCP endpoint ([MCP clients](/using-appstrate/mcp-clients)).
 
 ## Next steps
 

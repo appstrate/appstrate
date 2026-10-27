@@ -57,6 +57,6 @@ curl "https://your-instance/api/agents/@acme/support-triage/persistence?kind=mem
 | `DELETE /api/agents/{scope}/{name}/persistence/memories/{id}` | Delete one memory.                                                                                                                          | `persistence:delete` |
 | `DELETE /api/agents/{scope}/{name}/persistence/pinned/{id}`   | Delete one pinned slot.                                                                                                                     | `persistence:delete` |
 
-Without `persistence:delete` you see your own scope plus shared rows. A caller holding it (the `admin` and `builder` space roles) who inspects an agent without a filter sees every actor's pinned slots. Reading is granted to all five preset space roles. Deleting is held by the `admin` and `builder` space roles. See [roles and permissions](/features/roles-and-permissions).
+Without `persistence:delete` you see your own scope plus shared rows. A caller holding it (the `admin` and `builder` space roles) who inspects an agent without an actor filter sees every actor's pinned slots and memories. Reading is granted to all five preset space roles. Deleting is held by the `admin` and `builder` space roles. See [roles and permissions](/features/roles-and-permissions).
 
 There is no endpoint that writes memory directly. Memory only changes when an agent run calls the tools, or when someone deletes it. It lives in the platform database.

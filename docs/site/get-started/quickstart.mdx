@@ -37,7 +37,7 @@ Open `http://localhost:3000` and sign up (or claim the instance). The onboarding
 2. **Add an AI model.** Agents and the chat need at least one. Choose a provider (Anthropic, OpenAI, OpenRouter, Mistral, Groq and others, or any OpenAI-compatible or Anthropic-compatible endpoint), paste an API key, pick one or more of the models it lists and save.
 3. **Invite users** (optional).
 
-You can skip the model step and add one later under **Organization settings → Models**.
+You can skip the model step and add one later under **Settings → Organization → Models**.
 
 </Step>
 
@@ -45,7 +45,7 @@ You can skip the model step and add one later under **Organization settings → 
 
 ### Run your first agent
 
-The `hello-world` agent starts as a draft, with no published version. The webapp's **Run** button and the CLI's `@draft` run that draft, because you can edit the agent. The chat and a coding agent run the latest published version by default, and the `/appstrate:run-hello-world` command only appears once one exists: for those, open the agent first and choose **Create version** in its actions menu.
+The `hello-world` agent is created with its first version (1.0.0) already published, so the webapp, the chat, the CLI and a coding agent can all run it.
 
 <Tabs items={['Webapp', 'Chat', 'CLI', 'Coding agent']}>
 
@@ -60,7 +60,7 @@ The run streams live: logs, tool calls, and the result when it finishes. Open **
 
 <Tab value="Chat">
 
-Open **Chat** in the sidebar, pick a model, and ask for what you want, for example "Run my Hello World agent and show me the result". The assistant acts with your own permissions, launches the run and reports back. See [Chat](/using-appstrate/chat).
+Switch to **Chat** with the tabs at the top of the sidebar, pick a model, and ask for what you want, for example "Run my Hello World agent and show me the result". The assistant acts with your own permissions, launches the run and reports back. See [Chat](/using-appstrate/chat).
 
 </Tab>
 
@@ -69,7 +69,7 @@ Open **Chat** in the sidebar, pick a model, and ask for what you want, for examp
 ```bash
 appstrate login --instance http://localhost:3000   # approve the code in your browser
 appstrate api GET /api/agents                      # each agent has an id like @acme/hello-world
-appstrate run @acme/hello-world@draft              # launch the draft and follow the logs
+appstrate run @acme/hello-world                    # launch the latest version and follow the logs
 ```
 
 `appstrate login` pins your organization and its default space on the profile, so later commands need no extra flags. Replace `@acme` with your organization's slug. See [CLI](/using-appstrate/cli).
@@ -78,7 +78,7 @@ appstrate run @acme/hello-world@draft              # launch the draft and follow
 
 <Tab value="Coding agent">
 
-With [Claude Code](https://docs.claude.com/en/docs/claude-code), install the Appstrate plugin once. Every agent active in your space then appears as a `/appstrate:run-<agent>` command, and your space's skills as `/appstrate:<skill>`:
+With [Claude Code](https://docs.claude.com/en/docs/claude-code), install the Appstrate plugin once. Every agent active in a space where you can run agents then appears as a `/appstrate:run-<agent>` command, and the skills of your spaces as `/appstrate:<skill>`:
 
 ```bash
 appstrate login --instance http://localhost:3000

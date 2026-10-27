@@ -55,7 +55,7 @@ These cap `POST /api/runs/inline` and `POST /api/runs/inline/validate`.
 
 ## Proxy limits
 
-The CLI and the GitHub Action reach models and connected accounts through two proxies when they run an agent remotely (see [Headless and CI runs](/using-appstrate/cli#headless-and-ci-runs)). Two JSON variables, validated the same strict way, cap them:
+The CLI and the GitHub Action reach models and connected accounts through two proxies when they run an agent remotely (see [Headless and CI runs](/using-appstrate/cli#headless-and-ci-runs)). The credential proxy also answers calls made outside a run, by a script or an MCP client whose credential holds `credential-proxy:call` or `credential-proxy:call-own` (see [Authentication](/api/authentication#api-keys)), under the same limits. Two JSON variables, validated the same strict way, cap them:
 
 - `LLM_PROXY_LIMITS` for `/api/llm-proxy/*`: `rate_per_min` (default 60) and `max_request_bytes` (10 MiB).
 - `CREDENTIAL_PROXY_LIMITS` for `/api/credential-proxy/proxy`: `rate_per_min` (100), `max_request_bytes` (10 MiB), `max_response_bytes` (50 MiB) and `session_ttl_seconds` (3600).

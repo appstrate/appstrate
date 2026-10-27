@@ -57,16 +57,18 @@ Deep-dive: [Features / Agents](/features/agents) and [Features / Memory](/featur
 An integration is the definition of an external service (Gmail, Slack, GitHub, Jira, an internal API, any MCP server). Appstrate ships a catalog of system integrations, and you can [author your own](/integrations/custom-integrations) as a package. An integration declares:
 
 - Its **source**: a local MCP server that Appstrate runs in a runner container, a remote MCP endpoint, or a plain HTTP API called through the sidecar.
-- Its **authentication methods**: OAuth 2.0 (with discovery and PKCE), API key, basic auth, mTLS or custom credential fields.
+- Its **authentication methods**: OAuth 2.0 (with discovery and PKCE), API key, basic auth, mTLS or custom credential fields. A remote MCP server that needs no authentication declares none, and its integration needs no connection.
 - How credentials are **delivered** to a call, and the **authorized URIs** the credential may be used against. The sidecar refuses any other target.
 
 An agent lists the integrations it needs and which of their tools it may use. The OAuth scopes requested follow from that selection.
 
 ### Connections
 
-A connection is one authenticated account on an integration, owned by the person who connected it. A member can share a connection with the other users of a space. Credentials are encrypted at rest and handed to the sidecar for the run, never to the agent: the agent calls a tool, the sidecar adds the credential and relays the request.
+A connection is one authenticated account on an integration, owned by the person who connected it. Credentials are encrypted at rest and handed to the sidecar for the run, never to the agent: the agent calls a tool, the sidecar adds the credential and relays the request.
 
-A run that needs an integration without a usable connection is refused before it starts, and a connection whose OAuth grant expired is marked as needing reconnection. People connect accounts from the agent's Connections tab or from the integration's page, and manage them under **Preferences → My connections**, and the [chat](/using-appstrate/chat) can offer a connect link when it needs one.
+A connection is usually organization-wide: its owner connects Gmail once and uses it in every space they can access. One made through a space's own OAuth client, and an end-user's connection, stays in its space. The owner can share a connection with chosen spaces, or with all current and future team spaces (never a personal space). Other members of those spaces can then choose it for their runs, and nobody ever receives the secret. An administrator can also impose connections on an integration for an agent or for a whole space: runs always use them, and members can add their own only when the administrator allows it.
+
+A run that needs an integration without a usable connection is refused before it starts, and a connection whose OAuth grant expired is marked as needing reconnection. People connect accounts from the agent's Connections section or from the integration's page, and manage them under **Settings → Account → My connections**, and the [chat](/using-appstrate/chat) can offer a connect link when it needs one.
 
 Deep-dive: [Integrations](/integrations/catalog).
 
@@ -81,7 +83,7 @@ A run starts from the dashboard, the chat, a [schedule](/features/scheduling), t
 1. **Sidecar.** Holds the run's credentials, proxies the model calls, and exposes the agent's tools over MCP: integration tools, `api_call` with credential injection, `run_history` and `recall_memory`. It checks every outbound target against the integration's allowed URIs.
 2. **Agent.** The [Pi Coding Agent](/features/sandbox-and-sidecar) process that receives the prompt and talks only to its sidecar. It never holds the credentials.
 
-Where they run depends on the install. Docker tiers use one container pair per run on a private network, so concurrent runs of the same agent are isolated from each other. Tier 0 uses Bun subprocesses without container isolation. A Firecracker backend, opt-in, gives each run its own microVM.
+Where they run depends on the install. Docker tiers use one container pair per run on a private network, so concurrent runs of the same agent are isolated from each other. Tier 0 uses Bun subprocesses without container isolation. A Firecracker backend (early preview, opt-in) gives each run its own microVM.
 
 Logs stream live over Server-Sent Events and are persisted for replay. Token usage is metered per run and priced in US dollars from the model's rate card. A model without a known price leaves the run marked `unpriced` (`cost_pricing_status`): its `cost` is `null`, which means not priced rather than free, and the dashboard does not show an amount for it.
 
@@ -111,9 +113,11 @@ The AFPS specification lives in the [afps-spec repository](https://github.com/ap
 The organization is the membership and administration boundary. It holds:
 
 - Members and their organization role: `owner`, `admin`, `member` (shown as Standard user) or `guest`.
-- The LLM models and model provider keys, and outbound proxies.
+- The LLM models and model provider keys, and outbound proxies. A model can be left to each member, who then pays for it with a personal key added in their Preferences.
 - The package catalog, and organization-wide webhooks and OAuth clients.
 - Billing, when the optional billing module is enabled.
+
+Organizations, team spaces and agents each carry an icon and a color, set in their settings and shown in the switcher, the navigation and the tables.
 
 ### Spaces
 

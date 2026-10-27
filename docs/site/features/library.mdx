@@ -11,7 +11,7 @@ Packages (agents, skills, integrations, MCP servers) belong to the **organizatio
 | **Share** (an offer) | Which other spaces, or people, may use it?                                              | `<type>:share` in the home space                                                                                     |
 | **Activation**       | Does this space run it right now?                                                       | The recipient space, with `agents:configure` (agents), `skills:write`, `mcp-servers:write` or `integrations:install` |
 
-Sharing is the audience. It never turns the package on. Each space keeps that decision.
+Sharing is the audience. A share lands switched on only where the sharer may activate the package in the target (their own personal space, or a space where they hold the activation permission), and switched off otherwise. A space keeps the decision to run a package its members did not switch on themselves.
 
 ## Home
 
@@ -46,7 +46,7 @@ curl -X POST https://your-instance/api/packages/@acme/support-triage/shares \
 - The package must have a **published version**. An offer of an unpublished package is `409 package_has_no_version`.
 - You can only target a space you can reach, and not the package's own home (`409 share_target_is_home`).
 - Sharing the same pair twice is idempotent.
-- `GET /api/packages/{scope}/{name}/shares` lists the audience. `DELETE /api/packages/{scope}/{name}/shares/{target}` withdraws an offer **and** the placement behind it, so a space cannot keep running something it may no longer see. `target` is a space id or a user id.
+- `GET /api/packages/{scope}/{name}/shares` lists the audience. `DELETE /api/packages/{scope}/{name}/shares/{target}` withdraws an offer **and** the placement behind it, so a space cannot keep running something it may no longer see. `target` is a space id or a user id. The sharer (holding `<type>:share` in the home space) or the recipient space (holding the type's deactivation permission there) may withdraw it, and every enabled [schedule](/features/scheduling) of the package in that space is disabled with `disabled_reason: package_removed`.
 - The `share` permission belongs to the `admin` and `builder` presets, and API keys never carry it.
 - A person who receives a share gets a `package_shared` [notification](/features/notifications).
 
@@ -71,13 +71,15 @@ curl -X DELETE https://your-instance/api/spaces/spc_.../packages/@acme/support-t
 - `PATCH /api/spaces/{spaceId}/packages/{scope}/{name}` configures a placed package (`modelId`, `proxyId`, `generation_config`, and `chat_enforced` for a skill). It has no `enabled` field: activation is its own act.
 - A deactivated agent answers `404 agent_not_active_in_space` on launch and schedule creation, while its detail and runs stay readable. A [schedule](/features/scheduling) of a deactivated agent produces visible failed runs and stays armed, so reactivating resumes it.
 
-Each placement reports `via` (`home`, `shared`, `system`) and `state` (`active`, `inactive`, `none`). A `none` placement is an offer nobody has taken up yet.
+Each placement reports `via` (`home`, `shared`, `system`) and `state` (`active`, `inactive`, `none`). `inactive` means the space's own row says off, either switched off or placed by someone who could not switch it on there. `none` means no row and a deployment default of off.
 
 ## The library views
 
-| View                                                                                                                            | Who                            | What it shows                                                                                                              |
-| ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/library` and the **Library** page (`/library`)                                                                        | Organization owners and admins | Every package of the organization, grouped by type, with the map of spaces it is placed in and whether each space runs it. |
-| `GET /api/spaces/{spaceId}/library` and the **Packages in this space** page (`/space/packages`, from the organization switcher) | Readers of that space          | The packages placed in this space with their state and the switch, plus the ones you could still place here.               |
+| Endpoint                            | Who                                                  | What it shows                                                                                                                       |
+| ----------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/library`                  | Any member, graded by the spaces and types they read | The packages of the organization and the system, grouped by type, with the map of the spaces each is placed in and whether it runs. |
+| `GET /api/spaces/{spaceId}/library` | Readers of that space                                | The packages placed in this space with their state and the switch, plus the ones you could still place here.                        |
 
-The agents, skills, integrations and MCP server lists of a space show only what the space can **launch**, meaning active packages. The library shows what is **placed**, active or not. Each view only lists the spaces and types you may read.
+In the web app, both are the **Catalog** in the sidebar, with one page per kind of package (agents, skills, MCP servers, integrations) and two views: **Discover** and **By space**. API keys receive a `403` on `GET /api/library`.
+
+The agents, skills, integrations and MCP server lists of a space show only what the space can **launch**, meaning active packages. The library endpoints show what is **placed**, active or not. Each view only lists the spaces and types you may read.

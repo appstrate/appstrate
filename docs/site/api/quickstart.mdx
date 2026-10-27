@@ -8,7 +8,7 @@ This page takes you from nothing to a finished run using only HTTP. You will cre
 ## Prerequisites
 
 - A running Appstrate instance and an account in it. To start one, follow the [Get Started quickstart](/get-started/quickstart) (Tier 0 needs only Bun). The examples use `http://localhost:3000`; on Appstrate Cloud the base URL is `https://app.appstrate.com`.
-- A model the organization can run agents with. Add one in **Organization settings** under models if the onboarding did not.
+- A model the organization can run agents with. Add one under **Settings**, **Organization**, **Models** if the onboarding did not.
 
 ```bash
 export APPSTRATE_URL=http://localhost:3000
@@ -20,7 +20,7 @@ export APPSTRATE_URL=http://localhost:3000
 
 ### Create an API key
 
-In the dashboard, open **Organization settings**, then **API Keys** under **Space**, and click **New API key**. Give it a name such as `dev-local`, leave the scopes at their defaults (every scope you can grant, which is fine for a local try-out; use an explicit list in production), and copy the key. It starts with `apst_` and is shown **once**.
+In the dashboard, open **Settings**, then **API Keys** in the workspace section of the sidebar, and click **New API key**. Give it a name such as `dev-local`, leave the scopes at their defaults (every scope you can grant, which is fine for a local try-out; use an explicit list in production), and copy the key. It starts with `apst_` and is shown **once**.
 
 ```bash
 export APPSTRATE_KEY=apst_your_key_here

@@ -57,7 +57,7 @@ my-skill.afps
 
 ## Creating and editing
 
-In the web app, **Skills** (`/skills`) lists the skills of the space, lets you create one from a template, import a ZIP or a GitHub repository, edit the draft, see the version history, and publish.
+In the web app, **Skills** (`/skills`) lists the skills of the space and its actions menu lets you create one (**New skill**: a name and what it gives agents are enough, the `SKILL.md` is written afterwards in its files), **Import** a ZIP or a GitHub repository, or browse the **Catalog**. A skill's page edits the draft, shows the version history and publishes.
 
 Through the API:
 
@@ -103,7 +103,7 @@ Skills are attached in the agent manifest and nowhere else. Excerpt of the agent
 }
 ```
 
-At launch, each range resolves to a published version and its files are placed in the sandbox. The prompt lists the available skills with their descriptions. To test an unpublished skill without republishing the agent, launch with `dependency_overrides: { "@acme/ticket-tone": "draft" }`, which needs write access to that skill. See [Runs](/features/runs).
+At launch, each range resolves to a published version and its files are placed in the sandbox. The runtime announces the available skills to the model with the `description` of each `SKILL.md`. To test an unpublished skill without republishing the agent, launch with `dependency_overrides: { "@acme/ticket-tone": "draft" }`, which needs write access to that skill. See [Runs](/features/runs).
 
 ## Skills in the chat assistant
 

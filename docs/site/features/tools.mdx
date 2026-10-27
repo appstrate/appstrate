@@ -43,7 +43,7 @@ The model's plain text is never delivered. To reach the user, an agent must call
 
 ## Integration tools
 
-Each integration an agent depends on contributes tools under its own namespace, `{namespace}__{tool}`. Most integrations expose a generic `api_call` tool that sends an authenticated HTTP request (described in detail further down this page). The sidecar injects the credential at request time, and the model never sees it. Integrations backed by an MCP server also expose that server's tools.
+Each integration an agent depends on contributes tools under its own namespace, `{namespace}__{tool}`. Most integrations expose a generic `api_call` tool that sends an authenticated HTTP request (described in detail further down this page). The sidecar injects the credential at request time, and the model never sees it. Integrations backed by an MCP server also expose that server's tools, and `api_call` refuses a target on a remote MCP server's own endpoint: that server is reached through its tools.
 
 The agent author picks which tools an agent can use. Excerpt of the agent manifest:
 
@@ -61,7 +61,7 @@ The agent author picks which tools an agent can use. Excerpt of the agent manife
 - `tools: "*"` accepts every tool an upstream server advertises, only when the integration allows it.
 - The OAuth scopes requested at connection time are inferred from the selected tools.
 
-Large tool results are not pushed into the model's context. A result above the inline cap (8000 estimated tokens per call by default), or beyond a run-wide budget, is spilled to a run-scoped store and the model receives a resource link. Concurrency of `api_call` is capped per run. Operators tune these limits with the `SIDECAR_*` variables in [Environment Variables](/self-hosting/environment-variables).
+Large tool results are not pushed into the model's context. The text of a result above the inline cap (8000 estimated tokens per call by default), or beyond a run-wide budget, is spilled to a run-scoped store and the model receives a resource link, written as a file under `resources/` in the workspace. This applies to the tools of MCP-backed integrations as well as to `api_call`. An image returned by an MCP tool is also saved byte for byte under `resources/`, and the model gets a pointer to the file next to the image. To keep requests small, older images are dropped from what is sent to the model, with a note telling it how to see them again. Concurrency of `api_call` is capped per run. Operators tune these limits with the `SIDECAR_*` variables in [Environment Variables](/self-hosting/environment-variables).
 
 For connections, scopes and the catalog, see [Integrations](/integrations/how-integrations-work).
 
@@ -77,15 +77,17 @@ When an integration opts several auths into `api_call`, each auth gets its own t
 
 ### Arguments of `api_call`
 
-| Argument         | Meaning                                                                                                                                                        |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `target`         | Required. The absolute URL, or a `{{field}}` holding the connection's base URL followed by a path. It must match the integration's `authorized_uris`.          |
-| `method`         | `GET`, `POST`, `PUT`, `PATCH`, `DELETE` or `HEAD`. Defaults to `GET`.                                                                                          |
-| `headers`        | Extra headers to forward. `Host`, hop-by-hop and framing headers are dropped.                                                                                  |
-| `body`           | A string, a JSON object (sent as `application/json` unless you set the header), `{ fromFile }`, `{ fromBytes, encoding: "base64" }` or `{ multipart: [...] }`. |
-| `substituteBody` | When true, `{{credential}}` placeholders in a text body are substituted. Off by default so a token cannot leak into a payload by accident.                     |
-| `responseMode`   | `{ toFile }`, described below.                                                                                                                                 |
-| `connection`     | Present only when several connections are bound to the integration, described below.                                                                           |
+| Argument         | Meaning                                                                                                                                                                                                                                                                                                                     |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `target`         | Required. The absolute `http(s)` URL, or a `{{field}}` holding the connection's base URL followed by a path or query. It must match the integration's `authorized_uris`.                                                                                                                                                    |
+| `method`         | `GET`, `POST`, `PUT`, `PATCH`, `DELETE` or `HEAD`. Defaults to `GET`.                                                                                                                                                                                                                                                       |
+| `headers`        | Extra headers to forward. `Host`, hop-by-hop and framing headers are dropped.                                                                                                                                                                                                                                               |
+| `body`           | A string, a short JSON object (sent as `application/json` unless you set the header), `{ fromFile }`, `{ fromBytes, encoding: "base64" }` for small payloads or `{ multipart: [...] }`. A long body, or one embedding a file's base64, goes in a workspace file passed as `{ fromFile }`, never re-typed into the argument. |
+| `substituteBody` | When true, `{{field}}` placeholders in a text body are substituted. Off by default so a token cannot leak into a payload by accident.                                                                                                                                                                                       |
+| `responseMode`   | `{ toFile }`, described below.                                                                                                                                                                                                                                                                                              |
+| `connection`     | Present only when several connections are bound to the integration, described below.                                                                                                                                                                                                                                        |
+
+Every `{{field}}` in the target, the headers and a text body is encoded for the place it lands: one URL path or query component in the target, a header value in the headers, and, with `substituteBody`, a value escaped for the body's `Content-Type` (JSON, form, XML, multipart or plain text). A body holding a placeholder under any other `Content-Type`, or none, is refused and nothing is sent. A value its place cannot carry is refused as `credential_unusable`, without showing the value. `substituteBody` needs a text body, so it cannot be combined with `fromFile`, `fromBytes` or `multipart`. Only a leading `{{field}}` holding a base URL is inserted as is.
 
 ### Sending a file: `body.fromFile`
 

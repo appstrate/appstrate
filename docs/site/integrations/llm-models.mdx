@@ -10,7 +10,7 @@ Every agent needs a model. Models are not integrations: they are configured sepa
 | Layer              | What it is                                                                                                    | API                                            |
 | ------------------ | ------------------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
 | **Model provider** | A vendor entry contributed by a module: wire format, default endpoint, how to authenticate. Read-only.        | `GET /api/model-provider-credentials/registry` |
-| **Credential**     | Your API key for one provider, stored encrypted.                                                              | `/api/model-provider-credentials`              |
+| **Credential**     | An API key for one provider, stored encrypted. It belongs to the organization or to one member.               | `/api/model-provider-credentials`              |
 | **Model**          | A named model bound to one credential, with optional overrides (context window, max tokens, reasoning, cost). | `/api/models`                                  |
 
 ## Providers
@@ -34,7 +34,7 @@ Google, Vertex, Azure OpenAI and AWS Bedrock are not native providers. To use a 
 
 ### Subscription providers
 
-Two opt-in modules, `@appstrate/module-claude-code` and `@appstrate/module-codex`, let an organization use a Claude or ChatGPT subscription instead of an API key; an operator adds them to `MODULES` (see [Modules](/self-hosting/progressive-infrastructure#modules)). Check the provider's terms before enabling them.
+Two opt-in modules, `@appstrate/module-claude-code` and `@appstrate/module-codex`, let an organization, or a member for their own calls, use a Claude or ChatGPT subscription instead of an API key; an operator adds them to `MODULES` (see [Modules](/self-hosting/progressive-infrastructure#modules)). Check the provider's terms before enabling them.
 
 ## Adding a provider and a model
 
@@ -73,6 +73,20 @@ A provider's offer comes from the model registry that ships with your platform v
 
 - **A platform upgrade can change the offer.** A model the registry no longer records can no longer be added. A model you already added on it stays in your list with the values stored, but it loses the catalog defaults (label, limits, capabilities, price) and runs unpriced unless you set a `cost` on it. If the operator listed such a model in `SYSTEM_PROVIDER_KEYS`, the platform refuses to boot until it is removed, and `bun run verify:system-models` run before the deploy catches it. The release notes of each version say which providers lost models.
 - **A live catalog adds new models between releases.** Each API process reads a signed file from `get.appstrate.dev` when it starts and every hour, and holds it in memory. It lists models a newer registry records and your build can already serve, so a new vendor model becomes selectable without a platform release. It only adds: it never changes a model of the bundled registry, a system model or a featured model. The read sends nothing about your instance. Until a process has read the file (just after a restart, or while the channel is unreachable), a model added from it runs without its catalog defaults. An operator turns the read off with `MODEL_CATALOG_URL=off`, which leaves the bundled registry alone (see [Environment Variables](/self-hosting/environment-variables)). The design is in [`MODEL_CATALOG.md`](https://github.com/appstrate/appstrate/blob/main/docs/architecture/MODEL_CATALOG.md).
+
+## Organization keys and personal keys
+
+A credential belongs to the organization (the default) or to one member. A personal credential is created with `"owner_type": "user"` on `POST /api/model-provider-credentials`, which takes the `model-provider-credentials:connect` permission. It serves only its owner's own calls, cannot be bound to a model, and is refused on a custom endpoint provider. Members manage theirs under **Preferences**, **My model keys**. An organization turns personal credentials off with **Members can use their personal key or personal subscription** in its settings, and they then serve nothing.
+
+Who pays follows from the model, reported as `billed_to` on `GET /api/models`:
+
+| Model                                                                                            | Paid by                                                                                                             |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| A built-in model (`system`)                                                                      | The platform                                                                                                        |
+| Bound to an organization credential (`org`)                                                      | That credential, whoever calls                                                                                      |
+| Created with `"credentialId": null` and a `providerId`, so each member brings their own (`user`) | The caller's own credential for that provider. Without one the call is refused with `409 model_credential_required` |
+
+Only a signed-in user pays from a personal credential. API keys, end-users and schedules never do, so a model left to each member cannot be used by a schedule.
 
 ## System models and organization models
 

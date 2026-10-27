@@ -42,21 +42,21 @@ The call is fire-and-forget: it answers `201` with the created run resource (the
 
 The body is closed (an unknown field is a `400`) and every field is optional:
 
-| Field                  | Meaning                                                                                                                                                |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `input`                | Values for the agent's input schema. File fields take `upload://`, `appfile://` or inline data URIs (see [Files](/features/files)).                    |
-| `rerun_from`           | A previous run id whose stored input is replayed. Mutually exclusive with `input`. The run must belong to the same agent (`409 rerun_agent_mismatch`). |
-| `modelId`              | Model for this run only (system model key or organization model id).                                                                                   |
-| `generation`           | Per-run `temperature` and `reasoning_level`.                                                                                                           |
-| `proxyId`              | Proxy for this run, or `"none"` for direct egress.                                                                                                     |
-| `connection_overrides` | Per-integration connection picks, as arrays of connection ids.                                                                                         |
-| `dependency_overrides` | Per-run version overrides for skills and integrations. `"draft"` requires write access to that package.                                                |
+| Field                  | Meaning                                                                                                                                                              |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `input`                | Values for the agent's input schema. File fields take `upload://`, `appfile://` or inline data URIs (see [Files](/features/files)).                                  |
+| `rerun_from`           | A previous run id whose stored input is replayed. Mutually exclusive with `input`. The run must belong to the same agent (`409 rerun_agent_mismatch`).               |
+| `modelId`              | Model for this run only (system model key or organization model id).                                                                                                 |
+| `generation`           | Per-run `temperature` and `reasoning_level`.                                                                                                                         |
+| `proxyId`              | Proxy for this run, or `"none"` for direct egress.                                                                                                                   |
+| `connection_overrides` | Per-integration connection picks, as arrays of connection ids. A set imposed by an admin pin or an enforced default is always bound: an override can only add to it. |
+| `dependency_overrides` | Per-run version overrides for skills and integrations. `"draft"` requires write access to that package.                                                              |
 
 Query parameter `version` chooses the agent definition: `published` (default, the latest published version), a version, dist-tag or semver range, or `draft` for callers who can write the agent. The run records the definition it used in `version_ref`.
 
 Headers worth knowing: `X-Space-Id` (browser sessions), `Appstrate-User` ([impersonation](/features/end-users)), `Appstrate-Version` ([API versioning](/api)), and `X-Appstrate-Connect-Offers: 1`, which asks a `409 missing_integration_connection` to carry a ready-to-open connect link for each missing integration.
 
-Launch failures that create **no run**: `400 model_not_configured` or `400 model_credential_missing` when no usable model is configured, `404 agent_not_active_in_space`, `404 no_published_version`, `422 dependency_unresolved`, `422 bundle_invalid`, `409 missing_integration_connection`, `402` when the optional billing module refuses usage, `413` when input files exceed their caps.
+Launch failures that create **no run**: `400 model_not_configured` or `400 model_credential_missing` when no usable model is configured, `404 agent_not_active_in_space`, `404 no_published_version`, `422 dependency_unresolved`, `422 bundle_invalid`, `409 missing_integration_connection`, `409 model_credential_required` (the model is left to each member's own credential and the caller has none), `402` when the optional billing module refuses usage, `413` when input files exceed their caps.
 
 ### Waiting for the result
 
@@ -96,7 +96,7 @@ curl -X POST https://your-instance/api/runs/inline \
 
 The body takes `manifest` and `prompt` (required), `input`, `context_files` (existing `appfile://` files mounted read-only), `connection_overrides`, `modelId`, `proxyId` and `generation`. The platform stores a temporary **shadow package** (`package_ephemeral: true` on the run), runs it through the normal pipeline, and keeps the manifest and prompt snapshot for the retention window (default 30 days) before compacting them.
 
-Referenced skills and integrations must already exist in the organization or system catalog. Composing a manifest is authoring and launching it is running, so the caller needs both `agents:write` and `agents:run`.
+An inline run can select the `note` and `pin` runtime tools, and what they write is readable on the run page by whoever can read the run. Referenced skills and integrations must already exist in the organization or system catalog. Composing a manifest is authoring and launching it is running, so the caller needs both `agents:write` and `agents:run`.
 
 `POST /api/runs/inline/validate` runs the same preflight (manifest, input, integration readiness) without creating anything. It has the same per-minute cap as inline runs, counted separately.
 
@@ -109,7 +109,8 @@ A **remote run** (`runOrigin: "remote"`) executes the agent on the caller's host
 A finished run exposes:
 
 - `result.output`: the structured value passed to the `output` tool, validated against `output.schema` when one exists. It is `null` while the run is in flight or when no output was emitted.
-- `error`: a message when the run did not succeed.
+- `error`: a message when the run did not succeed, kept verbatim for debugging.
+- `model_error`: for a run that failed on a model call, a `category` (`credential_unavailable`, `rate_limited`, `upstream_unavailable`, `invalid_request` or `unknown`), whether it is `retryable`, and the provider's `status` and `message`. It is `null` on every other run. Branch on it, not on the `error` text.
 - **Files**: deliverables the agent wrote under `./outputs/` or published with `publish_file` (see [Files](/features/files)). `file_counts` gives the number of input and output files. `artifacts` summarises the end-of-run sweep (`complete` or `partial`, with the names of any files that could not be stored).
 - `checkpoint`: the carry-over snapshot of the run (see [Memory](/features/memory)).
 - `connections_used`: the connections bound to the run, for display.
@@ -125,11 +126,11 @@ The response is a list envelope. `since=<id>` returns entries with a greater id 
 
 ## The run page
 
-Open a run from **Runs**, from an agent's runs tab or from a notification. The same page serves a running and a finished run, and updates live. It has four tabs, always in this order: **Outcome** (the files, `output` value and memory the run produced, with the file opened in a viewer when there is exactly one), **Files** (every file the run imported or produced), **Execution** (the logs, run details, usage, a per-turn breakdown, the input and the metadata) and **Configuration** (the agent, the version, the trigger and the connections used). It opens on **Outcome** when the run produced something and on **Execution** otherwise, and the URL hash (`#outcome`, `#files`, `#execution`, `#configuration`) selects a tab. The header shows the cost (see [A zero is not always free](/features/run-cost#a-zero-is-not-always-free)) and how full the model's context window is, next to **Re-run** and **Cancel**. In the logs, each tool call is a single row with its status, and opens on its arguments and result. Banners above the tabs report the run's error, **Connection lost during this run** when an integration's authentication failed even after a refresh (each one with a **Reconnect** link, and its id in `metadata.degraded_integrations`), and **Some files were not saved** when the end-of-run sweep could not store some outputs (re-running the agent regenerates them).
+Open a run from **Runs**, from an agent's runs tab or from a notification. The same page serves a running and a finished run, and updates live. It has three tabs: **Overview** (the default: trigger, start time, cost and duration in the header, then the execution, activity, results, usage, input, connections used and metadata of the run, plus a per-turn breakdown), **Journal** (the run's logs, where each tool call is a single row that opens on its arguments and result) and **Results** (the files, the structured output and the memory the run produced). The URL hash (`#journal`, `#results`) selects a tab. The header shows the run status, a **Remote** badge for a remote run, and **Re-run** and **Cancel** buttons. Cards above the tabs report **Connection lost during this run** when an integration's authentication failed even after a refresh (each one with a **Reconnect** link, and its id in `metadata.degraded_integrations`), **Model replaced** when the run fell back to the default model, and **Some files were not saved** when the end-of-run sweep could not store some outputs (re-running the agent regenerates them). The cost and the context gauge are explained in [A zero is not always free](/features/run-cost#a-zero-is-not-always-free).
 
 ### Degraded runs
 
-Some things the platform cannot give a run are not errors, so the run starts anyway and records the gap as a `warn` entry in the run's logs. The entries have `type` `system`, and their `data` carries `platform: true`. They are written once, right after the run is created and before the sandbox's own logs, for runs the platform launches, and a failure to write one never fails the run. The run's status is not changed by them. Without them, a run that started with fewer tools would look the same as an agent that chose not to use them. In the web app they appear as warning lines in **Execution**, **Logs**. Over the API, read `GET /api/runs/{id}/logs` (`level=warn` narrows it) and look for these `event` values.
+Some things the platform cannot give a run are not errors, so the run starts anyway and records the gap as a `warn` entry in the run's logs. The entries have `type` `system`, and their `data` carries `platform: true`. They are written once, right after the run is created and before the sandbox's own logs, for runs the platform launches, and a failure to write one never fails the run. The run's status is not changed by them. Without them, a run that started with fewer tools would look the same as an agent that chose not to use them. In the web app they appear as warning lines in the **Journal** tab. Over the API, read `GET /api/runs/{id}/logs` (`level=warn` narrows it) and look for these `event` values.
 
 | `event`                      | What it means                                                                                                                                                                                             |
 | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -165,7 +166,7 @@ The call returns the updated run, already `cancelled`, once the sandbox has been
 
 ## Listing and deleting
 
-`GET /api/runs` lists the runs of the current space. Filters: `user=me`, `kind` (`all`, `package`, `inline`), `status`, `start_date`, `end_date`, `chat_session_id`, with `limit` (max 100) and `offset`. `GET /api/agents/{scope}/{name}/runs` lists one agent's runs.
+`GET /api/runs` lists the runs of the current space. Filters: `user=me`, `kind` (`all`, `package`, `inline`), `status` (one or several, comma-separated, as in `status=failed,timeout`), `q` (free text on the agent and the error, or on the run number), `start_date`, `end_date`, `chat_session_id`, with `limit` (max 100) and `offset`. `GET /api/agents/{scope}/{name}/runs` lists one agent's runs.
 
 Visibility follows [roles and permissions](/features/roles-and-permissions): `runs:read` shows the runs you launched, `runs:read-all` shows every run of the space. `DELETE /api/agents/{scope}/{name}/runs` deletes the completed runs of an agent and needs `runs:delete` plus `runs:read-all`. It is refused while a run of that agent is in progress.
 

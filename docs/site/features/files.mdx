@@ -57,17 +57,17 @@ An agent produces output files in two ways:
 
 The platform prompt asks agents to use a concise, descriptive file name, which is the name you see. The run reports what was stored: `file_counts` and an `artifacts` summary that lists any file that could not be saved.
 
-On the run page, **Outcome** features the deliverable when the run produced exactly one file, and **Files** lists all inputs and outputs.
+On the run page, the **Results** tab lists the files the run produced, and the **Overview** tab shows the input.
 
 ## Using the API
 
-| Method and route              | Purpose                                                                                                                                           |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/files`              | List files you can see. Filters: `purpose`, `runId`, `packageId`, `chat_session_id`. Paginate with `startingAfter` and `limit`.                   |
-| `GET /api/files/{id}`         | Metadata: `uri`, `purpose`, `name`, `mime`, `size`, `sha256`, `downloadable`, `expiresAt`, and a short-lived `preview_url` for previewable files. |
-| `GET /api/files/{id}/content` | Download, as an attachment. Answers `307` to a presigned URL when the storage supports it, and streams otherwise.                                 |
-| `POST /api/files/{id}/keep`   | Make a file permanent by clearing its expiry.                                                                                                     |
-| `DELETE /api/files/{id}`      | Delete it. `409 file_in_use` while a run still references it.                                                                                     |
+| Method and route              | Purpose                                                                                                                                                                       |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/files`              | List files you can see. Filters: `purpose`, `runId`, `packageId`, `chat_session_id`, and `q` (case-insensitive search over names). Paginate with `startingAfter` and `limit`. |
+| `GET /api/files/{id}`         | Metadata: `uri`, `purpose`, `name`, `mime`, `size`, `sha256`, `downloadable`, `expiresAt`, and a short-lived `preview_url` for previewable files.                             |
+| `GET /api/files/{id}/content` | Download, as an attachment. Answers `307` to a presigned URL when the storage supports it, and streams otherwise.                                                             |
+| `POST /api/files/{id}/keep`   | Make a file permanent by clearing its expiry.                                                                                                                                 |
+| `DELETE /api/files/{id}`      | Delete it. `409 file_in_use` while a run still references it.                                                                                                                 |
 
 Listing and downloading need `files:read`. Deleting or keeping a file needs `files:delete`, or being the file's creator on a credential that carries `files:delete`. `read` is held by all five preset space roles, `delete` by `admin` and `builder`. See [Roles and permissions](/features/roles-and-permissions).
 
@@ -93,5 +93,7 @@ Deleting a file always removes its stored object too, through a queue that retri
 ## Previews
 
 Files that can be previewed (images, PDFs, HTML, Markdown, text) get a `preview_url` signed for the viewer. Untrusted HTML is served from a hardened, cookie-less preview route with a restrictive content security policy. For the strongest isolation, set `USERCONTENT_URL` to a separate domain. Markdown is shown as inert text by the server and rendered by the web app.
+
+Every file has a page of its own at `/files/<file id>?org=<org id>&space=<space id>`. **Open in a new tab** and **Copy link** on a file lead to it, and it renders the file in the same isolated frame, so an agent's HTML renders instead of showing its source. The link names the organization and the space, and is judged by the same read rule as `GET /api/files/{id}`: someone who cannot read the file sees "File not found or not accessible". Unlike a `preview_url`, it does not expire.
 
 See [FILES.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/FILES.md) for the full design.

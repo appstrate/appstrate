@@ -64,7 +64,7 @@ Credentials are injected on the sidecar side, either into the tool's environment
 
 ## Data model
 
-- An **organization** has members with a role (`owner`, `admin`, `member`, `guest`) and contains **spaces**. A space holds agents, runs, schedules, end-users, files, integration connections, and API keys. See [SPACES.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/SPACES.md).
+- An **organization** has members with a role (`owner`, `admin`, `member`, `guest`) and contains **spaces**. A space holds agents, runs, schedules, end-users, files and API keys. Integration connections belong to their owner, usually organization-wide, and are shared into spaces. See [SPACES.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/SPACES.md).
 - **Packages** are agents, skills, MCP servers, and integrations. They are versioned (semver, with dist-tags) and immutable once published. A package belongs to a home space and is made runnable elsewhere by placing it in other spaces. Platform-provided ones have no organization.
 - **Runs** reference an agent version and record who or what triggered them: a member, an end-user, a schedule, or an API key. Cost is a ledger of model usage, summed per run ([RUN_COST.md](https://github.com/appstrate/appstrate/blob/main/docs/architecture/RUN_COST.md)).
 - **Memory** is one table keyed by actor (member, end-user, or shared): an archive agents search, and pinned slots injected into the prompt.

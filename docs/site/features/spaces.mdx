@@ -3,7 +3,7 @@ title: Spaces
 description: The workspace inside an organization that owns agents, runs, schedules, end-users, API keys and connections, and decides who can reach them.
 ---
 
-A **space** is the working area of an organization. Agents run in a space, and runs, schedules, files, end-users, API keys, notifications and integration connections belong to one. The organization is the membership and billing boundary, the space is the **scoping and access** boundary inside it.
+A **space** is the working area of an organization. Agents run in a space, and runs, schedules, files, end-users, API keys and notifications belong to one, and so do the integration pins and OAuth clients that decide which connections its agents use. The organization is the membership and billing boundary, the space is the **scoping and access** boundary inside it.
 
 ## What is in a space
 
@@ -15,7 +15,7 @@ Organization
 │   ├── Agents, skills, integrations placed here (and which are active)
 │   ├── Runs, files, notifications
 │   ├── Schedules
-│   ├── Integration connections, OAuth clients, pins
+│   ├── Integration OAuth clients, pins, shared connections
 │   ├── End-users
 │   ├── API keys
 │   └── Webhooks (space level)
@@ -49,7 +49,7 @@ Each team space has a **visibility**:
 
 Organization owners and admins reach every team space as `admin` and are never stored as members. A `guest` has no implicit access anywhere: they only see spaces they were added to.
 
-The **default space** is created with the organization. It is always `open` and cannot be deleted or made closed or private. It is where a new member lands, and it is the space the [MCP server](/using-appstrate/mcp-clients) uses when a client names none.
+The **default space** is created with the organization. It is always `open` and cannot be deleted or made closed or private. It is where a new member lands.
 
 A member's rights inside a space come from their **space role**: one of five presets (`admin`, `builder`, `operator`, `runner`, `viewer`) or a custom role your organization defined. See [Roles and permissions](/features/roles-and-permissions).
 
@@ -83,6 +83,7 @@ curl -X PATCH https://your-instance/api/spaces/spc_... \
 
 - `name`: 1 to 100 characters.
 - `settings.allowedRedirectDomains`: up to 20 domains allowed as OAuth redirect targets.
+- `icon` and `color`: the space's visual identity, shown in the organization switcher and the list of spaces (**Icon and colour** in the space settings). `icon` is a Lucide icon (`lucide:<name>`) or an emoji (`emoji:<emoji>`), `color` is `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink` or `orange`, and `null` clears either. A personal space accepts neither (`409 personal_space_immutable`).
 - `visibility` and `default_role` are changed with `PATCH`. Setting a default role or opening a space requires that you hold every permission of that role.
 - API keys cannot create spaces, and a key only lists its own space.
 - `GET /api/spaces` lists the spaces you reach, each with your `role`, your effective `permissions` and `access` (`member` or `none`).
@@ -109,7 +110,7 @@ Members are listed with `GET /api/spaces/{id}/members`. Permissions: `space-memb
 
 ## Deleting a space
 
-`DELETE /api/spaces/{id}` removes the space and, in the same transaction, everything it owns: runs, schedules, memory, files and uploads (with their stored objects), end-users, API keys, notifications, connections and space-level webhooks. It is refused for the default space, while a run is in progress, and while the space is the home of a package (move it first with `PUT /api/packages/{scope}/{name}/home`). Organization packages themselves stay. Audit events keep their space id.
+`DELETE /api/spaces/{id}` removes the space and, in the same transaction, everything it owns: runs, schedules, memory, files and uploads (with their stored objects), end-users, API keys, notifications, the connections confined to it and space-level webhooks. An organization-wide connection stays, and the space is removed from its shares. It is refused for the default space, while a run is in progress, and while the space is the home of a package (move it first with `PUT /api/packages/{scope}/{name}/home`). Organization packages themselves stay. Audit events keep their space id.
 
 ## Per-space configuration of a package
 

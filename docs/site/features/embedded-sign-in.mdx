@@ -14,8 +14,8 @@ Every OAuth client has a level, fixed when it is created. The level decides who 
 | Level      | Who signs in                                                                  | The token carries                                                    | Where you create it                                                                                          |
 | ---------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
 | `instance` | Platform users, through an app that lets them pick an organization afterwards | `actor_type` `user`, with no organization and no space               | Declared by the operator with `OIDC_INSTANCE_CLIENTS` at boot. Not in the web app, not through the admin API |
-| `org`      | Members of one organization, in your internal tools                           | `actor_type` `dashboard_user`, with `org_id` and `org_role`          | **Organization settings**, **Team SSO** tab                                                                  |
-| `space`    | The end-users of your product, in one team space                              | `actor_type` `end_user`, with `org_id`, `space_id` and `end_user_id` | **Space settings**, **End-user SSO** tab                                                                     |
+| `org`      | Members of one organization, in your internal tools                           | `actor_type` `dashboard_user`, with `org_id` and `org_role`          | **Settings**, **Organization**, **Team SSO**                                                                 |
+| `space`    | The end-users of your product, in one team space                              | `actor_type` `end_user`, with `org_id`, `space_id` and `end_user_id` | **Settings**, **Workspace**, **End-user SSO**                                                                |
 
 The level, and the organization or space a client is pinned to, cannot be changed afterwards. The client name cannot be changed either. To embed sign-in in a product for your customers, you want a **space** client. The other two levels exist for people who already have a platform account.
 
@@ -23,7 +23,7 @@ The level, and the organization or space a client is pinned to, cannot be change
 
 You need a team space (a personal space takes no OAuth client and answers `409 personal_space_takes_no_oauth_clients`) and the `oauth-clients:write` permission, which owners and admins hold by default.
 
-1. Open the space in **Space settings** and choose the **End-user SSO** tab.
+1. Open **Settings**, go to the **Workspace** section for the space and choose **End-user SSO**.
 2. Choose **New client**.
 3. Fill the form (the fields are described below) and choose **New client** again to save.
 4. Copy the **Client ID** and **Client Secret** from the dialog. The secret is shown once.
@@ -98,14 +98,14 @@ In the client list, each client has buttons for these actions:
 - **Disable** and **Enable** switch the client off without deleting it. A disabled client's hosted pages answer `404`.
 - **Delete** removes the client. Applications that use it stop working.
 
-Over the API these are `rotateOAuthClientSecret` (`POST /api/oauth/clients/{clientId}/rotate`), `updateOAuthClient` (`PATCH /api/oauth/clients/{clientId}`, with `disabled`) and `deleteOAuthClient`. Creating and updating need `oauth-clients:write`, deleting needs `oauth-clients:delete`, listing needs `oauth-clients:read`. These routes and the Organization and Space settings screens are the only way to manage a client: the client endpoints of Better Auth (`/api/auth/oauth2/create-client`, `update-client`, `delete-client`, `client/rotate-secret`, `get-client`, `get-clients`) answer `401` to every session, and a signed-in user cannot create or read a client through them.
+Over the API these are `rotateOAuthClientSecret` (`POST /api/oauth/clients/{clientId}/rotate`), `updateOAuthClient` (`PATCH /api/oauth/clients/{clientId}`, with `disabled`) and `deleteOAuthClient`. Creating and updating need `oauth-clients:write`, deleting needs `oauth-clients:delete`, listing needs `oauth-clients:read`. These routes and the **Settings** screens of the organization and the workspace are the only way to manage a client: the client endpoints of Better Auth (`/api/auth/oauth2/create-client`, `update-client`, `delete-client`, `client/rotate-secret`, `get-client`, `get-clients`) answer `401` to every session, and a signed-in user cannot create or read a client through them.
 
 ### Organization level: Team SSO
 
 Use an organization client when your own team signs in to an internal tool with their Appstrate account.
 
-1. Open **Organization settings**, **General**, and in the **Advanced** section choose **Enable** on **Team SSO**. This needs the `org:settings` permission.
-2. The **Team SSO** tab now appears. Create the client there, the same way as above. The form adds two fields.
+1. Open **Settings**, go to the **Organization** section, choose **Team SSO** and switch on **Enable team SSO**. This needs the `org:settings` permission.
+2. The list of clients appears on the same page. Create the client there, the same way as above. The form adds two fields.
 3. **Role assigned on auto-join** (`signupRole`) is the role a person gets when `allowSignup` is on and they join through this client: `guest`, `member` or `admin`. `owner` is refused. Admins already reach every space, so for them the space list must be empty (`400` otherwise).
 4. **Space assignments** (`signupSpaceAssignments`) lists spaces to put them in, each as `{ "spaceId": "spc_...", "preset_role": "..." }` or `{ "spaceId": "spc_...", "custom_role_id": "srl_..." }`. A personal space cannot be assigned.
 
@@ -196,7 +196,7 @@ If the URI is registered on the client, the person is redirected there. Otherwis
 
 A space client signs people in on pages that Appstrate hosts, and those pages need two things your instance may not give them: a mail server and Google or GitHub apps. A space brings its own, so each tenant sends mail from its own domain and shows its own Google or GitHub consent screen.
 
-Open the space's settings (**Organization settings**, **Spaces**, then the space) and choose **Authentication**. You need `space-settings:write` in that space, which the space `admin` role holds. The tab has three sections: **SMTP server**, **Google Sign-In** and **GitHub Sign-In**, each with a **Configured** or **Not configured** badge.
+Open **Settings**, go to the **Workspace** section for the space and choose **Authentication**. You need `space-settings:write` in that space, which the space `admin` role holds. The page has three sections: **SMTP server**, **Google Sign-In** and **GitHub Sign-In**, each with a **Configured** or **Not configured** badge.
 
 These settings apply to **space-level clients only**, and only to the pages Appstrate hosts for them.
 

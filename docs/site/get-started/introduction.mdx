@@ -56,7 +56,7 @@ You → launch an agent (dashboard, chat, schedule, CLI, API)
    Result, files, state, logs, cost
 ```
 
-Each run gets its own sidecar and agent process. The **sidecar** holds the credentials and the LLM access, and exposes them to the agent as MCP tools: the agent calls `api_call` on an integration, the sidecar injects the stored credential and checks the target URL against the integration's allowed URIs, and the agent never sees the secret. On Docker installs each run is a pair of containers on a private network. On a Tier 0 install the agent runs as a plain Bun subprocess, without container isolation. An opt-in Firecracker backend runs each agent in its own microVM. See [Sandbox and Sidecar](/features/sandbox-and-sidecar).
+Each run gets its own sidecar and agent process. The **sidecar** holds the credentials and the LLM access, and exposes them to the agent as MCP tools: the agent calls `api_call` on an integration, the sidecar injects the stored credential and checks the target URL against the integration's allowed URIs, and the agent never sees the secret. On Docker installs each run is a pair of containers on a private network. On a Tier 0 install the agent runs as a plain Bun subprocess, without container isolation. An opt-in Firecracker backend (early preview) runs each agent in its own microVM. See [Sandbox and Sidecar](/features/sandbox-and-sidecar).
 
 ## What you get
 
@@ -74,14 +74,14 @@ Each run gets its own sidecar and agent process. The **sidecar** holds the crede
 
 ## Ways to drive an instance
 
-| Surface                                       | Use it to                                                                          |
-| --------------------------------------------- | ---------------------------------------------------------------------------------- |
-| [Webapp](/using-appstrate/webapp)             | Build, run and monitor agents, manage members, models and integrations             |
-| [Chat](/using-appstrate/chat)                 | Delegate work to an assistant that uses the platform for you                       |
-| [CLI](/using-appstrate/cli)                   | Install and operate an instance, script the API, edit packages locally, run agents |
-| [Coding agent plugin](/using-appstrate/skill) | Bring your spaces' skills and agents into Claude Code and Codex                    |
-| [MCP clients](/using-appstrate/mcp-clients)   | Let any MCP client call the platform with your permissions                         |
-| [REST API](/api)                              | Embed Appstrate in your own product                                                |
+| Surface                                       | Use it to                                                                              |
+| --------------------------------------------- | -------------------------------------------------------------------------------------- |
+| [Webapp](/using-appstrate/webapp)             | Build, run and monitor agents, manage members, models and integrations                 |
+| [Chat](/using-appstrate/chat)                 | Delegate work to an assistant that uses the platform for you                           |
+| [CLI](/using-appstrate/cli)                   | Install and operate an instance, script the API, edit packages locally, run agents     |
+| [Coding agent plugin](/using-appstrate/skill) | Bring your spaces' skills into Claude Code and Codex, and your agents into Claude Code |
+| [MCP clients](/using-appstrate/mcp-clients)   | Let any MCP client call the platform with your permissions                             |
+| [REST API](/api)                              | Embed Appstrate in your own product                                                    |
 
 ## Who is Appstrate for?
 

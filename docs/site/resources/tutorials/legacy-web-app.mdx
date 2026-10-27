@@ -3,13 +3,9 @@ title: "Tutorial: Legacy Web App Agent"
 description: Let an agent read an internal web app that has no API, only a login form and HTML pages, and run it every month.
 ---
 
-<Callout type="warn" title="Limits of the declarative login">
+<Callout type="warn" title="Limit of the declarative login">
 
-This tutorial uses a declarative login, which has three known gaps, tracked in [issue #1818](https://github.com/appstrate/appstrate/issues/1818):
-
-- **The session is never renewed.** The password is not stored, so when the session expires, the user reconnects.
-- **Form values are not URL-encoded.** A password containing `&` or `=` breaks the login, unless the user types it encoded (`&` as `%26`).
-- **A refused login is a generic `500`.** A wrong password and a broken integration answer the same way.
+This tutorial uses a declarative login, whose session is never renewed. The password is not stored, so when the session expires, the user reconnects.
 
 </Callout>
 
@@ -315,12 +311,12 @@ For a login this page cannot express, the code route is a local MCP server that 
 
 ## Troubleshooting
 
-| Symptom                                                                      | Cause                                                                                                                  | Fix                                                                          |
-| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Connecting answers `500 internal_error`, log `LoginError: unexpected status` | Wrong credentials, an unencoded special character, or a success status other than the one in `success_criteria`        | Check the credentials, encode special characters, match `success_criteria`   |
-| Log `LoginError: url targets a blocked/internal address`                     | The intranet host is on a private address and not in `EGRESS_ALLOW_INTERNAL_HOSTS`                                     | Step 1                                                                       |
-| Import or save refused on `connect.login`                                    | A criterion the platform does not evaluate (a compound condition, an unquoted string), or `delivery.http.in: "cookie"` | One `<expression> == <value>` per criterion, strings quoted; header delivery |
-| `403 unauthorized_target` on a call                                          | The URL is outside `authorized_uris`                                                                                   | Fix the URL, or the pattern                                                  |
+| Symptom                                             | Cause                                                                                                                  | Fix                                                                          |
+| --------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Connecting answers `400 login_rejected`             | Wrong credentials, or a success status other than the one in `success_criteria`                                        | Check the credentials, match `success_criteria`                              |
+| Connecting answers `502 login_upstream_unavailable` | The intranet is unreachable, throttling or failing                                                                     | Check the intranet. If it is on a private address, see step 1                |
+| Import or save refused on `connect.login`           | A criterion the platform does not evaluate (a compound condition, an unquoted string), or `delivery.http.in: "cookie"` | One `<expression> == <value>` per criterion, strings quoted; header delivery |
+| `403 unauthorized_target` on a call                 | The URL is outside `authorized_uris`                                                                                   | Fix the URL, or the pattern                                                  |
 
 ## Resources
 

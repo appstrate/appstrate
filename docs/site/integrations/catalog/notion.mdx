@@ -7,10 +7,10 @@ description: Connect Notion to your Appstrate agents, with the direct API integr
 
 Notion is a workspace for notes, docs and databases. Appstrate ships two Notion integrations, as separate packages.
 
-| Integration             | Source     | How the agent reaches Notion                                                                   |
-| ----------------------- | ---------- | ---------------------------------------------------------------------------------------------- |
-| `@appstrate/notion`     | `api_call` | Calls the Notion REST API directly. Needs an OAuth client registered by an administrator.      |
-| `@appstrate/notion-mcp` | Remote MCP | Uses Notion's hosted MCP server. The OAuth client is registered automatically at connect time. |
+| Integration             | Source     | How the agent reaches Notion                                                                    |
+| ----------------------- | ---------- | ----------------------------------------------------------------------------------------------- |
+| `@appstrate/notion`     | `api_call` | Calls the Notion REST API directly. Needs an OAuth client registered by an administrator.       |
+| `@appstrate/notion-mcp` | Remote MCP | Uses Notion's hosted MCP server. The OAuth client is provisioned automatically at connect time. |
 
 Notion does not use OAuth scopes: access is granted per page and database when the user authorizes.
 

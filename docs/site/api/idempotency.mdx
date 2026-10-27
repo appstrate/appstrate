@@ -17,8 +17,9 @@ Only the operations that declare an `Idempotency-Key` parameter in the OpenAPI d
 | `POST /api/end-users`                 | A retry must not create a second end-user                                          |
 | `POST /api/webhooks`                  | A retry must not create a second webhook (the response carries the signing secret) |
 | `POST /api/oauth/clients`             | A retry must not register a second OAuth client                                    |
+| `POST /api/models/apply`              | A retry must not mint a second model credential                                    |
 
-The header is refused elsewhere. A `POST`, `PUT`, `PATCH`, or `DELETE` that carries `Idempotency-Key` to an operation that does not honor it fails with `400` and `code: "idempotency_not_supported"`, rather than being silently executed without the guarantee you asked for. Do not add the header to every outbound request. `GET`, `HEAD`, and `OPTIONS` ignore it. The authentication endpoints under `/api/auth/*` neither honor nor refuse it.
+The header is refused elsewhere. A `POST`, `PUT`, `PATCH`, or `DELETE` that carries `Idempotency-Key` to an operation that does not honor it fails with `400` and `code: "idempotency_not_supported"`, rather than being silently executed without the guarantee you asked for. Do not add the header to every outbound request. `GET`, `HEAD`, and `OPTIONS` ignore it. The authentication endpoints under `/api/auth/*` neither honor nor refuse it. On the credential proxy (`/api/credential-proxy/proxy`) the header belongs to the upstream API: it is relayed with your other headers, and Appstrate de-duplicates nothing on it.
 
 ## How it works
 
@@ -41,10 +42,10 @@ Run the same command again and you get the same `201` and the same end-user, wit
 ## Rules
 
 - **Format**: any string up to 255 characters. Longer is `400` with `code: "invalid_idempotency_key"`.
-- **Scope**: a key is scoped to the organization and the space of the request. Two spaces can use the same key without colliding.
+- **Scope**: a key is scoped to the organization, the space and the caller of the request (the member, API key or OAuth client that authenticated it). Two spaces, or two callers, can use the same key without colliding, and a stored response is only ever replayed to the caller that sent it.
 - **Same key, different request**: `422` with `code: "idempotency_conflict"`. The method, the URL, the query, or the body differs from the first use. Do not retry; use a new key, or send the original request.
 - **Same key, still running**: `409` with `code: "idempotency_in_progress"`. Wait and retry the same request.
-- **Some failures are not stored**. If the first attempt throws an error or ends in a `5xx`, the key is released, and a retry with the same key runs the operation again. A `2xx` or a `4xx` response returned by the operation is stored and replayed.
+- **Only a `2xx` is stored**. If the first attempt throws an error or ends in a `4xx` or `5xx`, the key is released, and a retry with the same key runs the operation again, so a launch refused for a missing connection runs once you have connected it.
 - **Large responses** (a body over about 1 MiB, 1,048,576 characters) are not stored, and the key is released.
 - **Permissions are checked first**, on every request, replays included. A replay is never served to a caller who would be refused on a fresh request, and a replayed run response is shaped for what the current caller may see.
 
