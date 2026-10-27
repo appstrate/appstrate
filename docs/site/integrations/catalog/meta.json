@@ -15,6 +15,10 @@
     "pinterest",
     "reddit",
     "x",
-    "youtube"
+    "youtube",
+    "garmin",
+    "vapi",
+    "browserless",
+    "playwright-mcp"
   ]
 }

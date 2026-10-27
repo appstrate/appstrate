@@ -1,0 +1,59 @@
+---
+title: Vapi
+description: Let an Appstrate agent place outbound phone calls through Vapi and read back the answers, with what to prepare in Vapi first.
+---
+
+## Overview
+
+Vapi is a voice AI platform. The `@appstrate/vapi` integration (`api_call`) lets an agent place an outbound call run by a voice assistant that the agent defines in the request, wait for the call to end, then read the answers Vapi extracts as JSON and the transcript. Its credential is sent to `https://api.vapi.ai/**`.
+
+A call is real and billed: it reaches a person and consumes the credits of the Vapi organization that owns the key.
+
+## Prepare in Vapi
+
+- **A private API key.** Create it in the Vapi dashboard under Private API Keys ([https://dashboard.vapi.ai/org/api-keys](https://dashboard.vapi.ai/org/api-keys)). A public key is refused, and the agent is told to stop and report a `401` or `403`.
+- **A phone number in Vapi.** The agent lists the organization's numbers and picks one: the only one, or the id named in its prompt or input. With none, it stops and reports that a number must be imported first.
+- **A number that can reach the callee.** The call is placed from a phone number set up in your Vapi account, so check with Vapi that the number can reach the callee's country. To use your own number, import one from a telephony provider into Vapi. Appstrate does not manage these numbers.
+
+## Connect Vapi
+
+The integration uses an API key, so there is no OAuth client to register. Activate it in the space, then each member opens the integration and pastes the private key into the hosted connect form. See [How integrations work](/integrations/how-integrations-work#connecting-an-account).
+
+## Run timeout
+
+A call is placed, then polled until it ends, with a wait of about 25 seconds between two polls. The agent's guide requires the manifest `timeout` to be at least the call's `maxDurationSeconds` plus 120 seconds, and refuses to place the call otherwise. It asks for a `maxDurationSeconds` between 120 and 180, so set a `timeout` of about 400 seconds or more. Without a `timeout` a run gets 300 seconds, and the platform clamps it to its ceiling (1800 seconds by default). See [Agents](/features/agents).
+
+## What the agent is told to do
+
+The guide is part of the package, so the agent reads it before its first call:
+
+- Call a number only when the prompt or input asks for that call, never for cold prospecting.
+- Open the call by saying that an AI is calling and that the call is recorded.
+- Never send the `phoneNumber` field, which carries provider credentials.
+
+These are instructions, not enforcement: the key can do anything the Vapi API allows. Use a key you are willing to give an agent, and give the agent a precise prompt.
+
+## Use it in an agent
+
+Excerpt of the agent manifest:
+
+```json
+{
+  "timeout": 400,
+  "dependencies": {
+    "integrations": { "@appstrate/vapi": "^1.0.0" }
+  }
+}
+```
+
+Example prompt:
+
+```
+Call +33 6 12 34 56 78 from the number "Paris office". Ask whether the
+shop can deliver on Friday, and report the answer with the transcript.
+```
+
+## Related
+
+- [How integrations work](/integrations/how-integrations-work)
+- [Built-in Integrations](/integrations/catalog)
