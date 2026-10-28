@@ -1,0 +1,63 @@
+---
+title: Self-Hosting
+description: Run Appstrate on your own infrastructure with the one-line installer or Docker Compose.
+---
+
+Self-hosting gives you control over your data, your network and your configuration. Appstrate has no third-party service dependency at boot: the database, queue, cache and storage all have in-process fallbacks, and everything else (Google or GitHub sign-in, SMTP, LLM providers, OpenTelemetry) is opt-in through environment variables.
+
+## Install and size the host
+
+[Install](/get-started/install) covers the one-line installer, the tiers and what each needs on the host. To manage the Compose files yourself, see [Docker Compose](/self-hosting/docker-compose). The installer's flags, verification options and lifecycle commands are in the [self-hosting README](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/README.md).
+
+The shipped root `docker-compose.yml` caps the platform container at 8 GiB, PostgreSQL at 1 GiB, Redis at 256 MiB and MinIO at 512 MiB. Agent runs are separate sibling containers, each bounded by the run limits (1536 MiB and 2 vCPU by default). See [Isolation and Security](/self-hosting/isolation-and-security#container-hardening-and-resource-limits).
+
+Three things are configured independently: the **tier** (which data services you run), the **execution backend** (where agent runs execute) and the **modules** (optional features loaded from `MODULES`). See [Progressive Infrastructure](/self-hosting/progressive-infrastructure).
+
+## First run and auth modes
+
+Appstrate ships in **open mode** by default: anyone who can reach the instance can sign up, and creating an organization is an explicit step in the onboarding flow (the creator becomes its `owner`).
+
+For a private deployment, use **closed mode**: signup is disabled, organizations are created by invitation or by an operator, and the first owner claims the instance with a single-use bootstrap token.
+
+- If you enter an owner email at the interactive prompt, or set `APPSTRATE_BOOTSTRAP_OWNER_EMAIL` for a non-interactive install, the installer writes closed-mode settings and a fresh `AUTH_BOOTSTRAP_TOKEN` into `.env`.
+- An unattended install with `--yes` and no owner email is closed by default too on the Docker tiers (1 to 3). It generates a token, disables signup and prints a banner with the claim URL. Tier 0 stays in open mode unless you set `APPSTRATE_BOOTSTRAP_OWNER_EMAIL`.
+- Open `<APP_URL>/claim`, paste the token and choose the owner email and password. The root organization is created in the same step.
+- Remove `AUTH_BOOTSTRAP_TOKEN` from `.env` once the instance is claimed.
+
+The token only works if the container receives it, and a Compose file forwards only the variables it lists. The Compose files shipped since 1.0.0-beta.65 list `AUTH_BOOTSTRAP_TOKEN`. A file that predates that release does not: add a bare `- AUTH_BOOTSTRAP_TOKEN` line under `appstrate.environment` and restart before you open `/claim` (see [Compose forwards only what it lists](/self-hosting/docker-compose#compose-forwards-only-what-it-lists)).
+
+Two rules about the named accounts:
+
+- When `AUTH_BOOTSTRAP_OWNER_EMAIL` is set, the claim accepts that address only. Any other address is refused with `403 bootstrap_owner_email_mismatch`.
+- The token works only while the instance has no organization. Once one exists, `/claim` answers `410`. An address named in `AUTH_BOOTSTRAP_OWNER_EMAIL` or `AUTH_PLATFORM_ADMIN_EMAILS` that has no account yet is not created by the sign-up form: it gets its account from a magic link (SMTP required) or from a Google or GitHub sign-in whose provider asserts the address as verified. The claim itself creates one account, the owner's.
+
+The full matrix of flags, recipes, known limits and recovery procedures is in [AUTH_MODES.md](https://github.com/appstrate/appstrate/blob/main/examples/self-hosting/AUTH_MODES.md). The variables are listed in [Environment Variables](/self-hosting/environment-variables).
+
+## Guides
+
+<Cards>
+  <Card title="Progressive Infrastructure" href="/self-hosting/progressive-infrastructure">
+    Tiers 0 to 3, execution backends and modules.
+  </Card>
+  <Card title="Docker Compose" href="/self-hosting/docker-compose">
+    Run the shipped Compose files without the installer.
+  </Card>
+  <Card title="Environment Variables" href="/self-hosting/environment-variables">
+    Every variable, with defaults.
+  </Card>
+  <Card title="Production Checklist" href="/self-hosting/production-checklist">
+    What to verify before taking the instance live.
+  </Card>
+  <Card title="Isolation and Security" href="/self-hosting/isolation-and-security">
+    Networks, credentials and egress rules.
+  </Card>
+  <Card title="Rate Limits" href="/self-hosting/rate-limits">
+    Per-endpoint limits and run limits.
+  </Card>
+  <Card title="Upgrading" href="/self-hosting/upgrading">
+    Back up, read the operator notes, upgrade.
+  </Card>
+  <Card title="Troubleshooting" href="/self-hosting/troubleshooting">
+    Common boot, run and network problems.
+  </Card>
+</Cards>

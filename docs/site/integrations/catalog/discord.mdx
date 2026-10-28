@@ -1,0 +1,60 @@
+---
+title: Discord
+description: Connect Discord to your Appstrate agents.
+---
+
+## Overview
+
+Discord is a communication platform for communities. The integration works through OAuth 2.0 user authorization against the Discord API.
+
+Integration: `@appstrate/discord`, reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
+
+## Connect Discord
+
+An administrator registers an OAuth client once, then members connect their own accounts.
+
+<Steps>
+<Step>
+
+Create an application in the Discord developer portal ([open](https://discord.com/developers/applications)).
+
+</Step>
+<Step>
+
+Register the redirect URI in the application's OAuth2 redirects: it is `APP_URL` followed by `/api/integrations/callback`, also shown in the integration's setup panel.
+
+</Step>
+<Step>
+
+In Appstrate, open the integration and register the OAuth client (client ID and client secret). See [How integrations work](/integrations/how-integrations-work#setting-up-an-integration).
+
+</Step>
+</Steps>
+
+## Use it in an agent
+
+Excerpt of the agent manifest:
+
+```json
+{
+  "dependencies": {
+    "integrations": { "@appstrate/discord": "^1.0.0" }
+  },
+  "integrations_configuration": {
+    "@appstrate/discord": {
+      "tools": ["api_call"]
+    }
+  }
+}
+```
+
+Example prompt:
+
+```
+List the servers I belong to and tell me which ones I have not opened this week.
+```
+
+## Related
+
+- [How integrations work](/integrations/how-integrations-work)
+- [Built-in Integrations](/integrations/catalog)

@@ -47,6 +47,14 @@ export const openApiInfo = {
     { name: "Health", description: "Health check" },
     { name: "Internal", description: "Container-to-host internal routes" },
     { name: "Models", description: "LLM model configuration" },
+    {
+      name: "Model Provider Credentials",
+      description: "Connect model providers (API key or OAuth subscription) to an organization",
+    },
+    {
+      name: "Integrations",
+      description: "Connect, list and disconnect the third-party services an agent can use",
+    },
     { name: "Proxies", description: "Org-level HTTP proxy configuration" },
     { name: "Meta", description: "API documentation and specification" },
     { name: "Spaces", description: "Space management for headless API" },

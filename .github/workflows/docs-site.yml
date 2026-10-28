@@ -1,0 +1,100 @@
+name: Docs site
+
+# Builds the public documentation (docs/web, a static Next.js export) and
+# deploys it to Cloudflare Pages, which serves docs.appstrate.com.
+#
+# The site is built from this commit only: the pages in docs/site, docs/ENV.md
+# (the "Environment Variables" page) and the OpenAPI document of this checkout
+# (scripts/export-openapi.ts), which is why the OpenAPI sources and the modules
+# that contribute to it are in the path filter.
+#
+# - Pull request: build, which fails on a broken MDX page or a dead internal
+#   link or anchor (docs/web/scripts/postbuild.ts), then deploy a preview on
+#   the branch alias `<branch>.appstrate-docs.pages.dev`.
+# - Push to main: build and deploy production (the `main` branch of the
+#   project). A manual run deploys the branch it was started on.
+#
+# Setup (repository settings > Secrets and variables > Actions):
+#   secret CLOUDFLARE_API_TOKEN   token with Account > Cloudflare Pages > Edit
+#   secret CLOUDFLARE_ACCOUNT_ID  the account that owns the `appstrate-docs` project
+# Without them the deploy step is skipped and the build still runs. Pull
+# requests from forks never receive secrets, so they only build.
+on:
+  pull_request:
+    branches: [main]
+    paths: &docs-paths
+      - "docs/**"
+      - "apps/api/src/openapi/**"
+      - "apps/api/src/modules/**"
+      - "packages/module-*/src/**"
+      - "packages/core/src/api-errors.ts"
+      - "scripts/export-openapi.ts"
+      - "scripts/lib/module-openapi.ts"
+      - ".github/workflows/docs-site.yml"
+  push:
+    branches: [main]
+    paths: *docs-paths
+  workflow_dispatch:
+
+concurrency:
+  group: docs-site-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      HAS_CLOUDFLARE: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Bun
+        uses: ./.github/actions/bun-setup
+
+      # `next build` runs on Node.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "22"
+
+      # The root install provides what scripts/export-openapi.ts imports
+      # (apps/api, the modules). Plain install: see .github/actions/bun-setup.
+      - name: Install repository dependencies
+        run: bun install
+
+      - name: Install docs site dependencies
+        working-directory: docs/web
+        run: bun install --frozen-lockfile
+
+      - name: Build the site
+        working-directory: docs/web
+        run: bun run build
+
+      # The functions/ directory next to `out` (the /errors resolver) is
+      # compiled and uploaded with it.
+      - name: Deploy to Cloudflare Pages
+        if: env.HAS_CLOUDFLARE == 'true'
+        working-directory: docs/web
+        # Explicit `bash` adds `pipefail`, so a failed deploy is not hidden by `tee`.
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Through env, never `${{ }}` in the script: the head ref is chosen by
+          # whoever opened the pull request.
+          BRANCH: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
+          COMMIT_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          bun run deploy \
+            --branch "$BRANCH" \
+            --commit-hash "$COMMIT_SHA" | tee "$RUNNER_TEMP/deploy.log"
+          url=$(grep -Eo 'https://[^ ]+\.pages\.dev' "$RUNNER_TEMP/deploy.log" | tail -1 || true)
+          if [ -n "$url" ]; then
+            echo "Deployed \`$BRANCH\` to $url" >> "$GITHUB_STEP_SUMMARY"
+          fi

@@ -1,0 +1,97 @@
+---
+title: Gmail
+description: Connect Gmail to your Appstrate agents, with the direct API integration or Google's hosted MCP server.
+---
+
+## Overview
+
+Gmail is Google's email service. Appstrate ships two Gmail integrations. They are separate packages with separate connections.
+
+| Integration            | Source     | How the agent reaches Gmail                                                              |
+| ---------------------- | ---------- | ---------------------------------------------------------------------------------------- |
+| `@appstrate/gmail`     | `api_call` | Calls the Gmail REST API directly                                                        |
+| `@appstrate/gmail-mcp` | Remote MCP | Uses Google's hosted Gmail MCP server (`gmailmcp.googleapis.com`) and its tool catalogue |
+
+Both use Google OAuth 2.0 and need an OAuth client registered by an administrator. For the model behind this page, see [How integrations work](/integrations/how-integrations-work).
+
+With the MCP integration, the platform grants the OAuth scopes the selected tools need, so an agent that only searches mail is never asked for write access. No tool in its catalogue sends a message: agents create drafts.
+
+## Connect Gmail
+
+<Steps>
+<Step>
+
+Create or select a Google Cloud project ([open](https://console.cloud.google.com/projectcreate)).
+
+</Step>
+<Step>
+
+Enable the API you need in that project.
+
+</Step>
+<Step>
+
+Configure the OAuth consent screen ([open](https://console.cloud.google.com/auth/overview)).
+
+</Step>
+<Step>
+
+Create an OAuth client ID of type "Web application" and register the Appstrate redirect URI ([open](https://console.cloud.google.com/apis/credentials)).
+
+</Step>
+<Step>
+
+Register the redirect URI in the OAuth client's authorized redirect URIs: it is `APP_URL` followed by `/api/integrations/callback`, also shown in the integration's setup panel.
+
+</Step>
+<Step>
+
+In Appstrate, open the integration and register the OAuth client (client ID and client secret). See [How integrations work](/integrations/how-integrations-work#setting-up-an-integration).
+
+</Step>
+</Steps>
+
+## Use it in an agent
+
+Direct API, with a wider scope than the default. Excerpt of the agent manifest:
+
+```json
+{
+  "dependencies": {
+    "integrations": { "@appstrate/gmail": "^1.0.0" }
+  },
+  "integrations_configuration": {
+    "@appstrate/gmail": {
+      "tools": ["api_call"],
+      "scopes": ["https://www.googleapis.com/auth/gmail.modify"]
+    }
+  }
+}
+```
+
+Hosted MCP server, selecting tools. Excerpt of the agent manifest:
+
+```json
+{
+  "dependencies": {
+    "integrations": { "@appstrate/gmail-mcp": "^2.0.0" }
+  },
+  "integrations_configuration": {
+    "@appstrate/gmail-mcp": {
+      "tools": ["search_threads", "get_thread", "create_draft"]
+    }
+  }
+}
+```
+
+Example prompt:
+
+```
+Every morning at 8am, read my unread emails received since last night.
+For each email, write a 2-line summary, then create a draft recap in my mailbox.
+```
+
+## Related
+
+- [How integrations work](/integrations/how-integrations-work)
+- [Built-in Integrations](/integrations/catalog)

@@ -1,0 +1,106 @@
+---
+title: Realtime
+description: Server-Sent Event streams for run status, logs, live cost and connection changes.
+---
+
+Appstrate pushes run activity over [Server-Sent Events](https://html.spec.whatwg.org/multipage/server-sent-events.html) so dashboards, bots and agents can follow a run without polling. The web app uses the same feeds to update the run page, the run list and the notification bell as things happen.
+
+## Endpoints
+
+| Route                                       | Streams                                                   |
+| ------------------------------------------- | --------------------------------------------------------- |
+| `GET /api/realtime/runs`                    | Every run of the space you are subscribed to.             |
+| `GET /api/realtime/runs/{id}`               | One run. Its first frame is the current state of the run. |
+| `GET /api/realtime/agents/{packageId}/runs` | Every run of one agent (the agent id, URL-encoded).       |
+
+Streams stay open until you close them. They do not end when a run ends.
+
+### Authentication
+
+A browser `EventSource` cannot send headers, so these routes take credentials in the query string.
+
+- **API key**: `?token=apst_...`. The space is the key's own.
+- **Browser session** (cookie): `?orgId=<org id>&spaceId=<space id>`.
+
+```bash
+# API key
+curl -N "https://your-instance/api/realtime/runs/run_0194...?token=$APPSTRATE_KEY"
+
+# Session cookie
+curl -N -b cookies.txt \
+  "https://your-instance/api/realtime/runs?orgId=$ORG_ID&spaceId=$SPACE_ID"
+```
+
+### Query options
+
+| Parameter                     | Effect                                                                                                            |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `verbose=true`                | Include the large fields that are stripped by default (the `data` of a log line).                                 |
+| `channels=run_update,run_log` | Subscribe only to some channels. Unknown names are ignored. If nothing recognised remains, you get every channel. |
+| `view_as=...`                 | Role preview for a session, same grammar as the `X-View-As` header. Not supported with API keys.                  |
+
+## What you may receive
+
+Visibility follows [roles and permissions](/features/roles-and-permissions). The single-run and per-agent streams need `runs:read` or `runs:read-all` in the space and answer `403` otherwise. Run frames only concern runs you may see: your own with `runs:read`, the whole space with `runs:read-all`. `debug` log lines are sent only to callers who hold `runs:delete`.
+
+On `/api/realtime/runs` you receive the channels you are allowed to read: `run_update`, `run_log` and `run_metric` need a run read, `connection_update` is held back from an API key that lacks the `integrations:read` scope, `chat_session_update` needs `chat:read`.
+
+## Events
+
+| Event                 | Sent when                                                                     |
+| --------------------- | ----------------------------------------------------------------------------- |
+| `run_update`          | A run row changes: created, started, finished.                                |
+| `run_log`             | A log line is written.                                                        |
+| `run_metric`          | The running cost and token totals change (throttled per run).                 |
+| `connection_update`   | An integration connection of yours is created, updated or deleted.            |
+| `chat_session_update` | One of your chat sessions changed.                                            |
+| `ping`                | Keep-alive, sent on connect and after 30 seconds without a frame. Empty data. |
+
+There is no separate `result` event. The result is on the run: fetch `GET /api/runs/{id}` once the status is terminal.
+
+### Frame shapes
+
+Top-level keys are camelCase. Nested objects keep their original snake_case keys.
+
+```
+event: run_update
+data: {"operation":"UPDATE","id":"run_0194...","packageId":"@acme/support-triage","status":"running","userId":"usr_...","endUserId":null,"orgId":"...","spaceId":"spc_...","scheduleId":null,"error":null,"startedAt":"2026-09-23T10:31:00.000Z","completedAt":null,"duration":null}
+
+event: run_log
+data: {"id":412,"runId":"run_0194...","orgId":"...","spaceId":"spc_...","type":"progress","level":"info","event":"log","message":"Fetching tickets","createdAt":"2026-09-23T10:31:02.000Z"}
+
+event: run_metric
+data: {"runId":"run_0194...","orgId":"...","spaceId":"spc_...","packageId":"@acme/support-triage","tokenUsage":{"input_tokens":8200,"output_tokens":410},"costSoFar":0.0042,"costPricingStatus":"priced"}
+
+event: ping
+data:
+```
+
+- `run_update`: `status` is one of `pending`, `running`, `success`, `failed`, `timeout`, `cancelled`. `operation` is `INSERT` or `UPDATE`. The frame carries no `result`.
+- `run_log`: `level` is `debug`, `info`, `warn` or `error`. `data` (the structured payload) is present only with `verbose=true`, and is the string `"[payload too large]"` when it does not fit.
+- `run_metric`: `costPricingStatus` can be `null`, which must not be read as `priced`. See [Run cost](/features/run-cost).
+- `connection_update`: `operation` (`INSERT`, `UPDATE`, `DELETE`), `id`, `integrationPackageId`, `authKey`, `userId`, `endUserId`, `spaceId`, `needsReconnection`, `deleted`.
+- `chat_session_update`: `sessionId`, `orgId`, `userId`. It is a change signal: refetch the session list.
+
+## Behaviour to plan for
+
+- **No replay.** A reconnect resumes on the live tail: the `Last-Event-ID` header a browser sends back is not honored. Frame ids are `<subscriber>:<n>`, unique across connections, so use them to deduplicate, not to resume. After reconnecting, fetch the current state with `GET /api/runs/{id}` and then keep listening.
+- **Slow consumers are dropped.** A subscriber with more than 2000 unsent frames, or a connection that stops accepting writes for 60 seconds, is closed. Reconnect and resync.
+- **Isolation.** A subscriber only receives events of the organization and space it authenticated against.
+- **Proxies.** The response sets `X-Accel-Buffering: no`. Make sure any reverse proxy in front of the API does not buffer `text/event-stream`.
+
+Under the hood the events come from Postgres `LISTEN/NOTIFY`, so no Redis or message broker is required and the feed works the same on the embedded PGlite database.
+
+## Example
+
+```js
+const src = new EventSource(`/api/realtime/runs/${runId}?token=${apiKey}`);
+src.addEventListener("run_update", (e) => {
+  const run = JSON.parse(e.data);
+  if (["success", "failed", "timeout", "cancelled"].includes(run.status)) src.close();
+});
+src.addEventListener("run_log", (e) => console.log(JSON.parse(e.data).message));
+src.addEventListener("run_metric", (e) => console.log("cost so far", JSON.parse(e.data).costSoFar));
+```
+
+For a server-side wait on a single result, `GET /api/runs/{id}?wait=55` is simpler. See [Runs](/features/runs#waiting-for-the-result).

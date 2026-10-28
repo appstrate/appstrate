@@ -1,0 +1,102 @@
+---
+title: "SSH"
+description: "Connect a server to your Appstrate agents over SSH: run commands and read or write files as one Unix account, with a key the platform generates."
+---
+
+## Overview
+
+SSH lets an agent reach a host that has `sshd` and no HTTP API: a VPS, a NAS, a build machine. Each connection is one key on one Unix account of one host.
+
+Integration: `@appstrate/ssh`, a local runner. It runs the `@appstrate/ssh-mcp` server package in a sandboxed runner container, which shells out to the `ssh` and `sftp` clients. For how this works, see [How integrations work](/integrations/how-integrations-work). Local runners need the `docker` or `firecracker` run adapter, as described in [Progressive Infrastructure](/self-hosting/progressive-infrastructure).
+
+## The Unix account is the security boundary
+
+Appstrate adds no allowlist of its own and does not narrow the account any further. What an agent can do through a connection is exactly what the Unix account can do: `ssh_exec` hands its command to the account's login shell. Grant `root` only if you mean it. Otherwise create a dedicated user on the host and restrict it with the tools the system already gives you: `sudoers`, groups, a restricted shell. The account needs a POSIX shell, because SSH runs every command through it and an account set to `nologin` would execute nothing.
+
+## Tools
+
+| Tool             | What it does                                                                                                                                                                                 | Changes the host |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
+| `ssh_probe`      | Connects, verifies the pinned host key and authenticates, then reports how the host was reached. Runs nothing on the host.                                                                   | No               |
+| `ssh_read`       | Reads a remote path over SFTP: a directory listing, or a UTF-8 text file with numbered lines, up to 256 KiB per call. Binary files and files over 8 MiB are refused.                         | No               |
+| `ssh_exec`       | Runs a command as the account. It times out after `timeout_seconds` (default 120, at most 600), and the remote process may keep running after a timeout, so wrap long commands in `timeout`. | Yes              |
+| `ssh_write_file` | Creates or overwrites a remote file over SFTP, 8 MiB at most. A new file is created with mode `0600`.                                                                                        | Yes              |
+| `ssh_edit_file`  | Replaces one exact string in a remote UTF-8 text file, keeping its mode and owner.                                                                                                           | Yes              |
+
+Relative paths start at the account's home directory, and `~` is not expanded. The server handles one call at a time, so a long `ssh_exec` holds up the other SSH tools until it returns.
+
+## Read-only agents
+
+Read-only is a property of the agent, not of the connection. Grant an agent `ssh_probe` and `ssh_read` and withhold `ssh_exec`, `ssh_write_file` and `ssh_edit_file`: a tool that is not selected is not available to that agent, so it cannot change the host through this integration. The same connection can serve a reader agent and a writer agent.
+
+A reader built this way can browse directories and read files up to 8 MiB, but it cannot search. For log analysis, grant `ssh_exec` on a dedicated, restricted account instead.
+
+## Reachable hosts
+
+The runner can reach only the host and port of the connection. The host must be a DNS name or a public IPv4 address. IPv6 is not supported, and a private, loopback or link-local address is refused, so a server on your local network cannot be reached.
+
+## Connect a host
+
+Appstrate never asks you for a private key. The platform generates the ed25519 key pair itself: the private half is stored with the connection's credentials, delivered to the runner as a file, never shown and never given to the agent's container. Reconnecting the same host, port and account reuses the existing pair, so the key already installed on the host keeps working. A changed host, port or account gets a new pair.
+
+<Steps>
+<Step>
+
+On the server, read the host's public key from a session you already trust. Prefer the ed25519 key:
+
+```bash
+awk '{print $1" "$2}' /etc/ssh/ssh_host_ed25519_key.pub
+```
+
+Use `/etc/ssh/ssh_host_rsa_key.pub` only if the server has no ed25519 key. Do not fetch it over the network: a fetch over an unauthenticated connection is exactly what an interceptor can forge.
+
+</Step>
+<Step>
+
+In Appstrate, open the integration and fill in the hosted connect form: the host, the SSH port (22 by default), the Unix account that will carry the key, and the host key from the previous step. The host key is pinned, so any later change refuses the connection. There is no trust on first use.
+
+</Step>
+<Step>
+
+After the connection is created, the page shows a block to paste on the server as root or with `sudo`. It authorizes the public key on the account with the `restrict` option (no port forwarding, agent forwarding, X11 or pty), and its last line prints the host's own fingerprint: compare it with the fingerprint shown on the page.
+
+</Step>
+</Steps>
+
+The server must run OpenSSH 7.2 or later. An older `sshd` rejects the `restrict` option, so the block reads the `sshd` version first and stops before writing anything if it is older. On an account with a locked password, the block warns unless `sshd -T` reports `usepam yes`.
+
+The same page shows a second block that removes the key from the server. Keep it. Deleting the connection destroys the private key held by Appstrate but cannot reach your server to remove the line from `authorized_keys`, and once the connection is deleted Appstrate can no longer show the block.
+
+An agent can bind several SSH connections in one run (up to 20 per integration), and each tool then takes a `connection` parameter, as described in [Tools](/features/tools). Binding several SSH connections to one run works only under the `docker` adapter.
+
+## Use it in an agent
+
+A read-only agent. Excerpt of the agent manifest:
+
+```json
+{
+  "dependencies": {
+    "integrations": { "@appstrate/ssh": "^1.0.0" }
+  },
+  "integrations_configuration": {
+    "@appstrate/ssh": {
+      "tools": ["ssh_probe", "ssh_read"]
+    }
+  }
+}
+```
+
+An agent that may change the host lists `ssh_exec`, `ssh_write_file` and `ssh_edit_file` as well.
+
+Example prompt:
+
+```
+Read /etc/os-release on the web host and tell me which distribution and version it runs.
+```
+
+## Related
+
+- [How integrations work](/integrations/how-integrations-work)
+- [Tools](/features/tools)
+- [Isolation and Security](/self-hosting/isolation-and-security)
+- [Built-in Integrations](/integrations/catalog)

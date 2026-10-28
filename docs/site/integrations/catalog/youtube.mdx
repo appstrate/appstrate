@@ -1,0 +1,75 @@
+---
+title: YouTube
+description: Connect YouTube to your Appstrate agents.
+---
+
+## Overview
+
+YouTube is Google's video platform. The integration lets agents read channel and video data, and upload videos when the matching scopes are granted.
+
+Integration: `@appstrate/youtube`, reached through the `api_call` tool. For how this works, see [How integrations work](/integrations/how-integrations-work).
+
+## Connect YouTube
+
+An administrator registers an OAuth client once, then members connect their own accounts.
+
+<Steps>
+<Step>
+
+Create or select a Google Cloud project ([open](https://console.cloud.google.com/projectcreate)).
+
+</Step>
+<Step>
+
+Enable the API you need in that project.
+
+</Step>
+<Step>
+
+Configure the OAuth consent screen ([open](https://console.cloud.google.com/auth/overview)).
+
+</Step>
+<Step>
+
+Create an OAuth client ID of type "Web application" and register the Appstrate redirect URI ([open](https://console.cloud.google.com/apis/credentials)).
+
+</Step>
+<Step>
+
+Register the redirect URI in the OAuth client's authorized redirect URIs: it is `APP_URL` followed by `/api/integrations/callback`, also shown in the integration's setup panel.
+
+</Step>
+<Step>
+
+In Appstrate, open the integration and register the OAuth client (client ID and client secret). See [How integrations work](/integrations/how-integrations-work#setting-up-an-integration).
+
+</Step>
+</Steps>
+
+## Use it in an agent
+
+Excerpt of the agent manifest:
+
+```json
+{
+  "dependencies": {
+    "integrations": { "@appstrate/youtube": "^1.0.0" }
+  },
+  "integrations_configuration": {
+    "@appstrate/youtube": {
+      "tools": ["api_call"]
+    }
+  }
+}
+```
+
+Example prompt:
+
+```
+List the ten latest videos of my channel with their view counts and write a weekly performance note.
+```
+
+## Related
+
+- [How integrations work](/integrations/how-integrations-work)
+- [Built-in Integrations](/integrations/catalog)

@@ -349,6 +349,20 @@ const config: KnipConfig = {
    */
   exclude: ["duplicates"],
 
+  /**
+   * `docs/web` is the public documentation site: a Next.js app with its own
+   * `package.json` and `bun.lock`, deliberately outside the root `workspaces`
+   * so Next.js and fumadocs stay out of this lockfile. Its entries are the
+   * App Router's file conventions under `app/` (`page.tsx`, `layout.tsx`,
+   * `route.ts`), a Cloudflare Pages Function, and scripts its own manifest
+   * runs; none of them is reachable from a workspace this config models, and
+   * its dependencies resolve from its own `node_modules`. Without this, every
+   * file in it reads as unused. Its build, type check and link check run in
+   * `.github/workflows/docs-site.yml`; `lint` and `verify:license-boundary`
+   * still cover its tracked sources here.
+   */
+  ignore: ["docs/web/**"],
+
   workspaces: {
     // The root manifest is private and declares no `exports`, `bin` or
     // `main`, so `manifestEntries` derives nothing for it.
@@ -393,6 +407,10 @@ const config: KnipConfig = {
         "scripts/bench/chat/ui-instrument.js",
         // Documentation examples, compiled by their own README instructions.
         "examples/**/*.ts",
+        // Writes the OpenAPI document for the docs site. Run by
+        // `docs/web/package.json` (`bun run content`), which is outside the
+        // workspaces, so no manifest knip reads names it.
+        "scripts/export-openapi.ts",
       ],
       // The examples illustrate what a *consumer* writes; the SDK they import
       // is deliberately not a dependency of this repo's root manifest.

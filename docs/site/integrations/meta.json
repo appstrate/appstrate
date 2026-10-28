@@ -1,0 +1,13 @@
+{
+  "title": "Integrations",
+  "icon": "Plug",
+  "collapsible": false,
+  "defaultOpen": true,
+  "pages": [
+    "how-integrations-work",
+    "catalog",
+    "custom-integrations",
+    "llm-models",
+    "personal-agents"
+  ]
+}
