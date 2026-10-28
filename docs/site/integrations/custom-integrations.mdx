@@ -350,7 +350,7 @@ The import validates the manifest and rejects what the platform cannot run: unkn
 In the dashboard, **New integration** on the **Integrations** page (with `integrations:write`) offers four ways in: **From an MCP URL**, **Create manually**, **Build with Chat** and **Import a package**.
 
 <Callout type="info" title="Preview">
-The guided creation from an MCP server URL is not yet in the latest release.
+  The guided creation from an MCP server URL is not yet in the latest release.
 </Callout>
 
 **From an MCP URL** is the guided route for a hosted MCP server. Paste the address and choose **Continue**: Appstrate probes the server (`POST /api/integrations/discover`) and proposes a name, an identifier, an icon and how an account connects, each line marked as detected or suggested, and lists the integrations already available at the same address. **Create** saves a draft and activates it in the space, without publishing. You then connect an account (Appstrate reads the server's tools through it), choose the tools (the ones the server marks read-only are checked in advance, never the destructive ones) and publish. The server's instructions can be saved as `INTEGRATION.md` on the way. **Use in an agent** then opens agent creation with the integration ticked. A server that needs no credential skips the connection step, and a remote integration that exposes no tool yet offers **Finish setup** on its page. **Continue with manual configuration** at the review step hands the proposal to the editor.

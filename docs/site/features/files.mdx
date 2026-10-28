@@ -61,13 +61,13 @@ On the run page, the **Results** tab lists the files the run produced, and the *
 
 ## Using the API
 
-| Method and route              | Purpose                                                                                                                                                                       |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Method and route              | Purpose                                                                                                                                                                                |
+| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET /api/files`              | List files you can see. Filters: `purpose`, `runId`, `packageId`, `chat_session_id`, and `q` (Preview: case-insensitive search over names). Paginate with `startingAfter` and `limit`. |
-| `GET /api/files/{id}`         | Metadata: `uri`, `purpose`, `name`, `mime`, `size`, `sha256`, `downloadable`, `expiresAt`, and a short-lived `preview_url` for previewable files.                             |
-| `GET /api/files/{id}/content` | Download, as an attachment. Answers `307` to a presigned URL when the storage supports it, and streams otherwise.                                                             |
-| `POST /api/files/{id}/keep`   | Make a file permanent by clearing its expiry.                                                                                                                                 |
-| `DELETE /api/files/{id}`      | Delete it. `409 file_in_use` while a run still references it.                                                                                                                 |
+| `GET /api/files/{id}`         | Metadata: `uri`, `purpose`, `name`, `mime`, `size`, `sha256`, `downloadable`, `expiresAt`, and a short-lived `preview_url` for previewable files.                                      |
+| `GET /api/files/{id}/content` | Download, as an attachment. Answers `307` to a presigned URL when the storage supports it, and streams otherwise.                                                                      |
+| `POST /api/files/{id}/keep`   | Make a file permanent by clearing its expiry.                                                                                                                                          |
+| `DELETE /api/files/{id}`      | Delete it. `409 file_in_use` while a run still references it.                                                                                                                          |
 
 Listing and downloading need `files:read`. Deleting or keeping a file needs `files:delete`, or being the file's creator on a credential that carries `files:delete`. `read` is held by all five preset space roles, `delete` by `admin` and `builder`. See [Roles and permissions](/features/roles-and-permissions).
 

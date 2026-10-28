@@ -42,15 +42,15 @@ The call is fire-and-forget: it answers `201` with the created run resource (the
 
 The body is closed (an unknown field is a `400`) and every field is optional:
 
-| Field                  | Meaning                                                                                                                                                              |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `input`                | Values for the agent's input schema. File fields take `upload://`, `appfile://` or inline data URIs (see [Files](/features/files)).                                  |
-| `rerun_from`           | A previous run id whose stored input is replayed. Mutually exclusive with `input`. The run must belong to the same agent (`409 rerun_agent_mismatch`).               |
-| `modelId`              | Model for this run only (system model key or organization model id).                                                                                                 |
-| `generation`           | Per-run `temperature` and `reasoning_level`.                                                                                                                         |
-| `proxyId`              | Proxy for this run, or `"none"` for direct egress.                                                                                                                   |
+| Field                  | Meaning                                                                                                                                                                        |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `input`                | Values for the agent's input schema. File fields take `upload://`, `appfile://` or inline data URIs (see [Files](/features/files)).                                            |
+| `rerun_from`           | A previous run id whose stored input is replayed. Mutually exclusive with `input`. The run must belong to the same agent (`409 rerun_agent_mismatch`).                         |
+| `modelId`              | Model for this run only (system model key or organization model id).                                                                                                           |
+| `generation`           | Per-run `temperature` and `reasoning_level`.                                                                                                                                   |
+| `proxyId`              | Proxy for this run, or `"none"` for direct egress.                                                                                                                             |
 | `connection_overrides` | Per-integration connection picks, as arrays of connection ids. A set imposed by an admin pin or an enforced default is always bound: an override can only add to it (Preview). |
-| `dependency_overrides` | Per-run version overrides for skills and integrations. `"draft"` requires write access to that package.                                                              |
+| `dependency_overrides` | Per-run version overrides for skills and integrations. `"draft"` requires write access to that package.                                                                        |
 
 Query parameter `version` chooses the agent definition: `published` (default, the latest published version), a version, dist-tag or semver range, or `draft` for callers who can write the agent. The run records the definition it used in `version_ref`.
 
