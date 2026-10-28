@@ -83,7 +83,7 @@ curl -X PATCH https://your-instance/api/spaces/spc_... \
 
 - `name`: 1 to 100 characters.
 - `settings.allowedRedirectDomains`: up to 20 domains allowed as OAuth redirect targets.
-- `icon` and `color`: the space's visual identity, shown in the organization switcher and the list of spaces (**Icon and colour** in the space settings). `icon` is a Lucide icon (`lucide:<name>`) or an emoji (`emoji:<emoji>`), `color` is `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink` or `orange`, and `null` clears either. A personal space accepts neither (`409 personal_space_immutable`).
+- `icon` and `color` (Preview): the space's visual identity, shown in the organization switcher and the list of spaces (**Icon and colour** in the space settings). `icon` is a Lucide icon (`lucide:<name>`) or an emoji (`emoji:<emoji>`), `color` is `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink` or `orange`, and `null` clears either. A personal space accepts neither (`409 personal_space_immutable`).
 - `visibility` and `default_role` are changed with `PATCH`. Setting a default role or opening a space requires that you hold every permission of that role.
 - API keys cannot create spaces, and a key only lists its own space.
 - `GET /api/spaces` lists the spaces you reach, each with your `role`, your effective `permissions` and `access` (`member` or `none`).

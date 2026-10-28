@@ -92,7 +92,7 @@ curl https://your-instance/api/schedules/sched_xxx/runs -H "Authorization: Beare
 curl -X DELETE https://your-instance/api/schedules/sched_xxx -H "Authorization: Bearer apst_your_key"
 ```
 
-Pausing keeps the schedule and removes its job, so no tick fires. `GET /api/schedules/{id}` answers with an `ETag`, and `PATCH` accepts it as `If-Match` (`412` when it no longer matches). A `PATCH` is judged against the schedule as it was when the request started: if another write lands in between, it answers `409 schedule_modified_concurrently`, writes nothing, and you reload and retry. Deleting the agent deletes its schedules.
+Pausing keeps the schedule and removes its job, so no tick fires. `GET /api/schedules/{id}` answers with an `ETag` (Preview), and `PATCH` accepts it as `If-Match` (`412` when it no longer matches). A `PATCH` is judged against the schedule as it was when the request started: if another write lands in between, it answers `409 schedule_modified_concurrently`, writes nothing, and you reload and retry. Deleting the agent deletes its schedules.
 
 Permissions: `schedules:read`, `schedules:write`, `schedules:delete`. The `builder` and `admin` space roles hold all three, `operator` can only read. Listing the runs of a schedule additionally needs a run read permission.
 

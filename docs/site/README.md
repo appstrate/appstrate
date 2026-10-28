@@ -24,6 +24,7 @@ A page here summarises in a sentence and links to GitHub.
   repository files are GitHub URLs. The build fails on a `/docs/...` link, a dead link or a missing anchor.
 - Never rename or remove a page without a redirect for its old URL in `docs/web/public/_redirects`.
 - Escape `{`, `}` and bare `<` outside code fences (MDX).
+- The docs follow `main`, the cloud and `get.appstrate.dev` follow the latest release. Mark what `main` has and the release lacks with `<Callout type="info" title="Preview">` (one sentence naming the feature, no version or PR number), or "(Preview)" in a sentence or table cell. Prove it with `git merge-base --is-ancestor <sha> <last release tag>` (exit 1 means Preview). API operations the cloud does not serve yet are marked by the build; when a release ships, remove the notes of the features it contains (`grep -rn 'title="Preview"' docs/site`).
 - Verify a claim against the code before writing it. A command, a default, an endpoint or a name
   that cannot be checked does not belong in the docs.
 
@@ -55,9 +56,9 @@ Cloudflare Pages project `appstrate-docs`, which serves `docs.appstrate.com`.
 - **Redirects.** `docs/web/public/_redirects` (Cloudflare syntax, first match wins). It maps the pages
   removed before the move and sends any other `/docs/<path>` to `/<path>`, so the old paths keep working
   once `appstrate.com/docs/*` forwards to this host.
-- **Error URIs.** The API's `type: https://docs.appstrate.dev/errors/<code>` and the runtime's
-  `/errors/afps/<code>` are answered by `docs/web/functions/errors/[[path]].ts`, which redirects to the
-  matching `code-<code>` or `code-afps-<code>` anchor of `/api/errors`.
+- **Error URIs.** The API's `type: https://docs.appstrate.dev/errors/<code>` is answered by
+  `docs/web/functions/errors/[[path]].ts`, which redirects to the matching `code-<code>` anchor of
+  `/api/errors`.
 
 ## Keeping the docs true
 

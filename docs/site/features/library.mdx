@@ -77,9 +77,9 @@ Each placement reports `via` (`home`, `shared`, `system`) and `state` (`active`,
 
 | Endpoint                            | Who                                                  | What it shows                                                                                                                       |
 | ----------------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /api/library`                  | Any member, graded by the spaces and types they read | The packages of the organization and the system, grouped by type, with the map of the spaces each is placed in and whether it runs. |
+| `GET /api/library`                  | Any member (Preview), graded by the spaces and types they read | The packages of the organization and the system, grouped by type, with the map of the spaces each is placed in and whether it runs. |
 | `GET /api/spaces/{spaceId}/library` | Readers of that space                                | The packages placed in this space with their state and the switch, plus the ones you could still place here.                        |
 
-In the web app, both are the **Catalog** in the sidebar, with one page per kind of package (agents, skills, MCP servers, integrations) and two views: **Discover** and **By space**. API keys receive a `403` on `GET /api/library`.
+In the web app, both are the **Catalog** in the sidebar (Preview), with one page per kind of package (agents, skills, MCP servers, integrations) and two views: **Discover** and **By space**. API keys receive a `403` on `GET /api/library`.
 
 The agents, skills, integrations and MCP server lists of a space show only what the space can **launch**, meaning active packages. The library endpoints show what is **placed**, active or not. Each view only lists the spaces and types you may read.

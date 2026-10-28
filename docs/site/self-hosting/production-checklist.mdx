@@ -23,6 +23,10 @@ TRUST_PROXY=1
 
 With `NODE_ENV=production`, `APP_URL` must be HTTPS (loopback excepted), and an HTTPS `APP_URL` with `TRUST_PROXY=false` refuses to boot. `TRUST_PROXY` is the number of proxies that append to `X-Forwarded-For`, and a value higher than your topology lets callers spoof their IP. Raise the proxy's body limit above your largest upload (100 MiB by default) and do not buffer or compress event streams. See [Docker Compose](/self-hosting/docker-compose#reverse-proxy).
 
+<Callout type="info" title="Preview">
+The instance's own metadata document as an OAuth client, and the `INTEGRATION_OAUTH_CIMD` setting, are not yet in the latest release.
+</Callout>
+
 Remote MCP integrations connect by OAuth, and by default this instance presents a metadata document at `APP_URL` to authorization servers that accept one, which only works when `APP_URL` is reachable from the internet. If it is not (internal hostname, split DNS, an access proxy), set `INTEGRATION_OAUTH_CIMD=off` so the instance registers its clients dynamically instead. Changing the origin of `APP_URL` later flags the connections minted with a document client for reconnection. See [Environment Variables](/self-hosting/environment-variables).
 
 ## Generate and protect the secrets

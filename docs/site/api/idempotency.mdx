@@ -17,7 +17,7 @@ Only the operations that declare an `Idempotency-Key` parameter in the OpenAPI d
 | `POST /api/end-users`                 | A retry must not create a second end-user                                          |
 | `POST /api/webhooks`                  | A retry must not create a second webhook (the response carries the signing secret) |
 | `POST /api/oauth/clients`             | A retry must not register a second OAuth client                                    |
-| `POST /api/models/apply`              | A retry must not mint a second model credential                                    |
+| `POST /api/models/apply` (Preview)    | A retry must not mint a second model credential                                    |
 
 The header is refused elsewhere. A `POST`, `PUT`, `PATCH`, or `DELETE` that carries `Idempotency-Key` to an operation that does not honor it fails with `400` and `code: "idempotency_not_supported"`, rather than being silently executed without the guarantee you asked for. Do not add the header to every outbound request. `GET`, `HEAD`, and `OPTIONS` ignore it. The authentication endpoints under `/api/auth/*` neither honor nor refuse it. On the credential proxy (`/api/credential-proxy/proxy`) the header belongs to the upstream API: it is relayed with your other headers, and Appstrate de-duplicates nothing on it.
 

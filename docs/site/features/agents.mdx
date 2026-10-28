@@ -122,7 +122,7 @@ The fields the platform reads:
 | `dependencies.skills` / `mcp_servers` / `integrations` | Flat maps of package id to semver range.                                                                                                                                                                                                                                                                        |
 | `integrations_configuration.<id>`                      | Per-integration selection: `tools`, `scopes`, `auth_key`. Every key must match a declared integration dependency.                                                                                                                                                                                               |
 | `runtime_tools`                                        | Opt-in first-party tools: `output`, `log`, `note`, `pin`, `publish_file`. None is injected by default.                                                                                                                                                                                                          |
-| `icon`, `_meta["dev.appstrate/ui"].color`              | Optional visual identity of the agent in the web app: `icon` is `lucide:<name>`, `emoji:<emoji>` or an inline `data:image/webp` or `data:image/png` image, `color` is `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink` or `orange`. Without a `color`, one is derived from the agent id. |
+| `icon`, `_meta["dev.appstrate/ui"].color`              | Optional visual identity of the agent in the web app (Preview): `icon` is `lucide:<name>`, `emoji:<emoji>` or an inline `data:image/webp` or `data:image/png` image, `color` is `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink` or `orange`. Without a `color`, one is derived from the agent id. |
 | `_meta["dev.appstrate/resources"]`                     | Optional memory and CPU hints. See [Configuring agent resources](https://github.com/appstrate/appstrate/blob/main/docs/guides/configuring-agent-resources.md).                                                                                                                                                  |
 
 The platform validates manifests on every write path. An unknown `runtime_tools` id is rejected on author input and dropped (with a report) when read back from a stored manifest.
@@ -133,7 +133,7 @@ The platform validates manifests on every write path. An unknown `runtime_tools`
 
 - the environment (ephemeral container, network access, timeout, workspace layout);
 - the skills (files under `.pi/skills/`, announced to the model by the runtime from their `SKILL.md` frontmatter);
-- a catalog of the integrations started for the run (name, description and the location of its `INTEGRATION.md` when it ships one). The file itself is written under `.pi/integrations/` in the workspace, like a skill's `SKILL.md`, and the agent reads it before its first call to that integration;
+- a catalog of the integrations started for the run (name, description and the location of its `INTEGRATION.md` when it ships one). The file itself is written under `.pi/integrations/` in the workspace, like a skill's `SKILL.md` (Preview), and the agent reads it before its first call to that integration;
 - the **User Input** and **Files** of this run;
 - the **Checkpoint** and **Pinned Slots** left by earlier runs (see [Memory](/features/memory));
 - a **Deliverables** section telling it to write user-facing files under `./outputs/`;

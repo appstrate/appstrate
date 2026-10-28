@@ -131,11 +131,41 @@ async function prepareSpec() {
   await Bun.write(OPENAPI_FILE, JSON.stringify(spec, null, 2));
 }
 
+const CLOUD_OPENAPI = 'https://app.appstrate.com/api/openapi.json';
+
+const operationIds = (spec: { paths?: Record<string, Record<string, { operationId?: string }>> }) =>
+  new Set(
+    Object.values(spec.paths ?? {}).flatMap((item) =>
+      Object.values(item).flatMap((op) => (op?.operationId ? [op.operationId] : [])),
+    ),
+  );
+
+/**
+ * Operations this checkout serves and the hosted cloud does not yet: they get a
+ * Preview note. The cloud follows the releases, so the set empties by itself once
+ * it is updated. When the cloud cannot be read, no note is better than a failed build.
+ */
+async function previewOperations(): Promise<Set<string>> {
+  try {
+    const res = await fetch(CLOUD_OPENAPI, { signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const cloud = operationIds(await res.json());
+    if (cloud.size === 0) throw new Error('no operation in the cloud spec');
+    const local = operationIds(JSON.parse(await readText(OPENAPI_FILE)));
+    return new Set([...local].filter((id) => !cloud.has(id)));
+  } catch (error) {
+    console.warn(`Preview notes skipped, ${CLOUD_OPENAPI} is not readable: ${error}`);
+    return new Set();
+  }
+}
+
+const PREVIEW_NOTE = '<Callout type="info" title="Preview">\nNot yet in the latest release.\n</Callout>\n';
+
 /**
  * Operation descriptions come from the OpenAPI spec as free Markdown (`{id}`,
  * `<token>`, ...) and `generateFiles` copies them into the MDX body as is.
  */
-async function escapeGeneratedBodies(apiDir: string) {
+async function escapeGeneratedBodies(apiDir: string, preview: Set<string>) {
   for await (const file of new Bun.Glob('*/*.mdx').scan(apiDir)) {
     const path = resolve(apiDir, file);
     const text = await readText(path);
@@ -145,7 +175,8 @@ async function escapeGeneratedBodies(apiDir: string) {
       .split('\n')
       .map((line) => (line.startsWith('<APIPage') || line.startsWith('{/*') ? line : toMdx(line)))
       .join('\n');
-    await Bun.write(path, text.slice(0, end) + body);
+    const note = preview.has(file.replace(/^.*\//, '').replace(/\.mdx$/, '')) ? `\n${PREVIEW_NOTE}` : '';
+    await Bun.write(path, text.slice(0, end) + note + body);
   }
 }
 
@@ -159,8 +190,10 @@ async function writeTagIndexes(apiDir: string) {
     );
     const links = await Promise.all(
       (meta.pages ?? []).map(async (op) => {
-        const title = /^title: (.*)$/m.exec(await readText(resolve(dir, `${op}.mdx`)))?.[1];
-        return `- [${title ?? op}](/api/${entry.name}/${op})`;
+        const page = await readText(resolve(dir, `${op}.mdx`));
+        const title = /^title: (.*)$/m.exec(page)?.[1];
+        const badge = page.includes(PREVIEW_NOTE) ? ' (Preview)' : '';
+        return `- [${title ?? op}](/api/${entry.name}/${op})${badge}`;
       }),
     );
     const title = JSON.stringify(meta.title ?? entry.name);
@@ -191,7 +224,7 @@ async function generateApiReference() {
     includeDescription: true,
   });
 
-  await escapeGeneratedBodies(apiDir);
+  await escapeGeneratedBodies(apiDir, await previewOperations());
   await writeTagIndexes(apiDir);
 
   const generated = await readJson<{ pages: string[] }>(metaPath);

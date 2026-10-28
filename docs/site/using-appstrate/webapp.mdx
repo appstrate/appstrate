@@ -3,6 +3,10 @@ title: Webapp
 description: "A tour of the Appstrate dashboard: navigation, agents, runs, integrations, the catalog, spaces, and settings."
 ---
 
+<Callout type="info" title="Preview">
+The redesigned navigation and dashboard described on this page are not yet in the latest release.
+</Callout>
+
 The webapp is the dashboard served by the instance itself, at `http://localhost:3000` on a local install. It uses the same [authentication](/api/authentication) as the REST API (cookie sessions), is available in French and English (change it under **Settings → Account → Appearance**), and shows each person only the pages their role can reach.
 
 ## First login
@@ -20,7 +24,7 @@ Onboarding for a new organization has three steps: create the organization (a de
 
 The sidebar has four parts, top to bottom:
 
-- **The organization switcher** at its head. It lists your organizations and, for the one you open, its spaces (the switcher calls them workspaces). Picking one applies the organization and the space together. Each organization and space shows its own icon and color.
+- **The organization switcher** at its head. It lists your organizations and, for the one you open, its spaces (the switcher calls them workspaces). Picking one applies the organization and the space together. Each organization and space shows its own icon and color (Preview).
 - **Studio and Chat tabs.** **Studio** is the management console below. **Chat** swaps the sidebar for your conversations and the [assistant](/using-appstrate/chat), with a badge for unread ones. The Chat tab only appears when the chat module is on and your role can write in the chat, or already has conversations to reread.
 - **The Studio navigation.** Two groups, each shown only for the pages your role can reach:
 
@@ -46,7 +50,7 @@ Open an agent for its tabs: **Overview**, **Runs**, **Memory** and **Settings**.
 
 An agent's **Settings** tab has a left rail in three groups. **Explore** holds the package's **Files** and **Versions** (history, diff, restore). **Configuration** holds what is set for this space: **Model**, **Proxy**, **Default inputs**, **Connections** and **Schedules**. **AFPS package** holds the definition, for people who can write it: **General** (name, description, icon and color, the prompt is in `prompt.md` under Files), **Schemas** (input and output), **Skills**, **Integrations** and **Tools**. A section your role cannot open stays in the rail with a lock and says why.
 
-Each index page (Agents, Skills, Integrations) has an **Actions** menu in its header: **Browse the catalog**, **Import** and **New agent** (or **New skill**, **New integration**). **New** opens a choice: **Create manually** (a short form, the rest is set in the package's settings), **Build with Chat**, **Import a package** (an `.afps` or `.zip` archive or a GitHub URL), and for an integration first **From an MCP URL**, which guides you from the address of a remote MCP server to an integration and its tools. Local MCP servers are imported, not created from a form. Packages have a draft you edit, and versions you publish from it.
+Each index page (Agents, Skills, Integrations) has an **Actions** menu in its header: **Browse the catalog**, **Import** and **New agent** (or **New skill**, **New integration**). **New** opens a choice: **Create manually** (a short form, the rest is set in the package's settings), **Build with Chat**, **Import a package** (an `.afps` or `.zip` archive or a GitHub URL), and for an integration first **From an MCP URL** (Preview), which guides you from the address of a remote MCP server to an integration and its tools. Local MCP servers are imported, not created from a form. Packages have a draft you edit, and versions you publish from it.
 
 Agents that use integrations need a **connection** for each. Connect your accounts from the agent's Connections section or from the integration's page. **Settings → Account → My connections** lists them, to edit a connection's label, choose the spaces it is shared with, or disconnect it. A run is refused until each required integration has a working connection, and one whose sign-in expired is flagged for reconnection. When several connections could serve an integration, the run form, the schedule form and the agent's Connections section offer the same connection menu to choose one, and an administrator can impose connections that members cannot remove. See [How integrations work](/integrations/how-integrations-work).
 
@@ -58,7 +62,7 @@ The **Catalog** (footer of the sidebar) lists what the organization and Appstrat
 
 ## Settings
 
-**Settings** (footer of the sidebar) opens over the page you were on, in three sections. Pages that edit text or values that only make sense together show a save bar with **Save** and **Cancel**, and ask before you leave with unsaved edits. A single choice, such as a switch, a menu or an icon, applies at once.
+**Settings** (footer of the sidebar) opens over the page you were on, in three sections. Pages that edit text or values that only make sense together show a save bar with **Save** and **Cancel**, and ask before you leave with unsaved edits (Preview). A single choice, such as a switch, a menu or an icon, applies at once.
 
 | Section      | Page           | Purpose                                                                                                                                              |
 | ------------ | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |

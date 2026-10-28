@@ -88,6 +88,10 @@ In the web app, **Settings** has an **Organization** section: **Users** manages 
 
 ## Icon and color
 
+<Callout type="info" title="Preview">
+The icon and color of an organization are not yet in the latest release.
+</Callout>
+
 An organization has an `icon` and a `color`, shown in the navigation and the organization switcher (**Icon and colour** in the organization settings). `PATCH /api/orgs/{orgId}` writes them with `org:update`: `icon` is a Lucide icon (`lucide:<name>`), an emoji (`emoji:<emoji>`) or a small WebP or PNG image sent as a base64 data URI, `color` is a palette key, and `null` clears either.
 
 ## Organization settings

@@ -49,7 +49,7 @@ The body is closed (an unknown field is a `400`) and every field is optional:
 | `modelId`              | Model for this run only (system model key or organization model id).                                                                                                 |
 | `generation`           | Per-run `temperature` and `reasoning_level`.                                                                                                                         |
 | `proxyId`              | Proxy for this run, or `"none"` for direct egress.                                                                                                                   |
-| `connection_overrides` | Per-integration connection picks, as arrays of connection ids. A set imposed by an admin pin or an enforced default is always bound: an override can only add to it. |
+| `connection_overrides` | Per-integration connection picks, as arrays of connection ids. A set imposed by an admin pin or an enforced default is always bound: an override can only add to it (Preview). |
 | `dependency_overrides` | Per-run version overrides for skills and integrations. `"draft"` requires write access to that package.                                                              |
 
 Query parameter `version` chooses the agent definition: `published` (default, the latest published version), a version, dist-tag or semver range, or `draft` for callers who can write the agent. The run records the definition it used in `version_ref`.
@@ -110,7 +110,7 @@ A finished run exposes:
 
 - `result.output`: the structured value passed to the `output` tool, validated against `output.schema` when one exists. It is `null` while the run is in flight or when no output was emitted.
 - `error`: a message when the run did not succeed, kept verbatim for debugging.
-- `model_error`: for a run that failed on a model call, a `category` (`credential_unavailable`, `rate_limited`, `upstream_unavailable`, `invalid_request` or `unknown`), whether it is `retryable`, and the provider's `status` and `message`. It is `null` on every other run. Branch on it, not on the `error` text.
+- `model_error` (Preview): for a run that failed on a model call, a `category` (`credential_unavailable`, `rate_limited`, `upstream_unavailable`, `invalid_request` or `unknown`), whether it is `retryable`, and the provider's `status` and `message`. It is `null` on every other run. Branch on it, not on the `error` text.
 - **Files**: deliverables the agent wrote under `./outputs/` or published with `publish_file` (see [Files](/features/files)). `file_counts` gives the number of input and output files. `artifacts` summarises the end-of-run sweep (`complete` or `partial`, with the names of any files that could not be stored).
 - `checkpoint`: the carry-over snapshot of the run (see [Memory](/features/memory)).
 - `connections_used`: the connections bound to the run, for display.
@@ -166,7 +166,7 @@ The call returns the updated run, already `cancelled`, once the sandbox has been
 
 ## Listing and deleting
 
-`GET /api/runs` lists the runs of the current space. Filters: `user=me`, `kind` (`all`, `package`, `inline`), `status` (one or several, comma-separated, as in `status=failed,timeout`), `q` (free text on the agent and the error, or on the run number), `start_date`, `end_date`, `chat_session_id`, with `limit` (max 100) and `offset`. `GET /api/agents/{scope}/{name}/runs` lists one agent's runs.
+`GET /api/runs` lists the runs of the current space. Filters: `user=me`, `kind` (`all`, `package`, `inline`), `status` (one or several, comma-separated, as in `status=failed,timeout`; several values are Preview), `q` (Preview: free text on the agent and the error, or on the run number), `start_date`, `end_date`, `chat_session_id`, with `limit` (max 100) and `offset`. `GET /api/agents/{scope}/{name}/runs` lists one agent's runs.
 
 Visibility follows [roles and permissions](/features/roles-and-permissions): `runs:read` shows the runs you launched, `runs:read-all` shows every run of the space. `DELETE /api/agents/{scope}/{name}/runs` deletes the completed runs of an agent and needs `runs:delete` plus `runs:read-all`. It is refused while a run of that agent is in progress.
 
