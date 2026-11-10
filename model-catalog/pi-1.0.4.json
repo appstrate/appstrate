@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "sdk_version": "1.0.4",
-  "source_version": "1.5.1",
-  "serial": 1794295421,
+  "source_version": "1.5.2",
+  "serial": 1794339996,
   "records": [
     {
       "provider": "amazon-bedrock",
@@ -1573,6 +1573,43 @@
     {
       "provider": "meta",
       "api": "openai-responses",
+      "id": "muse-ember-1.0",
+      "name": "Muse Ember",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "cost": {
+        "input": 0.1,
+        "output": 0.5,
+        "cacheRead": 0.004,
+        "cacheWrite": 0,
+        "tiers": [
+          {
+            "inputTokensAbove": 200000,
+            "input": 0.3,
+            "output": 1.5,
+            "cacheRead": 0.012,
+            "cacheWrite": 0
+          }
+        ]
+      },
+      "contextWindow": 1048576,
+      "maxTokens": 524288,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": "minimal",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      }
+    },
+    {
+      "provider": "meta",
+      "api": "openai-responses",
       "id": "muse-wonder-1.0",
       "name": "Muse Wonder",
       "reasoning": true,
@@ -2865,9 +2902,9 @@
         "image"
       ],
       "cost": {
-        "input": 0.075,
-        "output": 0.3,
-        "cacheRead": 0.0075,
+        "input": 0.15,
+        "output": 0.6,
+        "cacheRead": 0.015,
         "cacheWrite": 0
       },
       "contextWindow": 1048576,
@@ -2973,6 +3010,40 @@
         "high": "high",
         "xhigh": null,
         "max": "max"
+      },
+      "compat": {
+        "supportsDeveloperRole": false,
+        "thinkingFormat": "openrouter",
+        "supportsStrictMode": true,
+        "sendSessionAffinityHeaders": true
+      }
+    },
+    {
+      "provider": "openrouter",
+      "api": "openai-completions",
+      "id": "nex-agi/nex-n2.6",
+      "name": "Nex AGI: Nex-N2.6",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "cost": {
+        "input": 0.12,
+        "output": 0.4,
+        "cacheRead": 0.024,
+        "cacheWrite": 0
+      },
+      "contextWindow": 262144,
+      "maxTokens": 235929,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": null,
+        "low": null,
+        "medium": "medium",
+        "high": "high",
+        "xhigh": null,
+        "max": null
       },
       "compat": {
         "supportsDeveloperRole": false,
@@ -3875,9 +3946,9 @@
         "text"
       ],
       "cost": {
-        "input": 0.623,
-        "output": 1.271,
-        "cacheRead": 0.21,
+        "input": 0.527,
+        "output": 1.075,
+        "cacheRead": 0.178,
         "cacheWrite": 0
       },
       "contextWindow": 1048576,
