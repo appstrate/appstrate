@@ -56,7 +56,6 @@
     "clickup_create_space_tag",
     "clickup_create_task",
     "clickup_create_task_comment",
-    "clickup_delete_chat_message",
     "clickup_delete_comment",
     "clickup_delete_task",
     "clickup_download_document_page_attachment",
