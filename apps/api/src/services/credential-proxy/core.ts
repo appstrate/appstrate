@@ -54,10 +54,11 @@ import { upstreamFailureDetail, type ProxyProblemCode } from "../../lib/proxy-st
 import {
   resolveIntegrationProxyCredentials,
   forceRefreshIntegrationProxyCredentials,
-  type ProxyCredentialVerdict,
+  type ForcedRefreshResult,
   IntegrationCredentialNotFoundError,
   type ProxyCallPath,
 } from "./integration-resolver.ts";
+import type { CredentialStatus } from "../../lib/credential-status-header.ts";
 import { clearUpstreamRejections } from "../integration-connections.ts";
 
 /**
@@ -168,17 +169,17 @@ interface ProxyCallResult {
   truncated?: boolean;
   /**
    * True when the upstream returned 401 on a streaming-upload call and the
-   * forced refresh served a credential to retry with (never on `retry`/`dead`). The body cannot be replayed
+   * forced refresh served a credential to retry with (never with `credential`). The body cannot be replayed
    * so the caller must surface this flag to the client and let it retry
    * with a fresh body stream.
    */
   authRefreshed?: boolean;
   /**
-   * On a relayed 401 only: the forced refresh's `retry` or `dead` verdict, which left the
-   * rejected credential in place (the route's `X-Appstrate-Credential-Status`). Absent when no
-   * refresh was tried, or when it served a replay.
+   * On a relayed 401 only: what the forced refresh concluded about the rejected credential it
+   * left in place (the route's `X-Appstrate-Credential-Status`). Absent when no refresh was
+   * tried, or when it served a credential to retry with.
    */
-  credentialVerdict?: ProxyCredentialVerdict;
+  credential?: CredentialStatus;
 }
 
 /**
@@ -210,6 +211,11 @@ function logRefreshFault(err: unknown, integrationId: string, connectionId: stri
     connectionId,
     error: getErrorMessage(err),
   });
+}
+
+/** A forced refresh's verdict, for the 401 it judged: a verdict means no replay was made. */
+function credentialOf(forced: ForcedRefreshResult): { credential?: CredentialStatus } {
+  return forced?.kind === "verdict" ? { credential: forced.credential } : {};
 }
 
 /**
@@ -394,10 +400,8 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // The jar is saved on both ways out: hops received before a throw (off-allowlist redirect,
   // SSRF, timeout) keep their Set-Cookie, as in the sidecar.
   let res: Response;
-  let credentialVerdict: ProxyCredentialVerdict | undefined;
-  const recordVerdict = (verdict: ProxyCredentialVerdict) => {
-    credentialVerdict = verdict;
-  };
+  // The forced refresh of a 401, if one ran: its verdict, when it has one, annotates that 401.
+  let forced: ForcedRefreshResult = null;
   try {
     res = await performFetch(fetchInit as RequestInit);
 
@@ -410,11 +414,11 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
       credentialForwarded
     ) {
       try {
-        const refreshed = await forceRefreshIntegrationProxyCredentials(
+        forced = await forceRefreshIntegrationProxyCredentials(
           refreshSelection,
           credentialRevision,
-          recordVerdict,
         );
+        const refreshed = forced?.kind === "replay" ? forced.payload : null;
         // A refreshed set that no longer fills the call is not replayed: the 401 stands.
         const again = refreshed ? prepareFor(refreshed.credentials) : null;
         if (again && !again.ok) {
@@ -480,17 +484,11 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
   // server-side (so the *next* call from the caller uses fresh tokens)
   // but we cannot replay the body — surface authRefreshed so the route
   // can signal the client to retry itself with a fresh body stream. Only
-  // when the refresh served a credential to retry with: on `retry`/`dead`
-  // the verdict alone is relayed, a retry would meet the same 401.
+  // when the refresh served a credential to retry with: on a verdict it
+  // alone is relayed, a retry would meet the same 401.
   if (res.status === 401 && isStreamBody && credentialInjection.kind === "inject") {
-    let served = false;
     try {
-      served =
-        (await forceRefreshIntegrationProxyCredentials(
-          refreshSelection,
-          credentialRevision,
-          recordVerdict,
-        )) !== null;
+      forced = await forceRefreshIntegrationProxyCredentials(refreshSelection, credentialRevision);
     } catch (err) {
       rethrowKeyUnavailable(err, connectionId);
       logRefreshFault(err, input.integrationId, connectionId);
@@ -501,13 +499,11 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
       status: res.status,
       headers: res.headers,
       body: res.body,
-      ...(served ? { authRefreshed: true } : {}),
-      ...(credentialVerdict ? { credentialVerdict } : {}),
+      ...(forced?.kind === "replay" ? { authRefreshed: true } : {}),
+      ...credentialOf(forced),
     };
   }
 
-  // Only the 401 it judged carries the verdict: a replay's answer is the upstream's alone.
-  const verdict = credentialVerdict && res.status === 401 ? { credentialVerdict } : {};
   const cap = input.maxResponseBytes ?? 0;
   if (cap > 0 && res.body) {
     const capped = capResponseBody(res.body, cap);
@@ -520,7 +516,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
       status: res.status,
       headers: res.headers,
       body: capped.body,
-      ...verdict,
+      ...credentialOf(forced),
       get truncated() {
         return capped.truncated;
       },
@@ -533,7 +529,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     status: res.status,
     headers: res.headers,
     body: res.body,
-    ...verdict,
+    ...credentialOf(forced),
   };
 }
 

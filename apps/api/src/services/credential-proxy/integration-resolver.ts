@@ -59,23 +59,17 @@ import {
   isUnauthenticatedIntegration,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
-import type { CredentialFailureCause } from "@appstrate/core/sidecar-types";
+import type { CredentialStatus } from "../../lib/credential-status-header.ts";
 
 /**
- * Why a forced refresh left the rejected credential in place: the `retry` or `dead` verdict of
- * {@link refreshConnectionCredential}, less its `detail` (logs only). The route relays the 401
- * annotated with its public projection (`X-Appstrate-Credential-Status`: `in_use` /
- * `needs_reconnection`, see `lib/credential-status-header.ts`), so a caller can tell a credential the
- * platform could not recover from a request the upstream refuses with a good one.
+ * What the proxy's forced refresh leaves it with: a credential to replay the call with, the
+ * {@link CredentialStatus} of a rejected credential it could not recover (the relayed 401's
+ * `X-Appstrate-Credential-Status`), or `null` when nothing accessible serves.
  */
-export type ProxyCredentialVerdict =
-  | {
-      status: "retry";
-      cause: CredentialFailureCause;
-      /** Counted rejections toward `INTEGRATION_REFRESH_MAX_FAILURES`, when this one was counted. */
-      rejections?: { failures: number; maxFailures: number };
-    }
-  | { status: "dead"; cause: CredentialFailureCause };
+export type ForcedRefreshResult =
+  | { kind: "replay"; payload: ProxyCredentialsPayload }
+  | { kind: "verdict"; credential: CredentialStatus }
+  | null;
 
 /** An `X-Run-Id` run, which also names the integration version the call is authorized against. */
 export interface ProxyRunSelection extends RunBoundSelection {
@@ -187,14 +181,13 @@ export async function resolveIntegrationProxyCredentials(
  * {@link refreshConnectionCredential} judged the rejection of the credential of `rejectedRevision`
  * (`kept`: superseded, so replay with the one the connection holds now).
  *
- * `null` — the proxy relays the upstream 401 — when nothing accessible serves, and on `retry` and
- * `dead`, which are also handed to `onVerdict` so the relayed 401 can say what was tried.
+ * On `retry` / `dead` the proxy relays the upstream 401 with their public {@link CredentialStatus}
+ * (`in_use` / `needs_reconnection`); on `null` (nothing accessible serves), with nothing.
  */
 export async function forceRefreshIntegrationProxyCredentials(
   input: ResolveIntegrationProxyInput,
   rejectedRevision: string | null,
-  onVerdict?: (verdict: ProxyCredentialVerdict) => void,
-): Promise<ProxyCredentialsPayload | null> {
+): Promise<ForcedRefreshResult> {
   const manifest = await loadManifest(input);
   const connection = await resolveConnection(input, manifest);
   if (!connection) return null;
@@ -235,19 +228,19 @@ export async function forceRefreshIntegrationProxyCredentials(
         cause: outcome.cause,
         detail: outcome.detail,
       });
-      onVerdict?.(
-        outcome.status === "retry"
-          ? {
-              status: "retry",
-              cause: outcome.cause,
-              ...(outcome.rejections ? { rejections: outcome.rejections } : {}),
-            }
-          : { status: "dead", cause: outcome.cause },
-      );
-      return null;
+      return {
+        kind: "verdict",
+        credential:
+          outcome.status === "dead"
+            ? { status: "needs_reconnection", cause: outcome.cause }
+            : { status: "in_use", cause: outcome.cause, ...outcome.rejections },
+      };
   }
   if (!fields) return null;
-  return buildPayloadFromFields(manifest, connection.authKey, fields, connection.variables);
+  return {
+    kind: "replay",
+    payload: buildPayloadFromFields(manifest, connection.authKey, fields, connection.variables),
+  };
 }
 
 /** One connection a call outside a run may use (`GET /api/credential-proxy/connections`). */

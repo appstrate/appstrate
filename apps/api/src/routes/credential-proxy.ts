@@ -390,11 +390,8 @@ export function createCredentialProxyRouter() {
         }
         // A relayed 401 the forced refresh could not recover from says what the platform
         // concluded, so the caller can tell it from a refusal of the request itself.
-        if (result.credentialVerdict) {
-          responseHeaders.set(
-            CREDENTIAL_STATUS_HEADER,
-            formatCredentialStatus(result.credentialVerdict),
-          );
+        if (result.credential) {
+          responseHeaders.set(CREDENTIAL_STATUS_HEADER, formatCredentialStatus(result.credential));
         }
 
         // Streaming response path: pipe upstream bytes through a 100 MB

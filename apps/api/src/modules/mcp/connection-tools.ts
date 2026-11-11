@@ -23,7 +23,7 @@ import { isRelayedResponse } from "../../lib/proxy-status.ts";
 import {
   CREDENTIAL_STATUS_HEADER,
   parseCredentialStatus,
-  type PublicCredentialStatus,
+  type CredentialStatus,
 } from "../../lib/credential-status-header.ts";
 import { CREDENTIAL_FAILURE_SENTENCES } from "../../lib/credential-failure.ts";
 import { PROXY_CONTROL_HEADERS } from "../../services/credential-proxy/control-headers.ts";
@@ -198,26 +198,33 @@ type Outcome =
       bytes: Uint8Array;
       truncated: boolean;
       /** The proxy's verdict on the connection's credential, on a relayed 401 it judged. */
-      credential: PublicCredentialStatus | null;
+      credential: CredentialStatus | null;
     };
+
+interface CredentialMember {
+  status: CredentialStatus["status"];
+  cause: CredentialStatus["cause"];
+  detail: string;
+  failures?: number;
+  max_failures?: number;
+}
 
 /**
  * The `credential` member of an entry: what the platform concluded about the connection's
  * credential when the upstream refused it and a forced refresh could not recover it. Without it,
  * a 401 is the upstream refusing the request with a credential the platform did not judge.
  */
-function credentialMember(verdict: PublicCredentialStatus): Record<string, unknown> {
-  return {
-    status: verdict.status,
-    cause: verdict.cause,
-    detail: CREDENTIAL_FAILURE_SENTENCES[verdict.cause],
-    ...(verdict.status === "in_use" && verdict.rejections
-      ? {
-          failures: verdict.rejections.failures,
-          max_failures: verdict.rejections.maxFailures,
-        }
-      : {}),
+function credentialMember(credential: CredentialStatus): CredentialMember {
+  const member = {
+    status: credential.status,
+    cause: credential.cause,
+    detail: CREDENTIAL_FAILURE_SENTENCES[credential.cause],
   };
+  return credential.status === "in_use" &&
+    credential.failures !== undefined &&
+    credential.maxFailures !== undefined
+    ? { ...member, failures: credential.failures, max_failures: credential.maxFailures }
+    : member;
 }
 
 /** Bytes, so `Request` derives no Content-Type from the body: the caller's is the only one. */

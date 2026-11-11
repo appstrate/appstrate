@@ -15,42 +15,32 @@
  * A 401 without the header is the upstream refusing a credential the platform did not judge (or
  * a replay's answer).
  *
- * The public projection of {@link refreshConnectionCredential}'s `retry` / `dead` verdicts: the
- * internal names never leave the platform.
+ * Produced once, where {@link refreshConnectionCredential}'s verdict is known (the proxy's
+ * forced refresh); its internal `retry` / `dead` names never leave the platform.
  */
 
 import {
   CREDENTIAL_FAILURE_CAUSES,
   type CredentialFailureCause,
 } from "@appstrate/core/sidecar-types";
-import type { ProxyCredentialVerdict } from "../services/credential-proxy/integration-resolver.ts";
 
 export const CREDENTIAL_STATUS_HEADER = "X-Appstrate-Credential-Status";
 
-/** The public status of a judged credential, as the header and `api_call` name it. */
-export type PublicCredentialStatus =
+/** What the platform concluded about a rejected credential, as the header and `api_call` name it. */
+export type CredentialStatus =
   | {
       status: "in_use";
       cause: CredentialFailureCause;
       /** Counted rejections toward `INTEGRATION_REFRESH_MAX_FAILURES`, when this one was counted. */
-      rejections?: { failures: number; maxFailures: number };
+      failures?: number;
+      maxFailures?: number;
     }
   | { status: "needs_reconnection"; cause: CredentialFailureCause };
 
-/** The public projection of the proxy's internal verdict. */
-function toPublicCredentialStatus(verdict: ProxyCredentialVerdict): PublicCredentialStatus {
-  if (verdict.status === "dead") return { status: "needs_reconnection", cause: verdict.cause };
-  return verdict.rejections
-    ? { status: "in_use", cause: verdict.cause, rejections: verdict.rejections }
-    : { status: "in_use", cause: verdict.cause };
-}
-
-export function formatCredentialStatus(verdict: ProxyCredentialVerdict): string {
-  const projected = toPublicCredentialStatus(verdict);
-  let value = `${projected.status}; cause=${projected.cause}`;
-  if (projected.status === "in_use" && projected.rejections) {
-    const { failures, maxFailures } = projected.rejections;
-    value += `; failures=${failures}; max-failures=${maxFailures}`;
+export function formatCredentialStatus(credential: CredentialStatus): string {
+  const value = `${credential.status}; cause=${credential.cause}`;
+  if (credential.status === "in_use" && credential.failures !== undefined) {
+    return `${value}; failures=${credential.failures}; max-failures=${credential.maxFailures}`;
   }
   return value;
 }
@@ -58,7 +48,7 @@ export function formatCredentialStatus(verdict: ProxyCredentialVerdict): string 
 const CAUSES: ReadonlySet<string> = new Set(CREDENTIAL_FAILURE_CAUSES);
 
 /** The status a header value carries, or `null` for a value this platform does not write. */
-export function parseCredentialStatus(value: string | null): PublicCredentialStatus | null {
+export function parseCredentialStatus(value: string | null): CredentialStatus | null {
   if (value === null) return null;
   const [status, ...params] = value.split(";").map((part) => part.trim());
   const named = new Map<string, string>();
@@ -75,6 +65,6 @@ export function parseCredentialStatus(value: string | null): PublicCredentialSta
   const failures = Number(named.get("failures"));
   const maxFailures = Number(named.get("max-failures"));
   return Number.isSafeInteger(failures) && Number.isSafeInteger(maxFailures)
-    ? { status, cause: known, rejections: { failures, maxFailures } }
+    ? { status, cause: known, failures, maxFailures }
     : { status, cause: known };
 }
