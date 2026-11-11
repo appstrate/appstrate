@@ -504,12 +504,7 @@ jobs:
       || contains(github.event.pull_request.labels.*.name, 'e2e')
       || needs.e2e-changes.result != 'success'
       || needs.e2e-changes.outputs.relevant == 'true') }}
-    # Pinned, unlike the other jobs (#2157): the step below relies on the
-    # image already carrying Chromium's shared libraries, which the GitHub
-    # Ubuntu 24.04 image does (it ships google-chrome-stable). `ubuntu-latest`
-    # is migrating to Ubuntu 26 (actions/runner-images#14748); move back once
-    # a run there is green.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
@@ -534,24 +529,14 @@ jobs:
       - name: Build frontend
         run: cd apps/web && bun run build
 
-      # No `--with-deps` / `install-deps` (#2157): its `apt-get` stalled until
-      # killed on every run, on ubuntu-latest and on ubuntu-24.04 alike, while
-      # the runner image already provides the system libraries Chromium needs.
-      # If one goes missing, Playwright's launch-time dependency check fails
-      # the specs with the list of absent libraries. The browser download is
-      # cached per Playwright version and bounded by a short timeout, so a CDN
-      # stall fails in minutes instead of eating the job budget.
-      - name: Resolve Playwright version
-        id: playwright
-        run: echo "version=$(cd e2e && node -p 'require("@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
-
-      - name: Cache Playwright browsers
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.4.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}-chromium
-
-      # A no-op on a cache hit (the revision is already on disk).
+      # No `--with-deps` / `install-deps` (#2157): `playwright install-deps`
+      # stalled until killed on every run, on ubuntu-latest and ubuntu-24.04
+      # alike, while plain `apt-get` works on the same runners (see `Install
+      # sshd` in the `unit` job). The runner image already provides Chromium's
+      # shared libraries; if one goes missing, Playwright's launch-time
+      # dependency check fails the specs and lists the absent libraries. The
+      # short timeout makes a stalled browser download fail in minutes instead
+      # of eating the job budget.
       - name: Install Playwright browsers
         timeout-minutes: 5
         run: cd e2e && npx playwright install chromium
