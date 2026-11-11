@@ -39,7 +39,11 @@ export type CredentialStatus =
 
 export function formatCredentialStatus(credential: CredentialStatus): string {
   const value = `${credential.status}; cause=${credential.cause}`;
-  if (credential.status === "in_use" && credential.failures !== undefined) {
+  if (
+    credential.status === "in_use" &&
+    credential.failures !== undefined &&
+    credential.maxFailures !== undefined
+  ) {
     return `${value}; failures=${credential.failures}; max-failures=${credential.maxFailures}`;
   }
   return value;

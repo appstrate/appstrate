@@ -237,10 +237,13 @@ export async function forceRefreshIntegrationProxyCredentials(
       };
   }
   if (!fields) return null;
-  return {
-    kind: "replay",
-    payload: buildPayloadFromFields(manifest, connection.authKey, fields, connection.variables),
-  };
+  const payload = buildPayloadFromFields(
+    manifest,
+    connection.authKey,
+    fields,
+    connection.variables,
+  );
+  return payload ? { kind: "replay", payload } : null;
 }
 
 /** One connection a call outside a run may use (`GET /api/credential-proxy/connections`). */
