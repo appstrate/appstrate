@@ -50,7 +50,9 @@ describe("buildPiModel", () => {
   // A record's Anthropic cache markers make OpenRouter bill cache writes the
   // metering prices at $0; the proxied model keeps pi-ai's own detection.
   it("never sends a record's cache-control format", async () => {
-    const native = nativeModel("openrouter", "~anthropic/claude-sonnet-latest")!;
+    // Pi 1.5.2 serves OpenRouter's plain Claude ids over `anthropic-messages`;
+    // only the `:batch` variants stay `openai-completions` with the format.
+    const native = nativeModel("openrouter", "anthropic/claude-sonnet-5.5:batch")!;
     const spec = {
       id: "preset_or",
       dialect: piModelDialect(native),
@@ -182,8 +184,6 @@ describe("usableRecordMaxTokens", () => {
 describe("Pi registry accessors", () => {
   it("lists a provider's records of one API shape", () => {
     expect(listPiModels("openai-codex", "openai-codex-responses").map((m) => m.id)).toEqual([
-      "gpt-5.3-codex-spark",
-      "gpt-5.5",
       "gpt-5.6-luna",
       "gpt-5.6-sol",
       "gpt-5.6-terra",
@@ -191,6 +191,7 @@ describe("Pi registry accessors", () => {
       "gpt-6-luna",
       "gpt-6-sol",
       "gpt-6.1-sol",
+      "gpt-6.1-terra",
     ]);
     expect(listPiModels("xai", "openai-completions")).toEqual([]);
     expect(listPiModels("xai", "openai-responses")).toHaveLength(4);
@@ -205,7 +206,7 @@ describe("Pi registry accessors", () => {
   });
 
   it("finds an id across providers", () => {
-    const providers = findPiModelsById("gpt-5.5").map((m) => m.provider);
+    const providers = findPiModelsById("gpt-6-astra").map((m) => m.provider);
     expect(providers).toEqual(expect.arrayContaining(["openai", "openai-codex"]));
     expect(findPiModelsById("not-a-model")).toEqual([]);
   });

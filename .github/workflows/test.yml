@@ -529,8 +529,17 @@ jobs:
       - name: Build frontend
         run: cd apps/web && bun run build
 
+      # No `--with-deps` / `install-deps` (#2157): `playwright install-deps`
+      # stalled until killed on every run, on ubuntu-latest and ubuntu-24.04
+      # alike, while plain `apt-get` works on the same runners (see `Install
+      # sshd` in the `unit` job). The runner image already provides Chromium's
+      # shared libraries; if one goes missing, Playwright's launch-time
+      # dependency check fails the specs and lists the absent libraries. The
+      # short timeout makes a stalled browser download fail in minutes instead
+      # of eating the job budget.
       - name: Install Playwright browsers
-        run: cd e2e && npx playwright install chromium --with-deps
+        timeout-minutes: 5
+        run: cd e2e && npx playwright install chromium
 
       # When Bun's crash report has no stack trace (#1710), a core dump is the
       # only stack data. Ubuntu's default core_pattern pipes cores to apport;

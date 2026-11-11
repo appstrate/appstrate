@@ -8,6 +8,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
+- **Pi SDK bumped from 1.1.0 to 1.5.2: some models leave the embedded
+  registry** (#2149). Pi 1.5.2 now announces Claude Code `2.1.322` on its own,
+  which Anthropic requires for recent models such as `claude-fable-5-2`
+  (`claude_code_version_too_old` under 1.1.0). Its registry also drops models
+  that org models may reference. No automatic remap is done: re-point each
+  org model below to another model by hand, otherwise it becomes unavailable.
+  - Codex (ChatGPT) subscription: `gpt-5.5` and `gpt-5.3-codex-spark` are gone.
+    `PRO_PLAN_MODEL_IDS` is now `["gpt-6-astra"]`.
+  - OpenCode Go: `minimax-m2.7` and `deepseek-v4-flash` are gone. They leave the
+    featured models; `deepseek-v4.1-flash` replaces `deepseek-v4-flash`.
+  - OpenRouter: Pi now serves the plain Claude ids (`anthropic/claude-*`,
+    `~anthropic/claude-*-latest`) over `anthropic-messages`, so they leave the
+    OpenRouter offer (an `openai-completions` provider). Only the `:batch`
+    variants remain. Claude stays available through the Anthropic and Claude
+    Code providers.
+  - Anthropic and Claude Code feature `claude-fable-5-2` instead of
+    `claude-fable-5-1`.
+    The live model catalog follows the new Pi version: instances on this release
+    read `pi-1.5.2.json`, published by `publish-model-catalog.yml` once `main`
+    carries the bump; until then they run on the embedded registry only.
+
 - **A non-system integration whose authorization server does not support RFC 9207
   issuer identification no longer connects** (#2102). A client the platform
   provisions (DCR or client metadata document) now requires the server to

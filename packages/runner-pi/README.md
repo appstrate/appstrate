@@ -51,7 +51,7 @@ From `.`:
   `PiModelConfig`), `derivePiCompactionSettings`,
   `prepareRequestedThinkingLevel`, `setPiRuntimeCredential`.
 - **Provider mapping** — `deriveProviderFromApi`, `PROVIDER_BY_API`.
-- **Pi SDK import surface** — `Type`, `loadPiCodingAgentSdk`, and the SDK types
+- **Pi SDK import surface** — `unsafeSchema`, `loadPiCodingAgentSdk`, and the SDK types
   (`Api`, `Model`, `Message`, `ExtensionAPI`, `ExtensionFactory`) re-exported so
   consumers never import the vendor package directly. See `src/pi-sdk.ts`.
 - **Bundles and extensions** — `prepareBundleForPi`,

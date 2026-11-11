@@ -177,7 +177,7 @@ const codexHooks: ModelProviderHooks = {
  * knows their plan) and out of `featuredModels`, which the platform auto-seeds
  * into `org_models` on first connection and defaults the org to.
  */
-export const PRO_PLAN_MODEL_IDS = ["gpt-6-astra", "gpt-5.3-codex-spark"] as const;
+export const PRO_PLAN_MODEL_IDS = ["gpt-6-astra"] as const;
 
 // ---------------------------------------------------------------------------
 // Provider definition

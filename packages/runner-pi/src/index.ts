@@ -54,7 +54,7 @@ export {
 // here only when something outside the package imports it.
 export {
   InMemoryCredentialStore,
-  Type,
+  unsafeSchema,
   loadPiCodingAgentSdk,
   type PiCodingAgentSdk,
 } from "./pi-sdk.ts";

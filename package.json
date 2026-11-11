@@ -20,7 +20,7 @@
   "devDependencies": {
     "@commitlint/cli": "^21.2.3",
     "@commitlint/config-conventional": "^21.2.3",
-    "@earendil-works/pi-ai": "1.1.0",
+    "@earendil-works/pi-ai": "1.5.2",
     "@eslint/js": "^10.0.1",
     "@readme/openapi-parser": "^9.1.0",
     "@redocly/openapi-core": "^2.62.1",
@@ -155,13 +155,13 @@
     "ai": "^7.0.137",
     "@ai-sdk/react": "^4.0.140",
     "@ai-sdk/provider-utils": "^5.0.56",
-    "@earendil-works/chord": "1.1.0",
-    "@earendil-works/pi-agent-core": "1.1.0",
-    "@earendil-works/pi-ai": "1.1.0",
-    "@earendil-works/pi-codemode": "1.1.0",
-    "@earendil-works/pi-mcp": "1.1.0",
-    "@earendil-works/pi-telemetry": "1.1.0",
-    "@earendil-works/pi-tui": "1.1.0",
+    "@earendil-works/pi-agent-core": "1.5.2",
+    "@earendil-works/pi-ai": "1.5.2",
+    "@earendil-works/pi-codemode": "1.5.2",
+    "@earendil-works/pi-mcp": "1.5.2",
+    "@earendil-works/pi-schema": "1.5.2",
+    "@earendil-works/pi-telemetry": "1.5.2",
+    "@earendil-works/pi-tui": "1.5.2",
     "dompurify": "3.4.17"
   }
 }
