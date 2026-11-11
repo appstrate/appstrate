@@ -23,9 +23,9 @@ import { isRelayedResponse } from "../../lib/proxy-status.ts";
 import {
   CREDENTIAL_STATUS_HEADER,
   parseCredentialStatus,
+  type PublicCredentialStatus,
 } from "../../lib/credential-status-header.ts";
 import { CREDENTIAL_FAILURE_SENTENCES } from "../../lib/credential-failure.ts";
-import type { ProxyCredentialVerdict } from "../../services/credential-proxy/integration-resolver.ts";
 import { PROXY_CONTROL_HEADERS } from "../../services/credential-proxy/control-headers.ts";
 import { isValidSessionId } from "../../services/credential-proxy/session.ts";
 import { CREDENTIAL_PROXY_PATH } from "./catalog.ts";
@@ -198,7 +198,7 @@ type Outcome =
       bytes: Uint8Array;
       truncated: boolean;
       /** The proxy's verdict on the connection's credential, on a relayed 401 it judged. */
-      credential: ProxyCredentialVerdict | null;
+      credential: PublicCredentialStatus | null;
     };
 
 /**
@@ -206,32 +206,17 @@ type Outcome =
  * credential when the upstream refused it and a forced refresh could not recover it. Without it,
  * a 401 is the upstream refusing the request with a credential the platform did not judge.
  */
-function credentialMember(verdict: ProxyCredentialVerdict): Record<string, unknown> {
-  const reason = CREDENTIAL_FAILURE_SENTENCES[verdict.cause];
-  if (verdict.status === "dead") {
-    return {
-      status: "dead",
-      cause: verdict.cause,
-      reason,
-      action:
-        "The connection is now flagged needs_reconnection: its owner must reconnect it; " +
-        "calls through it are refused until then.",
-    };
-  }
+function credentialMember(verdict: PublicCredentialStatus): Record<string, unknown> {
   return {
-    status: "retry",
+    status: verdict.status,
     cause: verdict.cause,
-    reason,
-    ...(verdict.rejections
+    detail: CREDENTIAL_FAILURE_SENTENCES[verdict.cause],
+    ...(verdict.status === "in_use" && verdict.rejections
       ? {
           failures: verdict.rejections.failures,
           max_failures: verdict.rejections.maxFailures,
         }
       : {}),
-    action:
-      "The platform tried to refresh the credential and could not; it stays in use. The " +
-      "401 may be a refusal of this request (permissions) or a transient fault: repeated " +
-      "rejections flag the connection needs_reconnection.",
   };
 }
 
@@ -499,10 +484,12 @@ function buildApiCallTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
       "request, in order. An entry with `status` is the upstream's own answer, whatever the " +
       "status (a 401 there is the upstream refusing the connection), with `headers` and a text " +
       "`body`, cut at `max_response_bytes` (`truncated: true`); a non-text body is replaced by " +
-      "its size. A 401 entry with `credential` `{ status, cause }` is one the platform failed to " +
-      "recover by refreshing the credential: `retry` (still in use; `failures`/`max_failures` " +
-      "count toward flagging it) or `dead` (now needs reconnection); without it, the upstream " +
-      "refused the request itself. " +
+      "its size. A 401 entry with `credential` `{ status, cause, detail }` is one the platform " +
+      "failed to recover by refreshing the credential: `in_use` (the credential stays in use; " +
+      "the 401 may be a permission refusal or transient, and `failures`/`max_failures` count " +
+      "toward flagging the connection) or `needs_reconnection` (its owner must reconnect it; " +
+      "calls through it are refused until then); without it, the upstream refused the request " +
+      "itself. " +
       "An entry with `error` `{ status, code, detail }` is the platform's refusal and " +
       "does not stop the other requests: `call_permission_required`, `credential_not_found`, " +
       "`must_choose_connection` (retry with one `errors[0].candidate_connections[].id` as " +

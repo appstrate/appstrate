@@ -299,11 +299,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **A relayed upstream `401` on the credential proxy says what the platform
   tried** (#2155). When the forced refresh after the `401` could not recover the
   credential, `/api/credential-proxy/proxy` adds
-  `X-Appstrate-Credential-Status: retry; cause=…[; failures=…; max-failures=…]`
-  or `dead; cause=…` (the connection is now flagged `needs_reconnection`), and
-  the MCP `api_call` tool reports it as the entry's `credential` member. The
-  upstream body, the refresh behaviour and the failure threshold are unchanged;
-  an upstream's own copy of the header is stripped.
+  `X-Appstrate-Credential-Status: in_use; cause=…[; failures=…; max-failures=…]`
+  or `needs_reconnection; cause=…` (the connection is now flagged so), and the
+  MCP `api_call` tool reports it as the entry's `credential` member
+  `{ status, cause, detail, failures?, max_failures? }`. The upstream body, the
+  refresh behaviour and the failure threshold are unchanged; an upstream's own
+  copy of the header is stripped. On a streaming upload, `X-Auth-Refreshed: true`
+  is now set only when the forced refresh served a credential to retry with,
+  no longer when it could not refresh anything.
 
 - **Integrations from a remote MCP server that needs no authentication**
   (#2075, AFPS §7.2). The MCP-URL wizard no longer refuses a server that answers

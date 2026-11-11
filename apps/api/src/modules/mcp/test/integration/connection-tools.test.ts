@@ -24,8 +24,8 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { getEnv } from "@appstrate/env";
-import { like } from "drizzle-orm";
-import { oauthResource } from "@appstrate/db/schema";
+import { eq, like } from "drizzle-orm";
+import { integrationConnections, oauthResource } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { db, truncateAll } from "../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../test/helpers/redis.ts";
@@ -49,6 +49,7 @@ import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../../../../test/helpers/mc
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
 import { getMcpOrgResourceUri } from "../../../../lib/audiences.ts";
 import { drainAudits } from "../../../../services/audit.ts";
+import { CREDENTIAL_FAILURE_SENTENCES } from "../../../../lib/credential-failure.ts";
 import { isValidSessionId } from "../../../../services/credential-proxy/session.ts";
 import { resetOidcGuardsLimiters } from "../../../oidc/auth/guards.ts";
 import { authorizationCodeFlow } from "../../../oidc/test/helpers/authorization-code-flow.ts";
@@ -452,12 +453,40 @@ describe("mcp connection tools", () => {
         status: 401,
         body: { message: "Bad credentials" },
         credential: {
-          status: "retry",
+          status: "in_use",
           cause: "unrefreshable",
+          detail: CREDENTIAL_FAILURE_SENTENCES.unrefreshable,
           failures: 1,
           max_failures: getEnv().INTEGRATION_REFRESH_MAX_FAILURES,
         },
       });
+      // The internal verdict's wording never reaches the entry.
+      expect(Object.keys(entries(data)[0]!.credential as object).sort()).toEqual(
+        ["cause", "detail", "failures", "max_failures", "status"].sort(),
+      );
+    });
+
+    it("reports `needs_reconnection` on the 401 that flags the connection", async () => {
+      const connectionId = await connect(owner, "mine");
+      await db
+        .update(integrationConnections)
+        .set({ refreshFailureCount: getEnv().INTEGRATION_REFRESH_MAX_FAILURES - 1 })
+        .where(eq(integrationConnections.id, connectionId));
+      mockUpstream(() => json({ message: "Bad credentials" }, 401));
+
+      const { data } = await callTool(caller, "api_call", { requests: [get("/contacts")] });
+
+      expect(entries(data)[0]).toMatchObject({ status: 401, body: { message: "Bad credentials" } });
+      expect(entries(data)[0]!.credential).toEqual({
+        status: "needs_reconnection",
+        cause: "unrefreshable",
+        detail: CREDENTIAL_FAILURE_SENTENCES.unrefreshable,
+      });
+      const [row] = await db
+        .select({ needsReconnection: integrationConnections.needsReconnection })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, connectionId));
+      expect(row!.needsReconnection).toBe(true);
     });
 
     it("carries no `credential` on an upstream answer the platform did not judge", async () => {

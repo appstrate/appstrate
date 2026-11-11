@@ -64,7 +64,8 @@ import type { CredentialFailureCause } from "@appstrate/core/sidecar-types";
 /**
  * Why a forced refresh left the rejected credential in place: the `retry` or `dead` verdict of
  * {@link refreshConnectionCredential}, less its `detail` (logs only). The route relays the 401
- * annotated with it (`X-Appstrate-Credential-Status`), so a caller can tell a credential the
+ * annotated with its public projection (`X-Appstrate-Credential-Status`: `in_use` /
+ * `needs_reconnection`, see `lib/credential-status-header.ts`), so a caller can tell a credential the
  * platform could not recover from a request the upstream refuses with a good one.
  */
 export type ProxyCredentialVerdict =
