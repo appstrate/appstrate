@@ -504,7 +504,14 @@ jobs:
       || contains(github.event.pull_request.labels.*.name, 'e2e')
       || needs.e2e-changes.result != 'success'
       || needs.e2e-changes.outputs.relevant == 'true') }}
-    runs-on: ubuntu-latest
+    # Pinned, unlike the other jobs (#2157). Since `ubuntu-latest` started
+    # migrating to Ubuntu 26 (actions/runner-images#14748) the single
+    # `playwright install chromium --with-deps` step ran ~10 min then exited 1
+    # on every PR, while every other job of the same run passed on the new
+    # label. The last green E2E on main (2026-10-28) ran before that rollout.
+    # Moving back to `ubuntu-latest` is a one-line change once the split steps
+    # below show it passing there.
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -529,8 +536,29 @@ jobs:
       - name: Build frontend
         run: cd apps/web && bun run build
 
+      # The browser download (`~/.cache/ms-playwright`) is cached per Playwright
+      # version; the apt packages are not, `install-deps` takes them from the
+      # image's mirror. Two steps, each with its own short `timeout-minutes`, so
+      # a stall fails in minutes and the log names which half hung (apt or the
+      # CDN) instead of eating the job budget behind one opaque exit code.
+      - name: Resolve Playwright version
+        id: playwright
+        run: echo "version=$(cd e2e && node -p 'require("@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.4.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}-chromium
+
+      - name: Install Playwright system dependencies
+        timeout-minutes: 5
+        run: cd e2e && npx playwright install-deps chromium
+
+      # A no-op on a cache hit (the revision is already on disk).
       - name: Install Playwright browsers
-        run: cd e2e && npx playwright install chromium --with-deps
+        timeout-minutes: 5
+        run: cd e2e && npx playwright install chromium
 
       # When Bun's crash report has no stack trace (#1710), a core dump is the
       # only stack data. Ubuntu's default core_pattern pipes cores to apport;
