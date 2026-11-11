@@ -38,7 +38,7 @@ export type PublicCredentialStatus =
   | { status: "needs_reconnection"; cause: CredentialFailureCause };
 
 /** The public projection of the proxy's internal verdict. */
-export function toPublicCredentialStatus(verdict: ProxyCredentialVerdict): PublicCredentialStatus {
+function toPublicCredentialStatus(verdict: ProxyCredentialVerdict): PublicCredentialStatus {
   if (verdict.status === "dead") return { status: "needs_reconnection", cause: verdict.cause };
   return verdict.rejections
     ? { status: "in_use", cause: verdict.cause, rejections: verdict.rejections }
