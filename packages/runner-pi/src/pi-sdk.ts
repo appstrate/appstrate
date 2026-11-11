@@ -17,10 +17,12 @@
  */
 
 // --- cheap value (pi-ai, ~40ms) ---
-// `Type` is used synchronously at tool-registration time to build parameter
-// schemas, so it stays a static export. `InMemoryCredentialStore` backs the
+// `unsafeSchema` (pi-schema's `unsafe`, an identity function that only brands
+// the type) is used synchronously at tool-registration time to wrap parameter
+// JSON Schemas, so it stays a static export. `InMemoryCredentialStore` backs the
 // chat's per-turn ModelRuntime.
-export { InMemoryCredentialStore, Type } from "@earendil-works/pi-ai";
+export { InMemoryCredentialStore } from "@earendil-works/pi-ai";
+export { unsafe as unsafeSchema } from "@earendil-works/pi-schema";
 // NOTHING TEST-ONLY BELONGS IN THIS FILE: the `no-restricted-imports` guard
 // covers `src/**` only, so tests import the vendor entrypoints directly. Pi's
 // registry (`pi-ai/providers/all`) stays in `pi-model.ts`: ~14 ms to import,

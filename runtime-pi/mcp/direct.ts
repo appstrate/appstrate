@@ -31,7 +31,7 @@ import {
   readApiUploadSiblingKey,
   type AppstrateMcpClient,
 } from "@appstrate/mcp-transport";
-import { Type, type ExtensionFactory } from "../pi-sdk.ts";
+import { unsafeSchema, type ExtensionFactory } from "../pi-sdk.ts";
 import {
   buildRuntimeToolFactories,
   callToolResultToPi,
@@ -201,7 +201,7 @@ function buildIntegrationToolFactories(
         name: tool.name,
         label: tool.name,
         description: tool.description ?? `Integration tool: ${tool.name}`,
-        parameters: Type.Unsafe<Record<string, unknown>>(
+        parameters: unsafeSchema<Record<string, unknown>>(
           (tool.inputSchema as Record<string, unknown>) ?? { type: "object", properties: {} },
         ),
         async execute(toolCallId, params, signal) {

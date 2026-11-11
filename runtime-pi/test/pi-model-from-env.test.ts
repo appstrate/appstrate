@@ -5,14 +5,14 @@ import { buildRuntimePiEnv } from "@appstrate/runner-pi";
 import { PLATFORM_MODEL_COMPAT } from "@appstrate/runner-pi/model-compat";
 import { buildPiModelFromEnv, parseRuntimeEnv } from "../env.ts";
 
-const DIALECT = { name: "DeepSeek V4 Flash", compat: { thinkingFormat: "deepseek" } };
+const DIALECT = { name: "DeepSeek V4.1 Flash", compat: { thinkingFormat: "deepseek" } };
 
 function containerModel(opts: { aliased: boolean; dialect: typeof DIALECT | null }) {
   const env = buildRuntimePiEnv({
     model: {
       api: "openai-completions",
       // An id the container's own Pi records under this provider.
-      modelId: "deepseek-v4-flash",
+      modelId: "deepseek-v4.1-flash",
       piProvider: "opencode-go",
       dialect: opts.dialect,
       input: ["text"],
@@ -41,20 +41,20 @@ describe("buildPiModelFromEnv — the platform's dialect", () => {
   it("takes the dialect the platform sent and keeps MODEL_ID on the wire", () => {
     const { env, model } = containerModel({ aliased: false, dialect: DIALECT });
     expect(model).toMatchObject({
-      id: "deepseek-v4-flash",
-      name: "DeepSeek V4 Flash",
+      id: "deepseek-v4.1-flash",
+      name: "DeepSeek V4.1 Flash",
       provider: "opencode-go",
       reasoning: true,
       compat: { thinkingFormat: "deepseek" },
     });
-    expect(env.MODEL_ID).toBe("deepseek-v4-flash");
+    expect(env.MODEL_ID).toBe("deepseek-v4.1-flash");
   });
 
   it("reads no registry of its own: a recorded id the platform sends no dialect for gets none", () => {
     const { env, model } = containerModel({ aliased: false, dialect: null });
     expect(env.MODEL_PROVIDER).toBe("opencode-go");
     expect(env.MODEL_DIALECT).toBe("null");
-    expect(model.name).toBe("deepseek-v4-flash");
+    expect(model.name).toBe("deepseek-v4.1-flash");
     expect(model.compat).toEqual(PLATFORM_MODEL_COMPAT);
   });
 

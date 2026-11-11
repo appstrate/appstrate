@@ -48,7 +48,7 @@ const anthropic: ModelProviderDefinition = {
   baseUrlOverridable: false,
   authMode: "api_key",
   featured: true,
-  featuredModels: ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5"],
+  featuredModels: ["claude-fable-5-2", "claude-opus-5-5", "claude-sonnet-5-5"],
 };
 
 const cerebras: ModelProviderDefinition = {
@@ -235,9 +235,8 @@ const opencodeGo: ModelProviderDefinition = {
   featuredModels: [
     "kimi-k2.7-code",
     "glm-5.2",
-    "minimax-m2.7",
     "deepseek-v4-pro",
-    "deepseek-v4-flash",
+    "deepseek-v4.1-flash",
     "mimo-v2.5",
     "mimo-v2.5-pro",
   ],

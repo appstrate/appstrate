@@ -18,7 +18,7 @@
 
 import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
 import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
-import { Type, type ExtensionAPI, type ExtensionFactory } from "@appstrate/runner-pi";
+import { unsafeSchema, type ExtensionAPI, type ExtensionFactory } from "@appstrate/runner-pi";
 import type { UIMessageChunk } from "ai";
 import { stripMcpToolPrefix } from "./ui-stream-mapper.ts";
 import {
@@ -339,7 +339,7 @@ function makeForwardExtension(
       name: toolName,
       label: toolName,
       description: tool.description ?? toolName,
-      parameters: Type.Unsafe<Record<string, unknown>>(
+      parameters: unsafeSchema<Record<string, unknown>>(
         (tool.inputSchema as Record<string, unknown>) ?? { type: "object" },
       ),
       async execute(_toolCallId: string, params: unknown, execSignal?: AbortSignal) {
@@ -378,7 +378,7 @@ function makeRunAndWaitExtension(
       name: RUN_AND_WAIT_TOOL,
       label: RUN_AND_WAIT_TOOL,
       description: tool.description ?? "Launch an Appstrate run and wait for completion.",
-      parameters: Type.Unsafe<Record<string, unknown>>(
+      parameters: unsafeSchema<Record<string, unknown>>(
         (tool.inputSchema as Record<string, unknown>) ?? { type: "object" },
       ),
       async execute(toolCallId: string, params: unknown, execSignal?: AbortSignal) {

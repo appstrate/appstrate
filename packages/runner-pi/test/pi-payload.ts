@@ -5,7 +5,8 @@
  * full HTTP request Pi sends, for the runner-pi and api tests.
  */
 
-import { Type, type ThinkingLevel } from "@earendil-works/pi-ai";
+import type { ThinkingLevel } from "@earendil-works/pi-ai";
+import { unsafe } from "@earendil-works/pi-schema";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
 import { getBuiltinModel } from "@earendil-works/pi-ai/providers/all";
 import { PAYLOAD_API_KEY } from "../src/pi-payload.ts";
@@ -44,7 +45,14 @@ export async function captureRequest(
           {
             name: "lookup",
             description: "Look up a value",
-            parameters: Type.Object({ key: Type.String() }),
+            // The exact JSON TypeBox's `Type.Object({ key: Type.String() })`
+            // emitted before Pi 1.5 dropped `Type`: pi-schema's `obj()` would
+            // add `additionalProperties: false` and move the captured payload.
+            parameters: unsafe({
+              type: "object",
+              properties: { key: { type: "string" } },
+              required: ["key"],
+            }),
           },
         ],
       },
