@@ -12,7 +12,7 @@
  * The unified `api_call` surface exposes one tool per integration — the
  * integration is implied by the tool name, not a parameter.
  */
-import { Type, type ExtensionAPI, type ExtensionFactory } from "./pi-sdk.ts";
+import { unsafeSchema, type ExtensionAPI, type ExtensionFactory } from "./pi-sdk.ts";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import { ApiCallFailureError } from "@appstrate/afps-runtime/errors";
 import { apiCallStatusLine } from "@appstrate/mcp-transport";
@@ -142,7 +142,7 @@ function makeApiCallExtension(
       name: tool.name,
       label: tool.name,
       description: tool.description,
-      parameters: Type.Unsafe<Record<string, unknown>>({
+      parameters: unsafeSchema<Record<string, unknown>>({
         type: "object",
         additionalProperties: false,
         required: ["target"],

@@ -31,7 +31,7 @@
  *     api_call tool from the `_meta` marker payload and hands it in.
  */
 
-import { Type, type ExtensionAPI, type ExtensionFactory } from "../pi-sdk.ts";
+import { unsafeSchema, type ExtensionAPI, type ExtensionFactory } from "../pi-sdk.ts";
 import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { piToolResultOrThrow, type RuntimeEventEmitter } from "@appstrate/runner-pi";
 import { McpApiUploadResolver } from "./api-upload-resolver.ts";
@@ -102,7 +102,7 @@ function makeExtension(
           "ETag, etc.) plus a SHA-256 of the bytes uploaded so post-upload verification is " +
           "possible.",
       // Non-empty `protocols` guarantees the advertised schema is an object.
-      parameters: Type.Unsafe<Record<string, unknown>>(
+      parameters: unsafeSchema<Record<string, unknown>>(
         opts.tool.inputSchema as Record<string, unknown>,
       ),
       async execute(toolCallId, params, signal) {

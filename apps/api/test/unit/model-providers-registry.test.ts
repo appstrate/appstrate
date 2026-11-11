@@ -11,6 +11,7 @@ import {
   resetModelProviders,
 } from "../../src/services/model-providers/registry.ts";
 import { seedTestModelProviders } from "../helpers/model-providers.ts";
+import { getDiscoveredModules } from "../helpers/test-modules.ts";
 
 function fakeDef(
   id: string,
@@ -179,6 +180,21 @@ describe("model-providers runtime registry", () => {
           }),
         ),
       ).toThrow(/features "grok-4.6", which is not in its offer/);
+    });
+
+    // A featured id the pinned Pi no longer offers fails registration, i.e.
+    // boot. Registering each shipped provider on its own names the culprit
+    // here instead (Pi 1.5.2 dropped OpenCode Go's `minimax-m2.7`, #2149).
+    it("accepts every shipped provider's featured list against Pi's offer", () => {
+      const shipped = getDiscoveredModules().flatMap((m) => m.modelProviders?.() ?? []);
+      expect(shipped.some((p) => p.featuredModels.length > 0)).toBe(true);
+      for (const provider of shipped) {
+        resetModelProviders();
+        expect(
+          () => registerModelProvider(provider),
+          `${provider.providerId} features a model outside its offer`,
+        ).not.toThrow();
+      }
     });
 
     it("throws on a featured list over a provider naming no Pi provider", () => {

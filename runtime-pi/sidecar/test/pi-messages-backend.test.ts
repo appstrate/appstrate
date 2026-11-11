@@ -126,7 +126,7 @@ const BACKINGS: Backing[] = [
     name: "opencode-go",
     providerId: "opencode-go",
     apiShape: "openai-completions",
-    modelId: "deepseek-v4-flash",
+    modelId: "deepseek-v4.1-flash",
     baseUrl: "https://opencode.ai/zen/go/v1",
   },
 ];

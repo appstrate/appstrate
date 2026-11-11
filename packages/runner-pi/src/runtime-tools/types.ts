@@ -21,7 +21,7 @@ export interface RuntimeInjectedTool {
    * call surface). Used by the runtime container to register the Pi
    * tool with the same shape the sidecar advertises via MCP. Plain
    * JSON Schema so this module stays free of Pi-AI / typebox imports —
-   * the runtime wraps it with `Type.Unsafe(schema)` at registration.
+   * the runtime wraps it with `unsafeSchema(schema)` at registration.
    */
   readonly parameters: Readonly<Record<string, unknown>>;
 }

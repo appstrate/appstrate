@@ -27,7 +27,7 @@
  * code in either the runner-pi or runtime-pi tree.
  */
 
-import { Type, type ExtensionAPI, type ExtensionFactory } from "../pi-sdk.ts";
+import { unsafeSchema, type ExtensionAPI, type ExtensionFactory } from "../pi-sdk.ts";
 import type { AppstrateMcpClient, CallToolResult } from "@appstrate/mcp-transport";
 import { RUNTIME_INJECTED_TOOLS, type RuntimeInjectedTool } from "./index.ts";
 import { piToolResultOrThrow, type PiToolContent, type PiToolResult } from "../pi-tool-result.ts";
@@ -134,9 +134,9 @@ function makeMcpForwardExtension(
       label: tool.name,
       description: tool.description,
       // `parameters` is plain JSON Schema in the descriptor; Pi accepts
-      // it through `Type.Unsafe`, which preserves the schema verbatim
+      // it through `unsafeSchema` (pi-schema `unsafe`), which preserves the schema verbatim
       // for the LLM tool advertisement without reinterpreting types.
-      parameters: Type.Unsafe<Record<string, unknown>>(tool.parameters as Record<string, unknown>),
+      parameters: unsafeSchema<Record<string, unknown>>(tool.parameters as Record<string, unknown>),
       async execute(toolCallId, params, signal) {
         const startedAt = Date.now();
         opts.emit({
