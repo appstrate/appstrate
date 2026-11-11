@@ -52,6 +52,10 @@
 
 import { Hono } from "hono";
 import type { Context } from "hono";
+import {
+  CREDENTIAL_STATUS_HEADER,
+  formatCredentialStatus,
+} from "../lib/credential-status-header.ts";
 
 // Streaming cap — single-sourced from the shared outbound-HTTP engine, the
 // same module the in-container resolvers enforce it from, so this route and
@@ -384,6 +388,14 @@ export function createCredentialProxyRouter() {
         if (result.authRefreshed) {
           responseHeaders.set("X-Auth-Refreshed", "true");
         }
+        // A relayed 401 the forced refresh could not recover from says what the platform
+        // concluded, so the caller can tell it from a refusal of the request itself.
+        if (result.credentialVerdict) {
+          responseHeaders.set(
+            CREDENTIAL_STATUS_HEADER,
+            formatCredentialStatus(result.credentialVerdict),
+          );
+        }
 
         // Streaming response path: pipe upstream bytes through a 100 MB
         // capping transform stream and wall-clock timeout. X-Truncated is
@@ -468,6 +480,8 @@ const CALLER_RESPONSE_SKIP_HEADERS = new Set([
   "x-stream-response",
   "set-cookie",
   "set-cookie2",
+  // The platform's own verdict header: an upstream must not be able to forge it.
+  CREDENTIAL_STATUS_HEADER.toLowerCase(),
 ]);
 
 /** Context passed to {@link capStreamingBody} for structured warning logs. */

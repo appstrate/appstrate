@@ -275,9 +275,25 @@ const proxyResponses = {
       "connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no " +
       "challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the " +
       "credentials were refreshed server-side but the body could not be replayed — the caller " +
-      "replays the call itself.",
+      "replays the call itself. A relayed 401 the forced refresh could not recover from carries " +
+      "`X-Appstrate-Credential-Status`.",
     headers: {
       ...PROXY_STATUS_HEADER,
+      "X-Appstrate-Credential-Status": {
+        description:
+          "Set by the platform (never relayed from the upstream) on a relayed 401 after a " +
+          "forced refresh that left the rejected credential in place. An RFC 8941 Item: " +
+          "`retry; cause=<cause>[; failures=<n>; max-failures=<max>]` — the credential stays " +
+          "in use, and `failures` counts this rejection toward `INTEGRATION_REFRESH_MAX_FAILURES` " +
+          "when it was counted — or `dead; cause=<cause>` — the connection is now flagged " +
+          "`needs_reconnection`. `cause` is the credential-failure vocabulary " +
+          "(`refresh_token_revoked`, `unrefreshable`, `upstream_transient`, …). Absent: no " +
+          "refresh verdict, the upstream refused the request itself.",
+        schema: {
+          type: "string",
+          pattern: "^(retry|dead); cause=[a-z_]+(; failures=[0-9]+; max-failures=[0-9]+)?$",
+        },
+      },
       "X-Auth-Refreshed": {
         description:
           "Present and set to `true` on a streaming-upload 401 where credentials were " +

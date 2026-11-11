@@ -59,6 +59,22 @@ import {
   isUnauthenticatedIntegration,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
+import type { CredentialFailureCause } from "@appstrate/core/sidecar-types";
+
+/**
+ * Why a forced refresh left the rejected credential in place: the `retry` or `dead` verdict of
+ * {@link refreshConnectionCredential}, less its `detail` (logs only). The route relays the 401
+ * annotated with it (`X-Appstrate-Credential-Status`), so a caller can tell a credential the
+ * platform could not recover from a request the upstream refuses with a good one.
+ */
+export type ProxyCredentialVerdict =
+  | {
+      status: "retry";
+      cause: CredentialFailureCause;
+      /** Counted rejections toward `INTEGRATION_REFRESH_MAX_FAILURES`, when this one was counted. */
+      rejections?: { failures: number; maxFailures: number };
+    }
+  | { status: "dead"; cause: CredentialFailureCause };
 
 /** An `X-Run-Id` run, which also names the integration version the call is authorized against. */
 export interface ProxyRunSelection extends RunBoundSelection {
@@ -170,12 +186,13 @@ export async function resolveIntegrationProxyCredentials(
  * {@link refreshConnectionCredential} judged the rejection of the credential of `rejectedRevision`
  * (`kept`: superseded, so replay with the one the connection holds now).
  *
- * `null` — the proxy relays the upstream 401 unchanged — when nothing accessible serves, and on
- * `retry` and `dead` (already flagged: the relayed 401 does not hide a reconnect prompt).
+ * `null` — the proxy relays the upstream 401 — when nothing accessible serves, and on `retry` and
+ * `dead`, which are also handed to `onVerdict` so the relayed 401 can say what was tried.
  */
 export async function forceRefreshIntegrationProxyCredentials(
   input: ResolveIntegrationProxyInput,
   rejectedRevision: string | null,
+  onVerdict?: (verdict: ProxyCredentialVerdict) => void,
 ): Promise<ProxyCredentialsPayload | null> {
   const manifest = await loadManifest(input);
   const connection = await resolveConnection(input, manifest);
@@ -217,6 +234,15 @@ export async function forceRefreshIntegrationProxyCredentials(
         cause: outcome.cause,
         detail: outcome.detail,
       });
+      onVerdict?.(
+        outcome.status === "retry"
+          ? {
+              status: "retry",
+              cause: outcome.cause,
+              ...(outcome.rejections ? { rejections: outcome.rejections } : {}),
+            }
+          : { status: "dead", cause: outcome.cause },
+      );
       return null;
   }
   if (!fields) return null;

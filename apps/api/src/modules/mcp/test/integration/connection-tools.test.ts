@@ -23,6 +23,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { getEnv } from "@appstrate/env";
 import { like } from "drizzle-orm";
 import { oauthResource } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
@@ -439,6 +440,34 @@ describe("mcp connection tools", () => {
       expect(upstreamCalls[0]!.headers.get("accept")).toBe("application/json");
       // The connection's credential, never the caller's MCP token.
       expect(upstreamAuth()).toEqual(["Bearer tok-mine"]);
+    });
+
+    it("reports the refresh verdict of a 401 the platform could not recover as `credential`", async () => {
+      await connect(owner, "mine");
+      mockUpstream(() => json({ message: "Bad credentials" }, 401));
+
+      const { data } = await callTool(caller, "api_call", { requests: [get("/contacts")] });
+
+      expect(entries(data)[0]).toMatchObject({
+        status: 401,
+        body: { message: "Bad credentials" },
+        credential: {
+          status: "retry",
+          cause: "unrefreshable",
+          failures: 1,
+          max_failures: getEnv().INTEGRATION_REFRESH_MAX_FAILURES,
+        },
+      });
+    });
+
+    it("carries no `credential` on an upstream answer the platform did not judge", async () => {
+      await connect(owner, "mine");
+      mockUpstream(() => json({ message: "Forbidden" }, 403));
+
+      const { data } = await callTool(caller, "api_call", { requests: [get("/contacts")] });
+
+      expect(entries(data)[0]).toMatchObject({ status: 403 });
+      expect(entries(data)[0]).not.toHaveProperty("credential");
     });
 
     it("runs a batch through, one refused request leaving the others their answers", async () => {
