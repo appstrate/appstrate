@@ -130,24 +130,27 @@ describe("build-model-catalog", () => {
     expect(dropped).toEqual([]);
   });
 
-  // The rule reads Baseten's format as a disable without looking at its
-  // chat-template arguments: a record without them sends nothing and is dropped.
+  // The rule reads Baseten's format as a disable without looking at what the
+  // record sends. Pi 1.5.2 sends `off` either through the chat-template
+  // arguments or, under `supportsReasoningEffort`, as the mapped
+  // `reasoning_effort`: a record with neither sends nothing and is dropped.
   it("drops a Baseten record whose `off` sends nothing the rule expects", async () => {
-    const kimi = getPiModel("baseten", "moonshotai/Kimi-K2.5", "openai-completions")!;
-    const { chatTemplateArgs: _args, ...compat } = kimi.compat as Record<string, unknown>;
-    expect(kimi.thinkingLevelMap?.off).toBe("off");
+    const glm = getPiModel("baseten", "zai-org/GLM-5.2", "openai-completions")!;
+    const { chatTemplateArgs: _args, ...compat } = glm.compat as Record<string, unknown>;
+    expect(glm.compat).toMatchObject({ thinkingFormat: "baseten", supportsReasoningEffort: true });
+    expect(glm.thinkingLevelMap?.off).toBe("none");
     const source = (id: string, over: Record<string, unknown> = {}) =>
-      ({ ...kimi, type: "chat", id, ...over }) as Parameters<typeof selectCatalogRecords>[0][0];
+      ({ ...glm, type: "chat", id, ...over }) as Parameters<typeof selectCatalogRecords>[0][0];
     const { records, dropped } = await selectCatalogRecords([
-      source("moonshotai/Kimi-Next"),
-      source("moonshotai/Kimi-No-Args", { compat }),
+      source("zai-org/GLM-Next"),
+      source("zai-org/GLM-No-Args", { compat: { ...compat, supportsReasoningEffort: false } }),
     ]);
 
-    expect(records.map((r) => r.id)).toEqual(["moonshotai/Kimi-Next"]);
+    expect(records.map((r) => r.id)).toEqual(["zai-org/GLM-Next"]);
     expect(dropped).toEqual([
       {
         provider: "baseten",
-        id: "moonshotai/Kimi-No-Args",
+        id: "zai-org/GLM-No-Args",
         reason: 'reasoning off: derived "disables", observed "unsent"',
       },
     ]);
