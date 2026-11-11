@@ -22,7 +22,7 @@
  * directly.
  */
 
-import { Type, type ExtensionAPI, type ExtensionFactory } from "../pi-sdk.ts";
+import { unsafeSchema, type ExtensionAPI, type ExtensionFactory } from "../pi-sdk.ts";
 import {
   buildRuntimeToolDefs,
   buildPublishFileDef,
@@ -82,7 +82,7 @@ function runtimeToolExtension(
       name: def.descriptor.name,
       label: def.descriptor.name,
       description: def.descriptor.description,
-      parameters: Type.Unsafe<Record<string, unknown>>(def.descriptor.inputSchema),
+      parameters: unsafeSchema<Record<string, unknown>>(def.descriptor.inputSchema),
       async execute(_toolCallId, params) {
         const result = await def.handler(params ?? {});
         reEmitRuntimeToolEvents(result._meta, emit);
