@@ -83,6 +83,11 @@ describe("auth social provider config — Microsoft", () => {
     ["xms_edov is false", { xms_edov: false }],
     ["xms_edov is absent", {}],
     ["the user is a guest", { xms_edov: true, idp: "https://sts.windows.net/other-tenant/" }],
+    [
+      "idp only contains the tenant",
+      { xms_edov: true, idp: "https://evil.example/00000000-0000-0000-0000-0000000000aa/" },
+    ],
+    ["tid is not a GUID", { xms_edov: true, tid: "x", idp: "https://sts.windows.net/x/" }],
     ["the user signed in with Google", { xms_edov: true, idp: "google.com" }],
     ["the account is personal", { xms_edov: true, tid: "9188040d-6c67-4c5b-b112-36a304b66dad" }],
   ])("drops the address when %s, so the sign-in is refused", (_label, claims) => {

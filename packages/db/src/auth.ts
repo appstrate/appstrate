@@ -707,6 +707,7 @@ function buildBasePlugins(env: ReturnType<typeof getEnv>, smtpTransport: Transpo
 
 /** The tenant of personal Microsoft accounts. */
 const MICROSOFT_CONSUMER_TENANT_ID = "9188040d-6c67-4c5b-b112-36a304b66dad";
+const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * An Entra tenant admin can put ANY address in a user's `email` claim, a
@@ -722,11 +723,16 @@ const MICROSOFT_CONSUMER_TENANT_ID = "9188040d-6c67-4c5b-b112-36a304b66dad";
 function mapMicrosoftProfile(
   profile: MicrosoftEntraIDProfile,
 ): { emailVerified: true } | { email: undefined; emailVerified: false } {
-  // `idp` is absent for a member, or names the tenant itself (in either the
-  // v1 `sts.windows.net/{tid}/` or the v2 issuer form).
+  // `idp` is absent for a member, or names the tenant itself, in its v1 or
+  // v2 issuer form.
+  const tid = profile.tid;
   const member =
-    profile.tid !== MICROSOFT_CONSUMER_TENANT_ID &&
-    (!profile.idp || profile.idp.includes(profile.tid));
+    typeof tid === "string" &&
+    GUID.test(tid) &&
+    tid !== MICROSOFT_CONSUMER_TENANT_ID &&
+    (!profile.idp ||
+      profile.idp === `https://sts.windows.net/${tid}/` ||
+      profile.idp === `https://login.microsoftonline.com/${tid}/v2.0`);
   if (member && profile.xms_edov === true) return { emailVerified: true };
   logger.warn("auth: Microsoft sign-in refused", {
     tenantId: profile.tid,

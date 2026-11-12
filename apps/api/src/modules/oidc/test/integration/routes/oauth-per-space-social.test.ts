@@ -245,6 +245,22 @@ describe("OIDC per-space social auth — E2E (space-level clients)", () => {
     },
   );
 
+  it("refuses an unconfigured provider for a space client named only by the callbackURL", async () => {
+    const { clientId } = await setupSpaceClient({ google: true });
+    // No pending-client cookie: the transaction's stored destination alone
+    // names the space client, as the realm resolver will read it back.
+    const res = await app.request(`/api/auth/sign-in/social`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: "microsoft",
+        callbackURL: `http://localhost:3000/api/auth/oauth2/authorize?client_id=${encodeURIComponent(clientId)}&state=s`,
+      }),
+    });
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code?: string }).code).toBe("social_provider_not_configured");
+  });
+
   it("without a pending-client cookie, the resolver is NOT consulted", async () => {
     await setupSpaceClient({ google: true });
     // Direct POST to /sign-in/social with no pending cookie — this is the
