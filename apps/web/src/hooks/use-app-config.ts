@@ -12,6 +12,7 @@ const DEFAULT_CONFIG: AppConfig = {
   features: {
     googleAuth: false,
     githubAuth: false,
+    microsoftAuth: false,
     smtp: false,
     signupDisabled: false,
     bootstrapTokenPending: false,

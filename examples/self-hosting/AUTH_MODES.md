@@ -115,13 +115,13 @@ The owner's account is born owner, and the account of an address in
 address is not enough to create its account. The platform creates it only
 for a caller who proves control:
 
-| How the account is created                                                      | Accepted? |
-| ------------------------------------------------------------------------------- | --------- |
-| `/claim` with `AUTH_BOOTSTRAP_TOKEN` (see below)                                | yes       |
-| Google / GitHub sign-in, when the provider asserts the address is verified      | yes       |
-| Magic link sent to the address (requires SMTP)                                  | yes       |
-| Email + password on `/register`, with or without SMTP                           | **no**    |
-| An existing account changing its e-mail to the address (`email_change_refused`) | **no**    |
+| How the account is created                                                             | Accepted? |
+| -------------------------------------------------------------------------------------- | --------- |
+| `/claim` with `AUTH_BOOTSTRAP_TOKEN` (see below)                                       | yes       |
+| Google / GitHub / Microsoft sign-in, when the provider asserts the address is verified | yes       |
+| Magic link sent to the address (requires SMTP)                                         | yes       |
+| Email + password on `/register`, with or without SMTP                                  | **no**    |
+| An existing account changing its e-mail to the address (`email_change_refused`)        | **no**    |
 
 The sign-up form refuses whatever else is configured — open or closed
 sign-up, a pending invitation, a sign-up on a hosted end-user page. A
@@ -363,7 +363,7 @@ Workflow:
 2. Open `<APP_URL>/claim`, paste the token and claim the instance as
    `ops@acme.com`: the account is created together with a first
    organization it owns (`AUTH_BOOTSTRAP_ORG_NAME`, default `"Default"`).
-   With SMTP, Google or GitHub configured you can leave the token out and
+   With SMTP, Google, GitHub or Microsoft configured you can leave the token out and
    sign in as `ops@acme.com` by magic link or social sign-in instead. The
    sign-up form refuses that address.
 3. For each new tenant: create the org via `POST /api/orgs` (or the
@@ -412,6 +412,23 @@ AUTH_ALLOWED_SIGNUP_DOMAINS=acme.com
 Anyone with an `@acme.com` Google identity can sign up. External users
 need an explicit invitation.
 
+The Microsoft (Entra ID) variant:
+
+```env
+MICROSOFT_CLIENT_ID=…
+MICROSOFT_CLIENT_SECRET=…
+MICROSOFT_TENANT_ID=<your tenant GUID>
+AUTH_ALLOWED_SIGNUP_DOMAINS=acme.com
+```
+
+Setting `MICROSOFT_TENANT_ID` to the tenant GUID restricts sign-in to that
+one tenant (the default, `organizations`, admits any work or school
+account, and `common` also admits personal accounts). A Microsoft identity
+is accepted only when Entra asserts that the tenant owns the email domain
+(the `xms_edov` optional claim, to add to the app registration), so an
+address an Entra admin typed onto a user is refused. See
+[Microsoft Entra ID](https://docs.appstrate.com/self-hosting/production-checklist#sign-in-with-microsoft-entra-id).
+
 ---
 
 ## Migration — open → closed on a running instance
@@ -449,7 +466,7 @@ To go back to open mode, unset the flags and restart. No data migration.
 - **`AUTH_BOOTSTRAP_OWNER_EMAIL` on an instance that already has an
   organization, owner account absent** — no token can claim it (`/claim`
   answers 410) and the sign-up form refuses the address. Without Google,
-  GitHub or SMTP (magic link) the recovery is: remove the address from
+  GitHub, Microsoft or SMTP (magic link) the recovery is: remove the address from
   `AUTH_BOOTSTRAP_OWNER_EMAIL` and from `AUTH_PLATFORM_ADMIN_EMAILS`,
   restart, create the account as an ordinary address (with sign-up closed
   that takes an invitation, or sign-up reopened for the time it takes),
@@ -462,12 +479,12 @@ To go back to open mode, unset the flags and restart. No data migration.
   set `AUTH_BOOTSTRAP_TOKEN`, restart and claim the instance with that
   address at `/claim` (if `AUTH_BOOTSTRAP_OWNER_EMAIL` is set, the token
   claims that address only). Otherwise sign in with a magic link (SMTP)
-  or a Google / GitHub identity that verifies the address. Otherwise
+  or a Google / GitHub / Microsoft identity that verifies the address. Otherwise
   remove the address from the list, restart, create the account as an
   ordinary address (invitation, or sign-up reopened for the time it
   takes), put the address back and restart.
-- **Social OIDC + closed mode** — Google/GitHub callbacks go through the
-  same signup gate. An external Google user without an invitation gets a
+- **Social OIDC + closed mode** — Google/GitHub/Microsoft callbacks go
+  through the same signup gate. An external Google user without an invitation gets a
   `signup_disabled` redirect. Add their domain to
   `AUTH_ALLOWED_SIGNUP_DOMAINS` if you want company-wide self-service.
 - **Magic-link emails are sent even when blocked** — to avoid leaking

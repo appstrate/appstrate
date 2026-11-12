@@ -21,7 +21,7 @@ interface RegisterPageProps {
   name?: string;
   csrfToken: string;
   branding: ResolvedSpaceBranding;
-  socialProviders?: { google?: boolean; github?: boolean };
+  socialProviders?: { google?: boolean; github?: boolean; microsoft?: boolean };
   /**
    * Kept for type-parity with `LoginPageProps.allowSignup` so route
    * handlers can pass a single `allowSignupForClient(...)` result to every
@@ -48,7 +48,8 @@ export function renderRegisterPage(props: RegisterPageProps): RawHtml {
   // POST-only, so we match the `authClient.signIn.social()` SDK pattern).
   const google = props.socialProviders?.google ?? false;
   const github = props.socialProviders?.github ?? false;
-  const hasSocial = google || github;
+  const microsoft = props.socialProviders?.microsoft ?? false;
+  const hasSocial = google || github || microsoft;
 
   const loginUrl = `/api/oauth/login${props.queryString}`;
 
@@ -84,7 +85,7 @@ export function renderRegisterPage(props: RegisterPageProps): RawHtml {
       />
       <button type="submit">Créer mon compte</button>
     </form>
-    ${renderSocialButtons({ google, github })}
+    ${renderSocialButtons({ google, github, microsoft })}
     <div class="footer-links">
       <a href="${loginUrl}">Déjà un compte ? Se connecter</a>
     </div>

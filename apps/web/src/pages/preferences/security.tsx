@@ -14,7 +14,7 @@ import { FormItem } from "@/components/app-ui/form-item";
 import { useAuth } from "../../hooks/use-auth";
 import { useAppConfig } from "../../hooks/use-app-config";
 import { client } from "../../api/client";
-import { GoogleIcon, GitHubIcon } from "../../components/icons";
+import { GoogleIcon, GitHubIcon, MicrosoftIcon } from "../../components/icons";
 import { NewPasswordFields } from "../../components/auth-fields";
 import { ReauthModal } from "../../components/reauth-modal";
 import { SessionNotFreshError } from "../../lib/auth-errors";
@@ -38,17 +38,18 @@ function LinkedAccountsSection({
 }) {
   const { t } = useTranslation(["settings", "common"]);
   const { features } = useAppConfig();
-  const { linkGoogle, linkGithub, unlinkAccount } = useAuth();
+  const { linkGoogle, linkGithub, linkMicrosoft, unlinkAccount } = useAuth();
   const [unlinking, setUnlinking] = useState<string | false>(false);
   const [linking, setLinking] = useState<string | false>(false);
   // Account row id (`LinkedAccount["id"]`) awaiting a step-up re-login, not a
   // provider id — it is fed straight back to `unlinkAccount()` on retry.
   const [pendingUnlink, setPendingUnlink] = useState<string | null>(null);
 
-  if (!features.googleAuth && !features.githubAuth) return null;
+  if (!features.googleAuth && !features.githubAuth && !features.microsoftAuth) return null;
 
   const googleAccount = accounts?.find((a) => a.providerId === "google");
   const githubAccount = accounts?.find((a) => a.providerId === "github");
+  const microsoftAccount = accounts?.find((a) => a.providerId === "microsoft");
   const credentialAccount = accounts?.find((a) => a.providerId === "credential");
   const totalAccounts = accounts?.length ?? 0;
   const canUnlink = totalAccounts > 1;
@@ -77,6 +78,19 @@ function LinkedAccountsSection({
             link: linkGithub,
             linkingKey: "preferences.linkingGoogle" as const,
             linkKey: "preferences.linkGithub" as const,
+          },
+        ]
+      : []),
+    ...(features.microsoftAuth
+      ? [
+          {
+            id: "microsoft",
+            name: "Microsoft",
+            icon: MicrosoftIcon,
+            account: microsoftAccount,
+            link: linkMicrosoft,
+            linkingKey: "preferences.linkingGoogle" as const,
+            linkKey: "preferences.linkMicrosoft" as const,
           },
         ]
       : []),
