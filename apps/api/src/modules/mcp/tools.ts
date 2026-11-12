@@ -981,6 +981,12 @@ export const RUN_AND_WAIT_PROGRESS_INTERVAL_MS = DEFAULT_REQUEST_TIMEOUT_MSEC / 
 /** Wait cap (launch included) without a progress token: a heartbeat period before that timeout. */
 export const RUN_AND_WAIT_UNSTREAMED_MAX_MS =
   DEFAULT_REQUEST_TIMEOUT_MSEC - RUN_AND_WAIT_PROGRESS_INTERVAL_MS;
+/**
+ * Wait cap (launch included) with a progress token. Progress keeps an MCP SDK client waiting,
+ * but Claude's MCP connector ends any tool call at 230 s whatever it receives: 180 s leaves
+ * 50 s for the result's file read and the transit through the client's proxies.
+ */
+export const RUN_AND_WAIT_STREAMED_MAX_MS = 180_000;
 
 export const WARNING_CODES_PHRASE = CONNECTION_RESOLUTION_WARNING_CODES.map((c) => `\`${c}\``).join(
   ", ",
@@ -1171,8 +1177,9 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       "terminal status; `error` is the run's own failure. `warnings` (`[]` when none) lists the " +
       "integrations the run started without, each with the code that state raises as an error " +
       `on a required integration (${WARNING_CODES_PHRASE}; ` +
-      "`integration_unbound` alone: a pin or override bound none). If its wait ends first, it " +
-      `returns \`done:false\` with the run \`id\`. ${RUN_AND_WAIT_RESUME_INSTRUCTION} ` +
+      "`integration_unbound` alone: a pin or override bound none). Its wait is capped below " +
+      "the client's per-call timeout; if the run outlasts it, the call returns `done:false` " +
+      `with the run \`id\`. ${RUN_AND_WAIT_RESUME_INSTRUCTION} ` +
       "After `done:true`, do NOT call `getRun` to wait; the run is over. " +
       (inline
         ? "For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set " +
@@ -1371,7 +1378,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
     };
     const waited = await waitForRunAndWaitCompletion(launch, {
       ...waitOpts,
-      maxMs: stopProgress ? undefined : RUN_AND_WAIT_UNSTREAMED_MAX_MS,
+      maxMs: stopProgress ? RUN_AND_WAIT_STREAMED_MAX_MS : RUN_AND_WAIT_UNSTREAMED_MAX_MS,
     }).then(
       (result) => {
         stopProgress?.(true);

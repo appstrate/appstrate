@@ -102,6 +102,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **A streamed `run_and_wait` returns after 3 min at most** (#2169). Claude's
+  MCP connector ends every tool call after 230 s, whatever progress it receives,
+  so a call carrying a `progressToken` on a longer run was lost on the client
+  (`tool "run_and_wait" timed out after 230s`) while the run went on. Such a call
+  now waits 180 s at most, launch included, then returns `done:false` with the
+  run `id` and the instruction to read it back with `getRun`, as a call without
+  a token does after 45 s. Heartbeats and log lines are unchanged until then.
+  `getRun` with `query: { wait: true }` is unchanged (55 s at most).
+
 - **`api_call` returns a redirect off `authorized_uris` instead of failing** (#2154). When an
   allowlisted upstream answers with a 3xx whose `Location` lies outside the auth's
   `authorized_uris`, the call no longer fails with `unauthorized_target`

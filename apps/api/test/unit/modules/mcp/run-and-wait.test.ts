@@ -10,13 +10,13 @@ import {
   RUN_AND_WAIT_LOG_PROGRESS_INTERVAL_MS,
   RUN_AND_WAIT_LONG_POLL_RESUME,
   RUN_AND_WAIT_PROGRESS_INTERVAL_MS,
+  RUN_AND_WAIT_STREAMED_MAX_MS,
   RUN_AND_WAIT_UNSTREAMED_MAX_MS,
   type Dispatch,
   type McpToolContext,
   type McpToolEvent,
 } from "../../../../src/modules/mcp/tools.ts";
 import {
-  RUN_AND_WAIT_MAX_MS,
   RUN_AND_WAIT_RESUME_INSTRUCTION,
   RUN_CONNECT_OFFERS_HEADER,
 } from "@appstrate/core/run-and-wait-client";
@@ -477,7 +477,7 @@ describe("run_and_wait", () => {
     expect(events.find((e) => e.operationId === "getRun")?.status).toBe(404);
   });
 
-  describe("progress heartbeat and unstreamed wait cap", () => {
+  describe("progress heartbeat and wait caps", () => {
     type SentNotification = Parameters<AppstrateRequestExtra["sendNotification"]>[0];
 
     it("tells the model to read a `done:false` run back with getRun, not relaunch it", () => {
@@ -561,9 +561,9 @@ describe("run_and_wait", () => {
       await flush();
 
       expect(parseResult(res)).toMatchObject({ id: "run_1", status: "success", done: true });
-      // A streamed call asks for its whole default budget; the server clamps it.
+      // A streamed call asks for its whole streamed cap; the server clamps it.
       expect(calls.find((c) => c.method === "GET")?.search).toBe(
-        `?wait=${RUN_AND_WAIT_MAX_MS / 1000}`,
+        `?wait=${RUN_AND_WAIT_STREAMED_MAX_MS / 1000}`,
       );
       // One beat at launch, then one per interval.
       expect(sent).toEqual(
@@ -787,6 +787,49 @@ describe("run_and_wait", () => {
       expect(attempts).toBe(3); // the launch beat + two intervals
       expect(res.isError).toBeFalsy();
       expect(parseResult(res)).toMatchObject({ id: "run_1", status: "success", done: true });
+    });
+
+    it("caps a streamed wait below the 230 s tool-call limit of Claude's MCP connector", () => {
+      expect(RUN_AND_WAIT_STREAMED_MAX_MS).toBeLessThan(230_000);
+    });
+
+    it("returns done:false with the run id once the streamed cap passes, then stops its progress", async () => {
+      jest.useFakeTimers();
+      const sent: SentNotification[] = [];
+      const { tool, calls, logFollow } = makeRunAndWait({
+        launch: () => jsonResponse({ id: "run_7", packageId: "@acme/writer", status: "running" }),
+        getRun: [heldPoll().answer],
+      });
+
+      const { pending } = await startCall(
+        tool,
+        calls,
+        extraWith("tok_1", async (n) => {
+          sent.push(n);
+        }),
+      );
+      jest.advanceTimersByTime(RUN_AND_WAIT_STREAMED_MAX_MS);
+      const res = await pending;
+      const sentAtResult = sent.length;
+      jest.advanceTimersByTime(RUN_AND_WAIT_PROGRESS_INTERVAL_MS * 4);
+      await flush();
+
+      expect(calls.find((c) => c.method === "GET")?.search).toBe(
+        `?wait=${RUN_AND_WAIT_STREAMED_MAX_MS / 1000}`,
+      );
+      expect(res.isError).toBeFalsy();
+      expect(res.structuredContent).toEqual({
+        id: "run_7",
+        packageId: "@acme/writer",
+        status: "running",
+        done: false,
+        warnings: [],
+      });
+      expect(res.content.slice(1)).toEqual([{ type: "text", text: RUN_AND_WAIT_LONG_POLL_RESUME }]);
+      expect(messages(sent)[0]).toBe("Run run_7 launched");
+      expect(sentAtResult).toBeGreaterThan(1);
+      expect(sent).toHaveLength(sentAtResult);
+      expect(logFollow.stops).toBe(1);
     });
 
     it("sends nothing and returns done:false with the run id once the cap passes", async () => {
