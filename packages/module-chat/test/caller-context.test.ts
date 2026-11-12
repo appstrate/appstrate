@@ -9,11 +9,20 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { formatCallerContext, buildCallerContextBlock } from "../src/prompt.ts";
+import {
+  formatCallerContext,
+  buildCallerContextBlock,
+  type ChatSkillsClient,
+} from "../src/prompt.ts";
 import { turnCapabilities } from "../src/capabilities.ts";
 import { DEFAULT_SKILL_SELECTION } from "../src/skills.ts";
 import type { ChatPlatformDeps } from "../src/platform-services.ts";
 import type { EnforcedChatSkill } from "@appstrate/core/chat-contract";
+import {
+  SKILL_DEFINITION_META_KEY,
+  SKILL_LOCK_VERSION_META_KEY,
+  type SkillEntry,
+} from "@appstrate/core/skill-uri";
 
 /** The rendered texts; the injected-skills claim has its own cases. */
 const contextText = (...args: Parameters<typeof formatCallerContext>) =>
@@ -361,6 +370,7 @@ describe("formatCallerContext", () => {
         "@acme/zeta",
         {
           packageId: "@acme/zeta",
+          uri: "skill://space-1/acme/zeta/zeta/SKILL.md",
           version: "1.0.0",
           served: { definition: "published", version: "1.0.0" },
           content: "---\nname: zeta\n---\nZeta body.",
@@ -370,6 +380,7 @@ describe("formatCallerContext", () => {
         "@acme/mine",
         {
           packageId: "@acme/mine",
+          uri: "skill://space-1/acme/mine/mine/SKILL.md",
           version: "1.0.0",
           served: { definition: "published", version: "1.0.0" },
           content: "Mine body.\n",
@@ -389,9 +400,11 @@ describe("formatCallerContext", () => {
       });
       expect(out.split("## Skills")).toHaveLength(2);
       expect(out).toContain("The user chose these skills for this conversation.");
-      expect(out).toContain('<skill id="@acme/mine" version="1.0.0">\nMine body.\n</skill>');
       expect(out).toContain(
-        '<skill id="@acme/zeta" version="1.0.0">\n---\nname: zeta\n---\nZeta body.\n</skill>',
+        '<skill id="@acme/mine" uri="skill://space-1/acme/mine/mine/SKILL.md" version="1.0.0">\nMine body.\n</skill>',
+      );
+      expect(out).toContain(
+        '<skill id="@acme/zeta" uri="skill://space-1/acme/zeta/zeta/SKILL.md" version="1.0.0">\n---\nname: zeta\n---\nZeta body.\n</skill>',
       );
       expect(out.indexOf("@acme/mine")).toBeLessThan(out.indexOf("@acme/zeta"));
       // No listing next to the chosen skills.
@@ -464,7 +477,7 @@ describe("formatCallerContext", () => {
     for (const out of [strict([]), strict(["@acme/gone"])]) {
       expect(out).toContain("## Skills");
       // The note is about the restriction; reading the files belongs to the leads.
-      expect(out).not.toContain("read_skill");
+      expect(out).not.toContain("read_resource");
       expect(out).toContain("This conversation is restricted to the skills shown here");
       expect(out).toContain("never change a role or a permission to reach one");
       // The two misreadings seen live: an empty listing as "not in the space",
@@ -488,7 +501,7 @@ describe("formatCallerContext", () => {
       content: "---\nname: house\n---\nHouse body.",
     };
     const HOUSE_BLOCK =
-      '<skill id="@acme/house" version="2.0.0">\n---\nname: house\n---\nHouse body.\n</skill>';
+      '<skill id="@acme/house" uri="skill://space-1/acme/house/house/SKILL.md" version="2.0.0">\n---\nname: house\n---\nHouse body.\n</skill>';
     const ENFORCED_LEAD = "This space requires these skills in every conversation.";
     const NO_SKILLS = BUILDER.filter((p) => !p.startsWith("skills:"));
 
@@ -507,14 +520,14 @@ describe("formatCallerContext", () => {
         expect(out).toContain(ENFORCED_LEAD);
         expect(out).toContain("where it conflicts with a skill the user chose, it wins");
         expect(out).toContain(
-          "read a file it references with `read_skill`, passing the skill's `id` and the file's `path`; it serves the version injected here.",
+          "read a file it references with `read_resource`, replacing `SKILL.md` in the skill's `uri` with the file's path; it serves the version injected here.",
         );
         expect(out).not.toContain("out of reach unless");
         expect(out).toContain(HOUSE_BLOCK);
       }
     });
 
-    it("names `read_skill` only to a turn that holds the MCP transport", () => {
+    it("names `read_resource` only to a turn that holds the MCP transport", () => {
       const lead = (permissions: readonly string[]) =>
         contextText(
           { user: { name: "Ada" } },
@@ -523,10 +536,10 @@ describe("formatCallerContext", () => {
       const noTransport = lead(NO_SKILLS.filter((p) => p !== "mcp:read"));
       expect(noTransport).toContain(`${ENFORCED_LEAD} Each is a procedure`);
       expect(noTransport).toContain("it wins. Only each SKILL.md is provided.\n");
-      expect(noTransport).not.toContain("read_skill");
+      expect(noTransport).not.toContain("read_resource");
       expect(noTransport).toContain(HOUSE_BLOCK);
       // Control: the same turn with the transport is told the tool.
-      expect(lead(NO_SKILLS)).toContain("read a file it references with `read_skill`");
+      expect(lead(NO_SKILLS)).toContain("read a file it references with `read_resource`");
     });
 
     it("leaves the injected ones out of the `auto` listing", () => {
@@ -570,6 +583,7 @@ describe("formatCallerContext", () => {
               "@acme/mine",
               {
                 packageId: "@acme/mine",
+                uri: "skill://space-1/acme/mine/mine/SKILL.md",
                 version: "1.0.0",
                 served: { definition: "published", version: "1.0.0" },
                 content: "Mine body.",
@@ -579,6 +593,7 @@ describe("formatCallerContext", () => {
               "@acme/house",
               {
                 packageId: "@acme/house",
+                uri: "skill://space-1/acme/house/house/SKILL.md",
                 version: "1.0.0",
                 served: { definition: "published", version: "1.0.0" },
                 content: "Pinned copy.",
@@ -596,15 +611,15 @@ describe("formatCallerContext", () => {
         at(ENFORCED_LEAD),
       );
       expect(at(ENFORCED_LEAD)).toBeLessThan(at("The user chose these skills"));
-      expect(at('<skill id="@acme/mine" version="1.0.0">')).toBeLessThan(
-        at("`@acme/gone` was chosen"),
-      );
+      expect(
+        at('<skill id="@acme/mine" uri="skill://space-1/acme/mine/mine/SKILL.md" version="1.0.0">'),
+      ).toBeLessThan(at("`@acme/gone` was chosen"));
       // A pin naming an enforced skill is dropped: one copy, the space's.
       expect(out).not.toContain("Pinned copy.");
       expect(out).not.toContain("`@acme/house` was chosen");
     });
 
-    it("names `read_skill` on both leads with the transport, in manual and strict, and none without", () => {
+    it("names `read_resource` on both leads with the transport, in manual and strict, and none without", () => {
       const render = (skillMode: "manual" | "strict", permissions: readonly string[]) =>
         contextText(
           { user: { name: "Ada" } },
@@ -617,6 +632,7 @@ describe("formatCallerContext", () => {
                 "@acme/mine",
                 {
                   packageId: "@acme/mine",
+                  uri: "skill://space-1/acme/mine/mine/SKILL.md",
                   version: "1.0.0",
                   served: { definition: "published", version: "1.0.0" },
                   content: "Mine body.",
@@ -627,18 +643,20 @@ describe("formatCallerContext", () => {
           },
         );
       const files =
-        "Only each SKILL.md is shown: read a file it references with `read_skill`, passing the skill's `id` and the file's `path`; it serves the version injected here.";
+        "Only each SKILL.md is shown: read a file it references with `read_resource`, replacing `SKILL.md` in the skill's `uri` with the file's path; it serves the version injected here.";
       for (const skillMode of ["manual", "strict"] as const) {
         const tool = render(skillMode, NO_SKILLS);
         expect(tool).toContain(`it wins. ${files}`);
         expect(tool).toContain(`follow it whenever it applies. ${files}`);
-        expect(tool).toContain('<skill id="@acme/mine" version="1.0.0">');
+        expect(tool).toContain(
+          '<skill id="@acme/mine" uri="skill://space-1/acme/mine/mine/SKILL.md" version="1.0.0">',
+        );
         const none = render(
           skillMode,
           NO_SKILLS.filter((p) => p !== "mcp:read"),
         );
         expect(none).toContain("follow it whenever it applies. Only each SKILL.md is provided.");
-        expect(none).not.toContain("read_skill");
+        expect(none).not.toContain("read_resource");
       }
     });
 
@@ -978,6 +996,48 @@ describe("formatCallerContext", () => {
 /** The space enforces nothing: the turn's load resolved empty. */
 const NO_ENFORCED: Promise<readonly EnforcedChatSkill[]> = Promise.resolve([]);
 
+/** A skills connection that fails the test if the block opens it. */
+const NO_SKILLS = async (): Promise<ChatSkillsClient> => {
+  throw new Error("the skills connection was opened");
+};
+
+const skillEntry = (uri: string, version: string | null, lockVersion?: number): SkillEntry => ({
+  uri,
+  frontmatter: { name: "a", description: "A", ...(version ? { metadata: { version } } : {}) },
+  resources: [{ uri, digest: `sha256:${"0".repeat(64)}`, size: 1 }],
+  ...(lockVersion === undefined ? {} : { _meta: { [SKILL_LOCK_VERSION_META_KEY]: lockVersion } }),
+});
+
+/**
+ * A skills connection listing `published` and, under the draft `_meta`,
+ * `drafts`, serving `texts` by URI (a missing URI is refused). Records each
+ * call, and whether it was closed.
+ */
+function fakeSkillsClient(opts: {
+  published: SkillEntry[];
+  drafts?: SkillEntry[];
+  texts: Record<string, string>;
+}) {
+  const calls: string[] = [];
+  const client: ChatSkillsClient = {
+    listSkills: async (options) => {
+      const draft = options?.meta?.[SKILL_DEFINITION_META_KEY] === "draft";
+      calls.push(draft ? "skills/list draft" : "skills/list");
+      return { skills: draft ? (opts.drafts ?? []) : opts.published };
+    },
+    readResource: async ({ uri }) => {
+      calls.push(`resources/read ${uri}`);
+      const text = opts.texts[uri];
+      if (text === undefined) throw new Error("Resource not found");
+      return { contents: [{ uri, mimeType: "text/markdown", text }] };
+    },
+    close: async () => {
+      calls.push("close");
+    },
+  };
+  return { open: async () => client, calls };
+}
+
 describe("buildCallerContextBlock", () => {
   const user = { id: "u_1", name: "Ada", email: "ada@acme.com" };
 
@@ -999,6 +1059,7 @@ describe("buildCallerContextBlock", () => {
       permissions: ["mcp:read", "mcp:invoke"],
       skills: DEFAULT_SKILL_SELECTION,
       enforced: NO_ENFORCED,
+      openSkillsClient: NO_SKILLS,
     });
     // Block is rendered from the dispatched payload, not from request context.
     expect(out).toContain("`@appstrate/gmail`");
@@ -1012,28 +1073,22 @@ describe("buildCallerContextBlock", () => {
     expect(req.headers.get("cookie")).toBe("session=abc");
   });
 
-  it("resolves the chosen skills and reads their content with the caller's headers", async () => {
-    const seen: string[] = [];
-    const { deps } = fakeDeps((req) => {
-      const url = new URL(req.url);
-      seen.push(`${url.pathname}${url.search} ${req.headers.get("cookie")}`);
-      if (url.pathname === "/api/me/context") return Response.json({ user: { name: "Ada" } });
-      // `@acme/off` reads fine through `getSkill` but is not in the active listing.
-      if (url.pathname === "/api/packages/skills") {
-        return Response.json({
-          data: [
-            { id: "@acme/a", name: "A", description: null, version: "2.0.0" },
-            { id: "@acme/b", name: "B", description: null, version: "2.0.0" },
-          ],
-        });
-      }
-      const id = url.pathname.replace("/api/packages/skills/", "");
-      // The platform stamps a draft's `lock_version` as its `ETag`; `@acme/b`'s answer lacks it.
-      return Response.json(
-        { content: `${id} body`, definition: "draft", version: "2.0.0" },
-        { headers: id === "@acme/a" ? { etag: '"7"' } : {} },
-      );
+  it("resolves the chosen skills over the skills connection, draft first", async () => {
+    const A = "skill://spc_1/acme/a@draft/a/SKILL.md";
+    const B = "skill://spc_1/acme/b@draft/b/SKILL.md";
+    const C = "skill://spc_1/acme/c/c/SKILL.md";
+    const skills = fakeSkillsClient({
+      published: [
+        skillEntry("skill://spc_1/acme/a/a/SKILL.md", "1.0.0"),
+        skillEntry(C, "2.0.0"),
+        // Another space's entry never stands for a skill of this one.
+        skillEntry("skill://spc_2/acme/other/other/SKILL.md", "1.0.0"),
+      ],
+      // `@acme/b`'s draft entry lacks its `lock_version`: malformed.
+      drafts: [skillEntry(A, null, 7), skillEntry(B, null)],
+      texts: { [A]: "a draft body", [B]: "b draft body", [C]: "c body" },
     });
+    const { deps } = fakeDeps(() => Response.json({ user: { name: "Ada" } }));
     const { text: out, injected } = await buildCallerContextBlock(
       fakeContext({ orgRole: "member" }),
       {
@@ -1042,31 +1097,62 @@ describe("buildCallerContextBlock", () => {
         spaceId: "spc_1",
         user,
         deps,
-        // Strict: the turn holds no `skills:read`, the caller's headers still read.
+        // Strict: the turn holds no `skills:read`, the skills connection still reads.
         capabilities: caps(BUILDER.filter((permission) => permission !== "skills:read")),
         permissions: ["mcp:read", "mcp:invoke"],
-        skills: { skillMode: "strict", pinnedSkills: ["@acme/a", "@acme/b", "@acme/off"] },
+        skills: {
+          skillMode: "strict",
+          pinnedSkills: ["@acme/a", "@acme/b", "@acme/c", "@acme/off", "@acme/other"],
+        },
         enforced: NO_ENFORCED,
+        openSkillsClient: skills.open,
       },
     );
-    expect(seen.sort()).toEqual([
-      "/api/me/context session=abc",
-      "/api/packages/skills session=abc",
-      "/api/packages/skills/@acme/a session=abc",
-      "/api/packages/skills/@acme/b session=abc",
-      "/api/packages/skills/@acme/off session=abc",
+    expect(skills.calls.sort()).toEqual([
+      "close",
+      `resources/read ${A}`,
+      `resources/read ${B}`,
+      `resources/read ${C}`,
+      "skills/list",
+      "skills/list draft",
     ]);
-    // A draft is named as one: `read_skill` answers it by definition, not by version.
-    expect(out).toContain('<skill id="@acme/a" definition="draft">\n@acme/a body\n</skill>');
-    expect(out).not.toContain("@acme/off body");
+    // A draft is named as one: it has no version.
+    expect(out).toContain(
+      `<skill id="@acme/a" uri="${A}" definition="draft">\na draft body\n</skill>`,
+    );
+    expect(out).toContain(`<skill id="@acme/c" uri="${C}" version="2.0.0">\nc body\n</skill>`);
     expect(out).toContain("`@acme/off` was chosen for this conversation but is not available here");
-    // The claim pins the draft to its ETag; a malformed answer is not injected.
-    expect(out).not.toContain("@acme/b body");
+    expect(out).toContain(
+      "`@acme/other` was chosen for this conversation but is not available here",
+    );
+    // The claim pins the draft to its entry's `lock_version`; a malformed entry is not injected.
+    expect(out).not.toContain("b draft body");
     expect(out).toContain("`@acme/b` was chosen for this conversation but could not be read.");
     expect(injected).toEqual({
       spaceId: "spc_1",
-      skills: { "@acme/a": { definition: "draft", lockVersion: 7 } },
+      skills: {
+        "@acme/a": { definition: "draft", lockVersion: 7 },
+        "@acme/c": { definition: "published", version: "2.0.0" },
+      },
     });
+  });
+
+  it("leaves the chosen skills out when the skills connection cannot open", async () => {
+    const { deps } = fakeDeps(() => Response.json({ user: { name: "Ada" } }));
+    const out = await blockText(fakeContext({ orgRole: "member" }), {
+      origin: "http://127.0.0.1:3000",
+      headers: {},
+      spaceId: "spc_1",
+      user,
+      deps,
+      capabilities: caps(BUILDER),
+      permissions: ["mcp:read", "mcp:invoke"],
+      skills: { skillMode: "manual", pinnedSkills: ["@acme/a"] },
+      enforced: NO_ENFORCED,
+      openSkillsClient: NO_SKILLS,
+    });
+    expect(out).not.toContain("<skill");
+    expect(out).toContain("`@acme/a` was chosen for this conversation but is not available here");
   });
 
   it("asks nothing about the chosen skills in auto", async () => {
@@ -1085,21 +1171,17 @@ describe("buildCallerContextBlock", () => {
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillMode: "auto", pinnedSkills: ["@acme/a"] },
       enforced: NO_ENFORCED,
+      openSkillsClient: NO_SKILLS,
     });
     expect(seen).toEqual(["/api/me/context"]);
   });
 
   it("leaves out a chosen skill whose content read is refused", async () => {
-    const { deps } = fakeDeps((req) => {
-      const { pathname } = new URL(req.url);
-      if (pathname === "/api/me/context") return Response.json({ user: { name: "Ada" } });
-      if (pathname === "/api/packages/skills") {
-        return Response.json({
-          data: [{ id: "@acme/a", name: "A", description: null, version: null }],
-        });
-      }
-      return new Response(null, { status: 403 });
+    const skills = fakeSkillsClient({
+      published: [skillEntry("skill://spc_1/acme/a/a/SKILL.md", "1.0.0")],
+      texts: {},
     });
+    const { deps } = fakeDeps(() => Response.json({ user: { name: "Ada" } }));
     const out = await blockText(fakeContext({ orgRole: "member" }), {
       origin: "http://127.0.0.1:3000",
       headers: {},
@@ -1110,9 +1192,11 @@ describe("buildCallerContextBlock", () => {
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillMode: "manual", pinnedSkills: ["@acme/a"] },
       enforced: NO_ENFORCED,
+      openSkillsClient: skills.open,
     });
     expect(out).not.toContain("<skill");
     expect(out).toContain("`@acme/a` was chosen for this conversation but is not available here");
+    expect(skills.calls).toContain("close");
   });
 
   it("drops the runnable-agents section for a turn that cannot launch", async () => {
@@ -1132,6 +1216,7 @@ describe("buildCallerContextBlock", () => {
       permissions: ["mcp:read", "mcp:invoke"],
       skills: DEFAULT_SKILL_SELECTION,
       enforced: NO_ENFORCED,
+      openSkillsClient: NO_SKILLS,
     });
     expect(out).not.toContain("## Existing agents you can run");
     expect(out).not.toContain("@appstrate/triage");
@@ -1163,6 +1248,7 @@ describe("buildCallerContextBlock", () => {
       permissions: ["mcp:read", "mcp:invoke"],
       skills: DEFAULT_SKILL_SELECTION,
       enforced: NO_ENFORCED,
+      openSkillsClient: NO_SKILLS,
     };
     const preview = await blockText(
       fakeContext({
@@ -1194,6 +1280,7 @@ describe("buildCallerContextBlock", () => {
       permissions: ["mcp:read", "mcp:invoke"],
       skills: DEFAULT_SKILL_SELECTION,
       enforced: NO_ENFORCED,
+      openSkillsClient: NO_SKILLS,
     };
     const preview = await blockText(
       fakeContext({
@@ -1232,6 +1319,7 @@ describe("buildCallerContextBlock", () => {
       // Nothing was resolved, so a chosen skill must not read as unavailable.
       skills: { skillMode: "manual", pinnedSkills: ["@acme/mine"] },
       enforced: NO_ENFORCED,
+      openSkillsClient: NO_SKILLS,
     });
     expect(out).toContain("Ada (ada@acme.com)");
     expect(out).toContain("Current space: `spc_1`");
@@ -1250,6 +1338,7 @@ describe("buildCallerContextBlock", () => {
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillMode: "strict", pinnedSkills: ["@acme/mine"] },
       enforced: NO_ENFORCED,
+      openSkillsClient: NO_SKILLS,
     });
     expect(out).toContain("This conversation is restricted to the skills shown here");
     expect(out).not.toContain("@acme/mine");
@@ -1267,6 +1356,7 @@ describe("buildCallerContextBlock", () => {
       permissions: ["mcp:read", "mcp:invoke"],
       skills: DEFAULT_SKILL_SELECTION,
       enforced: NO_ENFORCED,
+      openSkillsClient: NO_SKILLS,
     });
     expect(out).toBe("");
   });
@@ -1279,7 +1369,8 @@ describe("buildCallerContextBlock", () => {
       uri: "skill://space-1/acme/house/house/SKILL.md",
       content: "House body.",
     };
-    const HOUSE_BLOCK = '<skill id="@acme/house" version="2.0.0">\nHouse body.\n</skill>';
+    const HOUSE_BLOCK =
+      '<skill id="@acme/house" uri="skill://space-1/acme/house/house/SKILL.md" version="2.0.0">\nHouse body.\n</skill>';
     const build = (deps: ChatPlatformDeps, enforced: Promise<readonly EnforcedChatSkill[]>) =>
       blockText(fakeContext({ orgRole: "member" }), {
         origin: "http://127.0.0.1:3000",
@@ -1291,6 +1382,7 @@ describe("buildCallerContextBlock", () => {
         permissions: ["mcp:read", "mcp:invoke"],
         skills: DEFAULT_SKILL_SELECTION,
         enforced,
+        openSkillsClient: NO_SKILLS,
       });
 
     it("renders them from the context payload", async () => {

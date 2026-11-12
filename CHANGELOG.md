@@ -169,6 +169,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   It runs `resources/read` on the platform MCP server only, and returns each content
   whole: its text, or a binary file's base64 in `blob`.
 
+- **The chat reads the skills it injects through the MCP Skills extension**
+  (#2175). A chosen skill is listed by `skills/list` (the caller's draft when the
+  drafts list holds it, else the published version) and its `SKILL.md` read by
+  `resources/read`, over a platform MCP connection with the caller's own
+  permissions and no injected-skills claim, closed before the turn's connection
+  opens; the chat no longer reads `GET /api/packages/skills`. An injected draft is
+  pinned by its entry's `dev.appstrate/lockVersion`. Each injected `<skill>` tag
+  carries its `uri`, and the prompt teaches `read_resource` on that URI for the
+  files a skill references. `AppstrateMcpClient` gains `listSkills`.
+
 - **BREAKING (CLI, MCP): agents are prompts of the MCP server, and `code sync`
   syncs skills only** (#2172). The Claude Code plugin's `/appstrate:run-<agent>`
   commands become MCP prompts of the organization's server: `prompts/list`

@@ -17,7 +17,14 @@
 
 import type { Context } from "hono";
 import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/core/naming";
-import { parseVersionEtag } from "@appstrate/core/etag";
+import {
+  SKILL_DEFINITION_META_KEY,
+  SKILL_LOCK_VERSION_META_KEY,
+  SKILL_URI_PREFIX,
+  parseSkillUriPackage,
+  type SkillEntry,
+} from "@appstrate/core/skill-uri";
+import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
 import type { PrincipalKind } from "@appstrate/core/module";
 import type { EnforcedChatSkill, InjectedSkills } from "@appstrate/core/chat-contract";
 import {
@@ -30,7 +37,6 @@ import type { ChatPlatformDeps } from "./platform-services.ts";
 import {
   injectedSkills,
   injectsSkills,
-  parseSkillList,
   resolveChatSkills,
   type ChatSkillSelection,
   type SkillContent,
@@ -99,10 +105,10 @@ export type ChatEnv = {
 const SKILLS_HEADING = "## Skills";
 const SKILLS_ENFORCED_LEAD =
   "This space requires these skills in every conversation. Each is a procedure for YOU: follow it whenever it applies; where it conflicts with a skill the user chose, it wins.";
-// The turn's MCP bearer names every injected definition, so `read_skill` serves
-// exactly it, whatever `skills:*` — but only over the transport.
+// The turn's MCP bearer names every injected definition, so `resources/read`
+// serves exactly its files, whatever `skills:*` — but only over the transport.
 const SKILLS_FILES = {
-  tool: "Only each SKILL.md is shown: read a file it references with `read_skill`, passing the skill's `id` and the file's `path`; it serves the version injected here.",
+  tool: "Only each SKILL.md is shown: read a file it references with `read_resource`, replacing `SKILL.md` in the skill's `uri` with the file's path; it serves the version injected here.",
   none: "Only each SKILL.md is provided.",
 };
 const SKILLS_INJECTED_LEAD =
@@ -307,16 +313,16 @@ function skillLine(skill: SkillHint): string {
   return `${head} — ${label}${description ? `: ${description}` : ""}`;
 }
 
-/** The whole `SKILL.md`, front matter included, tagged with its id and version. */
+/** The whole `SKILL.md`, front matter included, tagged with its id, URI and version. */
 function skillBlock(skill: SkillContent): string {
-  // A draft has no version `read_skill` would answer with: name the definition instead.
+  // A draft has no version: name the definition instead.
   const served =
     skill.served.definition === "draft"
       ? ' definition="draft"'
       : skill.version
         ? ` version="${skill.version}"`
         : "";
-  return `<skill id="${skill.packageId}"${served}>\n${skill.content.trim()}\n</skill>`;
+  return `<skill id="${skill.packageId}" uri="${skill.uri}"${served}>\n${skill.content.trim()}\n</skill>`;
 }
 
 /**
@@ -550,61 +556,103 @@ export function formatCallerContext(raw: unknown, opts: CallerContextOpts): Rend
 }
 
 /**
- * The chosen skills to inject: those in the space's ACTIVE listing (`getSkill`
- * only checks readability), with their `SKILL.md` through `getSkill`. Both with
- * the caller's own headers — what the caller would read, even in `strict`,
- * whose token holds no `skills:*`. A refusal or a failure leaves a skill out;
- * a malformed answer is kept as `null`, for its own notice.
+ * What the chat reads its chosen skills through: a platform MCP connection
+ * with the caller's own permissions and no injected-skills claim, closed once
+ * they are read.
  */
-async function loadSkillContents(
-  deps: ChatPlatformDeps,
-  origin: string,
-  headers: Headers,
-  ids: readonly string[],
-): Promise<Map<string, SkillContent | null>> {
-  if (ids.length === 0) return new Map();
-  const read = async (path: string): Promise<{ body: unknown; etag: string | null } | null> => {
-    try {
-      const res = await deps.dispatch(new Request(new URL(path, origin).toString(), { headers }));
-      return res.ok ? { body: await res.json(), etag: res.headers.get("etag") } : null;
-    } catch {
-      return null;
-    }
-  };
-  const [listing, ...details] = await Promise.all([
-    read("/api/packages/skills"),
-    ...ids.map((id) => read(`/api/packages/skills/${id}`)),
-  ]);
-  const active = new Set(parseSkillList(listing?.body).map((skill) => skill.packageId));
-  const loaded = new Map<string, SkillContent | null>();
-  ids.forEach((id, i) => {
-    const body = details[i]?.body as
-      { content?: unknown; version?: unknown; definition?: unknown } | undefined;
-    if (!active.has(id) || !body) return;
-    const version = typeof body.version === "string" ? body.version : null;
-    const served = servedAs(body.definition, version, details[i]!.etag);
-    loaded.set(
-      id,
-      served && typeof body.content === "string"
-        ? { packageId: id, version, content: body.content, served }
-        : null,
-    );
-  });
-  return loaded;
+export type ChatSkillsClient = Pick<AppstrateMcpClient, "listSkills" | "readResource" | "close">;
+
+/** The space's entries of a `skills/list`, by package id. */
+function entriesByPackage(
+  entries: readonly SkillEntry[],
+  spaceId: string,
+): Map<string, SkillEntry> {
+  const byPackage = new Map<string, SkillEntry>();
+  for (const entry of entries) {
+    if (!entry.uri.startsWith(`${SKILL_URI_PREFIX}${spaceId}/`)) continue;
+    const pkg = parseSkillUriPackage(entry.uri);
+    if (pkg) byPackage.set(pkg.packageId, entry);
+  }
+  return byPackage;
 }
 
 /**
- * The claim entry of a skill `getSkill` served — a draft pinned to its `ETag`,
- * which the platform always stamps — or `null` for a malformed answer.
+ * The chosen skills to inject, read over the MCP Skills extension (SEP-2640):
+ * a skill is the caller's draft when `skills/list` lists it among the drafts
+ * the caller may read, else its published version, and its `SKILL.md` is the
+ * text `resources/read` serves at the entry's URI. Read with the caller's own
+ * permissions, even in `strict`, whose turn holds no `skills:*`. A skill in
+ * neither list, or whose read is refused, is left out; a malformed answer is
+ * kept as `null`, for its own notice.
  */
-function servedAs(
-  definition: unknown,
-  version: string | null,
-  etag: string | null,
-): SkillContent["served"] | null {
-  if (definition === "published") return { definition, version };
-  const lockVersion = definition === "draft" ? parseVersionEtag(etag) : null;
-  return lockVersion === null ? null : { definition: "draft", lockVersion };
+async function loadSkillContents(
+  openSkillsClient: () => Promise<ChatSkillsClient>,
+  spaceId: string,
+  ids: readonly string[],
+): Promise<Map<string, SkillContent | null>> {
+  const loaded = new Map<string, SkillContent | null>();
+  if (ids.length === 0) return loaded;
+  let client: ChatSkillsClient;
+  try {
+    client = await openSkillsClient();
+  } catch (err) {
+    logger.warn("skills connection unavailable — chosen skills left out", { err: String(err) });
+    return loaded;
+  }
+  try {
+    const list = (meta?: Record<string, unknown>) =>
+      client.listSkills(meta ? { meta } : {}).then(
+        ({ skills }) => entriesByPackage(skills, spaceId),
+        () => new Map<string, SkillEntry>(),
+      );
+    const [published, drafts] = await Promise.all([
+      list(),
+      list({ [SKILL_DEFINITION_META_KEY]: "draft" }),
+    ]);
+    await Promise.all(
+      ids.map(async (id) => {
+        const entry = drafts.get(id) ?? published.get(id);
+        if (!entry) return;
+        const text = await client.readResource({ uri: entry.uri }).then(
+          ({ contents }) => contents.find((content) => content.uri === entry.uri)?.text,
+          () => undefined,
+        );
+        if (text === undefined) return;
+        const served = servedAs(entry, drafts.has(id));
+        loaded.set(
+          id,
+          served && typeof text === "string"
+            ? {
+                packageId: id,
+                version: served.definition === "published" ? served.version : null,
+                uri: entry.uri,
+                content: text,
+                served,
+              }
+            : null,
+        );
+      }),
+    );
+    return loaded;
+  } finally {
+    await client.close().catch(() => {});
+  }
+}
+
+/**
+ * The claim entry of a served skill — a draft pinned to the `lock_version` its
+ * entry carries, a published skill to its `metadata.version` — or `null` for a
+ * draft entry without one.
+ */
+function servedAs(entry: SkillEntry, draft: boolean): SkillContent["served"] | null {
+  if (draft) {
+    const lockVersion = entry._meta?.[SKILL_LOCK_VERSION_META_KEY];
+    return Number.isSafeInteger(lockVersion)
+      ? { definition: "draft", lockVersion: lockVersion as number }
+      : null;
+  }
+  const version = (entry.frontmatter.metadata as { version?: unknown } | undefined)?.version;
+  return { definition: "published", version: typeof version === "string" ? version : null };
 }
 
 /** The preset, or a custom bundle's name (its id when unnamed). */
@@ -664,10 +712,12 @@ export async function buildCallerContextBlock(
     skills: ChatSkillSelection;
     /** Already loading; a rejection rejects the block. */
     enforced: Promise<readonly EnforcedChatSkill[]>;
+    /** Opened only when the turn injects chosen skills; closed once they are read. */
+    openSkillsClient: () => Promise<ChatSkillsClient>;
   },
 ): Promise<{ text: string; injected: InjectedSkills }> {
   const { origin, headers, spaceId, user, deps, locale, capabilities, skills } = args;
-  // Bound to this space: `read_skill` honours the claim only for it.
+  // Bound to this space: `resources/read` honours the claim only for it.
   const claimed = ({ text, injected }: RenderedContext) => ({
     text,
     injected: { spaceId, skills: injected },
@@ -680,9 +730,8 @@ export async function buildCallerContextBlock(
   const [context, skillContents, enforced] = await Promise.all([
     readCallerContext(deps, origin, ctxHeaders),
     loadSkillContents(
-      deps,
-      origin,
-      ctxHeaders,
+      args.openSkillsClient,
+      spaceId,
       injectsSkills(skills.skillMode) ? skills.pinnedSkills : [],
     ),
     args.enforced,

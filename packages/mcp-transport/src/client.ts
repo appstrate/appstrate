@@ -23,11 +23,13 @@ import {
   UnauthorizedError,
 } from "@modelcontextprotocol/client";
 import { createCache } from "@appstrate/core/cache";
+import type { SkillEntry } from "@appstrate/core/skill-uri";
 import { readToolListPage } from "./tool-list.ts";
 import {
   ErrorCode,
   ListToolsResultSchema,
   McpError,
+  ResultSchema,
   type CallToolResult,
   type Implementation,
   type Progress,
@@ -155,6 +157,14 @@ export interface AppstrateMcpClient {
     args: { uri: string },
     options?: { signal?: AbortSignal; timeoutMs?: number },
   ): Promise<ReadResourceResult>;
+  /**
+   * `skills/list` of the Skills extension (SEP-2640), `meta` sent as the request `_meta` (a
+   * provider parameter). Throws, with no partial list, on an answer that is not a list of entries.
+   */
+  listSkills(options?: {
+    meta?: Record<string, unknown>;
+    signal?: AbortSignal;
+  }): Promise<{ skills: SkillEntry[] }>;
   close(): Promise<void>;
 }
 
@@ -561,6 +571,12 @@ interface SdkSession {
     options: SessionRequestOptions,
   ): Promise<CallToolResult>;
   readResource(args: { uri: string }, options: SessionRequestOptions): Promise<ReadResourceResult>;
+  /** A request of a method the SDK has no schema for: its raw result, validated by the caller. */
+  request(
+    method: string,
+    params: Record<string, unknown>,
+    options: SessionRequestOptions,
+  ): Promise<unknown>;
   close(): Promise<void>;
 }
 
@@ -589,6 +605,33 @@ async function walkTools(
     cursor = page.nextCursor;
   }
   throw new Error(`tools/list did not end within ${MAX_TOOL_PAGES} pages`);
+}
+
+function isSkillEntry(value: unknown): value is SkillEntry {
+  const entry = value as Partial<SkillEntry> | null;
+  const frontmatter = entry?.frontmatter as Partial<SkillEntry["frontmatter"]> | undefined;
+  return (
+    typeof entry?.uri === "string" &&
+    typeof frontmatter?.name === "string" &&
+    typeof frontmatter.description === "string" &&
+    Array.isArray(entry.resources) &&
+    entry.resources.every(
+      (resource: Partial<SkillEntry["resources"][number]> | null) =>
+        typeof resource?.uri === "string" &&
+        typeof resource.digest === "string" &&
+        Number.isSafeInteger(resource.size) &&
+        (resource.size as number) >= 0,
+    )
+  );
+}
+
+/** The entries of a `skills/list` result; any malformed entry fails the whole list. */
+function readSkillEntries(raw: unknown): SkillEntry[] {
+  const skills = (raw as { skills?: unknown } | null)?.skills;
+  if (!Array.isArray(skills)) throw new Error("skills/list answered without a `skills` array");
+  const malformed = skills.findIndex((entry) => !isSkillEntry(entry));
+  if (malformed !== -1) throw new Error(`skills/list entry ${malformed} is not a skill entry`);
+  return skills as SkillEntry[];
 }
 
 /** MCP 2026-07-28 `HeaderMismatch`. */
@@ -666,6 +709,8 @@ function dualEraSession(
     async readResource(args, options) {
       return (await client.readResource(args, options)) as ReadResourceResult;
     },
+    // The SDK sends a method outside the spec only with a result schema.
+    request: (method, params, options) => client.request({ method, params }, ResultSchema, options),
     close: () => client.close(),
   };
   return session;
@@ -695,6 +740,7 @@ function legacySession(client: LegacyClient): SdkSession {
       return (await client.callTool(args, undefined, options)) as CallToolResult;
     },
     readResource: (args, options) => client.readResource(args, options),
+    request: (method, params, options) => client.request({ method, params }, ResultSchema, options),
     close: () => client.close(),
   };
 }
@@ -778,6 +824,18 @@ function buildClient(
         ...signalOption(options?.signal),
         ...(timeout ? { timeout } : {}),
       });
+    },
+    async listSkills(options) {
+      live();
+      const raw = await session.request(
+        "skills/list",
+        options?.meta ? { _meta: options.meta } : {},
+        {
+          ...signalOption(options?.signal),
+          ...(defaultTimeoutMs ? { timeout: defaultTimeoutMs } : {}),
+        },
+      );
+      return { skills: readSkillEntries(raw) };
     },
     async close() {
       if (closed) return;

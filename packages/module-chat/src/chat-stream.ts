@@ -28,6 +28,7 @@ import { logger } from "./logger.ts";
 import { listModels, pickModel } from "./llm.ts";
 import { platformMcpUrl } from "./platform-mcp.ts";
 import { platformMcpSurfaceKey } from "./pi-chat/mcp-surface-cache.ts";
+import { connectPlatformMcp } from "./pi-chat/mcp-tools.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import type { InjectedSkills } from "@appstrate/core/chat-contract";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
@@ -399,6 +400,28 @@ export async function handleChatStream(
         permissions,
         skills,
         enforced: enforcedSkills,
+        // The chosen skills are read before the claim naming them exists, so
+        // over a connection of their own: the caller's permissions, not narrowed by
+        // `turnPermissions`, and no claim — what the caller reads.
+        // One in-process `initialize` plus the reads, only on a turn that
+        // injects chosen skills; closed before the turn's connection opens.
+        openSkillsClient: () =>
+          connectPlatformMcp({
+            url: platformMcpUrl(origin, orgId, spaceId),
+            headers: {
+              Authorization: `Bearer ${mintMcpLoopbackToken({
+                userId: user.id,
+                email: user.email,
+                name: user.name,
+                orgId,
+                orgRole,
+                permissions: c.get("permissions"),
+                viewAs: persona,
+              })}`,
+              "x-org-id": orgId,
+            },
+            fetch: platformFetch,
+          }),
       }).finally(() => {
         phaseBMs = Date.now() - phaseBStart;
       }),
@@ -659,7 +682,7 @@ export async function handleChatStream(
       // The re-entered request carries no header, so without this the hop would
       // answer with the caller's real authority while a preview is on screen.
       viewAs: persona,
-      // What `read_skill` serves without `skills:*`: the definitions this prompt injected.
+      // What `resources/read` serves without `skills:*`: the definitions this prompt injected.
       injectedSkills,
     },
     { ttlMs: ENGINE_LOOPBACK_TTL_MS },

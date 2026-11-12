@@ -237,19 +237,34 @@ function answerStatelessHopsLocally(next: typeof fetch): typeof fetch {
  * `tools/call`; a failed lazy connect fails that call and evicts the entry unless
  * the turn was stopped, so the next turn handshakes eagerly and fails loudly.
  */
+/** A connected client of the platform MCP server at `opts.url`, authenticated by `opts.headers`. */
+export function connectPlatformMcp(opts: {
+  url: string;
+  headers: Record<string, string>;
+  /** Cancels the connect: `initialize` re-enters this process and can wedge. */
+  signal?: AbortSignal;
+  fetch?: typeof fetch;
+}): Promise<AppstrateMcpClient> {
+  return createMcpHttpClient(opts.url, {
+    clientInfo: { name: "appstrate-chat-pi", version: "1.0" },
+    // The platform's MCP module is on the v1 SDK, legacy by construction: no era probe.
+    era: "legacy",
+    extraHeaders: opts.headers,
+    ...(opts.signal ? { signal: opts.signal } : {}),
+    fetch: answerStatelessHopsLocally(opts.fetch ?? fetch),
+  });
+}
+
 export async function buildPlatformMcpTools(
   opts: BuildPlatformMcpToolsOptions,
 ): Promise<PlatformMcpTools> {
+  // The turn's signal (not a tool call's — a lazy connect is shared) keeps stop and deadline live.
   const connect = () =>
-    createMcpHttpClient(opts.url, {
-      clientInfo: { name: "appstrate-chat-pi", version: "1.0" },
-      // The platform's MCP module is on the v1 SDK, legacy by construction: no era probe.
-      era: "legacy",
-      extraHeaders: opts.headers,
-      // `initialize` re-enters this process and can wedge: the turn's signal (not a
-      // tool call's — a lazy connect is shared) keeps stop and deadline live.
+    connectPlatformMcp({
+      url: opts.url,
+      headers: opts.headers,
       signal: opts.signal,
-      fetch: answerStatelessHopsLocally(opts.fetch ?? fetch),
+      ...(opts.fetch ? { fetch: opts.fetch } : {}),
     });
 
   const { surfaceKey } = opts;

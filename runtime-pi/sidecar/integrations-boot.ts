@@ -509,6 +509,7 @@ function withRemoteFailures(client: AppstrateMcpClient, origin: string): Appstra
     listToolsPage: (options) => guard(client.listToolsPage(options)),
     callTool: (args, options) => guard(client.callTool(args, options)),
     readResource: (args, options) => guard(client.readResource(args, options)),
+    listSkills: (options) => guard(client.listSkills(options)),
     close: () => guard(client.close()),
   };
 }

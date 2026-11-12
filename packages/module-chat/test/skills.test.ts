@@ -16,6 +16,7 @@ import {
 const content = (id: string, body = `# ${id}`): SkillContent => ({
   packageId: id,
   version: "1.0.0",
+  uri: `skill://space-1/${id.slice(1)}/skill/SKILL.md`,
   content: body,
   served: { definition: "published", version: "1.0.0" },
 });
@@ -106,12 +107,14 @@ describe("resolveChatSkills — space-enforced skills", () => {
         {
           packageId: "@b/house",
           version: "2.0.0",
+          uri: "skill://space-1/b/house/skill/SKILL.md",
           content: "# @b/house",
           served: { definition: "published", version: "2.0.0" },
         },
         {
           packageId: "@z/house",
           version: "2.0.0",
+          uri: "skill://space-1/z/house/skill/SKILL.md",
           content: "# @z/house",
           served: { definition: "published", version: "2.0.0" },
         },

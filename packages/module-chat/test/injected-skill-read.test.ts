@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A chosen skill injected by a real caller-context build is readable through
- * the real MCP `read_skill` with the bearer minted from that build's claim —
- * no hand-built claim, no fake `ETag`. A strict turn holds no `skills:*`, so
- * only the claim can open the read.
+ * A chosen skill injected by a real caller-context build — listed and read
+ * over a real MCP connection without claim — is readable through the real
+ * `resources/read` with the bearer minted from that build's claim, no
+ * hand-built claim. A strict turn holds no `skills:*`, so only the claim can
+ * open the read.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -26,6 +27,8 @@ import { mcpRpc, inSpace } from "../../../apps/api/test/helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../../apps/api/test/helpers/platform-app.ts";
 import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
 import { buildChatPlatformDeps } from "../src/platform-services.ts";
+import { connectPlatformMcp } from "../src/pi-chat/mcp-tools.ts";
+import { platformMcpUrl } from "../src/platform-mcp.ts";
 import { buildCallerContextBlock } from "../src/prompt.ts";
 import { turnCapabilities } from "../src/capabilities.ts";
 import { turnPermissions } from "../src/turn-permissions.ts";
@@ -59,10 +62,11 @@ async function strictTurn(
   user: { id: string; email: string; name: string },
   headers: Record<string, string>,
   granted: string[],
+  orgRole: "owner" | "guest",
 ) {
   const permissions = turnPermissions(granted, { authoring: true, skillMode: "strict" });
   const block = await buildCallerContextBlock(
-    { get: (key: string) => ({ orgRole: "member" })[key as "orgRole"] } as never,
+    { get: (key: string) => ({ orgRole })[key as "orgRole"] } as never,
     {
       origin: "http://localhost",
       headers,
@@ -73,6 +77,24 @@ async function strictTurn(
       permissions,
       skills: { skillMode: "strict", pinnedSkills: [SKILL_ID] },
       enforced: Promise.resolve([]),
+      // The caller's own permissions, no claim: what `chat-stream.ts` opens.
+      openSkillsClient: () =>
+        connectPlatformMcp({
+          url: platformMcpUrl("http://localhost", owner.orgId, owner.defaultSpaceId),
+          headers: {
+            Authorization: `Bearer ${mintMcpLoopbackToken({
+              userId: user.id,
+              email: user.email,
+              name: user.name,
+              orgId: owner.orgId,
+              orgRole,
+              permissions: granted,
+            })}`,
+            "x-org-id": owner.orgId,
+          },
+          fetch: ((input: RequestInfo | URL, init?: RequestInit) =>
+            app.request(new Request(input, init))) as typeof fetch,
+        }),
     },
   );
   const token = mintMcpLoopbackToken({
@@ -80,7 +102,7 @@ async function strictTurn(
     email: user.email,
     name: user.name,
     orgId: owner.orgId,
-    orgRole: "member",
+    orgRole,
     permissions,
     injectedSkills: block.injected,
   });
@@ -96,46 +118,52 @@ async function strictTurn(
       email: user.email,
       name: user.name,
       orgId: owner.orgId,
-      orgRole: "member",
+      orgRole,
       permissions,
     })}`,
   };
   return { block, permissions, bearer, unclaimed };
 }
 
-async function readSkill(headers: Record<string, string>) {
+/** The `skill://` URI of the injected `SKILL.md`, read off its `<skill>` tag. */
+function injectedUri(text: string): string {
+  const uri = /<skill id="[^"]+" uri="([^"]+)"/.exec(text)?.[1];
+  if (!uri) throw new Error(`no injected skill: ${text}`);
+  return uri;
+}
+
+async function readResource(headers: Record<string, string>, uri: string) {
   const { envelope } = await rpc(headers, {
     jsonrpc: "2.0",
     id: 1,
-    method: "tools/call",
-    params: { name: "read_skill", arguments: { id: SKILL_ID } },
+    method: "resources/read",
+    params: { uri },
   });
-  const content = envelope.result?.content as Array<{ text: string }> | undefined;
-  if (!content?.[0]) throw new Error(`no tool result: ${JSON.stringify(envelope)}`);
-  return {
-    isError: Boolean(envelope.result?.isError),
-    data: JSON.parse(content[0].text) as Record<string, unknown>,
-  };
+  const contents = envelope.result?.contents as Array<{ text: string }> | undefined;
+  return { text: contents?.[0]?.text, error: envelope.error };
 }
 
-describe("a chosen skill injected in a strict turn, read back through `read_skill`", () => {
+describe("a chosen skill injected in a strict turn, read back through `resources/read`", () => {
   it("serves the author's injected draft, then 409s once the draft is edited", async () => {
     const { block, permissions, bearer, unclaimed } = await strictTurn(
       owner.user,
       authHeaders(owner),
       ["chat:write", "mcp:read", "mcp:invoke", "skills:read", "skills:write"],
+      "owner",
     );
     expect(permissions.some((p) => p.startsWith("skills:"))).toBe(false);
-    expect(block.text).toContain(`<skill id="${SKILL_ID}" definition="draft">`);
+    const uri = `skill://${owner.defaultSpaceId}/injectedread/tone@draft/tone/SKILL.md`;
+    expect(injectedUri(block.text)).toBe(uri);
+    expect(block.text).toContain(`<skill id="${SKILL_ID}" uri="${uri}" definition="draft">`);
     const served = block.injected.skills[SKILL_ID];
     expect(block.injected.spaceId).toBe(owner.defaultSpaceId);
     expect(served?.definition).toBe("draft");
 
-    expect((await readSkill(unclaimed)).isError).toBe(true);
-    expect(await readSkill(bearer)).toMatchObject({
-      isError: false,
-      data: { id: SKILL_ID, definition: "draft", content: skillMd("Draft body.") },
-    });
+    expect((await readResource(unclaimed, uri)).error).toBeDefined();
+    const read = await readResource(bearer, uri);
+    expect(read.error).toBeUndefined();
+    // The injected SKILL.md is the very text `resources/read` serves.
+    expect(block.text).toContain(`definition="draft">\n${read.text!.trim()}\n</skill>`);
 
     const edited = await app.request(`/api/packages/skills/${SKILL_ID}`, {
       method: "PATCH",
@@ -147,9 +175,9 @@ describe("a chosen skill injected in a strict turn, read back through `read_skil
       body: JSON.stringify({ content: skillMd("Edited body.") }),
     });
     expect(edited.status).toBe(200);
-    expect(await readSkill(bearer)).toMatchObject({
-      isError: true,
-      data: { status: 409, body: { code: "injected_draft_changed" } },
+    expect((await readResource(bearer, uri)).error).toMatchObject({
+      code: -32600,
+      data: { code: "injected_draft_changed" },
     });
   });
 
@@ -171,19 +199,15 @@ describe("a chosen skill injected in a strict turn, read back through `read_skil
       reader,
       authHeaders({ ...owner, cookie: user.cookie }),
       granted,
+      "guest",
     );
-    expect(block.text).toContain(`<skill id="${SKILL_ID}" version="1.3.0">`);
+    const uri = `skill://${owner.defaultSpaceId}/injectedread/tone/tone/SKILL.md`;
+    expect(block.text).toContain(`<skill id="${SKILL_ID}" uri="${uri}" version="1.3.0">`);
     expect(block.injected.skills[SKILL_ID]).toEqual({ definition: "published", version: "1.3.0" });
 
-    expect((await readSkill(unclaimed)).isError).toBe(true);
-    expect(await readSkill(bearer)).toMatchObject({
-      isError: false,
-      data: {
-        id: SKILL_ID,
-        version: "1.3.0",
-        definition: "published",
-        content: skillMd("Published body."),
-      },
-    });
+    expect((await readResource(unclaimed, uri)).error).toBeDefined();
+    const read = await readResource(bearer, uri);
+    expect(read.text).toContain("Published body.");
+    expect(block.text).toContain(`version="1.3.0">\n${read.text!.trim()}\n</skill>`);
   });
 });
