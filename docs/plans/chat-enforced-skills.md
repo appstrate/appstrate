@@ -125,7 +125,9 @@ three branches, in this order:
    chosen ones as `skills/list` named them, a draft pinned to the
    `lock_version` of its entry's `_meta["dev.appstrate/lock_version"]` (an
    entry without it is malformed: the skill is left out with a "could not be
-   read" notice). The read serves exactly that definition, with no `skills:*` needed, and
+   read" notice), and the `SKILL.md` read is injected only when its bytes match
+   the `sha256` digest the entry lists (a draft saved between the list and the
+   read gets the same notice, with no retry). The read serves exactly that definition, with no `skills:*` needed, and
    honours the claim only on the chat loopback bearer, in the claim's space,
    while the caller still holds `chat:write` there; a skill released mid-turn
    is still served for the rest of that turn, and an edited draft answers

@@ -24,6 +24,7 @@
  * connection from `platformMcp.url`; the handler only mints the bearer.
  */
 
+import { createHash } from "node:crypto";
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { Hono } from "hono";
 import { and, asc, eq } from "drizzle-orm";
@@ -250,6 +251,8 @@ function answerSkillsMcp(
       return new Response(null, { status: 202 });
   }
 }
+
+const sha256 = (text: string) => `sha256:${createHash("sha256").update(text).digest("hex")}`;
 
 /** The permission set the turn's platform-MCP bearer actually carries. */
 async function tokenPermissions(input: PiChatInput): Promise<string[]> {
@@ -681,6 +684,7 @@ describe("handleChatStream", () => {
     // contents are read and with which bearer, so the rendered block is a
     // function of what the handler read.
     const uri = `skill://${ctx.defaultSpaceId}/acme/pinned-skill/pinned/SKILL.md`;
+    const PINNED_TEXT = "Always answer in haiku.";
     const read: string[] = [];
     const skillBearers: string[] = [];
     const dispatch = async (req: Request): Promise<Response> => {
@@ -691,9 +695,9 @@ describe("handleChatStream", () => {
           entry: {
             uri,
             frontmatter: { name: "pinned", description: "P", metadata: { version: "1.0.0" } },
-            resources: [{ uri, digest: `sha256:${"0".repeat(64)}`, size: 23 }],
+            resources: [{ uri, digest: sha256(PINNED_TEXT), size: 23 }],
           },
-          text: "Always answer in haiku.",
+          text: PINNED_TEXT,
           onRead: (readUri) => read.push(readUri),
         });
       }

@@ -15,6 +15,7 @@
  * manifest authoring pattern, and how to consume a run's result.
  */
 
+import { createHash } from "node:crypto";
 import type { Context } from "hono";
 import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/core/naming";
 import {
@@ -580,9 +581,9 @@ interface ChatSkillsRead {
  * `resources/read` serves at its entry's URI. Read with the caller's own
  * permissions, even in `strict`, whose turn holds no `skills:*`. A chosen skill
  * in neither list, or whose read is refused, is left out; a malformed answer (a
- * draft entry without `lock_version`, a `SKILL.md` served as a blob) is kept as
- * `null`, for its own notice. The connection is opened only when there is
- * something to read.
+ * draft entry without `lock_version`, a `SKILL.md` served as a blob, or text
+ * whose digest differs from the one its entry lists) is kept as `null`, for its
+ * own notice. The connection is opened only when there is something to read.
  */
 async function readChatSkills(
   openSkillsClient: () => Promise<ChatSkillsClient>,
@@ -634,10 +635,15 @@ async function readChatSkills(
         );
         if (!content) return;
         const served = servedAs(entry, drafts.has(id));
-        // A `SKILL.md` served as a blob is not a skill's text: its own notice.
+        // A `SKILL.md` served as a blob is not a skill's text, and text that is
+        // not the listed `SKILL.md` (a draft saved between the list and the
+        // read) is not the definition the claim pins: both get their own notice.
         read.contents.set(
           id,
-          served && "text" in content && typeof content.text === "string"
+          served &&
+            "text" in content &&
+            typeof content.text === "string" &&
+            isListedSkillMd(entry, content.text)
             ? {
                 packageId: id,
                 version: served.definition === "published" ? served.version : null,
@@ -653,6 +659,12 @@ async function readChatSkills(
   } finally {
     await client.close().catch(() => {});
   }
+}
+
+/** Whether `text` is the `SKILL.md` its entry lists: its UTF-8 bytes have the listed `digest`. */
+function isListedSkillMd(entry: SkillEntry, text: string): boolean {
+  const listed = entry.resources.find((resource) => resource.uri === entry.uri);
+  return listed?.digest === `sha256:${createHash("sha256").update(text, "utf8").digest("hex")}`;
 }
 
 /**

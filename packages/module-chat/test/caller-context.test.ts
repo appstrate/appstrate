@@ -8,6 +8,7 @@
  * when there is nothing useful to inject (so the caller skips it).
  */
 
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "bun:test";
 import {
   formatCallerContext,
@@ -991,29 +992,47 @@ const skillEntry = (uri: string, version: string | null, lockVersion?: number): 
   ...(lockVersion === undefined ? {} : { _meta: { [SKILL_LOCK_VERSION_META_KEY]: lockVersion } }),
 });
 
+const sha256 = (text: string) => `sha256:${createHash("sha256").update(text).digest("hex")}`;
+
 /**
  * A skills connection listing `published` and, under the draft `_meta`,
- * `drafts`, serving `texts` by URI and `blobs` as base64 (a missing URI is
+ * `drafts`, each `SKILL.md` with the digest of its text in `texts`. It serves
+ * `texts` by URI, or `savedAfterList` when a URI is there (the skill changed
+ * between the list and the read), and `blobs` as base64 (a missing URI is
  * refused). Records each call, and whether it was closed.
  */
 function fakeSkillsClient(opts: {
   published: SkillEntry[];
   drafts?: SkillEntry[];
   texts: Record<string, string>;
+  savedAfterList?: Record<string, string>;
   blobs?: Record<string, string>;
 }) {
   const calls: string[] = [];
+  const listed = (entries: SkillEntry[]): SkillEntry[] =>
+    entries.map((entry) => {
+      const text = opts.texts[entry.uri];
+      if (text === undefined) return entry;
+      return {
+        ...entry,
+        resources: entry.resources.map((resource) =>
+          resource.uri === entry.uri
+            ? { ...resource, digest: sha256(text), size: Buffer.byteLength(text) }
+            : resource,
+        ),
+      };
+    });
   const client: ChatSkillsClient = {
     listSkills: async (options) => {
       const draft = options?.meta?.[SKILL_DEFINITION_META_KEY] === "draft";
       calls.push(draft ? "skills/list draft" : "skills/list");
-      return { skills: draft ? (opts.drafts ?? []) : opts.published };
+      return { skills: listed(draft ? (opts.drafts ?? []) : opts.published) };
     },
     readResource: async ({ uri }) => {
       calls.push(`resources/read ${uri}`);
       const blob = opts.blobs?.[uri];
       if (blob !== undefined) return { contents: [{ uri, mimeType: "text/markdown", blob }] };
-      const text = opts.texts[uri];
+      const text = opts.savedAfterList?.[uri] ?? opts.texts[uri];
       if (text === undefined) throw new Error("Resource not found");
       return { contents: [{ uri, mimeType: "text/markdown", text }] };
     },
@@ -1165,6 +1184,42 @@ describe("buildCallerContextBlock", () => {
       },
     );
     expect(out).not.toContain("<skill");
+    expect(out).toContain("`@acme/a` was chosen for this conversation but could not be read.");
+    expect(injected).toEqual({ spaceId: "spc_1", skills: {} });
+  });
+
+  it("gives a chosen skill whose SKILL.md differs from its listed digest its could-not-be-read notice", async () => {
+    // The draft is saved between `skills/list` (lock_version 7) and `resources/read`:
+    // the text read is the next draft, which the claim's lock_version does not name.
+    const A = "skill://spc_1/acme/a@draft/a/SKILL.md";
+    const skills = fakeSkillsClient({
+      published: [],
+      drafts: [skillEntry(A, null, 7)],
+      texts: { [A]: "a draft body" },
+      savedAfterList: { [A]: "a draft body, saved again" },
+    });
+    const { deps } = fakeDeps(() => Response.json({ user: { name: "Ada" } }));
+    const { text: out, injected } = await buildCallerContextBlock(
+      fakeContext({ orgRole: "member" }),
+      {
+        origin: "http://127.0.0.1:3000",
+        headers: {},
+        spaceId: "spc_1",
+        user,
+        deps,
+        capabilities: caps(BUILDER),
+        permissions: ["mcp:read", "mcp:invoke"],
+        skills: { skillMode: "manual", pinnedSkills: ["@acme/a"] },
+        enforced: NO_ENFORCED,
+        openSkillsClient: skills.open,
+      },
+    );
+    // Read once, never retried.
+    expect(skills.calls.filter((call) => call.startsWith("resources/read"))).toEqual([
+      `resources/read ${A}`,
+    ]);
+    expect(out).not.toContain("<skill");
+    expect(out).not.toContain("saved again");
     expect(out).toContain("`@acme/a` was chosen for this conversation but could not be read.");
     expect(injected).toEqual({ spaceId: "spc_1", skills: {} });
   });

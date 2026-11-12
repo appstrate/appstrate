@@ -108,8 +108,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is unchanged (`skills:read`, or a skill the chat turn injected, at the definition
   injected); a refusal is `Resource not found` (`-32002`) on `resources/read` and
   `-32602` on `skills/get` instead of a `read_skill` result carrying the REST 403 or
-  404, and a changed injected draft is `-32600` with `data.code:
-"injected_draft_changed"`. A client calling `read_skill` gets `-32602 Unknown tool`.
+  404, and a changed injected draft is `-32600` with
+  `data.code: "injected_draft_changed"`. A client calling `read_skill` gets
+  `-32602 Unknown tool`.
   The chat's model reads a skill's files with its `read_resource` tool.
 
 - **The MCP server serves skills through the MCP Skills extension (SEP-2640)** (#2175). It
@@ -187,7 +188,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `resources/read`, over a platform MCP connection with the caller's own
   permissions and no injected-skills claim, closed before the turn's connection
   opens; the chat no longer reads `GET /api/packages/skills`. An injected draft is
-  pinned by its entry's `dev.appstrate/lock_version`. Each injected `<skill>` tag
+  pinned by its entry's `dev.appstrate/lock_version`, and a `SKILL.md` whose bytes
+  do not match the `sha256` digest its entry lists (a draft saved between the list
+  and the read) is not injected: the skill gets its could-not-be-read notice. Each injected `<skill>` tag
   carries its `uri`, and the prompt teaches `read_resource` on that URI for the
   files a skill references. In the `auto` mode, the skills the model may load are
   listed the same way, each with its `skill://` URI, and the model loads one with
