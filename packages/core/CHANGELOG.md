@@ -15,14 +15,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Agent launch prompts** (`@appstrate/core/agent-prompt`): **`renderAgentPrompt(view, request?)`**
-  renders the instructions that launch one run of an agent through the MCP tools, with its input
-  contract (`schema` and the `partitionInputFields` partition, never a stored value) inlined;
-  **`agentPromptDescription`** is its one-line description; **`agentPromptName`**,
-  **`spaceCollisionPromptName`** and **`scopeCollisionPromptName`** name it (`run-<name>`,
-  `run-<space>-<name>`, `run-<scope>-<name>`) under **`AGENT_PROMPT_PREFIX`**; **`AgentLaunchView`**
-  is its input. The MCP server serves it as a prompt. (#2172)
-
 - **Image MIME types in `extensionForMime`** (`@appstrate/core/naming`): `image/png`, `image/jpeg` and `image/jpg` (`jpg`), `image/gif`, `image/webp`, `image/bmp` and `image/svg+xml` (`svg`) now resolve to an extension, so spilled images are no longer extensionless. (#2120)
 - **`AJV_FORMATS_OPTIONS`** (`@appstrate/core/ajv`): the ajv-formats options `createAjv` uses, so
   the RJSF validator registers the same formats and client and server agree.

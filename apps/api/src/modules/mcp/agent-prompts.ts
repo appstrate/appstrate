@@ -17,6 +17,7 @@
 
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstratePromptProvider, GetPromptResult, Prompt } from "@appstrate/mcp-transport";
+import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
 import {
   agentPromptDescription,
   agentPromptName,
@@ -24,8 +25,7 @@ import {
   scopeCollisionPromptName,
   spaceCollisionPromptName,
   type AgentLaunchView,
-} from "@appstrate/core/agent-prompt";
-import { encodePackageIdPath, parseScopedName } from "@appstrate/core/naming";
+} from "./agent-prompt-render.ts";
 import type { Dispatch, McpSurface } from "./tools.ts";
 import { dispatchHeaders } from "./tool-results.ts";
 

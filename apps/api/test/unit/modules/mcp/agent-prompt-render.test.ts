@@ -9,9 +9,9 @@ import {
   scopeCollisionPromptName,
   spaceCollisionPromptName,
   type AgentLaunchView,
-} from "../src/agent-prompt.ts";
-import { CONNECTION_RESOLUTION_WARNING_CODES } from "../src/integration.ts";
-import { launchRunAndWait } from "../src/run-and-wait-client.ts";
+} from "../../../../src/modules/mcp/agent-prompt-render.ts";
+import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
+import { launchRunAndWait } from "@appstrate/core/run-and-wait-client";
 
 const SPACE_ID = "spc_0f8fad5b";
 

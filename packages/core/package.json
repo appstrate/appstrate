@@ -80,7 +80,6 @@
     "./schema-validation": "./src/schema-validation.ts",
     "./form": "./src/form.ts",
     "./input-resolution": "./src/input-resolution.ts",
-    "./agent-prompt": "./src/agent-prompt.ts",
     "./format": "./src/format.ts",
     "./module": "./src/module.ts",
     "./telemetry": "./src/telemetry.ts",

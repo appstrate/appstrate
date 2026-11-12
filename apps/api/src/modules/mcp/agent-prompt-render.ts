@@ -1,23 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * An agent rendered as a launch prompt: the instructions a model follows to
- * start one run of that agent through the Appstrate MCP tools, with the
- * agent's input contract inlined. The MCP server serves it as a user-controlled
- * prompt (`prompts/get`); any surface that offers "launch this agent" as a user
- * command renders the same text.
+ * An agent's launch prompt: its name, its one-line description, and the
+ * instructions a model follows to start one run of that agent through the
+ * Appstrate MCP tools, with the agent's input contract inlined. The MCP server
+ * serves it as a user-controlled prompt (`agent-prompts.ts`).
  *
  * Stored input values never reach the text, only which fields have one.
  */
 
 import { isValidSkillName, SKILL_NAME_MAX_LENGTH } from "@appstrate/afps-shared/companion-files";
-import { CONNECTION_RESOLUTION_WARNING_CODES } from "./integration.ts";
-import { parseScopedName, toSlug } from "./naming.ts";
-import { isFileField, type JSONSchemaObject, type SchemaWrapper } from "./form.ts";
-import { partitionInputFields, type AgentInputSettings } from "./input-resolution.ts";
+import { CONNECTION_RESOLUTION_WARNING_CODES } from "@appstrate/core/integration";
+import { parseScopedName, toSlug } from "@appstrate/core/naming";
+import { isFileField, type JSONSchemaObject, type SchemaWrapper } from "@appstrate/core/form";
+import { partitionInputFields, type AgentInputSettings } from "@appstrate/core/input-resolution";
 
 /** Every launch prompt's name starts with it: it says "this launches a metered run". */
-export const AGENT_PROMPT_PREFIX = "run-";
+const AGENT_PROMPT_PREFIX = "run-";
 
 /** `run-<name>`: the name of an agent's launch prompt when no other agent claims it. */
 export function agentPromptName(packageNameSegment: string): string {
