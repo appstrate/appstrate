@@ -324,7 +324,7 @@ describe("proxyCall — session cookie jar (#1613)", () => {
 
     expect(upstream.seen.map((s) => s.request)).toEqual([
       "POST https://1.1.1.1/cart/add",
-      "POST https://8.8.8.8/elsewhere",
+      "GET https://8.8.8.8/elsewhere",
       "POST https://1.1.1.1/cart",
     ]);
     expect(upstream.seen[2]?.cookie).toBe("PHPSESSID=new");
