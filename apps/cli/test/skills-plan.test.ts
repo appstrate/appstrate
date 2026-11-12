@@ -377,12 +377,13 @@ describe("fetchSkillFiles", () => {
           : served(input, init)) as unknown as typeof fetch;
     };
     const encode = (text: string) => new TextEncoder().encode(text);
-    for (const hostile of [
+    const hostiles: Record<string, Uint8Array>[] = [
       { ...original, "extra.md": encode("x") },
       { "SKILL.md": original["SKILL.md"]!, "../notes.md": original["notes.md"]! },
       { ...original, "notes.md": encode("notes, longer than listed") },
       { ...original, "notes.md": encode("n") },
-    ]) {
+    ];
+    for (const hostile of hostiles) {
       serveArchive(hostile);
       await expect(fetchSkillFiles("default", skill)).rejects.toThrow(
         /does not match its served digests/,
