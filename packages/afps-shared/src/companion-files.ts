@@ -253,11 +253,20 @@ export interface SkillFrontmatter {
   position?: { line: number; column: number };
   name: string;
   description: string;
+  /** The parsed frontmatter mapping, every key as authored; `{}` when absent or invalid. */
+  fields: Record<string, unknown>;
 }
 
 /** Parses the way the skill runtime does, so the gate cannot accept what it fails to read. */
 export function parseSkillFrontmatter(content: string): SkillFrontmatter {
-  const empty = { found: false, unterminated: false, error: null, name: "", description: "" };
+  const empty = {
+    found: false,
+    unterminated: false,
+    error: null,
+    name: "",
+    description: "",
+    fields: {},
+  };
 
   const normalized = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   if (!normalized.startsWith("---")) return empty;
@@ -294,7 +303,7 @@ export function parseSkillFrontmatter(content: string): SkillFrontmatter {
   const description = readStringField(record, "description");
   if (typeof description !== "string") return { ...empty, found: true, error: description.error };
 
-  return { found: true, unterminated: false, error: null, name, description };
+  return { found: true, unterminated: false, error: null, name, description, fields: record };
 }
 
 /** An absent key and an empty scalar both mean "not provided" and yield `""`. */

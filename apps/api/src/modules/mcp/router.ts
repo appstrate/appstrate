@@ -59,6 +59,7 @@ import {
   createMcpServer,
   parseMcpPost,
   serveStatelessPost,
+  type AppstrateResourceProvider,
   type McpPost,
 } from "@appstrate/mcp-transport";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
@@ -104,6 +105,10 @@ import {
 } from "./tools.ts";
 import { buildOperationIndex, buildOrgWideOperationIndex, operationIdGranted } from "./catalog.ts";
 import { skillReaderFor } from "./skill-tools.ts";
+import { buildSkillServer } from "./skills.ts";
+import { SKILL_URI_PREFIX } from "./skill-resources.ts";
+import { readSkillSnapshot } from "../../services/skill-read.ts";
+import { listActivePackages } from "../../services/space-packages.ts";
 import {
   listReachableSpaces,
   pinnedSpaceIds,
@@ -684,7 +689,27 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // `resources/read` for `appfile://file_xxx` — resolves through the same
     // forwarded-auth in-process dispatch as the tools (files are NOT listed
     // under `resources/list`; they surface only via `resource_link`).
-    const resources = buildFileResourceProvider(toolCtx);
+    const files = buildFileResourceProvider(toolCtx);
+    // `skills/*` and `resources/read` for `skill://` (SEP-2640), in the space this request entered.
+    const skills = buildSkillServer({
+      spaceId: scope.spaceId,
+      // Published ones: a system skill's stored tree, or a `latest` dist-tag.
+      listActiveSkillIds: async () =>
+        (await listActivePackages(scope, "skill"))
+          .filter((row) => row.source === "system" || row.latestVersionId !== null)
+          .map((row) => row.id),
+      readSkill: (packageId, definition) => readSkillSnapshot(c, scope, packageId, definition),
+      logUnservable: (event) =>
+        logger.warn("mcp.skill_unservable", {
+          requestId: c.get("requestId"),
+          spaceId: scope.spaceId,
+          ...event,
+        }),
+    });
+    const resources: AppstrateResourceProvider = {
+      read: (uri, extra) =>
+        uri.startsWith(SKILL_URI_PREFIX) ? skills.read(uri) : files.read(uri, extra),
+    };
     // One launch prompt per runnable agent, in every space this connection reaches.
     const prompts = buildAgentPromptProvider({
       origin,
@@ -704,6 +729,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
           orgSpaces,
         ),
         resources,
+        skills: skills.provider,
         prompts,
       },
     );

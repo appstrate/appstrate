@@ -210,12 +210,6 @@ export interface AppstrateSkillProvider {
   get: (uri: string, extra: AppstrateRequestExtra) => Promise<SkillEntry> | SkillEntry;
 }
 
-/**
- * Freshness hint on `skills/list` and `skills/get` results: entries are
- * computed per caller, so they are never shared across callers.
- */
-const SKILLS_CACHE = { ttlMs: 0, cacheScope: "private" } as const;
-
 export interface CreateMcpServerOptions {
   /** Resource provider — when omitted, no `resources/*` capability is advertised. */
   resources?: AppstrateResourceProvider;
@@ -340,7 +334,7 @@ export function createMcpServer(
     server.fallbackRequestHandler = async (request, extra) => {
       if (request.method === "skills/list") {
         const skills = await provider.list(extra);
-        return { resultType: "complete", skills, ...SKILLS_CACHE };
+        return { resultType: "complete", skills };
       }
       if (request.method === "skills/get") {
         const uri = request.params?.uri;
@@ -348,7 +342,7 @@ export function createMcpServer(
           throw new McpError(ErrorCode.InvalidParams, "skills/get requires a `uri`");
         }
         const skill = await provider.get(uri, extra);
-        return { resultType: "complete", skill, ...SKILLS_CACHE };
+        return { resultType: "complete", skill };
       }
       throw new McpError(ErrorCode.MethodNotFound, "Method not found");
     };

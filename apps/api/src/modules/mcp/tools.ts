@@ -1736,7 +1736,7 @@ function buildFileResourceReader(ctx: McpToolContext): {
 }
 
 /** JSON-RPC code for an unknown resource (MCP 2025-11-25, resources "Error Handling"). */
-const RESOURCE_NOT_FOUND_ERROR_CODE = -32002;
+export const RESOURCE_NOT_FOUND_ERROR_CODE = -32002;
 
 /**
  * `resources/read` for `appfile://` URIs: a refusal is a JSON-RPC error here, as

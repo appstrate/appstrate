@@ -55,15 +55,13 @@ describe("createMcpServer — skills extension (SEP-2640)", () => {
     }
   });
 
-  it("answers skills/list and skills/get with complete, per-caller cacheable results", async () => {
+  it("answers skills/list and skills/get with complete results and no cache attributes", async () => {
     const pair = await createInProcessPair([], { resources, skills });
     try {
       const list = await pair.client.request({ method: "skills/list", params: {} }, ResultSchema);
       expect(list).toEqual({
         resultType: "complete",
         skills: [ENTRY],
-        ttlMs: 0,
-        cacheScope: "private",
       });
       const get = await pair.client.request(
         { method: "skills/get", params: { uri: ENTRY.uri } },
@@ -72,8 +70,6 @@ describe("createMcpServer — skills extension (SEP-2640)", () => {
       expect(get).toEqual({
         resultType: "complete",
         skill: ENTRY,
-        ttlMs: 0,
-        cacheScope: "private",
       });
     } finally {
       await pair.close();

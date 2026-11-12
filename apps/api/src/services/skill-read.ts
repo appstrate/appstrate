@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// MCP `read_skill`: the file explorer's readers, with its own access rule.
+// MCP `read_skill` and `skill://` reads: the file explorer's readers, with their own access rule.
 
 import type { Context } from "hono";
 import { packagePermission } from "@appstrate/core/permissions";
@@ -27,6 +27,7 @@ import {
   type PackageFileSnapshot,
 } from "./package-files.ts";
 import { withPackageDraftLock } from "./package-locks.ts";
+import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 
 const SKILLS_READ = packagePermission("skill", "read");
 const CHAT_TURN = "chat:write";
@@ -63,19 +64,24 @@ interface SkillReadAccess {
  * injected answers from the claim alone, without `skills:*` — the chat already
  * put its SKILL.md in context — and never falls through: the published version
  * it was served at (a system skill's shipped tree), or its draft pinned to the
- * `lock_version` injected. Any other skill: `skills:read`, as `GET …/files`.
+ * `lock_version` injected; a `definition` other than the one injected is
+ * refused. Any other skill: `skills:read`, as `GET …/files`, at `definition`
+ * when named (the draft only for whoever may write the package), else at the
+ * file explorer's default.
  */
 async function resolveSkillReadAccess(
   c: Context<AppEnv>,
   scope: SpaceScope,
   packageId: string,
+  definition: SkillDefinitionSelector | undefined,
 ): Promise<SkillReadAccess | null> {
   const claim = turnClaim(c, scope);
   if (claim && Object.hasOwn(claim, packageId)) {
     const served = claim[packageId]!;
     const pkg = await findFileExplorerPackage(scope, packageId);
     if (pkg?.type !== "skill") return null;
-    if (pkg.source === "system") return { pkg, spec: undefined };
+    if (pkg.source === "system") return definition === "draft" ? null : { pkg, spec: undefined };
+    if (definition !== undefined && definition !== served.definition) return null;
     if (served.definition === "draft") {
       return { pkg, spec: undefined, draftLock: served.lockVersion };
     }
@@ -84,7 +90,13 @@ async function resolveSkillReadAccess(
   if (c.get("permissions")?.has(SKILLS_READ)) {
     const pkg = await findFileExplorerPackage(scope, packageId);
     if (pkg?.type === "skill") {
-      return { pkg, spec: await resolveFileExplorerVersion(c, pkg, undefined) };
+      const explicit =
+        definition === undefined
+          ? undefined
+          : definition === "draft"
+            ? VERSION_SELECTOR_DRAFT
+            : "latest";
+      return { pkg, spec: await resolveFileExplorerVersion(c, pkg, explicit) };
     }
   }
   return null;
@@ -126,13 +138,19 @@ export interface SkillSnapshot {
   snapshot: PackageFileSnapshot;
 }
 
-/** `null` when refused; the caller answers it as REST does (403, else 404). */
+export type SkillDefinitionSelector = "published" | "draft";
+
+/**
+ * `null` when refused; the caller answers it as REST does (403, else 404).
+ * `definition` names the definition to read (see `resolveSkillReadAccess`).
+ */
 export async function readSkillSnapshot(
   c: Context<AppEnv>,
   scope: SpaceScope,
   packageId: string,
+  definition?: SkillDefinitionSelector,
 ): Promise<SkillSnapshot | null> {
-  const access = await resolveSkillReadAccess(c, scope, packageId);
+  const access = await resolveSkillReadAccess(c, scope, packageId, definition);
   if (!access) return null;
   const { pkg, spec, draftLock } = access;
   const validator = await resolvePackageFileValidator(pkg, spec);
