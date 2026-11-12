@@ -46,6 +46,7 @@ import {
   type RunAndWaitLaunch,
 } from "@appstrate/core/run-and-wait-client";
 import type { ResolutionFieldError } from "@appstrate/core/api-errors";
+import type { RunLogEvent } from "@appstrate/shared-types";
 import { parseFileUri, fileUri } from "@appstrate/core/file-uri";
 import {
   CONNECTION_RESOLUTION_WARNING_CODES,
@@ -179,6 +180,12 @@ export interface McpToolContext {
   readSkill: SkillToolContext["readSkill"];
   /** The inbound request's id, for the problem bodies a tool builds itself. */
   requestId: string;
+  /**
+   * Deliver the `run_log` frames (info and above) of a run the caller may read
+   * until the returned function is called (`followRunLogs` in
+   * `services/realtime-access.ts`). Feeds `run_and_wait`'s progress messages.
+   */
+  followRunLogs: (runId: string, onLog: (log: RunLogEvent) => void) => () => void;
   /** In-process dispatcher (defaults to the platform app at request time). */
   dispatch: Dispatch;
   /**
@@ -982,7 +989,40 @@ export const WARNING_CODES_PHRASE = CONNECTION_RESOLUTION_WARNING_CODES.map((c) 
 /** The resume instruction for a caller with time to wait (not the chat). */
 export const RUN_AND_WAIT_LONG_POLL_RESUME = `${RUN_AND_WAIT_RESUME_INSTRUCTION} \`query: { wait: true }\` holds that read until the run ends.`;
 
-function startProgressHeartbeat(extra: AppstrateRequestExtra, runId: string): (() => void) | null {
+/** At most one log notification per period; a line arriving within it waits, replaced by any newer one. */
+export const RUN_AND_WAIT_LOG_PROGRESS_INTERVAL_MS = 1_000;
+/** Longest log message a progress notification carries, in code points. */
+export const RUN_AND_WAIT_LOG_MESSAGE_MAX_CHARS = 200;
+
+/** `Run <id> [<level>] <message>` on one line, message cut to its cap; `null` for nothing to show. */
+function logProgressMessage(runId: string, log: RunLogEvent): string | null {
+  if (log.level === "debug") return null;
+  const line = (log.message ?? "").replace(/\s+/g, " ").trim();
+  if (line === "") return null;
+  // Counted and cut in code points, so a character outside the BMP is never split.
+  const chars = [...line];
+  const message =
+    chars.length > RUN_AND_WAIT_LOG_MESSAGE_MAX_CHARS
+      ? `${chars.slice(0, RUN_AND_WAIT_LOG_MESSAGE_MAX_CHARS - 1).join("")}…`
+      : line;
+  return `Run ${runId} [${log.level}] ${message}`;
+}
+
+/**
+ * Progress of a streamed `run_and_wait` (the caller sent a `progressToken`): a
+ * heartbeat every {@link RUN_AND_WAIT_PROGRESS_INTERVAL_MS} plus the run's
+ * latest log line, throttled to {@link RUN_AND_WAIT_LOG_PROGRESS_INTERVAL_MS}.
+ * Both share one strictly increasing `progress` counter. `null` without a token.
+ *
+ * The returned stop takes whether the wait completed: a completed wait first
+ * sends the line still held by the throttle (often the run's final error), as
+ * the response has not left yet; a cancelled or disconnected call sends nothing.
+ */
+function startRunProgress(
+  ctx: McpToolContext,
+  extra: AppstrateRequestExtra,
+  runId: string,
+): ((waitCompleted: boolean) => void) | null {
   const progressToken = extra._meta?.progressToken;
   if (progressToken === undefined) return null;
   const startedAt = performance.now();
@@ -1005,7 +1045,32 @@ function startProgressHeartbeat(extra: AppstrateRequestExtra, runId: string): ((
     const elapsedS = Math.round((performance.now() - startedAt) / 1000);
     beat(`Waiting for run ${runId} (${elapsedS}s elapsed)`);
   }, RUN_AND_WAIT_PROGRESS_INTERVAL_MS);
-  return () => clearInterval(timer);
+
+  let cooldown: ReturnType<typeof setTimeout> | undefined;
+  let waiting: string | null = null;
+  const sendLog = (message: string) => {
+    beat(message);
+    cooldown = setTimeout(() => {
+      cooldown = undefined;
+      if (waiting === null) return;
+      const next = waiting;
+      waiting = null;
+      sendLog(next);
+    }, RUN_AND_WAIT_LOG_PROGRESS_INTERVAL_MS);
+  };
+  const stopLogs = ctx.followRunLogs(runId, (log) => {
+    const message = logProgressMessage(runId, log);
+    if (message === null) return;
+    if (cooldown === undefined) sendLog(message);
+    else waiting = message;
+  });
+
+  return (waitCompleted) => {
+    clearInterval(timer);
+    clearTimeout(cooldown);
+    if (waitCompleted && waiting !== null && !extra.signal?.aborted) beat(waiting);
+    stopLogs();
+  };
 }
 
 /**
@@ -1297,7 +1362,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       outcome: "invoked",
     });
 
-    const stopHeartbeat = startProgressHeartbeat(extra, runId);
+    const stopProgress = startRunProgress(ctx, extra, runId);
     const waitOpts = {
       origin: ctx.origin,
       headers: forwarded,
@@ -1306,8 +1371,17 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
     };
     const waited = await waitForRunAndWaitCompletion(launch, {
       ...waitOpts,
-      maxMs: stopHeartbeat ? undefined : RUN_AND_WAIT_UNSTREAMED_MAX_MS,
-    }).finally(() => stopHeartbeat?.());
+      maxMs: stopProgress ? undefined : RUN_AND_WAIT_UNSTREAMED_MAX_MS,
+    }).then(
+      (result) => {
+        stopProgress?.(true);
+        return result;
+      },
+      (err: unknown) => {
+        stopProgress?.(false);
+        throw err;
+      },
+    );
 
     // A failed poll reports its HTTP status; otherwise the run's own status (the
     // wait may have ended on `pending`/`running`), not the polling GET's 200.

@@ -102,6 +102,7 @@ function makeTools(
     placeRootAs: async () => null,
     readSkill: () => Promise.reject(new Error("read_skill is not exercised here")),
     requestId: "req_test",
+    followRunLogs: () => () => {},
   };
   const tools = toolsFor(ctx, proxyAcceptsCredential);
   const byName = new Map(tools.map((tool) => [tool.descriptor.name, tool]));

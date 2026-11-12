@@ -319,6 +319,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`run_and_wait` relays the run's log lines as MCP progress** (#2147). A
+  call carrying a `progressToken` keeps its 15 s heartbeat and also receives
+  each `info`, `warn` or `error` log line of the run as a
+  `notifications/progress` message `Run <id> [<level>] <message>` (one line,
+  200 characters at most, without `data`), at most one per second, the latest
+  line of a burst winning; a line still held when the wait ends is sent before
+  the result. The lines come from the realtime `run_log` stream
+  under the same gates as `GET /api/realtime/runs/{id}` (run read, run
+  visibility), so they cost no `GET /api/runs/{id}/logs` call. The chat is
+  unchanged.
+
 - **A relayed upstream `401` on the credential proxy says what the platform
   tried** (#2155). When the forced refresh after the `401` could not recover the
   credential, `/api/credential-proxy/proxy` adds

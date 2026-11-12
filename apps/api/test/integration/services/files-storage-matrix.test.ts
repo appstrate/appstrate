@@ -239,6 +239,7 @@ describeRequiresS3("files storage parity — S3 presigned posture", () => {
       placeRootAs: async () => null,
       readSkill: () => Promise.reject(new Error("read_skill is not exercised here")),
       requestId: "req_test",
+      followRunLogs: () => () => {},
       dispatch: async () => new Response(null),
     };
     const read = await buildFileResourceProvider(mcpCtx).read(

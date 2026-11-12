@@ -255,11 +255,20 @@ How long it waits depends on the client. Both delays derive from the MCP SDK
 client's default request timeout (60 s). A request carrying
 `params._meta.progressToken` is answered over SSE: the call streams
 `notifications/progress` every 15 s (a quarter of it) and returns `done:true`
-once the run is over. Without a token nothing can keep the request alive, so
-after 45 s (one heartbeat short of it) it returns `done:false` with the run
-`id` and no outcome, and a second text block saying what to do next: continue
-with `getRun` (`query: { wait: true }`, which the server holds for at most
-55 s) on that id, never with a second `run_and_wait`.
+once the run is over. The same stream relays the run's log lines as they are
+written: each `info`, `warn` or `error` line becomes a notification whose
+`message` is `Run <id> [<level>] <message>`, on one line and cut to 200
+characters, without the line's `data`. At most one log line is sent per
+second; when several arrive within that second, only the latest is sent, and a
+line still held when the wait ends is sent just before the result. Log lines
+and heartbeats share one strictly increasing `progress` counter. They follow
+the caller's run read: a caller receives the lines of a run it may read, as on
+`GET /api/realtime/runs/{id}`, never `debug` lines. Most clients show these
+notifications to the user, not to the model. Without a token nothing can keep
+the request alive, so after 45 s (one heartbeat short of it) it returns
+`done:false` with the run `id` and no outcome, and a second text block saying
+what to do next: continue with `getRun` (`query: { wait: true }`, which the
+server holds for at most 55 s) on that id, never with a second `run_and_wait`.
 Progress only helps a client that resets its request timeout on it: the MCP
 TypeScript SDK does so only with `resetTimeoutOnProgress: true` (default
 `false`). A client that sends a token without resetting its timeout on progress
