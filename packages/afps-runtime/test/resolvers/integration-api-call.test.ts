@@ -1857,4 +1857,43 @@ describe("RemoteAppstrateIntegrationResolver", () => {
       await rm(workspace, { recursive: true, force: true });
     }
   });
+
+  it("returns the proxy's relayed 3xx as is, never following it (#2154)", async () => {
+    const offList: string[] = [];
+    const blob = Bun.serve({
+      port: 0,
+      fetch(request) {
+        offList.push(request.url);
+        return new Response("blob", { status: 200 });
+      },
+    });
+    const proxyHits: string[] = [];
+    const location = `http://127.0.0.1:${blob.port}/logs?sig=abc`;
+    const proxy = Bun.serve({
+      port: 0,
+      fetch(request) {
+        proxyHits.push(new URL(request.url).pathname);
+        // The route relays an upstream redirect off authorized_uris unfollowed.
+        return new Response(null, { status: 302, headers: { location } });
+      },
+    });
+    try {
+      const tool = await remoteTool(((_url: string, init: RequestInit) =>
+        fetch(`http://127.0.0.1:${proxy.port}/api/credential-proxy/proxy`, init)) as typeof fetch);
+      const { ctx } = makeCtx();
+      const res = await tool.execute(
+        { method: "GET", target: "https://api.github.com/repos/o/r/actions/jobs/1/logs" },
+        ctx,
+      );
+      const body = JSON.parse((res.content[0] as { text: string }).text) as { status: number };
+      expect(body.status).toBe(302);
+      expect(JSON.stringify(res)).toContain(location);
+      // One request, to the platform route only — nothing reached the redirect target.
+      expect(proxyHits).toEqual(["/api/credential-proxy/proxy"]);
+      expect(offList).toEqual([]);
+    } finally {
+      proxy.stop(true);
+      blob.stop(true);
+    }
+  });
 });
