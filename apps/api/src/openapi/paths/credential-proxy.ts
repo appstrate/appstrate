@@ -314,9 +314,9 @@ const proxyResponses = {
   },
   "403": {
     description:
-      "Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or a " +
-      "redirect hop is not on a call that substitutes a `{{credential_field}}` (any other " +
-      "call gets that 3xx back unfollowed), or the connection does not render the declared list " +
+      "Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or, on a " +
+      "call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call " +
+      "gets that 3xx back unfollowed), or the connection does not render the declared list " +
       "(`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a " +
       "blocked network range (`destination_ip_prohibited`); " +
       "`credential_exfiltration_refused` — the call carries a credential and the allowlist " +

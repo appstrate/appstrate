@@ -828,7 +828,10 @@ function buildSidecarTools(options: MountMcpOptions): {
           "credential-injecting proxy. The sidecar injects the integration's resolved " +
           "credential and forwards the request to the supplied target URL, which must match " +
           "the integration auth's `authorizedUris`. Binary upstream responses spill to MCP " +
-          "`resources` and are returned as a `resource_link`.",
+          "`resources` and are returned as a `resource_link`. A 3xx whose `Location` is " +
+          "outside the auth's `authorizedUris` comes back as is, unfollowed (unless the " +
+          "request fills in a credential `{{field}}`): fetch that `Location` yourself right " +
+          "away, since such signed URLs expire fast (1 minute for GitHub Actions logs).",
         inputSchema:
           CREDENTIAL_PROXY_INPUT_SCHEMA as unknown as AppstrateToolDefinition["descriptor"]["inputSchema"],
         // Capability marker (read agent-side by `direct.ts`) — routes this
