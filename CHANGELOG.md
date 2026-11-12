@@ -348,6 +348,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`GET /api/agents` rows carry `published`** (#2172): `true` when the agent
+  has a published version (or is a system agent), so launching it without a
+  version selector resolves; `false` for a draft-only agent. The row's
+  `version` is the draft manifest's and does not answer this. The MCP server
+  builds its agent prompts from this flag with one listing read per space.
+
 - **`run_and_wait` relays the run's log lines as MCP progress** (#2147). A
   call carrying a `progressToken` keeps its 15 s heartbeat and also receives
   each `info`, `warn` or `error` log line of the run as a

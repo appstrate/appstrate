@@ -1089,6 +1089,36 @@ describe("Agents API", () => {
     });
   });
 
+  describe("GET /api/agents — published", () => {
+    it("is false for a draft-only agent whatever its manifest version, true once a version is cut", async () => {
+      await seedActiveAgent({
+        id: "@myorg/publish-flag",
+        orgId: ctx.orgId,
+        createdBy: ctx.user.id,
+        spaceId: ctx.defaultSpaceId,
+      });
+      const listed = async () => {
+        const res = await app.request("/api/agents", { headers: authHeaders(ctx) });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          data: { id: string; version: string | null; published: boolean }[];
+        };
+        return body.data.find((agent) => agent.id === "@myorg/publish-flag")!;
+      };
+
+      const draftOnly = await listed();
+      expect(draftOnly.version).not.toBeNull();
+      expect(draftOnly.published).toBe(false);
+
+      await createVersionFromDraft({
+        packageId: "@myorg/publish-flag",
+        orgId: ctx.orgId,
+        userId: ctx.user.id,
+      });
+      expect((await listed()).published).toBe(true);
+    });
+  });
+
   // ─── Persistence Routes (pinned slots + memories) ─
 
   describe("GET /api/agents/:scope/:name/persistence", () => {

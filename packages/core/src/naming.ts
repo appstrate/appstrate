@@ -138,7 +138,7 @@ export function toSlug(value: string, maxLen?: number): string {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+    .replace(/^-|-$/g, "");
   return maxLen && maxLen > 0 ? out.slice(0, maxLen) : out;
 }
 

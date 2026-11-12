@@ -50,6 +50,7 @@ export const agentsPaths = {
                     source: "local",
                     scope: "@acme",
                     version: "1.2.0",
+                    published: true,
                     type: "agent",
                     running_runs: 1,
                     dependencies: {
@@ -70,6 +71,7 @@ export const agentsPaths = {
                     source: "system",
                     scope: "@appstrate",
                     version: "2.0.0",
+                    published: true,
                     type: "agent",
                     running_runs: 0,
                     dependencies: {

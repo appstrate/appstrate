@@ -445,8 +445,8 @@ function packageListingOrder() {
 /**
  * List every package of one `type` this space runs ({@link activePackagesFilter}):
  * what can be launched from here. Placed-but-off packages belong to the library
- * (`services/package-library.ts`). The projection omits `draft_content` and the
- * `latest` tag: an index card reads neither.
+ * (`services/package-library.ts`). The projection omits `draft_content`, which
+ * an index card never reads; `latestVersionId` answers {@link isPublished}.
  */
 export async function listActivePackages(scope: SpaceScope, type: PackageType) {
   return db
@@ -455,9 +455,11 @@ export async function listActivePackages(scope: SpaceScope, type: PackageType) {
       type: packages.type,
       draftManifest: packages.draftManifest,
       source: packages.source,
+      latestVersionId: packageDistTags.versionId,
     })
     .from(packages)
     .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
+    .leftJoin(packageDistTags, latestTagJoin(packages.id))
     .where(activePackagesFilter(scope, type))
     .orderBy(...packageListingOrder());
 }

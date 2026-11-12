@@ -18,7 +18,10 @@ const noExtra = {} as unknown as AppstrateRequestExtra;
 
 interface FakeAgent {
   id: string;
-  /** Absent: nothing published, the detail route answers 404 at `latest`. */
+  /**
+   * Absent: nothing published — the listing says `published: false` and the
+   * detail route answers 404 at `latest`.
+   */
   version?: string;
   display_name?: string;
   description?: string;
@@ -37,7 +40,17 @@ function fakeDispatch(agentsBySpace: Record<string, FakeAgent[]>) {
     const agents = agentsBySpace[spaceId ?? ""];
     if (!agents) return Response.json({ code: "forbidden" }, { status: 403 });
     if (url.pathname === "/api/agents") {
-      return Response.json({ object: "list", data: agents.map(({ id }) => ({ id })) });
+      return Response.json({
+        object: "list",
+        data: agents.map((agent) => ({
+          id: agent.id,
+          display_name: agent.display_name,
+          description: agent.description ?? "",
+          // The draft manifest's version: present whether or not anything is published.
+          version: "0.0.1",
+          published: agent.version !== undefined,
+        })),
+      });
     }
     const match = /^\/api\/packages\/agents\/(@[^/]+)\/([^/]+)$/.exec(url.pathname);
     const agent = agents.find((a) => match && a.id === `${match[1]}/${match[2]}`);
@@ -106,8 +119,8 @@ describe("agent prompts — prompts/list", () => {
         arguments: [expect.objectContaining({ name: "request", required: false })],
       },
     ]);
-    // The space without `run_and_wait` is never read.
-    expect(requests.some((r) => r.spaceId === "spc_b")).toBe(false);
+    // One listing read for the one space with `run_and_wait`: no agent detail, no other space.
+    expect(requests).toEqual([{ spaceId: "spc_a", path: "/api/agents" }]);
   });
 
   it("lists nothing when the caller can run in no space", async () => {
@@ -135,6 +148,15 @@ describe("agent prompts — prompts/list", () => {
     expect(names).toEqual(["run-writer", "run-beta-team-writer", "run-other-writer"]);
     expect(await textOf(prompts, "run-beta-team-writer")).toContain('"space_id":"spc_b"');
     expect(await textOf(prompts, "run-other-writer")).toContain('"scope":"@other"');
+  });
+
+  it("names only published agents: an unpublished namesake in an earlier space claims nothing", async () => {
+    const { prompts } = provider([space("spc_a", "Alpha"), space("spc_b", "Beta")], {
+      spc_a: [{ id: "@draft/writer" }],
+      spc_b: [{ id: "@acme/writer", version: "1.0.0" }],
+    });
+    expect((await prompts.list(noExtra)).map((p) => p.name)).toEqual(["run-writer"]);
+    expect(await textOf(prompts, "run-writer")).toContain('"space_id":"spc_b"');
   });
 });
 
@@ -175,12 +197,20 @@ describe("agent prompts — prompts/get", () => {
   });
 
   it("omits the upload step without a file field and marks an absent request", async () => {
-    const { prompts } = provider([space("spc_a", "Alpha")], {
-      spc_a: [{ id: "@acme/writer", version: "1.0.0" }],
+    const { prompts, requests } = provider([space("spc_a", "Alpha")], {
+      spc_a: [
+        { id: "@acme/writer", version: "1.0.0" },
+        { id: "@acme/reader", version: "1.0.0" },
+      ],
     });
     const text = await textOf(prompts, "run-writer");
     expect(text).not.toContain("createUpload");
     expect(text.endsWith("## Request\n\n(none)\n")).toBe(true);
+    // The listing to resolve the name, then the requested agent's detail only.
+    expect(requests.map((r) => r.path)).toEqual([
+      "/api/agents",
+      "/api/packages/agents/@acme/writer?version=latest",
+    ]);
   });
 
   it("answers an unknown and an unpublished agent with the same invalid-params error", async () => {
@@ -189,10 +219,13 @@ describe("agent prompts — prompts/get", () => {
       spc_b: [{ id: "@acme/reader", version: "1.0.0" }],
     });
     for (const name of ["run-unpublished", "run-reader", "run-nothing"]) {
-      const error = await prompts.get(name, {}, noExtra).catch((e: unknown) => e);
-      expect(error).toBeInstanceOf(McpError);
-      expect((error as McpError).code).toBe(ErrorCode.InvalidParams);
-      expect((error as McpError).message).toContain(`Invalid prompt name: ${name}`);
+      const error = await Promise.resolve(prompts.get(name, {}, noExtra)).then(
+        () => undefined,
+        (rejection: unknown) => rejection,
+      );
+      if (!(error instanceof McpError)) throw new Error(`expected an McpError for ${name}`);
+      expect(error.code).toBe(ErrorCode.InvalidParams);
+      expect(error.message).toContain(`Invalid prompt name: ${name}`);
     }
   });
 });

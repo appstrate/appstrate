@@ -55,7 +55,7 @@ export function scopeCollisionPromptName(packageId: string, taken: ReadonlySet<s
 }
 
 function freeName(raw: string, taken: ReadonlySet<string>, source: string): string {
-  const base = toSlug(raw, SKILL_NAME_MAX_LENGTH).replace(/-+$/, "");
+  const base = toSlug(raw, SKILL_NAME_MAX_LENGTH).replace(/-$/, "");
   if (!isValidSkillName(base)) {
     throw new Error(`Cannot derive a prompt name from "${source}"`);
   }
@@ -63,7 +63,7 @@ function freeName(raw: string, taken: ReadonlySet<string>, source: string): stri
   for (let n = 2; ; n += 1) {
     const suffix = `-${n}`;
     // Trim the BASE, not the suffix: a truncated counter would collide again.
-    const head = base.slice(0, SKILL_NAME_MAX_LENGTH - suffix.length).replace(/-+$/, "");
+    const head = base.slice(0, SKILL_NAME_MAX_LENGTH - suffix.length).replace(/-$/, "");
     const candidate = `${head}${suffix}`;
     if (!taken.has(candidate) && isValidSkillName(candidate)) return candidate;
   }
