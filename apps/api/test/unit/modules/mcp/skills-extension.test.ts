@@ -189,9 +189,9 @@ describe("skills/list, skills/get and resources/read", () => {
         expect(bytes.byteLength).toBe(resource.size);
       }
       const [md] = (await p.client.readResource({ uri: entry!.uri })).contents;
-      expect(md && "text" in md).toBe(true);
-      const text = md && "text" in md ? md.text : "";
-      expect(parseSkillFrontmatter(text).fields).toEqual(entry!.frontmatter);
+      const text = (md as { text?: unknown } | undefined)?.text;
+      expect(typeof text).toBe("string");
+      expect(parseSkillFrontmatter(String(text)).fields).toEqual(entry!.frontmatter);
     } finally {
       await p.close();
     }
