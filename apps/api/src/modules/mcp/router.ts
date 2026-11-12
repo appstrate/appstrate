@@ -77,6 +77,8 @@ import { registerProtectedResourceFamily } from "../../lib/protected-resources.t
 import { recordAuditFromContext, trackAudit } from "../../services/audit.ts";
 import type { AppEnv } from "../../types/index.ts";
 import { dispatchInProcess } from "../../lib/platform-app.ts";
+import { followRunLogs } from "../../services/realtime-access.ts";
+import type { RunLogEvent } from "@appstrate/shared-types";
 import {
   MCP_RESOURCE_PREFIX,
   deriveMcpResourceUri,
@@ -651,6 +653,17 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       placeRootAs: (packageId: string) => heldPlacementAuthority(c, packageId),
       readSkill: skillReaderFor(c, scope),
       requestId: c.get("requestId"),
+      followRunLogs: (runId: string, onLog: (log: RunLogEvent) => void) =>
+        followRunLogs(
+          {
+            scope,
+            actor,
+            permissions,
+            ceilingAllows: (permission) => ceiling === undefined || ceiling.has(permission),
+          },
+          runId,
+          onLog,
+        ),
       origin,
       permissions,
       ceiling,

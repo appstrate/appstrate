@@ -65,6 +65,7 @@ function makeTools(
     placeRootAs: async () => null,
     readSkill: () => Promise.reject(new Error("read_skill is not exercised here")),
     requestId: "req_test",
+    followRunLogs: () => () => {},
     contextInjected,
   });
   const byName = new Map(tools.map((t) => [t.descriptor.name, t]));
@@ -512,6 +513,7 @@ describe("describe_operation", () => {
             placeRootAs: async () => null,
             readSkill: () => Promise.reject(new Error("read_skill is not exercised here")),
             requestId: "req_test",
+            followRunLogs: () => () => {},
           }).map((t) => [t.descriptor.name, t]),
         );
       const granted = async (ceiling: ReadonlySet<string> | undefined) =>
@@ -1112,6 +1114,7 @@ describe("buildMcpTools contextInjected", () => {
       placeRootAs: async () => null,
       readSkill: () => Promise.reject(new Error("read_skill is not exercised here")),
       requestId: "req_test",
+      followRunLogs: () => () => {},
     });
     // The whole registered surface IS the advertised surface: no retired name
     // is registered, listed or hidden — see "registers no retired name, listed

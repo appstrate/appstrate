@@ -4,7 +4,10 @@ import { afterEach, describe, expect, it, jest } from "bun:test";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { createInProcessPair, type AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
+import type { RunLogEvent } from "@appstrate/shared-types";
 import {
+  RUN_AND_WAIT_LOG_MESSAGE_MAX_CHARS,
+  RUN_AND_WAIT_LOG_PROGRESS_INTERVAL_MS,
   RUN_AND_WAIT_LONG_POLL_RESUME,
   RUN_AND_WAIT_PROGRESS_INTERVAL_MS,
   RUN_AND_WAIT_UNSTREAMED_MAX_MS,
@@ -70,6 +73,8 @@ function makeRunAndWait(opts: {
   /** Rows the stubbed `GET /api/files?runId=…` returns (published docs). */
   files?: Array<Record<string, unknown>>;
 }): {
+  /** The run log follow the tool opened: push a frame with `emit`; `stops` counts its teardowns. */
+  logFollow: { runIds: string[]; emit: (log: RunLogEvent) => void; stops: number };
   tool: ReturnType<typeof toolsFor>[number];
   calls: Array<{
     method: string;
@@ -124,6 +129,13 @@ function makeRunAndWait(opts: {
     throw new Error(`unexpected dispatch: ${req.method} ${url.pathname}`);
   };
 
+  const logFollow = {
+    runIds: [] as string[],
+    emit: (_log: RunLogEvent): void => {
+      throw new Error("run logs not followed");
+    },
+    stops: 0,
+  };
   const ctx: McpToolContext = {
     origin: "http://test.local",
     authHeaders: new Headers({ "X-Org-Id": "org_1", "X-Space-Id": "spc_1" }),
@@ -141,12 +153,19 @@ function makeRunAndWait(opts: {
     placeRootAs: async () => null,
     readSkill: () => Promise.reject(new Error("read_skill is not exercised here")),
     requestId: "req_test",
+    followRunLogs: (runId, onLog) => {
+      logFollow.runIds.push(runId);
+      logFollow.emit = onLog;
+      return () => {
+        logFollow.stops += 1;
+      };
+    },
     observe: (event) => events.push(event),
   };
   const tools = toolsFor(ctx);
   const tool = tools.find((t) => t.descriptor.name === "run_and_wait");
   if (!tool) throw new Error("run_and_wait tool not built");
-  return { tool, calls, events };
+  return { tool, calls, events, logFollow };
 }
 
 describe("run_and_wait", () => {
@@ -559,6 +578,108 @@ describe("run_and_wait", () => {
           params: { progressToken: "tok_1", progress: i + 1, message },
         })),
       );
+    });
+
+    function runLog(level: RunLogEvent["level"], message: string | null): RunLogEvent {
+      return {
+        id: 1,
+        runId: "run_1",
+        orgId: "org_1",
+        spaceId: "spc_1",
+        type: "progress",
+        level,
+        event: null,
+        message,
+        data: { secret: "never forwarded" },
+        createdAt: "2026-11-12T00:00:00.000Z",
+      };
+    }
+
+    const messages = (sent: SentNotification[]) =>
+      sent.map((n) => (n.params as { message: string }).message);
+
+    it("relays the run's info-and-above log lines on one line, cut to their cap, without data", async () => {
+      jest.useFakeTimers();
+      const poll = heldPoll();
+      const sent: SentNotification[] = [];
+      const { tool, calls, logFollow } = makeRunAndWait({ getRun: [poll.answer] });
+
+      const { pending } = await startCall(
+        tool,
+        calls,
+        extraWith("tok_1", async (n) => {
+          sent.push(n);
+        }),
+      );
+      expect(logFollow.runIds).toEqual(["run_1"]);
+      const long = "x".repeat(RUN_AND_WAIT_LOG_MESSAGE_MAX_CHARS + 50);
+      const lines: RunLogEvent[] = [
+        runLog("info", "Fetching\n  inbox"),
+        runLog("debug", "hidden"),
+        runLog("info", "   "),
+        runLog("warn", null),
+        runLog("warn", long),
+        runLog("error", "Upstream refused"),
+      ];
+      for (const line of lines) {
+        logFollow.emit(line);
+        jest.advanceTimersByTime(RUN_AND_WAIT_LOG_PROGRESS_INTERVAL_MS);
+        await flush();
+      }
+      poll.settle({ id: "run_1", status: "success" });
+      await pending;
+
+      expect(messages(sent)).toEqual([
+        "Run run_1 launched",
+        "Run run_1 [info] Fetching inbox",
+        `Run run_1 [warn] ${"x".repeat(RUN_AND_WAIT_LOG_MESSAGE_MAX_CHARS - 1)}…`,
+        "Run run_1 [error] Upstream refused",
+      ]);
+      expect(sent.map((n) => (n.params as { progress: number }).progress)).toEqual([1, 2, 3, 4]);
+      expect(JSON.stringify(sent)).not.toContain("never forwarded");
+      expect(logFollow.stops).toBe(1);
+    });
+
+    it("sends at most one log line per second, the latest of a burst, and nothing after the wait", async () => {
+      jest.useFakeTimers();
+      const poll = heldPoll();
+      const sent: SentNotification[] = [];
+      const { tool, calls, logFollow } = makeRunAndWait({ getRun: [poll.answer] });
+
+      const { pending } = await startCall(
+        tool,
+        calls,
+        extraWith("tok_1", async (n) => {
+          sent.push(n);
+        }),
+      );
+      for (const message of ["one", "two", "three"]) logFollow.emit(runLog("info", message));
+      await flush();
+      expect(messages(sent)).toEqual(["Run run_1 launched", "Run run_1 [info] one"]);
+
+      jest.advanceTimersByTime(RUN_AND_WAIT_LOG_PROGRESS_INTERVAL_MS - 1);
+      await flush();
+      expect(sent).toHaveLength(2);
+      jest.advanceTimersByTime(1);
+      await flush();
+      expect(messages(sent).slice(2)).toEqual(["Run run_1 [info] three"]);
+
+      // A line still cooling down when the run ends is dropped with the follow.
+      logFollow.emit(runLog("info", "late"));
+      poll.settle({ id: "run_1", status: "success" });
+      await pending;
+      jest.advanceTimersByTime(RUN_AND_WAIT_LOG_PROGRESS_INTERVAL_MS * 2);
+      await flush();
+
+      expect(messages(sent)).not.toContain("Run run_1 [info] late");
+      expect(sent).toHaveLength(3);
+      expect(logFollow.stops).toBe(1);
+    });
+
+    it("follows no logs without a progress token", async () => {
+      const { tool, logFollow } = makeRunAndWait({});
+      await tool.handler({ kind: "agent", scope: "@acme", name: "writer" }, noExtra);
+      expect(logFollow.runIds).toEqual([]);
     });
 
     it("never fails the call when sending a notification throws", async () => {
