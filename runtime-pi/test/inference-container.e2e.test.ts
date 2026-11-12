@@ -297,12 +297,13 @@ describe.skipIf(!RUN)("runtime-pi + sidecar images carry one inference turn verb
         expect(request.headers["openai-beta"]).toBe("responses=experimental");
         expect(request.headers.accept).toBe("text/event-stream");
         expect(request.headers["content-type"]).toStartWith("application/json");
-        // Pi's own UA, `getPiUserAgent()`: `pi (<platform> <release>; <arch>)`,
-        // or `pi (browser)` off Node. Assert the prefix rather than mere
-        // presence — Bun's fetch supplies a `Bun/<version>` UA when a request
-        // carries none, so `toBeTruthy()` would hold even had the header never
-        // crossed the container boundary.
-        expect(request.headers["user-agent"]).toStartWith("pi (");
+        // Pi's own UA, `formatUserAgent()` in its default `detailed` mode:
+        // `pi/<version> (<platform>; <runtime>/<version>; <arch>)`. Assert the
+        // prefix rather than mere presence — Bun's fetch supplies a
+        // `Bun/<version>` UA when a request carries none, so `toBeTruthy()`
+        // would hold even had the header never crossed the container boundary.
+        // The version is left out so a Pi bump does not redden this gate.
+        expect(request.headers["user-agent"]).toStartWith("pi/");
 
         // The container→sidecar-only header must stop at the sidecar: the
         // agent's own auth token has no business reaching the model provider.
