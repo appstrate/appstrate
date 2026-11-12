@@ -60,6 +60,8 @@ export interface SkillServer {
   provider: AppstrateSkillProvider;
   /** `resources/read` of a `skill://` URI. */
   read: (uri: string) => Promise<ReadResourceResult>;
+  /** The entries `skills/list` serves. */
+  list: () => Promise<SkillEntry[]>;
   /** The entry `skills/get` serves for a `SKILL.md` URI, `null` when none is readable there. */
   entry: (uri: string) => Promise<SkillEntry | null>;
   /** The bytes `resources/read` serves for a `skill://` URI, `null` when none are readable there. */
@@ -118,20 +120,22 @@ export function buildSkillServer(ctx: SkillProviderContext): SkillServer {
     return served.skill.files[address.path]!;
   };
 
+  const list = async (): Promise<SkillEntry[]> => {
+    const listed = await Promise.all(
+      ctx.spaceIds.map(async (spaceId) =>
+        (await ctx.listActiveSkillIds(spaceId)).map((packageId) => ({ spaceId, packageId })),
+      ),
+    );
+    const loaded = await mapWithConcurrency(listed.flat(), LIST_CONCURRENCY, (skill) =>
+      load(skill.spaceId, skill.packageId, "published"),
+    );
+    return loaded
+      .filter((served): served is Served => served !== null)
+      .map((served): SkillEntry => skillEntry(served.address, served.skill));
+  };
+
   const provider: AppstrateSkillProvider = {
-    list: async () => {
-      const listed = await Promise.all(
-        ctx.spaceIds.map(async (spaceId) =>
-          (await ctx.listActiveSkillIds(spaceId)).map((packageId) => ({ spaceId, packageId })),
-        ),
-      );
-      const loaded = await mapWithConcurrency(listed.flat(), LIST_CONCURRENCY, (skill) =>
-        load(skill.spaceId, skill.packageId, "published"),
-      );
-      return loaded
-        .filter((served): served is Served => served !== null)
-        .map((served): SkillEntry => skillEntry(served.address, served.skill));
-    },
+    list,
     get: async (uri) => {
       const found = await entry(uri);
       if (!found) {
@@ -161,5 +165,5 @@ export function buildSkillServer(ctx: SkillProviderContext): SkillServer {
     };
   };
 
-  return { provider, read, entry, file };
+  return { provider, read, list, entry, file };
 }

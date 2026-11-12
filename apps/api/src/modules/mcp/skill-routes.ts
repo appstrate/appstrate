@@ -69,9 +69,7 @@ export function createSkillRouter(): Hono<AppEnv> {
   // `/x/*` matches `/x` too: the list and both reads by URI.
   app.use(`${SKILLS_REST_PATH}/*`, rateLimit(50), enterSpace, requirePermission("skills", "read"));
 
-  app.get(SKILLS_REST_PATH, async (c) =>
-    c.json(listResponse(await requestSkillServer(c).provider.list())),
-  );
+  app.get(SKILLS_REST_PATH, async (c) => c.json(listResponse(await requestSkillServer(c).list())));
 
   app.get(`${SKILLS_REST_PATH}/entry`, async (c) => {
     const uri = uriParam(c);
