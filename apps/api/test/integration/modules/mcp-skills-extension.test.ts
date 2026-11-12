@@ -3,7 +3,8 @@
 /**
  * The MCP Skills extension (SEP-2640) through the real `/api/mcp/o/:org`
  * endpoint: `skills/list`, `skills/get` and `resources/read` on `skill://`,
- * read with the caller's permissions in each skill's space.
+ * read with the caller's permissions in each skill's space, and a skill the
+ * chat turn injected read from the turn bearer's claim alone.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -35,6 +36,10 @@ import {
   AGENT_PACKAGES_BUCKET,
   versionZipKey,
 } from "../../../src/services/package-storage-keys.ts";
+// By path, as `mcp-read-skill.test.ts` does: the minting secret is process-local
+// to the module instance whose auth strategy the app registered.
+import { mintMcpLoopbackToken } from "../../../../../packages/module-chat/src/loopback-auth.ts";
+import type { InjectedSkills } from "@appstrate/core/chat-contract";
 
 const app = getTestApp();
 await registerTestPlatformApp();
@@ -325,5 +330,93 @@ describe("REST reflection (`appstrate code sync`)", () => {
     expect((await rest(headers, archivePath(toneUri()))).status).toBe(403);
     expect((await rest(ownerHeaders(), "/api/mcp/skills/archive")).status).toBe(400);
     expect((await rest(ownerHeaders(), "/api/mcp/skills?definition=latest")).status).toBe(400);
+  });
+});
+
+describe("skills/get and resources/read in a chat turn", () => {
+  const draftUri = () => `skill://${owner.defaultSpaceId}/skillsext/tone@draft/tone/SKILL.md`;
+
+  /**
+   * The chat turn's MCP bearer, minted by the real loopback strategy: no
+   * `skills:*` unless `permissions` grants them.
+   */
+  function turnHeaders(
+    skills: InjectedSkills["skills"],
+    permissions = ["mcp:read", "chat:write"],
+  ): Record<string, string> {
+    const token = mintMcpLoopbackToken({
+      userId: owner.user.id,
+      email: owner.user.email,
+      name: owner.user.name,
+      orgId: owner.orgId,
+      orgRole: "owner",
+      permissions,
+      injectedSkills: { spaceId: owner.defaultSpaceId, skills },
+    });
+    return inSpace(
+      { Authorization: `Bearer ${token}`, "X-Org-Id": owner.orgId },
+      owner.defaultSpaceId,
+    );
+  }
+
+  async function readText(headers: Record<string, string>, uri: string): Promise<string> {
+    const read = await call(headers, "resources/read", { uri });
+    return (read.result?.contents as Array<{ text: string }>)[0]!.text;
+  }
+
+  /** The same turn holding `skills:read` too, so a refusal does not come from lacking it. */
+  const withSkillsRead = (skills: InjectedSkills["skills"]) =>
+    turnHeaders(skills, ["mcp:read", "chat:write", "skills:read"]);
+
+  async function expectRefused(headers: Record<string, string>, uri: string): Promise<void> {
+    expect((await call(headers, "skills/get", { uri })).error?.code).toBe(-32602);
+    expect((await call(headers, "resources/read", { uri })).error?.code).toBe(-32002);
+  }
+
+  it("serves the injected published version without skills:read, and refuses its draft", async () => {
+    const headers = turnHeaders({ [TONE]: { definition: "published", version: "1.0.0" } });
+    const get = await call(headers, "skills/get", { uri: toneUri() });
+    expect((get.result?.skill as Entry).frontmatter.metadata).toEqual({ version: "1.0.0" });
+    expect(await readText(headers, toneUri())).toContain("\nBody\n");
+    await expectRefused(
+      withSkillsRead({ [TONE]: { definition: "published", version: "1.0.0" } }),
+      draftUri(),
+    );
+  });
+
+  it("serves the injected draft without skills:read, and refuses the published version", async () => {
+    const headers = turnHeaders({ [TONE]: { definition: "draft", lockVersion: 1 } });
+    const get = await call(headers, "skills/get", { uri: draftUri() });
+    expect((get.result?.skill as Entry).uri).toBe(draftUri());
+    expect(await readText(headers, draftUri())).toContain("Draft body");
+    await expectRefused(
+      withSkillsRead({ [TONE]: { definition: "draft", lockVersion: 1 } }),
+      toneUri(),
+    );
+  });
+
+  it("refuses a skill the turn did not inject", async () => {
+    await seedPublishedSkill("@skillsext/other", "other", owner.defaultSpaceId);
+    const headers = turnHeaders({ [TONE]: { definition: "published", version: "1.0.0" } });
+    await expectRefused(headers, `skill://${owner.defaultSpaceId}/skillsext/other/other/SKILL.md`);
+  });
+
+  it("serves an injected system skill as the platform ships it, and refuses its @draft", async () => {
+    const system = "@appstrate/system-tone";
+    await seedPackage({
+      id: system,
+      orgId: null,
+      source: "system",
+      type: "skill",
+      draftManifest: { name: system, version: "1.0.0", type: "skill" },
+      draftContent: skillMd("system-tone"),
+    });
+    const headers = turnHeaders({ [system]: { definition: "published", version: null } });
+    const dir = `skill://${owner.defaultSpaceId}/appstrate/system-tone`;
+    expect(await readText(headers, `${dir}/system-tone/SKILL.md`)).toContain("version: 1.0.0");
+    await expectRefused(
+      withSkillsRead({ [system]: { definition: "published", version: null } }),
+      `${dir}@draft/system-tone/SKILL.md`,
+    );
   });
 });
