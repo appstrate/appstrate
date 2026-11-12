@@ -42,6 +42,7 @@ import { enterSocialOverride, type SocialOverride } from "@appstrate/db/auth";
 import { logger } from "../../../lib/logger.ts";
 import { EncryptionKeyUnavailableError } from "../../../lib/stored-credential.ts";
 import { getClientCached } from "./oauth-admin.ts";
+import { analyzeOAuthCallbackURL } from "./oauth-transaction-binding.ts";
 import { readPendingClientCookieFromHeaders } from "./pending-client-cookie.ts";
 import { resolveSocialProviderForClient, SOCIAL_PROVIDER_IDS } from "./social.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
@@ -67,12 +68,35 @@ function providerNotConfigured(provider: string | undefined): APIError {
   });
 }
 
+/**
+ * The client this social transaction is for. At initiation the authoritative
+ * source is the `callbackURL` resuming our authorize endpoint, the same one
+ * the realm resolver reads back from the OAuth state at the callback
+ * (`resolvePendingClientBinding`): a caller can drop the cookie, not the
+ * destination the transaction is stored with. Otherwise the pending-client
+ * cookie, as before.
+ */
+function transactionClientId(ctx: {
+  request?: Request;
+  path?: string;
+  body?: unknown;
+}): string | null {
+  if (ctx.path === "/sign-in/social") {
+    const callbackURL = (ctx.body as { callbackURL?: unknown } | undefined)?.callbackURL;
+    if (typeof callbackURL === "string") {
+      const analyzed = analyzeOAuthCallbackURL(callbackURL);
+      if (analyzed.kind === "oidc") return analyzed.clientId;
+    }
+  }
+  return readPendingClientCookieFromHeaders(ctx.request?.headers ?? null);
+}
+
 async function applyOverride(ctx: {
   request?: Request;
   path?: string;
   body?: unknown;
 }): Promise<void> {
-  const pendingClientId = readPendingClientCookieFromHeaders(ctx.request?.headers ?? null);
+  const pendingClientId = transactionClientId(ctx);
   if (!pendingClientId) return;
 
   const client = await getClientCached(pendingClientId);
