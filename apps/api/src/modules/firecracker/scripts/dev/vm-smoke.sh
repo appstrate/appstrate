@@ -6,6 +6,30 @@
 # focused unit tests, then boots a real microVM through the orchestrator.
 set -euo pipefail
 
+# DIAGNOSTIC ONLY (issue #2153, never merged): surface the tail of the smoke
+# log as workflow annotations — the only CI output readable without log access.
+if [ -n "${GITHUB_ACTIONS:-}" ] && [ -z "${DIAG_INNER:-}" ]; then
+  export DIAG_INNER=1
+  DIAG_LOG="$(mktemp)"
+  set +e
+  bash "$0" "$@" 2>&1 | tee "$DIAG_LOG"
+  rc=${PIPESTATUS[0]}
+  echo "::notice title=env::$(. /etc/os-release; echo "$PRETTY_NAME") kernel=$(uname -r) docker=$(docker version --format '{{.Server.Version}}' 2>&1 | head -1) runner=${ImageOS:-?}/${ImageVersion:-?}"
+  python3 - "$DIAG_LOG" "$rc" <<'PY'
+import re, sys
+log, rc = sys.argv[1], int(sys.argv[2])
+lines = [re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", l.rstrip("\r\n")) for l in open(log, errors="replace")]
+enc = lambda t: t.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+hits = [l for l in lines if re.search(r"error|fail|denied|not found|SMOKE|==>", l, re.I)][:120]
+print("::warning title=diag-grep::" + enc("\n".join(l[:300] for l in hits)))
+if rc != 0:
+    tail = lines[-300:]
+    for i in range(0, len(tail), 30):
+        print(f"::error title=diag-tail-{i // 30}::" + enc("\n".join(l[:400] for l in tail[i:i + 30])))
+PY
+  exit "$rc"
+fi
+
 cd "$(dirname "$0")/../../../../../../.."
 export PATH="$HOME/.bun/bin:$PATH"
 
