@@ -207,25 +207,33 @@ describe("full persona invariants", () => {
     }
   });
 
-  it("teaches loading a skill through `read_skill`, one at a time, before acting", () => {
+  it("teaches loading a skill through `read_resource` on its URI, one at a time, before acting", () => {
     expect(FULL).toContain("guides for YOU");
-    expect(FULL).toContain("LOAD IT BEFORE acting: call `read_skill` with its `id`");
-    expect(FULL).toContain("KEEP the leading `@`");
+    expect(FULL).toContain("LOAD IT BEFORE acting: call `read_resource` with that URI verbatim");
     expect(FULL).toContain("Load ONE at a time");
     expect(FULL).toContain("Never load a skill whose content already appears");
-    expect(FULL).toContain("call `read_skill` with the skill's `id` and the file's `path`");
-    // The injected ones are already loaded; `read_skill` is for a skill listed by name.
+    expect(FULL).toContain(
+      "call `read_resource` with the skill's URI, replacing `SKILL.md` with the file's path",
+    );
+    // The injected ones are already loaded; `read_resource` is for a skill listed by its URI.
     expect(FULL).toContain("One shown in full, inside a `<skill>` tag, is already loaded");
     expect(FULL).not.toContain("getSkill");
   });
 
   it("names the same heading the context block renders", () => {
     const block = contextText(
+      { user: { name: "Ada" } },
       {
-        user: { name: "Ada" },
-        skills: [{ packageId: "@acme/mine" }],
+        ...CONTEXT_OPTS,
+        skillCatalogue: [
+          {
+            packageId: "@acme/mine",
+            description: "Mine",
+            version: null,
+            uri: "skill://spc_1/acme/mine/mine/SKILL.md",
+          },
+        ],
       },
-      CONTEXT_OPTS,
     );
     expect(block).toContain("## Skills");
     expect(FULL).toContain("`## Skills`");
@@ -233,28 +241,25 @@ describe("full persona invariants", () => {
 
   it("teaches the loading rules whatever the turn may author", () => {
     const readerOnly = promptFor([...MCP, "skills:read"]);
-    expect(readerOnly).toContain("call `read_skill` with its `id`");
+    expect(readerOnly).toContain("call `read_resource` with that URI verbatim");
     expect(readerOnly).toContain("guides for YOU");
   });
 
-  it("teaches `read_skill` without dispatch, and `listSkills` only with it", () => {
-    // `read_skill` is declared on every MCP connection; `listSkills` goes through `invoke_operation`.
+  it("teaches `read_resource` without dispatch", () => {
+    // `read_resource` is registered on every platform MCP connection.
     const noDispatch = promptFor(["mcp:read", "skills:read"]);
-    expect(noDispatch).toContain("call `read_skill` with its `id`");
+    expect(noDispatch).toContain("call `read_resource` with that URI verbatim");
     expect(noDispatch).toContain("and the skills available");
-    expect(noDispatch).not.toContain("listSkills");
   });
 
-  it("names `listSkills` for an unlisted request here, and for a truncated list only in the list bullet", () => {
-    expect(FULL).toContain("Call `listSkills` only when the user asks for a skill you do not see.");
-    expect(FULL.split("listSkills")).toHaveLength(3);
+  it("never sends the model to `listSkills`: the context lists every skill with its URI", () => {
+    expect(FULL).not.toContain("listSkills");
   });
 
   it("teaches nothing about skills to a turn without `skills:read`", () => {
     const noSkills = promptFor(BUILDER.filter((permission) => permission !== "skills:read"));
     for (const skillRule of [
-      "read_skill",
-      "listSkills",
+      "read_resource",
       "## Skills",
       "Skills are not run on their own",
       "attach it under `dependencies.skills`",
@@ -313,10 +318,18 @@ describe("caller-context prompt hygiene", () => {
         connections: [{ integration_package_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
         agents: [{ packageId: "@appstrate/triage", takes_input: false }],
         agents_truncated: true,
-        skills: [{ packageId: "@appstrate/web-research", version: "1.2.0" }],
-        skills_truncated: true,
       },
-      CONTEXT_OPTS,
+      {
+        ...CONTEXT_OPTS,
+        skillCatalogue: [
+          {
+            packageId: "@appstrate/web-research",
+            description: "Research the web",
+            version: "1.2.0",
+            uri: "skill://spc_1/appstrate/web-research/web-research/SKILL.md",
+          },
+        ],
+      },
     );
     // Gone from the block…
     for (const imperative of [
@@ -337,7 +350,7 @@ describe("caller-context prompt hygiene", () => {
       "Use every `@scope/name` id verbatim",
       "Prefer running an existing agent over doing the work inline",
       "declare it under the agent manifest's `dependencies.skills`",
-      '`operation_id: "listAgents"` or `"listSkills"`',
+      '`operation_id: "listAgents"` for the full one',
       "call `listRuns` (newest first)",
     ]) {
       expect(FULL).toContain(imperative);
@@ -498,19 +511,16 @@ describe("the persona without agent runs", () => {
     expect(NO_RUNS_AUTHOR).toContain("Skills are not run on their own");
     expect(NO_RUNS_AUTHOR).toContain("in `dependencies.integrations` and in `dependencies.skills`");
     expect(NO_RUNS).not.toContain("Skills are not run on their own");
-    // Neither list is rendered, so the bullet about truncated lists is gone too.
+    // The skills list is whole and the agents list is not rendered: no truncated-list bullet.
     expect(NO_RUNS).not.toContain("(list truncated)");
-    expect(NO_RUNS_AUTHOR).toContain("(list truncated)");
+    expect(NO_RUNS_AUTHOR).not.toContain("(list truncated)");
   });
 
   it("names the full-list operation only for a list the context renders", () => {
-    // Skills are listed on reading them, agents on running: each operation is
-    // named under the gate that shows its list, never under the other one.
-    expect(NO_RUNS_AUTHOR).toContain('`operation_id: "listSkills"`');
+    // Agents are listed on running them; the skills list is never truncated.
     expect(NO_RUNS_AUTHOR).not.toContain("listAgents");
     const runsNoSkills = promptFor(BUILDER.filter((permission) => permission !== "skills:read"));
     expect(runsNoSkills).toContain('`operation_id: "listAgents"`');
-    expect(runsNoSkills).not.toContain("listSkills");
   });
 
   it("lists no agent as runnable in the caller-context block", () => {

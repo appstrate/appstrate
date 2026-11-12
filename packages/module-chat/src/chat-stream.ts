@@ -400,11 +400,12 @@ export async function handleChatStream(
         permissions,
         skills,
         enforced: enforcedSkills,
-        // The chosen skills are read before the claim naming them exists, so
+        // The turn's skills are read before the claim naming them exists, so
         // over a connection of their own: the caller's permissions, not narrowed by
         // `turnPermissions`, and no claim — what the caller reads.
-        // One in-process `initialize` plus the reads, only on a turn that
-        // injects chosen skills; closed before the turn's connection opens.
+        // One in-process `initialize` plus the reads, only on a turn that lists
+        // (`auto` with `skills:read`) or injects skills; closed before the turn's
+        // connection opens.
         openSkillsClient: () =>
           connectPlatformMcp({
             url: platformMcpUrl(origin, orgId, spaceId),

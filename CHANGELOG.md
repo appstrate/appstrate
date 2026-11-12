@@ -177,7 +177,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   opens; the chat no longer reads `GET /api/packages/skills`. An injected draft is
   pinned by its entry's `dev.appstrate/lock_version`. Each injected `<skill>` tag
   carries its `uri`, and the prompt teaches `read_resource` on that URI for the
-  files a skill references. `AppstrateMcpClient` gains `listSkills`.
+  files a skill references. In the `auto` mode, the skills the model may load are
+  listed the same way, each with its `skill://` URI, and the model loads one with
+  `read_resource`: the list is whole (no `(list truncated)` marker, no `listSkills`
+  call) and no longer comes from `GET /api/me/context`. `AppstrateMcpClient` gains
+  `listSkills`.
 
 - **BREAKING (CLI, MCP): agents are prompts of the MCP server, and `code sync`
   syncs skills only** (#2172). The Claude Code plugin's `/appstrate:run-<agent>`

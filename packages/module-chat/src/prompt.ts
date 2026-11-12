@@ -40,7 +40,6 @@ import {
   resolveChatSkills,
   type ChatSkillSelection,
   type SkillContent,
-  type SkillHint,
 } from "./skills.ts";
 
 type InjectedSkillMap = InjectedSkills["skills"];
@@ -146,15 +145,10 @@ export function buildSystemPrompt(capabilities: TurnCapabilities): string {
       : `- Use every \`@scope/name\` id verbatim: ${new Intl.ListFormat("en").format(
           idVerbatimTargets.map((target) => `in ${target}`),
         )}.\n`;
-  // Only the lists the context renders: the route of one never shown may refuse.
-  const fullListOps = [
-    ...(mayRun ? ["listAgents"] : []),
-    ...(invokes && readsSkills ? ["listSkills"] : []),
-  ];
-  const truncatedListBullet =
-    fullListOps.length > 0
-      ? `- A list marked \`(list truncated)\` is partial: call \`invoke_operation\` with ${fullListOps.map((id, i) => (i === 0 ? `\`operation_id: "${id}"\`` : ` or \`"${id}"\``)).join("")} for the full one.\n`
-      : "";
+  // Only a list the context renders: the route of one never shown may refuse.
+  const truncatedListBullet = runs(
+    '- A list marked `(list truncated)` is partial: call `invoke_operation` with `operation_id: "listAgents"` for the full one.\n',
+  );
   return `You are Appstrate's assistant. You help the user operate their Appstrate instance through the available tools.
 
 **You have no ability of your own to act on the outside world.** You cannot browse the web, read email, call third-party APIs, or use any integration or MCP directly. Your only power is ${invoke("invoking Appstrate operations", "looking Appstrate's own operations up and reading what it already exposes to you")}.${runs(" You are the brain/orchestrator; your hands are Appstrate agents. Any request that needs an integration, an MCP, or any action external to Appstrate MUST be carried out by running an agent and reading its result back — never by you claiming to have done it yourself.", " Never claim to have carried out an action external to Appstrate yourself.")}
@@ -229,7 +223,7 @@ ${runs(`Everything a run writes under \`outputs/\` is published when it ends: th
 `)}Your context block below is DATA — the user's identity and role, the current date, the integrations they have connected${runs(", the agents they can run")}${skills(", and the skills available")}. How to act on it:
 - Use the current date to resolve relative dates.
 ${idVerbatimBullet}${runs(`- ${inline("Prefer running an existing agent over doing the work inline when one fits the task", "Run an existing agent whenever one fits the task")}. Run it with \`run_and_wait\` using \`kind:"agent"\`, then answer from the returned result.
-`)}${skills(`- The skills under \`${SKILLS_HEADING}\` are guides for YOU — procedures you follow yourself, not packages you run. One shown in full, inside a \`<skill>\` tag, is already loaded: follow it. When one listed only by name clearly matches the request, LOAD IT BEFORE acting: call \`read_skill\` with its \`id\` (KEEP the leading \`@\`, e.g. \`@appstrate/web-research\`), then follow the SKILL.md it returns. Load ONE at a time, and none when none clearly matches. Never load a skill whose content already appears in this conversation. To read a file a skill references, call \`read_skill\` with the skill's \`id\` and the file's \`path\`.${invoke(" Call `listSkills` only when the user asks for a skill you do not see.")}
+`)}${skills(`- The skills under \`${SKILLS_HEADING}\` are guides for YOU — procedures you follow yourself, not packages you run. One shown in full, inside a \`<skill>\` tag, is already loaded: follow it. When one listed only by its id and \`skill://\` URI clearly matches the request, LOAD IT BEFORE acting: call \`read_resource\` with that URI verbatim, then follow the SKILL.md it returns. Load ONE at a time, and none when none clearly matches. Never load a skill whose content already appears in this conversation. To read a file a skill references, call \`read_resource\` with the skill's URI, replacing \`SKILL.md\` with the file's path.
 `)}${skills(
     author(`- Skills are not run on their own. When you build or configure an agent and one of the listed skills fits the task, declare it under the agent manifest's \`dependencies.skills\` keyed by its id (e.g. \`"@appstrate/web-research": "^1.2.0"\`) — use the version shown, or \`"*"\` if none. The run route validates that declared skills exist.
 `),
@@ -269,8 +263,6 @@ interface CallerContext {
       }[]
     | null;
   agents_truncated?: boolean | null;
-  skills?: SkillHint[] | null;
-  skills_truncated?: boolean | null;
 }
 
 /** Longest `default_tools` list rendered by name; a longer one is rendered as its count. */
@@ -304,13 +296,23 @@ export function normalizeChatLocale(raw: string | undefined): string {
   return /^[a-z]{2}$/.test(primary) ? primary : "fr";
 }
 
-/** `` - `@scope/name` (v1.2.0) — Label: desc ``, minus the parts that say nothing. */
-function skillLine(skill: SkillHint): string {
-  const description = skill.description?.trim();
-  const label = skill.display_name?.trim() || skill.packageId;
-  const head = `- \`${skill.packageId}\`` + (skill.version ? ` (v${skill.version})` : "");
-  if (label === skill.packageId) return description ? `${head} — ${description}` : head;
-  return `${head} — ${label}${description ? `: ${description}` : ""}`;
+/** A skill of the `auto` catalogue: an entry of `skills/list`, loaded by its `uri`. */
+interface CatalogueSkill {
+  packageId: string;
+  description: string;
+  /** The published version; `null` for a draft. */
+  version: string | null;
+  uri: string;
+}
+
+/** `` - `@scope/name` (v1.2.0) `skill://…/SKILL.md` — desc ``, minus the parts that say nothing. */
+function skillLine(skill: CatalogueSkill): string {
+  const description = skill.description.trim();
+  const head =
+    `- \`${skill.packageId}\`` +
+    (skill.version ? ` (v${skill.version})` : "") +
+    ` \`${skill.uri}\``;
+  return description ? `${head} — ${description}` : head;
 }
 
 /** The whole `SKILL.md`, front matter included, tagged with its id, URI and version. */
@@ -356,8 +358,7 @@ interface RenderedContext {
 function formatSkillsSection(opts: {
   selection: ChatSkillSelection;
   capabilities: TurnCapabilities;
-  catalogue: readonly SkillHint[];
-  catalogueTruncated: boolean;
+  catalogue: readonly CatalogueSkill[];
   contents: ReadonlyMap<string, SkillContent | null>;
   enforced: readonly EnforcedChatSkill[];
 }): RenderedContext {
@@ -377,19 +378,7 @@ function formatSkillsSection(opts: {
       ...skills.enforced.flatMap((s) => ["", skillBlock(s)]),
     ]);
   }
-  if (listed.length) {
-    groups.push([
-      ...listed.map(skillLine),
-      // Only an invoking turn is taught `listSkills`, the one way to page the rest.
-      ...(opts.catalogueTruncated
-        ? [
-            opts.capabilities.invokes
-              ? "(list truncated)"
-              : "(list truncated; this turn cannot list the rest)",
-          ]
-        : []),
-    ]);
-  }
+  if (listed.length) groups.push(listed.map(skillLine));
   if (skills.chosen.length) {
     groups.push([
       `${SKILLS_INJECTED_LEAD} ${files}`,
@@ -416,6 +405,8 @@ type CallerContextOpts = {
   skills: ChatSkillSelection;
   /** The chosen skills active here, read by {@link buildCallerContextBlock}. */
   skillContents?: ReadonlyMap<string, SkillContent | null>;
+  /** The `auto` catalogue, listed by {@link buildCallerContextBlock}. */
+  skillCatalogue?: readonly CatalogueSkill[];
   /** Required: a caller that forgot it would drop the space's skills silently. */
   enforced: readonly EnforcedChatSkill[];
 };
@@ -432,8 +423,7 @@ export function formatCallerContext(raw: unknown, opts: CallerContextOpts): Rend
   const skills = formatSkillsSection({
     selection: opts.skills,
     capabilities: opts.capabilities,
-    catalogue: ctx.skills ?? [],
-    catalogueTruncated: ctx.skills_truncated === true,
+    catalogue: opts.skillCatalogue ?? [],
     contents: opts.skillContents ?? new Map(),
     enforced: opts.enforced,
   });
@@ -556,7 +546,7 @@ export function formatCallerContext(raw: unknown, opts: CallerContextOpts): Rend
 }
 
 /**
- * What the chat reads its chosen skills through: a platform MCP connection
+ * What the chat reads a turn's skills through: a platform MCP connection
  * with the caller's own permissions and no injected-skills claim, closed once
  * they are read.
  */
@@ -576,29 +566,39 @@ function entriesByPackage(
   return byPackage;
 }
 
+/** The chosen skills' contents and the `auto` catalogue of a turn. */
+interface ChatSkillsRead {
+  contents: Map<string, SkillContent | null>;
+  catalogue: CatalogueSkill[];
+}
+
 /**
- * The chosen skills to inject, read over the MCP Skills extension (SEP-2640):
- * a skill is the caller's draft when `skills/list` lists it among the drafts
- * the caller may read, else its published version, and its `SKILL.md` is the
- * text `resources/read` serves at the entry's URI. Read with the caller's own
- * permissions, even in `strict`, whose turn holds no `skills:*`. A skill in
- * neither list, or whose read is refused, is left out; a malformed answer (a
+ * The skills of a turn, read over the MCP Skills extension (SEP-2640): a skill
+ * is the caller's draft when `skills/list` lists it among the drafts the caller
+ * may read, else its published version. With `catalogue`, every such skill of
+ * the space is listed by its `uri`; each of `chosen` is injected as the text
+ * `resources/read` serves at its entry's URI. Read with the caller's own
+ * permissions, even in `strict`, whose turn holds no `skills:*`. A chosen skill
+ * in neither list, or whose read is refused, is left out; a malformed answer (a
  * draft entry without `lock_version`, a `SKILL.md` served as a blob) is kept as
- * `null`, for its own notice.
+ * `null`, for its own notice. The connection is opened only when there is
+ * something to read.
  */
-async function loadSkillContents(
+async function readChatSkills(
   openSkillsClient: () => Promise<ChatSkillsClient>,
   spaceId: string,
-  ids: readonly string[],
-): Promise<Map<string, SkillContent | null>> {
-  const loaded = new Map<string, SkillContent | null>();
-  if (ids.length === 0) return loaded;
+  opts: { catalogue: boolean; chosen: readonly string[] },
+): Promise<ChatSkillsRead> {
+  const read: ChatSkillsRead = { contents: new Map(), catalogue: [] };
+  if (!opts.catalogue && opts.chosen.length === 0) return read;
   let client: ChatSkillsClient;
   try {
     client = await openSkillsClient();
   } catch (err) {
-    logger.warn("skills connection unavailable — chosen skills left out", { err: String(err) });
-    return loaded;
+    logger.warn("skills connection unavailable — the turn's skills left out", {
+      err: String(err),
+    });
+    return read;
   }
   try {
     const list = (meta?: Record<string, unknown>) =>
@@ -610,32 +610,46 @@ async function loadSkillContents(
       list(),
       list({ [SKILL_DEFINITION_META_KEY]: "draft" }),
     ]);
+    if (opts.catalogue) {
+      // A draft stands for its package's published version: one line per skill.
+      const listed = new Map([...published, ...drafts]);
+      read.catalogue = [...listed.keys()].sort().map((packageId) => {
+        const entry = listed.get(packageId)!;
+        const served = servedAs(entry, drafts.has(packageId));
+        return {
+          packageId,
+          description: entry.frontmatter.description,
+          version: served?.definition === "published" ? served.version : null,
+          uri: entry.uri,
+        };
+      });
+    }
     await Promise.all(
-      ids.map(async (id) => {
+      opts.chosen.map(async (id) => {
         const entry = drafts.get(id) ?? published.get(id);
         if (!entry) return;
-        const read = await client.readResource({ uri: entry.uri }).then(
-          ({ contents }) => contents.find((content) => content.uri === entry.uri),
+        const content = await client.readResource({ uri: entry.uri }).then(
+          ({ contents }) => contents.find((item) => item.uri === entry.uri),
           () => undefined,
         );
-        if (!read) return;
+        if (!content) return;
         const served = servedAs(entry, drafts.has(id));
         // A `SKILL.md` served as a blob is not a skill's text: its own notice.
-        loaded.set(
+        read.contents.set(
           id,
-          served && "text" in read && typeof read.text === "string"
+          served && "text" in content && typeof content.text === "string"
             ? {
                 packageId: id,
                 version: served.definition === "published" ? served.version : null,
                 uri: entry.uri,
-                content: read.text,
+                content: content.text,
                 served,
               }
             : null,
         );
       }),
     );
-    return loaded;
+    return read;
   } finally {
     await client.close().catch(() => {});
   }
@@ -714,7 +728,7 @@ export async function buildCallerContextBlock(
     skills: ChatSkillSelection;
     /** Already loading; a rejection rejects the block. */
     enforced: Promise<readonly EnforcedChatSkill[]>;
-    /** Opened only when the turn injects chosen skills; closed once they are read. */
+    /** Opened only when the turn lists or injects skills; closed once they are read. */
     openSkillsClient: () => Promise<ChatSkillsClient>;
   },
 ): Promise<{ text: string; injected: InjectedSkills }> {
@@ -729,13 +743,13 @@ export async function buildCallerContextBlock(
   const persona = c.get("viewAs");
   const ctxHeaders = new Headers(headers);
   ctxHeaders.set("x-space-id", spaceId);
-  const [context, skillContents, enforced] = await Promise.all([
+  const injects = injectsSkills(skills.skillMode);
+  const [context, turnSkills, enforced] = await Promise.all([
     readCallerContext(deps, origin, ctxHeaders),
-    loadSkillContents(
-      args.openSkillsClient,
-      spaceId,
-      injectsSkills(skills.skillMode) ? skills.pinnedSkills : [],
-    ),
+    readChatSkills(args.openSkillsClient, spaceId, {
+      catalogue: capabilities.readsSkills && !injects,
+      chosen: injects ? skills.pinnedSkills : [],
+    }),
     args.enforced,
   ]);
   const opts = {
@@ -748,7 +762,14 @@ export async function buildCallerContextBlock(
     enforced,
   };
   if (context && context !== 400) {
-    return claimed(formatCallerContext(context, { ...opts, skills, skillContents }));
+    return claimed(
+      formatCallerContext(context, {
+        ...opts,
+        skills,
+        skillContents: turnSkills.contents,
+        skillCatalogue: turnSkills.catalogue,
+      }),
+    );
   }
   // Degraded: nothing says which chosen skills are active here, so none is named,
   // but the mode (strict's note) and the space's skills stay.
@@ -774,7 +795,6 @@ export async function buildCallerContextBlock(
       selection: unresolved,
       capabilities,
       catalogue: [],
-      catalogueTruncated: false,
       contents: new Map(),
       enforced,
     }),

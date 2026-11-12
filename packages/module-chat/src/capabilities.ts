@@ -20,8 +20,9 @@ export interface TurnCapabilities {
   /** Dispatch ∧ a write on any package type: the turn may create a package of that type. */
   readonly authorsPackages: boolean;
   /**
-   * `transport` ∧ `skills:read`: the context lists the space's skills on `skills:read`, and
-   * `read_skill`, which loads one, is declared on every MCP connection — no dispatch needed.
+   * `transport` ∧ `skills:read`: the context lists the space's skills by their `skill://` URI, and
+   * `read_resource`, which loads one, is registered on every platform MCP connection — no
+   * dispatch needed.
    */
   readonly readsSkills: boolean;
 }

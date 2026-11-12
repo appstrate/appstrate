@@ -95,6 +95,17 @@ const BASE_OPTS = {
   enforced: [],
 } as const;
 
+/** A line of the `auto` catalogue: the published entry of `@<scope>/<name>`, or its draft. */
+const listedSkill = (packageId: string, description: string, version: string | null = null) => {
+  const [scope, name] = packageId.slice(1).split("/");
+  return {
+    packageId,
+    description,
+    version,
+    uri: `skill://space-1/${scope}/${name}${version ? "" : "@draft"}/${name}/SKILL.md`,
+  };
+};
+
 describe("formatCallerContext", () => {
   it("renders identity, role, and connected integrations with their default tools", () => {
     const out = contextText(
@@ -346,25 +357,21 @@ describe("formatCallerContext", () => {
   });
 
   it("lists skills whatever the turn's authoring grant — the chat loads them itself", () => {
-    const raw = {
-      user: { name: "Ada" },
-      org: { role: "member" },
-      skills: [{ packageId: "@acme/research", display_name: "Research" }],
-    };
+    const raw = { user: { name: "Ada" }, org: { role: "member" } };
     for (const permissions of [BUILDER, NO_AUTHORING]) {
-      const out = contextText(raw, { ...BASE_OPTS, capabilities: caps(permissions) });
+      const out = contextText(raw, {
+        ...BASE_OPTS,
+        capabilities: caps(permissions),
+        skillCatalogue: [listedSkill("@acme/research", "Research")],
+      });
       expect(out).toContain("## Skills");
       expect(out).toContain("`@acme/research`");
     }
   });
 
   it("injects the chosen skills in full, in stored order, tagged with id and version, in manual and strict", () => {
-    const raw = {
-      user: { name: "Ada" },
-      org: { role: "member" },
-      skills: [{ packageId: "@acme/pdf", display_name: "PDF" }],
-      skills_truncated: true,
-    };
+    const raw = { user: { name: "Ada" }, org: { role: "member" } };
+    const skillCatalogue = [listedSkill("@acme/pdf", "PDF")];
     const skillContents = new Map([
       [
         "@acme/zeta",
@@ -397,6 +404,7 @@ describe("formatCallerContext", () => {
         capabilities: caps(permissions),
         skills: { skillMode, pinnedSkills: ["@acme/mine", "@acme/zeta"] },
         skillContents,
+        skillCatalogue,
       });
       expect(out.split("## Skills")).toHaveLength(2);
       expect(out).toContain("The user chose these skills for this conversation.");
@@ -409,35 +417,30 @@ describe("formatCallerContext", () => {
       expect(out.indexOf("@acme/mine")).toBeLessThan(out.indexOf("@acme/zeta"));
       // No listing next to the chosen skills.
       expect(out).not.toContain("@acme/pdf");
-      expect(out).not.toContain("(list truncated)");
     }
   });
 
   it("lists the space's skills in auto, and none when the turn cannot load one", () => {
-    const raw = {
-      user: { name: "Ada" },
-      org: { role: "member" },
-      skills: [{ packageId: "@acme/pdf", display_name: "PDF", description: "Reads PDFs." }],
-      skills_truncated: true,
-    };
-    const out = contextText(raw, BASE_OPTS);
+    const raw = { user: { name: "Ada" }, org: { role: "member" } };
+    const skillCatalogue = [listedSkill("@acme/pdf", "Reads PDFs.", "1.0.0")];
+    const PDF_LINE = "- `@acme/pdf` (v1.0.0) `skill://space-1/acme/pdf/pdf/SKILL.md` — Reads PDFs.";
+    const out = contextText(raw, { ...BASE_OPTS, skillCatalogue });
     expect(out.split("## Skills")).toHaveLength(2);
-    expect(out).toContain("- `@acme/pdf` — PDF: Reads PDFs.");
-    expect(out).toContain("(list truncated)");
+    expect(out).toContain(PDF_LINE);
+    expect(out).not.toContain("(list truncated)");
     expect(out).not.toContain("<skill");
 
-    // `read_skill` loads one without dispatch; without the transport there is no tool at all.
+    // `read_resource` loads one without dispatch; without the transport there is no tool at all.
     const noDispatch = contextText(raw, {
       ...BASE_OPTS,
       capabilities: caps(BUILDER.filter((p) => p !== "mcp:invoke")),
+      skillCatalogue,
     });
-    expect(noDispatch).toContain("- `@acme/pdf` — PDF: Reads PDFs.");
-    // No `listSkills` without dispatch: the marker says the rest cannot be paged.
-    expect(noDispatch).toContain("(list truncated; this turn cannot list the rest)");
-    expect(out).not.toContain("cannot list the rest");
+    expect(noDispatch).toContain(PDF_LINE);
     const noTransport = contextText(raw, {
       ...BASE_OPTS,
       capabilities: caps(BUILDER.filter((p) => p !== "mcp:read")),
+      skillCatalogue,
     });
     expect(noTransport).not.toContain("## Skills");
   });
@@ -457,8 +460,8 @@ describe("formatCallerContext", () => {
   it("omits the heading entirely when nothing is chosen and nothing is listed", () => {
     for (const skillMode of ["auto", "manual"] as const) {
       const out = contextText(
-        { user: { name: "Ada" }, org: { role: "member" }, skills: [] },
-        { ...BASE_OPTS, skills: { skillMode, pinnedSkills: [] } },
+        { user: { name: "Ada" }, org: { role: "member" } },
+        { ...BASE_OPTS, skills: { skillMode, pinnedSkills: [] }, skillCatalogue: [] },
       );
       expect(out).not.toContain("## Skills");
     }
@@ -544,28 +547,32 @@ describe("formatCallerContext", () => {
 
     it("leaves the injected ones out of the `auto` listing", () => {
       const out = contextText(
+        { user: { name: "Ada" } },
         {
-          user: { name: "Ada" },
-          skills: [
-            { packageId: "@acme/house", display_name: "House rules" },
-            { packageId: "@acme/pdf", display_name: "PDF" },
+          ...BASE_OPTS,
+          enforced: [HOUSE],
+          skillCatalogue: [
+            listedSkill("@acme/house", "House rules"),
+            listedSkill("@acme/pdf", "PDF"),
           ],
         },
-        { ...BASE_OPTS, enforced: [HOUSE] },
       );
-      expect(out).toContain("- `@acme/pdf` — PDF");
+      expect(out).toContain("- `@acme/pdf` `skill://space-1/acme/pdf@draft/pdf/SKILL.md` — PDF");
       expect(out).not.toContain("- `@acme/house`");
       expect(out.split("@acme/house")).toHaveLength(2);
 
       // One the turn could not inject stays listed, so the model can still load it.
       const unpublished = contextText(
+        { user: { name: "Ada" } },
         {
-          user: { name: "Ada" },
-          skills: [{ packageId: "@acme/house", display_name: "House rules" }],
+          ...BASE_OPTS,
+          enforced: [{ ...HOUSE, version: null, uri: null, content: null }],
+          skillCatalogue: [listedSkill("@acme/house", "House rules")],
         },
-        { ...BASE_OPTS, enforced: [{ ...HOUSE, version: null, content: null }] },
       );
-      expect(unpublished).toContain("- `@acme/house` — House rules");
+      expect(unpublished).toContain(
+        "- `@acme/house` `skill://space-1/acme/house@draft/house/SKILL.md` — House rules",
+      );
     });
 
     it("orders the strict note, the space's skills, the chosen ones, then the notices", () => {
@@ -690,8 +697,13 @@ describe("formatCallerContext", () => {
       const other: EnforcedChatSkill = { ...HOUSE, packageId: "@acme/alpha", content: "Alpha." };
       const render = () =>
         contextText(
-          { user: { name: "Ada" }, skills: [{ packageId: "@acme/pdf" }] },
-          { ...BASE_OPTS, now: new Date("2026-06-25T09:05:00.000Z"), enforced: [other, HOUSE] },
+          { user: { name: "Ada" } },
+          {
+            ...BASE_OPTS,
+            now: new Date("2026-06-25T09:05:00.000Z"),
+            enforced: [other, HOUSE],
+            skillCatalogue: [listedSkill("@acme/pdf", "PDF")],
+          },
         );
       const first = render();
       expect(render()).toBe(first);
@@ -821,69 +833,42 @@ describe("formatCallerContext", () => {
     expect(out).not.toContain("Existing agents you can run");
   });
 
-  it("renders each skill line with id, version and label, dropping what says nothing", () => {
+  it("renders each skill line with id, version, URI and description, dropping what says nothing", () => {
     const out = contextText(
+      { user: { name: "Ada", email: "ada@acme.com" }, org: { role: "member" }, connections: [] },
       {
-        user: { name: "Ada", email: "ada@acme.com" },
-        org: { role: "member" },
-        connections: [],
-        skills: [
-          {
-            packageId: "@appstrate/web-research",
-            display_name: "Web Research",
-            description: "Multi-source web search.",
-            version: "1.2.0",
-          },
-          {
-            packageId: "@acme/pdf",
-            display_name: "PDF",
-            description: "Reads PDFs.",
-            version: null,
-          },
-          // A display name that only repeats the id is not worth a second copy.
-          { packageId: "@acme/bare", display_name: "@acme/bare", description: "Bare." },
+        ...BASE_OPTS,
+        skillCatalogue: [
+          listedSkill("@appstrate/web-research", "Multi-source web search.", "1.2.0"),
+          listedSkill("@acme/pdf", "Reads PDFs."),
+          listedSkill("@acme/bare", " "),
         ],
       },
-      BASE_OPTS,
     );
     expect(out).toContain("## Skills");
-    expect(out).toContain("`@appstrate/web-research`");
-    expect(out).toContain("(v1.2.0)");
-    expect(out).toContain("Web Research: Multi-source web search.");
-    expect(out).toContain("`@acme/pdf`");
-    // No version → no version suffix rendered.
-    expect(out).not.toContain("@acme/pdf` (v");
-    expect(out).toContain("- `@acme/bare` — Bare.");
+    expect(out).toContain(
+      "- `@appstrate/web-research` (v1.2.0) `skill://space-1/appstrate/web-research/web-research/SKILL.md` — Multi-source web search.",
+    );
+    // A draft has no version → no version suffix rendered.
+    expect(out).toContain(
+      "- `@acme/pdf` `skill://space-1/acme/pdf@draft/pdf/SKILL.md` — Reads PDFs.",
+    );
+    // A blank description adds nothing.
+    expect(out.endsWith("- `@acme/bare` `skill://space-1/acme/bare@draft/bare/SKILL.md`")).toBe(
+      true,
+    );
     // Data only — the `dependencies.skills` rule lives in `buildSystemPrompt` (when the turn may author).
     expect(out).not.toContain("dependencies.skills");
     expect(out).not.toContain("(list truncated)");
   });
 
-  it("marks the skill list as truncated without restating how to page it", () => {
-    const out = contextText(
-      {
-        user: { name: "Ada" },
-        org: { role: "member" },
-        connections: [],
-        skills: [{ packageId: "@appstrate/web-research", version: "1.2.0" }],
-        skills_truncated: true,
-      },
-      BASE_OPTS,
-    );
-    // The marker is data; `buildSystemPrompt` owns what to DO about it (listSkills).
-    // That instruction must name the operation: `search_operations` ranks
-    // `listSkills` below every create/delete variant, so a keyword search is
-    // not a reliable path back to the truncated list.
-    expect(out).toContain("(list truncated)");
-    expect(out).not.toContain('`operation_id: "listSkills"`');
-  });
-
   it("renders a context block from skills alone (no identity/connections/agents)", () => {
     const out = contextText(
+      {},
       {
-        skills: [{ packageId: "@appstrate/web-research", version: "1.2.0" }],
+        ...BASE_OPTS,
+        skillCatalogue: [listedSkill("@appstrate/web-research", "Research", "1.2.0")],
       },
-      BASE_OPTS,
     );
     expect(out).toContain("## Skills");
     expect(out).toContain("`@appstrate/web-research`");
@@ -895,9 +880,8 @@ describe("formatCallerContext", () => {
         user: { name: "Ada" },
         org: { role: "member" },
         connections: [],
-        skills: [],
       },
-      BASE_OPTS,
+      { ...BASE_OPTS, skillCatalogue: [] },
     );
     expect(out).not.toContain("## Skills");
   });
@@ -972,7 +956,6 @@ describe("formatCallerContext", () => {
       org: { role: "member", name: "Acme", slug: "acme" },
       connections: [{ integration_package_id: "@appstrate/gmail", name: "Gmail", source: "own" }],
       agents: [{ packageId: "@appstrate/triage", takes_input: false }],
-      skills: [{ packageId: "@appstrate/web-research", version: "1.2.0" }],
     };
     const at = new Date("2026-06-25T09:05:00.000Z");
     const later = new Date("2026-06-25T09:50:00.000Z");
@@ -1186,25 +1169,64 @@ describe("buildCallerContextBlock", () => {
     expect(injected).toEqual({ spaceId: "spc_1", skills: {} });
   });
 
-  it("asks nothing about the chosen skills in auto", async () => {
+  it("lists the space's skills in auto over the skills connection, draft first, reading none", async () => {
+    const skills = fakeSkillsClient({
+      published: [
+        skillEntry("skill://spc_1/acme/a/a/SKILL.md", "1.0.0"),
+        skillEntry("skill://spc_1/acme/c/c/SKILL.md", "2.0.0"),
+        // Another space's entry is not this space's skill.
+        skillEntry("skill://spc_2/acme/other/other/SKILL.md", "1.0.0"),
+      ],
+      drafts: [skillEntry("skill://spc_1/acme/a@draft/a/SKILL.md", null, 7)],
+      texts: {},
+    });
     const seen: string[] = [];
     const { deps } = fakeDeps((req) => {
       seen.push(new URL(req.url).pathname + new URL(req.url).search);
       return Response.json({ user: { name: "Ada" } });
     });
+    const { text: out, injected } = await buildCallerContextBlock(
+      fakeContext({ orgRole: "member" }),
+      {
+        origin: "http://127.0.0.1:3000",
+        headers: {},
+        spaceId: "spc_1",
+        user,
+        deps,
+        capabilities: caps(BUILDER),
+        permissions: ["mcp:read", "mcp:invoke"],
+        skills: { skillMode: "auto", pinnedSkills: ["@acme/a"] },
+        enforced: NO_ENFORCED,
+        openSkillsClient: skills.open,
+      },
+    );
+    expect(seen).toEqual(["/api/me/context"]);
+    expect(skills.calls.sort()).toEqual(["close", "skills/list", "skills/list draft"]);
+    expect(out).toContain(
+      "- `@acme/a` `skill://spc_1/acme/a@draft/a/SKILL.md` — A\n- `@acme/c` (v2.0.0) `skill://spc_1/acme/c/c/SKILL.md` — A",
+    );
+    expect(out).not.toContain("@acme/other");
+    expect(out).not.toContain("<skill");
+    expect(injected).toEqual({ spaceId: "spc_1", skills: {} });
+
+    // A turn that cannot load a skill lists none, and opens nothing.
+    let opened = false;
     await blockText(fakeContext({ orgRole: "member" }), {
       origin: "http://127.0.0.1:3000",
       headers: {},
       spaceId: "spc_1",
       user,
       deps,
-      capabilities: caps(BUILDER),
+      capabilities: caps(BUILDER.filter((permission) => permission !== "skills:read")),
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillMode: "auto", pinnedSkills: ["@acme/a"] },
       enforced: NO_ENFORCED,
-      openSkillsClient: NO_SKILLS,
+      openSkillsClient: async () => {
+        opened = true;
+        return skills.open();
+      },
     });
-    expect(seen).toEqual(["/api/me/context"]);
+    expect(opened).toBe(false);
   });
 
   it("leaves out a chosen skill whose content read is refused", async () => {
