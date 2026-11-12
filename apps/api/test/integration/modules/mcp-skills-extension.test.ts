@@ -124,7 +124,11 @@ describe("skills/list and resources/read", () => {
   it("serves every listed file whole, its digest and size verifiable", async () => {
     const envelope = await call(inSpace(ownerHeaders(), owner.defaultSpaceId), "skills/list", {});
     const entry = (envelope.result?.skills as Entry[]).find((e) => e.uri === toneUri());
-    expect(entry?.frontmatter).toEqual({ name: "tone", description: "Sets the tone." });
+    expect(entry?.frontmatter).toEqual({
+      name: "tone",
+      description: "Sets the tone.",
+      metadata: { version: "1.0.0" },
+    });
     expect(entry?.resources.map((r) => r.uri.split("/tone/tone/")[1]).sort()).toEqual([
       "SKILL.md",
       "references/guide.md",
@@ -143,7 +147,9 @@ describe("skills/list and resources/read", () => {
     expect(await listUris(inSpace(ownerHeaders(), owner.defaultSpaceId))).toEqual([toneUri()]);
     expect((await listUris(ownerHeaders())).sort()).toEqual([toneUri(), teamUri()].sort());
     const read = await call(ownerHeaders(), "resources/read", { uri: teamUri() });
-    expect((read.result?.contents as Array<{ text: string }>)[0]!.text).toBe(skillMd("team"));
+    expect((read.result?.contents as Array<{ text: string }>)[0]!.text).toBe(
+      skillMd("team").replace("\n---\nBody", "\nmetadata:\n  version: 1.0.0\n---\nBody"),
+    );
     const pinned = await call(inSpace(ownerHeaders(), owner.defaultSpaceId), "resources/read", {
       uri: teamUri(),
     });
