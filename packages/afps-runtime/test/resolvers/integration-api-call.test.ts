@@ -1108,7 +1108,7 @@ describe("LocalIntegrationResolver — SSRF + redirect hardening (newly added on
     expect(body.status).toBe(200);
   });
 
-  it("refuses a redirect hop that leaves the authorized_uris allowlist", async () => {
+  it("returns a redirect hop that leaves the authorized_uris allowlist unfollowed", async () => {
     const seen: string[] = [];
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const bundle = makeBundle(root, [
@@ -1130,11 +1130,14 @@ describe("LocalIntegrationResolver — SSRF + redirect hardening (newly added on
     });
     const tools = await resolver.resolve([{ name: "@acme/api", version: "^1" }], bundle);
     const { ctx } = makeCtx();
-    await expect(
-      tools[0]!.execute({ method: "GET", target: "https://api.acme.com/v1/me" }, ctx),
-    ).rejects.toThrow(/redirect blocked/i);
-    // Only the initial (allowed) hop was issued — the off-allowlist hop
-    // was refused before re-issuing the fetch.
+    const res = await tools[0]!.execute(
+      { method: "GET", target: "https://api.acme.com/v1/me" },
+      ctx,
+    );
+    // The 302 comes back as the upstream sent it, for the caller to follow itself (#2154).
+    const body = JSON.parse((res.content[0] as { text: string }).text) as { status: number };
+    expect(body.status).toBe(302);
+    // Only the initial (allowed) hop was issued — nothing was sent to the off-allowlist host.
     expect(seen).toEqual(["https://api.acme.com/v1/me"]);
   });
 
@@ -1640,10 +1643,12 @@ describe("LocalIntegrationResolver — the failure codes of every api_call path 
     expect(err.details).toMatchObject({ systemCode: "ECONNREFUSED" });
   });
 
-  it("refuses a redirect off the allowlist under the target's code, flagged, naming its host only", async () => {
+  it("refuses a templated call's redirect off the allowlist under the target's code, flagged, naming its host only", async () => {
     const location = "https://evil.example.com/steal?token=t0p";
     const err = await fail("https://api.acme.com/x", {
       fetch: () => Promise.resolve(new Response(null, { status: 302, headers: { location } })),
+      // A substituted credential: its redirect off the allowlist stays refused, not returned.
+      headers: { "X-Key": "{{api_key}}" },
     });
     expect(err).toMatchObject({ code: "unauthorized_target", details: { redirect: true } });
     expect(err.message).toContain("evil.example.com");
@@ -1850,6 +1855,45 @@ describe("RemoteAppstrateIntegrationResolver", () => {
     } finally {
       server.stop(true);
       await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it("returns the proxy's relayed 3xx as is, never following it (#2154)", async () => {
+    const offList: string[] = [];
+    const blob = Bun.serve({
+      port: 0,
+      fetch(request) {
+        offList.push(request.url);
+        return new Response("blob", { status: 200 });
+      },
+    });
+    const proxyHits: string[] = [];
+    const location = `http://127.0.0.1:${blob.port}/logs?sig=abc`;
+    const proxy = Bun.serve({
+      port: 0,
+      fetch(request) {
+        proxyHits.push(new URL(request.url).pathname);
+        // The route relays an upstream redirect off authorized_uris unfollowed.
+        return new Response(null, { status: 302, headers: { location } });
+      },
+    });
+    try {
+      const tool = await remoteTool(((_url: string, init: RequestInit) =>
+        fetch(`http://127.0.0.1:${proxy.port}/api/credential-proxy/proxy`, init)) as typeof fetch);
+      const { ctx } = makeCtx();
+      const res = await tool.execute(
+        { method: "GET", target: "https://api.github.com/repos/o/r/actions/jobs/1/logs" },
+        ctx,
+      );
+      const body = JSON.parse((res.content[0] as { text: string }).text) as { status: number };
+      expect(body.status).toBe(302);
+      expect(JSON.stringify(res)).toContain(location);
+      // One request, to the platform route only — nothing reached the redirect target.
+      expect(proxyHits).toEqual(["/api/credential-proxy/proxy"]);
+      expect(offList).toEqual([]);
+    } finally {
+      proxy.stop(true);
+      blob.stop(true);
     }
   });
 });

@@ -108,7 +108,12 @@ const proxyParameters = [
       "`allow_all_uris: true`. `allow_all_uris` is ignored when a " +
       "`{{credential_field}}` placeholder appears in this URL, a header, or a substituted " +
       "body: the target and every redirect hop must then match `authorized_uris`, and the " +
-      "call is refused when that list is empty.",
+      "call is refused when that list is empty. A redirect to a URL outside " +
+      "`authorized_uris` is not followed: the upstream's 3xx is returned as is (status, " +
+      "`Location`, body) and nothing is sent to that URL, so the caller can fetch a signed " +
+      "URL itself. On a call that substitutes a `{{credential_field}}` such a redirect is " +
+      "refused instead (`403 unauthorized_target`): its `Location` could carry the " +
+      "substituted value.",
     schema: { type: "string" },
   },
   {
@@ -309,8 +314,9 @@ const proxyResponses = {
   },
   "403": {
     description:
-      "Forbidden. `unauthorized_target` — the target or a redirect hop is not in " +
-      "`authorized_uris`, or the connection does not render the declared list " +
+      "Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or, on a " +
+      "call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call " +
+      "gets that 3xx back unfollowed), or the connection does not render the declared list " +
       "(`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a " +
       "blocked network range (`destination_ip_prohibited`); " +
       "`credential_exfiltration_refused` — the call carries a credential and the allowlist " +

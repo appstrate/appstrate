@@ -578,6 +578,44 @@ describe("guardedFetch — caller hop contract (validateHop / sensitiveHeaders)"
     expect(call).toBe(1); // the off-allowlist hop was never fetched
   });
 
+  it("returns the redirect unfollowed when returnRedirect accepts its hop, before validateHop or DNS", async () => {
+    let call = 0;
+    globalThis.fetch = (async () => {
+      call += 1;
+      return new Response("see other", {
+        status: 302,
+        headers: { location: "https://blob.storage.example/logs?sig=s" },
+      });
+    }) as unknown as typeof fetch;
+    const seen: Array<{ href: string; hop: number }> = [];
+    const validated: number[] = [];
+    const resolved: string[] = [];
+    const { response, finalUrl, hops } = await guardedFetchChain(
+      "https://api.vendor.example/v1/logs",
+      undefined,
+      {
+        resolve: async (host) => {
+          resolved.push(host);
+          return ["203.0.113.5"];
+        },
+        validateHop: (_url, hop) => validated.push(hop),
+        returnRedirect: (url, hop) => {
+          seen.push({ href: url.href, hop });
+          return true;
+        },
+      },
+    );
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("https://blob.storage.example/logs?sig=s");
+    expect(await response.text()).toBe("see other");
+    expect(finalUrl).toBe("https://api.vendor.example/v1/logs");
+    expect(hops).toBe(0);
+    expect(seen).toEqual([{ href: "https://blob.storage.example/logs?sig=s", hop: 1 }]);
+    expect(validated).toEqual([0]);
+    expect(resolved).toEqual(["api.vendor.example"]);
+    expect(call).toBe(1);
+  });
+
   it("aborts on a SAME-host redirect that walks off the allowlisted path", async () => {
     let call = 0;
     globalThis.fetch = (async () => {

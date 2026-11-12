@@ -780,6 +780,10 @@ export class RemoteAppstrateIntegrationResolver implements IntegrationApiCallRes
           headers,
           signal: ctx.signal,
           body: isStreamingBody ? resolved.stream : resolved.bytes,
+          // The route relays an upstream 3xx whose `Location` is off `authorized_uris`
+          // unfollowed (#2154): following it here would send the platform request's headers
+          // (and a 307/308 body) to that host and diverge from the other api_call paths.
+          redirect: "manual",
         };
         if (isStreamingBody) init.duplex = "half";
         return this.fetchImpl(`${this.instance}/api/credential-proxy/proxy`, init);

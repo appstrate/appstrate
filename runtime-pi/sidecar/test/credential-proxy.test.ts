@@ -1021,7 +1021,7 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     const fetchCredentials = mock(async (): Promise<CredentialsResponse> => ({
       credentials: { access_token: "secret-token" },
       // allow_all_uris is dropped for a call carrying a credential, so the
-      // redirect off authorized_uris is refused before its hop goes out.
+      // redirect off authorized_uris is returned unfollowed: its hop never goes out.
       authorizedUris: ["https://api.example.com/**"],
       allowAllUris: true,
       credentialHeaderName: "X-Api-Key",
@@ -1045,8 +1045,10 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     );
     expect(authHeadersSeen).toHaveLength(1);
     expect(authHeadersSeen[0]!.apiKey).toBe("secret-token");
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toMatch(/Redirect blocked \(unauthorized\)/);
+    expect(result.ok && result.response.status).toBe(302);
+    if (result.ok) {
+      expect(result.response.headers.get("location")).toBe("https://evil.attacker.com/steal");
+    }
   });
 
   it("strips an allowed caller override when the platform credential is empty", async () => {
@@ -1169,12 +1171,13 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
     ]);
   });
 
-  it("refuses HTTPS→HTTP downgrade redirects when allowlist is https-only (#475)", async () => {
+  it("never follows HTTPS→HTTP downgrade redirects when allowlist is https-only (#475)", async () => {
     // makeDeps declares authorizedUris: ["https://api.example.com/**"]
     // — the matcher is scheme-sensitive, so http://… does NOT match.
     // Pre-#475: hop 2 was issued cross-origin with credentials stripped.
-    // Post-#475: per-hop allowlist gate refuses the hop entirely, never
-    // exposing the agent's request timing/IP to the downgraded target.
+    // Post-#475: per-hop allowlist gate stops at the hop, never exposing
+    // the agent's request timing/IP to the downgraded target; since #2154
+    // the 302 is handed back unfollowed instead of failing the call.
     const fetchFn = mock(async (url: string | URL) => {
       const u = typeof url === "string" ? url : url.toString();
       if (u.startsWith("https://api.example.com")) {
@@ -1197,11 +1200,9 @@ describe("executeApiCall — multi-hop redirect cookie capture (#473)", () => {
       },
       deps,
     );
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.code).toBe("unauthorized_target");
-      expect(result.error).toMatch(/Redirect blocked \(unauthorized\)/);
-      expect(result.error).toContain("api.example.com");
+    expect(result.ok && result.response.status).toBe(302);
+    if (result.ok) {
+      expect(result.response.headers.get("location")).toBe("http://api.example.com/insecure");
     }
     // Hop 2 never issued — only the initial fetch happened.
     expect(fetchFn).toHaveBeenCalledTimes(1);
@@ -1363,7 +1364,7 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
     });
   }
 
-  it("refuses redirects to off-allowlist hosts even when reachable", async () => {
+  it("returns redirects to off-allowlist hosts unfollowed even when reachable (#2154)", async () => {
     const fetchFn = mock(async (url: string | URL) => {
       const u = typeof url === "string" ? url : url.toString();
       if (u.startsWith("https://api.example.com")) {
@@ -1386,14 +1387,11 @@ describe("executeApiCall — per-hop redirect hardening (#475)", () => {
       },
       deps,
     );
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.code).toBe("unauthorized_target");
-      expect(result.error).toMatch(/Redirect blocked \(unauthorized\)/);
-      expect(result.error).toContain("evil.attacker.com");
-      // The raw URL path/query never appears (defence against capability
-      // leakage via redirect-encoded tokens).
-      expect(result.error).not.toContain("/steal");
+    // The upstream's own 302 and Location, for the caller to fetch itself; the
+    // off-allowlist host received nothing.
+    expect(result.ok && result.response.status).toBe(302);
+    if (result.ok) {
+      expect(result.response.headers.get("location")).toBe("https://evil.attacker.com/steal");
     }
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });

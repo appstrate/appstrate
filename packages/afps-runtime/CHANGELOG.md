@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `fetchApiCall` returns a redirect off the allowlist (#2154)
+
+- When gated (no `allowAllUris`), a 3xx whose `Location` matches no `authorizedUris` entry is
+  returned unfollowed (status, `Location`, body, `hops` of the hop that answered it) instead of
+  throwing `ApiCallRefusedError("not_authorized", "Redirect blocked (unauthorized): …", true)`.
+  Nothing is resolved or sent for that hop. A call with non-empty `credentialFields` (it
+  substitutes a credential) still throws that refusal.
+
 ### Changed — `truncateToolResult` summarises image blocks
 
 - Every image block (`{ type: "image", data }`, at any depth) is logged as

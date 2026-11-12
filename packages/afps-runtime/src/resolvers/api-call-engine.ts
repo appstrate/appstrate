@@ -236,7 +236,9 @@ export interface FetchApiCallOptions {
 /**
  * Send one `api_call` upstream. Throws {@link ApiCallRefusedError} (the initial target or a hop
  * refused), {@link InvalidHeaderValueError} (nothing sent) or the scrubbed transport error. A
- * `ReadableStream` body cannot be replayed, so its redirect is returned unfollowed.
+ * redirect off `authorized_uris` (when gated) is returned unfollowed, its 3xx as the upstream sent
+ * it, unless the call substitutes a credential (then refused); so is any redirect of a
+ * `ReadableStream` body, which cannot be replayed.
  */
 export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFetchResult> {
   const fields = opts.credentialFields;
@@ -246,7 +248,9 @@ export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFe
   const inAllowlist = (url: URL) =>
     authorizedUris.some((p) => matchesAuthorizedUriSpec(p, url.href));
   // The pre-send guard bounds the target; a credential follows a hop only inside the same bound.
-  const carriesCredential = opts.credentialHeaders.length > 0 || Object.keys(fields).length > 0;
+  // `credentialFields` is non-empty exactly when the call substitutes a credential (`redactionFields`).
+  const substitutesCredential = Object.keys(fields).length > 0;
+  const carriesCredential = opts.credentialHeaders.length > 0 || substitutesCredential;
   const forwardCredentials = (url: URL) =>
     inAllowlist(url) &&
     (!carriesCredential || credentialStaysWithinBound(url.href, authorizedUris));
@@ -295,9 +299,20 @@ export async function fetchApiCall(opts: FetchApiCallOptions): Promise<GuardedFe
                     `URL not in authorized_uris allowlist. Allowed: ${declaredUris.join(", ")}`,
                   );
                 }
+                // Reached only by a call that substitutes a credential (`returnRedirect`).
                 const host = redactCredentialHost(url.href, fields);
                 warn("Redirect refused (not in authorizedUris)", hop, host);
                 throw redirectRefused("not_authorized", host);
+              },
+              // A redirect off the allowlist is not followed: its 3xx goes back to the caller
+              // as is (status, `Location`, body), nothing sent to that host, so the caller can
+              // fetch a signed URL itself (GitHub Actions logs → blob storage, #2154). Not when
+              // the call substitutes a credential into its URL, headers or body: an upstream
+              // routinely carries the query string into `Location`, which would hand the agent
+              // the substituted value; that hop stays refused, its message naming the host only.
+              returnRedirect: (url: URL, hop: number) => {
+                refuseTarget(url, hop);
+                return !substitutesCredential && !inAllowlist(url);
               },
               forwardCredentials,
             }

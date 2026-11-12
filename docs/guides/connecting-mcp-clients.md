@@ -310,7 +310,11 @@ who holds each is stated in `docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.4.
   entry with `status` is the upstream's own answer, whatever the status, with a
   few response headers and a text `body` cut at `max_response_bytes` (32 KiB by
   default) and marked `truncated`; a non-text body is replaced by its size. All
-  bodies of one result share a 256 KiB budget. An entry with `error`
+  bodies of one result share a 256 KiB budget. A 3xx whose `Location` is outside
+  the connection's `authorized_uris` is returned as is, not followed (unless the
+  request fills in a credential `{{field}}`): fetch that `Location` yourself
+  right away, since such signed URLs expire fast (1 minute for GitHub Actions
+  logs). An entry with `error`
   (`{ status, code, detail }`) is the platform's refusal of that request
   (`call_permission_required`, `credential_not_found`, `must_choose_connection`,
   `needs_reconnection`, `unauthorized_target`, `rate_limited`, …) and does not

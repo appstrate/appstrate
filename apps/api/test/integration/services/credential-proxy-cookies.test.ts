@@ -91,6 +91,10 @@ function recordingUpstream(respond: (url: string, n: number) => Response) {
   return { fetchImpl, seen };
 }
 
+/** A transport fault on a hop: the upstream never answered it. */
+const refusedConnection = () =>
+  Object.assign(new Error("Unable to connect"), { code: "ECONNREFUSED" });
+
 const redirect = (location: string, setCookie: string) =>
   new Response(null, { status: 302, headers: { location, "Set-Cookie": setCookie } });
 
@@ -305,7 +309,28 @@ describe("proxyCall — session cookie jar (#1613)", () => {
     ]);
   });
 
-  it("keeps a redirect hop's session when the next hop is refused", async () => {
+  it("keeps a redirect hop's session when the next hop fails", async () => {
+    const packageId = "@cpcookieorg/shop";
+    await cookieCredential(packageId, ["https://1.1.1.1/**", "https://8.8.8.8/**"]);
+    const upstream = recordingUpstream((url) => {
+      if (url.startsWith("https://8.8.8.8")) throw refusedConnection();
+      return url.endsWith("/cart/add")
+        ? redirect("https://8.8.8.8/elsewhere", "PHPSESSID=new; Path=/")
+        : new Response("{}", { status: 200 });
+    });
+
+    await expect(call(packageId, "https://1.1.1.1/cart/add", upstream.fetchImpl)).rejects.toThrow();
+    await call(packageId, "https://1.1.1.1/cart", upstream.fetchImpl);
+
+    expect(upstream.seen.map((s) => s.request)).toEqual([
+      "POST https://1.1.1.1/cart/add",
+      "GET https://8.8.8.8/elsewhere",
+      "POST https://1.1.1.1/cart",
+    ]);
+    expect(upstream.seen[2]?.cookie).toBe("PHPSESSID=new");
+  });
+
+  it("keeps the session of a redirect returned unfollowed (off authorized_uris, #2154)", async () => {
     const packageId = "@cpcookieorg/shop";
     await cookieCredential(packageId);
     const upstream = recordingUpstream((url) =>
@@ -314,7 +339,9 @@ describe("proxyCall — session cookie jar (#1613)", () => {
         : new Response("{}", { status: 200 }),
     );
 
-    await expect(call(packageId, "https://1.1.1.1/cart/add", upstream.fetchImpl)).rejects.toThrow();
+    const res = await call(packageId, "https://1.1.1.1/cart/add", upstream.fetchImpl);
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("https://8.8.8.8/elsewhere");
     await call(packageId, "https://1.1.1.1/cart", upstream.fetchImpl);
 
     expect(upstream.seen.map((s) => s.request)).toEqual([
@@ -490,10 +517,14 @@ describe("proxyCall — session cookie jar (#1613)", () => {
 
     it("leaves the call's own error in flight when the call failed too", async () => {
       const packageId = "@cpcookieorg/shop";
-      const connectionId = await cookieCredential(packageId);
-      const upstream = recordingUpstream(() =>
-        redirect("https://8.8.8.8/elsewhere", "PHPSESSID=new; Path=/"),
-      );
+      const connectionId = await cookieCredential(packageId, [
+        "https://1.1.1.1/**",
+        "https://8.8.8.8/**",
+      ]);
+      const upstream = recordingUpstream((url) => {
+        if (url.startsWith("https://8.8.8.8")) throw refusedConnection();
+        return redirect("https://8.8.8.8/elsewhere", "PHPSESSID=new; Path=/");
+      });
 
       const err = await call(
         packageId,
@@ -504,7 +535,7 @@ describe("proxyCall — session cookie jar (#1613)", () => {
       ).catch((thrown: unknown) => thrown);
 
       expect(err).toBeInstanceOf(ProxyCallError);
-      expect(err).toMatchObject({ code: "unauthorized_target", connectionId });
+      expect(err).toMatchObject({ code: "upstream_unreachable", connectionId });
     });
   });
 });
