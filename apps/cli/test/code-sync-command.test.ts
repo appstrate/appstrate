@@ -101,6 +101,33 @@ describe("code sync — claude-plugin target", () => {
     expect(stdout()).toContain("claude-plugin");
   });
 
+  it("removes a ledger entry the catalogue no longer lists, an agent command's included", async () => {
+    createSkillServer(ONE_SKILL).install();
+    const { io } = createMemoryIO();
+    await codeSyncCommand({ target: ["claude-plugin"] }, io);
+
+    // An entry the catalogue cannot produce: a `run-<agent>` directory recorded with a `spaceId`.
+    const state = JSON.parse(await readText(getStatePath()));
+    state.targets["claude-plugin"].managed["run-report"] = {
+      packageId: "@acme/report",
+      spaceId: "spc_1",
+      version: "1.0.0",
+      integrity: "sha256-x",
+    };
+    await writeFile(getStatePath(), JSON.stringify(state));
+    await mkdir(join(pluginRoot(), "skills", "run-report"), { recursive: true });
+    await writeFile(
+      join(pluginRoot(), "skills", "run-report", "SKILL.md"),
+      "---\nname: run-report\n---\n",
+    );
+
+    await codeSyncCommand({ target: ["claude-plugin"] }, io);
+
+    expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
+    const after = (await readSyncState()).state.targets["claude-plugin"]!.managed;
+    expect(Object.keys(after)).toEqual(["pdf-tools"]);
+  });
+
   it("produces byte-identical bytes when rebuilt from scratch", async () => {
     // Two FULL builds, not "build then no-op": the second run of the old test
     // short-circuited and wrote nothing, so it compared a tree against itself.

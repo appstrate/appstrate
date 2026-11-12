@@ -201,6 +201,38 @@ What happens under the hood:
 
 ---
 
+## Agent prompts
+
+The server declares the MCP `prompts` capability: `prompts/list` returns one
+prompt per agent you can launch, in every space of the connection where you
+hold what `run_and_wait` needs there (the same agents as `GET /api/agents` in
+that space). A delegated credential is held to its scopes, as for the tools. A
+pinned connection (`/api/mcp/o/<orgId>/s/<spaceId>`) lists the agents of its
+space alone.
+
+- **Name.** `run-<name>`. When the same agent is also launchable in another
+  space, the later space's prompt is `run-<space name>-<name>`; another agent
+  with the same name is `run-<scope>-<name>`; both continue with `-2`, `-3`, …
+  Spaces are taken in the order of `GET /api/spaces`, agents by package id.
+- **Argument.** One optional string, `request`: what you want, in your own
+  words. The model builds the run's `input` from it against the agent's schema,
+  and asks only for a missing required field.
+- **Text.** `prompts/get` returns one `user` message: the steps to launch the
+  agent at its latest published version with this server's `run_and_wait`
+  (in the agent's space, `space_id`), to follow a run still going with
+  `getRun`, to upload a file input, and to handle warnings and errors, followed
+  by the agent's input contract (its JSON Schema and which fields are prompted,
+  prefilled or locked; never a stored value) and the request. An agent with no
+  published version has no prompt.
+- **Errors.** A name `prompts/list` would not return you — unknown, in a space
+  you cannot launch from, or unpublished — is answered `-32602`
+  `Invalid prompt name`, the same for each.
+
+A prompt is user-controlled: clients expose it as a command (Claude Code as
+`/mcp__<server>__<prompt>`) and the model cannot invoke it on its own, so
+choosing the command is the user asking for the metered run. The launch itself
+is still a `run_and_wait` call, which your client may ask you to approve.
+
 ## The tool surface
 
 The server exposes a handful of tools rather than one per REST operation (which

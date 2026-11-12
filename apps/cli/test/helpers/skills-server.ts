@@ -2,7 +2,7 @@
 
 /**
  * A stand-in for the package routes `appstrate code sync` reads,
- * driven by a table of skills and agents rather than by per-test URL matching.
+ * driven by a table of skills rather than by per-test URL matching.
  *
  * The artifacts are REAL `.afps` archives built with `zipArtifact` and hashed
  * with `computeIntegrity`, so the download path exercises the same
@@ -14,9 +14,7 @@
  * `skills-command.test.ts` need it and neither owns it.
  */
 
-import type { SchemaWrapper } from "@appstrate/core/form";
 import { computeIntegrity } from "@appstrate/core/integrity";
-import { withoutLockedFields } from "@appstrate/core/input-resolution";
 import { zipArtifact } from "@appstrate/core/zip";
 
 const encoder = new TextEncoder();
@@ -114,33 +112,6 @@ export interface SkillFixture {
   draft?: DraftFixture;
 }
 
-/**
- * An agent as `GET /api/agents` and its detail answer it. The detail
- * carries the space's input layer (`values` + `locked_fields`) next to the
- * schema, in one read, exactly like the launch form's own projection.
- */
-export interface AgentFixture {
-  /** `@scope/name`. */
-  id: string;
-  display_name?: string;
-  description?: string;
-  /** Published versions, oldest first; the last one is `latest`. `[]` = never published. */
-  versions?: string[];
-  /** `source` on the list DTO — a system agent has no draft anybody may name. */
-  source?: "local" | "system";
-  /** Spaces where the agent is ACTIVE, which is what the list route answers. Defaults to all. */
-  activeIn?: string[];
-  /** The manifest's input wrapper. Defaults to an empty object schema. */
-  input?: SchemaWrapper;
-  /** The space's stored values — never to be written to disk (D20). */
-  values?: Record<string, unknown>;
-  locked_fields?: string[];
-  /** Working-copy state for `--source draft`; defaults to the published definition. */
-  draft?: { description?: string; notWritable?: boolean };
-  /** HTTP status the detail answers with instead of resolving — a transient failure. */
-  detailError?: number;
-}
-
 export interface SkillServer {
   /** Install the stub over `globalThis.fetch`. */
   install(): void;
@@ -152,8 +123,6 @@ export interface SkillServer {
   draftDownloads(): number;
   /** Highest number of requests the stub held open at once. */
   peakInFlight(): number;
-  /** Requests to the agent list and detail routes. */
-  agentReads(): number;
 }
 
 interface Prepared {
@@ -202,11 +171,9 @@ const json = (body: unknown, status = 200, headers: Record<string, string> = {})
 export function createSkillServer(
   fixtures: SkillFixture[],
   spaces: SpaceFixture[] = DEFAULT_SPACES,
-  agents: AgentFixture[] = [],
 ): SkillServer {
   const prepared = fixtures.map(prepare);
   const spaceById = new Map(spaces.map((space) => [space.id, space]));
-  let agentReads = 0;
   let downloads = 0;
   let indexReads = 0;
   let draftDownloads = 0;
@@ -264,11 +231,6 @@ export function createSkillServer(
     if (required) {
       const refusal = spaceRefusal(spaceId, required);
       if (refusal) return refusal;
-    }
-
-    if (path === "/api/agents" || path.startsWith("/api/packages/agents/")) {
-      agentReads += 1;
-      return agentRoute(agents, path, url, spaceId, grants(spaceId, "agents:read"));
     }
 
     // The sync selects its skill sources from the spaces this profile reaches,
@@ -452,91 +414,16 @@ export function createSkillServer(
     indexReads: () => indexReads,
     draftDownloads: () => draftDownloads,
     peakInFlight: () => peakInFlight,
-    agentReads: () => agentReads,
   };
 }
 
 /**
- * What each route guards on in the space: the agent list and detail take
- * either grant (`requireAgentRead`), every skill route `skills:read`. `null`
- * for the one route that is not space-scoped.
+ * What each route guards on in the space: every skill route `skills:read`.
+ * `null` for the one route that is not space-scoped.
  */
 function routePermissions(path: string): string[] | null {
   if (path === "/api/spaces") return null;
-  if (path === "/api/agents" || path.startsWith("/api/packages/agents/")) {
-    return ["agents:read", "agents:run"];
-  }
   return ["skills:read"];
-}
-
-/**
- * `GET /api/agents` (the ACTIVE, launchable set of the space) and the agent
- * detail. The detail NAMES its definition: `latest` resolves the dist-tag and
- * answers 404 when nothing is published, `draft` is reserved to whoever may
- * write the agent (never anyone for a system agent), and the stub refuses a
- * read without a selector so a sync that forgets it fails here.
- */
-function agentRoute(
-  agents: AgentFixture[],
-  path: string,
-  url: URL,
-  spaceId: string,
-  fullRead: boolean,
-): Response {
-  if (path === "/api/agents") {
-    return json({
-      object: "list",
-      data: agents
-        .filter((agent) => !agent.activeIn || agent.activeIn.includes(spaceId))
-        .map((agent) => ({
-          id: agent.id,
-          source: agent.source ?? "local",
-        })),
-      hasMore: false,
-    });
-  }
-  const detail = path.match(/^\/api\/packages\/agents\/(@[^/]+)\/([^/]+)$/);
-  const agent = detail && agents.find((a) => a.id === `${detail[1]}/${detail[2]}`);
-  if (!agent) return json({ code: "not_found", message: "Agent not found" }, 404);
-  if (agent.detailError) {
-    return json({ code: "internal_error", message: "detail blew up" }, agent.detailError);
-  }
-  const selector = url.searchParams.get("version");
-  const versions = agent.versions ?? ["1.0.0"];
-  const system = agent.source === "system";
-  let version: string | null;
-  let description = agent.description ?? "";
-  if (selector === "draft") {
-    if (system || agent.draft?.notWritable) {
-      return json(
-        {
-          code: "draft_not_writable",
-          detail: `Running the draft of '${agent.id}' requires write authority on it`,
-        },
-        403,
-      );
-    }
-    version = versions.at(-1) ?? null;
-    description = agent.draft?.description ?? description;
-  } else if (selector === "latest") {
-    version = versions.at(-1) ?? null;
-    if (version === null) return json({ code: "not_found", detail: "No published version" }, 404);
-  } else {
-    return json({ code: "bad_request", message: `Unexpected version selector: ${selector}` }, 400);
-  }
-  const values = agent.values ?? {};
-  const lockedFields = agent.locked_fields ?? [];
-  return json({
-    display_name: agent.display_name ?? agent.id,
-    description,
-    version,
-    input: {
-      ...(agent.input ?? { schema: { type: "object", properties: {} } }),
-      // A summary read (`agents:run` alone) keeps the lock names, not the values behind them.
-      values: fullRead ? values : withoutLockedFields(values, lockedFields),
-      locked_fields: lockedFields,
-    },
-  });
 }
 
 function draftSkillMd(p: Prepared): string {

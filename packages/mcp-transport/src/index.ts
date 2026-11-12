@@ -38,14 +38,19 @@ import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv
 import type { JsonSchemaType, JsonSchemaValidator } from "@modelcontextprotocol/sdk/validation";
 import {
   CallToolRequestSchema,
+  GetPromptRequestSchema,
+  ListPromptsRequestSchema,
   ListResourcesRequestSchema,
   ListToolsRequestSchema,
   ReadResourceRequestSchema,
   McpError,
   ErrorCode,
   type CallToolResult,
+  type GetPromptResult,
   type Implementation,
+  type ListPromptsResult,
   type ListResourcesResult,
+  type Prompt,
   type ReadResourceResult,
   type Resource,
   type ServerNotification,
@@ -151,9 +156,29 @@ export interface AppstrateResourceProvider {
   ) => Promise<ReadResourceResult> | ReadResourceResult;
 }
 
+/**
+ * Prompt provider hooks. Pass `prompts` to `createMcpServer` to expose
+ * `prompts/list` and `prompts/get`.
+ *
+ * - `list(extra)` returns the prompts the caller may use right now.
+ * - `get(name, args, extra)` renders one. Throw an `McpError` with
+ *   `ErrorCode.InvalidParams` (-32602) for a name `list` would not return
+ *   (MCP 2025-11-25, "Invalid prompt name").
+ */
+export interface AppstratePromptProvider {
+  list: (extra: AppstrateRequestExtra) => Promise<Prompt[]> | Prompt[];
+  get: (
+    name: string,
+    args: Record<string, string>,
+    extra: AppstrateRequestExtra,
+  ) => Promise<GetPromptResult> | GetPromptResult;
+}
+
 export interface CreateMcpServerOptions {
   /** Resource provider — when omitted, no `resources/*` capability is advertised. */
   resources?: AppstrateResourceProvider;
+  /** Prompt provider — when omitted, no `prompts/*` capability is advertised. */
+  prompts?: AppstratePromptProvider;
   /**
    * Server `instructions` returned in the `initialize` result. MCP clients
    * (Claude Code, Cursor, VSCode, Goose) inject this into the system prompt
@@ -222,6 +247,9 @@ export function createMcpServer(
   if (options.resources) {
     capabilities.resources = { listChanged: false, subscribe: false };
   }
+  if (options.prompts) {
+    capabilities.prompts = { listChanged: false };
+  }
 
   const server = new Server(serverInfo, { capabilities, instructions: options.instructions });
 
@@ -252,6 +280,16 @@ export function createMcpServer(
     });
     server.setRequestHandler(ReadResourceRequestSchema, async (req, extra) => {
       return provider.read(req.params.uri, extra);
+    });
+  }
+
+  if (options.prompts) {
+    const provider = options.prompts;
+    server.setRequestHandler(ListPromptsRequestSchema, async (_req, extra) => {
+      return { prompts: await provider.list(extra) } satisfies ListPromptsResult;
+    });
+    server.setRequestHandler(GetPromptRequestSchema, async (req, extra) => {
+      return provider.get(req.params.name, req.params.arguments ?? {}, extra);
     });
   }
 
@@ -288,10 +326,13 @@ export async function createInProcessPair(
      * to {@link createMcpServer}.
      */
     resources?: AppstrateResourceProvider;
+    /** Optional prompt provider, forwarded verbatim to {@link createMcpServer}. */
+    prompts?: AppstratePromptProvider;
   } = {},
 ): Promise<InProcessMcpPair> {
   const server = createMcpServer(tools, options.serverInfo, {
     ...(options.resources ? { resources: options.resources } : {}),
+    ...(options.prompts ? { prompts: options.prompts } : {}),
   });
   const client = new Client(
     options.clientInfo ?? { name: "appstrate-mcp-client", version: "0.0.0" },
@@ -328,6 +369,8 @@ export function notifyDetached(
 export { McpError, ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 export type {
   CallToolResult,
+  GetPromptResult,
+  Prompt,
   ReadResourceResult,
   Resource,
   Tool,
