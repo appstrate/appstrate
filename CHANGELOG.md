@@ -163,7 +163,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   normalized), with its `skill://` URI, so it is the bytes `resources/read`
   answers there. A published version that cannot be served as a skill (over the
   SEP-2640 limits, no valid name) refuses the turn's enforced skills like an
-  unreadable archive (`version_artifact_unavailable`).
+  unreadable archive (`version_artifact_unavailable`). The `enforced_skills_budget`
+  check measures each enforced skill by this served `SKILL.md`, the text the chat
+  injects.
 
 - **The chat's model reads platform resources with a `read_resource` tool** (#2175).
   It runs `resources/read` on the platform MCP server only, and returns each content

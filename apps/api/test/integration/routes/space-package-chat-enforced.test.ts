@@ -301,6 +301,24 @@ describe("enforcing a skill in the chat", () => {
     expect((await patch("@enforce/also-big", { chat_enforced: true })).status).toBe(200);
   });
 
+  it("counts each SKILL.md as the chat injects it: served, with its `metadata.version`", async () => {
+    // Two stored bodies that fill the budget exactly; serving each writes
+    // `metadata.version`, so the injected pair is over it.
+    const head = (name: string) => `---\nname: ${name}\ndescription: A skill.\n---\n`;
+    const half = Math.floor(CHAT_SKILLS_CONTENT_BUDGET_CHARS / 2);
+    const big = head("big") + "a".repeat(half - head("big").length);
+    const other =
+      head("other") + "b".repeat(CHAT_SKILLS_CONTENT_BUDGET_CHARS - half - head("other").length);
+    expect(big.length + other.length).toBe(CHAT_SKILLS_CONTENT_BUDGET_CHARS);
+    await seedSkill("@enforce/big", { content: big, enforced: true });
+    await seedSkill("@enforce/other", { content: other });
+
+    await expectProblem(await patch("@enforce/other", { chat_enforced: true }), 409, {
+      code: "enforced_skills_budget",
+    });
+    expect(await storedFlag("@enforce/other")).toBe(false);
+  });
+
   it("422s when the skill's latest archive cannot be read, and writes nothing", async () => {
     await seedSkill("@enforce/broken");
     await storage.deleteFile(AGENT_PACKAGES_BUCKET, versionZipKey("@enforce/broken", "1.0.0"));

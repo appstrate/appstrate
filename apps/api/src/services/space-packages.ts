@@ -37,6 +37,7 @@ import {
   loadPublishedDefinition,
 } from "./package-versions.ts";
 import { downloadVersionZip } from "./package-storage.ts";
+import { serveSkill, SKILL_ENTRY } from "./served-skill.ts";
 import {
   activeHereSql,
   isActiveHere,
@@ -957,6 +958,25 @@ export async function updatePlacementSettings(
   });
 }
 
+/**
+ * The length of the `SKILL.md` the chat injects for a published skill: the one
+ * {@link serveSkill} serves (normalized `name`, `metadata.version` written), or
+ * the stored one when it cannot be served.
+ */
+function injectedSkillMdLength(
+  packageId: string,
+  skill: { version: string | null; content: string },
+): number {
+  const served = serveSkill(
+    packageId,
+    { [SKILL_ENTRY]: new TextEncoder().encode(skill.content) },
+    skill.version,
+  );
+  return served.ok
+    ? new TextDecoder().decode(served.skill.files[SKILL_ENTRY]).length
+    : skill.content.length;
+}
+
 // Every read goes through `tx`: under PGlite's single connection a query on
 // the root `db` would wait on this very transaction.
 async function assertChatEnforceable(scope: SpaceScope, packageId: string, tx: Tx) {
@@ -981,14 +1001,15 @@ async function assertChatEnforceable(scope: SpaceScope, packageId: string, tx: T
     );
   }
 
+  const flaggedOthers = flagged.filter((row) => row.packageId !== packageId);
   const others = await Promise.all(
-    flagged
-      .filter((row) => row.packageId !== packageId)
-      .map((row) => loadPublishedDefinition("skill", row.packageId, "latest", tx)),
+    flaggedOthers.map((row) => loadPublishedDefinition("skill", row.packageId, "latest", tx)),
   );
+  // Measured as injected: the served `SKILL.md` is what the chat puts in the prompt.
   const total = others.reduce(
-    (sum, skill) => sum + (skill?.content.length ?? 0),
-    own.content.length,
+    (sum, skill, i) =>
+      sum + (skill ? injectedSkillMdLength(flaggedOthers[i]!.packageId, skill) : 0),
+    injectedSkillMdLength(packageId, own),
   );
   if (total > CHAT_SKILLS_CONTENT_BUDGET_CHARS) {
     throw conflict(
