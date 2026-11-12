@@ -56,10 +56,15 @@ let owner: TestContext;
 let teamB: { id: string };
 
 /** A skill homed and active in `spaceId`, its draft distinct from its published 1.0.0. */
-async function seedPublishedSkill(id: string, name: string, spaceId: string): Promise<void> {
+async function seedPublishedSkill(
+  id: string,
+  name: string,
+  spaceId: string,
+  orgId = owner.orgId,
+): Promise<void> {
   await seedPackage({
     id,
-    orgId: owner.orgId,
+    orgId,
     type: "skill",
     homeSpaceId: spaceId,
     draftManifest: { name: id, version: "0.0.0", type: "skill" },
@@ -81,6 +86,19 @@ async function seedPublishedSkill(id: string, name: string, spaceId: string): Pr
     artifactSize: zip.byteLength,
   });
   await db.insert(packageDistTags).values({ packageId: id, tag: "latest", versionId: row.id });
+}
+
+/** A skill homed and active in the owner's default space that has a draft and no published version. */
+async function seedUnpublishedSkill(id: string, name: string): Promise<void> {
+  await seedPackage({
+    id,
+    orgId: owner.orgId,
+    type: "skill",
+    homeSpaceId: owner.defaultSpaceId,
+    draftManifest: { name: id, version: "0.0.0", type: "skill" },
+    draftContent: skillMd(name),
+  });
+  await seedSpacePackage(owner.defaultSpaceId, id);
 }
 
 /** A guest holding exactly the given permissions in each space named, through custom roles. */
@@ -258,6 +276,39 @@ describe("REST reflection (`appstrate code sync`)", () => {
     const readerDrafts = await rest(reader, "/api/mcp/skills?definition=draft");
     expect(((await readerDrafts.json()) as { data: Entry[] }).data).toEqual([]);
     expect((await rest(reader, archivePath(draftUri))).status).toBe(404);
+  });
+
+  it("lists the draft of a skill never published with definition=draft, and serves it", async () => {
+    await seedUnpublishedSkill("@skillsext/fresh", "fresh");
+    const draftUri = `skill://${owner.defaultSpaceId}/skillsext/fresh@draft/fresh/SKILL.md`;
+    const drafts = (await (
+      await rest(ownerHeaders(), "/api/mcp/skills?definition=draft")
+    ).json()) as {
+      data: Entry[];
+    };
+    expect(drafts.data.map((e) => e.uri)).toContain(draftUri);
+    const published = (await (await rest(ownerHeaders(), "/api/mcp/skills")).json()) as {
+      data: Entry[];
+    };
+    expect(published.data.map((e) => e.uri).some((uri) => uri.includes("/fresh"))).toBe(false);
+    expect((await rest(ownerHeaders(), archivePath(draftUri))).status).toBe(200);
+  });
+
+  it("reads nothing in a space of another organization", async () => {
+    const other = await createTestContext({ orgSlug: "skillsother" });
+    await seedPublishedSkill("@skillsother/secret", "secret", other.defaultSpaceId, other.orgId);
+    const secretUri = `skill://${other.defaultSpaceId}/skillsother/secret/secret/SKILL.md`;
+    expect((await call(ownerHeaders(), "skills/get", { uri: secretUri })).error?.code).toBe(-32602);
+    expect((await call(ownerHeaders(), "resources/read", { uri: secretUri })).error?.code).toBe(
+      -32002,
+    );
+    const listed = (await call(ownerHeaders(), "skills/list", {})).result?.skills as Entry[];
+    expect(listed.map((e) => e.uri)).not.toContain(secretUri);
+    const res = await app.request(archivePath(secretUri), {
+      headers: { ...ownerHeaders(), "X-Space-Id": other.defaultSpaceId },
+    });
+    expect([403, 404]).toContain(res.status);
+    expect((await rest(ownerHeaders(), archivePath(secretUri))).status).toBe(404);
   });
 
   it("serves the published version in metadata.version", async () => {
