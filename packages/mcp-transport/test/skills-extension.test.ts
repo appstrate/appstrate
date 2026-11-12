@@ -178,8 +178,9 @@ describe("AppstrateMcpClient.listSkills", () => {
   /** {@link skillsFetch}, with `skills/list` answered by `page(params)` instead. */
   const pagedFetch = (page: (params: Record<string, unknown>) => unknown): typeof fetch => {
     const server = skillsFetch(skills);
-    return (async (input: RequestInfo | URL, init?: RequestInit) => {
-      const request = new Request(input, init);
+    return (async (input: string | URL | Request, init?: RequestInit) => {
+      const request =
+        input instanceof Request ? new Request(input, init) : new Request(String(input), init);
       const text = await request.clone().text();
       const message = text ? (JSON.parse(text) as Record<string, unknown>) : {};
       if (message.method !== "skills/list") return server(request);
@@ -221,7 +222,7 @@ describe("AppstrateMcpClient.listSkills", () => {
   });
 
   it("accepts an entry whose `resources` is `dynamic`", async () => {
-    const dynamic = { ...ENTRY, resources: "dynamic" };
+    const dynamic = { ...ENTRY, resources: "dynamic" as const };
     const client = await createMcpHttpClient("http://mcp.test/mcp", {
       era: "legacy",
       fetch: pagedFetch(() => ({ skills: [ENTRY, dynamic] })),
