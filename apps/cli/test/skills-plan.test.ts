@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `lib/skills-sync/plan.ts` — catalogue reading, version pinning, slug
- * assignment and the verified download.
+ * `lib/skills-sync/plan.ts` — catalogue reading (`GET /api/mcp/skills`),
+ * pinning by served digests, slug assignment and the verified download
+ * (`GET /api/mcp/skills/content`).
  *
  * `globalThis.fetch` is stubbed with the shared skill server
  * (`helpers/skills-server.ts`) rather than injected: the CLI's whole auth
@@ -25,7 +26,6 @@ import {
   type FakeKeyringInstall,
 } from "./helpers/auth-fixture.ts";
 import { createSkillServer, skillMd } from "./helpers/skills-server.ts";
-import { formatError } from "../src/lib/ui.ts";
 
 const configHome = useTempConfigHome("appstrate-cli-skills-plan-");
 let keyring: FakeKeyringInstall;
@@ -45,143 +45,107 @@ afterEach(async () => {
 
 function resolved(overrides: Partial<ResolvedSkill> & { packageId: string }): ResolvedSkill {
   return {
+    spaceId: "spc_1",
     version: "1.0.0",
-    integrity: "sha256-x",
+    integrity: "sha256:x",
     frontmatterName: "",
+    entry: { uri: "", frontmatter: { name: "" }, resources: [] },
     ...overrides,
   };
 }
 
+const ids = (entries: { uri: string }[]) => entries.map((entry) => entry.uri.split("/")[4]);
+
+/** The single entry the space lists at `source`. */
+async function onlyEntry(source: "published" | "draft") {
+  const [entry, ...rest] = await listSyncableSkills("default", "spc_1", source);
+  expect(rest).toHaveLength(0);
+  return entry!;
+}
+
 describe("listSyncableSkills", () => {
-  it("unwraps the list envelope, drops system packages and sorts by id", async () => {
+  it("reads the space's list and drops system packages", async () => {
     createSkillServer([
       { id: "@acme/zebra", skillMd: skillMd("zebra") },
-      { id: "@appstrate/builtin", skillMd: skillMd("builtin"), source: "system" },
+      { id: "@appstrate/builtin", skillMd: skillMd("builtin") },
       { id: "@acme/alpha", skillMd: skillMd("alpha") },
     ]).install();
 
-    expect(await listSyncableSkills("default")).toEqual(["@acme/alpha", "@acme/zebra"]);
+    expect(ids(await listSyncableSkills("default", "spc_1", "published"))).toEqual([
+      "zebra",
+      "alpha",
+    ]);
   });
 
   // The sync reads what the space OFFERS, which is the ACTIVE set: a skill
   // somebody switched off in the space is not written into the local Claude
   // Code checkout, or the switch would mean nothing outside the dashboard.
-  // The stub narrows unconditionally, like the route: a sync that read a wider
-  // listing than the index turns this red.
   it("reads the ACTIVE set — a skill switched off in the space is not syncable", async () => {
     createSkillServer([
       { id: "@acme/on", skillMd: skillMd("on") },
       { id: "@acme/off", skillMd: skillMd("off"), inactive: true },
     ]).install();
 
-    expect(await listSyncableSkills("default")).toEqual(["@acme/on"]);
+    expect(ids(await listSyncableSkills("default", "spc_1", "published"))).toEqual(["on"]);
+  });
+
+  it("lists the drafts the caller may read for --source draft, published or not", async () => {
+    createSkillServer([
+      { id: "@acme/pdf", skillMd: skillMd("pdf"), draft: { skillMd: skillMd("pdf-next") } },
+      { id: "@acme/new", skillMd: skillMd("new"), unpublished: true, draft: {} },
+      { id: "@acme/theirs", skillMd: skillMd("theirs"), draft: { notWritable: true } },
+    ]).install();
+
+    const drafts = await listSyncableSkills("default", "spc_1", "draft");
+    expect(drafts.map((entry) => entry.uri)).toEqual([
+      "skill://spc_1/acme/pdf@draft/pdf-next/SKILL.md",
+      "skill://spc_1/acme/new@draft/new/SKILL.md",
+    ]);
   });
 });
 
 describe("resolveSkill", () => {
-  it("pins the latest published version and reads the frontmatter name", async () => {
+  it("labels a published skill with its served metadata.version and pins its digests", async () => {
     createSkillServer([
-      { id: "@acme/pdf", skillMd: skillMd("PDF Tools", "Work with PDFs."), version: "2.3.1" },
+      { id: "@acme/pdf", skillMd: skillMd("pdf-tools", "Work with PDFs."), version: "2.3.1" },
     ]).install();
 
-    const skill = await resolveSkill("default", "@acme/pdf", "published");
-    expect(skill?.version).toBe("2.3.1");
-    expect(skill?.frontmatterName).toBe("PDF Tools");
-    expect(skill?.integrity).toMatch(/^sha256-/);
+    const skill = resolveSkill(await onlyEntry("published"));
+    expect(skill.packageId).toBe("@acme/pdf");
+    expect(skill.spaceId).toBe("spc_1");
+    expect(skill.version).toBe("2.3.1");
+    expect(skill.frontmatterName).toBe("pdf-tools");
+    expect(skill.integrity).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 
-  it("returns null — not an error — when the skill was never published", async () => {
+  it("changes the pin when a served digest changes, not when the version label does", async () => {
+    createSkillServer([{ id: "@acme/pdf", skillMd: skillMd("pdf"), version: "1.0.0" }]).install();
+    const first = resolveSkill(await onlyEntry("published"));
     createSkillServer([
-      { id: "@acme/draft-only", skillMd: skillMd("draft-only"), unpublished: true },
+      { id: "@acme/pdf", skillMd: skillMd("pdf"), extraFiles: { "a.md": "a" }, version: "1.0.0" },
     ]).install();
-
-    expect(await resolveSkill("default", "@acme/draft-only", "published")).toBeNull();
+    const second = resolveSkill(await onlyEntry("published"));
+    expect(second.integrity).not.toBe(first.integrity);
   });
-});
 
-describe("resolveSkill — the draft is NAMED, never left to the route's default", () => {
-  // Without `?version=draft` the detail and file routes alike serve the
-  // definition the detail page renders, which for anyone who cannot write the
-  // package is the PUBLISHED version. A sync that omitted the selector on
-  // either request would still succeed — and would write published bytes under
-  // a ledger entry that calls them a draft. The stub answers an unnamed
-  // selector with the published snapshot for exactly that reason, so these
-  // assertions fail on content, not on an absent request.
-  it("reads the working copy and tokenizes it with the draft index ETag", async () => {
+  it('labels a draft "draft"', async () => {
     createSkillServer([
-      {
-        id: "@acme/pdf",
-        skillMd: skillMd("PDF Tools", "Published."),
-        extraFiles: { "reference/notes.md": "published notes" },
-        draft: {
-          skillMd: skillMd("pdf-tools-draft", "Working copy."),
-          etag: "idx-9",
-          files: { "reference/notes.md": "draft notes" },
-        },
-      },
+      { id: "@acme/pdf", skillMd: skillMd("pdf"), draft: { skillMd: skillMd("pdf-next") } },
     ]).install();
 
-    const skill = (await resolveSkill("default", "@acme/pdf", "draft"))!;
+    const skill = resolveSkill(await onlyEntry("draft"));
     expect(skill.version).toBe("draft");
-    expect(skill.integrity).toBe('draft:"1":"idx-9"');
-    // The two fixtures carry DIFFERENT frontmatter names, so this pins the
-    // selector on the detail request the same way the bytes below pin it on
-    // the file routes: unnamed, the stub answers with the published metadata.
-    expect(skill.frontmatterName).toBe("pdf-tools-draft");
-
-    const files = await fetchSkillFiles("default", skill, "draft");
-    const decoder = new TextDecoder();
-    expect(decoder.decode(files["SKILL.md"]!)).toContain("Working copy.");
-    // Only the draft archive carries this text: the published one says otherwise.
-    expect(decoder.decode(files["reference/notes.md"]!)).toBe("draft notes");
+    expect(skill.frontmatterName).toBe("pdf-next");
   });
 
-  it("says whose copy it is when the caller may not write the skill", async () => {
-    createSkillServer([
-      {
-        id: "@acme/pdf",
-        skillMd: skillMd("PDF Tools"),
-        draft: { skillMd: skillMd("PDF Tools", "Working copy."), notWritable: true },
-      },
-    ]).install();
-
-    const err = await resolveSkill("default", "@acme/pdf", "draft").then(
-      () => null,
-      (e: unknown) => e,
-    );
-    const rendered = formatError(err);
-    expect(rendered).toContain("@acme/pdf");
-    expect(rendered).toContain("author's working copy");
-    expect(rendered).toContain("skills:write");
-    expect(rendered).toContain("--source published");
-    // The status code alone would send the reader hunting for a permission on
-    // the sync command itself.
-    expect(rendered).not.toContain("HTTP 403");
-  });
-
-  it("explains the same refusal when it lands on the draft archive", async () => {
-    // Resolution and download are separate requests: a grant revoked between
-    // them refuses the second one, and that refusal must read the same way.
-    createSkillServer([
-      {
-        id: "@acme/pdf",
-        skillMd: skillMd("PDF Tools"),
-        draft: { skillMd: skillMd("PDF Tools"), notWritable: true },
-      },
-    ]).install();
-
-    const skill = resolved({
-      packageId: "@acme/pdf",
-      version: "draft",
-      integrity: 'draft:1:"idx-1"',
-    });
-    const err = await fetchSkillFiles("default", skill, "draft").then(
-      () => null,
-      (e: unknown) => e,
-    );
-    expect(formatError(err)).toContain("author's working copy");
-    expect(formatError(err)).toContain("skills:write");
-    expect(formatError(err)).toContain("--source published");
+  it("refuses a published entry without metadata.version", () => {
+    const uri = "skill://spc_1/acme/pdf/pdf/SKILL.md";
+    const entry = {
+      uri,
+      frontmatter: { name: "pdf" },
+      resources: [{ uri, digest: "sha256:00", size: 1 }],
+    };
+    expect(() => resolveSkill(entry)).toThrow(/metadata\.version/);
   });
 });
 
@@ -221,11 +185,6 @@ describe("assignSlugs", () => {
     const slugs = planned.map((s) => s.slug);
     expect(slugs).toEqual(["acme-foo", "foo", "acme-foo-2"]);
     expect(new Set(slugs).size).toBe(slugs.length);
-  });
-
-  it("falls back to the package name segment when the frontmatter name is absent", () => {
-    const { planned } = assignSlugs([resolved({ packageId: "@acme/weekly-report" })]);
-    expect(planned[0]?.slug).toBe("weekly-report");
   });
 });
 
@@ -282,28 +241,32 @@ describe("assignSlugs — an installed name stays with its package", () => {
 });
 
 describe("fetchSkillFiles", () => {
-  it("returns the archive entries of a published skill", async () => {
+  it("returns every served file, by path inside the skill directory", async () => {
     createSkillServer([
       {
         id: "@acme/pdf",
         skillMd: skillMd("pdf"),
         extraFiles: { "reference/notes.md": "notes" },
+        draft: { files: { "reference/notes.md": "draft notes" } },
       },
     ]).install();
 
-    const skill = (await resolveSkill("default", "@acme/pdf", "published"))!;
-    const files = await fetchSkillFiles("default", skill, "published");
-    expect(Object.keys(files).sort()).toEqual(["SKILL.md", "manifest.json", "reference/notes.md"]);
+    const files = await fetchSkillFiles("default", resolveSkill(await onlyEntry("published")));
+    expect(Object.keys(files).sort()).toEqual(["SKILL.md", "reference/notes.md"]);
+    expect(new TextDecoder().decode(files["reference/notes.md"]!)).toBe("notes");
+
+    const draft = await fetchSkillFiles("default", resolveSkill(await onlyEntry("draft")));
+    expect(new TextDecoder().decode(draft["reference/notes.md"]!)).toBe("draft notes");
   });
 
-  it("refuses bytes that do not match the advertised integrity", async () => {
+  it("refuses bytes that do not match the served digest", async () => {
     createSkillServer([
       { id: "@acme/pdf", skillMd: skillMd("pdf"), corruptDownload: true },
     ]).install();
 
-    const skill = (await resolveSkill("default", "@acme/pdf", "published"))!;
-    await expect(fetchSkillFiles("default", skill, "published")).rejects.toThrow(
-      /Integrity mismatch/,
+    const skill = resolveSkill(await onlyEntry("published"));
+    await expect(fetchSkillFiles("default", skill)).rejects.toThrow(
+      /does not match its served digest/,
     );
   });
 });

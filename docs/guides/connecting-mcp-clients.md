@@ -259,8 +259,9 @@ attributes.
 - **Served files.** The skill is an Agent Skills directory: the package
   manifest and signature record are dropped, and the `name` line of `SKILL.md`
   is set to the served name when the stored one is not a valid Agent Skills
-  name (1-64 characters of `[a-z0-9-]`, else derived from the package name). A
-  file is returned whole, as `text` when its bytes are UTF-8, else as `blob`.
+  name (1-64 characters of `[a-z0-9-]`, else derived from the package name).
+  The frontmatter `metadata.version` holds the package version: the semver of
+  a published definition; a draft has none. A file is returned whole, as `text` when its bytes are UTF-8, else as `blob`.
 - **Limits.** A skill is served whole or not at all: one with a file over
   1 MiB (the largest file a package draft write accepts), more than 512 files
   or more than 16 MiB in total is absent from `skills/list`, refused by
@@ -270,8 +271,8 @@ attributes.
   file you may read.
 - **REST.** `appstrate code sync` reads the same entries and bytes over REST,
   for the space `X-Space-Id` names and behind `skills:read` there:
-  `GET /api/mcp/skills` (the entries of `skills/list`),
-  `GET /api/mcp/skills/entry?uri=` (the entry of `skills/get`) and
+  `GET /api/mcp/skills` (the entries of `skills/list`; with
+  `?definition=draft`, the drafts you may read, at their `@draft` URIs) and
   `GET /api/mcp/skills/content?uri=` (the bytes of `resources/read`). These
   routes are not operations of the MCP catalog.
 

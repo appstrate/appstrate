@@ -19,6 +19,10 @@ consumer's publish rather than the first user's `npm install`.
 - **`normalizeSkillMd(content, name)`** (`companion-files`): points a `SKILL.md` frontmatter
   `name` at `name` by rewriting only that line (or prepending it), every other byte as
   authored. The MCP Skills extension and `appstrate code sync` share it (#2175).
+- **`setSkillMdVersion(content, version)`** (`companion-files`): points a `SKILL.md`
+  frontmatter `metadata.version` at `version`, or removes it for `null`, and leaves the
+  content untouched when it already holds that value. The MCP Skills extension writes a
+  skill's published version there (#2175).
 - **`SkillFrontmatter.fields`**: `parseSkillFrontmatter` returns the parsed frontmatter
   mapping with every key as authored (`{}` when the block is absent or invalid), so the MCP
   Skills extension serves a skill's `frontmatter` from the same parser as its `name` (#2175).

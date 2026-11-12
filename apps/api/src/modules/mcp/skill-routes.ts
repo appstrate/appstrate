@@ -6,9 +6,9 @@
  * skill server the MCP endpoint serves (`./skills.ts`), for the space the
  * request names (`X-Space-Id`) and behind `skills:read`:
  *
- * - `GET /api/mcp/skills`: the entries of `skills/list`;
- * - `GET /api/mcp/skills/entry?uri=`: the entry of `skills/get`, the way to an
- *   unlisted `@draft` skill;
+ * - `GET /api/mcp/skills`: the entries of `skills/list`; with
+ *   `?definition=draft`, the entries of the drafts the caller may read, at
+ *   their `@draft` URIs (those `skills/get` serves);
  * - `GET /api/mcp/skills/content?uri=`: the bytes of `resources/read`.
  *
  * The paths sit under the module's `/api/mcp` and outside `/api/mcp/o`, the
@@ -35,10 +35,15 @@ export function skillServerFor(c: Context<AppEnv>, spaces: readonly SkillReadSpa
   const bySpace = new Map(spaces.map((space) => [space.spaceId, space]));
   return buildSkillServer({
     spaceIds: [...bySpace.keys()],
-    // Published ones: a system skill's stored tree, or a `latest` dist-tag.
-    listActiveSkillIds: async (spaceId) =>
+    // Published: a system skill's stored tree, or a `latest` dist-tag. Draft: any
+    // organization skill (a system skill has none).
+    listActiveSkillIds: async (spaceId, definition) =>
       (await listActivePackages(bySpace.get(spaceId)!, "skill"))
-        .filter((row) => row.source === "system" || row.latestVersionId !== null)
+        .filter((row) =>
+          definition === "draft"
+            ? row.source !== "system"
+            : row.source === "system" || row.latestVersionId !== null,
+        )
         .map((row) => row.id),
     readSkill: (spaceId, packageId, definition) =>
       readSkillSnapshot(c, bySpace.get(spaceId)!, packageId, definition),
@@ -66,18 +71,17 @@ export function createSkillRouter(): Hono<AppEnv> {
     await enterSpaceContext(c);
     return next();
   };
-  // `/x/*` matches `/x` too: the list and both reads by URI.
+  // `/x/*` matches `/x` too: the list and the read by URI.
   app.use(`${SKILLS_REST_PATH}/*`, rateLimit(50));
   app.use(`${SKILLS_REST_PATH}/*`, enterSpace);
   app.use(`${SKILLS_REST_PATH}/*`, requirePermission("skills", "read"));
 
-  app.get(SKILLS_REST_PATH, async (c) => c.json(listResponse(await requestSkillServer(c).list())));
-
-  app.get(`${SKILLS_REST_PATH}/entry`, async (c) => {
-    const uri = uriParam(c);
-    const entry = await requestSkillServer(c).entry(uri);
-    if (!entry) throw notFound(`No skill readable at ${uri}`);
-    return c.json(entry);
+  app.get(SKILLS_REST_PATH, async (c) => {
+    const definition = c.req.query("definition") ?? "published";
+    if (definition !== "published" && definition !== "draft") {
+      throw invalidRequest("`definition` must be `published` or `draft`", "definition");
+    }
+    return c.json(listResponse(await requestSkillServer(c).list(definition)));
   });
 
   app.get(`${SKILLS_REST_PATH}/content`, async (c) => {

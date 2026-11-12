@@ -109,14 +109,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `<package-name>@draft`, readable by whoever may write the package, never listed). Entries
   carry the served `SKILL.md` frontmatter verbatim and every file's `sha256` digest and size.
   The served skill is a valid Agent Skills directory: packaging entries dropped, `SKILL.md`
-  `name` set to the served name. The list covers every space the connection reaches (each space of an
+  `name` set to the served name, `metadata.version` set to the published version (absent from
+  a draft). The list covers every space the connection reaches (each space of an
   organization URL), and each read follows the `read_skill` rule with the caller's permissions in
   the skill's space (`skills:read` under the credential's ceiling, or a skill the chat turn
   injected, at the definition injected). A
   skill with a file over 1 MiB, more than 512 files or more than 16 MiB is not served.
-  `GET /api/mcp/skills`, `GET /api/mcp/skills/entry` and `GET /api/mcp/skills/content` serve
-  the same entries and bytes over REST for one space (`X-Space-Id`, `skills:read`), for
-  `appstrate code sync`.
+  `GET /api/mcp/skills` and `GET /api/mcp/skills/content` serve the same entries and bytes over
+  REST for one space (`X-Space-Id`, `skills:read`), for `appstrate code sync`;
+  `GET /api/mcp/skills?definition=draft` lists the drafts the caller may read.
+
+- **`appstrate code sync` reads skills through the MCP Skills extension's REST
+  reflection** (#2175). It lists each space's skills with `GET /api/mcp/skills`
+  (`?definition=draft` for `--source draft`), downloads files with
+  `GET /api/mcp/skills/content`, checks each against its served `sha256` digest,
+  and writes the bytes as served; only the `name` line of a skill renamed after a
+  collision is rewritten. The ledger compares the served digests, and the plan
+  shows the served `metadata.version`. The CLI no longer normalizes skills
+  itself: the server does. `--source draft` syncs the drafts the instance lists
+  for you, published or not.
 
 - **BREAKING (CLI, MCP): agents are prompts of the MCP server, and `code sync`
   syncs skills only** (#2172). The Claude Code plugin's `/appstrate:run-<agent>`

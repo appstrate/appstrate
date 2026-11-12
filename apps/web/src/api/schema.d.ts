@@ -2202,7 +2202,7 @@ export interface paths {
         };
         /**
          * List skills as the MCP Skills extension serves them
-         * @description The entries of `skills/list`: the published definition of each active skill of the space that the caller may read and the server can serve whole. A draft is never listed. Serves `appstrate code sync` and reflects the MCP Skills extension (SEP-2640) of the MCP endpoint: same server function, same entries, same bytes, for the space `X-Space-Id` names. Requires `skills:read` in that space. Rate-limited to 50 requests/minute.
+         * @description The entries of `skills/list`: the published definition of each active skill of the space that the caller may read and the server can serve whole. With `definition=draft`, the drafts of the space that the caller may read (only a caller who may write a package reads its draft), at their `@draft` URIs; `skills/list` never holds a draft. Serves `appstrate code sync` and reflects the MCP Skills extension (SEP-2640) of the MCP endpoint: same server function, same entries, same bytes, for the space `X-Space-Id` names. Requires `skills:read` in that space. Rate-limited to 50 requests/minute.
          */
         get: operations["listServedSkills"];
         put?: never;
@@ -2225,26 +2225,6 @@ export interface paths {
          * @description The bytes `resources/read` serves for the `skill://` URI `uri`, whose `sha256` is the `digest` of its entry. Always `application/octet-stream` with `nosniff`. Serves `appstrate code sync` and reflects the MCP Skills extension (SEP-2640) of the MCP endpoint: same server function, same entries, same bytes, for the space `X-Space-Id` names. Requires `skills:read` in that space. Rate-limited to 50 requests/minute.
          */
         get: operations["getServedSkillFile"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/mcp/skills/entry": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Read one skill entry as the MCP Skills extension serves it
-         * @description The entry of `skills/get` for the `SKILL.md` URI `uri`, listed or not: the way to a draft, whose URI carries `@draft` and which only a caller who may write the package reads. Serves `appstrate code sync` and reflects the MCP Skills extension (SEP-2640) of the MCP endpoint: same server function, same entries, same bytes, for the space `X-Space-Id` names. Requires `skills:read` in that space. Rate-limited to 50 requests/minute.
-         */
-        get: operations["getServedSkill"];
         put?: never;
         post?: never;
         delete?: never;
@@ -16723,7 +16703,10 @@ export interface operations {
     };
     listServedSkills: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description The definition listed. */
+                definition?: "published" | "draft";
+            };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
@@ -16747,7 +16730,7 @@ export interface operations {
                         data: {
                             /** @description `skill://` URI of the skill's `SKILL.md`: `skill://<spaceId>/<scope>/<package-name>/<name>/SKILL.md` for the published definition, `<package-name>@draft` in place of `<package-name>` for the draft. */
                             uri: string;
-                            /** @description The YAML frontmatter of the served `SKILL.md`, verbatim. */
+                            /** @description The YAML frontmatter of the served `SKILL.md`, verbatim. `metadata.version` is the package version: the semver of a published definition; a draft has none. */
                             frontmatter: {
                                 name: string;
                                 description: string;
@@ -16804,59 +16787,6 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             /** @description No skill file the caller may read in this space is served at `uri`. */
-            404: components["responses"]["NotFound"];
-            429: components["responses"]["RateLimited"];
-        };
-    };
-    getServedSkill: {
-        parameters: {
-            query: {
-                /** @description `skill://` URI of the skill's `SKILL.md`. */
-                uri: string;
-            };
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Skill entry */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        /** @description `skill://` URI of the skill's `SKILL.md`: `skill://<spaceId>/<scope>/<package-name>/<name>/SKILL.md` for the published definition, `<package-name>@draft` in place of `<package-name>` for the draft. */
-                        uri: string;
-                        /** @description The YAML frontmatter of the served `SKILL.md`, verbatim. */
-                        frontmatter: {
-                            name: string;
-                            description: string;
-                        } & {
-                            [key: string]: unknown;
-                        };
-                        /** @description Every file of the skill, `SKILL.md` included. */
-                        resources: {
-                            /** @description `skill://` URI of the file. */
-                            uri: string;
-                            /** @description `sha256:<hex>` of the bytes `GET /api/mcp/skills/content` serves. */
-                            digest: string;
-                            /** @description Size of the file in bytes. */
-                            size: number;
-                        }[];
-                    };
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            /** @description No skill the caller may read in this space is served at `uri`. */
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };

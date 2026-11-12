@@ -10,16 +10,22 @@
  * credential's ceiling).
  *
  * `skills/list` holds the published definition of each active skill, in each
- * space reached, that the caller may read and the server can serve whole. A draft is never listed: it is read
- * by its `@draft` URI through `skills/get` and `resources/read`. Whatever is
+ * space reached, that the caller may read and the server can serve whole. A
+ * draft is never in `skills/list`: it is read by its `@draft` URI through
+ * `skills/get` and `resources/read`, and the REST list of `./skill-routes.ts`
+ * lists the drafts for `appstrate code sync --source draft`. Whatever is
  * listed is readable; a skill over the limits of `./skill-resources.ts` is
  * absent, refused by `skills/get` and `resources/read`, and logged.
+ *
+ * The served `SKILL.md` carries the package version in `metadata.version`: the
+ * semver of a published definition, none for a draft.
  */
 
 import { ErrorCode, McpError, type ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateSkillProvider, SkillEntry } from "@appstrate/mcp-transport";
 import { ApiError } from "../../lib/errors.ts";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
+import { PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
 import type { SkillDefinitionSelector, SkillSnapshot } from "../../services/skill-read.ts";
 import {
   parseSkillUri,
@@ -37,8 +43,8 @@ const LIST_CONCURRENCY = 8;
 export interface SkillProviderContext {
   /** The spaces the connection reaches, in listing order. */
   spaceIds: readonly string[];
-  /** Ids of the published skills active in a space. */
-  listActiveSkillIds: (spaceId: string) => Promise<string[]>;
+  /** Ids of the skills active in a space that have `definition` (a draft, or a published version). */
+  listActiveSkillIds: (spaceId: string, definition: SkillDefinitionSelector) => Promise<string[]>;
   /** `readSkillSnapshot` in a space, bound to the request; `null` or an `ApiError` when refused. */
   readSkill: (
     spaceId: string,
@@ -60,10 +66,8 @@ export interface SkillServer {
   provider: AppstrateSkillProvider;
   /** `resources/read` of a `skill://` URI. */
   read: (uri: string) => Promise<ReadResourceResult>;
-  /** The entries `skills/list` serves. */
-  list: () => Promise<SkillEntry[]>;
-  /** The entry `skills/get` serves for a `SKILL.md` URI, `null` when none is readable there. */
-  entry: (uri: string) => Promise<SkillEntry | null>;
+  /** The entries of `definition` the caller may read: `skills/list` serves the published ones. */
+  list: (definition: SkillDefinitionSelector) => Promise<SkillEntry[]>;
   /** The bytes `resources/read` serves for a `skill://` URI, `null` when none are readable there. */
   file: (uri: string) => Promise<Uint8Array | null>;
 }
@@ -72,6 +76,23 @@ export interface SkillServer {
 function exactText(bytes: Uint8Array): string | null {
   try {
     return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The version a definition serves: a published version's semver, else a system
+ * skill's shipped manifest version; `null` for a draft.
+ */
+function servedVersion(snapshot: SkillSnapshot): string | null {
+  if (snapshot.definition === "draft") return null;
+  if (snapshot.version !== null) return snapshot.version;
+  const manifest = snapshot.snapshot.files[PACKAGE_MANIFEST_FILE];
+  if (!manifest) return null;
+  try {
+    const { version } = JSON.parse(new TextDecoder().decode(manifest)) as { version?: unknown };
+    return typeof version === "string" ? version : null;
   } catch {
     return null;
   }
@@ -92,7 +113,7 @@ export function buildSkillServer(ctx: SkillProviderContext): SkillServer {
       throw err;
     }
     if (!snapshot || snapshot.definition !== definition) return null;
-    const served = serveSkill(packageId, snapshot.snapshot.files);
+    const served = serveSkill(packageId, snapshot.snapshot.files, servedVersion(snapshot));
     if (!served.ok) {
       ctx.logUnservable({ spaceId, packageId, definition, reason: served.reason });
       return null;
@@ -120,14 +141,17 @@ export function buildSkillServer(ctx: SkillProviderContext): SkillServer {
     return served.skill.files[address.path]!;
   };
 
-  const list = async (): Promise<SkillEntry[]> => {
+  const list = async (definition: SkillDefinitionSelector): Promise<SkillEntry[]> => {
     const listed = await Promise.all(
       ctx.spaceIds.map(async (spaceId) =>
-        (await ctx.listActiveSkillIds(spaceId)).map((packageId) => ({ spaceId, packageId })),
+        (await ctx.listActiveSkillIds(spaceId, definition)).map((packageId) => ({
+          spaceId,
+          packageId,
+        })),
       ),
     );
     const loaded = await mapWithConcurrency(listed.flat(), LIST_CONCURRENCY, (skill) =>
-      load(skill.spaceId, skill.packageId, "published"),
+      load(skill.spaceId, skill.packageId, definition),
     );
     return loaded
       .filter((served): served is Served => served !== null)
@@ -135,7 +159,7 @@ export function buildSkillServer(ctx: SkillProviderContext): SkillServer {
   };
 
   const provider: AppstrateSkillProvider = {
-    list,
+    list: () => list("published"),
     get: async (uri) => {
       const found = await entry(uri);
       if (!found) {
@@ -165,5 +189,5 @@ export function buildSkillServer(ctx: SkillProviderContext): SkillServer {
     };
   };
 
-  return { provider, read, list, entry, file };
+  return { provider, read, list, file };
 }

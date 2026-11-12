@@ -297,7 +297,9 @@ const skillEntrySchema = {
     },
     frontmatter: {
       type: "object",
-      description: "The YAML frontmatter of the served `SKILL.md`, verbatim.",
+      description:
+        "The YAML frontmatter of the served `SKILL.md`, verbatim. `metadata.version` is the " +
+        "package version: the semver of a published definition; a draft has none.",
       properties: { name: { type: "string" }, description: { type: "string" } },
       required: ["name", "description"],
       additionalProperties: true,
@@ -345,12 +347,21 @@ const skillsRestPaths = {
       summary: "List skills as the MCP Skills extension serves them",
       description:
         "The entries of `skills/list`: the published definition of each active skill of the " +
-        "space that the caller may read and the server can serve whole. A draft is never " +
-        "listed. " +
+        "space that the caller may read and the server can serve whole. With " +
+        "`definition=draft`, the drafts of the space that the caller may read (only a caller " +
+        "who may write a package reads its draft), at their `@draft` URIs; `skills/list` " +
+        "never holds a draft. " +
         SKILLS_REST_DESCRIPTION,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
+        {
+          name: "definition",
+          in: "query",
+          required: false,
+          schema: { type: "string", enum: ["published", "draft"], default: "published" },
+          description: "The definition listed.",
+        },
       ],
       responses: {
         "200": {
@@ -370,34 +381,6 @@ const skillsRestPaths = {
           },
         },
         ...skillReadErrors,
-      },
-    },
-  },
-  "/api/mcp/skills/entry": {
-    get: {
-      operationId: "getServedSkill",
-      tags: ["MCP"],
-      summary: "Read one skill entry as the MCP Skills extension serves it",
-      description:
-        "The entry of `skills/get` for the `SKILL.md` URI `uri`, listed or not: the way to a " +
-        "draft, whose URI carries `@draft` and which only a caller who may write the package " +
-        "reads. " +
-        SKILLS_REST_DESCRIPTION,
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-        skillUriParameter("`skill://` URI of the skill's `SKILL.md`."),
-      ],
-      responses: {
-        "200": {
-          description: "Skill entry",
-          content: { "application/json": { schema: skillEntrySchema } },
-        },
-        ...skillReadErrors,
-        "404": {
-          $ref: "#/components/responses/NotFound",
-          description: "No skill the caller may read in this space is served at `uri`.",
-        },
       },
     },
   },

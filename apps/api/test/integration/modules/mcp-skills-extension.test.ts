@@ -189,7 +189,6 @@ describe("REST reflection (`appstrate code sync`)", () => {
   const rest = (headers: Record<string, string>, path: string) =>
     app.request(path, { headers: { ...headers, "X-Space-Id": owner.defaultSpaceId } });
   const contentPath = (uri: string) => `/api/mcp/skills/content?uri=${encodeURIComponent(uri)}`;
-  const entryPath = (uri: string) => `/api/mcp/skills/entry?uri=${encodeURIComponent(uri)}`;
 
   it("serves the entries and bytes the MCP endpoint serves to the same caller", async () => {
     const mcp = await call(inSpace(ownerHeaders(), owner.defaultSpaceId), "skills/list", {});
@@ -221,21 +220,34 @@ describe("REST reflection (`appstrate code sync`)", () => {
     expect((await rest(ownerHeaders(), contentPath(teamUri()))).status).toBe(404);
   });
 
-  it("serves an author the draft entry by its @draft URI, and refuses it to a reader", async () => {
+  it("lists the drafts an author may read with definition=draft, and none to a reader", async () => {
     const draftUri = `skill://${owner.defaultSpaceId}/skillsext/tone@draft/tone/SKILL.md`;
     const mcp = await call(ownerHeaders(), "skills/get", { uri: draftUri });
-    const res = await rest(ownerHeaders(), entryPath(draftUri));
+    const res = await rest(ownerHeaders(), "/api/mcp/skills?definition=draft");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual(mcp.result?.skill as Entry);
+    const drafts = ((await res.json()) as { data: Entry[] }).data;
+    const draft = drafts.find((e) => e.uri === draftUri)!;
+    expect(draft).toEqual(mcp.result?.skill as Entry);
+    expect(draft.frontmatter.metadata).toBeUndefined();
     const reader = await guest({ [owner.defaultSpaceId]: ["skills:read"] });
-    expect((await rest(reader, entryPath(draftUri))).status).toBe(404);
+    const readerDrafts = await rest(reader, "/api/mcp/skills?definition=draft");
+    expect(((await readerDrafts.json()) as { data: Entry[] }).data).toEqual([]);
     expect((await rest(reader, contentPath(draftUri))).status).toBe(404);
   });
 
-  it("refuses a caller without skills:read, and a request without uri", async () => {
+  it("serves the published version in metadata.version", async () => {
+    const body = (await (await rest(ownerHeaders(), "/api/mcp/skills")).json()) as {
+      data: Entry[];
+    };
+    const tone = body.data.find((e) => e.uri === toneUri())!;
+    expect(tone.frontmatter.metadata).toEqual({ version: "1.0.0" });
+  });
+
+  it("refuses a caller without skills:read, a request without uri, and an unknown definition", async () => {
     const headers = await guest({ [owner.defaultSpaceId]: ["mcp:read"] });
     expect((await rest(headers, "/api/mcp/skills")).status).toBe(403);
     expect((await rest(headers, contentPath(toneUri()))).status).toBe(403);
     expect((await rest(ownerHeaders(), "/api/mcp/skills/content")).status).toBe(400);
+    expect((await rest(ownerHeaders(), "/api/mcp/skills?definition=latest")).status).toBe(400);
   });
 });

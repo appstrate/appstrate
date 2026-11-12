@@ -76,12 +76,16 @@ describe("serveSkill", () => {
 
   it("drops packaging entries, keeps every other file as stored", () => {
     const script = new Uint8Array([0, 255, 1]);
-    const served = serveSkill("@acme/tone", {
-      "SKILL.md": encode(md("tone")),
-      "manifest.json": encode("{}"),
-      RECORD: encode("sig"),
-      "scripts/run.bin": script,
-    });
+    const served = serveSkill(
+      "@acme/tone",
+      {
+        "SKILL.md": encode(md("tone")),
+        "manifest.json": encode("{}"),
+        RECORD: encode("sig"),
+        "scripts/run.bin": script,
+      },
+      null,
+    );
     expect(served.ok).toBe(true);
     if (!served.ok) return;
     expect(Object.keys(served.skill.files)).toEqual(["SKILL.md", "scripts/run.bin"]);
@@ -94,7 +98,7 @@ describe("serveSkill", () => {
   });
 
   it("names an invalid frontmatter name after the package and rewrites only that line", () => {
-    const served = serveSkill("@acme/tone-kit", { "SKILL.md": encode(md("Tone Kit")) });
+    const served = serveSkill("@acme/tone-kit", { "SKILL.md": encode(md("Tone Kit")) }, null);
     expect(served.ok).toBe(true);
     if (!served.ok) return;
     expect(served.skill.name).toBe("tone-kit");
@@ -104,18 +108,39 @@ describe("serveSkill", () => {
     expect(parseSkillFrontmatter(text).fields).toEqual(served.skill.frontmatter);
   });
 
+  it("writes the version in metadata.version, read back into the entry's frontmatter", () => {
+    const served = serveSkill("@acme/tone", { "SKILL.md": encode(md("tone")) }, "2.1.0");
+    expect(served.ok).toBe(true);
+    if (!served.ok) return;
+    const text = new TextDecoder().decode(served.skill.files["SKILL.md"]);
+    expect(text).toBe(
+      "---\nname: tone\ndescription: Sets the tone.\nx-extra: kept\nmetadata:\n  version: 2.1.0\n---\nBody $& $1\n",
+    );
+    expect(served.skill.frontmatter.metadata).toEqual({ version: "2.1.0" });
+    expect(parseSkillFrontmatter(text).fields).toEqual(served.skill.frontmatter);
+  });
+
+  it("drops an authored metadata.version from a draft and keeps the other metadata", () => {
+    const authored =
+      "---\nname: tone\ndescription: d\nmetadata:\n  author: me\n  version: 9.9.9\n---\n";
+    const served = serveSkill("@acme/tone", { "SKILL.md": encode(authored) }, null);
+    expect(served.ok).toBe(true);
+    if (!served.ok) return;
+    expect(served.skill.frontmatter.metadata).toEqual({ author: "me" });
+  });
+
   it("refuses a tree it cannot serve whole", () => {
     const big = new Uint8Array(SKILL_FILE_MAX_BYTES + 1);
-    expect(serveSkill("@acme/tone", { "SKILL.md": encode(md("tone")), "a.bin": big }).ok).toBe(
-      false,
-    );
+    expect(
+      serveSkill("@acme/tone", { "SKILL.md": encode(md("tone")), "a.bin": big }, null).ok,
+    ).toBe(false);
     const many: Record<string, Uint8Array> = { "SKILL.md": encode(md("tone")) };
     for (let i = 0; i < SKILL_MAX_FILES; i += 1) many[`f/${i}`] = encode("x");
-    expect(serveSkill("@acme/tone", many).ok).toBe(false);
-    expect(serveSkill("@acme/tone", { "README.md": encode("x") }).ok).toBe(false);
-    expect(serveSkill("@acme/tone", { "SKILL.md": encode("---\nname: tone\n---\n") }).ok).toBe(
-      false,
-    );
+    expect(serveSkill("@acme/tone", many, null).ok).toBe(false);
+    expect(serveSkill("@acme/tone", { "README.md": encode("x") }, null).ok).toBe(false);
+    expect(
+      serveSkill("@acme/tone", { "SKILL.md": encode("---\nname: tone\n---\n") }, null).ok,
+    ).toBe(false);
   });
 
   it("keeps the normalization rules: valid name wins, `$` sequences untouched, name inserted", () => {
@@ -176,7 +201,11 @@ describe("skills/list, skills/get and resources/read", () => {
       const skills = list.skills as SkillEntry[];
       expect(skills.map((entry) => entry.uri)).toEqual(["skill://spc_1/acme/tone/tone/SKILL.md"]);
       const [entry] = skills;
-      expect(entry!.frontmatter).toEqual({ name: "tone", description: "Sets the tone." });
+      expect(entry!.frontmatter).toEqual({
+        name: "tone",
+        description: "Sets the tone.",
+        metadata: { version: "1.0.0" },
+      });
       for (const resource of entry!.resources) {
         const read = await p.client.readResource({ uri: resource.uri });
         const content = read.contents[0]!;
@@ -194,6 +223,22 @@ describe("skills/list, skills/get and resources/read", () => {
     } finally {
       await p.close();
     }
+  });
+
+  it("lists the drafts the caller may read at their @draft URIs, without a version", async () => {
+    const definitions: string[] = [];
+    const s = server({
+      listActiveSkillIds: async (_spaceId, definition) => {
+        definitions.push(definition);
+        return ["@acme/tone", "@acme/hidden"];
+      },
+    });
+    const drafts = await s.list("draft");
+    expect(definitions).toEqual(["draft"]);
+    expect(drafts.map((entry) => entry.uri)).toEqual([
+      "skill://spc_1/acme/tone@draft/tone/SKILL.md",
+    ]);
+    expect(drafts[0]!.frontmatter.metadata).toBeUndefined();
   });
 
   it("serves an unlisted draft by its @draft URI through skills/get", async () => {

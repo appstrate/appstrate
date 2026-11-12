@@ -20,6 +20,7 @@ import {
   isValidSkillName,
   normalizeSkillMd,
   parseSkillFrontmatter,
+  setSkillMdVersion,
   SKILL_NAME_MAX_LENGTH,
 } from "@appstrate/afps-shared/companion-files";
 import type { SkillEntry } from "@appstrate/mcp-transport";
@@ -121,12 +122,15 @@ export type ServeSkillResult = { ok: true; skill: ServedSkill } | { ok: false; r
 
 /**
  * The stored tree of `packageId` as an Agent Skills directory: packaging
- * entries dropped, `SKILL.md` normalized, within the size limits above. A tree
- * that cannot be served whole is refused with the reason, never trimmed.
+ * entries dropped, `SKILL.md` normalized (its `name`, and its
+ * `metadata.version` set to `version`, absent when `null`), within the size
+ * limits above. A tree that cannot be served whole is refused with the reason,
+ * never trimmed.
  */
 export function serveSkill(
   packageId: string,
   stored: Record<string, Uint8Array>,
+  version: string | null,
 ): ServeSkillResult {
   const files: Record<string, Uint8Array> = {};
   let total = 0;
@@ -154,7 +158,7 @@ export function serveSkill(
     parseScopedName(packageId)?.name ?? "",
   );
   if (!name) return { ok: false, reason: "no valid Agent Skills name" };
-  const served = normalizeSkillMd(authored, name);
+  const served = setSkillMdVersion(normalizeSkillMd(authored, name), version);
   const parsed = parseSkillFrontmatter(served);
   if (parsed.name !== name || !parsed.description) {
     return { ok: false, reason: `${SKILL_ENTRY} frontmatter lacks a name or a description` };

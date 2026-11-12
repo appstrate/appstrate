@@ -23,23 +23,24 @@ import {
 import { listSpaces, resolveSpaceRef, type Space } from "../lib/spaces.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import { formatError } from "../lib/ui.ts";
-import { checkSkillMarkdown } from "@appstrate/afps-shared/companion-files";
-import { materializeSkill, SKILL_ENTRY } from "../lib/skills-sync/materialize.ts";
+import { checkSkillMarkdown, normalizeSkillMd } from "@appstrate/afps-shared/companion-files";
+import { SKILL_ENTRY } from "../lib/skills-sync/materialize.ts";
 import { withSyncLock } from "../lib/skills-sync/lock.ts";
 import { renderNotice, type NoticeKind } from "../lib/skills-sync/notice.ts";
 import {
   assignSlugs,
   diffTarget,
   fetchSkillFiles,
-  isDraftRefusal,
   listSyncableSkills,
   MAX_CONCURRENCY,
   ownedLedger,
   resolveSkill,
+  skillPackageId,
   type Catalogue,
   type EntriesBySlug,
   type PlannedSkill,
   type ResolvedSkill,
+  type SkillEntry,
   type SkillSource,
   type TargetPlan,
 } from "../lib/skills-sync/plan.ts";
@@ -305,8 +306,9 @@ async function bootstrapPlugin(
 }
 
 /**
- * List the selected spaces' skills, pin each to a version, and assign
- * directory names. A skill with no published version is a note, not a failure.
+ * List the selected spaces' skills at `source`, pin each to the digests of its
+ * served files, and assign directory names. A skill without a definition at
+ * `source` is not listed, so it is not synced.
  */
 async function resolveAll(
   profileName: string,
@@ -322,28 +324,22 @@ async function resolveAll(
   // downloaded once, from the first space that listed it — and `spaceIds` order
   // decides which, so the listings run concurrently but merge in input order.
   const listings = await mapWithConcurrency(spaceIds, MAX_CONCURRENCY, (spaceId) =>
-    listSyncableSkills(profileName, spaceId),
+    listSyncableSkills(profileName, spaceId, source),
   );
-  const origins = new Map<string, string>();
-  spaceIds.forEach((spaceId, index) => {
-    for (const packageId of listings[index]!) {
-      if (!origins.has(packageId)) origins.set(packageId, spaceId);
+  const origins = new Map<string, SkillEntry>();
+  for (const listing of listings) {
+    for (const entry of listing) {
+      const packageId = skillPackageId(entry);
+      if (!origins.has(packageId)) origins.set(packageId, entry);
+    }
+  }
+  const resolutions = [...origins.keys()].sort().map((packageId) => {
+    try {
+      return { packageId, resolved: resolveSkill(origins.get(packageId)!) };
+    } catch (err) {
+      return { packageId, error: err };
     }
   });
-  const resolutions = await mapWithConcurrency(
-    [...origins.keys()].sort(),
-    MAX_CONCURRENCY,
-    async (packageId) => {
-      try {
-        return {
-          packageId,
-          resolved: await resolveSkill(profileName, packageId, source, origins.get(packageId)),
-        };
-      } catch (err) {
-        return { packageId, error: err };
-      }
-    },
-  );
 
   const skills: ResolvedSkill[] = [];
   const unresolved: Catalogue["unresolved"] = new Set();
@@ -351,12 +347,8 @@ async function resolveAll(
     const { packageId } = entry;
     if ("error" in entry) {
       if (fixOf(entry.error)) throw entry.error;
-      // A refused draft is refused again next run: it goes.
-      if (!isDraftRefusal(entry.error)) unresolved.add(packageId);
+      unresolved.add(packageId);
       report.skill(`Skipped ${packageId}: ${formatError(entry.error)}`);
-    } else if (!entry.resolved) {
-      const what = source === "draft" ? "draft" : "published version";
-      report.note(`Skipped ${packageId}: no ${what} available.`);
     } else {
       skills.push(entry.resolved);
     }
@@ -398,7 +390,7 @@ async function executePlans(
   validate: () => Promise<void>,
 ): Promise<boolean> {
   const wanted = new Set(plans.flatMap((plan) => plan.write));
-  const trees = await fetchTrees(profileName, source, [...wanted], bySlug, report);
+  const trees = await fetchTrees(profileName, [...wanted], bySlug, report);
   if (plans.some((plan) => plan.contextChanged) && trees.size !== wanted.size) {
     throw new Error(
       "Could not download the new context completely; previous installation preserved.",
@@ -466,10 +458,9 @@ async function executePlans(
   return pluginOk;
 }
 
-/** Download + materialize, reporting each failure and dropping it. */
+/** Download and verify against the served digests, reporting each failure and dropping it. */
 async function fetchTrees(
   profileName: string,
-  source: SkillSource,
   slugs: string[],
   bySlug: EntriesBySlug,
   report: Report,
@@ -478,10 +469,14 @@ async function fetchTrees(
   const results = await mapWithConcurrency(slugs, MAX_CONCURRENCY, async (slug) => {
     const entry = bySlug.get(slug)!;
     try {
-      const files = materializeSkill({
-        slug,
-        files: await fetchSkillFiles(profileName, entry, source),
-      });
+      const files = await fetchSkillFiles(profileName, entry);
+      // The host names skills on disk: a renamed skill points its `name` at its
+      // directory, every other byte as served.
+      if (slug !== entry.frontmatterName) {
+        files[SKILL_ENTRY] = new TextEncoder().encode(
+          normalizeSkillMd(new TextDecoder().decode(files[SKILL_ENTRY]), slug),
+        );
+      }
       return { entry, tree: { slug, files } };
     } catch (err) {
       return { entry, error: err };
