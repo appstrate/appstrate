@@ -36,7 +36,7 @@ const DRAFT_MARKER = "@draft";
 
 /** SEP-2640: a server SHOULD NOT serve a skill with more files or bytes than this. */
 export const SKILL_MAX_FILES = 512;
-export const SKILL_MAX_TOTAL_BYTES = 16 * 1024 * 1024;
+const SKILL_MAX_TOTAL_BYTES = 16 * 1024 * 1024;
 /**
  * The largest file a `skill://` read returns: the largest file a package draft
  * write accepts, so every authored file is servable.
@@ -195,7 +195,7 @@ export function serveSkill(
   };
 }
 
-export function sha256Digest(bytes: Uint8Array): string {
+function sha256Digest(bytes: Uint8Array): string {
   return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 }
 
