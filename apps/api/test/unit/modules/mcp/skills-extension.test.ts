@@ -12,10 +12,15 @@ import { ResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createInProcessPair } from "@appstrate/mcp-transport";
 import { SKILL_MAX_FILES, type SkillEntry } from "@appstrate/core/skill-uri";
 import { normalizeSkillMd, parseSkillFrontmatter } from "@appstrate/afps-shared/companion-files";
-import { forbidden } from "../../../../src/lib/errors.ts";
-import { serveSkill, skillName } from "../../../../src/modules/mcp/skill-resources.ts";
+import { conflict, forbidden } from "../../../../src/lib/errors.ts";
+import { createServedSkillCache } from "../../../../src/modules/mcp/skill-cache.ts";
+import {
+  serveSkill,
+  skillName,
+  type ServedSkill,
+} from "../../../../src/modules/mcp/skill-resources.ts";
 import { buildSkillServer, type SkillProviderContext } from "../../../../src/modules/mcp/skills.ts";
-import type { SkillSnapshot } from "../../../../src/services/skill-read.ts";
+import type { SkillRead } from "../../../../src/services/skill-read.ts";
 
 const encode = (text: string) => new TextEncoder().encode(text);
 const sha256 = (bytes: Uint8Array) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
@@ -128,15 +133,19 @@ describe("skills/list, skills/get and resources/read", () => {
   const binary = new Uint8Array([0xff, 0xfe, 0x00]);
   const bom = encode("\uFEFFwith bom");
 
-  function snapshot(packageId: string, definition: "published" | "draft"): SkillSnapshot {
+  const files = { "SKILL.md": skillMd, "data.bin": binary, "refs/bom.txt": bom };
+
+  function snapshot(
+    packageId: string,
+    definition: "published" | "draft",
+    stored: Record<string, Uint8Array> = files,
+  ): SkillRead {
     return {
       packageId,
       version: definition === "draft" ? null : "1.0.0",
+      integrity: definition === "draft" ? null : "sha256-a",
       definition,
-      snapshot: {
-        files: { "SKILL.md": skillMd, "data.bin": binary, "refs/bom.txt": bom },
-        snapshotId: "s",
-      },
+      readSnapshot: async () => ({ files: stored, snapshotId: "s" }),
     };
   }
 
@@ -150,6 +159,7 @@ describe("skills/list, skills/get and resources/read", () => {
         return snapshot(packageId, definition);
       },
       logUnservable: (event) => unservable.push(event.packageId),
+      cache: createServedSkillCache(1024 * 1024),
       ...overrides,
     };
     return { ...buildSkillServer(ctx), unservable };
@@ -226,7 +236,7 @@ describe("skills/list, skills/get and resources/read", () => {
     const s = server({
       readSkill: async (_spaceId, packageId, definition) =>
         packageId === "@acme/big"
-          ? { ...snapshot(packageId, definition), snapshot: { files: {}, snapshotId: "s" } }
+          ? snapshot(packageId, definition, {})
           : packageId === "@acme/pinned"
             ? snapshot(packageId, "draft")
             : null,
@@ -308,6 +318,151 @@ describe("skills/list, skills/get and resources/read", () => {
           (e: unknown) => e,
         );
       expect(err).toMatchObject({ code: -32002 });
+    } finally {
+      await p.close();
+    }
+  });
+});
+
+describe("the served skill cache", () => {
+  const TONE = "skill://spc_1/acme/tone/tone/SKILL.md";
+  const DRAFT = "skill://spc_1/acme/tone@draft/tone/SKILL.md";
+  const skillMd = encode("---\nname: tone\ndescription: Sets the tone.\n---\nBody\n");
+
+  /** A skill server whose file reads are counted, over `cache`. */
+  function counted(
+    cache = createServedSkillCache(1024 * 1024),
+    readSkill?: SkillProviderContext["readSkill"],
+  ) {
+    const fileReads: string[] = [];
+    const server = buildSkillServer({
+      spaceIds: [SPACE],
+      listActiveSkillIds: async () => ["@acme/tone"],
+      readSkill:
+        readSkill ??
+        (async (_spaceId, packageId, definition) => ({
+          packageId,
+          version: definition === "draft" ? null : "1.0.0",
+          integrity: definition === "draft" ? null : "sha256-a",
+          definition,
+          readSnapshot: async () => {
+            fileReads.push(definition);
+            return { files: { "SKILL.md": skillMd }, snapshotId: "s" };
+          },
+        })),
+      logUnservable: () => {},
+      cache,
+    });
+    return { server, fileReads, cache };
+  }
+
+  it("serves a published version from the cache on the next call, without reading its files", async () => {
+    const { server, fileReads } = counted();
+    const listed = await server.list("published");
+    const read = await server.read(TONE);
+    expect(await server.provider.get(TONE)).toEqual(listed[0]!);
+    expect(read.contents).toHaveLength(1);
+    expect(fileReads).toEqual(["published"]);
+  });
+
+  it("reads again an archive published again under the same version", async () => {
+    const cache = createServedSkillCache(1024 * 1024);
+    const fileReads: string[] = [];
+    const republished =
+      (integrity: string): SkillProviderContext["readSkill"] =>
+      async (_spaceId, packageId) => ({
+        packageId,
+        version: "1.0.0",
+        integrity,
+        definition: "published",
+        readSnapshot: async () => {
+          fileReads.push(integrity);
+          return { files: { "SKILL.md": skillMd }, snapshotId: "s" };
+        },
+      });
+    await counted(cache, republished("sha256-a")).server.read(TONE);
+    await counted(cache, republished("sha256-b")).server.read(TONE);
+    expect(fileReads).toEqual(["sha256-a", "sha256-b"]);
+  });
+
+  it("reads a draft on every call, never from the cache", async () => {
+    const { server, fileReads } = counted();
+    await server.read(DRAFT);
+    await server.read(DRAFT);
+    await server.provider.get(DRAFT);
+    expect(fileReads).toEqual(["draft", "draft", "draft"]);
+  });
+
+  it("gives nothing to a caller the access rule refuses, even with the skill cached", async () => {
+    const cache = createServedSkillCache(1024 * 1024);
+    const { server: allowed } = counted(cache);
+    await allowed.list("published");
+    const { server: refused } = counted(cache, async () => null);
+    expect(await refused.list("published")).toEqual([]);
+    expect(await refused.skillFiles(TONE)).toBeNull();
+    const err = await refused.read(TONE).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(err).toMatchObject({ code: -32002 });
+  });
+
+  it("evicts the least recently used skill past its byte budget, and keeps none larger than it", () => {
+    const skill = (bytes: number): ServedSkill => ({
+      name: "tone",
+      frontmatter: { name: "tone", description: "d" },
+      files: { "SKILL.md": new Uint8Array(bytes) },
+    });
+    const cache = createServedSkillCache(10);
+    cache.set("a", skill(4));
+    cache.set("b", skill(4));
+    expect(cache.get("a")).toBeDefined();
+    cache.set("c", skill(4));
+    expect(cache.get("b")).toBeUndefined();
+    expect(cache.get("a")).toBeDefined();
+    expect(cache.get("c")).toBeDefined();
+    cache.set("big", skill(11));
+    expect(cache.get("big")).toBeUndefined();
+    expect(cache.get("a")).toBeDefined();
+  });
+});
+
+describe("a draft the chat turn injected that changed since", () => {
+  it("answers skills/get and resources/read with the explicit conflict, not a not-found", async () => {
+    const uri = "skill://spc_1/acme/tone@draft/tone/SKILL.md";
+    const changed = conflict("injected_draft_changed", "The draft of '@acme/tone' changed.");
+    const server = buildSkillServer({
+      spaceIds: [SPACE],
+      listActiveSkillIds: async () => [],
+      readSkill: async (_spaceId, packageId, definition) => ({
+        packageId,
+        version: null,
+        integrity: null,
+        definition,
+        readSnapshot: () => Promise.reject(changed),
+      }),
+      logUnservable: () => {},
+      cache: createServedSkillCache(1024),
+    });
+    const p = await createInProcessPair([], {
+      resources: { read: (u) => server.read(u) },
+      skills: server.provider,
+    });
+    try {
+      const getErr = await p.client
+        .request({ method: "skills/get", params: { uri } }, ResultSchema)
+        .then(
+          () => undefined,
+          (e: unknown) => e,
+        );
+      const readErr = await p.client.readResource({ uri }).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      for (const err of [getErr, readErr]) {
+        expect(err).toMatchObject({ code: -32600 });
+        expect(String((err as Error).message)).toContain("The draft of '@acme/tone' changed.");
+      }
     } finally {
       await p.close();
     }

@@ -138,6 +138,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   for you, published or not: those of the skills you may write; a draft you may
   not write is absent from the list, so it is not synced.
 
+- **The skills served for published versions are kept in memory** (#2175). A
+  published version is immutable, so `skills/list`, `skills/get`, `resources/read`
+  on `skill://` and their REST reflection read and digest it once per API process,
+  then serve it from a least-recently-used cache bounded at 64 MiB of files (four
+  skills at the SEP-2640 limit). The access rule runs on every call, before the
+  cache. Drafts and system skills are read on every call.
+
+- **A draft the chat turn injected and that changed since is refused explicitly on
+  `skill://`** (#2175). `skills/get` and `resources/read` answer JSON-RPC
+  `-32600` with the `injected_draft_changed` message (the next turn injects the
+  current draft) instead of `Resource not found`.
+
 - **BREAKING (CLI, MCP): agents are prompts of the MCP server, and `code sync`
   syncs skills only** (#2172). The Claude Code plugin's `/appstrate:run-<agent>`
   commands become MCP prompts of the organization's server: `prompts/list`

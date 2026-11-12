@@ -146,18 +146,27 @@ export interface SkillSnapshot {
   snapshot: PackageFileSnapshot;
 }
 
+/** A granted skill read: which definition it serves, its files read on demand. */
+export interface SkillRead extends Omit<SkillSnapshot, "snapshot"> {
+  /** The integrity of the published archive served, `null` for the stored tree. */
+  integrity: string | null;
+  readSnapshot: () => Promise<PackageFileSnapshot>;
+}
+
 export type SkillDefinitionSelector = "published" | "draft";
 
 /**
- * `null` when refused; the caller answers it as REST does (403, else 404).
- * `definition` names the definition to read (see `resolveSkillReadAccess`).
+ * The access rule applied, without reading the files: `null` when refused, the
+ * caller answers it as REST does (403, else 404). `definition` names the
+ * definition to read (see `resolveSkillReadAccess`). `readSnapshot` of a draft
+ * pinned by the turn throws 409 `injected_draft_changed` once that draft moved.
  */
-export async function readSkillSnapshot(
+export async function resolveSkillRead(
   c: Context<AppEnv>,
   space: SkillReadSpace,
   packageId: string,
   definition?: SkillDefinitionSelector,
-): Promise<SkillSnapshot | null> {
+): Promise<SkillRead | null> {
   const access = await resolveSkillReadAccess(c, space, packageId, definition);
   if (!access) return null;
   const { pkg, spec, draftLock } = access;
@@ -165,10 +174,24 @@ export async function readSkillSnapshot(
   return {
     packageId: pkg.id,
     version: validator.kind === "version" ? validator.version : null,
+    integrity: validator.kind === "version" ? validator.integrity : null,
     definition: servedDefinition(pkg, spec),
-    snapshot:
+    readSnapshot: () =>
       draftLock === undefined
-        ? await readPackageSnapshot(pkg, validator)
-        : await readPinnedDraft(pkg, draftLock),
+        ? readPackageSnapshot(pkg, validator)
+        : readPinnedDraft(pkg, draftLock),
   };
+}
+
+/** {@link resolveSkillRead} with the files read. */
+export async function readSkillSnapshot(
+  c: Context<AppEnv>,
+  space: SkillReadSpace,
+  packageId: string,
+  definition?: SkillDefinitionSelector,
+): Promise<SkillSnapshot | null> {
+  const read = await resolveSkillRead(c, space, packageId, definition);
+  if (!read) return null;
+  const { packageId: id, version, definition: served, readSnapshot } = read;
+  return { packageId: id, version, definition: served, snapshot: await readSnapshot() };
 }
