@@ -354,8 +354,8 @@ const skillsRestPaths = {
         "The entries of `skills/list`: the published definition of each active skill of the " +
         "space that the caller may read and the server can serve whole. With " +
         "`definition=draft`, the drafts of the space that the caller may read (only a caller " +
-        "who may write a package reads its draft), at their `@draft` URIs; `skills/list` " +
-        "never holds a draft. " +
+        "who may write a package reads its draft), at their `@draft` URIs, as `skills/list` " +
+        'lists them with the request `_meta` `{"dev.appstrate/definition": "draft"}`. ' +
         SKILLS_REST_DESCRIPTION,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },

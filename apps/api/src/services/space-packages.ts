@@ -33,11 +33,12 @@ import { parsePackageZip } from "@appstrate/core/zip";
 import { placementRowJoin } from "./package-placement.ts";
 import {
   getLatestVersionId,
+  getVersionDetail,
   getVersionForDownload,
-  loadPublishedDefinition,
+  requirePublishedArchive,
 } from "./package-versions.ts";
 import { downloadVersionZip } from "./package-storage.ts";
-import { serveSkill, SKILL_ENTRY } from "./served-skill.ts";
+import { serveSkillMd } from "./served-skill.ts";
 import {
   activeHereSql,
   isActiveHere,
@@ -959,29 +960,30 @@ export async function updatePlacementSettings(
 }
 
 /**
- * The length of the `SKILL.md` the chat injects for a published skill: the one
- * {@link serveSkill} serves (normalized `name`, `metadata.version` written), or
- * the stored one when it cannot be served.
+ * The `SKILL.md` the chat injects for the `latest` published version of a
+ * skill: the one {@link serveSkillMd} serves from its whole archive (normalized
+ * `name`, `metadata.version` written), or `null` without a published version. A
+ * skill that cannot be served is refused: the chat could not inject it.
  */
-function injectedSkillMdLength(
-  packageId: string,
-  skill: { version: string | null; content: string },
-): number {
-  const served = serveSkill(
-    packageId,
-    { [SKILL_ENTRY]: new TextEncoder().encode(skill.content) },
-    skill.version,
-  );
-  return served.ok
-    ? new TextDecoder().decode(served.skill.files[SKILL_ENTRY]).length
-    : skill.content.length;
+async function injectedSkillMd(packageId: string, tx: Tx): Promise<string | null> {
+  const detail = await getVersionDetail(packageId, "latest", { executor: tx });
+  if (!detail) return null;
+  const { files } = requirePublishedArchive("skill", packageId, detail);
+  const served = serveSkillMd(packageId, files, detail.version);
+  if (!served.ok) {
+    throw conflict(
+      "skill_not_servable",
+      `Skill '${packageId}' version ${detail.version} cannot be served as an Agent Skills skill (${served.reason}) — publish a version that can`,
+    );
+  }
+  return served.content;
 }
 
 // Every read goes through `tx`: under PGlite's single connection a query on
 // the root `db` would wait on this very transaction.
 async function assertChatEnforceable(scope: SpaceScope, packageId: string, tx: Tx) {
-  const own = await loadPublishedDefinition("skill", packageId, "latest", tx);
-  if (!own) {
+  const own = await injectedSkillMd(packageId, tx);
+  if (own === null) {
     throw conflict(
       "no_published_version",
       `Skill '${packageId}' has no published version to enforce — publish it first`,
@@ -1002,15 +1004,9 @@ async function assertChatEnforceable(scope: SpaceScope, packageId: string, tx: T
   }
 
   const flaggedOthers = flagged.filter((row) => row.packageId !== packageId);
-  const others = await Promise.all(
-    flaggedOthers.map((row) => loadPublishedDefinition("skill", row.packageId, "latest", tx)),
-  );
+  const others = await Promise.all(flaggedOthers.map((row) => injectedSkillMd(row.packageId, tx)));
   // Measured as injected: the served `SKILL.md` is what the chat puts in the prompt.
-  const total = others.reduce(
-    (sum, skill, i) =>
-      sum + (skill ? injectedSkillMdLength(flaggedOthers[i]!.packageId, skill) : 0),
-    injectedSkillMdLength(packageId, own),
-  );
+  const total = others.reduce((sum, skill) => sum + (skill?.length ?? 0), own.length);
   if (total > CHAT_SKILLS_CONTENT_BUDGET_CHARS) {
     throw conflict(
       "enforced_skills_budget",

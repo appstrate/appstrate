@@ -406,8 +406,9 @@ export async function handleChatStream(
         // One in-process `initialize` plus the reads, only on a turn that lists
         // (`auto` with `skills:read`) or injects skills; closed before the turn's
         // connection opens.
-        openSkillsClient: () =>
+        openSkillsClient: (signal) =>
           connectPlatformMcp({
+            signal,
             url: platformMcpUrl(origin, orgId, spaceId),
             headers: {
               Authorization: `Bearer ${mintMcpLoopbackToken({

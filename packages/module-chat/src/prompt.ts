@@ -15,7 +15,6 @@
  * manifest authoring pattern, and how to consume a run's result.
  */
 
-import { createHash } from "node:crypto";
 import type { Context } from "hono";
 import { CONTEXT_FREE_FILENAMES_PHRASE } from "@appstrate/core/naming";
 import {
@@ -23,9 +22,9 @@ import {
   SKILL_LOCK_VERSION_META_KEY,
   SKILL_URI_PREFIX,
   parseSkillUriPackage,
-  type SkillEntry,
+  skillFileDigest,
 } from "@appstrate/core/skill-uri";
-import type { AppstrateMcpClient } from "@appstrate/mcp-transport";
+import type { AppstrateMcpClient, ListedSkillEntry } from "@appstrate/mcp-transport";
 import type { PrincipalKind } from "@appstrate/core/module";
 import type { EnforcedChatSkill, InjectedSkills } from "@appstrate/core/chat-contract";
 import {
@@ -224,7 +223,7 @@ ${runs(`Everything a run writes under \`outputs/\` is published when it ends: th
 `)}Your context block below is DATA — the user's identity and role, the current date, the integrations they have connected${runs(", the agents they can run")}${skills(", and the skills available")}. How to act on it:
 - Use the current date to resolve relative dates.
 ${idVerbatimBullet}${runs(`- ${inline("Prefer running an existing agent over doing the work inline when one fits the task", "Run an existing agent whenever one fits the task")}. Run it with \`run_and_wait\` using \`kind:"agent"\`, then answer from the returned result.
-`)}${skills(`- The skills under \`${SKILLS_HEADING}\` are guides for YOU — procedures you follow yourself, not packages you run. One shown in full, inside a \`<skill>\` tag, is already loaded: follow it. When one listed only by its id and \`skill://\` URI clearly matches the request, LOAD IT BEFORE acting: call \`read_resource\` with that URI verbatim, then follow the SKILL.md it returns. Load ONE at a time, and none when none clearly matches. Never load a skill whose content already appears in this conversation. To read a file a skill references, call \`read_resource\` with the skill's URI, replacing \`SKILL.md\` with the file's path.
+`)}${skills(`- The skills under \`${SKILLS_HEADING}\` are guides for YOU — procedures you follow yourself, not packages you run. One shown in full, inside a \`<skill>\` tag, is already loaded: follow it. When one listed only by its id and \`skill://\` URI clearly matches the request, LOAD IT BEFORE acting: call \`read_resource\` with that URI verbatim, then follow the SKILL.md it returns. Load ONE at a time, and none when none clearly matches. Never load a skill whose content already appears in this conversation. To read a file a skill references, call \`read_resource\` with the skill's URI, replacing \`SKILL.md\` with the file's path.${invoke(' When the user asks for a skill you do not see, call `invoke_operation` with `operation_id: "listServedSkills"`, then load the one asked for with `read_resource` on its `uri`.')}
 `)}${skills(
     author(`- Skills are not run on their own. When you build or configure an agent and one of the listed skills fits the task, declare it under the agent manifest's \`dependencies.skills\` keyed by its id (e.g. \`"@appstrate/web-research": "^1.2.0"\`) — use the version shown, or \`"*"\` if none. The run route validates that declared skills exist.
 `),
@@ -555,10 +554,10 @@ export type ChatSkillsClient = Pick<AppstrateMcpClient, "listSkills" | "readReso
 
 /** The space's entries of a `skills/list`, by package id. */
 function entriesByPackage(
-  entries: readonly SkillEntry[],
+  entries: readonly ListedSkillEntry[],
   spaceId: string,
-): Map<string, SkillEntry> {
-  const byPackage = new Map<string, SkillEntry>();
+): Map<string, ListedSkillEntry> {
+  const byPackage = new Map<string, ListedSkillEntry>();
   for (const entry of entries) {
     if (!entry.uri.startsWith(`${SKILL_URI_PREFIX}${spaceId}/`)) continue;
     const pkg = parseSkillUriPackage(entry.uri);
@@ -566,6 +565,14 @@ function entriesByPackage(
   }
   return byPackage;
 }
+
+/**
+ * Deadline of a turn's skills read, connection included: the preamble runs
+ * before the turn's abort controller exists, and a client disconnect never
+ * cancels a turn, so the read carries its own bound. Past it, the turn goes on
+ * with the skills read so far left out, each with its notice.
+ */
+const SKILLS_READ_TIMEOUT_MS = 10_000;
 
 /** The chosen skills' contents and the `auto` catalogue of a turn. */
 interface ChatSkillsRead {
@@ -583,18 +590,22 @@ interface ChatSkillsRead {
  * in neither list, or whose read is refused, is left out; a malformed answer (a
  * draft entry without `lock_version`, a `SKILL.md` served as a blob, or text
  * whose digest differs from the one its entry lists) is kept as `null`, for its
- * own notice. The connection is opened only when there is something to read.
+ * own notice. The catalogue names a draft only with `catalogueDrafts` (the turn
+ * itself may read the drafts the caller reads), so every URI it lists is one the
+ * turn's `read_resource` reads. The connection is opened only when there is
+ * something to read.
  */
 async function readChatSkills(
-  openSkillsClient: () => Promise<ChatSkillsClient>,
+  openSkillsClient: (signal: AbortSignal) => Promise<ChatSkillsClient>,
   spaceId: string,
-  opts: { catalogue: boolean; chosen: readonly string[] },
+  opts: { catalogue: boolean; catalogueDrafts: boolean; chosen: readonly string[] },
 ): Promise<ChatSkillsRead> {
   const read: ChatSkillsRead = { contents: new Map(), catalogue: [] };
   if (!opts.catalogue && opts.chosen.length === 0) return read;
+  const signal = AbortSignal.timeout(SKILLS_READ_TIMEOUT_MS);
   let client: ChatSkillsClient;
   try {
-    client = await openSkillsClient();
+    client = await openSkillsClient(signal);
   } catch (err) {
     logger.warn("skills connection unavailable — the turn's skills left out", {
       err: String(err),
@@ -603,9 +614,15 @@ async function readChatSkills(
   }
   try {
     const list = (meta?: Record<string, unknown>) =>
-      client.listSkills(meta ? { meta } : {}).then(
+      client.listSkills(meta ? { meta, signal } : { signal }).then(
         ({ skills }) => entriesByPackage(skills, spaceId),
-        () => new Map<string, SkillEntry>(),
+        (err: unknown) => {
+          logger.warn("skills/list failed — its skills left out of the turn", {
+            definition: meta ? "draft" : "published",
+            err: String(err),
+          });
+          return new Map<string, ListedSkillEntry>();
+        },
       );
     const [published, drafts] = await Promise.all([
       list(),
@@ -613,10 +630,11 @@ async function readChatSkills(
     ]);
     if (opts.catalogue) {
       // A draft stands for its package's published version: one line per skill.
-      const listed = new Map([...published, ...drafts]);
+      const catalogueDrafts = opts.catalogueDrafts ? drafts : new Map<string, ListedSkillEntry>();
+      const listed = new Map([...published, ...catalogueDrafts]);
       read.catalogue = [...listed.keys()].sort().map((packageId) => {
         const entry = listed.get(packageId)!;
-        const served = servedAs(entry, drafts.has(packageId));
+        const served = servedAs(entry, catalogueDrafts.has(packageId));
         return {
           packageId,
           description: entry.frontmatter.description,
@@ -629,9 +647,15 @@ async function readChatSkills(
       opts.chosen.map(async (id) => {
         const entry = drafts.get(id) ?? published.get(id);
         if (!entry) return;
-        const content = await client.readResource({ uri: entry.uri }).then(
+        const content = await client.readResource({ uri: entry.uri }, { signal }).then(
           ({ contents }) => contents.find((item) => item.uri === entry.uri),
-          () => undefined,
+          (err: unknown) => {
+            logger.warn("resources/read of a chosen skill failed — left out", {
+              uri: entry.uri,
+              err: String(err),
+            });
+            return undefined;
+          },
         );
         if (!content) return;
         const served = servedAs(entry, drafts.has(id));
@@ -662,9 +686,11 @@ async function readChatSkills(
 }
 
 /** Whether `text` is the `SKILL.md` its entry lists: its UTF-8 bytes have the listed `digest`. */
-function isListedSkillMd(entry: SkillEntry, text: string): boolean {
+function isListedSkillMd(entry: ListedSkillEntry, text: string): boolean {
+  // A `dynamic` entry lists no digest to check the text against.
+  if (entry.resources === "dynamic") return false;
   const listed = entry.resources.find((resource) => resource.uri === entry.uri);
-  return listed?.digest === `sha256:${createHash("sha256").update(text, "utf8").digest("hex")}`;
+  return listed?.digest === skillFileDigest(text);
 }
 
 /**
@@ -672,7 +698,7 @@ function isListedSkillMd(entry: SkillEntry, text: string): boolean {
  * entry carries, a published skill to its `metadata.version` — or `null` for a
  * draft entry without one.
  */
-function servedAs(entry: SkillEntry, draft: boolean): SkillContent["served"] | null {
+function servedAs(entry: ListedSkillEntry, draft: boolean): SkillContent["served"] | null {
   if (draft) {
     const lockVersion = entry._meta?.[SKILL_LOCK_VERSION_META_KEY];
     return Number.isSafeInteger(lockVersion)
@@ -740,8 +766,8 @@ export async function buildCallerContextBlock(
     skills: ChatSkillSelection;
     /** Already loading; a rejection rejects the block. */
     enforced: Promise<readonly EnforcedChatSkill[]>;
-    /** Opened only when the turn lists or injects skills; closed once they are read. */
-    openSkillsClient: () => Promise<ChatSkillsClient>;
+    /** Opened only when the turn lists or injects skills, under `signal`; closed once they are read. */
+    openSkillsClient: (signal: AbortSignal) => Promise<ChatSkillsClient>;
   },
 ): Promise<{ text: string; injected: InjectedSkills }> {
   const { origin, headers, spaceId, user, deps, locale, capabilities, skills } = args;
@@ -760,6 +786,9 @@ export async function buildCallerContextBlock(
     readCallerContext(deps, origin, ctxHeaders),
     readChatSkills(args.openSkillsClient, spaceId, {
       catalogue: capabilities.readsSkills && !injects,
+      // The drafts the caller reads are the turn's only while the turn keeps the
+      // caller's `skills:write` (the authoring switch drops it).
+      catalogueDrafts: args.permissions.includes("skills:write"),
       chosen: injects ? skills.pinnedSkills : [],
     }),
     args.enforced,

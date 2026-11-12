@@ -9,7 +9,6 @@
  * `@appstrate/core/skill-uri`.
  */
 
-import { createHash } from "node:crypto";
 import {
   isValidSkillName,
   normalizeSkillMd,
@@ -21,6 +20,7 @@ import { parseScopedName, toSlug } from "@appstrate/core/naming";
 import {
   SKILL_MAX_FILES,
   SKILL_MAX_TOTAL_BYTES,
+  skillFileDigest,
   skillFileUri,
   type SkillAddress,
   type SkillEntry,
@@ -106,8 +106,23 @@ export function serveSkill(
   };
 }
 
-function sha256Digest(bytes: Uint8Array): string {
-  return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+/**
+ * The `SKILL.md` {@link serveSkill} serves from `stored`, with the served name:
+ * the text the chat injects and `resources/read` answers, or why the tree
+ * cannot be served.
+ */
+export function serveSkillMd(
+  packageId: string,
+  stored: Record<string, Uint8Array>,
+  version: string | null,
+): { ok: true; name: string; content: string } | { ok: false; reason: string } {
+  const served = serveSkill(packageId, stored, version);
+  if (!served.ok) return served;
+  return {
+    ok: true,
+    name: served.skill.name,
+    content: new TextDecoder("utf-8", { ignoreBOM: true }).decode(served.skill.files[SKILL_ENTRY]),
+  };
 }
 
 /** The SEP-2640 entry of a served skill: `SKILL.md` URI, frontmatter, every file with its digest. */
@@ -123,7 +138,7 @@ export function skillEntry(
       .sort()
       .map((path) => {
         const bytes = skill.files[path]!;
-        return { uri: uriOf(path), digest: sha256Digest(bytes), size: bytes.byteLength };
+        return { uri: uriOf(path), digest: skillFileDigest(bytes), size: bytes.byteLength };
       }),
   };
 }

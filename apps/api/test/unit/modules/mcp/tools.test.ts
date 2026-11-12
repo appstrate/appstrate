@@ -84,12 +84,15 @@ describe("mcp catalog", () => {
   });
 
   it("excludes the MCP server's own transport + discovery paths", () => {
+    const mcpPaths: string[] = [];
     for (const op of getCatalog().operations.values()) {
       // The per-org transport endpoint (`/api/mcp/o/:org`) must never be
       // surfaced as an invokable operation — recursive self-invocation.
-      expect(op.pathTemplate.startsWith("/api/mcp")).toBe(false);
+      if (op.pathTemplate.startsWith("/api/mcp")) mcpPaths.push(`${op.method} ${op.pathTemplate}`);
       expect(op.pathTemplate.startsWith("/.well-known/oauth-protected-resource")).toBe(false);
     }
+    // The skills listing alone: the chat's model lists skills on request through it.
+    expect(mcpPaths).toEqual(["GET /api/mcp/skills"]);
   });
 
   it("keeps the credential proxy out: `api_call` is its one MCP path", async () => {

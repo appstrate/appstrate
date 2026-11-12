@@ -23,7 +23,7 @@ import {
   UnauthorizedError,
 } from "@modelcontextprotocol/client";
 import { createCache } from "@appstrate/core/cache";
-import type { SkillEntry } from "@appstrate/core/skill-uri";
+import type { SkillEntry, SkillResource } from "@appstrate/core/skill-uri";
 import { readToolListPage } from "./tool-list.ts";
 import {
   ErrorCode,
@@ -158,13 +158,14 @@ export interface AppstrateMcpClient {
     options?: { signal?: AbortSignal; timeoutMs?: number },
   ): Promise<ReadResourceResult>;
   /**
-   * `skills/list` of the Skills extension (SEP-2640), `meta` sent as the request `_meta` (a
-   * provider parameter). Throws, with no partial list, on an answer that is not a list of entries.
+   * Every `skills/list` page of the Skills extension (SEP-2640), `meta` sent as each request's
+   * `_meta` (a provider parameter). Throws, with no partial list, on an answer that is not a list
+   * of entries, a server repeating its cursor, or one still paginating past {@link MAX_SKILL_PAGES}.
    */
   listSkills(options?: {
     meta?: Record<string, unknown>;
     signal?: AbortSignal;
-  }): Promise<{ skills: SkillEntry[] }>;
+  }): Promise<{ skills: ListedSkillEntry[] }>;
   close(): Promise<void>;
 }
 
@@ -607,31 +608,49 @@ async function walkTools(
   throw new Error(`tools/list did not end within ${MAX_TOOL_PAGES} pages`);
 }
 
-function isSkillEntry(value: unknown): value is SkillEntry {
-  const entry = value as Partial<SkillEntry> | null;
+/**
+ * A `skills/list` entry as any SEP-2640 server may send it: `resources` lists every file, or is
+ * `"dynamic"` when the server does not enumerate them.
+ */
+export type ListedSkillEntry = Omit<SkillEntry, "resources"> & {
+  resources: SkillResource[] | "dynamic";
+};
+
+const MAX_SKILL_PAGES = 64;
+
+function isSkillEntry(value: unknown): value is ListedSkillEntry {
+  const entry = value as Partial<ListedSkillEntry> | null;
   const frontmatter = entry?.frontmatter as Partial<SkillEntry["frontmatter"]> | undefined;
   return (
     typeof entry?.uri === "string" &&
     typeof frontmatter?.name === "string" &&
     typeof frontmatter.description === "string" &&
-    Array.isArray(entry.resources) &&
-    entry.resources.every(
-      (resource: Partial<SkillEntry["resources"][number]> | null) =>
-        typeof resource?.uri === "string" &&
-        typeof resource.digest === "string" &&
-        Number.isSafeInteger(resource.size) &&
-        (resource.size as number) >= 0,
-    )
+    (entry.resources === "dynamic" ||
+      (Array.isArray(entry.resources) &&
+        entry.resources.every(
+          (resource: Partial<SkillResource> | null) =>
+            typeof resource?.uri === "string" &&
+            typeof resource.digest === "string" &&
+            Number.isSafeInteger(resource.size) &&
+            (resource.size as number) >= 0,
+        )))
   );
 }
 
-/** The entries of a `skills/list` result; any malformed entry fails the whole list. */
-function readSkillEntries(raw: unknown): SkillEntry[] {
-  const skills = (raw as { skills?: unknown } | null)?.skills;
+/** One `skills/list` page; any malformed entry fails the whole list. */
+function readSkillPage(raw: unknown): { skills: ListedSkillEntry[]; nextCursor?: string } {
+  const page = raw as { skills?: unknown; nextCursor?: unknown } | null;
+  const skills = page?.skills;
   if (!Array.isArray(skills)) throw new Error("skills/list answered without a `skills` array");
   const malformed = skills.findIndex((entry) => !isSkillEntry(entry));
   if (malformed !== -1) throw new Error(`skills/list entry ${malformed} is not a skill entry`);
-  return skills as SkillEntry[];
+  if (page?.nextCursor !== undefined && typeof page.nextCursor !== "string") {
+    throw new Error("skills/list answered a `nextCursor` that is not a string");
+  }
+  return {
+    skills: skills as ListedSkillEntry[],
+    ...(page?.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
+  };
 }
 
 /** MCP 2026-07-28 `HeaderMismatch`. */
@@ -827,15 +846,32 @@ function buildClient(
     },
     async listSkills(options) {
       live();
-      const raw = await session.request(
-        "skills/list",
-        options?.meta ? { _meta: options.meta } : {},
-        {
-          ...signalOption(options?.signal),
-          ...(defaultTimeoutMs ? { timeout: defaultTimeoutMs } : {}),
-        },
-      );
-      return { skills: readSkillEntries(raw) };
+      const skills: ListedSkillEntry[] = [];
+      let cursor: string | undefined;
+      for (let n = 0; n < MAX_SKILL_PAGES; n++) {
+        const page = readSkillPage(
+          await session.request(
+            "skills/list",
+            {
+              ...(cursor === undefined ? {} : { cursor }),
+              ...(options?.meta ? { _meta: options.meta } : {}),
+            },
+            {
+              ...signalOption(options?.signal),
+              ...(defaultTimeoutMs ? { timeout: defaultTimeoutMs } : {}),
+            },
+          ),
+        );
+        skills.push(...page.skills);
+        if (page.nextCursor === undefined) return { skills };
+        if (page.nextCursor === cursor) {
+          throw new Error(
+            `skills/list repeated its cursor '${cursor}': the listing would never end`,
+          );
+        }
+        cursor = page.nextCursor;
+      }
+      throw new Error(`skills/list did not end within ${MAX_SKILL_PAGES} pages`);
     },
     async close() {
       if (closed) return;

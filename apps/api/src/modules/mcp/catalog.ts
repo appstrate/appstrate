@@ -78,15 +78,23 @@ function extractHeaderParams(node: OperationNode): string[] {
 export const CREDENTIAL_PROXY_PATH = "/api/credential-proxy/proxy";
 
 /**
- * Kept out of the catalog: the MCP module's own routes and the transport's RFC
- * 9728 well-known (no recursive self-invocation; the endpoint serves skills
- * through the Skills extension, not as operations), the spec document and its viewer, which
+ * The one MCP module route in the catalog: `listServedSkills`, the entries of
+ * `skills/list` with their `skill://` URIs, which the chat's model lists on the
+ * user's request before loading one with `read_resource`.
+ */
+const CATALOGUED_MCP_PATH = "/api/mcp/skills";
+
+/**
+ * Kept out of the catalog: the MCP module's own routes but
+ * {@link CATALOGUED_MCP_PATH} and the transport's RFC 9728 well-known (no
+ * recursive self-invocation; the endpoint serves skills through the Skills
+ * extension, not as operations), the spec document and its viewer, which
  * `describe_operation` already serves piecewise, and the credential proxy,
  * which the `api_call` tool alone reaches (`connection-tools.ts`).
  */
 function isExcludedPath(pathTemplate: string): boolean {
   return (
-    pathTemplate.startsWith("/api/mcp/") ||
+    (pathTemplate.startsWith("/api/mcp/") && pathTemplate !== CATALOGUED_MCP_PATH) ||
     pathTemplate.startsWith("/.well-known/oauth-protected-resource") ||
     pathTemplate === "/api/openapi.json" ||
     pathTemplate === "/api/docs" ||

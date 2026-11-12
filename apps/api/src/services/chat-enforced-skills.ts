@@ -15,7 +15,7 @@ import { activePackagesFilter, latestTagJoin } from "./space-packages.ts";
 import { skillFileUri } from "@appstrate/core/skill-uri";
 import { readPackageSnapshot, resolvePackageFileValidator } from "./package-files.ts";
 import { versionArtifactUnavailable } from "./package-versions.ts";
-import { serveSkill, SKILL_ENTRY } from "./served-skill.ts";
+import { serveSkillMd, SKILL_ENTRY } from "./served-skill.ts";
 
 /** The space's ACTIVE flagged skills, sorted by id, named from their `latest` published version. */
 export async function listEnforcedChatSkills(
@@ -63,14 +63,14 @@ async function readServedSkillMd(
     draftContent: null,
   };
   const { files } = await readPackageSnapshot(pkg, await resolvePackageFileValidator(pkg, version));
-  const served = serveSkill(packageId, files, version);
+  const served = serveSkillMd(packageId, files, version);
   if (!served.ok) {
     throw versionArtifactUnavailable(packageId, version, `skill to serve (${served.reason})`);
   }
-  const { name, files: servedFiles } = served.skill;
+  const { name, content } = served;
   return {
     uri: skillFileUri({ spaceId, packageId, definition: "published", name, path: SKILL_ENTRY }),
-    content: new TextDecoder("utf-8", { ignoreBOM: true }).decode(servedFiles[SKILL_ENTRY]),
+    content,
   };
 }
 

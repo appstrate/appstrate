@@ -2202,7 +2202,7 @@ export interface paths {
         };
         /**
          * List skills as the MCP Skills extension serves them
-         * @description The entries of `skills/list`: the published definition of each active skill of the space that the caller may read and the server can serve whole. With `definition=draft`, the drafts of the space that the caller may read (only a caller who may write a package reads its draft), at their `@draft` URIs; `skills/list` never holds a draft. Serves `appstrate code sync` and reflects the MCP Skills extension (SEP-2640) of the MCP endpoint: same server function, same entries, same bytes, for the space `X-Space-Id` names. Requires `skills:read` in that space. Rate-limited to 50 requests/minute.
+         * @description The entries of `skills/list`: the published definition of each active skill of the space that the caller may read and the server can serve whole. With `definition=draft`, the drafts of the space that the caller may read (only a caller who may write a package reads its draft), at their `@draft` URIs, as `skills/list` lists them with the request `_meta` `{"dev.appstrate/definition": "draft"}`. Serves `appstrate code sync` and reflects the MCP Skills extension (SEP-2640) of the MCP endpoint: same server function, same entries, same bytes, for the space `X-Space-Id` names. Requires `skills:read` in that space. Rate-limited to 50 requests/minute.
          */
         get: operations["listServedSkills"];
         put?: never;
@@ -27168,7 +27168,7 @@ export interface operations {
             /** @description The caller lacks the package type's `configure` grant in this space — for a skill, `skills:write`. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Enforcing the skill in the chat is refused: it has no published version (`no_published_version`), the space already enforces the maximum number of skills (`enforced_skills_limit`, the cap in the `limit` extension), or the enforced skills' published `SKILL.md` bodies would exceed the chat's skills budget (`enforced_skills_budget`, with `budget` and `total` extensions). Nothing in the patch is written. */
+            /** @description Enforcing the skill in the chat is refused: it has no published version (`no_published_version`), the space already enforces the maximum number of skills (`enforced_skills_limit`, the cap in the `limit` extension), the latest published version of the skill, or of another skill already enforced here, cannot be served as an Agent Skills skill (`skill_not_servable`), or the enforced skills' `SKILL.md` bodies, as the chat injects them, would exceed the chat's skills budget (`enforced_skills_budget`, with `budget` and `total` extensions). Nothing in the patch is written. */
             409: {
                 headers: {
                     [name: string]: unknown;

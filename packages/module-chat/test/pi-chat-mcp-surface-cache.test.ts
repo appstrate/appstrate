@@ -12,6 +12,11 @@
 
 import { describe, expect, it } from "bun:test";
 import type { ExtensionAPI } from "@appstrate/runner-pi";
+import {
+  RESOURCE_BLOB_MAX_BYTES,
+  RESOURCE_OVERSIZED_NOTE,
+  RESOURCE_TEXT_MAX_BYTES,
+} from "@appstrate/mcp-transport";
 import { buildPlatformMcpTools } from "../src/pi-chat/mcp-tools.ts";
 import {
   MCP_SURFACE_CACHE_MAX_ENTRIES,
@@ -98,6 +103,22 @@ function mcpStub() {
       const { uri } = msg.params as { uri: string };
       if (uri.endsWith("/data.bin")) {
         return reply({ contents: [{ uri, mimeType: "application/octet-stream", blob: "AP8=" }] });
+      }
+      // At and one byte over the inline bounds the platform's file reads apply.
+      const sized = /\/(text|blob)-(\d+)$/.exec(uri);
+      if (sized) {
+        const bytes = Number(sized[2]);
+        return reply({
+          contents: [
+            sized[1] === "text"
+              ? { uri, mimeType: "text/plain", text: "é".repeat(bytes / 2) }
+              : {
+                  uri,
+                  mimeType: "application/octet-stream",
+                  blob: Buffer.alloc(bytes).toString("base64"),
+                },
+          ],
+        });
       }
       if (uri.endsWith("/SKILL.md")) {
         return reply({
@@ -427,6 +448,39 @@ describe("read_resource", () => {
         blob: "AP8=",
       });
       expect(stub.count("resources/read")).toBe(2);
+    } finally {
+      await turn.close();
+    }
+  });
+
+  it("returns a content over the file reads' inline bounds as its size and a note", async () => {
+    const stub = mcpStub();
+    const turn = await buildTurn(stub, "alpha", undefined);
+    try {
+      const read = register(turn.extensionFactories).find((t) => t.name === "read_resource")!;
+      const at = (path: string) => SKILL.replace("SKILL.md", path);
+      const text = async (path: string) =>
+        (await read.execute("call", { uri: at(path) })).content[0]!.text as string;
+      // Text is measured in UTF-8 bytes: `é` is two.
+      expect(await text(`text-${RESOURCE_TEXT_MAX_BYTES}`)).toBe(
+        "é".repeat(RESOURCE_TEXT_MAX_BYTES / 2),
+      );
+      expect(JSON.parse(await text(`text-${RESOURCE_TEXT_MAX_BYTES + 2}`))).toEqual({
+        uri: at(`text-${RESOURCE_TEXT_MAX_BYTES + 2}`),
+        mimeType: "text/plain",
+        size: RESOURCE_TEXT_MAX_BYTES + 2,
+        note: RESOURCE_OVERSIZED_NOTE,
+      });
+      // A blob is measured in raw bytes, not base64 characters.
+      expect(JSON.parse(await text(`blob-${RESOURCE_BLOB_MAX_BYTES}`)).blob).toBe(
+        Buffer.alloc(RESOURCE_BLOB_MAX_BYTES).toString("base64"),
+      );
+      expect(JSON.parse(await text(`blob-${RESOURCE_BLOB_MAX_BYTES + 2}`))).toEqual({
+        uri: at(`blob-${RESOURCE_BLOB_MAX_BYTES + 2}`),
+        mimeType: "application/octet-stream",
+        size: RESOURCE_BLOB_MAX_BYTES + 2,
+        note: RESOURCE_OVERSIZED_NOTE,
+      });
     } finally {
       await turn.close();
     }

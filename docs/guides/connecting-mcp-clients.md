@@ -254,10 +254,11 @@ the `resources` capability. Results carry no cache attributes.
   `size` in bytes.
 - **URIs.** `skill://<spaceId>/<scope>/<package-name>/<name>/<path>` for the
   published definition, where `<scope>` drops the `@` and `<name>` is the
-  frontmatter `name` of the served `SKILL.md`. A draft is never listed: whoever
-  may write the package reads it at
-  `skill://<spaceId>/<scope>/<package-name>@draft/<name>/SKILL.md` through
-  `skills/get` and `resources/read`.
+  frontmatter `name` of the served `SKILL.md`. A draft lives at
+  `skill://<spaceId>/<scope>/<package-name>@draft/<name>/SKILL.md`: whoever
+  may write the package reads it through `skills/get` and `resources/read`, and
+  `skills/list` lists it only with the `dev.appstrate/definition` request
+  `_meta` above.
 - **Served files.** The skill is an Agent Skills directory: the package
   manifest and signature record are dropped, and the `name` line of `SKILL.md`
   is set to the served name when the stored one is not a valid Agent Skills
@@ -284,8 +285,10 @@ the `resources` capability. Results carry no cache attributes.
   `GET /api/mcp/skills` (the entries of `skills/list`; with
   `?definition=draft`, the drafts you may read, at their `@draft` URIs) and
   `GET /api/mcp/skills/archive?uri=` (a ZIP of every file `resources/read`
-  serves for the skill whose `SKILL.md` is at `uri`). These
-  routes are not operations of the MCP catalog.
+  serves for the skill whose `SKILL.md` is at `uri`). The list route is the
+  operation `listServedSkills` of the MCP catalog, which `invoke_operation`
+  reaches (the chat's model lists skills with it on request); the archive
+  route is not an operation of the catalog.
 
 ## The tool surface
 

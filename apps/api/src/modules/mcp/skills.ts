@@ -181,6 +181,10 @@ export function buildSkillServer(ctx: SkillProviderContext): SkillServer {
     }
   }
 
+  const isInjectedDraftChanged = (err: unknown): boolean =>
+    err instanceof McpError &&
+    (err.data as { code?: unknown } | undefined)?.code === INJECTED_DRAFT_CHANGED;
+
   /** The skill a URI of a reached space names, with the served name it carries. */
   async function resolve(address: SkillAddress | null): Promise<Served | null> {
     if (!address || !ctx.spaceIds.includes(address.spaceId)) return null;
@@ -218,7 +222,11 @@ export function buildSkillServer(ctx: SkillProviderContext): SkillServer {
       ),
     );
     const loaded = await mapWithConcurrency(listed.flat(), LIST_CONCURRENCY, (skill) =>
-      load(skill.spaceId, skill.packageId, definition),
+      // A changed injected draft refuses its own reads explicitly; the list leaves it out.
+      load(skill.spaceId, skill.packageId, definition).catch((err: unknown) => {
+        if (isInjectedDraftChanged(err)) return null;
+        throw err;
+      }),
     );
     return loaded.filter((served): served is Served => served !== null).map(servedEntry);
   };

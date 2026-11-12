@@ -175,6 +175,64 @@ describe("AppstrateMcpClient.listSkills", () => {
     }
   });
 
+  /** {@link skillsFetch}, with `skills/list` answered by `page(params)` instead. */
+  const pagedFetch = (page: (params: Record<string, unknown>) => unknown): typeof fetch => {
+    const server = skillsFetch(skills);
+    return (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      const text = await request.clone().text();
+      const message = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+      if (message.method !== "skills/list") return server(request);
+      const result = page((message.params as Record<string, unknown>) ?? {});
+      return Response.json({ jsonrpc: "2.0", id: message.id, result });
+    }) as typeof fetch;
+  };
+
+  it("follows `nextCursor` to the last page, sending `meta` on each", async () => {
+    const seen: unknown[] = [];
+    const second = { ...ENTRY, uri: ENTRY.uri.replace("tone", "other") };
+    const client = await createMcpHttpClient("http://mcp.test/mcp", {
+      era: "legacy",
+      fetch: pagedFetch((params) => {
+        seen.push(params);
+        return params.cursor === "p2"
+          ? { skills: [second] }
+          : { skills: [ENTRY], nextCursor: "p2" };
+      }),
+    });
+    try {
+      expect(await client.listSkills({ meta: { k: "v" } })).toEqual({ skills: [ENTRY, second] });
+      expect(seen).toEqual([{ _meta: { k: "v" } }, { cursor: "p2", _meta: { k: "v" } }]);
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("refuses a server repeating its cursor, with no partial list", async () => {
+    const client = await createMcpHttpClient("http://mcp.test/mcp", {
+      era: "legacy",
+      fetch: pagedFetch(() => ({ skills: [ENTRY], nextCursor: "again" })),
+    });
+    try {
+      await expect(client.listSkills()).rejects.toThrow("skills/list repeated its cursor 'again'");
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("accepts an entry whose `resources` is `dynamic`", async () => {
+    const dynamic = { ...ENTRY, resources: "dynamic" };
+    const client = await createMcpHttpClient("http://mcp.test/mcp", {
+      era: "legacy",
+      fetch: pagedFetch(() => ({ skills: [ENTRY, dynamic] })),
+    });
+    try {
+      expect(await client.listSkills()).toEqual({ skills: [ENTRY, dynamic] });
+    } finally {
+      await client.close();
+    }
+  });
+
   it("fails the whole list on a malformed entry", async () => {
     const client = await createMcpHttpClient("http://mcp.test/mcp", {
       era: "legacy",

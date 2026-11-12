@@ -277,8 +277,12 @@ describe("enforcing a skill in the chat", () => {
 
   it("409s when the published SKILL.md bodies would exceed the budget", async () => {
     const half = Math.floor(CHAT_SKILLS_CONTENT_BUDGET_CHARS / 2);
-    await seedSkill("@enforce/big", { content: "a".repeat(half + 1), enforced: true });
-    await seedSkill("@enforce/also-big", { content: "b".repeat(half) });
+    const head = (name: string) => `---\nname: ${name}\ndescription: A skill.\n---\n`;
+    await seedSkill("@enforce/big", {
+      content: head("big") + "a".repeat(half + 1),
+      enforced: true,
+    });
+    await seedSkill("@enforce/also-big", { content: head("also-big") + "b".repeat(half) });
 
     await expectProblem(await patch("@enforce/also-big", { chat_enforced: true }), 409, {
       code: "enforced_skills_budget",
@@ -296,7 +300,7 @@ describe("enforcing a skill in the chat", () => {
     // …a smaller published version does.
     await seedPublishedVersion("@enforce/also-big", "1.0.1", {
       manifest: { name: "@enforce/also-big", version: "1.0.1", type: "skill" },
-      content: "b".repeat(half - 1),
+      content: head("also-big") + "b".repeat(half - 1000),
     });
     expect((await patch("@enforce/also-big", { chat_enforced: true })).status).toBe(200);
   });
@@ -317,6 +321,15 @@ describe("enforcing a skill in the chat", () => {
       code: "enforced_skills_budget",
     });
     expect(await storedFlag("@enforce/other")).toBe(false);
+  });
+
+  it("409s a skill whose latest version cannot be served, and writes nothing", async () => {
+    // No frontmatter `description`: the chat could not inject it as a skill.
+    await seedSkill("@enforce/unservable", { content: "---\nname: unservable\n---\nBody." });
+    await expectProblem(await patch("@enforce/unservable", { chat_enforced: true }), 409, {
+      code: "skill_not_servable",
+    });
+    expect(await storedFlag("@enforce/unservable")).toBe(false);
   });
 
   it("422s when the skill's latest archive cannot be read, and writes nothing", async () => {

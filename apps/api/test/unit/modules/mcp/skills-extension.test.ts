@@ -527,4 +527,79 @@ describe("a draft the chat turn injected that changed since", () => {
       await p.close();
     }
   });
+
+  it("is left out of skills/list, which lists the other skills", async () => {
+    const changed = conflict("injected_draft_changed", "The draft of '@acme/tone' changed.");
+    const server = buildSkillServer({
+      spaceIds: [SPACE],
+      listActiveSkillIds: async () => ["@acme/tone", "@acme/other"],
+      readSkill: async (_spaceId, packageId, definition) => ({
+        packageId,
+        version: null,
+        integrity: null,
+        definition,
+        readSnapshot: () =>
+          packageId === "@acme/tone"
+            ? Promise.reject(changed)
+            : Promise.resolve({
+                files: { "SKILL.md": encode("---\nname: other\ndescription: Other.\n---\n") },
+                snapshotId: "s",
+                lockVersion: 3,
+              }),
+      }),
+      logUnservable: () => {},
+      cache: createServedSkillCache(1024),
+    });
+    const p = await createInProcessPair([], {
+      resources: { read: (u) => server.read(u) },
+      skills: server.provider,
+    });
+    try {
+      const listed = await p.client.request(
+        { method: "skills/list", params: { _meta: { [SKILL_DEFINITION_META_KEY]: "draft" } } },
+        ResultSchema,
+      );
+      expect((listed.skills as SkillEntry[]).map((entry) => entry.uri)).toEqual([
+        "skill://spc_1/acme/other@draft/other/SKILL.md",
+      ]);
+    } finally {
+      await p.close();
+    }
+  });
+});
+
+describe("a read failure that is not an access refusal", () => {
+  it("propagates as an error, never as a skill not found", async () => {
+    const server = buildSkillServer({
+      spaceIds: [SPACE],
+      listActiveSkillIds: async () => ["@acme/tone"],
+      readSkill: async () => {
+        throw new Error("storage unreachable");
+      },
+      logUnservable: () => {},
+      cache: createServedSkillCache(1024),
+    });
+    const p = await createInProcessPair([], {
+      resources: { read: (u) => server.read(u) },
+      skills: server.provider,
+    });
+    try {
+      const uri = "skill://spc_1/acme/tone/tone/SKILL.md";
+      const failure = (call: Promise<unknown>): Promise<unknown> =>
+        call.then(
+          () => undefined,
+          (e: unknown) => e,
+        );
+      const failures = await Promise.all([
+        failure(p.client.request({ method: "skills/list", params: {} }, ResultSchema)),
+        failure(p.client.request({ method: "skills/get", params: { uri } }, ResultSchema)),
+        failure(p.client.readResource({ uri })),
+      ]);
+      for (const err of failures) {
+        expect(String((err as Error | undefined)?.message)).toContain("storage unreachable");
+      }
+    } finally {
+      await p.close();
+    }
+  });
 });

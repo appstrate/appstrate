@@ -13,16 +13,18 @@ native skill directory is not an option.
 Each conversation has a skill mode (`chat_sessions.skill_mode`) and a set of
 chosen skills (`chat_sessions.pinned_skills`):
 
-| Mode             | The model sees                          | Skill tools on the turn                             |
-| ---------------- | --------------------------------------- | --------------------------------------------------- |
-| `auto` (default) | the space's skills, one line each       | `read_resource`                                     |
-| `manual`         | the chosen skills in full, no listing   | `read_resource`, `listSkills` on the user's request |
-| `strict`         | the chosen skills in full, nothing else | `read_resource` on the injected skills only         |
+| Mode             | The model sees                          | Skill tools on the turn                                   |
+| ---------------- | --------------------------------------- | --------------------------------------------------------- |
+| `auto` (default) | the space's skills, one line each       | `read_resource`                                           |
+| `manual`         | the chosen skills in full, no listing   | `read_resource`, `listServedSkills` on the user's request |
+| `strict`         | the chosen skills in full, nothing else | `read_resource` on the injected skills only               |
 
 **auto** is progressive disclosure, as in the Agent Skills spec: one line per
 skill (id, version, `skill://` URI, description) under `## Skills`, the
-entries of `skills/list` (the draft's entry first when the caller may read it),
-uncapped; the model loads a body on demand with the chat's `read_resource`
+entries of `skills/list` (the draft's entry first when the turn itself may
+read it: it keeps the caller's `skills:write`, which the authoring switch
+drops; otherwise the published entry, so every URI listed is one the turn's
+`read_resource` reads), uncapped; the model loads a body on demand with the chat's `read_resource`
 tool, `resources/read` on the platform MCP server at that URI (a file of the
 skill: the URI with `SKILL.md` replaced by the file's path). `resources/read`
 is served on every MCP connection, so loading needs no dispatch: `readsSkills`
@@ -56,7 +58,7 @@ At most `MAX_PINNED_SKILLS` (5) chosen skills: every one is in every turn.
 
 **strict** also withholds every `skills:*` from the turn's permissions
 (`turnPermissions`, the mechanism the agent-authoring switch uses), so the MCP
-surface derived from the route guards drops `listSkills` and `getSkill`,
+surface derived from the route guards drops `listSkills`, `getSkill` and `listServedSkills`,
 `read_resource` reads only the skills injected in the turn (named in the turn's
 signed MCP bearer, see `docs/plans/chat-enforced-skills.md`), declaring a skill in an agent (`dependencies.skills`, checked by
 `assertPackageDependenciesAccessible`) is refused, and so is writing one — a

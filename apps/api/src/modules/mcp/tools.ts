@@ -32,6 +32,9 @@ import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import {
   notifyDetached,
+  RESOURCE_BLOB_MAX_BYTES,
+  RESOURCE_OVERSIZED_NOTE,
+  RESOURCE_TEXT_MAX_BYTES,
   type AppstrateRequestExtra,
   type AppstrateResourceProvider,
   type AppstrateToolDefinition,
@@ -82,7 +85,6 @@ import {
   asRecord,
   asString,
   dispatchHeaders,
-  RESOURCE_BLOB_MAX_BYTES,
   jsonResult,
   refusalResult,
   ToolRefusal,
@@ -266,13 +268,6 @@ const MAX_RESPONSE_CHARS = 100_000;
 // dependency-free helpers from `@appstrate/core/file-uri` (imported above)
 // — the tool layer stays free of the files service's DB/storage graph
 // while sharing one contract.
-
-/**
- * Ceiling on inlining a file's bytes into a `resources/read` text block.
- * Above it (or for a non-textual mime) the read returns metadata only — MCP has
- * no partial-content standard, so we keep it simple.
- */
-const RESOURCE_TEXT_MAX_BYTES = 1024 * 1024;
 
 /** A published run file → the MCP `resource_link` content block (spec 2025-06-18). */
 function fileResourceLink(doc: RunAndWaitFile): {
@@ -1724,8 +1719,7 @@ function buildFileResourceReader(ctx: McpToolContext): {
         canonicalUri,
         row,
         capabilities,
-        "Content omitted — it exceeds the inline size limit (1 MiB text / 700 KiB binary). " +
-          "Fetch it from the content_url.",
+        `${RESOURCE_OVERSIZED_NOTE} Fetch it from the content_url.`,
       );
     },
   };

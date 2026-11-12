@@ -18,7 +18,13 @@
  */
 
 import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
-import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
+import {
+  createMcpHttpClient,
+  RESOURCE_BLOB_MAX_BYTES,
+  RESOURCE_OVERSIZED_NOTE,
+  RESOURCE_TEXT_MAX_BYTES,
+  type AppstrateMcpClient,
+} from "@appstrate/mcp-transport";
 import { unsafeSchema, type ExtensionAPI, type ExtensionFactory } from "@appstrate/runner-pi";
 import type { UIMessageChunk } from "ai";
 import { stripMcpToolPrefix } from "./ui-stream-mapper.ts";
@@ -379,9 +385,10 @@ function makeForwardExtension(
 /**
  * `read_resource` Pi tool: `resources/read` on the platform MCP server, the
  * only server it reaches — how the model reads a skill's `SKILL.md` or one of
- * its files by its `skill://` URI (SEP-2640). Each content is returned whole:
- * its text, or a binary file's base64 in `blob`. A refusal reaches the model
- * as the server's error.
+ * its files by its `skill://` URI (SEP-2640). Each content is returned whole
+ * within the platform's inline bounds ({@link inlineResourceContent}): its
+ * text, or a binary file's base64 in `blob`. A refusal reaches the model as the
+ * server's error.
  */
 function makeReadResourceExtension(
   getClient: () => Promise<AppstrateMcpClient>,
@@ -393,7 +400,7 @@ function makeReadResourceExtension(
       name: READ_RESOURCE_TOOL,
       label: READ_RESOURCE_TOOL,
       description:
-        "Read a resource of the Appstrate platform by its URI, such as a skill's SKILL.md or one of its files (`skill://…`). Returns each content whole: its text, or a binary file's base64 in `blob`.",
+        "Read a resource of the Appstrate platform by its URI, such as a skill's SKILL.md or one of its files (`skill://…`). Returns each content whole: its text up to 1 MiB, or a binary file's base64 in `blob` up to 700 KiB. A larger content returns its size and a note instead.",
       parameters: unsafeSchema<{ uri: string }>({
         type: "object",
         properties: {
@@ -414,20 +421,41 @@ function makeReadResourceExtension(
         }
         const client = await untilAborted(getClient(), callSignal);
         const result = await client.readResource({ uri }, { signal: callSignal });
-        const content = result.contents.map((c) => {
-          const { text, blob } = c as { text?: unknown; blob?: unknown };
-          return {
-            type: "text" as const,
-            text:
-              typeof text === "string"
-                ? text
-                : JSON.stringify({ uri: c.uri, mimeType: c.mimeType, blob }),
-          };
-        });
+        const content = result.contents.map((c) => ({
+          type: "text" as const,
+          text: inlineResourceContent(c),
+        }));
         return withTurnBudgetNote({ content, details: { uri } }, turnBudget);
       },
     });
   };
+}
+
+/**
+ * One `resources/read` content as `read_resource` returns it: the text, or
+ * `{ uri, mimeType, blob }`, within the bounds the platform's file reads
+ * apply; above them, `{ uri, mimeType, size, note }` (`size` in bytes).
+ */
+function inlineResourceContent(
+  content: Awaited<ReturnType<AppstrateMcpClient["readResource"]>>["contents"][number],
+): string {
+  if ("text" in content && typeof content.text === "string") {
+    const size = Buffer.byteLength(content.text, "utf8");
+    if (size <= RESOURCE_TEXT_MAX_BYTES) return content.text;
+    return JSON.stringify({
+      uri: content.uri,
+      mimeType: content.mimeType,
+      size,
+      note: RESOURCE_OVERSIZED_NOTE,
+    });
+  }
+  const blob = "blob" in content && typeof content.blob === "string" ? content.blob : "";
+  const size = Buffer.from(blob, "base64").byteLength;
+  return JSON.stringify(
+    size <= RESOURCE_BLOB_MAX_BYTES
+      ? { uri: content.uri, mimeType: content.mimeType, blob }
+      : { uri: content.uri, mimeType: content.mimeType, size, note: RESOURCE_OVERSIZED_NOTE },
+  );
 }
 
 /**

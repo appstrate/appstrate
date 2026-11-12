@@ -23,14 +23,15 @@ comes back enforced when switched on again. It shows up on the wire as
   `skills:write` in the space. It runs before the body is parsed.
 - **Refusals:**
 
-  | Status | Code                           | When                                                                                               |
-  | ------ | ------------------------------ | -------------------------------------------------------------------------------------------------- |
-  | 400    | `chat_enforced_not_skill`      | the package is not a skill                                                                         |
-  | 404    | `not_found`                    | the package is not placed in the space                                                             |
-  | 409    | `no_published_version`         | the skill has no `latest` published version                                                        |
-  | 409    | `enforced_skills_limit`        | more than `MAX_ENFORCED_CHAT_SKILLS` (3) flagged rows in the space, deactivated ones included      |
-  | 409    | `enforced_skills_budget`       | the flagged skills' published `SKILL.md` bodies exceed `CHAT_SKILLS_CONTENT_BUDGET_CHARS` (64 000) |
-  | 422    | `version_artifact_unavailable` | the published archive of this skill, or of another skill already flagged here, cannot be read      |
+  | Status | Code                           | When                                                                                            |
+  | ------ | ------------------------------ | ----------------------------------------------------------------------------------------------- |
+  | 400    | `chat_enforced_not_skill`      | the package is not a skill                                                                      |
+  | 404    | `not_found`                    | the package is not placed in the space                                                          |
+  | 409    | `no_published_version`         | the skill has no `latest` published version                                                     |
+  | 409    | `enforced_skills_limit`        | more than `MAX_ENFORCED_CHAT_SKILLS` (3) flagged rows in the space, deactivated ones included   |
+  | 409    | `skill_not_servable`           | the `latest` version of this skill, or of another skill already flagged here, cannot be served  |
+  | 409    | `enforced_skills_budget`       | the flagged skills' served `SKILL.md` bodies exceed `CHAT_SKILLS_CONTENT_BUDGET_CHARS` (64 000) |
+  | 422    | `version_artifact_unavailable` | the published archive of this skill, or of another skill already flagged here, cannot be read   |
 
 - **Setting `true`:** `updatePlacementSettings` runs it in one transaction
   under the advisory lock `space-chat-enforced:<spaceId>`. The flag is written

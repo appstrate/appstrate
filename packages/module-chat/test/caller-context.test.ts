@@ -999,7 +999,8 @@ const sha256 = (text: string) => `sha256:${createHash("sha256").update(text).dig
  * `drafts`, each `SKILL.md` with the digest of its text in `texts`. It serves
  * `texts` by URI, or `savedAfterList` when a URI is there (the skill changed
  * between the list and the read), and `blobs` as base64 (a missing URI is
- * refused). Records each call, and whether it was closed.
+ * refused). Records each call, whether it was closed, and the signal each
+ * hop carried.
  */
 function fakeSkillsClient(opts: {
   published: SkillEntry[];
@@ -1009,6 +1010,7 @@ function fakeSkillsClient(opts: {
   blobs?: Record<string, string>;
 }) {
   const calls: string[] = [];
+  const signals: (AbortSignal | undefined)[] = [];
   const listed = (entries: SkillEntry[]): SkillEntry[] =>
     entries.map((entry) => {
       const text = opts.texts[entry.uri];
@@ -1024,11 +1026,13 @@ function fakeSkillsClient(opts: {
     });
   const client: ChatSkillsClient = {
     listSkills: async (options) => {
+      signals.push(options?.signal);
       const draft = options?.meta?.[SKILL_DEFINITION_META_KEY] === "draft";
       calls.push(draft ? "skills/list draft" : "skills/list");
       return { skills: listed(draft ? (opts.drafts ?? []) : opts.published) };
     },
-    readResource: async ({ uri }) => {
+    readResource: async ({ uri }, options) => {
+      signals.push(options?.signal);
       calls.push(`resources/read ${uri}`);
       const blob = opts.blobs?.[uri];
       if (blob !== undefined) return { contents: [{ uri, mimeType: "text/markdown", blob }] };
@@ -1040,7 +1044,14 @@ function fakeSkillsClient(opts: {
       calls.push("close");
     },
   };
-  return { open: async () => client, calls };
+  return {
+    open: async (signal: AbortSignal) => {
+      signals.push(signal);
+      return client;
+    },
+    calls,
+    signals,
+  };
 }
 
 describe("buildCallerContextBlock", () => {
@@ -1121,6 +1132,10 @@ describe("buildCallerContextBlock", () => {
       "skills/list",
       "skills/list draft",
     ]);
+    // The connect and every hop carry the read's one deadline.
+    expect(skills.signals).toHaveLength(6);
+    expect(skills.signals[0]).toBeInstanceOf(AbortSignal);
+    expect(new Set(skills.signals).size).toBe(1);
     // A draft is named as one: it has no version.
     expect(out).toContain(
       `<skill id="@acme/a" uri="${A}" definition="draft">\na draft body\n</skill>`,
@@ -1224,6 +1239,34 @@ describe("buildCallerContextBlock", () => {
     expect(injected).toEqual({ spaceId: "spc_1", skills: {} });
   });
 
+  it("gives a chosen published skill whose SKILL.md differs from its listed digest its could-not-be-read notice", async () => {
+    const A = "skill://spc_1/acme/a/a/SKILL.md";
+    const skills = fakeSkillsClient({
+      published: [skillEntry(A, "1.0.0")],
+      texts: { [A]: "a body" },
+      savedAfterList: { [A]: "another body" },
+    });
+    const { deps } = fakeDeps(() => Response.json({ user: { name: "Ada" } }));
+    const { text: out, injected } = await buildCallerContextBlock(
+      fakeContext({ orgRole: "member" }),
+      {
+        origin: "http://127.0.0.1:3000",
+        headers: {},
+        spaceId: "spc_1",
+        user,
+        deps,
+        capabilities: caps(BUILDER),
+        permissions: ["mcp:read", "mcp:invoke"],
+        skills: { skillMode: "manual", pinnedSkills: ["@acme/a"] },
+        enforced: NO_ENFORCED,
+        openSkillsClient: skills.open,
+      },
+    );
+    expect(out).not.toContain("another body");
+    expect(out).toContain("`@acme/a` was chosen for this conversation but could not be read.");
+    expect(injected).toEqual({ spaceId: "spc_1", skills: {} });
+  });
+
   it("lists the space's skills in auto over the skills connection, draft first, reading none", async () => {
     const skills = fakeSkillsClient({
       published: [
@@ -1249,7 +1292,8 @@ describe("buildCallerContextBlock", () => {
         user,
         deps,
         capabilities: caps(BUILDER),
-        permissions: ["mcp:read", "mcp:invoke"],
+        // The turn keeps `skills:write`: it reads the drafts the caller reads.
+        permissions: ["mcp:read", "mcp:invoke", "skills:read", "skills:write"],
         skills: { skillMode: "auto", pinnedSkills: ["@acme/a"] },
         enforced: NO_ENFORCED,
         openSkillsClient: skills.open,
@@ -1264,6 +1308,32 @@ describe("buildCallerContextBlock", () => {
     expect(out).not.toContain("<skill");
     expect(injected).toEqual({ spaceId: "spc_1", skills: {} });
 
+    // Without `skills:write` (authoring off), the turn's `read_resource` refuses a
+    // draft URI: the catalogue lists the published entry, and no unpublished draft.
+    const readOnly = fakeSkillsClient({
+      published: [skillEntry("skill://spc_1/acme/a/a/SKILL.md", "1.0.0")],
+      drafts: [
+        skillEntry("skill://spc_1/acme/a@draft/a/SKILL.md", null, 7),
+        skillEntry("skill://spc_1/acme/new@draft/new/SKILL.md", null, 1),
+      ],
+      texts: {},
+    });
+    const readOnlyOut = await blockText(fakeContext({ orgRole: "member" }), {
+      origin: "http://127.0.0.1:3000",
+      headers: {},
+      spaceId: "spc_1",
+      user,
+      deps,
+      capabilities: caps(BUILDER),
+      permissions: ["mcp:read", "mcp:invoke", "skills:read"],
+      skills: { skillMode: "auto", pinnedSkills: [] },
+      enforced: NO_ENFORCED,
+      openSkillsClient: readOnly.open,
+    });
+    expect(readOnlyOut).toContain("- `@acme/a` (v1.0.0) `skill://spc_1/acme/a/a/SKILL.md` — A");
+    expect(readOnlyOut).not.toContain("@draft");
+    expect(readOnlyOut).not.toContain("@acme/new");
+
     // A turn that cannot load a skill lists none, and opens nothing.
     let opened = false;
     await blockText(fakeContext({ orgRole: "member" }), {
@@ -1276,9 +1346,9 @@ describe("buildCallerContextBlock", () => {
       permissions: ["mcp:read", "mcp:invoke"],
       skills: { skillMode: "auto", pinnedSkills: ["@acme/a"] },
       enforced: NO_ENFORCED,
-      openSkillsClient: async () => {
+      openSkillsClient: async (signal) => {
         opened = true;
-        return skills.open();
+        return skills.open(signal);
       },
     });
     expect(opened).toBe(false);

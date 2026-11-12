@@ -16,6 +16,7 @@
  * `encodeURIComponent`; only that canonical spelling parses.
  */
 
+import { createHash } from "node:crypto";
 import { isValidSkillName } from "@appstrate/afps-shared/companion-files";
 import { parseScopedName } from "./naming.ts";
 import { isSafeArchivePath } from "./zip.ts";
@@ -27,6 +28,11 @@ const DRAFT_MARKER = "@draft";
 export const SKILL_MAX_FILES = 512;
 /** SEP-2640: a server SHOULD NOT serve a skill with more bytes than this, all files together. */
 export const SKILL_MAX_TOTAL_BYTES = 16 * 1024 * 1024;
+
+/** The SEP-2640 `digest` of a served file: `sha256:<hex>` of its bytes, a string as its UTF-8 bytes. */
+export function skillFileDigest(bytes: Uint8Array | string): string {
+  return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+}
 
 /** A file of a skill: its resource URI, `sha256:{hex}` digest of its raw bytes, and byte length. */
 export interface SkillResource {
