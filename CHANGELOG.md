@@ -109,8 +109,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   call carrying a `progressToken` used to wait up to 30 min, past the fixed per-call timeout of
   some clients (the Claude connector cuts a tool call at 230 s, whatever the progress), which
   lost the call; a call without one waited 45 s. Progress notifications are still sent during
-  the wait. `wait` follows the parsing rule of `GET /api/runs/{id}?wait=`, whose behaviour does
-  not change (no wait when omitted, 55 s ceiling); a wait longer than 55 s chains such reads.
+  the wait. `wait` takes non-negative integer seconds only; a wait longer than 55 s chains reads
+  of `GET /api/runs/{id}?wait=`, whose behaviour does not change (`true`/`false` or integer
+  seconds, 55 s ceiling, no wait when omitted).
   The in-app chat is not offered `wait`: its wait still descends from the turn budget.
 - **`api_call` returns a redirect off `authorized_uris` instead of failing** (#2154). When an
   allowlisted upstream answers with a 3xx whose `Location` lies outside the auth's

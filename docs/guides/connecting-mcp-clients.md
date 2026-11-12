@@ -261,9 +261,10 @@ it returns `done:false` with the run `id` and no outcome, and a second text
 block saying what to do next: continue with `getRun` (`query: { wait: true }`,
 which the server holds for at most 55 s) on that id, never with a second
 `run_and_wait`. A wait longer than 55 s is a chain of such reads inside the one
-call. The `wait` query of `getRun` follows the same rule (`true`, `false`, or
-non-negative integer seconds, clamped), with 55 s as its ceiling and no wait
-when omitted.
+call. `run_and_wait` takes `wait` as a non-negative integer number of seconds
+and refuses any other value. The `wait` query of `getRun` also accepts `true`
+(its 55 s ceiling) and `false` (no wait), clamps integer seconds to 55, and
+does not wait when omitted.
 
 A request carrying `params._meta.progressToken` is answered over SSE: during
 the wait the call streams `notifications/progress` every 15 s. The same stream

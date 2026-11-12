@@ -67,7 +67,6 @@ import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
 import { withoutConnectOffers } from "../../services/connect/preflight-connect-offer.ts";
 import { logger } from "../../lib/logger.ts";
 import { ceilingHolds } from "../../lib/route-requirements.ts";
-import { parseWaitSeconds } from "../../lib/run-wait-limits.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import {
   getFileForActor,
@@ -1326,8 +1325,8 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
     const waitSeconds =
       wait === undefined
         ? RUN_AND_WAIT_DEFAULT_WAIT_SECONDS
-        : typeof wait === "number"
-          ? parseWaitSeconds(String(wait), RUN_AND_WAIT_MAX_WAIT_SECONDS)
+        : typeof wait === "number" && Number.isInteger(wait) && wait >= 0
+          ? Math.min(wait, RUN_AND_WAIT_MAX_WAIT_SECONDS)
           : null;
     if (waitSeconds === null) {
       emit(ctx, {
