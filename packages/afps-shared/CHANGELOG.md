@@ -14,6 +14,12 @@ consumer's publish rather than the first user's `npm install`.
 
 ## [Unreleased]
 
+### Added
+
+- **`GuardedFetchOptions.returnRedirect`**: `(url, hop) => boolean`. It is called for each
+  redirect hop before `validateHop`, DNS resolution or any request. Returning `true` ends the
+  chain and returns the 3xx unfollowed. (#2154)
+
 ### Fixed
 
 - **`urlTemplateAuthority`** ends the authority at a backslash: WHATWG reads `\` as a

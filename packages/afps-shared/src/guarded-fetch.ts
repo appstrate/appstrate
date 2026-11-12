@@ -145,6 +145,15 @@ export interface GuardedFetchOptions {
    */
   validateHop?: (url: URL, hop: number) => void;
   /**
+   * Caller-owned "hand it back" predicate for a redirect hop (hop >= 1),
+   * called with the logical next URL BEFORE `validateHop`, DNS resolution or
+   * any request to it. Returning true ends the chain: the 3xx response that
+   * pointed there is returned as is (status, `Location`, body), unfollowed,
+   * and nothing is sent to that URL. Throwing aborts the exchange as
+   * `validateHop` does.
+   */
+  returnRedirect?: (url: URL, hop: number) => boolean;
+  /**
    * Additional header names (case-insensitive) treated as credentials for
    * cross-origin redirect stripping. UNIONED with the builtin
    * `authorization`/`cookie`/`proxy-authorization` set — never a
@@ -389,6 +398,9 @@ export async function guardedFetchChain(
       const location = res.headers.get("location")!;
       const next = stripUserInfoAndFragment(new URL(location, current));
       assertHttp(next, hop + 1);
+      if (opts?.returnRedirect?.(next, hop + 1) === true) {
+        return { response: res, finalUrl: current.href, hops: hop, credentialsForwarded };
+      }
       // Caller's reachability contract FIRST (cheap, sync, fail-closed): an
       // off-contract hop aborts the exchange before we even resolve it. A
       // same-origin redirect can walk off an allowlisted PATH while keeping

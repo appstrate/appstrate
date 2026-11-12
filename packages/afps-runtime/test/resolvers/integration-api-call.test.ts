@@ -1108,7 +1108,7 @@ describe("LocalIntegrationResolver — SSRF + redirect hardening (newly added on
     expect(body.status).toBe(200);
   });
 
-  it("refuses a redirect hop that leaves the authorized_uris allowlist", async () => {
+  it("returns a redirect hop that leaves the authorized_uris allowlist unfollowed", async () => {
     const seen: string[] = [];
     const root = makePackage("@acme/agent", "1.0.0", "agent", {});
     const bundle = makeBundle(root, [
@@ -1130,11 +1130,14 @@ describe("LocalIntegrationResolver — SSRF + redirect hardening (newly added on
     });
     const tools = await resolver.resolve([{ name: "@acme/api", version: "^1" }], bundle);
     const { ctx } = makeCtx();
-    await expect(
-      tools[0]!.execute({ method: "GET", target: "https://api.acme.com/v1/me" }, ctx),
-    ).rejects.toThrow(/redirect blocked/i);
-    // Only the initial (allowed) hop was issued — the off-allowlist hop
-    // was refused before re-issuing the fetch.
+    const res = await tools[0]!.execute(
+      { method: "GET", target: "https://api.acme.com/v1/me" },
+      ctx,
+    );
+    // The 302 comes back as the upstream sent it, for the caller to follow itself (#2154).
+    const body = JSON.parse((res.content[0] as { text: string }).text) as { status: number };
+    expect(body.status).toBe(302);
+    // Only the initial (allowed) hop was issued — nothing was sent to the off-allowlist host.
     expect(seen).toEqual(["https://api.acme.com/v1/me"]);
   });
 
@@ -1640,10 +1643,12 @@ describe("LocalIntegrationResolver — the failure codes of every api_call path 
     expect(err.details).toMatchObject({ systemCode: "ECONNREFUSED" });
   });
 
-  it("refuses a redirect off the allowlist under the target's code, flagged, naming its host only", async () => {
+  it("refuses a templated call's redirect off the allowlist under the target's code, flagged, naming its host only", async () => {
     const location = "https://evil.example.com/steal?token=t0p";
     const err = await fail("https://api.acme.com/x", {
       fetch: () => Promise.resolve(new Response(null, { status: 302, headers: { location } })),
+      // A substituted credential: its redirect off the allowlist stays refused, not returned.
+      headers: { "X-Key": "{{api_key}}" },
     });
     expect(err).toMatchObject({ code: "unauthorized_target", details: { redirect: true } });
     expect(err.message).toContain("evil.example.com");

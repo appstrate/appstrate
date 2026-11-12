@@ -102,6 +102,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **`api_call` returns a redirect off `authorized_uris` instead of failing** (#2154). When an
+  allowlisted upstream answers with a 3xx whose `Location` lies outside the auth's
+  `authorized_uris`, the call no longer fails with `unauthorized_target`
+  (`Redirect blocked (unauthorized): host=…`; `403` on `POST /api/credential-proxy/proxy`,
+  status `0` with that code on the sidecar `api_call`, `ApiCallFailureError` in the CLI
+  resolver). The 3xx comes back as the upstream sent it (status, `Location`, body), and the
+  caller fetches the URL itself if it wants to. Nothing is sent to that host, not even a DNS
+  lookup, so the credential never reaches it. Example: GitHub Actions logs
+  (`/actions/jobs/{id}/logs`), which redirect to signed blob-storage URLs. A call that
+  substitutes a `{{credential_field}}` keeps the refusal, because an upstream often copies the
+  query string into `Location`. Redirects to an allowlisted host are followed as before, and the
+  SSRF checks do not change.
 - **OAuth connect to remote MCP servers is hardened** (#2102, #2078, #2084). Each DCR client
   is registered at, bound to and called back on its own authorization server. A server whose
   metadata does not list PKCE S256 is refused before any client is provisioned, with
