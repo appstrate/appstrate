@@ -705,22 +705,32 @@ function buildBasePlugins(env: ReturnType<typeof getEnv>, smtpTransport: Transpo
   ];
 }
 
+/** The tenant of personal Microsoft accounts. */
+const MICROSOFT_CONSUMER_TENANT_ID = "9188040d-6c67-4c5b-b112-36a304b66dad";
+
 /**
  * An Entra tenant admin can put ANY address in a user's `email` claim, a
  * domain the tenant does not own included ("nOAuth"). Microsoft's answer is
  * `xms_edov` (email domain owner verified), an optional ID-token claim the
- * app registration must request. Without it the address proves nothing, so
- * the identity carries no email: Better Auth then refuses the sign-in
- * (`email_not_found`) before creating or linking any user, and the signup
- * gate, the invitation match and account linking can all trust the address
- * of a Microsoft account that got through.
+ * app registration must request. It vouches for a member of the tenant only:
+ * a guest (`idp` names another issuer) or a personal account is refused too,
+ * whatever `xms_edov` says. A refused identity carries no email, so Better
+ * Auth stops the sign-in (`email_not_found`) before creating or linking any
+ * user, and the signup gate, the invitation match and account linking can all
+ * trust the address of a Microsoft account that got through.
  */
 function mapMicrosoftProfile(
   profile: MicrosoftEntraIDProfile,
 ): { emailVerified: true } | { email: undefined; emailVerified: false } {
-  if (profile.xms_edov === true) return { emailVerified: true };
-  logger.warn("auth: Microsoft sign-in refused, email domain not verified by the tenant", {
+  // `idp` is absent for a member, or names the tenant itself (in either the
+  // v1 `sts.windows.net/{tid}/` or the v2 issuer form).
+  const member =
+    profile.tid !== MICROSOFT_CONSUMER_TENANT_ID &&
+    (!profile.idp || profile.idp.includes(profile.tid));
+  if (member && profile.xms_edov === true) return { emailVerified: true };
+  logger.warn("auth: Microsoft sign-in refused", {
     tenantId: profile.tid,
+    reason: member ? "email_domain_not_verified" : "not_a_tenant_member",
   });
   return { email: undefined, emailVerified: false };
 }
@@ -801,8 +811,14 @@ function buildAuth(options: CreateAuthOptions) {
         clientId: env.MICROSOFT_CLIENT_ID!,
         clientSecret: env.MICROSOFT_CLIENT_SECRET!,
         tenantId: env.MICROSOFT_TENANT_ID,
-        // The photo would land in `user.image` as a base64 data URL.
+        // Sign-in only: no Graph access (`User.Read`) and no refresh token
+        // (`offline_access`) to store. The photo would land in `user.image`
+        // as a base64 data URL.
+        disableDefaultScope: true,
+        scope: ["openid", "profile", "email"],
         disableProfilePhoto: true,
+        // The SPA uses the redirect flow only; no replayable id_token door.
+        disableIdTokenSignIn: true,
         mapProfileToUser: mapMicrosoftProfile,
       },
     }),

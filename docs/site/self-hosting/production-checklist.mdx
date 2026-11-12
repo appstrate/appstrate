@@ -105,13 +105,13 @@ Set `MICROSOFT_CLIENT_ID` and `MICROSOFT_CLIENT_SECRET` to add a "Continue with 
 ```bash
 MICROSOFT_CLIENT_ID=<application (client) ID>
 MICROSOFT_CLIENT_SECRET=<client secret value>
-# optional: organizations (default), a tenant GUID, or common
+# optional: organizations (default) or a tenant GUID
 MICROSOFT_TENANT_ID=organizations
 ```
 
-`MICROSOFT_TENANT_ID` defaults to `organizations`, which admits work and school accounts only. A single-tenant app registration needs its tenant GUID here, and the same value restricts sign-in to that tenant. `common` also admits personal Microsoft accounts.
+`MICROSOFT_TENANT_ID` defaults to `organizations`, which admits work and school accounts only. A single-tenant app registration needs its tenant GUID here, and the same value restricts sign-in to that tenant. Personal Microsoft accounts and guest users of a tenant are always refused: only a member signing in to their own tenant is accepted.
 
-`xms_edov` is required. An Entra administrator can set any email address on a user, so an address alone proves nothing. Appstrate accepts a Microsoft identity only when Entra asserts, through `xms_edov`, that the tenant verified the domain of that address. Without the claim, or when it is false, the sign-in is refused (the user comes back to the login page with `error=email_not_found`), and linking a Microsoft account from the preferences page is refused too.
+`xms_edov` is required. An Entra administrator can set any email address on a user, so an address alone proves nothing. Appstrate accepts a Microsoft identity only when Entra asserts, through `xms_edov`, that the tenant verified the domain of that address. Without the claim, or when it is false, the sign-in is refused with `email_not_found`, and linking a Microsoft account from the preferences page is refused too.
 
 A tenant that restricts user consent needs an administrator to grant consent once before its members can sign in.
 

@@ -70,11 +70,30 @@ describe("auth social provider config — Microsoft", () => {
     expect(mapProfile({ xms_edov: true })).toEqual({ emailVerified: true });
   });
 
+  it("keeps it when idp names the tenant itself", () => {
+    expect(
+      mapProfile({
+        xms_edov: true,
+        idp: "https://sts.windows.net/00000000-0000-0000-0000-0000000000aa/",
+      }),
+    ).toEqual({ emailVerified: true });
+  });
+
   it.each([
-    ["false", { xms_edov: false }],
-    ["absent", {}],
-  ])("drops the address when xms_edov is %s, so the sign-in is refused", (_label, claims) => {
+    ["xms_edov is false", { xms_edov: false }],
+    ["xms_edov is absent", {}],
+    ["the user is a guest", { xms_edov: true, idp: "https://sts.windows.net/other-tenant/" }],
+    ["the user signed in with Google", { xms_edov: true, idp: "google.com" }],
+    ["the account is personal", { xms_edov: true, tid: "9188040d-6c67-4c5b-b112-36a304b66dad" }],
+  ])("drops the address when %s, so the sign-in is refused", (_label, claims) => {
     expect(mapProfile(claims)).toEqual({ email: undefined, emailVerified: false });
+  });
+
+  it("asks for sign-in scopes only and has no id_token sign-in door", () => {
+    const config = socialProviderOptions("microsoft") as MicrosoftOptions;
+    expect(config.disableDefaultScope).toBe(true);
+    expect(config.scope).toEqual(["openid", "profile", "email"]);
+    expect(config.disableIdTokenSignIn).toBe(true);
   });
 });
 

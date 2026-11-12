@@ -223,6 +223,28 @@ describe("OIDC per-space social auth — E2E (space-level clients)", () => {
     expect(((await res.json()) as { code?: string }).code).toBe("encryption_key_unavailable");
   });
 
+  it.each(["github", "microsoft"])(
+    "refuses %s for a space client whose space has not configured it",
+    async (provider) => {
+      const { clientId } = await setupSpaceClient({ google: true });
+      const loginRes = await app.request(
+        `/api/oauth/login?client_id=${encodeURIComponent(clientId)}&state=s`,
+      );
+      const cookie = loginRes.headers
+        .getSetCookie()
+        .find((c) => c.startsWith("oidc_pending_client="))!
+        .split(";")[0]!;
+
+      const res = await app.request(`/api/auth/sign-in/social`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Cookie: cookie },
+        body: JSON.stringify({ provider, callbackURL: "https://acme.example.com/oauth/callback" }),
+      });
+      expect(res.status).toBe(403);
+      expect(((await res.json()) as { code?: string }).code).toBe("social_provider_not_configured");
+    },
+  );
+
   it("without a pending-client cookie, the resolver is NOT consulted", async () => {
     await setupSpaceClient({ google: true });
     // Direct POST to /sign-in/social with no pending cookie — this is the

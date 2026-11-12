@@ -423,7 +423,7 @@ AUTH_ALLOWED_SIGNUP_DOMAINS=acme.com
 
 Setting `MICROSOFT_TENANT_ID` to the tenant GUID restricts sign-in to that
 one tenant (the default, `organizations`, admits any work or school
-account, and `common` also admits personal accounts). A Microsoft identity
+account; personal accounts and guests are always refused). A Microsoft identity
 is accepted only when Entra asserts that the tenant owns the email domain
 (the `xms_edov` optional claim, to add to the app registration), so an
 address an Entra admin typed onto a user is refused. See
