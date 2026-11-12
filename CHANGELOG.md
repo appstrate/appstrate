@@ -324,7 +324,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   each `info`, `warn` or `error` log line of the run as a
   `notifications/progress` message `Run <id> [<level>] <message>` (one line,
   200 characters at most, without `data`), at most one per second, the latest
-  line of a burst winning. The lines come from the realtime `run_log` stream
+  line of a burst winning; a line still held when the wait ends is sent before
+  the result. The lines come from the realtime `run_log` stream
   under the same gates as `GET /api/realtime/runs/{id}` (run read, run
   visibility), so they cost no `GET /api/runs/{id}/logs` call. The chat is
   unchanged.

@@ -673,7 +673,7 @@ describe("run_and_wait", () => {
       expect(messages(sent).every((m) => m.isWellFormed())).toBe(true);
     });
 
-    it("sends at most one log line per second, the latest of a burst, and nothing after the wait", async () => {
+    it("sends at most one log line per second, the latest of a burst, the held line at the end, and nothing after", async () => {
       jest.useFakeTimers();
       const poll = heldPoll();
       const sent: SentNotification[] = [];
@@ -697,16 +697,64 @@ describe("run_and_wait", () => {
       await flush();
       expect(messages(sent).slice(2)).toEqual(["Run run_1 [info] three"]);
 
-      // A line still cooling down when the run ends is dropped with the follow.
-      logFollow.emit(runLog("info", "late"));
-      poll.settle({ id: "run_1", status: "success" });
+      // A line still held by the throttle when the wait completes goes out
+      // before the response, once; nothing follows the stop.
+      logFollow.emit(runLog("error", "late"));
+      poll.settle({ id: "run_1", status: "failed" });
       await pending;
       jest.advanceTimersByTime(RUN_AND_WAIT_LOG_PROGRESS_INTERVAL_MS * 2);
       await flush();
 
-      expect(messages(sent)).not.toContain("Run run_1 [info] late");
-      expect(sent).toHaveLength(3);
+      expect(messages(sent).slice(3)).toEqual(["Run run_1 [error] late"]);
+      expect(sent.map((n) => (n.params as { progress: number }).progress)).toEqual([1, 2, 3, 4]);
       expect(logFollow.stops).toBe(1);
+    });
+
+    it("stops following logs once when the call is cancelled, sending nothing more", async () => {
+      jest.useFakeTimers();
+      const poll = heldPoll();
+      const sent: SentNotification[] = [];
+      const controller = new AbortController();
+      const { tool, calls, logFollow } = makeRunAndWait({ getRun: [poll.answer] });
+
+      const { pending } = await startCall(tool, calls, {
+        ...extraWith("tok_1", async (n) => {
+          sent.push(n);
+        }),
+        signal: controller.signal,
+      } as AppstrateRequestExtra);
+      logFollow.emit(runLog("info", "one"));
+      logFollow.emit(runLog("info", "held"));
+      await flush();
+      controller.abort(new Error("client cancelled"));
+      await pending.catch(() => undefined);
+      jest.advanceTimersByTime(RUN_AND_WAIT_PROGRESS_INTERVAL_MS * 2);
+      await flush();
+
+      expect(logFollow.stops).toBe(1);
+      expect(messages(sent)).toEqual(["Run run_1 launched", "Run run_1 [info] one"]);
+    });
+
+    it("stops following logs once when the poll fails", async () => {
+      jest.useFakeTimers();
+      const sent: SentNotification[] = [];
+      const { tool, logFollow } = makeRunAndWait({
+        getRun: [jsonResponse({ type: "about:blank", status: 404 }, 404)],
+      });
+
+      const res = await tool.handler(
+        { kind: "agent", scope: "@acme", name: "writer" },
+        extraWith("tok_1", async (n) => {
+          sent.push(n);
+        }),
+      );
+      jest.advanceTimersByTime(RUN_AND_WAIT_PROGRESS_INTERVAL_MS * 2);
+      await flush();
+
+      expect(res.isError).toBe(true);
+      expect(logFollow.runIds).toEqual(["run_1"]);
+      expect(logFollow.stops).toBe(1);
+      expect(messages(sent)).toEqual(["Run run_1 launched"]);
     });
 
     it("follows no logs without a progress token", async () => {

@@ -1013,12 +1013,16 @@ function logProgressMessage(runId: string, log: RunLogEvent): string | null {
  * heartbeat every {@link RUN_AND_WAIT_PROGRESS_INTERVAL_MS} plus the run's
  * latest log line, throttled to {@link RUN_AND_WAIT_LOG_PROGRESS_INTERVAL_MS}.
  * Both share one strictly increasing `progress` counter. `null` without a token.
+ *
+ * The returned stop takes whether the wait completed: a completed wait first
+ * sends the line still held by the throttle (often the run's final error), as
+ * the response has not left yet; a cancelled or disconnected call sends nothing.
  */
 function startRunProgress(
   ctx: McpToolContext,
   extra: AppstrateRequestExtra,
   runId: string,
-): (() => void) | null {
+): ((waitCompleted: boolean) => void) | null {
   const progressToken = extra._meta?.progressToken;
   if (progressToken === undefined) return null;
   const startedAt = performance.now();
@@ -1061,9 +1065,10 @@ function startRunProgress(
     else waiting = message;
   });
 
-  return () => {
+  return (waitCompleted) => {
     clearInterval(timer);
     clearTimeout(cooldown);
+    if (waitCompleted && waiting !== null && !extra.signal?.aborted) beat(waiting);
     stopLogs();
   };
 }
@@ -1367,7 +1372,16 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
     const waited = await waitForRunAndWaitCompletion(launch, {
       ...waitOpts,
       maxMs: stopProgress ? undefined : RUN_AND_WAIT_UNSTREAMED_MAX_MS,
-    }).finally(() => stopProgress?.());
+    }).then(
+      (result) => {
+        stopProgress?.(true);
+        return result;
+      },
+      (err: unknown) => {
+        stopProgress?.(false);
+        throw err;
+      },
+    );
 
     // A failed poll reports its HTTP status; otherwise the run's own status (the
     // wait may have ended on `pending`/`running`), not the polling GET's 200.
