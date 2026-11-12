@@ -58,10 +58,14 @@ _appstrate_runner_bootstrap() {
   # sudo. This keeps the `curl … | bash` trust chain minisign-anchored: the
   # bytes root runs are the bytes we already verified below. We therefore do NOT
   # re-exec the whole (piped, unverified) shell function as root.
+  #
+  # The env `runner install` reads (pairing token, artifacts-key override) is
+  # named in `--preserve-env=<list>`, never `-E`: sudo-rs (the default sudo
+  # since Ubuntu 25.10) ignores `-E` with only a warning.
   SUDO=""
   if [ "$(id -u)" != "0" ]; then
     if command -v sudo >/dev/null 2>&1; then
-      SUDO="sudo -E"
+      SUDO="sudo --preserve-env=APPSTRATE_RUNNER_TOKEN,FIRECRACKER_ARTIFACTS_PUBKEY"
     else
       echo "The runner installer must run as root. Re-run with sudo." >&2
       exit 1
