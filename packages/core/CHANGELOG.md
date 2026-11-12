@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`followRunAndWaitLogs`** (`@appstrate/core/run-and-wait-client`): follows a run's `info`-and-above
+  logs (`GET /api/runs/:id/logs?since=…` every `RUN_AND_WAIT_LOG_POLL_MS`, 5 s) and yields each
+  read's new lines as `RunAndWaitLogLine` (`id`, `level`, `message` on one line, cut at
+  `RUN_AND_WAIT_LOG_MESSAGE_MAX_CHARS`, 200). Best-effort: it ends silently on a failed read and
+  when its signal aborts. (#2147)
 - **Image MIME types in `extensionForMime`** (`@appstrate/core/naming`): `image/png`, `image/jpeg` and `image/jpg` (`jpg`), `image/gif`, `image/webp`, `image/bmp` and `image/svg+xml` (`svg`) now resolve to an extension, so spilled images are no longer extensionless. (#2120)
 - **`AJV_FORMATS_OPTIONS`** (`@appstrate/core/ajv`): the ajv-formats options `createAjv` uses, so
   the RJSF validator registers the same formats and client and server agree.

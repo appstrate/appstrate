@@ -319,6 +319,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`run_and_wait` progress names the run's latest log line** (#2147). A call
+  that sends a `progressToken` keeps its 15 s heartbeat and also reads the run's
+  logs every 5 s: each read with new `info`, `warn` or `error` lines sends one
+  `notifications/progress` whose `message` is the newest line
+  (`Run <id> [<level>] <message>`, on one line, cut at 200 characters). The lines
+  are the ones `GET /api/runs/{id}/logs` returns to the same caller. The final
+  result and the in-app chat are unchanged.
+
 - **A relayed upstream `401` on the credential proxy says what the platform
   tried** (#2155). When the forced refresh after the `401` could not recover the
   credential, `/api/credential-proxy/proxy` adds

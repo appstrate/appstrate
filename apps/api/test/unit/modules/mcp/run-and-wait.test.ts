@@ -13,6 +13,7 @@ import {
   type McpToolEvent,
 } from "../../../../src/modules/mcp/tools.ts";
 import {
+  RUN_AND_WAIT_LOG_POLL_MS,
   RUN_AND_WAIT_MAX_MS,
   RUN_AND_WAIT_RESUME_INSTRUCTION,
   RUN_CONNECT_OFFERS_HEADER,
@@ -69,6 +70,8 @@ function makeRunAndWait(opts: {
   getRun?: Array<Response | ((req: Request) => Promise<Response>)>;
   /** Rows the stubbed `GET /api/files?runId=…` returns (published docs). */
   files?: Array<Record<string, unknown>>;
+  /** Successive `GET /api/runs/{id}/logs` answers; an empty page once they run out. */
+  logs?: Response[];
 }): {
   tool: ReturnType<typeof toolsFor>[number];
   calls: Array<{
@@ -90,6 +93,7 @@ function makeRunAndWait(opts: {
     connectOffers: string | null;
   }> = [];
   const getRuns = [...(opts.getRun ?? [jsonResponse({ id: "run_1", status: "success" })])];
+  const logs = [...(opts.logs ?? [])];
   const dispatch: Dispatch = async (req) => {
     const url = new URL(req.url);
     const body =
@@ -116,6 +120,10 @@ function makeRunAndWait(opts: {
     if (req.method === "GET" && /\/api\/runs\/[^/]+$/.test(url.pathname)) {
       const next = getRuns.shift() ?? jsonResponse({ id: "run_1", status: "success" });
       return typeof next === "function" ? next(req) : next;
+    }
+    // Live progress log reads (followRunAndWaitLogs).
+    if (req.method === "GET" && /\/api\/runs\/[^/]+\/logs$/.test(url.pathname)) {
+      return logs.shift() ?? jsonResponse({ object: "list", data: [], hasMore: false });
     }
     // Post-completion file enrichment (fetchRunFiles).
     if (req.method === "GET" && url.pathname === "/api/files") {
@@ -559,6 +567,56 @@ describe("run_and_wait", () => {
           params: { progressToken: "tok_1", progress: i + 1, message },
         })),
       );
+    });
+
+    it("adds the newest run log line of each read to the progress, until the wait ends", async () => {
+      jest.useFakeTimers();
+      const poll = heldPoll();
+      const sent: SentNotification[] = [];
+      const { tool, calls } = makeRunAndWait({
+        getRun: [poll.answer],
+        logs: [
+          jsonResponse({
+            object: "list",
+            data: [
+              { id: 1, level: "info", message: "Fetching inbox" },
+              { id: 2, level: "warn", message: "Rate limited,\n retrying" },
+            ],
+            hasMore: false,
+          }),
+        ],
+      });
+
+      const { pending } = await startCall(
+        tool,
+        calls,
+        extraWith("tok_1", async (n) => {
+          sent.push(n);
+        }),
+      );
+      for (let t = 0; t < RUN_AND_WAIT_PROGRESS_INTERVAL_MS; t += RUN_AND_WAIT_LOG_POLL_MS) {
+        jest.advanceTimersByTime(RUN_AND_WAIT_LOG_POLL_MS);
+        await flush();
+      }
+      poll.settle({ id: "run_1", status: "success" });
+      await pending;
+      const logReads = () => calls.filter((c) => c.path === "/api/runs/run_1/logs");
+      const readsAtEnd = logReads().length;
+      jest.advanceTimersByTime(RUN_AND_WAIT_LOG_POLL_MS * 4);
+      await flush();
+
+      expect(sent.map((n) => (n.params as { message: string }).message)).toEqual([
+        "Run run_1 launched",
+        "Run run_1 [warn] Rate limited, retrying",
+        `Waiting for run run_1 (${RUN_AND_WAIT_PROGRESS_INTERVAL_MS / 1000}s elapsed)`,
+      ]);
+      expect(sent.map((n) => (n.params as { progress: number }).progress)).toEqual([1, 2, 3]);
+      // Each read asks for `info` and above after the last row seen, and none follows the wait.
+      expect(logReads().map((c) => c.search)).toEqual([
+        "?level=info",
+        ...Array.from({ length: readsAtEnd - 1 }, () => "?level=info&since=2"),
+      ]);
+      expect(logReads()).toHaveLength(readsAtEnd);
     });
 
     it("never fails the call when sending a notification throws", async () => {

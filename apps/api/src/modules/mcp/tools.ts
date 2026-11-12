@@ -39,9 +39,11 @@ import {
 } from "@appstrate/mcp-transport";
 import {
   enrichTerminalRunAndWaitStep,
+  followRunAndWaitLogs,
   launchRunAndWait,
   waitForRunAndWaitCompletion,
   RUN_AND_WAIT_RESUME_INSTRUCTION,
+  type RunAndWaitClientOptions,
   type RunAndWaitFile,
   type RunAndWaitLaunch,
 } from "@appstrate/core/run-and-wait-client";
@@ -982,7 +984,17 @@ export const WARNING_CODES_PHRASE = CONNECTION_RESOLUTION_WARNING_CODES.map((c) 
 /** The resume instruction for a caller with time to wait (not the chat). */
 export const RUN_AND_WAIT_LONG_POLL_RESUME = `${RUN_AND_WAIT_RESUME_INSTRUCTION} \`query: { wait: true }\` holds that read until the run ends.`;
 
-function startProgressHeartbeat(extra: AppstrateRequestExtra, runId: string): (() => void) | null {
+/**
+ * Progress for a caller that sent a `progressToken`: a beat at launch and every
+ * {@link RUN_AND_WAIT_PROGRESS_INTERVAL_MS}, plus one per log read that brings new lines,
+ * naming the newest of them (`followRunAndWaitLogs`: `info` and above, one line, cut).
+ * Those lines are what the same caller reads with `GET /api/runs/{id}/logs`.
+ */
+function startProgressHeartbeat(
+  extra: AppstrateRequestExtra,
+  runId: string,
+  clientOpts: RunAndWaitClientOptions,
+): (() => void) | null {
   const progressToken = extra._meta?.progressToken;
   if (progressToken === undefined) return null;
   const startedAt = performance.now();
@@ -1005,7 +1017,20 @@ function startProgressHeartbeat(extra: AppstrateRequestExtra, runId: string): ((
     const elapsedS = Math.round((performance.now() - startedAt) / 1000);
     beat(`Waiting for run ${runId} (${elapsedS}s elapsed)`);
   }, RUN_AND_WAIT_PROGRESS_INTERVAL_MS);
-  return () => clearInterval(timer);
+  const logs = new AbortController();
+  void (async () => {
+    for await (const lines of followRunAndWaitLogs(runId, {
+      ...clientOpts,
+      signal: logs.signal,
+    })) {
+      const newest = lines.at(-1);
+      if (newest) beat(`Run ${runId} [${newest.level}] ${newest.message}`);
+    }
+  })();
+  return () => {
+    clearInterval(timer);
+    logs.abort();
+  };
 }
 
 /**
@@ -1297,13 +1322,13 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       outcome: "invoked",
     });
 
-    const stopHeartbeat = startProgressHeartbeat(extra, runId);
     const waitOpts = {
       origin: ctx.origin,
       headers: forwarded,
       fetch: dispatchFetch,
       signal,
     };
+    const stopHeartbeat = startProgressHeartbeat(extra, runId, waitOpts);
     const waited = await waitForRunAndWaitCompletion(launch, {
       ...waitOpts,
       maxMs: stopHeartbeat ? undefined : RUN_AND_WAIT_UNSTREAMED_MAX_MS,

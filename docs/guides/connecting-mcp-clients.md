@@ -255,7 +255,11 @@ How long it waits depends on the client. Both delays derive from the MCP SDK
 client's default request timeout (60 s). A request carrying
 `params._meta.progressToken` is answered over SSE: the call streams
 `notifications/progress` every 15 s (a quarter of it) and returns `done:true`
-once the run is over. Without a token nothing can keep the request alive, so
+once the run is over. The run's logs are read every 5 s while it waits, and each
+read that brings new `info`, `warn` or `error` lines sends one more notification
+whose `message` is the newest of them (`Run <id> [<level>] <message>`, on one
+line, cut at 200 characters). These are the lines the same caller reads with
+`GET /api/runs/{id}/logs`; most clients show them to the user, not to the model. Without a token nothing can keep the request alive, so
 after 45 s (one heartbeat short of it) it returns `done:false` with the run
 `id` and no outcome, and a second text block saying what to do next: continue
 with `getRun` (`query: { wait: true }`, which the server holds for at most

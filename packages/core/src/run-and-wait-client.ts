@@ -836,6 +836,75 @@ export async function* runAndWaitSteps(
   yield await waitForRunAndWaitCompletion(launch.launch, opts);
 }
 
+/** A run log line, as a live progress surface shows it. */
+export interface RunAndWaitLogLine {
+  id: number;
+  level: string;
+  message: string;
+}
+
+/**
+ * Delay before each read of a followed run's logs: 12 reads a minute, a tenth of the
+ * `GET /api/runs/:id/logs` budget (120 per minute per identity).
+ */
+export const RUN_AND_WAIT_LOG_POLL_MS = 5_000;
+/** Longest `message` a {@link RunAndWaitLogLine} carries; a longer one is cut and ends in `…`. */
+export const RUN_AND_WAIT_LOG_MESSAGE_MAX_CHARS = 200;
+
+function toLogLineMessage(raw: unknown): string | undefined {
+  const message = asString(raw)?.replace(/\s+/g, " ").trim();
+  if (!message) return undefined;
+  const chars = [...message];
+  return chars.length > RUN_AND_WAIT_LOG_MESSAGE_MAX_CHARS
+    ? `${chars.slice(0, RUN_AND_WAIT_LOG_MESSAGE_MAX_CHARS - 1).join("")}…`
+    : message;
+}
+
+/**
+ * Follow a run's `info`-and-above logs: every {@link RUN_AND_WAIT_LOG_POLL_MS}, read the rows
+ * after the last one seen (`GET /api/runs/:id/logs?level=info&since=…`) and yield the new
+ * lines that carry a message, on one line and cut at {@link RUN_AND_WAIT_LOG_MESSAGE_MAX_CHARS}.
+ * Each yield is one read's lines, oldest first. Every read carries the caller's own headers,
+ * so the route's `runs:read` and run-visibility checks decide what it returns.
+ *
+ * Best-effort: it ends when `opts.signal` aborts, and silently on the first failed read
+ * (network, non-2xx, malformed body), so a log tail never fails the wait it accompanies.
+ * It has no deadline of its own: the caller aborts it once the wait settles.
+ */
+export async function* followRunAndWaitLogs(
+  runId: string,
+  opts: RunAndWaitClientOptions & { pollMs?: number },
+): AsyncGenerator<RunAndWaitLogLine[]> {
+  const pollMs = opts.pollMs ?? RUN_AND_WAIT_LOG_POLL_MS;
+  let since = 0;
+  for (;;) {
+    let rows: unknown[];
+    try {
+      await sleep(pollMs, opts.signal);
+      const cursor = since > 0 ? `&since=${since}` : "";
+      const res = await opts.fetch(
+        apiUrl(opts.origin, `/api/runs/${encodeURIComponent(runId)}/logs?level=info${cursor}`),
+        { method: "GET", headers: new Headers(opts.headers), signal: opts.signal },
+      );
+      if (!res.ok) return;
+      const data = asRecordOrUndefined(await readJsonResponse(res))?.data;
+      if (!Array.isArray(data)) return;
+      rows = data;
+    } catch {
+      return;
+    }
+    const lines: RunAndWaitLogLine[] = [];
+    for (const raw of rows) {
+      const row = asRecordOrUndefined(raw);
+      if (typeof row?.id !== "number") continue;
+      since = Math.max(since, row.id);
+      const message = toLogLineMessage(row.message);
+      if (message) lines.push({ id: row.id, level: asString(row.level) ?? "info", message });
+    }
+    if (lines.length > 0) yield lines;
+  }
+}
+
 /**
  * How many produced-file rows one read asks for. `GET /api/files` clamps
  * `limit` to 100 and answers `hasMore` rather than a cursor, so this is also
