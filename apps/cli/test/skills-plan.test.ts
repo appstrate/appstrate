@@ -2,7 +2,7 @@
 
 /**
  * `lib/skills-sync/plan.ts` — catalogue reading, version pinning, slug
- * assignment (skills and agent commands) and the verified download.
+ * assignment and the verified download.
  *
  * `globalThis.fetch` is stubbed with the shared skill server
  * (`helpers/skills-server.ts`) rather than injected: the CLI's whole auth
@@ -14,21 +14,17 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import {
   assignSlugs,
   fetchSkillFiles,
-  listSyncableAgents,
   listSyncableSkills,
-  resolveAgent,
   resolveSkill,
-  type PlannedEntry,
   type ResolvedSkill,
 } from "../src/lib/skills-sync/plan.ts";
-import { treeIntegrity, type AgentLaunchView } from "../src/lib/skills-sync/materialize.ts";
 import {
   installFakeKeyring,
   seedLoggedInProfile,
   useTempConfigHome,
   type FakeKeyringInstall,
 } from "./helpers/auth-fixture.ts";
-import { createSkillServer, skillMd, type AgentFixture } from "./helpers/skills-server.ts";
+import { createSkillServer, skillMd } from "./helpers/skills-server.ts";
 import { formatError } from "../src/lib/ui.ts";
 
 const configHome = useTempConfigHome("appstrate-cli-skills-plan-");
@@ -233,146 +229,14 @@ describe("assignSlugs", () => {
   });
 });
 
-// Platform-shaped: the command writes it, and refuses any other shape.
-const SPACE = "spc_00000000-0000-4000-8000-000000000001";
-const SECOND = "spc_00000000-0000-4000-8000-000000000002";
-
-function view(packageId: string, spaceId = SPACE, spaceName = "Space One"): AgentLaunchView {
-  return {
-    packageId,
-    spaceId,
-    spaceName,
-    version: "1.0.0",
-    title: packageId,
-    description: "Does a thing.",
-    input: { schema: { type: "object", properties: {} }, values: {}, locked_fields: [] },
-  };
+/** A ledger's `slug → holder`. */
+function holding(pairs: [string, string][]) {
+  return new Map(pairs.map(([slug, packageId]) => [slug, { packageId }]));
 }
-
-/** A ledger's `slug → claimant`: an agent entry records its space, a skill entry none. */
-function holding(pairs: [string, string][], spaceId?: string) {
-  return new Map(
-    pairs.map(([slug, packageId]) => [slug, spaceId ? { packageId, spaceId } : { packageId }]),
-  );
-}
-
-describe("assignSlugs — agent commands (D23)", () => {
-  it("prefixes an agent with run- and renders its tree, hashed as rendered", () => {
-    const { planned, failed } = assignSlugs([], [view("@acme/report")]);
-
-    expect(failed).toEqual([]);
-    const agent = planned[0]!;
-    expect(agent.slug).toBe("run-report");
-    expect(agent.kind).toBe("agent");
-    if (agent.kind !== "agent") throw new Error("expected an agent entry");
-    expect(Object.keys(agent.files).sort()).toEqual(["SKILL.md", "input.json"]);
-    expect(agent.integrity).toBe(treeIntegrity(agent.files));
-  });
-
-  it("assigns every skill before any agent, so an agent never renames a skill", () => {
-    // The agent sorts first by package id, and still loses `run-foo` to the skill.
-    const { planned } = assignSlugs(
-      [
-        resolved({ packageId: "@zed/foo", frontmatterName: "foo" }),
-        resolved({ packageId: "@zed/run-foo", frontmatterName: "run-foo" }),
-      ],
-      [view("@acme/foo")],
-    );
-
-    expect(planned.map((entry) => [entry.packageId, entry.slug, entry.renamedFrom])).toEqual([
-      ["@zed/foo", "foo", undefined],
-      ["@zed/run-foo", "run-foo", undefined],
-      ["@acme/foo", "run-acme-foo", "run-foo"],
-    ]);
-  });
-
-  it("keeps the run- prefix through the counter when the fallback collides too", () => {
-    const { planned } = assignSlugs(
-      [resolved({ packageId: "@zed/run-foo", frontmatterName: "run-foo" })],
-      [view("@acme/foo"), view("@other/acme-foo")],
-      holding([["run-acme-foo", "@gone/unresolved"]], SPACE),
-    );
-
-    expect(planned.map((entry) => entry.slug)).toEqual([
-      "run-foo",
-      "run-acme-foo-2",
-      "run-other-acme-foo",
-    ]);
-  });
-
-  it("reports an agent that fails to render and leaves its name to the next claimant", () => {
-    const { planned, failed } = assignSlugs(
-      [],
-      [{ ...view("@acme/foo"), version: "not-semver" }, view("@zed/foo")],
-    );
-
-    expect(failed.map((f) => f.view.packageId)).toEqual(["@acme/foo"]);
-    expect(planned.map((entry) => [entry.packageId, entry.slug])).toEqual([
-      ["@zed/foo", "run-foo"],
-    ]);
-  });
-});
 
 describe("assignSlugs — an installed name stays with its package", () => {
   const slugsOf = (planned: { packageId: string; slug: string }[]) =>
     Object.fromEntries(planned.map((entry) => [entry.packageId, entry.slug]));
-
-  it("keeps an agent on its name when a newcomer sorts first", () => {
-    const { planned } = assignSlugs(
-      [],
-      [view("@alpha/report"), view("@zeta/report")],
-      holding([["run-report", "@zeta/report"]], SPACE),
-    );
-
-    expect(slugsOf(planned)).toEqual({
-      "@alpha/report": "run-alpha-report",
-      "@zeta/report": "run-report",
-    });
-  });
-
-  it("keeps an agent on its fallback, even once the name's holder left", () => {
-    const agents = [view("@alpha/report"), view("@zeta/report")];
-    const both = holding(
-      [
-        ["run-report", "@zeta/report"],
-        ["run-alpha-report", "@alpha/report"],
-      ],
-      SPACE,
-    );
-    expect(slugsOf(assignSlugs([], agents, both).planned)).toEqual({
-      "@alpha/report": "run-alpha-report",
-      "@zeta/report": "run-report",
-    });
-
-    // An agent's command is never renamed under it: `/appstrate:run-alpha-report` keeps working.
-    const left = holding([["run-alpha-report", "@alpha/report"]], SPACE);
-    expect(slugsOf(assignSlugs([], [view("@alpha/report")], left).planned)).toEqual({
-      "@alpha/report": "run-alpha-report",
-    });
-    // A newcomer, holding nothing, takes the freed name.
-    expect(slugsOf(assignSlugs([], [view("@alpha/report")]).planned)).toEqual({
-      "@alpha/report": "run-report",
-    });
-  });
-
-  // A newcomer whose PREFERRED slug is somebody's installed fallback.
-  const held = holding(
-    [
-      ["run-report", "@zeta/report"],
-      ["run-alpha-report", "@alpha/report"],
-    ],
-    SPACE,
-  );
-
-  it("never hands a held fallback to a newcomer that prefers it", () => {
-    const agents = [view("@a/alpha-report"), view("@alpha/report"), view("@zeta/report")];
-
-    expect(slugsOf(assignSlugs([], agents, held).planned)).toEqual({
-      "@a/alpha-report": "run-a-alpha-report",
-      "@alpha/report": "run-alpha-report",
-      "@zeta/report": "run-report",
-    });
-  });
 
   it("leaves a cycle where it is", () => {
     // Each holds the other's preferred name.
@@ -381,7 +245,6 @@ describe("assignSlugs — an installed name stays with its package", () => {
         resolved({ packageId: "@acme/one", frontmatterName: "one" }),
         resolved({ packageId: "@acme/two", frontmatterName: "two" }),
       ],
-      [],
       holding([
         ["two", "@acme/one"],
         ["one", "@acme/two"],
@@ -398,7 +261,6 @@ describe("assignSlugs — an installed name stays with its package", () => {
         resolved({ packageId: "@acme/pdf", frontmatterName: "pdf" }),
         resolved({ packageId: "@zed/tools", frontmatterName: "tools" }),
       ],
-      [],
       holding([["pdf", "@zed/tools"]]),
     );
 
@@ -410,175 +272,12 @@ describe("assignSlugs — an installed name stays with its package", () => {
         resolved({ packageId: "@acme/pdf", frontmatterName: "pdf" }),
         resolved({ packageId: "@zed/tools", frontmatterName: "tools" }),
       ],
-      [],
       holding([
         ["acme-pdf", "@acme/pdf"],
         ["tools", "@zed/tools"],
       ]),
     );
     expect(slugsOf(next.planned)).toEqual({ "@acme/pdf": "pdf", "@zed/tools": "tools" });
-  });
-});
-
-describe("assignSlugs — one agent active in several spaces (#1972)", () => {
-  const spacesOf = (planned: PlannedEntry[]) =>
-    planned.map((entry) => [entry.kind === "agent" ? entry.spaceId : "", entry.slug]);
-
-  it("names the first claimant run-<name> and the next run-<space>-<name>", () => {
-    const { planned } = assignSlugs(
-      [],
-      [view("@acme/report"), view("@acme/report", SECOND, "Lab Team")],
-    );
-
-    expect(spacesOf(planned)).toEqual([
-      [SPACE, "run-report"],
-      [SECOND, "run-lab-team-report"],
-    ]);
-    expect(planned[1]!.renamedFrom).toBe("run-report");
-  });
-
-  it("keeps run-<name> with the space that holds it, whichever space comes first", () => {
-    const held = new Map([["run-report", { packageId: "@acme/report", spaceId: SECOND }]]);
-    const { planned } = assignSlugs(
-      [],
-      [view("@acme/report"), view("@acme/report", SECOND, "Lab")],
-      held,
-    );
-
-    expect(spacesOf(planned)).toEqual([
-      [SPACE, "run-space-one-report"],
-      [SECOND, "run-report"],
-    ]);
-  });
-
-  it("counts on when the space fallback is taken, and keeps run-<scope>-<name> for another package", () => {
-    const { planned } = assignSlugs(
-      [resolved({ packageId: "@zed/run-lab-report", frontmatterName: "run-lab-report" })],
-      [view("@acme/report"), view("@acme/report", SECOND, "Lab"), view("@other/report")],
-    );
-
-    expect(planned.map((entry) => entry.slug)).toEqual([
-      "run-lab-report",
-      "run-report",
-      "run-lab-report-2",
-      "run-other-report",
-    ]);
-  });
-});
-
-describe("assignSlugs — the space fallback", () => {
-  it("names the second space's command after its space when another package holds run-<name>", () => {
-    const { planned } = assignSlugs(
-      [],
-      [view("@acme/report"), view("@acme/report", SECOND, "Lab")],
-      holding([["run-report", "@zeta/report"]], SPACE),
-    );
-
-    expect(planned.map((entry) => entry.slug)).toEqual(["run-acme-report", "run-lab-report"]);
-  });
-
-  it("cuts a long space name, never the agent's name", () => {
-    const space = "a".repeat(60);
-    const { planned } = assignSlugs(
-      [],
-      [view("@acme/weekly-report"), view("@acme/weekly-report", SECOND, space)],
-    );
-
-    const slug = planned[1]!.slug;
-    expect(slug.length).toBeLessThanOrEqual(64);
-    expect(slug.startsWith("run-aaaa")).toBe(true);
-    expect(slug.endsWith("-weekly-report")).toBe(true);
-  });
-});
-
-describe("listSyncableAgents", () => {
-  const agents: AgentFixture[] = [
-    { id: "@acme/zebra", activeIn: ["spc_2"] },
-    { id: "@appstrate/builtin", source: "system", activeIn: ["spc_2"] },
-    { id: "@acme/alpha", activeIn: ["spc_2"] },
-    { id: "@acme/elsewhere", activeIn: ["spc_1"] },
-  ];
-
-  it("lists the ACTIVE agents of the space it names, system ones included, sorted", async () => {
-    // The profile pins spc_1: only the header can bring spc_2's agents back.
-    createSkillServer([], undefined, agents).install();
-
-    expect(await listSyncableAgents("default", "spc_2")).toEqual([
-      { packageId: "@acme/alpha", system: false },
-      { packageId: "@acme/zebra", system: false },
-      { packageId: "@appstrate/builtin", system: true },
-    ]);
-  });
-});
-
-describe("resolveAgent", () => {
-  const ONE = { id: "spc_1", name: "One" };
-
-  it("pins the latest published version and carries the space's input layer", async () => {
-    createSkillServer([], undefined, [
-      {
-        id: "@acme/report",
-        display_name: "Weekly report",
-        description: "Writes the report.",
-        versions: ["1.0.0", "1.2.0"],
-        input: { schema: { type: "object", properties: { topic: { type: "string" } } } },
-        values: { topic: "sales" },
-        locked_fields: ["topic"],
-      },
-    ]).install();
-
-    expect(await resolveAgent("default", "@acme/report", "published", ONE)).toEqual({
-      packageId: "@acme/report",
-      spaceId: "spc_1",
-      spaceName: "One",
-      version: "1.2.0",
-      title: "Weekly report",
-      description: "Writes the report.",
-      input: {
-        schema: { type: "object", properties: { topic: { type: "string" } } },
-        values: { topic: "sales" },
-        locked_fields: ["topic"],
-      },
-    });
-  });
-
-  it("titles an agent with no display name by its package id", async () => {
-    createSkillServer([], undefined, [{ id: "@acme/report", display_name: " " }]).install();
-
-    const agent = (await resolveAgent("default", "@acme/report", "published", ONE))!;
-    expect(agent.title).toBe("@acme/report");
-  });
-
-  it("returns null — not an error — when the agent was never published", async () => {
-    createSkillServer([], undefined, [{ id: "@acme/report", versions: [] }]).install();
-
-    expect(await resolveAgent("default", "@acme/report", "published", ONE)).toBeNull();
-  });
-
-  it("names the draft and pins the command to it", async () => {
-    createSkillServer([], undefined, [
-      { id: "@acme/report", description: "Published.", draft: { description: "Working copy." } },
-    ]).install();
-
-    const agent = (await resolveAgent("default", "@acme/report", "draft", ONE))!;
-    expect(agent.version).toBe("draft");
-    expect(agent.description).toBe("Working copy.");
-  });
-
-  it("says whose copy it is when the caller may not write the agent", async () => {
-    createSkillServer([], undefined, [
-      { id: "@acme/report", draft: { notWritable: true } },
-    ]).install();
-
-    const err = await resolveAgent("default", "@acme/report", "draft", ONE).then(
-      () => null,
-      (e: unknown) => e,
-    );
-    const rendered = formatError(err);
-    expect(rendered).toContain("@acme/report");
-    expect(rendered).toContain("author's working copy");
-    expect(rendered).toContain("agents:write");
-    expect(rendered).toContain("--source published");
   });
 });
 

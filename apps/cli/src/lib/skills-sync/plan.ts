@@ -4,7 +4,6 @@
  * Server half of `appstrate code sync`. No bulk endpoint exists, so it is one
  * list call, one resolution call per package, and downloads only for what
  * changed; concurrency is capped because the package routes are rate limited.
- * Agent commands are rendered from their detail read and download nothing.
  */
 
 import { apiFetchRaw, apiFetchWithHeaders, apiList, ApiError, problemFields } from "../api.ts";
@@ -17,17 +16,7 @@ import {
   fetchPackageDefinition,
   PackageDefinitionError,
 } from "../package-definition.ts";
-import {
-  AGENT_SLUG_PREFIX,
-  agentSlug,
-  collisionSlug,
-  materializeAgent,
-  SKILL_ENTRY,
-  skillSlug,
-  spaceCollisionSlug,
-  treeIntegrity,
-  type AgentLaunchView,
-} from "./materialize.ts";
+import { collisionSlug, SKILL_ENTRY, skillSlug } from "./materialize.ts";
 import {
   emptyTargetState,
   type ManagedSkill,
@@ -84,48 +73,10 @@ export interface ResolvedSkill {
   frontmatterName: string;
 }
 
-interface SlugClaim {
+export interface PlannedSkill extends ResolvedSkill {
   slug: string;
-  /** Set when a collision forced a fallback newly assigned this run (D4, D23). */
+  /** Set when a collision forced a fallback newly assigned this run (D4). */
   renamedFrom?: string;
-}
-
-interface PlannedSkill extends ResolvedSkill, SlugClaim {
-  kind: "skill";
-}
-
-interface PlannedAgent extends SlugClaim {
-  kind: "agent";
-  packageId: string;
-  spaceId: string;
-  /** Messages only. */
-  spaceName: string;
-  version: string;
-  /** SRI of the rendered tree (D22): a template, lock or space change moves it. */
-  integrity: string;
-  files: Record<string, Uint8Array>;
-}
-
-export type PlannedEntry = PlannedSkill | PlannedAgent;
-
-/** Who an entry is: an agent command is `(packageId, spaceId)`, a skill its package alone. */
-type Claimant = Pick<ManagedSkill, "packageId" | "spaceId">;
-
-/**
- * One string per identity, for maps and sets. A ledger entry passes through
- * as recorded. Never pass a `ResolvedSkill` or a `PlannedSkill`: they carry
- * the `spaceId` the skill was downloaded from, which would key one skill per
- * space. Key a skill as `{ packageId }`, or a planned entry through
- * {@link plannedClaimant}.
- */
-export function claimKey({ packageId, spaceId }: Claimant): string {
-  return spaceId ? `${spaceId}/${packageId}` : packageId;
-}
-
-export function plannedClaimant(entry: PlannedEntry): Claimant {
-  return entry.kind === "agent"
-    ? { packageId: entry.packageId, spaceId: entry.spaceId }
-    : { packageId: entry.packageId };
 }
 
 interface ListedPackage {
@@ -137,7 +88,7 @@ interface ListedPackage {
  * Sorted by package id, which is what makes collision resolution reproducible
  * rather than server-order dependent.
  *
- * Both listings ARE the ACTIVE set, not merely the placed one. Activation is
+ * The listing IS the ACTIVE set, not merely the placed one. Activation is
  * what a space OFFERS — a package switched off there is one somebody decided the
  * space would not use, and writing it into the local Claude Code checkout anyway
  * would hand the switch no meaning outside the dashboard. A package switched back
@@ -161,20 +112,11 @@ export async function listSyncableSkills(profileName: string, spaceId?: string):
   return listed.filter((row) => !row.system).map((row) => row.packageId);
 }
 
-/**
- * `GET /api/agents` answers `agents:run` alone: it is the launchable set
- * `run_and_wait` accepts in that space (D19). System agents stay: they launch.
- */
-export function listSyncableAgents(profileName: string, spaceId: string): Promise<ListedPackage[]> {
-  return listActive(profileName, "/api/agents", spaceId);
-}
-
-/** Both kinds: `null` on 404, the author-only refusal when the draft is named. */
+/** `null` on 404, the author-only refusal when the draft is named. */
 async function readDetail<T>(
   profileName: string,
   path: string,
   packageId: string,
-  type: "skill" | "agent",
   spaceId?: string,
 ): Promise<{ body: T; headers: Headers } | null> {
   try {
@@ -183,7 +125,7 @@ async function readDetail<T>(
     if (err instanceof ApiError) {
       if (err.status === 404) return null;
       if (problemFields(err.body).code === DRAFT_NOT_WRITABLE) {
-        throw draftRefusal(packageId, type, DRAFT_REMEDY);
+        throw draftRefusal(packageId, "skill", DRAFT_REMEDY);
       }
     }
     throw err;
@@ -216,7 +158,6 @@ async function resolvePublished(
     profileName,
     `/api/packages/skills/${encodePackageIdPath(packageId)}/versions/latest`,
     packageId,
-    "skill",
     spaceId,
   );
   if (!read) return null;
@@ -250,7 +191,6 @@ async function resolveDraft(
     profileName,
     `/api/packages/skills/${encodePackageIdPath(packageId)}?version=draft`,
     packageId,
-    "skill",
     spaceId,
   );
   if (!read) return null;
@@ -290,152 +230,33 @@ async function resolveDraft(
 }
 
 /**
- * The agent's launch contract in one space: its definition at the selected
- * version plus that space's input layer, in one read. `latest` is the
- * dist-tag the detail route resolves (exact → dist-tag → range), answering 404
- * when nothing is published; the pinned version is whatever it resolved to.
- */
-export async function resolveAgent(
-  profileName: string,
-  packageId: string,
-  source: SkillSource,
-  space: { id: string; name: string },
-): Promise<AgentLaunchView | null> {
-  interface AgentDetailBody {
-    display_name?: unknown;
-    description?: unknown;
-    version?: unknown;
-    input?: unknown;
-  }
-  const selector = source === "draft" ? "draft" : "latest";
-  const read = await readDetail<AgentDetailBody>(
-    profileName,
-    `/api/packages/agents/${encodePackageIdPath(packageId)}?version=${selector}`,
-    packageId,
-    "agent",
-    space.id,
-  );
-  if (!read) return null;
-  const { body } = read;
-  const version = source === "draft" ? "draft" : body.version;
-  if (typeof version !== "string" || !isLaunchInput(body.input)) {
-    throw new SkillSyncError(
-      `Agent detail for ${packageId} is missing version or input`,
-      "The instance is running an incompatible API version.",
-    );
-  }
-  return {
-    packageId,
-    spaceId: space.id,
-    spaceName: space.name,
-    version,
-    title:
-      typeof body.display_name === "string" && body.display_name.trim()
-        ? body.display_name
-        : packageId,
-    description: typeof body.description === "string" ? body.description : "",
-    input: body.input,
-  };
-}
-
-function isLaunchInput(value: unknown): value is AgentLaunchView["input"] {
-  if (typeof value !== "object" || value === null) return false;
-  const input = value as Record<string, unknown>;
-  return (
-    typeof input.values === "object" &&
-    input.values !== null &&
-    Array.isArray(input.locked_fields) &&
-    input.locked_fields.every((field) => typeof field === "string")
-  );
-}
-
-interface SlugAssignment {
-  planned: PlannedEntry[];
-  /** Agents whose command cannot be rendered: deterministic, so never kept as unresolved. */
-  failed: { view: AgentLaunchView; error: unknown }[];
-}
-
-/**
- * Newcomers collide in input order (sorted by package id); every skill before
- * any agent (D23). `incumbents` (slug → wanted claimant) are never handed to
- * another claimant this run: an unattended sync must never make
- * `/appstrate:<slug>` launch a different one, nor the same agent in another
- * space. A skill takes its preferred slug when free, else the one it holds; an
- * agent the one it holds, else its preferred slug when free — a name that
- * frees up may have launched the same agent in another space. Otherwise, a
- * fallback: `run-<space>-<name>` when the same agent has a command in
- * another space (claimed this run, or held), `<scope>-<name>` otherwise.
+ * Newcomers collide in input order (sorted by package id). `incumbents`
+ * (slug → holder) are never handed to another package this run. A skill takes
+ * its preferred slug when free, else the one it holds, else `<scope>-<name>`.
  */
 export function assignSlugs(
   skills: ResolvedSkill[],
-  agents: AgentLaunchView[] = [],
-  incumbents: ReadonlyMap<string, Claimant> = new Map(),
-): SlugAssignment {
+  incumbents: ReadonlyMap<string, Pick<ManagedSkill, "packageId">> = new Map(),
+): { planned: PlannedSkill[] } {
   const nameOf = (packageId: string): string => parseScopedName(packageId)?.name ?? packageId;
-  const taken = new Map<string, Claimant>();
-  const pick = (
-    claimant: Claimant,
-    preferred: string,
-    fallback: (blocked: ReadonlySet<string>) => string,
-    keepsOwn = false,
-  ): SlugClaim => {
-    const key = claimKey(claimant);
-    const blocked = new Set(taken.keys());
-    let own: string | undefined;
-    for (const [slug, holder] of incumbents) {
-      if (claimKey(holder) !== key) blocked.add(slug);
-      else own ??= slug;
-    }
-    const slug =
-      keepsOwn && own ? own : !blocked.has(preferred) ? preferred : (own ?? fallback(blocked));
-    // Keeping the fallback it already holds is not news: only a new name is reported.
-    return slug === preferred || slug === own ? { slug } : { slug, renamedFrom: preferred };
-  };
-
-  const planned: PlannedEntry[] = skills.map((skill) => {
+  const taken = new Set<string>();
+  const planned = skills.map((skill): PlannedSkill => {
     const { packageId } = skill;
     const preferred = skillSlug(skill.frontmatterName, nameOf(packageId));
-    const naming = pick({ packageId }, preferred, (blocked) => collisionSlug(packageId, blocked));
-    taken.set(naming.slug, { packageId });
-    return { ...skill, kind: "skill" as const, ...naming };
-  });
-  const failed: SlugAssignment["failed"] = [];
-  for (const view of agents) {
-    const { packageId, spaceId, spaceName, version } = view;
-    const name = nameOf(packageId);
-    const key = claimKey({ packageId, spaceId });
-    const inAnotherSpace = [...taken.values(), ...incumbents.values()].some(
-      (claimant) => claimant.packageId === packageId && claimKey(claimant) !== key,
-    );
-    try {
-      // An agent keeps the command it holds even when its preferred name
-      // frees up: that name may have launched the same agent in another space.
-      const naming = pick(
-        { packageId, spaceId },
-        agentSlug(name),
-        (blocked) =>
-          inAnotherSpace
-            ? spaceCollisionSlug(name, spaceName, blocked)
-            : collisionSlug(packageId, blocked, AGENT_SLUG_PREFIX),
-        true,
-      );
-      const files = materializeAgent(naming.slug, view);
-      taken.set(naming.slug, { packageId, spaceId });
-      planned.push({
-        kind: "agent",
-        packageId,
-        spaceId,
-        spaceName,
-        version,
-        integrity: treeIntegrity(files),
-        files,
-        ...naming,
-      });
-    } catch (error) {
-      failed.push({ view, error });
+    const blocked = new Set(taken);
+    let own: string | undefined;
+    for (const [slug, holder] of incumbents) {
+      if (holder.packageId !== packageId) blocked.add(slug);
+      else own ??= slug;
     }
-  }
-  return { planned, failed };
+    const slug = !blocked.has(preferred) ? preferred : (own ?? collisionSlug(packageId, blocked));
+    taken.add(slug);
+    // Keeping the fallback it already holds is not news: only a new name is reported.
+    return slug === preferred || slug === own
+      ? { ...skill, slug }
+      : { ...skill, slug, renamedFrom: preferred };
+  });
+  return { planned };
 }
 
 /**
@@ -474,7 +295,7 @@ function frontmatterNameOf(content: unknown): string {
 }
 
 /** Slug assignment is global, so every plan indexes into the same map. */
-export type EntriesBySlug = ReadonlyMap<string, PlannedEntry>;
+export type EntriesBySlug = ReadonlyMap<string, PlannedSkill>;
 
 export interface TargetPlan {
   target: SyncTarget;
@@ -491,18 +312,10 @@ export interface TargetPlan {
   contextChanged: boolean;
 }
 
-/** D18: only the plugin ships `.mcp.json`; an agent command anywhere else fails every run. */
-export function targetCarries(target: SyncTarget, kind: PlannedEntry["kind"]): boolean {
-  return kind === "skill" || target === "claude-plugin";
-}
-
 export interface Catalogue {
   bySlug: EntriesBySlug;
-  /**
-   * Listed but unresolvable ({@link claimKey} → kind), unlike "not published".
-   * Decides deletion, per space for an agent.
-   */
-  unresolved: Map<string, PlannedEntry["kind"]>;
+  /** Package ids listed but unresolvable, unlike "not published". Decides deletion. */
+  unresolved: Set<string>;
 }
 
 /**
@@ -536,9 +349,7 @@ export async function diffTarget(
     state.targets[target]?.root === targetRoot(target) && !sameContext(ledger.context, context);
   const stale = state.version !== STATE_VERSION || ledger.source !== source;
   const shared = target !== "claude-plugin";
-  const wanted = new Map(
-    [...catalogue.bySlug].filter(([, entry]) => targetCarries(target, entry.kind)),
-  );
+  const wanted = catalogue.bySlug;
   const present = new Set<string>();
   for (const slug of Object.keys(ledger.managed)) {
     if (await isMaterialized(target, slug)) present.add(slug);
@@ -568,7 +379,7 @@ export async function diffTarget(
     const current =
       !stale &&
       managed.integrity === entry.integrity &&
-      claimKey(managed) === claimKey(plannedClaimant(entry)) &&
+      managed.packageId === entry.packageId &&
       present.has(slug);
     (current ? plan.keep : plan.write).push(slug);
   }
@@ -578,7 +389,7 @@ export async function diffTarget(
   for (const slug of Object.keys(ledger.managed).sort()) {
     if (wanted.has(slug)) continue;
     // The plugin is rebuilt by COPYING carried-over directories.
-    const keepable = catalogue.unresolved.has(claimKey(ledger.managed[slug]!)) && present.has(slug);
+    const keepable = catalogue.unresolved.has(ledger.managed[slug]!.packageId) && present.has(slug);
     (keepable ? plan.keep : plan.removed).push(slug);
   }
   plan.write.sort();

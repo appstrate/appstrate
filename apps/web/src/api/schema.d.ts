@@ -5740,6 +5740,8 @@ export interface components {
             scope: string | null;
             /** @description Version from manifest */
             version: string | null;
+            /** @description True when the agent has a published version (or is a system agent) — run it via `runAgent` with `version` omitted. False means draft-only: omitting `version` answers 404 `no_published_version`. */
+            published: boolean;
             /**
              * @description Package type from manifest
              * @enum {string}
@@ -8354,6 +8356,7 @@ export interface operations {
                      *           "source": "local",
                      *           "scope": "@acme",
                      *           "version": "1.2.0",
+                     *           "published": true,
                      *           "type": "agent",
                      *           "running_runs": 1,
                      *           "dependencies": {
@@ -8378,6 +8381,7 @@ export interface operations {
                      *           "source": "system",
                      *           "scope": "@appstrate",
                      *           "version": "2.0.0",
+                     *           "published": true,
                      *           "type": "agent",
                      *           "running_runs": 0,
                      *           "dependencies": {

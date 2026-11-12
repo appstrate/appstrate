@@ -543,7 +543,7 @@ spaceGroup
     });
   });
 
-// ─── `appstrate code …` — skills and agent commands into coding-agent tools ──
+// ─── `appstrate code …` — skills into coding-agent tools ──
 
 const codeGroup = program
   .command("code")
@@ -554,7 +554,7 @@ const codeGroup = program
 codeGroup
   .command("sync")
   .description(
-    "Materialize the skills of every space this profile is a member of as Agent Skills directories, and the agents active there as plugin commands. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
+    "Materialize the skills of every space this profile is a member of as Agent Skills directories. Non-interactive: designed to run unattended from a Claude Code plugin marketplace `command` source.",
   )
   .option(
     "--target <target>",

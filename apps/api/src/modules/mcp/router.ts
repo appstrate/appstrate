@@ -90,6 +90,7 @@ import {
 } from "../../lib/audiences.ts";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
 import { ensureMcpResourceMintable } from "./oauth-resources.ts";
+import { buildAgentPromptProvider } from "./agent-prompts.ts";
 import {
   buildMcpTools,
   buildFileResourceProvider,
@@ -684,6 +685,13 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // forwarded-auth in-process dispatch as the tools (files are NOT listed
     // under `resources/list`; they surface only via `resource_link`).
     const resources = buildFileResourceProvider(toolCtx);
+    // One launch prompt per runnable agent, in every space this connection reaches.
+    const prompts = buildAgentPromptProvider({
+      origin,
+      authHeaders,
+      dispatch,
+      spaces: orgSpaces?.reachable ?? [{ id: scope.spaceId, name: c.get("space")!.name, surface }],
+    });
     const server = createMcpServer(
       tools,
       { name: "appstrate", version: MCP_SERVER_VERSION },
@@ -696,6 +704,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
           orgSpaces,
         ),
         resources,
+        prompts,
       },
     );
     const raw = c.req.raw;

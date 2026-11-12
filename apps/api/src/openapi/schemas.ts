@@ -988,6 +988,7 @@ export const schemas = {
       "scope",
       "keywords",
       "version",
+      "published",
     ],
     properties: {
       id: { type: "string" },
@@ -1004,6 +1005,13 @@ export const schemas = {
           "Scope from manifest name, including the leading `@` (e.g. `@myorg` from `@myorg/name`). Directly usable as the `{scope}` path parameter of package/agent operations.",
       },
       version: { type: ["string", "null"], description: "Version from manifest" },
+      published: {
+        type: "boolean",
+        description:
+          "True when the agent has a published version (or is a system agent) — " +
+          "run it via `runAgent` with `version` omitted. False means draft-only: " +
+          "omitting `version` answers 404 `no_published_version`.",
+      },
       type: {
         type: "string",
         description: "Package type from manifest",

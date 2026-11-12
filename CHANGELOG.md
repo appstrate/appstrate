@@ -102,6 +102,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **BREAKING (CLI, MCP): agents are prompts of the MCP server, and `code sync`
+  syncs skills only** (#2172). The Claude Code plugin's `/appstrate:run-<agent>`
+  commands become MCP prompts of the organization's server: `prompts/list`
+  offers one `run-<agent>` prompt per agent you can launch, in every space of
+  the connection where you hold what `run_and_wait` needs, and `prompts/get`
+  renders its launch instructions at the agent's latest published version,
+  with one optional free-text argument, `request`. Claude Code lists them as
+  `/mcp__plugin_appstrate_appstrate__run-<agent>`; every MCP client that
+  supports prompts (not only the plugin) gets them, and the model cannot
+  trigger one on its own. The same agent in a second space is
+  `run-<space name>-<agent>`, another agent with the same name
+  `run-<scope>-<agent>`. An agent with no published version has no prompt, and
+  `--source draft` no longer applies to agents. `appstrate code sync` writes
+  and reads no agent: a space is a sync source only where your role holds
+  `skills:read`, and the next sync removes the installed `run-<agent>`
+  directories through the ordinary removal of entries the catalogue no longer
+  lists. `--space` and `syncSpaces` no longer select agents.
+
 - **`run_and_wait` waits within a `wait` budget, with or without a progress token** (#2169).
   A new `wait` argument (integer seconds, counted from the start of the call) sets how long the
   MCP tool waits for the run: 50 s when omitted, `0` for none, clamped to 30 min. When the wait
@@ -329,6 +347,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   stored; `DELETE` is always allowed.
 
 ### Added
+
+- **`GET /api/agents` rows carry `published`** (#2172): `true` when the agent
+  has a published version (or is a system agent), so launching it without a
+  version selector resolves; `false` for a draft-only agent. The row's
+  `version` is the draft manifest's and does not answer this. The MCP server
+  builds its agent prompts from this flag with one listing read per space.
 
 - **`run_and_wait` relays the run's log lines as MCP progress** (#2147). A
   call carrying a `progressToken` keeps its 15 s heartbeat and also receives

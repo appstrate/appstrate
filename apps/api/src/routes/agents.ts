@@ -21,6 +21,7 @@ import { assertLockedFieldsSatisfiable } from "../services/input-resolution.ts";
 import { dropLockedFieldsFromSchedules } from "../services/scheduler.ts";
 import { db } from "@appstrate/db/client";
 import {
+  isPublished,
   listActivePackages,
   updateSpacePackage,
   getSpacePackageSettings,
@@ -249,6 +250,9 @@ export function createAgentsRouter() {
         // `version` from the manifest may be absent on a partial draft; the DB
         // `type` column is NOT NULL and authoritative (manifest JSONB can lie).
         version: manifest.version ?? null,
+        // The draft manifest's `version` above says nothing about publication:
+        // `published` is whether omitting the version selector at launch resolves.
+        published: isPublished(row),
         type: row.type,
       };
     });

@@ -581,6 +581,8 @@ export interface AgentListItem extends BasePackageListItem {
     integrations: Record<string, string>;
   };
   running_runs: number;
+  /** A published version (or a system agent): launching without a version selector resolves. */
+  published: boolean;
   type: PackageType;
   /** Always emitted by the agent-list mapper (`@scope` or null). */
   scope: string | null;

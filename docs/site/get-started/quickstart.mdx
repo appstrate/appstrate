@@ -78,7 +78,7 @@ appstrate run @acme/hello-world                    # launch the latest version a
 
 <Tab value="Coding agent">
 
-With [Claude Code](https://docs.claude.com/en/docs/claude-code), install the Appstrate plugin once. Every agent active in a space where you can run agents then appears as a `/appstrate:run-<agent>` command, and the skills of your spaces as `/appstrate:<skill>`:
+With [Claude Code](https://docs.claude.com/en/docs/claude-code), install the Appstrate plugin once. The skills of your spaces then appear as `/appstrate:<skill>`, and every agent you can run as a `/mcp__plugin_appstrate_appstrate__run-<agent>` command of the plugin's MCP server:
 
 ```bash
 appstrate login --instance http://localhost:3000
@@ -86,7 +86,7 @@ claude plugin marketplace add appstrate/claude-plugins
 claude plugin install appstrate@appstrate
 ```
 
-Then, in a new Claude Code session, run `/mcp` and authenticate the `plugin:appstrate:appstrate` server, and try `/appstrate:run-hello-world`. See [Skills and coding agents](/using-appstrate/skill).
+Then, in a new Claude Code session, run `/mcp` and authenticate the `plugin:appstrate:appstrate` server, and try `/mcp__plugin_appstrate_appstrate__run-hello-world`. See [Skills and coding agents](/using-appstrate/skill).
 
 </Tab>
 
