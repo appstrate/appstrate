@@ -20,6 +20,12 @@ import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { isTextShapedContentType } from "@appstrate/core/mime";
 import { logger } from "../../lib/logger.ts";
 import { isRelayedResponse } from "../../lib/proxy-status.ts";
+import {
+  CREDENTIAL_STATUS_HEADER,
+  parseCredentialStatus,
+  type CredentialStatus,
+} from "../../lib/credential-status-header.ts";
+import { CREDENTIAL_FAILURE_SENTENCES } from "../../lib/credential-failure.ts";
 import { PROXY_CONTROL_HEADERS } from "../../services/credential-proxy/control-headers.ts";
 import { isValidSessionId } from "../../services/credential-proxy/session.ts";
 import { CREDENTIAL_PROXY_PATH } from "./catalog.ts";
@@ -191,7 +197,35 @@ type Outcome =
       contentType: string;
       bytes: Uint8Array;
       truncated: boolean;
+      /** The proxy's verdict on the connection's credential, on a relayed 401 it judged. */
+      credential: CredentialStatus | null;
     };
+
+interface CredentialMember {
+  status: CredentialStatus["status"];
+  cause: CredentialStatus["cause"];
+  detail: string;
+  failures?: number;
+  max_failures?: number;
+}
+
+/**
+ * The `credential` member of an entry: what the platform concluded about the connection's
+ * credential when the upstream refused it and a forced refresh could not recover it. Without it,
+ * a 401 is the upstream refusing the request with a credential the platform did not judge.
+ */
+function credentialMember(credential: CredentialStatus): CredentialMember {
+  const member = {
+    status: credential.status,
+    cause: credential.cause,
+    detail: CREDENTIAL_FAILURE_SENTENCES[credential.cause],
+  };
+  return credential.status === "in_use" &&
+    credential.failures !== undefined &&
+    credential.maxFailures !== undefined
+    ? { ...member, failures: credential.failures, max_failures: credential.maxFailures }
+    : member;
+}
 
 /** Bytes, so `Request` derives no Content-Type from the body: the caller's is the only one. */
 function encodeBody(text: string): Uint8Array<ArrayBuffer> {
@@ -326,6 +360,7 @@ async function dispatchCall(
     // Already cut by the proxy at `X-Max-Response-Size`.
     bytes: new Uint8Array(await response.arrayBuffer()),
     truncated: response.headers.get("x-truncated") === "true",
+    credential: parseCredentialStatus(response.headers.get(CREDENTIAL_STATUS_HEADER)),
   };
 }
 
@@ -347,7 +382,12 @@ function projectOutcomes(outcomes: readonly Outcome[]): {
       return { index, error: outcome.error };
     }
     if (outcome.status >= 400) failed += 1;
-    const entry = { index, status: outcome.status, headers: outcome.headers };
+    const entry = {
+      index,
+      status: outcome.status,
+      headers: outcome.headers,
+      ...(outcome.credential ? { credential: credentialMember(outcome.credential) } : {}),
+    };
     const { bytes } = outcome;
     if (bytes.byteLength === 0) return entry;
     if (!isTextShapedContentType(outcome.contentType)) {
@@ -451,7 +491,13 @@ function buildApiCallTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
       "request, in order. An entry with `status` is the upstream's own answer, whatever the " +
       "status (a 401 there is the upstream refusing the connection), with `headers` and a text " +
       "`body`, cut at `max_response_bytes` (`truncated: true`); a non-text body is replaced by " +
-      "its size. An entry with `error` `{ status, code, detail }` is the platform's refusal and " +
+      "its size. A 401 entry with `credential` `{ status, cause, detail }` is one the platform " +
+      "failed to recover by refreshing the credential: `in_use` (the credential stays in use; " +
+      "the 401 may be a permission refusal or transient, and `failures`/`max_failures` count " +
+      "toward flagging the connection) or `needs_reconnection` (its owner must reconnect it; " +
+      "calls through it are refused until then); without it, the upstream refused the request " +
+      "itself. " +
+      "An entry with `error` `{ status, code, detail }` is the platform's refusal and " +
       "does not stop the other requests: `call_permission_required`, `credential_not_found`, " +
       "`must_choose_connection` (retry with one `errors[0].candidate_connections[].id` as " +
       "`connection_id`), `connection_not_in_org_default`, `pinned_connection_unavailable`, " +

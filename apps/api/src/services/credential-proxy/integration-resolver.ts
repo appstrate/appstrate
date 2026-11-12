@@ -59,6 +59,17 @@ import {
   isUnauthenticatedIntegration,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
+import type { CredentialStatus } from "../../lib/credential-status-header.ts";
+
+/**
+ * What the proxy's forced refresh leaves it with: a credential to replay the call with, the
+ * {@link CredentialStatus} of a rejected credential it could not recover (the relayed 401's
+ * `X-Appstrate-Credential-Status`), or `null` when nothing accessible serves.
+ */
+export type ForcedRefreshResult =
+  | { kind: "replay"; payload: ProxyCredentialsPayload }
+  | { kind: "verdict"; credential: CredentialStatus }
+  | null;
 
 /** An `X-Run-Id` run, which also names the integration version the call is authorized against. */
 export interface ProxyRunSelection extends RunBoundSelection {
@@ -170,13 +181,13 @@ export async function resolveIntegrationProxyCredentials(
  * {@link refreshConnectionCredential} judged the rejection of the credential of `rejectedRevision`
  * (`kept`: superseded, so replay with the one the connection holds now).
  *
- * `null` — the proxy relays the upstream 401 unchanged — when nothing accessible serves, and on
- * `retry` and `dead` (already flagged: the relayed 401 does not hide a reconnect prompt).
+ * On `retry` / `dead` the proxy relays the upstream 401 with their public {@link CredentialStatus}
+ * (`in_use` / `needs_reconnection`); on `null` (nothing accessible serves), with nothing.
  */
 export async function forceRefreshIntegrationProxyCredentials(
   input: ResolveIntegrationProxyInput,
   rejectedRevision: string | null,
-): Promise<ProxyCredentialsPayload | null> {
+): Promise<ForcedRefreshResult> {
   const manifest = await loadManifest(input);
   const connection = await resolveConnection(input, manifest);
   if (!connection) return null;
@@ -217,10 +228,22 @@ export async function forceRefreshIntegrationProxyCredentials(
         cause: outcome.cause,
         detail: outcome.detail,
       });
-      return null;
+      return {
+        kind: "verdict",
+        credential:
+          outcome.status === "dead"
+            ? { status: "needs_reconnection", cause: outcome.cause }
+            : { status: "in_use", cause: outcome.cause, ...outcome.rejections },
+      };
   }
   if (!fields) return null;
-  return buildPayloadFromFields(manifest, connection.authKey, fields, connection.variables);
+  const payload = buildPayloadFromFields(
+    manifest,
+    connection.authKey,
+    fields,
+    connection.variables,
+  );
+  return payload ? { kind: "replay", payload } : null;
 }
 
 /** One connection a call outside a run may use (`GET /api/credential-proxy/connections`). */

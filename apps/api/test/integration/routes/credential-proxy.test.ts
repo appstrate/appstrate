@@ -66,6 +66,7 @@ import { CURRENT_API_VERSION } from "../../../src/lib/api-versions.ts";
 import { logger } from "../../../src/lib/logger.ts";
 import { encryptCredentialEnvelope } from "@appstrate/connect";
 import type { IntegrationManifest } from "@appstrate/core/integration";
+import { getEnv } from "@appstrate/env";
 import {
   localIntegrationManifest,
   httpHeaderDelivery,
@@ -554,6 +555,103 @@ describe("POST /api/credential-proxy/proxy — error→status mapping", () => {
     expect(res.headers.get("Proxy-Status")).toBe("appstrate; received-status=401");
     expect(res.headers.get("WWW-Authenticate")).toBeNull();
     expect(await res.text()).toBe('{"error":"expired"}');
+  });
+
+  describe("X-Appstrate-Credential-Status on a relayed 401", () => {
+    const call = () =>
+      app.request("/api/credential-proxy/proxy", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "X-Org-Id": ctx.orgId,
+          "X-Space-Id": ctx.defaultSpaceId,
+          "X-Integration-Id": INTEGRATION_ID,
+          "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+          "X-Session-Id": uuidV4(),
+        },
+      });
+
+    it("says `in_use` with the counted rejection when the unrefreshable credential stays in use", async () => {
+      await seedIntegrationWithConnection(ctx);
+      mockUpstream(async () => new Response('{"error":"denied"}', { status: 401 }));
+
+      const res = await call();
+      expect(res.status).toBe(401);
+      expect(res.headers.get("X-Appstrate-Credential-Status")).toBe(
+        `in_use; cause=unrefreshable; failures=1; max-failures=${getEnv().INTEGRATION_REFRESH_MAX_FAILURES}`,
+      );
+      // The upstream's answer is relayed unchanged.
+      expect(await res.text()).toBe('{"error":"denied"}');
+    });
+
+    it("on a streamed upload, relays the verdict alone: no X-Auth-Refreshed when nothing was refreshed", async () => {
+      await seedIntegrationWithConnection(ctx);
+      let upstreamCalls = 0;
+      mockUpstream(async (_input, init) => {
+        upstreamCalls += 1;
+        await new Response(init?.body).arrayBuffer();
+        return new Response('{"error":"denied"}', { status: 401 });
+      });
+
+      const res = await app.request("/api/credential-proxy/proxy", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "X-Org-Id": ctx.orgId,
+          "X-Space-Id": ctx.defaultSpaceId,
+          "X-Integration-Id": INTEGRATION_ID,
+          "X-Target": "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+          "X-Session-Id": uuidV4(),
+          "X-Stream-Request": "1",
+          "Content-Type": "application/octet-stream",
+        },
+        body: "upload-bytes",
+      });
+      expect(res.status).toBe(401);
+      expect(res.headers.get("X-Auth-Refreshed")).toBeNull();
+      expect(res.headers.get("X-Appstrate-Credential-Status")).toBe(
+        `in_use; cause=unrefreshable; failures=1; max-failures=${getEnv().INTEGRATION_REFRESH_MAX_FAILURES}`,
+      );
+      // The body is not replayable: one upstream call.
+      expect(upstreamCalls).toBe(1);
+    });
+
+    it("says `needs_reconnection` on the rejection that flags the connection", async () => {
+      const connectionId = await seedIntegrationWithConnection(ctx);
+      await db
+        .update(integrationConnections)
+        .set({ refreshFailureCount: getEnv().INTEGRATION_REFRESH_MAX_FAILURES - 1 })
+        .where(eq(integrationConnections.id, connectionId));
+      mockUpstream(async () => new Response('{"error":"denied"}', { status: 401 }));
+
+      const res = await call();
+      expect(res.status).toBe(401);
+      expect(res.headers.get("X-Appstrate-Credential-Status")).toBe(
+        "needs_reconnection; cause=unrefreshable",
+      );
+      const [row] = await db
+        .select({ needsReconnection: integrationConnections.needsReconnection })
+        .from(integrationConnections)
+        .where(eq(integrationConnections.id, connectionId));
+      expect(row!.needsReconnection).toBe(true);
+    });
+
+    it("never relays an upstream's own copy of the header", async () => {
+      await seedIntegrationWithConnection(ctx);
+      mockUpstream(
+        async () =>
+          new Response("{}", {
+            status: 200,
+            headers: {
+              "X-Appstrate-Credential-Status": "needs_reconnection; cause=refresh_token_revoked",
+            },
+          }),
+      );
+
+      const res = await call();
+      expect(res.status).toBe(200);
+      expect(res.headers.get("X-Appstrate-Credential-Status")).toBeNull();
+    });
   });
 });
 

@@ -11549,12 +11549,14 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the credentials were refreshed server-side but the body could not be replayed — the caller replays the call itself. */
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the forced refresh served a credential to retry with but the body could not be replayed — the caller replays the call itself. A relayed 401 the forced refresh could not recover from carries `X-Appstrate-Credential-Status`. */
             401: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
                     "Proxy-Status"?: string;
-                    /** @description Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry. */
+                    /** @description Set by the platform (never relayed from the upstream) on a relayed 401 after a forced refresh that left the rejected credential in place. An RFC 8941 Item: `in_use; cause=<cause>[; failures=<n>; max-failures=<max>]` — the credential stays in use, and `failures` counts this rejection toward `INTEGRATION_REFRESH_MAX_FAILURES` when it was counted — or `needs_reconnection; cause=<cause>` — the connection is now flagged `needs_reconnection` and its owner must reconnect it. `cause` is the credential-failure vocabulary (`refresh_token_revoked`, `unrefreshable`, `upstream_transient`, …). Absent: no refresh verdict, the upstream refused the request itself. */
+                    "X-Appstrate-Credential-Status"?: string;
+                    /** @description Present and set to `true` on a streaming-upload 401 where the forced refresh served a credential to retry with but the body could not be replayed (absent when it did not: `X-Appstrate-Credential-Status` says why). Signals the caller to retry. */
                     "X-Auth-Refreshed"?: "true";
                     [name: string]: unknown;
                 };
@@ -11733,12 +11735,14 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the credentials were refreshed server-side but the body could not be replayed — the caller replays the call itself. */
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the forced refresh served a credential to retry with but the body could not be replayed — the caller replays the call itself. A relayed 401 the forced refresh could not recover from carries `X-Appstrate-Credential-Status`. */
             401: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
                     "Proxy-Status"?: string;
-                    /** @description Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry. */
+                    /** @description Set by the platform (never relayed from the upstream) on a relayed 401 after a forced refresh that left the rejected credential in place. An RFC 8941 Item: `in_use; cause=<cause>[; failures=<n>; max-failures=<max>]` — the credential stays in use, and `failures` counts this rejection toward `INTEGRATION_REFRESH_MAX_FAILURES` when it was counted — or `needs_reconnection; cause=<cause>` — the connection is now flagged `needs_reconnection` and its owner must reconnect it. `cause` is the credential-failure vocabulary (`refresh_token_revoked`, `unrefreshable`, `upstream_transient`, …). Absent: no refresh verdict, the upstream refused the request itself. */
+                    "X-Appstrate-Credential-Status"?: string;
+                    /** @description Present and set to `true` on a streaming-upload 401 where the forced refresh served a credential to retry with but the body could not be replayed (absent when it did not: `X-Appstrate-Credential-Status` says why). Signals the caller to retry. */
                     "X-Auth-Refreshed"?: "true";
                     [name: string]: unknown;
                 };
@@ -11917,12 +11921,14 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the credentials were refreshed server-side but the body could not be replayed — the caller replays the call itself. */
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the forced refresh served a credential to retry with but the body could not be replayed — the caller replays the call itself. A relayed 401 the forced refresh could not recover from carries `X-Appstrate-Credential-Status`. */
             401: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
                     "Proxy-Status"?: string;
-                    /** @description Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry. */
+                    /** @description Set by the platform (never relayed from the upstream) on a relayed 401 after a forced refresh that left the rejected credential in place. An RFC 8941 Item: `in_use; cause=<cause>[; failures=<n>; max-failures=<max>]` — the credential stays in use, and `failures` counts this rejection toward `INTEGRATION_REFRESH_MAX_FAILURES` when it was counted — or `needs_reconnection; cause=<cause>` — the connection is now flagged `needs_reconnection` and its owner must reconnect it. `cause` is the credential-failure vocabulary (`refresh_token_revoked`, `unrefreshable`, `upstream_transient`, …). Absent: no refresh verdict, the upstream refused the request itself. */
+                    "X-Appstrate-Credential-Status"?: string;
+                    /** @description Present and set to `true` on a streaming-upload 401 where the forced refresh served a credential to retry with but the body could not be replayed (absent when it did not: `X-Appstrate-Credential-Status` says why). Signals the caller to retry. */
                     "X-Auth-Refreshed"?: "true";
                     [name: string]: unknown;
                 };
@@ -12096,12 +12102,14 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the credentials were refreshed server-side but the body could not be replayed — the caller replays the call itself. */
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the forced refresh served a credential to retry with but the body could not be replayed — the caller replays the call itself. A relayed 401 the forced refresh could not recover from carries `X-Appstrate-Credential-Status`. */
             401: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
                     "Proxy-Status"?: string;
-                    /** @description Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry. */
+                    /** @description Set by the platform (never relayed from the upstream) on a relayed 401 after a forced refresh that left the rejected credential in place. An RFC 8941 Item: `in_use; cause=<cause>[; failures=<n>; max-failures=<max>]` — the credential stays in use, and `failures` counts this rejection toward `INTEGRATION_REFRESH_MAX_FAILURES` when it was counted — or `needs_reconnection; cause=<cause>` — the connection is now flagged `needs_reconnection` and its owner must reconnect it. `cause` is the credential-failure vocabulary (`refresh_token_revoked`, `unrefreshable`, `upstream_transient`, …). Absent: no refresh verdict, the upstream refused the request itself. */
+                    "X-Appstrate-Credential-Status"?: string;
+                    /** @description Present and set to `true` on a streaming-upload 401 where the forced refresh served a credential to retry with but the body could not be replayed (absent when it did not: `X-Appstrate-Credential-Status` says why). Signals the caller to retry. */
                     "X-Auth-Refreshed"?: "true";
                     [name: string]: unknown;
                 };
@@ -12280,12 +12288,14 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the credentials were refreshed server-side but the body could not be replayed — the caller replays the call itself. */
+            /** @description The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the forced refresh served a credential to retry with but the body could not be replayed — the caller replays the call itself. A relayed 401 the forced refresh could not recover from carries `X-Appstrate-Credential-Status`. */
             401: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
                     "Proxy-Status"?: string;
-                    /** @description Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry. */
+                    /** @description Set by the platform (never relayed from the upstream) on a relayed 401 after a forced refresh that left the rejected credential in place. An RFC 8941 Item: `in_use; cause=<cause>[; failures=<n>; max-failures=<max>]` — the credential stays in use, and `failures` counts this rejection toward `INTEGRATION_REFRESH_MAX_FAILURES` when it was counted — or `needs_reconnection; cause=<cause>` — the connection is now flagged `needs_reconnection` and its owner must reconnect it. `cause` is the credential-failure vocabulary (`refresh_token_revoked`, `unrefreshable`, `upstream_transient`, …). Absent: no refresh verdict, the upstream refused the request itself. */
+                    "X-Appstrate-Credential-Status"?: string;
+                    /** @description Present and set to `true` on a streaming-upload 401 where the forced refresh served a credential to retry with but the body could not be replayed (absent when it did not: `X-Appstrate-Credential-Status` says why). Signals the caller to retry. */
                     "X-Auth-Refreshed"?: "true";
                     [name: string]: unknown;
                 };
