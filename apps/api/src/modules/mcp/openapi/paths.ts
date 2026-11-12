@@ -329,9 +329,6 @@ const SKILLS_REST_DESCRIPTION =
   "endpoint: same server function, same entries, same bytes, for the space `X-Space-Id` names. " +
   "Requires `skills:read` in that space. Rate-limited to 50 requests/minute.";
 
-const skillUriParameter = (description: string) =>
-  ({ name: "uri", in: "query", required: true, schema: { type: "string" }, description }) as const;
-
 const skillReadErrors = {
   "400": { $ref: "#/components/responses/ValidationError" },
   "401": { $ref: "#/components/responses/Unauthorized" },
@@ -397,7 +394,13 @@ const skillsRestPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
-        skillUriParameter("`skill://` URI of a skill entry's `SKILL.md` (the entry's `uri`)."),
+        {
+          name: "uri",
+          in: "query",
+          required: true,
+          schema: { type: "string" },
+          description: "`skill://` URI of a skill entry's `SKILL.md` (the entry's `uri`).",
+        },
       ],
       responses: {
         "200": {

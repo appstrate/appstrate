@@ -16,15 +16,17 @@ import {
   SKILL_NAME_MAX_LENGTH,
 } from "@appstrate/afps-shared/companion-files";
 import { parseScopedName, toSlug } from "@appstrate/core/naming";
-import { skillFileUri, type SkillAddress, type SkillEntry } from "@appstrate/core/skill-uri";
+import {
+  SKILL_MAX_FILES,
+  SKILL_MAX_TOTAL_BYTES,
+  skillFileUri,
+  type SkillAddress,
+  type SkillEntry,
+} from "@appstrate/core/skill-uri";
 import { isSafeArchivePath } from "@appstrate/core/zip";
 import { PACKAGE_CONTENT_ENTRY, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
 
 export const SKILL_ENTRY = PACKAGE_CONTENT_ENTRY.skill!.path;
-
-/** SEP-2640: a server SHOULD NOT serve a skill with more files or bytes than this. */
-export const SKILL_MAX_FILES = 512;
-const SKILL_MAX_TOTAL_BYTES = 16 * 1024 * 1024;
 
 /** Appstrate packaging, not skill content: archives carry them, a skill directory does not. */
 const PACKAGING_ENTRIES: ReadonlySet<string> = new Set([PACKAGE_MANIFEST_FILE, "RECORD"]);
@@ -47,13 +49,13 @@ export interface ServedSkill {
   files: Record<string, Uint8Array>;
 }
 
-export type ServeSkillResult = { ok: true; skill: ServedSkill } | { ok: false; reason: string };
+type ServeSkillResult = { ok: true; skill: ServedSkill } | { ok: false; reason: string };
 
 /**
  * The stored tree of `packageId` as an Agent Skills directory: packaging
  * entries dropped, `SKILL.md` normalized (its `name`, and its
  * `metadata.version` set to `version`, absent when `null`), within the size
- * limits above. A tree that cannot be served whole is refused with the reason,
+ * limits of SEP-2640. A tree that cannot be served whole is refused with the reason,
  * never trimmed.
  */
 export function serveSkill(

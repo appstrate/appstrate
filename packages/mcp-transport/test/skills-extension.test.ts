@@ -3,7 +3,6 @@
 import { describe, it, expect } from "bun:test";
 import { ErrorCode, McpError, ResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import {
-  SKILLS_EXTENSION_ID,
   createInProcessPair,
   createMcpServer,
   type AppstrateResourceProvider,
@@ -40,7 +39,7 @@ describe("createMcpServer — skills extension (SEP-2640)", () => {
     try {
       const caps = pair.client.getServerCapabilities();
       expect(caps?.resources).toBeDefined();
-      expect(caps?.extensions?.[SKILLS_EXTENSION_ID]).toEqual({});
+      expect(caps?.extensions?.["io.modelcontextprotocol/skills"]).toEqual({});
     } finally {
       await pair.close();
     }

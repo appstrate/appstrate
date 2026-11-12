@@ -23,6 +23,11 @@ import { isSafeArchivePath } from "./zip.ts";
 export const SKILL_URI_PREFIX = "skill://";
 const DRAFT_MARKER = "@draft";
 
+/** SEP-2640: a server SHOULD NOT serve a skill with more files than this. */
+export const SKILL_MAX_FILES = 512;
+/** SEP-2640: a server SHOULD NOT serve a skill with more bytes than this, all files together. */
+export const SKILL_MAX_TOTAL_BYTES = 16 * 1024 * 1024;
+
 /** A file of a skill: its resource URI, `sha256:{hex}` digest of its raw bytes, and byte length. */
 export interface SkillResource {
   uri: string;
@@ -66,6 +71,23 @@ export function skillFileUri(address: SkillAddress): string {
 }
 
 /**
+ * The package a `skill://` URI names and whether it names its draft, read from
+ * its first three segments alone; `null` when they name no scoped package.
+ */
+export function parseSkillUriPackage(
+  uri: string,
+): { packageId: string; definition: SkillAddress["definition"] } | null {
+  if (!uri.startsWith(SKILL_URI_PREFIX)) return null;
+  const [, scope, packageSegment] = uri.slice(SKILL_URI_PREFIX.length).split("/");
+  if (!scope || !packageSegment) return null;
+  const draft = packageSegment.endsWith(DRAFT_MARKER);
+  const packageId = `@${scope}/${draft ? packageSegment.slice(0, -DRAFT_MARKER.length) : packageSegment}`;
+  return parseScopedName(packageId)
+    ? { packageId, definition: draft ? "draft" : "published" }
+    : null;
+}
+
+/**
  * The address a `skill://` URI names, `null` unless it is the canonical
  * spelling of one of the two forms: a scoped package, a valid skill name and a
  * file path that stays inside the skill directory.
@@ -74,23 +96,15 @@ export function parseSkillUri(uri: string): SkillAddress | null {
   if (!uri.startsWith(SKILL_URI_PREFIX)) return null;
   const segments = uri.slice(SKILL_URI_PREFIX.length).split("/");
   if (segments.length < 5 || segments.some((segment) => segment === "")) return null;
-  const [spaceId, scope, packageSegment, name, ...rest] = segments as [
-    string,
-    string,
-    string,
-    string,
-    ...string[],
-  ];
-  const draft = packageSegment.endsWith(DRAFT_MARKER);
-  const packageName = draft ? packageSegment.slice(0, -DRAFT_MARKER.length) : packageSegment;
-  const packageId = `@${scope}/${packageName}`;
-  if (!parseScopedName(packageId) || !isValidSkillName(name)) return null;
+  const [spaceId, , , name, ...rest] = segments as [string, string, string, string, ...string[]];
+  const pkg = parseSkillUriPackage(uri);
+  if (!pkg || !isValidSkillName(name)) return null;
   let address: SkillAddress;
   try {
     address = {
       spaceId,
-      packageId,
-      definition: draft ? "draft" : "published",
+      packageId: pkg.packageId,
+      definition: pkg.definition,
       name,
       path: rest.map(decodeURIComponent).join("/"),
     };

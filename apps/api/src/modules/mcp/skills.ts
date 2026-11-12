@@ -62,8 +62,6 @@ export interface SkillServer {
   read: (uri: string) => Promise<ReadResourceResult>;
   /** The entries of `definition` the caller may read: `skills/list` serves the published ones. */
   list: (definition: SkillDefinitionSelector) => Promise<SkillEntry[]>;
-  /** The bytes `resources/read` serves for a `skill://` URI, `null` when none are readable there. */
-  file: (uri: string) => Promise<Uint8Array | null>;
   /**
    * Every file `resources/read` serves for the skill whose `SKILL.md` is at
    * `uri`, by path inside the skill directory; `null` when none is readable there.
@@ -139,6 +137,7 @@ export function buildSkillServer(ctx: SkillProviderContext): SkillServer {
     return served ? served.skill.files : null;
   };
 
+  /** The bytes `resources/read` serves for a `skill://` URI, `null` when none are readable there. */
   const file = async (uri: string): Promise<Uint8Array | null> => {
     const address = parseSkillUri(uri);
     const served = await resolve(address);
@@ -194,5 +193,5 @@ export function buildSkillServer(ctx: SkillProviderContext): SkillServer {
     };
   };
 
-  return { provider, read, list, file, skillFiles };
+  return { provider, read, list, skillFiles };
 }

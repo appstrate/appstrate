@@ -720,7 +720,7 @@ describe("code sync — --source draft", () => {
 describe("code sync — a failed download is not a deletion", () => {
   const TWO: SkillFixture[] = [...ONE_SKILL, { id: "@acme/notes", skillMd: skillMd("notes") }];
 
-  it("keeps the directory and the ledger entry when /content 500s", async () => {
+  it("keeps the directory and the ledger entry when /archive 500s", async () => {
     createSkillServer(TWO).install();
     const { io } = createMemoryIO();
     await codeSyncCommand({ target: ["claude-plugin", "codex"] }, io);
@@ -1591,7 +1591,7 @@ describe("code sync — session notice", () => {
 });
 
 describe("code sync — request concurrency", () => {
-  it("never holds more than eight package-route requests open", async () => {
+  it("never holds more than eight skill-route requests open", async () => {
     const many = Array.from({ length: 24 }, (_, i) => ({
       id: `@acme/skill-${String(i).padStart(2, "0")}`,
       skillMd: skillMd(`skill-${String(i).padStart(2, "0")}`),

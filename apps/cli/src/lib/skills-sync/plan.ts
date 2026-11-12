@@ -11,11 +11,15 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { parseSkillFrontmatter } from "@appstrate/afps-shared/companion-files";
-import { apiFetchRaw, apiList, problemFields, sessionRevokedError } from "../api.ts";
+import { ApiError, apiFetchRaw, apiList, problemFields, sessionRevokedError } from "../api.ts";
 import { isReservedScope, parseScopedName } from "@appstrate/core/naming";
+import { canonicalPackagePath } from "@appstrate/core/package-file-operations";
 import { unzipArtifact } from "@appstrate/core/zip";
 import {
   parseSkillUri,
+  parseSkillUriPackage,
+  SKILL_MAX_FILES,
+  SKILL_MAX_TOTAL_BYTES,
   type SkillAddress,
   type SkillEntry,
   type SkillResource,
@@ -40,6 +44,7 @@ export type SkillSource = TargetState["source"];
 
 const SKILLS_PATH = "/api/mcp/skills";
 const DRAFT_VERSION = "draft";
+const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
 
 class SkillSyncError extends Error {
   constructor(
@@ -81,21 +86,28 @@ function malformed(what: string): SkillSyncError {
  * The address of `entry` and its files by path inside the skill directory,
  * `SKILL.md` included. Every URI must parse (a canonical `skill://` URI whose
  * path stays inside the skill directory) and name the entry's skill, whose
- * name is its frontmatter `name`; a path listed twice is refused.
+ * name is its frontmatter `name`. Every file has a `sha256` digest and a byte
+ * size, within the SEP-2640 limits in count and in total. Two paths that are
+ * one file on a case- or normalization-insensitive disk are refused.
  */
 function entryFiles(entry: SkillEntry): {
   address: SkillAddress;
   files: Map<string, SkillResource>;
 } {
-  const address = parseSkillUri(entry.uri);
+  const address = typeof entry.uri === "string" ? parseSkillUri(entry.uri) : null;
   if (!address) throw malformed(`${entry.uri} is not a skill:// URI`);
   if (address.path !== SKILL_ENTRY) throw malformed(`${entry.uri} is not a ${SKILL_ENTRY}`);
   if (entry.frontmatter?.name !== address.name) {
     throw malformed(`${entry.uri} does not end with its frontmatter name`);
   }
+  if (!Array.isArray(entry.resources) || entry.resources.length > SKILL_MAX_FILES) {
+    throw malformed(`${entry.uri} lists no files, or more than ${SKILL_MAX_FILES}`);
+  }
   const files = new Map<string, SkillResource>();
+  const canonical = new Set<string>();
+  let total = 0;
   for (const resource of entry.resources) {
-    const file = parseSkillUri(resource.uri);
+    const file = typeof resource?.uri === "string" ? parseSkillUri(resource.uri) : null;
     if (
       !file ||
       file.spaceId !== address.spaceId ||
@@ -105,8 +117,22 @@ function entryFiles(entry: SkillEntry): {
     ) {
       throw malformed(`${resource.uri} is not a file of ${entry.uri}`);
     }
-    if (files.has(file.path)) throw malformed(`${resource.uri} is listed twice`);
+    if (!Number.isSafeInteger(resource.size) || resource.size < 0) {
+      throw malformed(`${resource.uri} has no byte size`);
+    }
+    if (typeof resource.digest !== "string" || !DIGEST_PATTERN.test(resource.digest)) {
+      throw malformed(`${resource.uri} has no sha256 digest`);
+    }
+    // A case- or normalization-insensitive disk (macOS, Windows) holds one of
+    // two such paths, and the second write would silently replace the first.
+    const key = canonicalPackagePath(file.path);
+    if (canonical.has(key)) throw malformed(`${resource.uri} is listed twice`);
+    canonical.add(key);
+    total += resource.size;
     files.set(file.path, resource);
+  }
+  if (total > SKILL_MAX_TOTAL_BYTES) {
+    throw malformed(`${entry.uri} holds more than ${SKILL_MAX_TOTAL_BYTES} bytes`);
   }
   if (!files.has(SKILL_ENTRY)) throw malformed(`${entry.uri} lists no ${SKILL_ENTRY}`);
   return { address, files };
@@ -143,11 +169,14 @@ export function resolveSkill(entry: SkillEntry): ResolvedSkill {
   };
 }
 
-/** The package id a listed entry's URI names. */
+/**
+ * The package id a listed entry's URI names, read from its package segments so
+ * that an entry the sync refuses still names the skill it keeps on disk.
+ */
 export function skillPackageId(entry: SkillEntry): string {
-  const address = parseSkillUri(entry.uri);
-  if (!address) throw malformed(`${entry.uri} is not a skill:// URI`);
-  return address.packageId;
+  const pkg = typeof entry.uri === "string" ? parseSkillUriPackage(entry.uri) : null;
+  if (!pkg) throw malformed(`${entry.uri} names no package`);
+  return pkg.packageId;
 }
 
 /**
@@ -163,10 +192,23 @@ export async function listSyncableSkills(
   source: SkillSource,
 ): Promise<SkillEntry[]> {
   const path = source === "draft" ? `${SKILLS_PATH}?definition=draft` : SKILLS_PATH;
-  const entries = await apiList<SkillEntry>(profileName, path, { spaceId });
+  let entries: SkillEntry[];
+  try {
+    entries = await apiList<SkillEntry>(profileName, path, { spaceId });
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) {
+      throw new SkillSyncError(
+        `Listing the skills of space ${spaceId} failed: ${SKILLS_PATH} answered 404 (${err.message})`,
+        "code sync reads skills through the instance's mcp module: the instance does not run it (ask its administrator to add `mcp` to MODULES), or the space is not readable.",
+      );
+    }
+    throw err;
+  }
+  // An entry naming no package is kept, so the sync fails on it rather than
+  // deleting the skill it may name.
   return entries.filter((entry) => {
-    const address = parseSkillUri(entry.uri);
-    return address !== null && !isReservedScope(parseScopedName(address.packageId)!.scope);
+    const pkg = typeof entry.uri === "string" ? parseSkillUriPackage(entry.uri) : null;
+    return pkg === null || !isReservedScope(parseScopedName(pkg.packageId)!.scope);
   });
 }
 
@@ -215,7 +257,10 @@ export async function fetchSkillFiles(
     if (digest !== resource.digest) throw changed;
   }
   const { fields } = parseSkillFrontmatter(new TextDecoder().decode(files[SKILL_ENTRY]));
-  if (!isDeepStrictEqual(fields, skill.entry.frontmatter)) {
+  // The entry reached the CLI through JSON: both sides compare after the same
+  // JSON round trip, so YAML values JSON has no spelling for (`.inf`, `-0`) match.
+  const asJson = (value: unknown): unknown => JSON.parse(JSON.stringify(value));
+  if (!isDeepStrictEqual(asJson(fields), asJson(skill.entry.frontmatter))) {
     throw new SkillSyncError(
       `${skill.entry.uri} does not match the frontmatter of its entry`,
       "Re-run the sync; the skill may have changed during it.",

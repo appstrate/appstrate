@@ -12,6 +12,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { SKILL_MAX_FILES, SKILL_MAX_TOTAL_BYTES } from "@appstrate/core/skill-uri";
+import { zipArtifact } from "@appstrate/core/zip";
 import {
   assignSlugs,
   fetchSkillFiles,
@@ -53,6 +55,8 @@ function resolved(overrides: Partial<ResolvedSkill> & { packageId: string }): Re
     ...overrides,
   };
 }
+
+const DIGEST = `sha256:${"0".repeat(64)}`;
 
 const ids = (entries: { uri: string }[]) => entries.map((entry) => entry.uri.split("/")[4]);
 
@@ -143,7 +147,7 @@ describe("resolveSkill", () => {
     const entry = {
       uri,
       frontmatter: { name: "pdf", description: "d" },
-      resources: [{ uri, digest: "sha256:00", size: 1 }],
+      resources: [{ uri, digest: DIGEST, size: 1 }],
     };
     expect(() => resolveSkill(entry)).toThrow(/metadata\.version/);
   });
@@ -151,7 +155,7 @@ describe("resolveSkill", () => {
   it("refuses an entry naming a path outside its directory, a duplicate or an invalid name", () => {
     const dir = "skill://spc_1/acme/pdf@draft/pdf";
     const skillMdUri = `${dir}/SKILL.md`;
-    const file = (uri: string) => ({ uri, digest: "sha256:00", size: 1 });
+    const file = (uri: string) => ({ uri, digest: DIGEST, size: 1 });
     const entry = (uri: string, name: string, extra: string[]) => ({
       uri,
       frontmatter: { name, description: "d" },
@@ -173,6 +177,59 @@ describe("resolveSkill", () => {
       expect(() => resolveSkill(hostile)).toThrow(/Malformed skill entry/);
     }
     expect(resolveSkill(entry(skillMdUri, "pdf", [`${dir}/refs/a%20b.md`])).version).toBe("draft");
+  });
+
+  // The sizes bound the archive download: each must be a byte count, and the
+  // whole within the SEP-2640 limits, before the CLI relies on them.
+  it("refuses sizes and digests that are not usable, and an entry over the SEP-2640 limits", () => {
+    const dir = "skill://spc_1/acme/pdf@draft/pdf";
+    const skillMdUri = `${dir}/SKILL.md`;
+    const entry = (resources: { uri: string; digest: unknown; size: unknown }[]) =>
+      ({
+        uri: skillMdUri,
+        frontmatter: { name: "pdf", description: "d" },
+        resources: [{ uri: skillMdUri, digest: DIGEST, size: 1 }, ...resources],
+      }) as Parameters<typeof resolveSkill>[0];
+    const file = (size: unknown, digest: unknown = DIGEST) => ({
+      uri: `${dir}/a.md`,
+      digest,
+      size,
+    });
+    for (const hostile of [
+      entry([file("1")]),
+      entry([file(-1)]),
+      entry([file(1.5)]),
+      entry([file(Number.MAX_SAFE_INTEGER + 1)]),
+      entry([file(1, "sha256:00")]),
+      entry([file(1, `sha256:${"A".repeat(64)}`)]),
+      entry([file(1, 42)]),
+      entry([file(SKILL_MAX_TOTAL_BYTES)]),
+      entry(
+        Array.from({ length: SKILL_MAX_FILES }, (_, i) => ({
+          uri: `${dir}/f${i}.md`,
+          digest: DIGEST,
+          size: 1,
+        })),
+      ),
+    ]) {
+      expect(() => resolveSkill(hostile)).toThrow(/Malformed skill entry/);
+    }
+    expect(resolveSkill(entry([file(SKILL_MAX_TOTAL_BYTES - 1)])).version).toBe("draft");
+  });
+
+  it("refuses two paths that are one file on a case- or normalization-insensitive disk", () => {
+    const dir = "skill://spc_1/acme/pdf@draft/pdf";
+    const skillMdUri = `${dir}/SKILL.md`;
+    const entry = (paths: string[]) => ({
+      uri: skillMdUri,
+      frontmatter: { name: "pdf", description: "d" },
+      resources: [skillMdUri, ...paths.map((path) => `${dir}/${encodeURIComponent(path)}`)].map(
+        (uri) => ({ uri, digest: DIGEST, size: 1 }),
+      ),
+    });
+    expect(() => resolveSkill(entry(["skill.md"]))).toThrow(/listed twice/);
+    expect(() => resolveSkill(entry(["caf\u00e9.md", "cafe\u0301.md"]))).toThrow(/listed twice/);
+    expect(resolveSkill(entry(["notes.md"])).version).toBe("draft");
   });
 });
 
@@ -304,6 +361,35 @@ describe("fetchSkillFiles", () => {
     expect(archiveReads).toBe(1);
   });
 
+  it("refuses an archive that does not hold exactly the entry's files", async () => {
+    createSkillServer([
+      { id: "@acme/pdf", skillMd: skillMd("pdf"), extraFiles: { "notes.md": "notes" } },
+    ]).install();
+    const skill = resolveSkill(await onlyEntry("published"));
+    const served = globalThis.fetch;
+    const original = await fetchSkillFiles("default", skill);
+    const serveArchive = (files: Record<string, Uint8Array>) => {
+      globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
+        new URL(String(input)).pathname === "/api/mcp/skills/archive"
+          ? new Response(new Uint8Array(zipArtifact(files)), {
+              headers: { "Content-Type": "application/zip" },
+            })
+          : served(input, init)) as unknown as typeof fetch;
+    };
+    const encode = (text: string) => new TextEncoder().encode(text);
+    for (const hostile of [
+      { ...original, "extra.md": encode("x") },
+      { "SKILL.md": original["SKILL.md"]!, "../notes.md": original["notes.md"]! },
+      { ...original, "notes.md": encode("notes, longer than listed") },
+      { ...original, "notes.md": encode("n") },
+    ]) {
+      serveArchive(hostile);
+      await expect(fetchSkillFiles("default", skill)).rejects.toThrow(
+        /does not match its served digests/,
+      );
+    }
+  });
+
   it("refuses bytes that do not match the served digest", async () => {
     createSkillServer([
       { id: "@acme/pdf", skillMd: skillMd("pdf"), corruptDownload: true },
@@ -324,5 +410,49 @@ describe("fetchSkillFiles", () => {
     await expect(
       fetchSkillFiles("default", { ...skill, entry: { ...skill.entry, frontmatter: altered } }),
     ).rejects.toThrow(/does not match the frontmatter of its entry/);
+  });
+
+  // The entry reaches the CLI as JSON, which has no spelling for these YAML values.
+  it("accepts frontmatter values that JSON spells differently (.inf, .nan, -0)", async () => {
+    const md = "---\nname: pdf\ndescription: d\nx-max: .inf\nx-nan: .nan\nx-zero: -0\n---\nBody.\n";
+    createSkillServer([{ id: "@acme/pdf", skillMd: md }]).install();
+
+    const skill = resolveSkill(await onlyEntry("published"));
+    expect(Object.keys(await fetchSkillFiles("default", skill))).toContain("SKILL.md");
+  });
+});
+
+describe("listSyncableSkills — what the list route answers", () => {
+  function serveList(response: () => Response): void {
+    createSkillServer([{ id: "@acme/pdf", skillMd: skillMd("pdf") }]).install();
+    const served = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
+      new URL(String(input)).pathname === "/api/mcp/skills"
+        ? response()
+        : served(input, init)) as unknown as typeof fetch;
+  }
+
+  // Kept so that it reaches `resolveSkill` and is reported as refused, which
+  // keeps the skill its package installed, instead of vanishing from the catalogue.
+  it("keeps an entry whose URI does not parse but names a package", async () => {
+    const uri = "skill://spc_1/acme/pdf/Not_Valid/SKILL.md";
+    const entry = { uri, frontmatter: { name: "Not_Valid", description: "d" }, resources: [] };
+    serveList(() => Response.json({ object: "list", data: [entry], hasMore: false }));
+
+    const [listed] = await listSyncableSkills("default", "spc_1", "published");
+    expect(listed!.uri).toBe(uri);
+    expect(() => resolveSkill(listed!)).toThrow(/Malformed skill entry/);
+  });
+
+  it("explains a 404: the instance may not run the mcp module", async () => {
+    serveList(() =>
+      Response.json({ code: "not_found", detail: "API endpoint not found" }, { status: 404 }),
+    );
+
+    await expect(listSyncableSkills("default", "spc_1", "published")).rejects.toThrow(
+      /answered 404/,
+    );
+    const error = await listSyncableSkills("default", "spc_1", "published").catch((e) => e);
+    expect((error as { hint?: string }).hint).toMatch(/mcp module/);
   });
 });

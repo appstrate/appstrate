@@ -10,14 +10,10 @@ import { describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
 import { ResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createInProcessPair } from "@appstrate/mcp-transport";
-import type { SkillEntry } from "@appstrate/core/skill-uri";
+import { SKILL_MAX_FILES, type SkillEntry } from "@appstrate/core/skill-uri";
 import { normalizeSkillMd, parseSkillFrontmatter } from "@appstrate/afps-shared/companion-files";
 import { forbidden } from "../../../../src/lib/errors.ts";
-import {
-  serveSkill,
-  SKILL_MAX_FILES,
-  skillName,
-} from "../../../../src/modules/mcp/skill-resources.ts";
+import { serveSkill, skillName } from "../../../../src/modules/mcp/skill-resources.ts";
 import { buildSkillServer, type SkillProviderContext } from "../../../../src/modules/mcp/skills.ts";
 import type { SkillSnapshot } from "../../../../src/services/skill-read.ts";
 

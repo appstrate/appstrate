@@ -176,7 +176,7 @@ export interface AppstratePromptProvider {
 }
 
 /** The MCP Skills extension identifier (SEP-2640). */
-export const SKILLS_EXTENSION_ID = "io.modelcontextprotocol/skills";
+const SKILLS_EXTENSION_ID = "io.modelcontextprotocol/skills";
 
 /**
  * Skill provider hooks (SEP-2640). Pass `skills` with `resources` to

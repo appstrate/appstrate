@@ -3,14 +3,14 @@
 /**
  * A stand-in for the routes `appstrate code sync` reads — `GET /api/spaces` and
  * the REST reflection of the MCP Skills extension (`GET /api/mcp/skills`,
- * `/content`) — driven by a table of skills rather than by per-test URL
+ * `/api/mcp/skills/archive`) — driven by a table of skills rather than by per-test URL
  * matching.
  *
  * Entries are served the way the server serves them: packaging entries
  * dropped, the `SKILL.md` `name` pointed at the served name with the shared
  * `normalizeSkillMd`, `metadata.version` set with the shared
  * `setSkillMdVersion` (none for a draft), and every file listed with the `sha256` digest of the
- * bytes `/content` returns, so the digest check is exercised for real.
+ * bytes `/archive` returns, so the digest check is exercised for real.
  */
 
 import { createHash } from "node:crypto";
@@ -98,12 +98,12 @@ export interface SkillFixture {
   /** Never published: the list, which serves published skills, leaves it out. */
   unpublished?: boolean;
   /**
-   * HTTP status `/content` answers with for this skill's published files.
+   * HTTP status `/archive` answers with for this skill's published files.
    * Models a transient server-side failure — distinct from `unpublished`, a
    * definite "there is nothing to sync".
    */
   resolveError?: number;
-  /** When true, `/content` serves bytes that do not match the listed digest. */
+  /** When true, `/archive` serves bytes that do not match the listed digest. */
   corruptDownload?: boolean;
   /** Working-copy state for `--source draft`. */
   draft?: DraftFixture;

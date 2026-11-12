@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { parseSkillUri, skillFileUri } from "../src/skill-uri.ts";
+import { parseSkillUri, parseSkillUriPackage, skillFileUri } from "../src/skill-uri.ts";
 
 const SPACE = "spc_1";
 
@@ -48,6 +48,24 @@ describe("skill:// URIs", () => {
       "skill://spc_1/acme/kit/tone/%2Fetc/passwd",
     ]) {
       expect(parseSkillUri(uri)).toBeNull();
+    }
+  });
+
+  it("reads the package of a URI from its package segments alone", () => {
+    expect(parseSkillUriPackage("skill://spc_1/acme/tone-kit/Not_Valid/../x")).toEqual({
+      packageId: "@acme/tone-kit",
+      definition: "published",
+    });
+    expect(parseSkillUriPackage("skill://spc_1/acme/tone-kit@draft/tone/SKILL.md")).toEqual({
+      packageId: "@acme/tone-kit",
+      definition: "draft",
+    });
+    for (const uri of [
+      "skill://spc_1/acme",
+      "skill://spc_1//tone-kit/x",
+      "file://spc_1/acme/x/y",
+    ]) {
+      expect(parseSkillUriPackage(uri)).toBeNull();
     }
   });
 });

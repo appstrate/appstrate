@@ -128,8 +128,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `sha256` digest and the received `SKILL.md` frontmatter against the entry's,
   and writes the bytes as served; only the `name` line of a skill renamed after a
   collision is rewritten. An entry with a file path outside its skill directory,
-  a duplicate path or a name that is not a valid Agent Skills name (or not the
-  last segment of its URI) is reported and not written; the other skills sync. The ledger compares the served digests, and the plan
+  two paths that are one file on a case- or normalization-insensitive disk, a name
+  that is not a valid Agent Skills name (or not the last segment of its URI), a
+  size or digest that is not one, or more than 512 files or 16 MiB is reported and
+  not written, and the skill already on disk is kept; the other skills sync. The
+  sync needs the instance's `mcp` module and explains a 404 of its list route. The ledger compares the served digests, and the plan
   shows the served `metadata.version`. The CLI no longer normalizes skills
   itself: the server does. `--source draft` syncs the drafts the instance lists
   for you, published or not: those of the skills you may write; a draft you may

@@ -237,8 +237,7 @@ is still a `run_and_wait` call, which your client may ask you to approve.
 
 The server declares the MCP Skills extension (`io.modelcontextprotocol/skills`,
 SEP-2640) in `capabilities.extensions` of its `initialize` result, together with
-the `resources` capability. Results carry `resultType: "complete"` and no cache
-attributes.
+the `resources` capability. Results carry no cache attributes.
 
 - **`skills/list`** returns the published definition of every skill you may
   read in the spaces the connection reaches (the space of a space URL, every
