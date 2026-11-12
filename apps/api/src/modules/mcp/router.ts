@@ -77,6 +77,7 @@ import { registerProtectedResourceFamily } from "../../lib/protected-resources.t
 import { recordAuditFromContext, trackAudit } from "../../services/audit.ts";
 import type { AppEnv } from "../../types/index.ts";
 import { dispatchInProcess } from "../../lib/platform-app.ts";
+import { ceilingAllows } from "../../lib/permissions.ts";
 import { followRunLogs } from "../../services/realtime-access.ts";
 import type { RunLogEvent } from "@appstrate/shared-types";
 import {
@@ -659,7 +660,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
             scope,
             actor,
             permissions,
-            ceilingAllows: (permission) => ceiling === undefined || ceiling.has(permission),
+            ceilingAllows: (permission) => ceilingAllows(c, permission),
           },
           runId,
           onLog,
