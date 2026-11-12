@@ -991,7 +991,7 @@ export const RUN_AND_WAIT_LONG_POLL_RESUME = `${RUN_AND_WAIT_RESUME_INSTRUCTION}
 
 /** At most one log notification per period; a line arriving within it waits, replaced by any newer one. */
 export const RUN_AND_WAIT_LOG_PROGRESS_INTERVAL_MS = 1_000;
-/** Longest log message a progress notification carries. */
+/** Longest log message a progress notification carries, in code points. */
 export const RUN_AND_WAIT_LOG_MESSAGE_MAX_CHARS = 200;
 
 /** `Run <id> [<level>] <message>` on one line, message cut to its cap; `null` for nothing to show. */
@@ -999,9 +999,11 @@ function logProgressMessage(runId: string, log: RunLogEvent): string | null {
   if (log.level === "debug") return null;
   const line = (log.message ?? "").replace(/\s+/g, " ").trim();
   if (line === "") return null;
+  // Counted and cut in code points, so a character outside the BMP is never split.
+  const chars = [...line];
   const message =
-    line.length > RUN_AND_WAIT_LOG_MESSAGE_MAX_CHARS
-      ? `${line.slice(0, RUN_AND_WAIT_LOG_MESSAGE_MAX_CHARS - 1)}…`
+    chars.length > RUN_AND_WAIT_LOG_MESSAGE_MAX_CHARS
+      ? `${chars.slice(0, RUN_AND_WAIT_LOG_MESSAGE_MAX_CHARS - 1).join("")}…`
       : line;
   return `Run ${runId} [${log.level}] ${message}`;
 }

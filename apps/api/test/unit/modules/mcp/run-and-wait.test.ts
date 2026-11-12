@@ -640,6 +640,39 @@ describe("run_and_wait", () => {
       expect(logFollow.stops).toBe(1);
     });
 
+    it("cuts a log line in code points, never splitting a character outside the BMP", async () => {
+      jest.useFakeTimers();
+      const poll = heldPoll();
+      const sent: SentNotification[] = [];
+      const { tool, calls, logFollow } = makeRunAndWait({ getRun: [poll.answer] });
+
+      const { pending } = await startCall(
+        tool,
+        calls,
+        extraWith("tok_1", async (n) => {
+          sent.push(n);
+        }),
+      );
+      const max = RUN_AND_WAIT_LOG_MESSAGE_MAX_CHARS;
+      // At the cap in code points (one more UTF-16 unit): kept whole.
+      const atCap = `${"a".repeat(max - 1)}😀`;
+      // Over the cap, the emoji is the last code point kept before the ellipsis.
+      const overCap = `${"b".repeat(max - 2)}😀${"c".repeat(10)}`;
+      for (const line of [atCap, overCap]) {
+        logFollow.emit(runLog("info", line));
+        jest.advanceTimersByTime(RUN_AND_WAIT_LOG_PROGRESS_INTERVAL_MS);
+        await flush();
+      }
+      poll.settle({ id: "run_1", status: "success" });
+      await pending;
+
+      expect(messages(sent).slice(1)).toEqual([
+        `Run run_1 [info] ${atCap}`,
+        `Run run_1 [info] ${"b".repeat(max - 2)}😀…`,
+      ]);
+      expect(messages(sent).every((m) => m.isWellFormed())).toBe(true);
+    });
+
     it("sends at most one log line per second, the latest of a burst, and nothing after the wait", async () => {
       jest.useFakeTimers();
       const poll = heldPoll();
