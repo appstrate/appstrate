@@ -256,7 +256,12 @@ interface PageContext {
   client: OAuthClientRecord;
   branding: Awaited<ReturnType<typeof resolveBrandingForClient>>;
   csrfToken: string;
-  features: { smtp: boolean; socialGoogle: boolean; socialGithub: boolean };
+  features: {
+    smtp: boolean;
+    socialGoogle: boolean;
+    socialGithub: boolean;
+    socialMicrosoft: boolean;
+  };
   smtp: ResolvedSmtpConfig | null;
   /**
    * Per-client social-provider availability, passed verbatim to
@@ -264,9 +269,10 @@ interface PageContext {
    * clients, reflects `space_social_providers` rows — buttons appear
    * only when the tenant has configured creds for that provider. For
    * `level=org` / `level=instance`, reflects env presence — those flows
-   * authenticate against the platform's own shared OAuth App.
+   * authenticate against the platform's own shared OAuth App. Microsoft is
+   * platform-level only (env pair): `level=space` clients never get it.
    */
-  socialProviders: { google: boolean; github: boolean };
+  socialProviders: { google: boolean; github: boolean; microsoft: boolean };
 }
 
 /**
@@ -336,6 +342,7 @@ async function loadPageContext(
   let smtp: Awaited<ReturnType<typeof resolveSmtpForClient>>;
   let socialGoogle: boolean;
   let socialGithub: boolean;
+  let socialMicrosoft = false;
   try {
     smtp = await resolveSmtpForClient(record);
     // Space clients read their own provider rows; org/instance ones the platform's env pair.
@@ -350,6 +357,7 @@ async function loadPageContext(
       const env = getEnv();
       socialGoogle = !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
       socialGithub = !!(env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET);
+      socialMicrosoft = !!(env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET);
     }
   } catch (err) {
     // A browser page, not a JSON client: the 503 of a key missing from the keyring as a page.
@@ -372,9 +380,9 @@ async function loadPageContext(
       client: record,
       branding: await resolveBrandingForClient(record),
       csrfToken: issueCsrfToken(c),
-      features: { smtp: !!smtp, socialGoogle, socialGithub },
+      features: { smtp: !!smtp, socialGoogle, socialGithub, socialMicrosoft },
       smtp,
-      socialProviders: { google: socialGoogle, github: socialGithub },
+      socialProviders: { google: socialGoogle, github: socialGithub, microsoft: socialMicrosoft },
     },
   };
 }

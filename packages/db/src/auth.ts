@@ -5,6 +5,7 @@ import { BASE_ERROR_CODES, betterAuth, getCurrentAdapter } from "better-auth";
 import { APIError, createAuthMiddleware, getOAuthState, isAPIError } from "better-auth/api";
 import type { GenericEndpointContext } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import type { MicrosoftEntraIDProfile, MicrosoftOptions } from "better-auth/social-providers";
 import { magicLink } from "better-auth/plugins/magic-link";
 import { createTransport, type Transporter } from "nodemailer";
 import { and, eq, gt } from "drizzle-orm";
@@ -704,6 +705,26 @@ function buildBasePlugins(env: ReturnType<typeof getEnv>, smtpTransport: Transpo
   ];
 }
 
+/**
+ * An Entra tenant admin can put ANY address in a user's `email` claim, a
+ * domain the tenant does not own included ("nOAuth"). Microsoft's answer is
+ * `xms_edov` (email domain owner verified), an optional ID-token claim the
+ * app registration must request. Without it the address proves nothing, so
+ * the identity carries no email: Better Auth then refuses the sign-in
+ * (`email_not_found`) before creating or linking any user, and the signup
+ * gate, the invitation match and account linking can all trust the address
+ * of a Microsoft account that got through.
+ */
+function mapMicrosoftProfile(
+  profile: MicrosoftEntraIDProfile,
+): { emailVerified: true } | { email: undefined; emailVerified: false } {
+  if (profile.xms_edov === true) return { emailVerified: true };
+  logger.warn("auth: Microsoft sign-in refused, email domain not verified by the tenant", {
+    tenantId: profile.tid,
+  });
+  return { email: undefined, emailVerified: false };
+}
+
 // ─── Auth — lazy factory ──────────────────────────────────
 //
 // The Better Auth instance is constructed lazily by `createAuth()` during
@@ -750,14 +771,13 @@ function buildAuth(options: CreateAuthOptions) {
   // env-configured providers only: per-space social applies exclusively to
   // `level=space` OIDC clients, which have their own auth surface —
   // the instance-wide account linking flag is an env concern.
-  const anySocialEnabled = googleEnvEnabled || githubEnvEnabled;
-  const socialProviders: Record<
-    string,
-    {
-      clientId: string;
-      clientSecret: string;
-    }
-  > = {
+  const microsoftEnvEnabled = !!(env.MICROSOFT_CLIENT_ID && env.MICROSOFT_CLIENT_SECRET);
+  const anySocialEnabled = googleEnvEnabled || githubEnvEnabled || microsoftEnvEnabled;
+  const socialProviders: {
+    google: { clientId: string; clientSecret: string };
+    github: { clientId: string; clientSecret: string };
+    microsoft?: MicrosoftOptions;
+  } = {
     google: {
       get clientId() {
         return getSocialOverride()?.google?.clientId ?? env.GOOGLE_CLIENT_ID ?? "";
@@ -774,6 +794,18 @@ function buildAuth(options: CreateAuthOptions) {
         return getSocialOverride()?.github?.clientSecret ?? env.GITHUB_CLIENT_SECRET ?? "";
       },
     },
+    // Instance-level only: no per-space override, so it is registered only
+    // when configured.
+    ...(microsoftEnvEnabled && {
+      microsoft: {
+        clientId: env.MICROSOFT_CLIENT_ID!,
+        clientSecret: env.MICROSOFT_CLIENT_SECRET!,
+        tenantId: env.MICROSOFT_TENANT_ID,
+        // The photo would land in `user.image` as a base64 data URL.
+        disableProfilePhoto: true,
+        mapProfileToUser: mapMicrosoftProfile,
+      },
+    }),
   };
   const basePlugins = buildBasePlugins(env, smtpTransport);
   const notifyPasswordChanged = async (account: { id: string; email: string }): Promise<void> => {

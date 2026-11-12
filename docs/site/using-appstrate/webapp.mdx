@@ -16,7 +16,7 @@ Who can sign up depends on how the instance was set up (see [Install](/get-start
 - **Open instance.** Anyone with the URL can create an account. Each new account is guided through creating its own organization, and becomes its owner. A new account never joins an existing organization on its own.
 - **Invitation-only instance.** The first owner claims the instance at `/claim` with the installer's token. After that, people join through an invitation, sent from **Settings → Organization → Users**. A person with no organization and no invitation sees a "waiting for an invitation" page.
 
-Sign-in methods depend on configuration: email and password, plus Google or GitHub when the operator enabled them, and magic links or email verification when SMTP is configured.
+Sign-in methods depend on configuration: email and password, plus Google, GitHub or Microsoft when the operator enabled them, and magic links or email verification when SMTP is configured.
 
 Onboarding for a new organization has three steps: create the organization (a default space and a `hello-world` demo agent come with it), add an AI model, and optionally invite users. When the billing module is enabled, a plan step comes right after the first one.
 
@@ -77,14 +77,14 @@ The **Catalog** (footer of the sidebar) lists what the organization and Appstrat
 |              | Billing        | Plans and credits, when the billing module is enabled                                                                                                |
 | Workspace    | General        | The current space's name, icon and color, redirect domains, visibility and default role                                                              |
 |              | Members        | Who is in the space and with which role                                                                                                              |
-|              | Authentication | Google and GitHub sign-in and the SMTP server used for your end-users' sign-in, when enabled                                                         |
+|              | Authentication | Google, GitHub and Microsoft sign-in and the SMTP server used for your end-users' sign-in, when enabled                                              |
 |              | API Keys       | Keys bound to this space                                                                                                                             |
 |              | End-user SSO   | OAuth clients for sign-in of your product's end-users, when enabled                                                                                  |
 |              | End-Users      | The customers of your own product, on whose behalf agents run                                                                                        |
 |              | Webhooks       | Signed callbacks for run events                                                                                                                      |
 | Account      | General        | Your email and display name                                                                                                                          |
 |              | Appearance     | Theme and language                                                                                                                                   |
-|              | Security       | Password and linked Google or GitHub accounts                                                                                                        |
+|              | Security       | Password and linked Google, GitHub or Microsoft accounts                                                                                             |
 |              | Devices        | Your signed-in CLI sessions, which you can revoke                                                                                                    |
 |              | My connections | Your connected accounts                                                                                                                              |
 |              | MCP access     | The URL and snippets to connect an [MCP client](/using-appstrate/mcp-clients)                                                                        |

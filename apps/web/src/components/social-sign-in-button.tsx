@@ -5,13 +5,14 @@ import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { Button } from "@appstrate/ui/components/button";
 import { useAuth } from "../hooks/use-auth";
-import { GitHubIcon, GoogleIcon } from "./icons";
+import { GitHubIcon, GoogleIcon, MicrosoftIcon } from "./icons";
 
-type SocialProvider = "github" | "google";
+type SocialProvider = "github" | "google" | "microsoft";
 
 const PROVIDERS: Record<SocialProvider, { icon: React.ComponentType; labelKey: string }> = {
   github: { icon: GitHubIcon, labelKey: "login.continueGithub" },
   google: { icon: GoogleIcon, labelKey: "login.continueGoogle" },
+  microsoft: { icon: MicrosoftIcon, labelKey: "login.continueMicrosoft" },
 };
 
 export function SocialSignInButton({
