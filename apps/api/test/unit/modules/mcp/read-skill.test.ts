@@ -49,7 +49,6 @@ function tool(read: (id: string) => Promise<SkillSnapshot>) {
     readSkill: read,
     origin: "https://test.local",
     requestId: "req_test",
-    followRunLogs: () => () => {},
     observe: (event) => events.push(event),
   });
   return {
