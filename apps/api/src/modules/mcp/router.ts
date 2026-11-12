@@ -105,10 +105,8 @@ import {
 } from "./tools.ts";
 import { buildOperationIndex, buildOrgWideOperationIndex, operationIdGranted } from "./catalog.ts";
 import { skillReaderFor } from "./skill-tools.ts";
-import { buildSkillServer } from "./skills.ts";
+import { createSkillRouter, skillServerFor } from "./skill-routes.ts";
 import { SKILL_URI_PREFIX } from "./skill-resources.ts";
-import { readSkillSnapshot, type SkillReadSpace } from "../../services/skill-read.ts";
-import { listActivePackages } from "../../services/space-packages.ts";
 import {
   listReachableSpaces,
   pinnedSpaceIds,
@@ -692,24 +690,14 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const files = buildFileResourceProvider(toolCtx);
     // `skills/*` and `resources/read` for `skill://` (SEP-2640), in every space this
     // connection reaches, each read with the caller's permissions in that space.
-    const skillSpaces = new Map<string, SkillReadSpace>(
-      (orgSpaces?.reachable ?? [{ id: scope.spaceId, permissions }]).map((space) => [
-        space.id,
-        { orgId: org, spaceId: space.id, permissions: space.permissions },
-      ]),
+    const skills = skillServerFor(
+      c,
+      (orgSpaces?.reachable ?? [{ id: scope.spaceId, permissions }]).map((space) => ({
+        orgId: org,
+        spaceId: space.id,
+        permissions: space.permissions,
+      })),
     );
-    const skills = buildSkillServer({
-      spaceIds: [...skillSpaces.keys()],
-      // Published ones: a system skill's stored tree, or a `latest` dist-tag.
-      listActiveSkillIds: async (spaceId) =>
-        (await listActivePackages(skillSpaces.get(spaceId)!, "skill"))
-          .filter((row) => row.source === "system" || row.latestVersionId !== null)
-          .map((row) => row.id),
-      readSkill: (spaceId, packageId, definition) =>
-        readSkillSnapshot(c, skillSpaces.get(spaceId)!, packageId, definition),
-      logUnservable: (event) =>
-        logger.warn("mcp.skill_unservable", { requestId: c.get("requestId"), ...event }),
-    });
     const resources: AppstrateResourceProvider = {
       read: (uri, extra) =>
         uri.startsWith(SKILL_URI_PREFIX) ? skills.read(uri) : files.read(uri, extra),
@@ -773,6 +761,9 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   };
   app.all(MCP_PATH, notAllowed);
   app.all(MCP_SPACE_PATH, notAllowed);
+
+  // The skill server as REST, for `appstrate code sync`.
+  app.route("/", createSkillRouter());
 
   return app;
 }

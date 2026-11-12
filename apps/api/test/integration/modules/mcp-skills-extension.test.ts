@@ -184,3 +184,58 @@ describe("skills/get on a draft", () => {
     expect((await call(headers, "resources/read", { uri: draftUri() })).error?.code).toBe(-32002);
   });
 });
+
+describe("REST reflection (`appstrate code sync`)", () => {
+  const rest = (headers: Record<string, string>, path: string) =>
+    app.request(path, { headers: { ...headers, "X-Space-Id": owner.defaultSpaceId } });
+  const contentPath = (uri: string) => `/api/mcp/skills/content?uri=${encodeURIComponent(uri)}`;
+  const entryPath = (uri: string) => `/api/mcp/skills/entry?uri=${encodeURIComponent(uri)}`;
+
+  it("serves the entries and bytes the MCP endpoint serves to the same caller", async () => {
+    const mcp = await call(inSpace(ownerHeaders(), owner.defaultSpaceId), "skills/list", {});
+    const listed = await rest(ownerHeaders(), "/api/mcp/skills");
+    expect(listed.status).toBe(200);
+    const body = (await listed.json()) as { object: string; data: Entry[] };
+    expect(body.object).toBe("list");
+    expect(body.data).toEqual(mcp.result?.skills as Entry[]);
+    const entry = body.data.find((e) => e.uri === toneUri())!;
+    for (const resource of entry.resources) {
+      const res = await rest(ownerHeaders(), contentPath(resource.uri));
+      expect(res.status).toBe(200);
+      expect(res.headers.get("content-type")).toBe("application/octet-stream");
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      expect(sha256(bytes)).toBe(resource.digest);
+      const read = await call(inSpace(ownerHeaders(), owner.defaultSpaceId), "resources/read", {
+        uri: resource.uri,
+      });
+      expect(bytes).toEqual(encode((read.result?.contents as Array<{ text: string }>)[0]!.text));
+    }
+  });
+
+  it("covers the space X-Space-Id names only", async () => {
+    const body = (await (await rest(ownerHeaders(), "/api/mcp/skills")).json()) as {
+      data: Entry[];
+    };
+    expect(body.data.map((e) => e.uri)).toContain(toneUri());
+    expect(body.data.map((e) => e.uri)).not.toContain(teamUri());
+    expect((await rest(ownerHeaders(), contentPath(teamUri()))).status).toBe(404);
+  });
+
+  it("serves an author the draft entry by its @draft URI, and refuses it to a reader", async () => {
+    const draftUri = `skill://${owner.defaultSpaceId}/skillsext/tone@draft/tone/SKILL.md`;
+    const mcp = await call(ownerHeaders(), "skills/get", { uri: draftUri });
+    const res = await rest(ownerHeaders(), entryPath(draftUri));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(mcp.result?.skill as Entry);
+    const reader = await guest({ [owner.defaultSpaceId]: ["skills:read"] });
+    expect((await rest(reader, entryPath(draftUri))).status).toBe(404);
+    expect((await rest(reader, contentPath(draftUri))).status).toBe(404);
+  });
+
+  it("refuses a caller without skills:read, and a request without uri", async () => {
+    const headers = await guest({ [owner.defaultSpaceId]: ["mcp:read"] });
+    expect((await rest(headers, "/api/mcp/skills")).status).toBe(403);
+    expect((await rest(headers, contentPath(toneUri()))).status).toBe(403);
+    expect((await rest(ownerHeaders(), "/api/mcp/skills/content")).status).toBe(400);
+  });
+});

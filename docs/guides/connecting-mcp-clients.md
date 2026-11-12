@@ -268,6 +268,12 @@ attributes.
 - **Errors.** `skills/get` answers `-32602` for a URI that names no skill you
   may read; `resources/read` answers `-32002` for a `skill://` URI that names no
   file you may read.
+- **REST.** `appstrate code sync` reads the same entries and bytes over REST,
+  for the space `X-Space-Id` names and behind `skills:read` there:
+  `GET /api/mcp/skills` (the entries of `skills/list`),
+  `GET /api/mcp/skills/entry?uri=` (the entry of `skills/get`) and
+  `GET /api/mcp/skills/content?uri=` (the bytes of `resources/read`). These
+  routes are not operations of the MCP catalog.
 
 ## The tool surface
 

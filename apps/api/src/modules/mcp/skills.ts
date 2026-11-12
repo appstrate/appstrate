@@ -60,6 +60,10 @@ export interface SkillServer {
   provider: AppstrateSkillProvider;
   /** `resources/read` of a `skill://` URI. */
   read: (uri: string) => Promise<ReadResourceResult>;
+  /** The entry `skills/get` serves for a `SKILL.md` URI, `null` when none is readable there. */
+  entry: (uri: string) => Promise<SkillEntry | null>;
+  /** The bytes `resources/read` serves for a `skill://` URI, `null` when none are readable there. */
+  file: (uri: string) => Promise<Uint8Array | null>;
 }
 
 /** Bytes the round trip through a JSON string keeps exactly: UTF-8 without a BOM to strip. */
@@ -101,6 +105,19 @@ export function buildSkillServer(ctx: SkillProviderContext): SkillServer {
     return served?.skill.name === address.name ? served : null;
   }
 
+  const entry = async (uri: string): Promise<SkillEntry | null> => {
+    const address = parseSkillUri(uri);
+    const served = address?.path === SKILL_ENTRY ? await resolve(address) : null;
+    return served ? skillEntry(served.address, served.skill) : null;
+  };
+
+  const file = async (uri: string): Promise<Uint8Array | null> => {
+    const address = parseSkillUri(uri);
+    const served = await resolve(address);
+    if (!served || !address || !Object.hasOwn(served.skill.files, address.path)) return null;
+    return served.skill.files[address.path]!;
+  };
+
   const provider: AppstrateSkillProvider = {
     list: async () => {
       const listed = await Promise.all(
@@ -116,24 +133,21 @@ export function buildSkillServer(ctx: SkillProviderContext): SkillServer {
         .map((served): SkillEntry => skillEntry(served.address, served.skill));
     },
     get: async (uri) => {
-      const address = parseSkillUri(uri);
-      const served = address?.path === SKILL_ENTRY ? await resolve(address) : null;
-      if (!served) {
+      const found = await entry(uri);
+      if (!found) {
         throw new McpError(ErrorCode.InvalidParams, `No skill readable at ${uri}`, { uri });
       }
-      return skillEntry(served.address, served.skill);
+      return found;
     },
   };
 
   const read = async (uri: string): Promise<ReadResourceResult> => {
-    const address = parseSkillUri(uri);
-    const served = await resolve(address);
-    const bytes = served && address ? served.skill.files[address.path] : undefined;
+    const bytes = await file(uri);
     if (!bytes) {
       throw new McpError(RESOURCE_NOT_FOUND_ERROR_CODE, "Resource not found", { uri });
     }
     const text = exactText(bytes);
-    const mimeType = address!.path.endsWith(".md") ? "text/markdown" : "text/plain";
+    const mimeType = uri.endsWith(".md") ? "text/markdown" : "text/plain";
     return {
       contents: [
         text !== null
@@ -147,5 +161,5 @@ export function buildSkillServer(ctx: SkillProviderContext): SkillServer {
     };
   };
 
-  return { provider, read };
+  return { provider, read, entry, file };
 }

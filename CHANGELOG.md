@@ -114,6 +114,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the skill's space (`skills:read` under the credential's ceiling, or a skill the chat turn
   injected, at the definition injected). A
   skill with a file over 1 MiB, more than 512 files or more than 16 MiB is not served.
+  `GET /api/mcp/skills`, `GET /api/mcp/skills/entry` and `GET /api/mcp/skills/content` serve
+  the same entries and bytes over REST for one space (`X-Space-Id`, `skills:read`), for
+  `appstrate code sync`.
 
 - **BREAKING (CLI, MCP): agents are prompts of the MCP server, and `code sync`
   syncs skills only** (#2172). The Claude Code plugin's `/appstrate:run-<agent>`
