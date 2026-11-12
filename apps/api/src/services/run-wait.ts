@@ -33,7 +33,6 @@
  * means "poll again".
  */
 
-import { z } from "zod";
 import { and, eq } from "drizzle-orm";
 import { getEnv } from "@appstrate/env";
 import { db } from "@appstrate/db/client";
@@ -43,7 +42,7 @@ import type { RunStatus } from "@appstrate/core/run-status";
 import { addSubscriber, removeSubscriber } from "./realtime.ts";
 import { invalidRequest } from "../lib/errors.ts";
 import type { SpaceScope } from "../lib/scope.ts";
-import { MAX_WAIT_SECONDS } from "../lib/run-wait-limits.ts";
+import { MAX_WAIT_SECONDS, parseWaitSeconds } from "../lib/run-wait-limits.ts";
 
 /**
  * Resolve the fallback DB re-check cadence while waiting (see module doc,
@@ -152,39 +151,26 @@ function addSharedPollWaiter(
 }
 
 /**
- * `?wait=` accepts `true`/`false` (boolean form) or a non-negative integer
- * number of seconds. Negative, fractional, or non-numeric values are
- * rejected; values above {@link MAX_WAIT_SECONDS} are clamped to it.
- */
-const waitQuerySchema = z.union([
-  z.literal("true").transform(() => MAX_WAIT_SECONDS),
-  z.literal("false").transform(() => 0),
-  z.coerce
-    .number()
-    .int()
-    .min(0)
-    .transform((n) => Math.min(n, MAX_WAIT_SECONDS)),
-]);
-
-/**
  * Parse the raw `wait` query value into a wait budget in milliseconds.
  *
- * - `undefined` (param absent) → `0` (no wait — today's behavior)
+ * - `undefined` (param absent) → `0` (no wait)
  * - `""` (bare `?wait`) and `"true"` → the {@link MAX_WAIT_SECONDS} cap
  * - `"false"` / `"0"` → `0`
  * - integer seconds → clamped to the cap
  * - anything else → 400 `invalid_request`
+ *
+ * The rule itself is {@link parseWaitSeconds}, shared with the MCP `run_and_wait` tool.
  */
 export function parseWaitQuery(raw: string | undefined): number {
   if (raw === undefined) return 0;
-  const parsed = waitQuerySchema.safeParse(raw === "" ? "true" : raw);
-  if (!parsed.success) {
+  const seconds = parseWaitSeconds(raw === "" ? "true" : raw, MAX_WAIT_SECONDS);
+  if (seconds === null) {
     throw invalidRequest(
       `Invalid 'wait' value: expected true, false, or a non-negative integer number of seconds (max ${MAX_WAIT_SECONDS})`,
       "wait",
     );
   }
-  return parsed.data * 1000;
+  return seconds * 1000;
 }
 
 /** One narrow indexed read: is the run terminal right now? */

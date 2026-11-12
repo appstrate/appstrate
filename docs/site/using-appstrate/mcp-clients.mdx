@@ -67,17 +67,17 @@ A space's URL (`/api/mcp/o/<orgId>/s/<spaceId>`) pins the connection to that spa
 
 The server does not declare one tool per API operation. It exposes a small set that lets the client find and call any operation, and the list you see depends on your permissions:
 
-| Tool                                           | What it does                                                                                                                                |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `get_me`                                       | Who you are in this organization, your role, the space the request resolved to and the integrations you have connected there. Call it first |
-| `search_operations`, `describe_operation`      | Find an API operation and read its input schema                                                                                             |
-| `invoke_operation`                             | Call an operation, validated and authorized like the equivalent REST call                                                                   |
-| `run_and_wait`                                 | Launch an agent (or a one-off inline agent) and return when the run finishes                                                                |
-| `list_files`, `read_file`                      | List and read files, addressed by `appfile://` URIs                                                                                         |
-| `read_skill`                                   | Read a skill's `SKILL.md` and files                                                                                                         |
-| `validate_package_file`, `import_package_file` | Check and import a package archive                                                                                                          |
-| `get_runtime_capabilities`                     | The MCP server runtimes and manifest templates for authoring packages                                                                       |
-| `list_connections`, `api_call`                 | List the connections you can use outside a run and call a third-party API through one, with the credential injected by the platform         |
+| Tool                                           | What it does                                                                                                                                                           |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_me`                                       | Who you are in this organization, your role, the space the request resolved to and the integrations you have connected there. Call it first                            |
+| `search_operations`, `describe_operation`      | Find an API operation and read its input schema                                                                                                                        |
+| `invoke_operation`                             | Call an operation, validated and authorized like the equivalent REST call                                                                                              |
+| `run_and_wait`                                 | Launch an agent (or a one-off inline agent) and wait for the run to finish, within its `wait` argument (50 s by default); a run still going is read back with `getRun` |
+| `list_files`, `read_file`                      | List and read files, addressed by `appfile://` URIs                                                                                                                    |
+| `read_skill`                                   | Read a skill's `SKILL.md` and files                                                                                                                                    |
+| `validate_package_file`, `import_package_file` | Check and import a package archive                                                                                                                                     |
+| `get_runtime_capabilities`                     | The MCP server runtimes and manifest templates for authoring packages                                                                                                  |
+| `list_connections`, `api_call`                 | List the connections you can use outside a run and call a third-party API through one, with the credential injected by the platform                                    |
 
 `mcp:read` lets a client connect and use the read-only tools, except `list_files`, which needs `files:read`. `mcp:invoke` adds `invoke_operation`, and `run_and_wait` further needs `agents:run` and a run-read permission. `import_package_file` needs `mcp:invoke` plus a package write permission. `list_connections` and `api_call` need `mcp:invoke` and `credential-proxy:call-own`. An operation your role cannot perform is not shown, and every call is checked again when it runs, so a client can never do more than the same credentials could over REST. If your role changes or the platform is upgraded, re-list the tools in your client.
 

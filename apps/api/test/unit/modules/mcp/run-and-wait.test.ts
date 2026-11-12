@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, describe, expect, it, jest } from "bun:test";
+import { DEFAULT_REQUEST_TIMEOUT_MSEC } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { createInProcessPair, type AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { OPERATION_INDEX_HEADING } from "@appstrate/core/chat-contract";
@@ -10,13 +11,13 @@ import {
   RUN_AND_WAIT_LOG_PROGRESS_INTERVAL_MS,
   RUN_AND_WAIT_LONG_POLL_RESUME,
   RUN_AND_WAIT_PROGRESS_INTERVAL_MS,
-  RUN_AND_WAIT_UNSTREAMED_MAX_MS,
+  RUN_AND_WAIT_DEFAULT_WAIT_SECONDS,
+  RUN_AND_WAIT_MAX_WAIT_SECONDS,
   type Dispatch,
   type McpToolContext,
   type McpToolEvent,
 } from "../../../../src/modules/mcp/tools.ts";
 import {
-  RUN_AND_WAIT_MAX_MS,
   RUN_AND_WAIT_RESUME_INSTRUCTION,
   RUN_CONNECT_OFFERS_HEADER,
 } from "@appstrate/core/run-and-wait-client";
@@ -429,9 +430,9 @@ describe("run_and_wait", () => {
       result: { ok: true },
     });
     expect(calls.find((c) => c.method === "POST")?.body).toEqual({ input: { topic: "x" } });
-    // No progress token: the wait is capped below the clients' 60 s timeout.
+    // No `wait`: the default budget, under the clients' 60 s timeout.
     expect(calls.find((c) => c.method === "GET")?.search).toBe(
-      `?wait=${RUN_AND_WAIT_UNSTREAMED_MAX_MS / 1000}`,
+      `?wait=${RUN_AND_WAIT_DEFAULT_WAIT_SECONDS}`,
     );
   });
 
@@ -477,7 +478,7 @@ describe("run_and_wait", () => {
     expect(events.find((e) => e.operationId === "getRun")?.status).toBe(404);
   });
 
-  describe("progress heartbeat and unstreamed wait cap", () => {
+  describe("progress heartbeat and wait budget", () => {
     type SentNotification = Parameters<AppstrateRequestExtra["sendNotification"]>[0];
 
     it("tells the model to read a `done:false` run back with getRun, not relaunch it", () => {
@@ -531,8 +532,12 @@ describe("run_and_wait", () => {
       tool: ReturnType<typeof makeRunAndWait>["tool"],
       calls: ReturnType<typeof makeRunAndWait>["calls"],
       extra: AppstrateRequestExtra,
+      args: Record<string, unknown> = {},
     ): Promise<{ pending: Promise<CallToolResult> }> {
-      const pending = tool.handler({ kind: "agent", scope: "@acme", name: "writer" }, extra);
+      const pending = tool.handler(
+        { kind: "agent", scope: "@acme", name: "writer", ...args },
+        extra,
+      );
       for (let i = 0; i < 50 && !calls.some((c) => c.method === "GET"); i++) await flush();
       expect(calls.some((c) => c.method === "GET")).toBe(true);
       return { pending };
@@ -561,9 +566,9 @@ describe("run_and_wait", () => {
       await flush();
 
       expect(parseResult(res)).toMatchObject({ id: "run_1", status: "success", done: true });
-      // A streamed call asks for its whole default budget; the server clamps it.
+      // A progress token leaves the budget as it is: the same default as without one.
       expect(calls.find((c) => c.method === "GET")?.search).toBe(
-        `?wait=${RUN_AND_WAIT_MAX_MS / 1000}`,
+        `?wait=${RUN_AND_WAIT_DEFAULT_WAIT_SECONDS}`,
       );
       // One beat at launch, then one per interval.
       expect(sent).toEqual(
@@ -789,7 +794,7 @@ describe("run_and_wait", () => {
       expect(parseResult(res)).toMatchObject({ id: "run_1", status: "success", done: true });
     });
 
-    it("sends nothing and returns done:false with the run id once the cap passes", async () => {
+    it("sends nothing and returns done:false with the run id once the default wait passes", async () => {
       jest.useFakeTimers();
       const sent: SentNotification[] = [];
       const { tool, calls, events } = makeRunAndWait({
@@ -804,11 +809,11 @@ describe("run_and_wait", () => {
           sent.push(n);
         }),
       );
-      jest.advanceTimersByTime(RUN_AND_WAIT_UNSTREAMED_MAX_MS);
+      jest.advanceTimersByTime(RUN_AND_WAIT_DEFAULT_WAIT_SECONDS * 1000);
       const res = await pending;
 
       expect(calls.find((c) => c.method === "GET")?.search).toBe(
-        `?wait=${RUN_AND_WAIT_UNSTREAMED_MAX_MS / 1000}`,
+        `?wait=${RUN_AND_WAIT_DEFAULT_WAIT_SECONDS}`,
       );
       expect(res.isError).toBeFalsy();
       // `done` alone says the wait ended; the next step comes as a second text block.
@@ -826,6 +831,115 @@ describe("run_and_wait", () => {
       expect(events.some((e) => e.operationId === "getRun")).toBe(false);
       expect(sent).toEqual([]);
     });
+    it("streams progress, then returns done:false once the default wait passes", async () => {
+      jest.useFakeTimers();
+      const sent: SentNotification[] = [];
+      const { tool, calls } = makeRunAndWait({ getRun: [heldPoll().answer] });
+
+      const { pending } = await startCall(
+        tool,
+        calls,
+        extraWith("tok_1", async (n) => {
+          sent.push(n);
+        }),
+      );
+      for (let i = 0; i < 3; i++) {
+        jest.advanceTimersByTime(RUN_AND_WAIT_PROGRESS_INTERVAL_MS);
+        await flush();
+      }
+      jest.advanceTimersByTime(
+        RUN_AND_WAIT_DEFAULT_WAIT_SECONDS * 1000 - 3 * RUN_AND_WAIT_PROGRESS_INTERVAL_MS,
+      );
+      const res = await pending;
+
+      expect(calls.filter((c) => c.method === "GET").map((c) => c.search)).toEqual([
+        `?wait=${RUN_AND_WAIT_DEFAULT_WAIT_SECONDS}`,
+      ]);
+      expect(res.structuredContent).toMatchObject({ id: "run_1", status: "pending", done: false });
+      expect(res.content.slice(1)).toEqual([{ type: "text", text: RUN_AND_WAIT_LONG_POLL_RESUME }]);
+      expect(messages(sent)).toEqual([
+        "Run run_1 launched",
+        ...[1, 2, 3].map(
+          (n) =>
+            `Waiting for run run_1 (${(n * RUN_AND_WAIT_PROGRESS_INTERVAL_MS) / 1000}s elapsed)`,
+        ),
+      ]);
+    });
+  });
+
+  describe("`wait` argument", () => {
+    it("defaults under the 60 s per-call timeout of MCP clients", () => {
+      expect(RUN_AND_WAIT_DEFAULT_WAIT_SECONDS).toBeLessThan(DEFAULT_REQUEST_TIMEOUT_MSEC / 1000);
+      const schema = makeRunAndWait({}).tool.descriptor.inputSchema;
+      expect(schema.properties?.wait).toMatchObject({ type: "integer", minimum: 0 });
+    });
+
+    it("sends an explicit wait as the read's `?wait=`, the query getRun takes", async () => {
+      jest.useFakeTimers();
+      const { tool, calls } = makeRunAndWait({});
+      await tool.handler({ kind: "agent", scope: "@acme", name: "writer", wait: 10 }, noExtra);
+      expect(calls.find((c) => c.method === "GET")?.search).toBe("?wait=10");
+    });
+
+    it(`clamps a wait above ${RUN_AND_WAIT_MAX_WAIT_SECONDS} s to that ceiling`, async () => {
+      jest.useFakeTimers();
+      const { tool, calls } = makeRunAndWait({});
+      await tool.handler(
+        { kind: "agent", scope: "@acme", name: "writer", wait: 1_000_000 },
+        noExtra,
+      );
+      expect(calls.find((c) => c.method === "GET")?.search).toBe(
+        `?wait=${RUN_AND_WAIT_MAX_WAIT_SECONDS}`,
+      );
+    });
+
+    it("chains reads until the run ends within the wait", async () => {
+      const { tool, calls } = makeRunAndWait({
+        getRun: [
+          jsonResponse({ id: "run_1", status: "running" }),
+          jsonResponse({ id: "run_1", status: "success", result: { ok: true } }),
+        ],
+      });
+      const res = await tool.handler(
+        { kind: "agent", scope: "@acme", name: "writer", wait: 600 },
+        noExtra,
+      );
+      expect(
+        calls.filter((c) => c.method === "GET" && c.path.startsWith("/api/runs/")),
+      ).toHaveLength(2);
+      expect(parseResult(res)).toMatchObject({
+        status: "success",
+        done: true,
+        result: { ok: true },
+      });
+    });
+
+    it("returns done:false right after the launch for `wait: 0`", async () => {
+      const { tool, calls } = makeRunAndWait({
+        launch: () => jsonResponse({ id: "run_9", packageId: "@acme/writer", status: "pending" }),
+      });
+      const res = await tool.handler(
+        { kind: "agent", scope: "@acme", name: "writer", wait: 0 },
+        noExtra,
+      );
+      expect(calls.map((c) => c.method)).toEqual(["POST"]);
+      expect(res.structuredContent).toMatchObject({ id: "run_9", status: "pending", done: false });
+      expect(res.content.slice(1)).toEqual([{ type: "text", text: RUN_AND_WAIT_LONG_POLL_RESUME }]);
+    });
+
+    it.each([["50"], [-1], [1.5], [true], [null]])(
+      "refuses `wait: %p` before any launch",
+      async (wait) => {
+        const { tool, calls } = makeRunAndWait({});
+        const res = await tool.handler(
+          { kind: "agent", scope: "@acme", name: "writer", wait },
+          noExtra,
+        );
+        expect(res.isError).toBe(true);
+        expect(parseResult(res)).toMatchObject({ code: "invalid_argument", arguments: ["wait"] });
+        expect(calls).toEqual([]);
+      },
+    );
   });
 
   it("ends its telemetry on the run's status when the wait reaches a terminal run", async () => {

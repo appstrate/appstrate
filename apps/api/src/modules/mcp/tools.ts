@@ -41,6 +41,7 @@ import {
   enrichTerminalRunAndWaitStep,
   launchRunAndWait,
   waitForRunAndWaitCompletion,
+  RUN_AND_WAIT_MAX_MS,
   RUN_AND_WAIT_RESUME_INSTRUCTION,
   type RunAndWaitFile,
   type RunAndWaitLaunch,
@@ -66,6 +67,7 @@ import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
 import { withoutConnectOffers } from "../../services/connect/preflight-connect-offer.ts";
 import { logger } from "../../lib/logger.ts";
 import { ceilingHolds } from "../../lib/route-requirements.ts";
+import { parseWaitSeconds } from "../../lib/run-wait-limits.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import {
   getFileForActor,
@@ -978,9 +980,14 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
 
 /** Well under the SDK client's request timeout, which each progress notification resets. */
 export const RUN_AND_WAIT_PROGRESS_INTERVAL_MS = DEFAULT_REQUEST_TIMEOUT_MSEC / 4;
-/** Wait cap (launch included) without a progress token: a heartbeat period before that timeout. */
-export const RUN_AND_WAIT_UNSTREAMED_MAX_MS =
-  DEFAULT_REQUEST_TIMEOUT_MSEC - RUN_AND_WAIT_PROGRESS_INTERVAL_MS;
+/**
+ * Wait budget, in seconds and launch included, of a call without `wait`: 10 s under the
+ * 60 s per-call timeout that is the shortest one MCP clients commonly apply, whether or
+ * not they send a progress token.
+ */
+export const RUN_AND_WAIT_DEFAULT_WAIT_SECONDS = 50;
+/** Ceiling of the `wait` argument, in seconds: the fallback wait ceiling of `run_and_wait`. */
+export const RUN_AND_WAIT_MAX_WAIT_SECONDS = RUN_AND_WAIT_MAX_MS / 1000;
 
 export const WARNING_CODES_PHRASE = CONNECTION_RESOLUTION_WARNING_CODES.map((c) => `\`${c}\``).join(
   ", ",
@@ -1244,6 +1251,17 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
           additionalProperties: true,
         },
         ...(inline ? INLINE_ONLY_RUN_AND_WAIT_PROPERTIES : {}),
+        wait: {
+          type: "integer",
+          minimum: 0,
+          description:
+            "Seconds this call waits for the run to end, launch included: " +
+            `${RUN_AND_WAIT_DEFAULT_WAIT_SECONDS} when omitted, at most ` +
+            `${RUN_AND_WAIT_MAX_WAIT_SECONDS} (a larger value is clamped to it); \`0\` returns ` +
+            "right after the launch. Set it only when you know your client keeps a tool call " +
+            "open longer than the default. When the wait ends first, the call returns " +
+            "`done:false` and the run goes on.",
+        },
         connection_overrides: {
           type: "object",
           additionalProperties: connectionIdSetJsonSchema,
@@ -1303,6 +1321,27 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       });
     }
 
+    // `wait` is this tool's own argument; the launch reads every other one.
+    const { wait, ...launchArgs } = args;
+    const waitSeconds =
+      wait === undefined
+        ? RUN_AND_WAIT_DEFAULT_WAIT_SECONDS
+        : typeof wait === "number"
+          ? parseWaitSeconds(String(wait), RUN_AND_WAIT_MAX_WAIT_SECONDS)
+          : null;
+    if (waitSeconds === null) {
+      emit(ctx, {
+        tool: "run_and_wait",
+        durationMs: performance.now() - start,
+        outcome: "rejected",
+      });
+      return refusalResult({
+        code: "invalid_argument",
+        error: "`wait` must be a non-negative integer number of seconds.",
+        arguments: ["wait"],
+      });
+    }
+
     // Trusted in-process dispatch: forward the caller's auth + the self-dispatch
     // marker (same as invoke_operation), and route the launch and poll fetches
     // back through the platform app. `launchRunAndWait` (shared with the chat
@@ -1314,7 +1353,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       return ctx.dispatch(request);
     }) as typeof fetch;
 
-    const launched = await launchRunAndWait(args, {
+    const launched = await launchRunAndWait(launchArgs, {
       origin: ctx.origin,
       headers: forwarded,
       fetch: dispatchFetch,
@@ -1371,7 +1410,7 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
     };
     const waited = await waitForRunAndWaitCompletion(launch, {
       ...waitOpts,
-      maxMs: stopProgress ? undefined : RUN_AND_WAIT_UNSTREAMED_MAX_MS,
+      maxMs: waitSeconds * 1000,
     }).then(
       (result) => {
         stopProgress?.(true);

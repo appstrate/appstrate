@@ -251,34 +251,41 @@ answer anything else: `{ id, packageId, status, done, warnings }`, plus
 that tells a finished run from one still going; `error` is always the run's own
 failure, and `warnings` is `[]` when the launch reported none.
 
-How long it waits depends on the client. Both delays derive from the MCP SDK
-client's default request timeout (60 s). A request carrying
-`params._meta.progressToken` is answered over SSE: the call streams
-`notifications/progress` every 15 s (a quarter of it) and returns `done:true`
-once the run is over. The same stream relays the run's log lines as they are
-written: each `info`, `warn` or `error` line becomes a notification whose
-`message` is `Run <id> [<level>] <message>`, on one line and cut to 200
-characters, without the line's `data`. At most one log line is sent per
-second; when several arrive within that second, only the latest is sent, and a
-line still held when the wait ends is sent just before the result. Log lines
-and heartbeats share one strictly increasing `progress` counter. They follow
-the caller's run read: a caller receives the lines of a run it may read, as on
-`GET /api/realtime/runs/{id}`, never `debug` lines. Most clients show these
-notifications to the user, not to the model. Without a token nothing can keep
-the request alive, so after 45 s (one heartbeat short of it) it returns
-`done:false` with the run `id` and no outcome, and a second text block saying
-what to do next: continue with `getRun` (`query: { wait: true }`, which the
-server holds for at most 55 s) on that id, never with a second `run_and_wait`.
-Progress only helps a client that resets its request timeout on it: the MCP
-TypeScript SDK does so only with `resetTimeoutOnProgress: true` (default
-`false`). A client that sends a token without resetting its timeout on progress
-hits its own timeout on a long run, not the `done:false` fallback: the server
-cannot tell it apart from one that does. A client that gives up on a streamed
-call without closing its HTTP connection (MCP SDK clients: their per-call
-timeout only sends `notifications/cancelled` in a new POST, which a stateless
-server cannot match to the call) leaves the server waiting until the run ends,
-30 min at most; the run itself is unaffected, so read it back with `getRun`
-rather than launching it again.
+How long it waits is its `wait` argument, in seconds, counted from the start of
+the call (launch included): 50 when omitted, at most 1800 (a larger value is
+clamped to it), and `0` returns right after the launch. The default fits under
+the shortest per-call timeout MCP clients commonly apply (60 s); set `wait`
+only when your client is known to keep a tool call open longer. When the run
+ends within the wait, the call returns `done:true` with its outcome. Otherwise
+it returns `done:false` with the run `id` and no outcome, and a second text
+block saying what to do next: continue with `getRun` (`query: { wait: true }`,
+which the server holds for at most 55 s) on that id, never with a second
+`run_and_wait`. A wait longer than 55 s is a chain of such reads inside the one
+call. The `wait` query of `getRun` follows the same rule (`true`, `false`, or
+non-negative integer seconds, clamped), with 55 s as its ceiling and no wait
+when omitted.
+
+A request carrying `params._meta.progressToken` is answered over SSE: during
+the wait the call streams `notifications/progress` every 15 s. The same stream
+relays the run's log lines as they are written: each `info`, `warn` or `error`
+line becomes a notification whose `message` is `Run <id> [<level>] <message>`,
+on one line and cut to 200 characters, without the line's `data`. At most one
+log line is sent per second; when several arrive within that second, only the
+latest is sent, and a line still held when the wait ends is sent just before
+the result. Log lines and heartbeats share one strictly increasing `progress`
+counter. They follow the caller's run read: a caller receives the lines of a
+run it may read, as on `GET /api/realtime/runs/{id}`, never `debug` lines.
+Most clients show these notifications to the user, not to the model. Progress
+resets the timeout of a client that resets it on progress (the MCP TypeScript
+SDK does so only with `resetTimeoutOnProgress: true`, default `false`); it
+does not extend a fixed per-call timeout. A client that gives up on a call
+without closing its HTTP connection (MCP SDK clients: their per-call timeout
+only sends `notifications/cancelled` in a new POST, which a stateless server
+cannot match to the call) leaves the server waiting until the wait ends; the
+run itself is unaffected, so read it back with `getRun` rather than launching
+it again. The MCP tasks extension (`io.modelcontextprotocol/tasks`), which
+would let a client poll a long call natively, is the future target for long
+runs; Appstrate does not implement it yet.
 
 `list_connections` and `api_call` are the credential proxy
 (`/api/credential-proxy/*`) outside a run. The proxy route is not an operation

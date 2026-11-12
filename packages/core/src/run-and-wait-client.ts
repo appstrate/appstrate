@@ -213,8 +213,10 @@ function materializeInlineManifest(manifest: Record<string, unknown>): Materiali
  * never had. That failure mode has no other place to be caught.
  *
  * Must match the MCP descriptor's `inputSchema.properties` (apps/api
- * `modules/mcp/tools.ts`). The MCP module refuses any argument its schema does
- * not declare, so a name on only one side is refused on one path, never
+ * `modules/mcp/tools.ts`), except `wait`: the MCP tool reads it and launches
+ * with the other arguments, and the chat, whose wait descends from its turn
+ * budget, is not offered it. The MCP module refuses any argument its schema
+ * does not declare, so a name on only one side is refused on one path, never
  * dropped.
  */
 const RUN_AND_WAIT_ARGUMENT_NAMES: ReadonlySet<string> = new Set([
