@@ -496,7 +496,10 @@ function buildApiCallTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
       "the 401 may be a permission refusal or transient, and `failures`/`max_failures` count " +
       "toward flagging the connection) or `needs_reconnection` (its owner must reconnect it; " +
       "calls through it are refused until then); without it, the upstream refused the request " +
-      "itself. " +
+      "itself. A 3xx whose `Location` is outside the connection's `authorized_uris` comes back " +
+      "as is, unfollowed (unless the request fills in a credential `{{field}}`): fetch that " +
+      "`Location` yourself right away, since such signed URLs expire fast (1 minute for " +
+      "GitHub Actions logs). " +
       "An entry with `error` `{ status, code, detail }` is the platform's refusal and " +
       "does not stop the other requests: `call_permission_required`, `credential_not_found`, " +
       "`must_choose_connection` (retry with one `errors[0].candidate_connections[].id` as " +
