@@ -6,8 +6,11 @@
  * hash of its contents, so a byte-identical re-run must hash identically.
  */
 
-import { isValidSkillName, SKILL_NAME_MAX_LENGTH } from "@appstrate/afps-shared/companion-files";
-import { extractSkillMeta } from "@appstrate/core/validation";
+import {
+  isValidSkillName,
+  normalizeSkillMd,
+  SKILL_NAME_MAX_LENGTH,
+} from "@appstrate/afps-shared/companion-files";
 import { toSlug } from "@appstrate/core/naming";
 import { isSafeArchivePath } from "@appstrate/core/zip";
 import { PACKAGE_CONTENT_ENTRY, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
@@ -17,8 +20,6 @@ import { SIGNATURE_RECORD } from "../package-definition.ts";
 const DROPPED_ENTRIES: ReadonlySet<string> = new Set([PACKAGE_MANIFEST_FILE, SIGNATURE_RECORD]);
 
 export const SKILL_ENTRY = PACKAGE_CONTENT_ENTRY.skill!.path;
-
-const FRONTMATTER_RE = /^---[^\S\n]*\n([\s\S]*?)\n---/;
 
 export class SkillMaterializeError extends Error {
   constructor(
@@ -118,27 +119,4 @@ export function materializeSkill(input: MaterializeSkillInput): Record<string, U
     );
   }
   return out;
-}
-
-/**
- * Point the frontmatter `name` at the directory — the one rewrite the spec
- * forces. Every other byte passes through as authored: unknown keys are Claude
- * Code's extensions, and invented content would hide a publishing mistake.
- */
-export function normalizeSkillMd(content: string, slug: string): string {
-  if (extractSkillMeta(content).name === slug) return content;
-  const match = content.match(FRONTMATTER_RE);
-  if (!match) return content;
-
-  // Splice by offset, not `String.replace`: the block is user content that can
-  // recur later, and a replacement would re-interpret `$` sequences.
-  const blockStart = match[0]!.indexOf("\n") + 1;
-  const block = match[1]!;
-  const line = /^name:[^\r\n]*/m.exec(block);
-  if (!line) {
-    const eol = block.includes("\r\n") ? "\r\n" : "\n";
-    return `${content.slice(0, blockStart)}name: ${slug}${eol}${content.slice(blockStart)}`;
-  }
-  const at = blockStart + line.index;
-  return `${content.slice(0, at)}name: ${slug}${content.slice(at + line[0].length)}`;
 }

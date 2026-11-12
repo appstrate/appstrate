@@ -17,7 +17,6 @@ import {
   SkillMaterializeError,
   collisionSlug,
   materializeSkill,
-  normalizeSkillMd,
   skillSlug,
 } from "../src/lib/skills-sync/materialize.ts";
 
@@ -102,61 +101,6 @@ describe("collisionSlug", () => {
     expect(second.length).toBeLessThanOrEqual(64);
     expect(second).not.toBe(first);
     expect(second.endsWith("-2")).toBe(true);
-  });
-});
-
-describe("normalizeSkillMd", () => {
-  it("leaves a conforming file byte-for-byte alone", () => {
-    expect(normalizeSkillMd(CONFORMING_SKILL, "pdf-tools")).toBe(CONFORMING_SKILL);
-  });
-
-  it("rewrites only the name line when it differs from the slug", () => {
-    const source = CONFORMING_SKILL.replace("name: pdf-tools", "name: PDF Tools");
-    const out = normalizeSkillMd(source, "pdf-tools");
-    expect(out).toBe(CONFORMING_SKILL);
-    expect(out).toContain("allowed-tools: Read, Bash");
-  });
-
-  it("handles a name declared after other keys", () => {
-    const source = "---\ndescription: Work with PDFs.\nname: PDF Tools\n---\n\nBody.\n";
-    expect(normalizeSkillMd(source, "pdf-tools")).toBe(
-      "---\ndescription: Work with PDFs.\nname: pdf-tools\n---\n\nBody.\n",
-    );
-  });
-
-  it("prepends the name when the block only carries it inside a nested mapping", () => {
-    const source = "---\nmeta:\n  name: inner\n  description: inner desc\n---\n\nBody.\n";
-    expect(normalizeSkillMd(source, "pdf-tools")).toBe(
-      "---\nname: pdf-tools\nmeta:\n  name: inner\n  description: inner desc\n---\n\nBody.\n",
-    );
-  });
-
-  it("does not mistake an indented key inside a nested mapping for the top-level one", () => {
-    const source = "---\nmeta:\n  name: inner\nname: PDF Tools\ndescription: Work.\n---\n\nBody.\n";
-    expect(normalizeSkillMd(source, "pdf-tools")).toBe(
-      "---\nmeta:\n  name: inner\nname: pdf-tools\ndescription: Work.\n---\n\nBody.\n",
-    );
-  });
-
-  it("rewrites CRLF frontmatter in place and keeps CRLF line endings", () => {
-    const source = "---\r\nname: PDF Tools\r\ndescription: Work.\r\n---\r\n\r\nBody.\r\n";
-    const out = normalizeSkillMd(source, "pdf-tools");
-    expect(out).toBe("---\r\nname: pdf-tools\r\ndescription: Work.\r\n---\r\n\r\nBody.\r\n");
-    // The bug this pins prepended a SECOND key rather than replacing the first.
-    expect(out.match(/^name:/gm)).toHaveLength(1);
-  });
-
-  it("leaves a file whose frontmatter yaml cannot parse otherwise untouched", () => {
-    // Legacy published artifacts exist with an unquoted `description: a : b`.
-    // The sync still points the name at the directory and copies the rest.
-    const source = "---\nname: legacy\ndescription: Reports: weekly\n---\n\nBody.\n";
-    expect(normalizeSkillMd(source, "legacy-skill")).toBe(
-      "---\nname: legacy-skill\ndescription: Reports: weekly\n---\n\nBody.\n",
-    );
-  });
-
-  it("leaves a file with no frontmatter block exactly as authored", () => {
-    expect(normalizeSkillMd("Just a body.\n", "pdf-tools")).toBe("Just a body.\n");
   });
 });
 

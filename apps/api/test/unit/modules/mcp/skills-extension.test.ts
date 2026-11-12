@@ -11,10 +11,9 @@ import { describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
 import { ResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createInProcessPair, type SkillEntry } from "@appstrate/mcp-transport";
-import { parseSkillFrontmatter } from "@appstrate/afps-shared/companion-files";
+import { normalizeSkillMd, parseSkillFrontmatter } from "@appstrate/afps-shared/companion-files";
 import { forbidden } from "../../../../src/lib/errors.ts";
 import {
-  normalizeSkillMd,
   parseSkillUri,
   serveSkill,
   SKILL_FILE_MAX_BYTES,

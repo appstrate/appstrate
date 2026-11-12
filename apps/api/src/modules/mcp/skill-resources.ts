@@ -18,6 +18,7 @@
 import { createHash } from "node:crypto";
 import {
   isValidSkillName,
+  normalizeSkillMd,
   parseSkillFrontmatter,
   SKILL_NAME_MAX_LENGTH,
 } from "@appstrate/afps-shared/companion-files";
@@ -107,31 +108,6 @@ export function skillName(frontmatterName: string, packageNameSegment: string): 
   if (isValidSkillName(frontmatterName)) return frontmatterName;
   const fromPackage = toSlug(packageNameSegment, SKILL_NAME_MAX_LENGTH).replace(/-+$/, "");
   return isValidSkillName(fromPackage) ? fromPackage : null;
-}
-
-const FRONTMATTER_RE = /^---[^\S\n]*\n([\s\S]*?)\n---/;
-
-/**
- * Point the frontmatter `name` at `name`, the one rewrite Agent Skills forces.
- * Every other byte passes through as authored: unknown keys are client
- * extensions, and invented content would hide a publishing mistake.
- */
-export function normalizeSkillMd(content: string, name: string): string {
-  if (parseSkillFrontmatter(content).name === name) return content;
-  const match = content.match(FRONTMATTER_RE);
-  if (!match) return content;
-
-  // Splice by offset, not `String.replace`: the block is user content that can
-  // recur later, and a replacement would re-interpret `$` sequences.
-  const blockStart = match[0]!.indexOf("\n") + 1;
-  const block = match[1]!;
-  const line = /^name:[^\r\n]*/m.exec(block);
-  if (!line) {
-    const eol = block.includes("\r\n") ? "\r\n" : "\n";
-    return `${content.slice(0, blockStart)}name: ${name}${eol}${content.slice(blockStart)}`;
-  }
-  const at = blockStart + line.index;
-  return `${content.slice(0, at)}name: ${name}${content.slice(at + line[0].length)}`;
 }
 
 /** A skill as served: its name, its files, and its frontmatter read from the served `SKILL.md`. */
