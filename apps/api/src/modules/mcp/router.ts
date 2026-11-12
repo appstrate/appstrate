@@ -107,7 +107,7 @@ import { buildOperationIndex, buildOrgWideOperationIndex, operationIdGranted } f
 import { skillReaderFor } from "./skill-tools.ts";
 import { buildSkillServer } from "./skills.ts";
 import { SKILL_URI_PREFIX } from "./skill-resources.ts";
-import { readSkillSnapshot } from "../../services/skill-read.ts";
+import { readSkillSnapshot, type SkillReadSpace } from "../../services/skill-read.ts";
 import { listActivePackages } from "../../services/space-packages.ts";
 import {
   listReachableSpaces,
@@ -658,7 +658,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const toolCtx = {
       authorizeBundle: (bundle: Bundle) => authorizeBundlePackages(c, bundle),
       placeRootAs: (packageId: string) => heldPlacementAuthority(c, packageId),
-      readSkill: skillReaderFor(c, scope),
+      readSkill: skillReaderFor(c, { ...scope, permissions }),
       requestId: c.get("requestId"),
       followRunLogs: (runId: string, onLog: (log: RunLogEvent) => void) =>
         followRunLogs(
@@ -690,21 +690,25 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     // forwarded-auth in-process dispatch as the tools (files are NOT listed
     // under `resources/list`; they surface only via `resource_link`).
     const files = buildFileResourceProvider(toolCtx);
-    // `skills/*` and `resources/read` for `skill://` (SEP-2640), in the space this request entered.
+    // `skills/*` and `resources/read` for `skill://` (SEP-2640), in every space this
+    // connection reaches, each read with the caller's permissions in that space.
+    const skillSpaces = new Map<string, SkillReadSpace>(
+      (orgSpaces?.reachable ?? [{ id: scope.spaceId, permissions }]).map((space) => [
+        space.id,
+        { orgId: org, spaceId: space.id, permissions: space.permissions },
+      ]),
+    );
     const skills = buildSkillServer({
-      spaceId: scope.spaceId,
+      spaceIds: [...skillSpaces.keys()],
       // Published ones: a system skill's stored tree, or a `latest` dist-tag.
-      listActiveSkillIds: async () =>
-        (await listActivePackages(scope, "skill"))
+      listActiveSkillIds: async (spaceId) =>
+        (await listActivePackages(skillSpaces.get(spaceId)!, "skill"))
           .filter((row) => row.source === "system" || row.latestVersionId !== null)
           .map((row) => row.id),
-      readSkill: (packageId, definition) => readSkillSnapshot(c, scope, packageId, definition),
+      readSkill: (spaceId, packageId, definition) =>
+        readSkillSnapshot(c, skillSpaces.get(spaceId)!, packageId, definition),
       logUnservable: (event) =>
-        logger.warn("mcp.skill_unservable", {
-          requestId: c.get("requestId"),
-          spaceId: scope.spaceId,
-          ...event,
-        }),
+        logger.warn("mcp.skill_unservable", { requestId: c.get("requestId"), ...event }),
     });
     const resources: AppstrateResourceProvider = {
       read: (uri, extra) =>

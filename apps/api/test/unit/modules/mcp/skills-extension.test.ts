@@ -102,7 +102,7 @@ describe("serveSkill", () => {
     const text = new TextDecoder().decode(served.skill.files["SKILL.md"]);
     expect(text).toBe(md("tone-kit"));
     // The entry's frontmatter is the served SKILL.md's.
-    expect(served.skill.frontmatter).toEqual(parseSkillFrontmatter(text).fields);
+    expect(parseSkillFrontmatter(text).fields).toEqual(served.skill.frontmatter);
   });
 
   it("refuses a tree it cannot serve whole", () => {
@@ -150,9 +150,9 @@ describe("skills/list, skills/get and resources/read", () => {
   function server(overrides: Partial<SkillProviderContext> = {}) {
     const unservable: string[] = [];
     const ctx: SkillProviderContext = {
-      spaceId: SPACE,
+      spaceIds: [SPACE],
       listActiveSkillIds: async () => ["@acme/tone", "@acme/hidden"],
-      readSkill: async (packageId, definition) => {
+      readSkill: async (_spaceId, packageId, definition) => {
         if (packageId === "@acme/hidden") throw forbidden("no");
         return snapshot(packageId, definition);
       },
@@ -211,7 +211,7 @@ describe("skills/list, skills/get and resources/read", () => {
 
   it("refuses a refused, mismatched, other-space or unservable skill", async () => {
     const s = server({
-      readSkill: async (packageId, definition) =>
+      readSkill: async (_spaceId, packageId, definition) =>
         packageId === "@acme/big"
           ? { ...snapshot(packageId, definition), snapshot: { files: {}, snapshotId: "s" } }
           : packageId === "@acme/pinned"
@@ -243,6 +243,42 @@ describe("skills/list, skills/get and resources/read", () => {
         );
         expect(readErr).toMatchObject({ code: -32002 });
       }
+    } finally {
+      await p.close();
+    }
+  });
+
+  it("lists and reads every space reached, each with its own read", async () => {
+    const reads: string[] = [];
+    const s = server({
+      spaceIds: [SPACE, "spc_2"],
+      listActiveSkillIds: async (spaceId) => (spaceId === SPACE ? ["@acme/tone"] : ["@acme/voice"]),
+      readSkill: async (spaceId, packageId, definition) => {
+        reads.push(`${spaceId} ${packageId}`);
+        return spaceId === "spc_2" && packageId === "@acme/tone"
+          ? null
+          : snapshot(packageId, definition);
+      },
+    });
+    const p = await pair(s);
+    try {
+      const list = await p.client.request({ method: "skills/list", params: {} }, ResultSchema);
+      expect((list.skills as SkillEntry[]).map((entry) => entry.uri)).toEqual([
+        "skill://spc_1/acme/tone/tone/SKILL.md",
+        "skill://spc_2/acme/voice/tone/SKILL.md",
+      ]);
+      expect(reads).toEqual(["spc_1 @acme/tone", "spc_2 @acme/voice"]);
+      const read = await p.client.readResource({ uri: "skill://spc_2/acme/voice/tone/SKILL.md" });
+      expect(read.contents).toHaveLength(1);
+      // A skill readable in one space is not readable through another space's URI.
+      const err = await p.client
+        .readResource({ uri: "skill://spc_2/acme/tone/tone/SKILL.md" })
+        .then(
+          () => undefined,
+          (e: unknown) => e,
+        );
+      expect(err).toMatchObject({ code: -32002 });
+      expect(reads.at(-1)).toBe("spc_2 @acme/tone");
     } finally {
       await p.close();
     }

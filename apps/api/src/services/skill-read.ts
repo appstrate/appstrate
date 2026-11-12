@@ -33,11 +33,19 @@ const SKILLS_READ = packagePermission("skill", "read");
 const CHAT_TURN = "chat:write";
 
 /**
+ * The space a skill read targets, with the caller's permissions there: the live
+ * grants under the token's ceiling. An org-wide MCP connection reads each space
+ * it reaches with that space's permissions, not those of the space it entered.
+ */
+export interface SkillReadSpace extends SpaceScope {
+  permissions: ReadonlySet<string>;
+}
+
+/**
  * The skills this request's chat turn injected, or `null`. The claim is a
  * chat-turn grant: it holds in the turn's space only, and lapses with the
- * caller's LIVE `chat:write` there (the hop's permissions are the live grants
- * under the token's ceiling) — revoking chat access revokes it. A malformed
- * claim is ignored.
+ * caller's LIVE `chat:write` there — revoking chat access revokes it. A
+ * malformed claim is ignored.
  *
  * This IS a hard-coded auth method, the chat module's: core names it (in
  * `@appstrate/core/chat-contract`) because a claim any loaded strategy could
@@ -45,11 +53,11 @@ const CHAT_TURN = "chat:write";
  * therefore a deliberate core change, not a module capability — the same
  * stance as the bearer allowlist in `lib/bearer-only.ts`.
  */
-function turnClaim(c: Context<AppEnv>, scope: SpaceScope): InjectedSkills["skills"] | null {
+function turnClaim(c: Context<AppEnv>, space: SkillReadSpace): InjectedSkills["skills"] | null {
   if (c.get("authMethod") !== CHAT_LOOPBACK_AUTH_METHOD) return null;
-  if (!c.get("permissions")?.has(CHAT_TURN)) return null;
+  if (!space.permissions.has(CHAT_TURN)) return null;
   const claim = injectedSkillsSchema.safeParse(c.get("authExtra")?.[INJECTED_SKILLS_AUTH_EXTRA]);
-  return claim.success && claim.data.spaceId === scope.spaceId ? claim.data.skills : null;
+  return claim.success && claim.data.spaceId === space.spaceId ? claim.data.skills : null;
 }
 
 /** What a read serves: `spec` `undefined` = the stored tree; `draftLock` pins that tree. */
@@ -71,14 +79,14 @@ interface SkillReadAccess {
  */
 async function resolveSkillReadAccess(
   c: Context<AppEnv>,
-  scope: SpaceScope,
+  space: SkillReadSpace,
   packageId: string,
   definition: SkillDefinitionSelector | undefined,
 ): Promise<SkillReadAccess | null> {
-  const claim = turnClaim(c, scope);
+  const claim = turnClaim(c, space);
   if (claim && Object.hasOwn(claim, packageId)) {
     const served = claim[packageId]!;
-    const pkg = await findFileExplorerPackage(scope, packageId);
+    const pkg = await findFileExplorerPackage(space, packageId);
     if (pkg?.type !== "skill") return null;
     if (pkg.source === "system") return definition === "draft" ? null : { pkg, spec: undefined };
     if (definition !== undefined && definition !== served.definition) return null;
@@ -87,8 +95,8 @@ async function resolveSkillReadAccess(
     }
     return served.version === null ? null : { pkg, spec: served.version };
   }
-  if (c.get("permissions")?.has(SKILLS_READ)) {
-    const pkg = await findFileExplorerPackage(scope, packageId);
+  if (space.permissions.has(SKILLS_READ)) {
+    const pkg = await findFileExplorerPackage(space, packageId);
     if (pkg?.type === "skill") {
       const explicit =
         definition === undefined
@@ -146,11 +154,11 @@ export type SkillDefinitionSelector = "published" | "draft";
  */
 export async function readSkillSnapshot(
   c: Context<AppEnv>,
-  scope: SpaceScope,
+  space: SkillReadSpace,
   packageId: string,
   definition?: SkillDefinitionSelector,
 ): Promise<SkillSnapshot | null> {
-  const access = await resolveSkillReadAccess(c, scope, packageId, definition);
+  const access = await resolveSkillReadAccess(c, space, packageId, definition);
   if (!access) return null;
   const { pkg, spec, draftLock } = access;
   const validator = await resolvePackageFileValidator(pkg, spec);

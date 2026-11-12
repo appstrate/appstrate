@@ -240,10 +240,12 @@ SEP-2640) in `capabilities.extensions` of its `initialize` result, together with
 the `resources` capability. Results carry `resultType: "complete"` and no cache
 attributes.
 
-- **`skills/list`** returns the published definition of every skill active in
-  the space the request entered that you may read: `skills:read` there (a
-  delegated credential is held to its scopes), or, on the chat's own
-  connection, a skill the current turn injected. No pagination.
+- **`skills/list`** returns the published definition of every skill you may
+  read in the spaces the connection reaches (the space of a space URL, every
+  space of an organization URL), each skill under its own space's permissions:
+  `skills:read` in that space (a delegated credential is held to its scopes),
+  or, on the chat's own connection, a skill the current turn injected. No
+  pagination.
 - **Entry.** `uri` names the skill's `SKILL.md`; `frontmatter` is that file's
   YAML frontmatter, verbatim; `resources` lists every file of the skill with its
   `uri`, `digest` (`sha256:<hex>` of the bytes `resources/read` returns) and

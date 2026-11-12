@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The MCP Skills extension (SEP-2640) of the space a request entered:
- * `skills/list`, `skills/get` and `resources/read` on `skill://`. Every read
- * goes through `services/skill-read.ts`, the rule `read_skill` applies: a skill
- * the chat turn injected is readable at the definition injected, any other
- * needs `skills:read` (under the credential's ceiling).
+ * The MCP Skills extension (SEP-2640) of the spaces a connection reaches (the
+ * space it entered, or every space of an org-wide connection): `skills/list`,
+ * `skills/get` and `resources/read` on `skill://`. Every read goes through
+ * `services/skill-read.ts`, the rule `read_skill` applies, with the caller's
+ * permissions in the skill's space: a skill the chat turn injected is readable
+ * at the definition injected, any other needs `skills:read` there (under the
+ * credential's ceiling).
  *
- * `skills/list` holds the published definition of each active skill the caller
- * may read and the server can serve whole. A draft is never listed: it is read
+ * `skills/list` holds the published definition of each active skill, in each
+ * space reached, that the caller may read and the server can serve whole. A draft is never listed: it is read
  * by its `@draft` URI through `skills/get` and `resources/read`. Whatever is
  * listed is readable; a skill over the limits of `./skill-resources.ts` is
  * absent, refused by `skills/get` and `resources/read`, and logged.
@@ -33,16 +35,19 @@ import { RESOURCE_NOT_FOUND_ERROR_CODE } from "./tools.ts";
 const LIST_CONCURRENCY = 8;
 
 export interface SkillProviderContext {
-  spaceId: string;
-  /** Ids of the published skills active in the space. */
-  listActiveSkillIds: () => Promise<string[]>;
-  /** `readSkillSnapshot` bound to the request; `null` or an `ApiError` when refused. */
+  /** The spaces the connection reaches, in listing order. */
+  spaceIds: readonly string[];
+  /** Ids of the published skills active in a space. */
+  listActiveSkillIds: (spaceId: string) => Promise<string[]>;
+  /** `readSkillSnapshot` in a space, bound to the request; `null` or an `ApiError` when refused. */
   readSkill: (
+    spaceId: string,
     packageId: string,
     definition: SkillDefinitionSelector,
   ) => Promise<SkillSnapshot | null>;
   /** A skill the server refuses to serve, with the reason. */
   logUnservable: (event: {
+    spaceId: string;
     packageId: string;
     definition: SkillDefinitionSelector;
     reason: string;
@@ -69,12 +74,13 @@ function exactText(bytes: Uint8Array): string | null {
 export function buildSkillServer(ctx: SkillProviderContext): SkillServer {
   /** The skill served at `definition`, `null` when refused, unknown or unservable. */
   async function load(
+    spaceId: string,
     packageId: string,
     definition: SkillDefinitionSelector,
   ): Promise<Served | null> {
     let snapshot: SkillSnapshot | null;
     try {
-      snapshot = await ctx.readSkill(packageId, definition);
+      snapshot = await ctx.readSkill(spaceId, packageId, definition);
     } catch (err) {
       if (err instanceof ApiError) return null;
       throw err;
@@ -82,23 +88,29 @@ export function buildSkillServer(ctx: SkillProviderContext): SkillServer {
     if (!snapshot || snapshot.definition !== definition) return null;
     const served = serveSkill(packageId, snapshot.snapshot.files);
     if (!served.ok) {
-      ctx.logUnservable({ packageId, definition, reason: served.reason });
+      ctx.logUnservable({ spaceId, packageId, definition, reason: served.reason });
       return null;
     }
-    return { skill: served.skill, address: { spaceId: ctx.spaceId, packageId, definition } };
+    return { skill: served.skill, address: { spaceId, packageId, definition } };
   }
 
-  /** The skill a URI of this space names, with the served name it carries. */
+  /** The skill a URI of a reached space names, with the served name it carries. */
   async function resolve(address: SkillAddress | null): Promise<Served | null> {
-    if (!address || address.spaceId !== ctx.spaceId) return null;
-    const served = await load(address.packageId, address.definition);
+    if (!address || !ctx.spaceIds.includes(address.spaceId)) return null;
+    const served = await load(address.spaceId, address.packageId, address.definition);
     return served?.skill.name === address.name ? served : null;
   }
 
   const provider: AppstrateSkillProvider = {
     list: async () => {
-      const ids = await ctx.listActiveSkillIds();
-      const loaded = await mapWithConcurrency(ids, LIST_CONCURRENCY, (id) => load(id, "published"));
+      const listed = await Promise.all(
+        ctx.spaceIds.map(async (spaceId) =>
+          (await ctx.listActiveSkillIds(spaceId)).map((packageId) => ({ spaceId, packageId })),
+        ),
+      );
+      const loaded = await mapWithConcurrency(listed.flat(), LIST_CONCURRENCY, (skill) =>
+        load(skill.spaceId, skill.packageId, "published"),
+      );
       return loaded
         .filter((served): served is Served => served !== null)
         .map((served): SkillEntry => skillEntry(served.address, served.skill));

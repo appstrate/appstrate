@@ -109,8 +109,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `<package-name>@draft`, readable by whoever may write the package, never listed). Entries
   carry the served `SKILL.md` frontmatter verbatim and every file's `sha256` digest and size.
   The served skill is a valid Agent Skills directory: packaging entries dropped, `SKILL.md`
-  `name` set to the served name. Reads follow the `read_skill` rule (`skills:read` under the
-  credential's ceiling, or a skill the chat turn injected, at the definition injected). A
+  `name` set to the served name. The list covers every space the connection reaches (each space of an
+  organization URL), and each read follows the `read_skill` rule with the caller's permissions in
+  the skill's space (`skills:read` under the credential's ceiling, or a skill the chat turn
+  injected, at the definition injected). A
   skill with a file over 1 MiB, more than 512 files or more than 16 MiB is not served.
 
 - **BREAKING (CLI, MCP): agents are prompts of the MCP server, and `code sync`

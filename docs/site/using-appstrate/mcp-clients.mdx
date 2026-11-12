@@ -69,7 +69,7 @@ The server offers every agent you can launch as an MCP prompt named `run-<agent>
 
 ## Skills
 
-The server offers skills through the MCP Skills extension (`io.modelcontextprotocol/skills`): `skills/list` returns the published skills active in the space you connected to that you may read, each with its `SKILL.md` URI, its frontmatter and every file with a SHA-256 digest; `resources/read` returns a file. Skill URIs have the form `skill://<spaceId>/<scope>/<package-name>/<name>/SKILL.md`. A skill's draft is not listed: its authors read it at `skill://<spaceId>/<scope>/<package-name>@draft/<name>/SKILL.md`.
+The server offers skills through the MCP Skills extension (`io.modelcontextprotocol/skills`): `skills/list` returns, for every space the connection reaches (the space of a space URL, every space of an organization URL), the published skills your permissions in that space let you read. Each entry carries its `SKILL.md` URI, its frontmatter and every file with a SHA-256 digest; `resources/read` returns a file. Skill URIs have the form `skill://<spaceId>/<scope>/<package-name>/<name>/SKILL.md`. A skill's draft is not listed: its authors read it at `skill://<spaceId>/<scope>/<package-name>@draft/<name>/SKILL.md`.
 
 ## The tools
 
