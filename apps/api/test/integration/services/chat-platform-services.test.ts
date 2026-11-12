@@ -389,8 +389,7 @@ describe("recordChatUsage — pricing provenance", () => {
         apiShape: "openai-codex-responses",
         inputTokens: 400_000,
         outputTokens: 20_000,
-        // Pi's `openai/gpt-5.5` rate card, copied by hand (`openai-codex` carried
-        // the same card until Pi 1.5.2 dropped `gpt-5.5` from it).
+        // Pi's `openai/gpt-5.5` rate card, copied by hand.
         cost: {
           input: 5,
           output: 30,

@@ -57,8 +57,7 @@ const { run: RUN, daemon } = resolveContainerE2eGate("inference-container.e2e", 
 
 const RID = "run_inference_e2e";
 // In Pi's `openai-codex` offer, so the container resolves the registry record
-// exactly as it does for a run the platform launches. A reasoning model, like
-// the `gpt-5.5` it replaced when Pi 1.5.2 dropped that id from `openai-codex`.
+// exactly as it does for a run the platform launches, with reasoning enabled.
 const MODEL_ID = "gpt-5.6-sol";
 const RECORD = getPiModel("openai-codex", MODEL_ID, "openai-codex-responses");
 // Fail loudly at load, gate or not: a Pi bump that drops the model must name
