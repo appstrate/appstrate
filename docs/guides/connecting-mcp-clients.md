@@ -41,7 +41,7 @@ The `<orgId>` in the URL must be the key's own organization (the dashboard gives
 you the matching command).
 
 - `mcp:read` — connect, `search_operations`, `describe_operation`, and the
-  read-only helpers `read_file`, `read_skill`, `validate_package_file`,
+  read-only helpers `read_file`, `validate_package_file`,
   `get_runtime_capabilities` and `get_me`.
 - `mcp:invoke` — `invoke_operation` (call an operation). Defence in depth: the
   dispatched operation still enforces its own permission, so an MCP call can
@@ -244,7 +244,10 @@ the `resources` capability. Results carry no cache attributes.
   space of an organization URL), each skill under its own space's permissions:
   `skills:read` in that space (a delegated credential is held to its scopes),
   or, on the chat's own connection, a skill the current turn injected. No
-  pagination.
+  pagination. With the request `_meta` `{"dev.appstrate/definition": "draft"}`,
+  it returns the drafts you may read instead, at their `@draft` URIs, each
+  entry carrying `_meta["dev.appstrate/lock_version"]`: the package
+  `lock_version` its files were read at.
 - **Entry.** `uri` names the skill's `SKILL.md`; `frontmatter` is that file's
   YAML frontmatter, verbatim; `resources` lists every file of the skill with its
   `uri`, `digest` (`sha256:<hex>` of the bytes `resources/read` returns) and
@@ -269,6 +272,13 @@ the `resources` capability. Results carry no cache attributes.
 - **Errors.** `skills/get` answers `-32602` for a URI that names no skill you
   may read; `resources/read` answers `-32002` for a `skill://` URI that names no
   file you may read.
+- **A skill the chat turn injected.** Outside `skills:read`, the chat turn's
+  own bearer reads a skill its prompt injected, at the definition injected (a
+  draft only at the `lock_version` injected, else `-32600` with
+  `data.code: "injected_draft_changed"`), in the turn's space and while the
+  caller holds `chat:write` there — even if the skill is switched off or
+  `skills:read` is withdrawn mid-turn, since its `SKILL.md` is already in
+  context.
 - **REST.** `appstrate code sync` reads the same entries and bytes over REST,
   for the space `X-Space-Id` names and behind `skills:read` there:
   `GET /api/mcp/skills` (the entries of `skills/list`; with
@@ -297,7 +307,6 @@ guards require today. The package `:write` permissions are `agents:write`,
 | `search_operations`        | `mcp:read`                                                            | Find operations by keyword/tag → operationIds. A keyword search also returns `best_match` with its full input schema.                                                       |
 | `describe_operation`       | `mcp:read`                                                            | Full input schema for one operation (only needed when `best_match` didn't cover it).                                                                                        |
 | `read_file`                | `mcp:read`                                                            | Read one `appfile://` URI; the file's own ACL decides on the row.                                                                                                           |
-| `read_skill`               | `mcp:read`                                                            | A skill's `SKILL.md` and files; `skills:read`, or a skill the chat turn injected (see below).                                                                               |
 | `validate_package_file`    | `mcp:read`                                                            | Check an `.afps`/ZIP archive before importing it.                                                                                                                           |
 | `get_runtime_capabilities` | `mcp:read`                                                            | The MCP-server runtimes and manifest templates package authoring works from.                                                                                                |
 | `invoke_operation`         | `mcp:invoke`                                                          | Execute one operation (validated + authorized exactly as the equivalent REST call).                                                                                         |
@@ -306,13 +315,6 @@ guards require today. The package `:write` permissions are `agents:write`,
 | `import_package_file`      | `mcp:invoke` + a package `:write` permission; not end-users           | Import a validated archive as a package.                                                                                                                                    |
 | `list_connections`         | `mcp:invoke` + `credential-proxy:call-own` or `credential-proxy:call` | The connections you can call outside a run, with the ids and `authorized_uris` `api_call` takes (see below).                                                                |
 | `api_call`                 | `mcp:invoke` + `credential-proxy:call-own` or `credential-proxy:call` | Call third-party APIs with a connection's credential injected by the platform: one request or a batch (see below).                                                          |
-
-`read_skill` needs `skills:read`, except for a skill a chat turn injected:
-that turn's own bearer reads it at the definition injected (a draft only at the
-`lock_version` injected, else 409 `injected_draft_changed`), in the turn's
-space and while the caller holds `chat:write` there — even if the skill is
-switched off or `skills:read` is withdrawn mid-turn, since its `SKILL.md` is
-already in context.
 
 `run_and_wait` needs both halves because it launches AND polls the run back
 under your own credentials: `agents:run` without a run-read permission would

@@ -960,11 +960,11 @@ describe("handleChatStream", () => {
           '<skill id="@acme/house" uri="skill://space-1/acme/house/house/SKILL.md" version="2.0.0">\nAlways sign with the house motto.\n</skill>',
         );
         // The turn's token still reaches no skill: the content needed none, and
-        // `read_skill` is named for the injected files only (no loading rule is taught).
+        // `read_resource` is named for the injected files only (no loading rule is taught).
         expect(system).not.toContain("LOAD IT BEFORE acting");
         expect(system).toContain("it wins. Only each SKILL.md is shown: read a file");
         expect(await tokenPermissions(calls[0]!)).toEqual(["chat:write", "mcp:invoke", "mcp:read"]);
-        // Readable through `read_skill` all the same: the bearer names it, bound to the space.
+        // Readable through `resources/read` all the same: the bearer names it, bound to the space.
         expect(await tokenInjectedSkills(calls[0]!)).toEqual({
           spaceId: ctx.defaultSpaceId,
           skills: { "@acme/house": { definition: "published", version: "2.0.0" } },

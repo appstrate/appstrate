@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// MCP `read_skill` and `skill://` reads: the file explorer's readers, with their own access rule.
+// `skill://` reads: the file explorer's readers, with their own access rule.
 
 import type { Context } from "hono";
 import { packagePermission } from "@appstrate/core/permissions";
@@ -141,21 +141,17 @@ function readDraft(pkg: FileExplorerPackage, pinned: number | undefined): Promis
   });
 }
 
-export interface SkillSnapshot {
-  packageId: string;
-  /** `null` for the stored tree (the draft, or a system package). */
-  version: string | null;
-  definition: "draft" | "published";
-  snapshot: PackageFileSnapshot;
-}
-
 /** The files of a skill read, with the draft `lock_version` they were read at (`null` outside a draft). */
 interface SkillFiles extends PackageFileSnapshot {
   lockVersion: number | null;
 }
 
 /** A granted skill read: which definition it serves, its files read on demand. */
-export interface SkillRead extends Omit<SkillSnapshot, "snapshot"> {
+export interface SkillRead {
+  packageId: string;
+  /** `null` for the stored tree (the draft, or a system package). */
+  version: string | null;
+  definition: "draft" | "published";
   /** The integrity of the published archive served, `null` for the stored tree. */
   integrity: string | null;
   readSnapshot: () => Promise<SkillFiles>;
@@ -191,17 +187,4 @@ export async function resolveSkillRead(
         ? readDraft(pkg, draftLock)
         : { ...(await readPackageSnapshot(pkg, validator)), lockVersion: null },
   };
-}
-
-/** {@link resolveSkillRead} with the files read. */
-export async function readSkillSnapshot(
-  c: Context<AppEnv>,
-  space: SkillReadSpace,
-  packageId: string,
-  definition?: SkillDefinitionSelector,
-): Promise<SkillSnapshot | null> {
-  const read = await resolveSkillRead(c, space, packageId, definition);
-  if (!read) return null;
-  const { packageId: id, version, definition: served, readSnapshot } = read;
-  return { packageId: id, version, definition: served, snapshot: await readSnapshot() };
 }

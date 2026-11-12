@@ -13,38 +13,40 @@ native skill directory is not an option.
 Each conversation has a skill mode (`chat_sessions.skill_mode`) and a set of
 chosen skills (`chat_sessions.pinned_skills`):
 
-| Mode             | The model sees                          | Skill tools on the turn                           |
-| ---------------- | --------------------------------------- | ------------------------------------------------- |
-| `auto` (default) | the space's skills, one line each       | `read_skill`, `listSkills`                        |
-| `manual`         | the chosen skills in full, no listing   | `read_skill`, `listSkills`, on the user's request |
-| `strict`         | the chosen skills in full, nothing else | `read_skill` on the injected skills only          |
+| Mode             | The model sees                          | Skill tools on the turn                             |
+| ---------------- | --------------------------------------- | --------------------------------------------------- |
+| `auto` (default) | the space's skills, one line each       | `read_resource`                                     |
+| `manual`         | the chosen skills in full, no listing   | `read_resource`, `listSkills` on the user's request |
+| `strict`         | the chosen skills in full, nothing else | `read_resource` on the injected skills only         |
 
 **auto** is progressive disclosure, as in the Agent Skills spec: one line per
-skill (id, version, label, description) under `## Skills`; the model loads a
-body on demand with the platform MCP tool `read_skill` (`{ id, path? }`: the
-`SKILL.md` and its file list, or one file at the same version). The tool is
-declared on every MCP connection, so loading needs no dispatch: `readsSkills`
+skill (id, version, `skill://` URI, description) under `## Skills`, the
+entries of `skills/list` (the draft's entry first when the caller may read it),
+uncapped; the model loads a body on demand with the chat's `read_resource`
+tool, `resources/read` on the platform MCP server at that URI (a file of the
+skill: the URI with `SKILL.md` replaced by the file's path). `resources/read`
+is served on every MCP connection, so loading needs no dispatch: `readsSkills`
 (`capabilities.ts`) is `transport` (`mcp:read`) ∧ `skills:read` — the grant
-under which `/api/me/context` lists the skills and `read_skill` serves them. A
+under which `skills/list` lists the skills and `resources/read` serves them. A
 turn without it is shown no listing and taught no skill rule, as a turn that
-cannot launch is shown no runnable agent. `listSkills`, for a truncated list,
-goes through `invoke_operation` and is named only when the turn also invokes.
+cannot launch is shown no runnable agent.
 
 **manual** and **strict** inject each chosen skill's whole `SKILL.md`, front
-matter included, as `<skill id="…" version="…">…</skill>` (a draft: `definition="draft"`) under `## Skills`,
+matter included, as `<skill id="…" uri="skill://…" version="…">…</skill>` (a draft: `definition="draft"`) under `## Skills`,
 sorted by id, after a lead line telling the model to follow them. The chat reads
-them with the CALLER's own headers, so they need the caller's `skills:read`, not
-the turn's. Whatever skill a turn injects stays readable through `read_skill`
-(its files included) at the injected definition — injected in this turn (signed
-claim) ⇒ readable at that definition; else `skills:read`; else refused. In
-parallel:
+them over a listing MCP connection whose bearer carries the CALLER's own
+permissions and no injected-skills claim, closed before the turn's connection
+opens, so they need the caller's `skills:read`, not the turn's. Whatever skill a
+turn injects stays readable through `read_resource` (its files included) at the
+injected definition — injected in this turn (signed claim) ⇒ readable at that
+definition; else `skills:read`; else refused. On that connection:
 
-- `GET /api/packages/skills`, the space's ACTIVE skills, uncapped — the listing
-  the picker chooses from. `getSkill` only checks readability, so a skill
-  switched off here would otherwise still be injected.
-- `GET /api/packages/skills/{scope}/{name}` (`getSkill`) per chosen skill gives
-  the content — by construction the definition any other reader gets (the
-  draft when writable, else the latest published version).
+- `skills/list`, the space's ACTIVE skills at their published definition, and
+  `skills/list` with `_meta` `dev.appstrate/definition: "draft"`, the drafts
+  the caller may read. A chosen skill takes its draft entry when there is one,
+  else its published entry; a skill in neither list gets a notice.
+- `resources/read` of each chosen skill's `SKILL.md` gives the content, the
+  bytes every MCP client and `appstrate code sync` get at that URI.
 
 The injected `SKILL.md`s share one budget, `CHAT_SKILLS_CONTENT_BUDGET_CHARS`
 (64 000, `@appstrate/core/chat-contract`), spent in stored order: what weighs on the context is the sum, so one
@@ -55,7 +57,7 @@ At most `MAX_PINNED_SKILLS` (5) chosen skills: every one is in every turn.
 **strict** also withholds every `skills:*` from the turn's permissions
 (`turnPermissions`, the mechanism the agent-authoring switch uses), so the MCP
 surface derived from the route guards drops `listSkills` and `getSkill`,
-`read_skill` serves only the skills injected in the turn (named in the turn's
+`read_resource` reads only the skills injected in the turn (named in the turn's
 signed MCP bearer, see `docs/plans/chat-enforced-skills.md`), declaring a skill in an agent (`dependencies.skills`, checked by
 `assertPackageDependenciesAccessible`) is refused, and so is writing one — a
 write answers with the package detail, `SKILL.md` included, so `skills:write`
@@ -100,7 +102,7 @@ a session row is a selection.
 Rejected: a `chat_session_skills` table (a replace-on-write set read with the
 session row needs none); two booleans ("list the space" / "allow listing"),
 whose fourth combination — listing on, listing tool off — cannot be enforced:
-`listSkills` and `read_skill` on a skill the turn did not inject both answer to
+`listSkills` and `resources/read` on a skill the turn did not inject both answer to
 `skills:read` alone.
 
 The selection rides the turn: `POST /api/chat` takes `skill_mode` and

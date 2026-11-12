@@ -180,7 +180,7 @@ export interface EnforcedChatSkillRef {
   version: string | null;
 }
 
-/** The chat loopback strategy's auth method — the only source `read_skill` trusts for an injected-skills claim. */
+/** The chat loopback strategy's auth method — the only source `skill://` reads trust for an injected-skills claim. */
 export const CHAT_LOOPBACK_AUTH_METHOD = "chat-loopback";
 
 /**

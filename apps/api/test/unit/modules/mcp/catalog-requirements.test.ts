@@ -557,7 +557,7 @@ describe("hand-written predicates agree with the guards they stand for", () => {
       guards: transport,
     },
     {
-      // `read_skill` is declared on every connection, so the transport is the
+      // `resources/read` on `skill://` is served on every connection, so the transport is the
       // only MCP half; a skill the space does not enforce is served on
       // `getSkill`'s guard, and `listSkills` names the rest.
       name: "turnCapabilities.readsSkills ↔ mcp:read ∧ getSkill ∧ listSkills",

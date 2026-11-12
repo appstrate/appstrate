@@ -33,6 +33,8 @@ import { buildCallerContextBlock } from "../src/prompt.ts";
 import { turnCapabilities } from "../src/capabilities.ts";
 import { turnPermissions } from "../src/turn-permissions.ts";
 import { mintMcpLoopbackToken } from "../src/loopback-auth.ts";
+import { createHash } from "node:crypto";
+import { unzipArtifact } from "@appstrate/core/zip";
 
 const app = getTestApp();
 await registerTestPlatformApp();
@@ -209,5 +211,62 @@ describe("a chosen skill injected in a strict turn, read back through `resources
     const read = await readResource(bearer, uri);
     expect(read.text).toContain("Published body.");
     expect(block.text).toContain(`version="1.3.0">\n${read.text!.trim()}\n</skill>`);
+  });
+});
+
+describe("one skill, the same bytes for the chat, an MCP client and `code sync`", () => {
+  it("injects, serves over `resources/read` and archives for `code sync` identical files", async () => {
+    await seedPublishedVersion(SKILL_ID, "1.3.0", { content: skillMd("Published body.") });
+    const granted = ["chat:write", "mcp:read", "mcp:invoke", "skills:read"];
+    const user = await createTestUser();
+    await addOrgMember(owner.orgId, user.id, "guest");
+    const role = await seedSpaceRole({ orgId: owner.orgId, permissions: granted });
+    await seedSpaceMember({
+      spaceId: owner.defaultSpaceId,
+      userId: user.id,
+      presetRole: null,
+      customRoleId: role.id,
+    });
+    const headers = authHeaders({ ...owner, cookie: user.cookie });
+    const reader = { id: user.id, email: user.email, name: user.name };
+    const { block, bearer } = await strictTurn(reader, headers, granted, "guest");
+    const uri = injectedUri(block.text);
+
+    // An MCP client: the entry, then every file it lists.
+    const { envelope } = await rpc(bearer, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "skills/get",
+      params: { uri },
+    });
+    const entry = envelope.result?.skill as {
+      resources: Array<{ uri: string; digest: string; size: number }>;
+    };
+    const base = uri.slice(0, -"SKILL.md".length);
+    const served: Record<string, string> = {};
+    for (const resource of entry.resources) {
+      const read = await readResource(bearer, resource.uri);
+      expect(read.error).toBeUndefined();
+      served[resource.uri.slice(base.length)] = read.text!;
+    }
+
+    // `code sync`: the archive it checks against the entry's digests and writes as is.
+    const archive = await app.request(`/api/mcp/skills/archive?uri=${encodeURIComponent(uri)}`, {
+      headers: { ...headers, "X-Space-Id": owner.defaultSpaceId },
+    });
+    expect(archive.status).toBe(200);
+    const files = unzipArtifact(new Uint8Array(await archive.arrayBuffer()));
+    const decoder = new TextDecoder();
+    expect(Object.keys(files).sort()).toEqual(Object.keys(served).sort());
+    for (const resource of entry.resources) {
+      const bytes = files[resource.uri.slice(base.length)]!;
+      expect(bytes.byteLength).toBe(resource.size);
+      expect(`sha256:${createHash("sha256").update(bytes).digest("hex")}`).toBe(resource.digest);
+      expect(decoder.decode(bytes)).toBe(served[resource.uri.slice(base.length)]!);
+    }
+
+    // The chat: the injected SKILL.md is that same text.
+    expect(served["SKILL.md"]).toContain("Published body.");
+    expect(block.text).toContain(`version="1.3.0">\n${served["SKILL.md"]!.trim()}\n</skill>`);
   });
 });

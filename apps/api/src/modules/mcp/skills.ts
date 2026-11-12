@@ -4,7 +4,7 @@
  * The MCP Skills extension (SEP-2640) of the spaces a connection reaches (the
  * space it entered, or every space of an org-wide connection): `skills/list`,
  * `skills/get` and `resources/read` on `skill://`. Every read goes through
- * `services/skill-read.ts`, the rule `read_skill` applies, with the caller's
+ * `services/skill-read.ts`, with the caller's
  * permissions in the skill's space: a skill the chat turn injected is readable
  * at the definition injected, any other needs `skills:read` there (under the
  * credential's ceiling).

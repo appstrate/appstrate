@@ -237,7 +237,6 @@ describeRequiresS3("files storage parity — S3 presigned posture", () => {
       // Never reached: this test drives `resources/read`, not the bundle tools.
       authorizeBundle: async () => {},
       placeRootAs: async () => null,
-      readSkill: () => Promise.reject(new Error("read_skill is not exercised here")),
       requestId: "req_test",
       followRunLogs: () => () => {},
       dispatch: async () => new Response(null),

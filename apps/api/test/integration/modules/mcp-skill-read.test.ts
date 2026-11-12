@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `read_skill` through the real `/api/mcp/o/:org` endpoint, and the rule it
- * reads by (`resolveSkillReadAccess`):
+ * `resources/read` and `skills/get` on `skill://` through the real
+ * `/api/mcp/o/:org` endpoint, and the rule they read by
+ * (`resolveSkillReadAccess`):
  *
  *  1. a skill the chat turn injected (the chat bearer's signed claim, in the
  *     turn's space, while the caller may chat there): the version injected, or
  *     the draft while unchanged — whatever the turn's `skills:*`;
- *  2. otherwise `skills:read`: what the REST file explorer serves — the draft
- *     to an author, the latest published version to a reader;
- *  3. otherwise the REST refusal: 403 without `skills:read`, 404 with it.
+ *  2. otherwise `skills:read`: the latest published version, and the draft to
+ *     an author;
+ *  3. otherwise nothing: `Resource not found`, whether or not the skill exists.
  */
 
 import { beforeEach, describe, expect, it } from "bun:test";
@@ -35,7 +36,8 @@ import {
   seedSpacePackage,
   seedSpaceRole,
 } from "../../helpers/seed.ts";
-import { mcpRpc, type JsonRpcEnvelope, inSpace, mcpAuthHeaders } from "../../helpers/mcp.ts";
+import { mcpRpc, inSpace, mcpAuthHeaders } from "../../helpers/mcp.ts";
+import { skillFileUri } from "@appstrate/core/skill-uri";
 import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
 import {
   AGENT_PACKAGES_BUCKET,
@@ -53,7 +55,7 @@ import {
   type InjectedSkill,
   type InjectedSkills,
 } from "@appstrate/core/chat-contract";
-import { readSkillSnapshot } from "../../../src/services/skill-read.ts";
+import { resolveSkillRead } from "../../../src/services/skill-read.ts";
 import { withPackageDraftLock } from "../../../src/services/package-locks.ts";
 import type { AppEnv } from "../../../src/types/index.ts";
 
@@ -66,6 +68,11 @@ const encode = (text: string) => new TextEncoder().encode(text);
 
 let owner: TestContext;
 
+/** A `SKILL.md` whose frontmatter names the package's own segment, so the served name is that segment. */
+function skillMd(id: string, body: string): string {
+  return `---\nname: ${id.split("/")[1]}\ndescription: ${body}.\n---\n${body}\n`;
+}
+
 /** A skill homed in `spaceId`, whose DRAFT differs from every published version. */
 async function seedSkill(id: string, spaceId = owner.defaultSpaceId): Promise<void> {
   await seedPackage({
@@ -74,7 +81,7 @@ async function seedSkill(id: string, spaceId = owner.defaultSpaceId): Promise<vo
     type: "skill",
     homeSpaceId: spaceId,
     draftManifest: { name: id, version: "0.0.0", type: "skill" },
-    draftContent: `draft ${id}`,
+    draftContent: skillMd(id, `draft ${id}`),
   });
 }
 
@@ -82,7 +89,7 @@ async function seedSkill(id: string, spaceId = owner.defaultSpaceId): Promise<vo
 async function publish(id: string, version: string): Promise<void> {
   const zip = zipArtifact({
     "manifest.json": encode(JSON.stringify({ name: id, version, type: "skill" })),
-    "SKILL.md": encode(`published ${id} ${version}`),
+    "SKILL.md": encode(skillMd(id, `published ${id} ${version}`)),
     "scripts/run.sh": encode(`echo ${version}`),
     "references/guide.md": encode(`guide ${version}`),
   });
@@ -117,54 +124,66 @@ async function customMember(permissions: string[]) {
   return { user, roleId: role.id, headers: mcpAuthHeaders({ ...owner, cookie: user.cookie }) };
 }
 
-async function readSkill(
+/** The `skill://` URI of `path` in skill `id`, at its published definition unless `draft`. */
+function uriOf(
+  id: string,
+  path = "SKILL.md",
+  opts: { draft?: boolean; spaceId?: string } = {},
+): string {
+  return skillFileUri({
+    spaceId: opts.spaceId ?? owner.defaultSpaceId,
+    packageId: id,
+    definition: opts.draft ? "draft" : "published",
+    name: id.split("/")[1]!,
+    path,
+  });
+}
+
+interface RpcError {
+  code: number;
+  message: string;
+  data?: Record<string, unknown>;
+}
+
+/** `resources/read` of `uri`: the text served, or the JSON-RPC error. */
+async function readResource(
   headers: Record<string, string>,
-  args: Record<string, unknown>,
-): Promise<{ isError: boolean; data: Record<string, unknown> }> {
+  uri: string,
+): Promise<{ text?: string; error?: RpcError }> {
   const { envelope } = await rpc(headers, {
     jsonrpc: "2.0",
     id: 1,
-    method: "tools/call",
-    params: { name: "read_skill", arguments: args },
+    method: "resources/read",
+    params: { uri },
   });
-  return toolData(envelope);
+  if (envelope.error) return { error: envelope.error as RpcError };
+  const [content] = envelope.result?.contents as Array<{ text?: string }>;
+  return { text: content?.text };
 }
 
-function toolData(envelope: JsonRpcEnvelope): { isError: boolean; data: Record<string, unknown> } {
-  const content = (envelope.result?.content as Array<{ type: string; text: string }>) ?? [];
-  if (!content[0]) throw new Error(`no tool result: ${JSON.stringify(envelope)}`);
-  return { isError: Boolean(envelope.result?.isError), data: JSON.parse(content[0].text) };
+/** `skills/get` of `uri`: the entry served, or the JSON-RPC error. */
+async function getSkill(
+  headers: Record<string, string>,
+  uri: string,
+): Promise<{ skill?: Record<string, unknown>; error?: RpcError }> {
+  const { envelope } = await rpc(headers, {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "skills/get",
+    params: { uri },
+  });
+  if (envelope.error) return { error: envelope.error as RpcError };
+  return { skill: envelope.result?.skill as Record<string, unknown> };
 }
 
-const PUBLISHED_FILES = [
-  { path: "SKILL.md", size: encode(`published ${TONE} 1.0.0`).byteLength },
-  { path: "manifest.json", size: expect.any(Number) },
-  { path: "references/guide.md", size: 11 },
-  { path: "scripts/run.sh", size: 10 },
-];
+/** What `resources/read` answers for a URI the caller may not read, whether or not it exists. */
+const NOT_FOUND = {
+  error: expect.objectContaining({ code: -32002, data: { uri: expect.any(String) } }),
+};
 
-/** The problem body the REST error handler sends, as the tool carries it. */
-function refusal(status: number, code: string, title: string, detail: string) {
-  return {
-    status,
-    body: {
-      type: `https://docs.appstrate.dev/errors/${code.replace(/_/g, "-")}`,
-      title,
-      status,
-      detail,
-      instance: expect.stringMatching(/^urn:appstrate:request:/),
-      code,
-      request_id: expect.any(String),
-    },
-  };
-}
-
-const FORBIDDEN = refusal(
-  403,
-  "forbidden",
-  "Forbidden",
-  "Insufficient permissions: skills:read required",
-);
+const DRAFT_CHANGED = {
+  error: expect.objectContaining({ code: -32600, data: { code: "injected_draft_changed" } }),
+};
 
 beforeEach(async () => {
   await truncateAll();
@@ -213,7 +232,7 @@ function turnHeaders(
 const PUBLISHED_1_0: InjectedSkill = { definition: "published", version: "1.0.0" };
 
 /**
- * `readSkillSnapshot` on a hand-built request context, to reach the service's
+ * `resolveSkillRead` on a hand-built request context, to reach the service's
  * own parse of `authExtra` — a real chat bearer is re-validated by the strategy
  * before it gets there.
  */
@@ -229,75 +248,56 @@ function readThroughService(
     ["authExtra", { [INJECTED_SKILLS_AUTH_EXTRA]: injected }],
   ]);
   const c = { get: (key: string) => values.get(key) } as unknown as Context<AppEnv>;
-  return readSkillSnapshot(
+  return resolveSkillRead(
     c,
     { orgId: owner.orgId, spaceId: owner.defaultSpaceId, permissions: new Set(permissions) },
     packageId,
   );
 }
 
-describe("read_skill — a skill the chat turn injected", () => {
-  it("is declared to a turn holding no skills:* at all", async () => {
-    const { envelope } = await rpc(turnHeaders({}), {
-      jsonrpc: "2.0",
-      id: 1,
-      method: "tools/list",
-      params: {},
-    });
-    const names = (envelope.result?.tools as Array<{ name: string }>).map((t) => t.name);
-    expect(names).toContain("read_skill");
-  });
-
-  it("serves SKILL.md, the files and one file at the version injected", async () => {
+describe("skill:// — a skill the chat turn injected", () => {
+  it("serves the entry, SKILL.md and each file at the version injected, without any skills:*", async () => {
     const headers = turnHeaders({ [TONE]: PUBLISHED_1_0 });
-    expect(await readSkill(headers, { id: TONE })).toEqual({
-      isError: false,
-      data: {
-        id: TONE,
-        version: "1.0.0",
-        definition: "published",
-        content: `published ${TONE} 1.0.0`,
-        files: PUBLISHED_FILES,
-      },
+    const { skill } = await getSkill(headers, uriOf(TONE));
+    expect(skill).toMatchObject({
+      uri: uriOf(TONE),
+      frontmatter: { name: "tone", description: `published ${TONE} 1.0.0.` },
     });
-    expect(await readSkill(headers, { id: TONE, path: "scripts/run.sh" })).toEqual({
-      isError: false,
-      data: {
-        id: TONE,
-        version: "1.0.0",
-        definition: "published",
-        path: "scripts/run.sh",
-        size: 10,
-        media_kind: "text",
-        content: "echo 1.0.0",
-      },
+    const paths = (skill!.resources as Array<{ uri: string }>).map((r) => r.uri);
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        uriOf(TONE),
+        uriOf(TONE, "scripts/run.sh"),
+        uriOf(TONE, "references/guide.md"),
+      ]),
+    );
+    expect((await readResource(headers, uriOf(TONE))).text).toContain(`published ${TONE} 1.0.0`);
+    expect(await readResource(headers, uriOf(TONE, "scripts/run.sh"))).toEqual({
+      text: "echo 1.0.0",
     });
   });
 
   it("stays on the pinned version after a newer publish", async () => {
     await publish(TONE, "1.1.0");
-    const { data } = await readSkill(turnHeaders({ [TONE]: PUBLISHED_1_0 }), {
-      id: TONE,
-      path: "references/guide.md",
+    const headers = turnHeaders({ [TONE]: PUBLISHED_1_0 });
+    expect(await readResource(headers, uriOf(TONE, "references/guide.md"))).toEqual({
+      text: "guide 1.0.0",
     });
-    expect(data).toMatchObject({ version: "1.0.0", content: "guide 1.0.0" });
   });
 
-  it("serves the injected draft while it is unchanged, and 409 once it was edited", async () => {
+  it("serves the injected draft while it is unchanged, and refuses once it was edited", async () => {
     const headers = turnHeaders({ [TONE]: { definition: "draft", lockVersion: 1 } });
-    expect((await readSkill(headers, { id: TONE })).data).toMatchObject({
-      version: null,
-      definition: "draft",
-      content: `draft ${TONE}`,
-    });
+    const draft = uriOf(TONE, "SKILL.md", { draft: true });
+    expect((await readResource(headers, draft)).text).toContain(`draft ${TONE}`);
+    // The claim names the draft: the published definition is not injected.
+    expect(await readResource(headers, uriOf(TONE))).toEqual(NOT_FOUND);
 
     await db
       .update(packages)
-      .set({ draftContent: "edited", lockVersion: 2 })
+      .set({ draftContent: skillMd(TONE, "edited"), lockVersion: 2 })
       .where(eq(packages.id, TONE));
-    const { isError, data } = await readSkill(headers, { id: TONE });
-    expect(isError).toBe(true);
-    expect(data).toMatchObject({ status: 409, body: { code: "injected_draft_changed" } });
+    expect(await readResource(headers, draft)).toEqual(DRAFT_CHANGED);
+    expect(await getSkill(headers, draft)).toEqual(DRAFT_CHANGED);
   });
 
   it("reads a draft under the draft lock, so a save in flight cannot slip in", async () => {
@@ -316,21 +316,21 @@ describe("read_skill — a skill the chat turn injected", () => {
       await held;
     });
     await acquired;
-    const read = readSkill(headers, { id: TONE });
+    const read = readResource(headers, uriOf(TONE, "SKILL.md", { draft: true }));
     await Bun.sleep(50);
     release();
     await save;
-    const { isError, data } = await read;
-    expect(isError).toBe(true);
-    expect(data).toMatchObject({ status: 409, body: { code: "injected_draft_changed" } });
+    expect(await read).toEqual(DRAFT_CHANGED);
   });
 
   it("keeps serving the turn after the skill is switched off, and without any skills:*", async () => {
     // Deliberate: its SKILL.md is already in the turn's context; the next turn
     // no longer injects it. Releasing an enforcement is the same case.
     await seedSpacePackage(owner.defaultSpaceId, TONE, { enabled: false });
-    const { data } = await readSkill(turnHeaders({ [TONE]: PUBLISHED_1_0 }), { id: TONE });
-    expect(data).toMatchObject({ version: "1.0.0" });
+    const headers = turnHeaders({ [TONE]: PUBLISHED_1_0 });
+    expect(await readResource(headers, uriOf(TONE, "scripts/run.sh"))).toEqual({
+      text: "echo 1.0.0",
+    });
   });
 
   it("reads under a strict turn's own permissions, every skills:* stripped", async () => {
@@ -342,9 +342,9 @@ describe("read_skill — a skill the chat turn injected", () => {
     expect(permissions.some((permission) => permission.startsWith("skills:"))).toBe(false);
     const headers = turnHeaders({ [TONE]: PUBLISHED_1_0 }, { permissions });
 
-    expect((await readSkill(headers, { id: TONE })).data).toMatchObject({ version: "1.0.0" });
+    expect((await readResource(headers, uriOf(TONE))).text).toContain("1.0.0");
     // Not injected: the turn's own grants decide, and it holds no skills:read.
-    expect(await readSkill(headers, { id: other })).toEqual({ isError: true, data: FORBIDDEN });
+    expect(await readResource(headers, uriOf(other))).toEqual(NOT_FOUND);
   });
 
   it("lapses with the caller's live chat:write", async () => {
@@ -353,14 +353,14 @@ describe("read_skill — a skill the chat turn injected", () => {
       { [TONE]: PUBLISHED_1_0 },
       { user, orgRole: "guest", permissions: ["mcp:read", "chat:write"] },
     );
-    expect((await readSkill(headers, { id: TONE })).data).toMatchObject({ version: "1.0.0" });
+    expect((await readResource(headers, uriOf(TONE))).text).toContain("1.0.0");
 
     // The same bearer, once the role no longer grants chat:write in the space.
     await db
       .update(spaceRoles)
       .set({ permissions: ["mcp:read"] })
       .where(eq(spaceRoles.id, roleId));
-    expect(await readSkill(headers, { id: TONE })).toEqual({ isError: true, data: FORBIDDEN });
+    expect(await readResource(headers, uriOf(TONE))).toEqual(NOT_FOUND);
   });
 
   it("holds in the turn's space only", async () => {
@@ -372,22 +372,18 @@ describe("read_skill — a skill the chat turn injected", () => {
     await seedPackageShare(owner.defaultSpaceId, team);
     await seedSpacePackage(owner.defaultSpaceId, team);
     const skills = { [team]: PUBLISHED_1_0 };
-    expect((await readSkill(turnHeaders(skills), { id: team })).data).toMatchObject({
-      version: "1.0.0",
-    });
+    expect((await readResource(turnHeaders(skills), uriOf(team))).text).toContain("1.0.0");
 
+    const inTeamB = uriOf(team, "SKILL.md", { spaceId: teamB.id });
     expect(
-      (await readSkill(turnHeaders(skills, { spaceId: teamB.id }), { id: team })).data,
-    ).toMatchObject({ version: "1.0.0", content: `published ${team} 1.0.0` });
+      (await readResource(turnHeaders(skills, { spaceId: teamB.id }), inTeamB)).text,
+    ).toContain(`published ${team} 1.0.0`);
     // A claim minted for another space is ignored, whichever side differs.
-    for (const opts of [
-      { spaceId: teamB.id, claimSpaceId: owner.defaultSpaceId },
-      { spaceId: owner.defaultSpaceId, claimSpaceId: teamB.id },
-    ]) {
-      expect(await readSkill(turnHeaders(skills, opts), { id: team })).toEqual({
-        isError: true,
-        data: FORBIDDEN,
-      });
+    for (const [opts, uri] of [
+      [{ spaceId: teamB.id, claimSpaceId: owner.defaultSpaceId }, inTeamB],
+      [{ spaceId: owner.defaultSpaceId, claimSpaceId: teamB.id }, uriOf(team)],
+    ] as const) {
+      expect(await readResource(turnHeaders(skills, opts), uri)).toEqual(NOT_FOUND);
     }
   });
 
@@ -402,10 +398,7 @@ describe("read_skill — a skill the chat turn injected", () => {
       { permissions: ["mcp:read", "chat:write", "skills:read"] },
     );
     for (const id of [TONE, "@readskill/agent"]) {
-      expect(await readSkill(headers, { id })).toEqual({
-        isError: true,
-        data: refusal(404, "not_found", "Not Found", `Skill '${id}' not found`),
-      });
+      expect(await readResource(headers, uriOf(id))).toEqual(NOT_FOUND);
     }
   });
 
@@ -421,10 +414,10 @@ describe("read_skill — a skill the chat turn injected", () => {
     await seedSpacePackage(rival.defaultSpaceId, "@rival/tone");
     await publish("@rival/tone", "1.0.0");
     const headers = turnHeaders({ "@rival/tone": PUBLISHED_1_0 });
-    expect(await readSkill(headers, { id: "@rival/tone" })).toEqual({
-      isError: true,
-      data: FORBIDDEN,
-    });
+    for (const spaceId of [owner.defaultSpaceId, rival.defaultSpaceId]) {
+      const uri = uriOf("@rival/tone", "SKILL.md", { spaceId });
+      expect(await readResource(headers, uri)).toEqual(NOT_FOUND);
+    }
   });
 
   it("maps a system skill's published definition to the tree the platform ships", async () => {
@@ -435,18 +428,14 @@ describe("read_skill — a skill the chat turn injected", () => {
       source: "system",
       type: "skill",
       draftManifest: { name: system, version: "1.0.0", type: "skill" },
-      draftContent: "system tone",
+      draftContent: skillMd(system, "system tone"),
     });
     const headers = turnHeaders({ [system]: { definition: "published", version: null } });
-    expect((await readSkill(headers, { id: system })).data).toMatchObject({
-      version: null,
-      definition: "published",
-      content: "system tone",
-    });
+    expect((await readResource(headers, uriOf(system))).text).toContain("system tone");
   });
 });
 
-describe("read_skill — a chat turn under a role preview", () => {
+describe("skill:// — a chat turn under a role preview", () => {
   it("honours the claim only if the persona may chat in the space", async () => {
     await publish(TONE, "1.1.0");
     const headers = (preset: string) => {
@@ -469,18 +458,15 @@ describe("read_skill — a chat turn under a role preview", () => {
         owner.defaultSpaceId,
       );
     };
+    const guide = uriOf(TONE, "references/guide.md");
     // A builder chats: the pinned version. A viewer does not: the claim is
     // ignored and its own skills:read serves the latest.
-    expect((await readSkill(headers("builder"), { id: TONE })).data).toMatchObject({
-      version: "1.0.0",
-    });
-    expect((await readSkill(headers("viewer"), { id: TONE })).data).toMatchObject({
-      version: "1.1.0",
-    });
+    expect(await readResource(headers("builder"), guide)).toEqual({ text: "guide 1.0.0" });
+    expect(await readResource(headers("viewer"), guide)).toEqual({ text: "guide 1.1.0" });
   });
 });
 
-describe("readSkillSnapshot — the service's own reading of the claim", () => {
+describe("resolveSkillRead — the service's own reading of the claim", () => {
   const claim = () => ({ spaceId: owner.defaultSpaceId, skills: { [TONE]: PUBLISHED_1_0 } });
 
   it("trusts the claim from the chat loopback strategy only", async () => {
@@ -505,7 +491,7 @@ describe("readSkillSnapshot — the service's own reading of the claim", () => {
   });
 });
 
-describe("read_skill — a role preview", () => {
+describe("skill:// — a role preview", () => {
   it("answers as the persona, not as the previewing owner", async () => {
     const persona = async (permissions: string[]) => {
       const role = await seedSpaceRole({ orgId: owner.orgId, permissions });
@@ -514,18 +500,15 @@ describe("read_skill — a role preview", () => {
         "X-View-As": `org_role=member; space=${owner.defaultSpaceId}; role=custom:${role.id}`,
       };
     };
-    expect(await readSkill(await persona(["mcp:read"]), { id: TONE })).toEqual({
-      isError: true,
-      data: FORBIDDEN,
-    });
+    expect(await readResource(await persona(["mcp:read"]), uriOf(TONE))).toEqual(NOT_FOUND);
     // The control: the same preview granted skills:read reads it.
     expect(
-      (await readSkill(await persona(["mcp:read", "skills:read"]), { id: TONE })).data,
-    ).toMatchObject({ version: "1.0.0" });
+      (await readResource(await persona(["mcp:read", "skills:read"]), uriOf(TONE))).text,
+    ).toContain("1.0.0");
   });
 });
 
-describe("read_skill — a skill read with the caller's own skills:read", () => {
+describe("skill:// — a skill read with the caller's own skills:read", () => {
   const CHOSEN = "@readskill/chosen";
   beforeEach(async () => {
     await seedSkill(CHOSEN);
@@ -533,23 +516,14 @@ describe("read_skill — a skill read with the caller's own skills:read", () => 
     await publish(CHOSEN, "1.0.0");
   });
 
-  it("serves an author the draft, as the REST file explorer does", async () => {
-    expect(await readSkill(mcpAuthHeaders(owner), { id: CHOSEN })).toEqual({
-      isError: false,
-      data: {
-        id: CHOSEN,
-        version: null,
-        definition: "draft",
-        content: `draft ${CHOSEN}`,
-        files: [
-          { path: "SKILL.md", size: expect.any(Number) },
-          { path: "manifest.json", size: expect.any(Number) },
-        ],
-      },
-    });
+  it("serves an author the draft at its @draft URI, a reader who cannot write it nothing there", async () => {
+    const draft = uriOf(CHOSEN, "SKILL.md", { draft: true });
+    expect((await readResource(mcpAuthHeaders(owner), draft)).text).toContain(`draft ${CHOSEN}`);
+    const viewer = mcpAuthHeaders(await memberContext(owner, "member", "viewer"));
+    expect(await readResource(viewer, draft)).toEqual(NOT_FOUND);
   });
 
-  it("serves a system skill as the platform ships it: published, with no version", async () => {
+  it("serves a system skill as the platform ships it, at its published URI", async () => {
     const system = "@appstrate/system-tone";
     await seedPackage({
       id: system,
@@ -557,29 +531,23 @@ describe("read_skill — a skill read with the caller's own skills:read", () => 
       source: "system",
       type: "skill",
       draftManifest: { name: system, version: "1.0.0", type: "skill" },
-      draftContent: "system tone",
+      draftContent: skillMd(system, "system tone"),
     });
     const viewer = mcpAuthHeaders(await memberContext(owner, "member", "viewer"));
-    const { data } = await readSkill(viewer, { id: system });
-    expect(data).toMatchObject({
-      id: system,
-      version: null,
-      definition: "published",
-      content: "system tone",
-    });
+    expect((await readResource(viewer, uriOf(system))).text).toContain("system tone");
+    expect(await readResource(viewer, uriOf(system, "SKILL.md", { draft: true }))).toEqual(
+      NOT_FOUND,
+    );
   });
 
   it("serves a reader who cannot write it the latest published version", async () => {
     const viewer = mcpAuthHeaders(await memberContext(owner, "member", "viewer"));
-    const { data } = await readSkill(viewer, { id: CHOSEN, path: "scripts/run.sh" });
-    expect(data).toMatchObject({
-      version: "1.0.0",
-      definition: "published",
-      content: "echo 1.0.0",
+    expect(await readResource(viewer, uriOf(CHOSEN, "scripts/run.sh"))).toEqual({
+      text: "echo 1.0.0",
     });
   });
 
-  it("answers 404 for a skill this space cannot reach, and for a package that is no skill", async () => {
+  it("finds nothing for a skill this space cannot reach, and for a package that is no skill", async () => {
     const viewer = mcpAuthHeaders(await memberContext(owner, "member", "viewer"));
     const other = await seedSpace({ orgId: owner.orgId, name: "Other" });
     const unreachable = "@readskill/unreachable";
@@ -588,40 +556,21 @@ describe("read_skill — a skill read with the caller's own skills:read", () => 
     await seedPackage({ id: "@readskill/agent", orgId: owner.orgId });
 
     for (const id of [unreachable, "@readskill/agent", "@readskill/nothing"]) {
-      expect(await readSkill(viewer, { id })).toEqual({
-        isError: true,
-        data: refusal(404, "not_found", "Not Found", `Skill '${id}' not found`),
-      });
+      expect(await readResource(viewer, uriOf(id))).toEqual(NOT_FOUND);
     }
   });
 
-  it("answers the REST 403 without skills:read, whether or not the id exists", async () => {
+  it("finds nothing without skills:read, whether or not the skill exists", async () => {
     const { headers: chatter } = await customMember(["mcp:read", "chat:write"]);
     for (const id of [CHOSEN, "@readskill/nothing"]) {
-      expect(await readSkill(chatter, { id })).toEqual({ isError: true, data: FORBIDDEN });
+      expect(await readResource(chatter, uriOf(id))).toEqual(NOT_FOUND);
     }
   });
 
-  it("answers 404 for a path the version does not hold, traversal included", async () => {
+  it("finds nothing at a path the version does not hold, traversal included", async () => {
+    const base = uriOf(TONE).slice(0, -"SKILL.md".length);
     for (const path of ["missing.md", "../SKILL.md", "./SKILL.md", "/SKILL.md", "__proto__"]) {
-      expect(await readSkill(mcpAuthHeaders(owner), { id: TONE, path })).toEqual({
-        isError: true,
-        data: refusal(404, "not_found", "Not Found", "File not found"),
-      });
+      expect(await readResource(mcpAuthHeaders(owner), base + path)).toEqual(NOT_FOUND);
     }
-  });
-
-  it("refuses an argument it does not declare", async () => {
-    const { envelope } = await rpc(mcpAuthHeaders(owner), {
-      jsonrpc: "2.0",
-      id: 1,
-      method: "tools/call",
-      params: { name: "read_skill", arguments: { id: TONE, version: "draft" } },
-    });
-    expect(envelope.error).toBeUndefined();
-    const refused = toolData(envelope);
-    expect(refused.isError).toBe(true);
-    expect(refused.data).toMatchObject({ code: "unknown_argument", arguments: ["version"] });
-    expect(refused.data.error as string).toContain("Unknown argument(s): version");
   });
 });

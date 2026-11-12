@@ -102,6 +102,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **BREAKING (MCP): the `read_skill` tool is removed** (#2175). A skill and its files
+  are read through the MCP Skills extension: `skills/list` and `skills/get` for the
+  entries, `resources/read` on a file's `skill://` URI for its bytes. The access rule
+  is unchanged (`skills:read`, or a skill the chat turn injected, at the definition
+  injected); a refusal is `Resource not found` (`-32002`) on `resources/read` and
+  `-32602` on `skills/get` instead of a `read_skill` result carrying the REST 403 or
+  404, and a changed injected draft is `-32600` with `data.code:
+"injected_draft_changed"`. A client calling `read_skill` gets `-32602 Unknown tool`.
+  The chat's model reads a skill's files with its `read_resource` tool.
+
 - **The MCP server serves skills through the MCP Skills extension (SEP-2640)** (#2175). It
   declares `io.modelcontextprotocol/skills` in `capabilities.extensions` at `initialize` and
   answers `skills/list` and `skills/get`; `resources/read` returns a skill's files under
@@ -111,7 +121,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   The served skill is a valid Agent Skills directory: packaging entries dropped, `SKILL.md`
   `name` set to the served name, `metadata.version` set to the published version (absent from
   a draft). The list covers every space the connection reaches (each space of an
-  organization URL), and each read follows the `read_skill` rule with the caller's permissions in
+  organization URL), and each read is checked with the caller's permissions in
   the skill's space (`skills:read` under the credential's ceiling, or a skill the chat turn
   injected, at the definition injected). A
   skill with more than 512 files or more than 16 MiB of served bytes is not served; any file

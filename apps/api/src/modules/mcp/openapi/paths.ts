@@ -78,7 +78,7 @@ const spacePathParameter = {
 const MCP_TOOLS_DESCRIPTION =
   "Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it " +
   "declares follow the caller's permissions: the read-only set (`search_operations`, " +
-  "`describe_operation`, `read_file`, `read_skill`, `validate_package_file`, " +
+  "`describe_operation`, `read_file`, `validate_package_file`, " +
   "`get_runtime_capabilities`, " +
   "and `get_me` unless the client injects its own caller context) is always present, " +
   "while the acting tools — `invoke_operation` (`mcp:invoke`), " +

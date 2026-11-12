@@ -94,7 +94,7 @@ interface LoopbackClaims extends LoopbackIdentity {
    * header. Absent on the MCP bearer and on ephemeral (unpersisted) turns.
    */
   chatSessionId?: string | null;
-  /** The skills the turn's prompt injected, as served; MCP bearer only (→ `read_skill`). */
+  /** The skills the turn's prompt injected, as served; MCP bearer only (→ `skill://` reads). */
   injectedSkills?: InjectedSkills;
 }
 
@@ -212,7 +212,7 @@ export const chatLoopbackStrategy: AuthStrategy = {
     // malformed and refused like any other invalid token (fail closed).
     if (!Array.isArray(claims.permissions)) return null;
     const permissions = claims.permissions;
-    // A malformed map widens nothing: dropped, `read_skill` falls back to `skills:read`.
+    // A malformed map widens nothing: dropped, `skill://` reads fall back to `skills:read`.
     const injected = injectedSkillsSchema.safeParse(claims.injectedSkills);
     const injectedSkills = injected.success ? injected.data : undefined;
 

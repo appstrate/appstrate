@@ -91,7 +91,6 @@ import {
 } from "./tool-results.ts";
 import { buildConnectionTools } from "./connection-tools.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
-import { buildReadSkillTool, type SkillToolContext } from "./skill-tools.ts";
 import {
   describeSpace,
   grantedIn,
@@ -115,7 +114,6 @@ export type McpToolName =
   | "run_and_wait"
   | "list_files"
   | "read_file"
-  | "read_skill"
   | "validate_package_file"
   | "import_package_file"
   | "get_runtime_capabilities"
@@ -177,8 +175,6 @@ export interface McpToolContext {
   scope: SpaceScope;
   authorizeBundle: Parameters<typeof buildPackageFileTools>[0]["authorizeBundle"];
   placeRootAs: Parameters<typeof buildPackageFileTools>[0]["placeRootAs"];
-  /** `read_skill`'s read, bound to the caller and space (`skillReaderFor`). */
-  readSkill: SkillToolContext["readSkill"];
   /** The inbound request's id, for the problem bodies a tool builds itself. */
   requestId: string;
   /**
@@ -1912,12 +1908,6 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
     ...(surface.runs ? [buildRunAndWaitTool(ctx, surface.composes)] : []),
     ...(surface.listsFiles ? [buildListFilesTool(ctx)] : []),
     buildReadFileTool(ctx),
-    buildReadSkillTool({
-      readSkill: ctx.readSkill,
-      origin: ctx.origin,
-      requestId: ctx.requestId,
-      observe: (event) => emit(ctx, event),
-    }),
     ...buildPackageFileTools(ctx, surface.importsPackages),
     ...(surface.proxies
       ? buildConnectionTools({
@@ -1950,7 +1940,6 @@ const SPACE_ACTS: Record<McpToolName, keyof McpSurface | null | false> = {
   run_and_wait: "runs",
   list_files: "listsFiles",
   read_file: null,
-  read_skill: null,
   validate_package_file: null,
   import_package_file: "importsPackages",
   list_connections: "proxies",
