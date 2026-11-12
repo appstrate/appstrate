@@ -78,14 +78,15 @@ function extractHeaderParams(node: OperationNode): string[] {
 export const CREDENTIAL_PROXY_PATH = "/api/credential-proxy/proxy";
 
 /**
- * Kept out of the catalog: the MCP transport and its RFC 9728 well-known (no
- * recursive self-invocation), the spec document and its viewer, which
+ * Kept out of the catalog: the MCP module's own routes and the transport's RFC
+ * 9728 well-known (no recursive self-invocation; the endpoint serves skills
+ * through the Skills extension, not as operations), the spec document and its viewer, which
  * `describe_operation` already serves piecewise, and the credential proxy,
  * which the `api_call` tool alone reaches (`connection-tools.ts`).
  */
 function isExcludedPath(pathTemplate: string): boolean {
   return (
-    pathTemplate.startsWith("/api/mcp/o") ||
+    pathTemplate.startsWith("/api/mcp/") ||
     pathTemplate.startsWith("/.well-known/oauth-protected-resource") ||
     pathTemplate === "/api/openapi.json" ||
     pathTemplate === "/api/docs" ||

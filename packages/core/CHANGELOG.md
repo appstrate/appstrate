@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`@appstrate/core/skill-uri`**: the `skill://` URIs of the MCP Skills extension (SEP-2640)
+  as Appstrate serves them — **`SKILL_URI_PREFIX`**, **`skillFileUri`**, **`parseSkillUri`**
+  (the canonical spelling only, a file path `isSafeArchivePath` accepts, a valid skill name),
+  **`parseSkillUriPackage`** (the package and definition of a URI, from its package segments),
+  the SEP-2640 size limits **`SKILL_MAX_FILES`** (512) and **`SKILL_MAX_TOTAL_BYTES`** (16 MiB),
+  and the **`SkillAddress`**, **`SkillEntry`** and **`SkillResource`** types, shared by the API, `@appstrate/mcp-transport` and the CLI. (#2175)
 - **Image MIME types in `extensionForMime`** (`@appstrate/core/naming`): `image/png`, `image/jpeg` and `image/jpg` (`jpg`), `image/gif`, `image/webp`, `image/bmp` and `image/svg+xml` (`svg`) now resolve to an extension, so spilled images are no longer extensionless. (#2120)
 - **`AJV_FORMATS_OPTIONS`** (`@appstrate/core/ajv`): the ajv-formats options `createAjv` uses, so
   the RJSF validator registers the same formats and client and server agree.

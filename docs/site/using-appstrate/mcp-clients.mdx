@@ -67,6 +67,10 @@ A space's URL (`/api/mcp/o/<orgId>/s/<spaceId>`) pins the connection to that spa
 
 The server offers every agent you can launch as an MCP prompt named `run-<agent>`, in each space where you can run it. Clients that support prompts list them as commands: in Claude Code, `/mcp__<server>__run-<agent>`, followed by your request in plain words. The model builds the agent's input from your request, launches one metered run with `run_and_wait` and reports its result and files. A prompt only runs when you choose it; the model cannot trigger it on its own. The same agent launchable in two spaces gets a second command, `run-<space>-<agent>`.
 
+## Skills
+
+The server offers skills through the MCP Skills extension (`io.modelcontextprotocol/skills`): `skills/list` returns, for every space the connection reaches (the space of a space URL, every space of an organization URL), the published skills your permissions in that space let you read. Each entry carries its `SKILL.md` URI, its frontmatter (where `metadata.version` is the published version) and every file with a SHA-256 digest; `resources/read` returns a file. Skill URIs have the form `skill://<spaceId>/<scope>/<package-name>/<name>/SKILL.md`. A skill's draft is not listed: its authors read it at `skill://<spaceId>/<scope>/<package-name>@draft/<name>/SKILL.md`.
+
 ## The tools
 
 The server does not declare one tool per API operation. It exposes a small set that lets the client find and call any operation, and the list you see depends on your permissions:

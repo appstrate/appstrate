@@ -36,6 +36,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import type { JsonSchemaType, JsonSchemaValidator } from "@modelcontextprotocol/sdk/validation";
+import type { SkillEntry } from "@appstrate/core/skill-uri";
 import {
   CallToolRequestSchema,
   GetPromptRequestSchema,
@@ -174,9 +175,30 @@ export interface AppstratePromptProvider {
   ) => Promise<GetPromptResult> | GetPromptResult;
 }
 
+/** The MCP Skills extension identifier (SEP-2640). */
+const SKILLS_EXTENSION_ID = "io.modelcontextprotocol/skills";
+
+/**
+ * Skill provider hooks (SEP-2640). Pass `skills` with `resources` to
+ * `createMcpServer` to declare the `io.modelcontextprotocol/skills`
+ * extension and answer `skills/list` / `skills/get`; the skill files
+ * themselves are read through the resource provider.
+ *
+ * - `list(extra)` returns the skills the caller may read.
+ * - `get(uri, extra)` returns the entry whose `SKILL.md` is `uri`, listed or
+ *   not. Throw an `McpError` with `ErrorCode.InvalidParams` (-32602) for a URI
+ *   that names no skill the caller may read.
+ */
+export interface AppstrateSkillProvider {
+  list: (extra: AppstrateRequestExtra) => Promise<SkillEntry[]> | SkillEntry[];
+  get: (uri: string, extra: AppstrateRequestExtra) => Promise<SkillEntry> | SkillEntry;
+}
+
 export interface CreateMcpServerOptions {
   /** Resource provider — when omitted, no `resources/*` capability is advertised. */
   resources?: AppstrateResourceProvider;
+  /** Skill provider — requires `resources`; when omitted, the skills extension is not declared. */
+  skills?: AppstrateSkillProvider;
   /** Prompt provider — when omitted, no `prompts/*` capability is advertised. */
   prompts?: AppstratePromptProvider;
   /**
@@ -243,9 +265,16 @@ export function createMcpServer(
     registry.set(tool.descriptor.name, tool);
   }
 
+  if (options.skills && !options.resources) {
+    throw new Error("createMcpServer: the skills extension requires a resource provider");
+  }
+
   const capabilities: Record<string, unknown> = { tools: { listChanged: false } };
   if (options.resources) {
     capabilities.resources = { listChanged: false, subscribe: false };
+  }
+  if (options.skills) {
+    capabilities.extensions = { [SKILLS_EXTENSION_ID]: {} };
   }
   if (options.prompts) {
     capabilities.prompts = { listChanged: false };
@@ -281,6 +310,26 @@ export function createMcpServer(
     server.setRequestHandler(ReadResourceRequestSchema, async (req, extra) => {
       return provider.read(req.params.uri, extra);
     });
+  }
+
+  if (options.skills) {
+    const provider = options.skills;
+    // `skills/*` are extension methods the SDK has no request schema for.
+    server.fallbackRequestHandler = async (request, extra) => {
+      if (request.method === "skills/list") {
+        const skills = await provider.list(extra);
+        return { skills };
+      }
+      if (request.method === "skills/get") {
+        const uri = request.params?.uri;
+        if (typeof uri !== "string" || uri === "") {
+          throw new McpError(ErrorCode.InvalidParams, "skills/get requires a `uri`");
+        }
+        const skill = await provider.get(uri, extra);
+        return { skill };
+      }
+      throw new McpError(ErrorCode.MethodNotFound, "Method not found");
+    };
   }
 
   if (options.prompts) {
@@ -328,11 +377,14 @@ export async function createInProcessPair(
     resources?: AppstrateResourceProvider;
     /** Optional prompt provider, forwarded verbatim to {@link createMcpServer}. */
     prompts?: AppstratePromptProvider;
+    /** Optional skill provider, forwarded verbatim to {@link createMcpServer}. */
+    skills?: AppstrateSkillProvider;
   } = {},
 ): Promise<InProcessMcpPair> {
   const server = createMcpServer(tools, options.serverInfo, {
     ...(options.resources ? { resources: options.resources } : {}),
     ...(options.prompts ? { prompts: options.prompts } : {}),
+    ...(options.skills ? { skills: options.skills } : {}),
   });
   const client = new Client(
     options.clientInfo ?? { name: "appstrate-mcp-client", version: "0.0.0" },

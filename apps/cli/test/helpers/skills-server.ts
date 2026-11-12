@@ -1,26 +1,30 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * A stand-in for the package routes `appstrate code sync` reads,
- * driven by a table of skills rather than by per-test URL matching.
+ * A stand-in for the routes `appstrate code sync` reads — `GET /api/spaces` and
+ * the REST reflection of the MCP Skills extension (`GET /api/mcp/skills`,
+ * `/api/mcp/skills/archive`) — driven by a table of skills rather than by per-test URL
+ * matching.
  *
- * The artifacts are REAL `.afps` archives built with `zipArtifact` and hashed
- * with `computeIntegrity`, so the download path exercises the same
- * SRI-verify → `unzipArtifact` chain production does. A fixture of
- * hand-written bytes would let the integrity check pass vacuously — which is
- * the one thing these suites must not be able to do.
- *
- * Lives in `test/helpers/` because both `skills-plan.test.ts` and
- * `skills-command.test.ts` need it and neither owns it.
+ * Entries are served the way the server serves them: packaging entries
+ * dropped, the `SKILL.md` `name` pointed at the served name with the shared
+ * `normalizeSkillMd`, `metadata.version` set with the shared
+ * `setSkillMdVersion` (none for a draft), and every file listed with the `sha256` digest of the
+ * bytes `/archive` returns, so the digest check is exercised for real.
  */
 
-import { computeIntegrity } from "@appstrate/core/integrity";
+import { createHash } from "node:crypto";
+import {
+  isValidSkillName,
+  normalizeSkillMd,
+  parseSkillFrontmatter,
+  setSkillMdVersion,
+  SKILL_NAME_MAX_LENGTH,
+} from "@appstrate/afps-shared/companion-files";
+import { toSlug } from "@appstrate/core/naming";
 import { zipArtifact } from "@appstrate/core/zip";
 
 const encoder = new TextEncoder();
-
-/** The sync never reads it; the stub carries it because the real DTOs do. */
-const MANIFEST_DESCRIPTION = "A skill.";
 
 /** Same reason: `Space` declares it, nothing in the sync reads it. */
 const SPACE_STAMP = { createdAt: "2026-01-01T00:00:00.000Z" };
@@ -67,16 +71,11 @@ function spaceWire(fixture: SpaceFixture) {
 export interface DraftFixture {
   /** `SKILL.md` of the working copy. Defaults to the published one. */
   skillMd?: string;
-  /** The draft version, served as its detail `ETag`: half of the draft change token. */
-  lockVersion?: number;
-  /** File-index `ETag`, the other half. */
-  etag?: string;
-  /** Supporting files of the working copy, path → text; the draft archive carries them. */
+  /** Supporting files of the working copy, path → text. */
   files?: Record<string, string>;
   /**
-   * The caller cannot WRITE this skill. Naming the working copy is an author's
-   * act, so the detail and index routes answer `403 draft_not_writable` to an
-   * explicit `?version=draft` from anyone else, and the draft archive to them all.
+   * The caller cannot WRITE this skill. The draft is served to its authors
+   * only, so the draft list leaves it out and its `@draft` URI answers 404.
    */
   notWritable?: boolean;
 }
@@ -86,27 +85,25 @@ export interface SkillFixture {
   id: string;
   /** Full `SKILL.md` text, frontmatter included. */
   skillMd: string;
-  /** Published version label. */
+  /** Published version, served as `metadata.version`. Defaults to `"1.0.0"`. */
   version?: string;
-  /** Extra archive entries, path → text. */
+  /** Extra files of the skill, path → text. */
   extraFiles?: Record<string, string>;
-  /** `source` on the list DTO — set to `"system"` to assert it is skipped. */
-  source?: "local" | "system";
   /**
    * The skill is PLACED in the space but switched off there. The real list
    * route IS the active set, so it drops the skill from the only listing the
    * sync reads — a fixture marked this way must never reach the plan.
    */
   inactive?: boolean;
-  /** When true, `versions/latest` answers 404 (never published). */
+  /** Never published: the list, which serves published skills, leaves it out. */
   unpublished?: boolean;
   /**
-   * HTTP status `versions/latest` answers with instead of resolving. Models a
-   * transient server-side failure — distinct from `unpublished`, which is a
+   * HTTP status `/archive` answers with for this skill's published files.
+   * Models a transient server-side failure — distinct from `unpublished`, a
    * definite "there is nothing to sync".
    */
   resolveError?: number;
-  /** When true, the download serves bytes that do not match `X-Integrity`. */
+  /** When true, `/archive` serves bytes that do not match the listed digest. */
   corruptDownload?: boolean;
   /** Working-copy state for `--source draft`. */
   draft?: DraftFixture;
@@ -115,50 +112,77 @@ export interface SkillFixture {
 export interface SkillServer {
   /** Install the stub over `globalThis.fetch`. */
   install(): void;
-  /** Count of published `/download` requests — the "no re-download" assertion. */
+  /** Count of published `SKILL.md` reads — the "no re-download" assertion. */
   downloads(): number;
-  /** Count of `/files` index reads. */
-  indexReads(): number;
-  /** Count of `/draft/download` requests. */
+  /** Count of draft `SKILL.md` reads. */
   draftDownloads(): number;
   /** Highest number of requests the stub held open at once. */
   peakInFlight(): number;
+}
+
+interface Served {
+  name: string;
+  frontmatter: Record<string, unknown>;
+  files: Record<string, Uint8Array>;
 }
 
 interface Prepared {
   fixture: SkillFixture;
   scope: string;
   name: string;
-  version: string;
-  bytes: Uint8Array;
-  integrity: string;
+  published: Served;
+  draft: Served | null;
+}
+
+/** The server's rule: the frontmatter `name` when valid, else the package name segment. */
+function serve(
+  packageName: string,
+  skill: string,
+  version: string | null,
+  extra: Record<string, string> = {},
+): Served {
+  const authored = parseSkillFrontmatter(skill).name;
+  const name = isValidSkillName(authored)
+    ? authored
+    : toSlug(packageName, SKILL_NAME_MAX_LENGTH).replace(/-+$/, "");
+  const served = setSkillMdVersion(normalizeSkillMd(skill, name), version);
+  const files: Record<string, Uint8Array> = { "SKILL.md": encoder.encode(served) };
+  for (const [path, text] of Object.entries(extra)) files[path] = encoder.encode(text);
+  return { name, frontmatter: parseSkillFrontmatter(served).fields, files };
 }
 
 function prepare(fixture: SkillFixture): Prepared {
   const [scope, name] = fixture.id.split("/") as [string, string];
-  const entries: Record<string, Uint8Array> = {
-    "manifest.json": encoder.encode(
-      JSON.stringify({
-        afps_version: "0.2",
-        type: "skill",
-        name: fixture.id,
-        version: fixture.version ?? "1.0.0",
-        description: MANIFEST_DESCRIPTION,
-      }),
-    ),
-    "SKILL.md": encoder.encode(fixture.skillMd),
-  };
-  for (const [path, text] of Object.entries(fixture.extraFiles ?? {})) {
-    entries[path] = encoder.encode(text);
-  }
-  const bytes = zipArtifact(entries);
+  const draft = fixture.draft;
   return {
     fixture,
     scope,
     name,
-    version: fixture.version ?? "1.0.0",
-    bytes,
-    integrity: computeIntegrity(bytes),
+    published: serve(name, fixture.skillMd, fixture.version ?? "1.0.0", fixture.extraFiles),
+    draft: draft ? serve(name, draft.skillMd ?? fixture.skillMd, null, draft.files) : null,
+  };
+}
+
+const digest = (bytes: Uint8Array): string =>
+  `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+
+function skillDirUri(spaceId: string, p: Prepared, draft: boolean, name: string): string {
+  return `skill://${spaceId}/${p.scope.slice(1)}/${p.name}${draft ? "@draft" : ""}/${name}/`;
+}
+
+function entryOf(spaceId: string, p: Prepared, draft: boolean) {
+  const served = draft ? p.draft! : p.published;
+  const dir = skillDirUri(spaceId, p, draft, served.name);
+  return {
+    uri: `${dir}SKILL.md`,
+    frontmatter: served.frontmatter,
+    resources: Object.keys(served.files)
+      .sort()
+      .map((path) => ({
+        uri: `${dir}${path.split("/").map(encodeURIComponent).join("/")}`,
+        digest: digest(served.files[path]!),
+        size: served.files[path]!.byteLength,
+      })),
   };
 }
 
@@ -175,7 +199,6 @@ export function createSkillServer(
   const prepared = fixtures.map(prepare);
   const spaceById = new Map(spaces.map((space) => [space.id, space]));
   let downloads = 0;
-  let indexReads = 0;
   let draftDownloads = 0;
   let inFlight = 0;
   let peakInFlight = 0;
@@ -239,171 +262,63 @@ export function createSkillServer(
       return json({ object: "list", data: spaces.map(spaceWire) });
     }
 
-    if (path === "/api/packages/skills") {
-      // The index IS the ACTIVE set, not the placed one — the narrowing the
-      // server applies, reproduced here unconditionally so a sync that read a
-      // wider listing fails instead of quietly syncing switched-off skills.
-      //
-      // The route takes no `active` filter. The real server ignores unknown
-      // query keys, so it would answer this same body either way; the stub is
-      // deliberately stricter and refuses, so a sync still sending the
-      // parameter turns red here instead of passing on a coincidence.
-      if (url.searchParams.has("active")) {
-        return json({ code: "bad_request", message: "Unknown query parameter: active" }, 400);
-      }
+    if (path === "/api/mcp/skills") {
+      // The list IS the ACTIVE set of the space at the definition asked — its
+      // published skills, or the drafts this caller may read — the narrowing the
+      // server applies, reproduced here so a sync that read a wider listing fails.
+      const draft = url.searchParams.get("definition") === "draft";
       return json({
         object: "list",
         data: prepared
-          .filter((p) => !p.fixture.inactive)
-          .map((p) => ({
-            id: p.fixture.id,
-            name: p.name,
-            description: MANIFEST_DESCRIPTION,
-            source: p.fixture.source ?? "local",
-            version: p.version,
-            updatedAt: "2026-01-01T00:00:00.000Z",
-          })),
+          .filter((p) =>
+            p.fixture.inactive
+              ? false
+              : draft
+                ? p.draft !== null && !p.fixture.draft?.notWritable
+                : !p.fixture.unpublished,
+          )
+          .map((p) => entryOf(spaceId, p, draft)),
       });
     }
 
-    const latest = path.match(/^\/api\/packages\/skills\/(@[^/]+)\/([^/]+)\/versions\/latest$/);
-    if (latest) {
-      const found = prepared.find((p) => p.scope === latest[1] && p.name === latest[2]);
-      if (!found || found.fixture.unpublished) {
-        return json({ code: "not_found", message: "Version not found" }, 404);
+    const uri = url.searchParams.get("uri") ?? "";
+    if (path === "/api/mcp/skills/archive") {
+      const found = locate(uri, spaceId);
+      if (!found || found.filePath !== "SKILL.md") {
+        return json({ code: "not_found", message: `No skill readable at ${uri}` }, 404);
       }
-      if (found.fixture.resolveError) {
-        return json(
-          { code: "internal_error", message: "resolution blew up" },
-          found.fixture.resolveError,
-        );
+      const { p, draft } = found;
+      if (!draft && p.fixture.resolveError) {
+        return json({ code: "internal_error", message: "read blew up" }, p.fixture.resolveError);
       }
-      return json({
-        id: found.fixture.id,
-        version: found.version,
-        manifest: {
-          afps_version: "0.2",
-          type: "skill",
-          name: found.fixture.id,
-          version: found.version,
-          description: MANIFEST_DESCRIPTION,
-        },
-        content: found.fixture.skillMd,
-        yanked: false,
-        integrity: found.integrity,
-        artifact_size: found.bytes.byteLength,
-        createdAt: "2026-01-01T00:00:00.000Z",
-        dist_tags: ["latest"],
-      });
-    }
-
-    // Before the published route, whose version segment `draft` would match.
-    const draftDownload = path.match(/^\/api\/packages\/(@[^/]+)\/([^/]+)\/draft\/download$/);
-    if (draftDownload) {
-      const found = prepared.find(
-        (p) => p.scope === draftDownload[1] && p.name === draftDownload[2],
-      );
-      if (!found?.fixture.draft) {
-        return json({ code: "not_found", message: "Package not found" }, 404);
-      }
-      if (found.fixture.draft.notWritable) return draftNotWritable(found);
-      draftDownloads += 1;
-      const entries: Record<string, Uint8Array> = {};
-      for (const [entryPath, text] of Object.entries(draftEntries(found))) {
-        entries[entryPath] = encoder.encode(text);
-      }
-      return new Response(new Uint8Array(zipArtifact(entries)), {
+      if (draft) draftDownloads += 1;
+      else downloads += 1;
+      const files = { ...(draft ? p.draft! : p.published).files };
+      if (!draft && p.fixture.corruptDownload) files["SKILL.md"] = encoder.encode("tampered");
+      return new Response(new Uint8Array(zipArtifact(files)), {
         status: 200,
-        headers: {
-          "Content-Type": "application/zip",
-          ETag: `"${found.fixture.draft.etag ?? "idx-1"}"`,
-        },
-      });
-    }
-
-    const download = path.match(/^\/api\/packages\/(@[^/]+)\/([^/]+)\/([^/]+)\/download$/);
-    if (download) {
-      const found = prepared.find((p) => p.scope === download[1] && p.name === download[2]);
-      if (!found) return json({ code: "not_found", message: "Package not found" }, 404);
-      downloads += 1;
-      const body = found.fixture.corruptDownload
-        ? zipArtifact({ "manifest.json": encoder.encode("{}") })
-        : found.bytes;
-      return new Response(new Uint8Array(body), {
-        status: 200,
-        headers: { "Content-Type": "application/afps+zip", "X-Integrity": found.integrity },
-      });
-    }
-
-    // --- draft side -------------------------------------------------------
-
-    const detail = path.match(/^\/api\/packages\/skills\/(@[^/]+)\/([^/]+)$/);
-    if (detail) {
-      const found = prepared.find((p) => p.scope === detail[1] && p.name === detail[2]);
-      if (!found?.fixture.draft) {
-        return json({ code: "not_found", message: "Package not found" }, 404);
-      }
-      // The detail route reserves an explicit `?version=draft` exactly as the
-      // file routes do, and it is the FIRST request the draft resolution
-      // makes — so this is where a non-author is refused, before `/files` is
-      // ever reached.
-      const refusal = draftSelectorRefusal(found, url);
-      if (refusal) return refusal;
-      return json(
-        {
-          id: found.fixture.id,
-          name: found.name,
-          description: MANIFEST_DESCRIPTION,
-          // Same rule as the file routes: the working copy answers only when the
-          // selector NAMES it, so a resolution that forgets it reads published
-          // metadata and fails on content.
-          content:
-            url.searchParams.get("version") === "draft"
-              ? draftSkillMd(found)
-              : found.fixture.skillMd,
-          source: found.fixture.source ?? "local",
-          version: found.version,
-          manifest: {
-            afps_version: "0.2",
-            type: "skill",
-            name: found.fixture.id,
-            version: found.version,
-            description: MANIFEST_DESCRIPTION,
-          },
-          createdAt: "2026-01-01T00:00:00.000Z",
-          updatedAt: "2026-01-02T00:00:00.000Z",
-        },
-        200,
-        // The draft version is the detail's ETag, never a body field.
-        { ETag: `"${found.fixture.draft.lockVersion ?? 1}"` },
-      );
-    }
-
-    const index = path.match(/^\/api\/packages\/(@[^/]+)\/([^/]+)\/files$/);
-    if (index) {
-      const found = prepared.find((p) => p.scope === index[1] && p.name === index[2]);
-      if (!found?.fixture.draft) {
-        return json({ code: "not_found", message: "Package not found" }, 404);
-      }
-      const refusal = draftSelectorRefusal(found, url);
-      if (refusal) return refusal;
-      indexReads += 1;
-      // `buildFileIndex` shape in the list envelope: sorted entries of
-      // { path, size, media_kind }, with `inline` carrying the full text.
-      const entries = Object.entries(entriesFor(found, url))
-        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-        .map(([entryPath, text]) => ({
-          path: entryPath,
-          size: encoder.encode(text).byteLength,
-          media_kind: "text",
-          inline: text,
-        }));
-      return json({ object: "list", data: entries, hasMore: false }, 200, {
-        ETag: `"${indexEtag(found, url)}"`,
+        headers: { "Content-Type": "application/zip" },
       });
     }
 
     return json({ code: "not_found", message: `not stubbed: ${path}` }, 404);
+  };
+
+  /** The skill and file a URI of `spaceId` names, `null` when this caller may read none there. */
+  const locate = (
+    uri: string,
+    spaceId: string,
+  ): { p: Prepared; draft: boolean; filePath: string } | null => {
+    const prefix = `skill://${spaceId}/`;
+    if (!uri.startsWith(prefix)) return null;
+    const [scope, packageSegment, name, ...rest] = uri.slice(prefix.length).split("/");
+    const draft = packageSegment?.endsWith("@draft") ?? false;
+    const packageName = draft ? packageSegment!.slice(0, -"@draft".length) : packageSegment;
+    const p = prepared.find((c) => c.scope === `@${scope}` && c.name === packageName);
+    if (!p || p.fixture.inactive) return null;
+    if (draft ? !p.draft || p.fixture.draft?.notWritable : p.fixture.unpublished) return null;
+    if ((draft ? p.draft! : p.published).name !== name) return null;
+    return { p, draft, filePath: rest.map(decodeURIComponent).join("/") };
   };
 
   return {
@@ -411,7 +326,6 @@ export function createSkillServer(
       globalThis.fetch = stub as unknown as typeof fetch;
     },
     downloads: () => downloads,
-    indexReads: () => indexReads,
     draftDownloads: () => draftDownloads,
     peakInFlight: () => peakInFlight,
   };
@@ -424,72 +338,6 @@ export function createSkillServer(
 function routePermissions(path: string): string[] | null {
   if (path === "/api/spaces") return null;
   return ["skills:read"];
-}
-
-function draftSkillMd(p: Prepared): string {
-  return p.fixture.draft?.skillMd ?? p.fixture.skillMd;
-}
-
-/**
- * The detail and index routes serve the definition the detail page renders
- * unless a selector names one, and `draft` named explicitly is reserved to
- * whoever may WRITE the package. Both call this, so a sync that forgets to
- * name the working copy gets the PUBLISHED metadata — the way the routes
- * answer it — and fails its assertion on content rather than on nothing.
- */
-function draftSelectorRefusal(p: Prepared, url: URL): Response | null {
-  if (url.searchParams.get("version") !== "draft") return null;
-  if (!p.fixture.draft?.notWritable) return null;
-  return draftNotWritable(p);
-}
-
-function draftNotWritable(p: Prepared): Response {
-  return json(
-    {
-      code: "draft_not_writable",
-      detail: `You cannot write ${p.fixture.id}, so its draft is not yours to read`,
-    },
-    403,
-  );
-}
-
-function entriesFor(p: Prepared, url: URL): Record<string, string> {
-  return url.searchParams.get("version") === "draft" ? draftEntries(p) : publishedEntries(p);
-}
-
-/** The index ETag is a property of the snapshot it describes, not of the package. */
-function indexEtag(p: Prepared, url: URL): string {
-  return url.searchParams.get("version") === "draft"
-    ? (p.fixture.draft?.etag ?? "idx-1")
-    : `published-${p.version}`;
-}
-
-/** The published snapshot of the same two-or-more entries. */
-function publishedEntries(p: Prepared): Record<string, string> {
-  return {
-    "manifest.json": manifestJson(p),
-    "SKILL.md": p.fixture.skillMd,
-    ...p.fixture.extraFiles,
-  };
-}
-
-function manifestJson(p: Prepared): string {
-  return JSON.stringify({
-    afps_version: "0.2",
-    type: "skill",
-    name: p.fixture.id,
-    version: p.version,
-    description: MANIFEST_DESCRIPTION,
-  });
-}
-
-/** Flat map of every draft entry — what the index lists and the draft archive carries. */
-function draftEntries(p: Prepared): Record<string, string> {
-  return {
-    "manifest.json": manifestJson(p),
-    "SKILL.md": draftSkillMd(p),
-    ...p.fixture.draft!.files,
-  };
 }
 
 /** A minimal conforming `SKILL.md`. */

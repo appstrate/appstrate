@@ -282,7 +282,145 @@ const SPACE_ENDPOINT_GET_DESCRIPTION =
   "stateless mode (no standalone server-initiated SSE stream), so GET returns 405; clients " +
   "POST JSON-RPC messages instead. Requires the `mcp:read` permission in `{space}`.";
 
+const skillEntrySchema = {
+  type: "object",
+  description:
+    "A skill as the MCP Skills extension (SEP-2640) serves it: the entry of `skills/list` and " +
+    "`skills/get`.",
+  properties: {
+    uri: {
+      type: "string",
+      description:
+        "`skill://` URI of the skill's `SKILL.md`: " +
+        "`skill://<spaceId>/<scope>/<package-name>/<name>/SKILL.md` for the published " +
+        "definition, `<package-name>@draft` in place of `<package-name>` for the draft.",
+    },
+    frontmatter: {
+      type: "object",
+      description:
+        "The YAML frontmatter of the served `SKILL.md`, verbatim. `metadata.version` is the " +
+        "package version: the semver of a published definition; a draft has none.",
+      properties: { name: { type: "string" }, description: { type: "string" } },
+      required: ["name", "description"],
+      additionalProperties: true,
+    },
+    resources: {
+      type: "array",
+      description: "Every file of the skill, `SKILL.md` included.",
+      items: {
+        type: "object",
+        properties: {
+          uri: { type: "string", description: "`skill://` URI of the file." },
+          digest: {
+            type: "string",
+            description: "`sha256:<hex>` of the bytes `resources/read` serves for `uri`.",
+          },
+          size: { type: "integer", description: "Size of the file in bytes." },
+        },
+        required: ["uri", "digest", "size"],
+      },
+    },
+  },
+  required: ["uri", "frontmatter", "resources"],
+} as const;
+
+const SKILLS_REST_DESCRIPTION =
+  "Serves `appstrate code sync` and reflects the MCP Skills extension (SEP-2640) of the MCP " +
+  "endpoint: same server function, same entries, same bytes, for the space `X-Space-Id` names. " +
+  "Requires `skills:read` in that space. Rate-limited to 50 requests/minute.";
+
+const skillReadErrors = {
+  "400": { $ref: "#/components/responses/ValidationError" },
+  "401": { $ref: "#/components/responses/Unauthorized" },
+  "403": { $ref: "#/components/responses/Forbidden" },
+  "429": { $ref: "#/components/responses/RateLimited" },
+} as const;
+
+const skillsRestPaths = {
+  "/api/mcp/skills": {
+    get: {
+      operationId: "listServedSkills",
+      tags: ["MCP"],
+      summary: "List skills as the MCP Skills extension serves them",
+      description:
+        "The entries of `skills/list`: the published definition of each active skill of the " +
+        "space that the caller may read and the server can serve whole. With " +
+        "`definition=draft`, the drafts of the space that the caller may read (only a caller " +
+        "who may write a package reads its draft), at their `@draft` URIs; `skills/list` " +
+        "never holds a draft. " +
+        SKILLS_REST_DESCRIPTION,
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        {
+          name: "definition",
+          in: "query",
+          required: false,
+          schema: { type: "string", enum: ["published", "draft"], default: "published" },
+          description: "The definition listed.",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "Skill entries",
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: { type: "array", items: skillEntrySchema },
+                  hasMore: { type: "boolean" },
+                },
+                required: ["object", "data", "hasMore"],
+              },
+            },
+          },
+        },
+        ...skillReadErrors,
+      },
+    },
+  },
+  "/api/mcp/skills/archive": {
+    get: {
+      operationId: "getServedSkillArchive",
+      tags: ["MCP"],
+      summary: "Download every file of a skill as the MCP Skills extension serves it",
+      description:
+        "A ZIP of every file `resources/read` serves for the skill whose `SKILL.md` is at the " +
+        "`skill://` URI `uri`, at its path inside the skill directory; each file's `sha256` is " +
+        "the `digest` of its entry. " +
+        SKILLS_REST_DESCRIPTION,
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        {
+          name: "uri",
+          in: "query",
+          required: true,
+          schema: { type: "string" },
+          description: "`skill://` URI of a skill entry's `SKILL.md` (the entry's `uri`).",
+        },
+      ],
+      responses: {
+        "200": {
+          description: "ZIP archive of the skill's files",
+          content: {
+            "application/zip": { schema: { type: "string", format: "binary" } },
+          },
+        },
+        ...skillReadErrors,
+        "404": {
+          $ref: "#/components/responses/NotFound",
+          description: "No skill the caller may read in this space is served at `uri`.",
+        },
+      },
+    },
+  },
+} as const;
+
 export const mcpPaths = {
+  ...skillsRestPaths,
   "/api/mcp/o/{org}": orgEndpoint,
   "/api/mcp/o/{org}/s/{space}": {
     post: {

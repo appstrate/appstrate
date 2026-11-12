@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// MCP `read_skill`: the file explorer's readers, with its own access rule.
+// MCP `read_skill` and `skill://` reads: the file explorer's readers, with their own access rule.
 
 import type { Context } from "hono";
 import { packagePermission } from "@appstrate/core/permissions";
@@ -27,16 +27,25 @@ import {
   type PackageFileSnapshot,
 } from "./package-files.ts";
 import { withPackageDraftLock } from "./package-locks.ts";
+import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 
 const SKILLS_READ = packagePermission("skill", "read");
 const CHAT_TURN = "chat:write";
 
 /**
+ * The space a skill read targets, with the caller's permissions there: the live
+ * grants under the token's ceiling. An org-wide MCP connection reads each space
+ * it reaches with that space's permissions, not those of the space it entered.
+ */
+export interface SkillReadSpace extends SpaceScope {
+  permissions: ReadonlySet<string>;
+}
+
+/**
  * The skills this request's chat turn injected, or `null`. The claim is a
  * chat-turn grant: it holds in the turn's space only, and lapses with the
- * caller's LIVE `chat:write` there (the hop's permissions are the live grants
- * under the token's ceiling) — revoking chat access revokes it. A malformed
- * claim is ignored.
+ * caller's LIVE `chat:write` there — revoking chat access revokes it. A
+ * malformed claim is ignored.
  *
  * This IS a hard-coded auth method, the chat module's: core names it (in
  * `@appstrate/core/chat-contract`) because a claim any loaded strategy could
@@ -44,11 +53,11 @@ const CHAT_TURN = "chat:write";
  * therefore a deliberate core change, not a module capability — the same
  * stance as the bearer allowlist in `lib/bearer-only.ts`.
  */
-function turnClaim(c: Context<AppEnv>, scope: SpaceScope): InjectedSkills["skills"] | null {
+function turnClaim(c: Context<AppEnv>, space: SkillReadSpace): InjectedSkills["skills"] | null {
   if (c.get("authMethod") !== CHAT_LOOPBACK_AUTH_METHOD) return null;
-  if (!c.get("permissions")?.has(CHAT_TURN)) return null;
+  if (!space.permissions.has(CHAT_TURN)) return null;
   const claim = injectedSkillsSchema.safeParse(c.get("authExtra")?.[INJECTED_SKILLS_AUTH_EXTRA]);
-  return claim.success && claim.data.spaceId === scope.spaceId ? claim.data.skills : null;
+  return claim.success && claim.data.spaceId === space.spaceId ? claim.data.skills : null;
 }
 
 /** What a read serves: `spec` `undefined` = the stored tree; `draftLock` pins that tree. */
@@ -63,28 +72,39 @@ interface SkillReadAccess {
  * injected answers from the claim alone, without `skills:*` — the chat already
  * put its SKILL.md in context — and never falls through: the published version
  * it was served at (a system skill's shipped tree), or its draft pinned to the
- * `lock_version` injected. Any other skill: `skills:read`, as `GET …/files`.
+ * `lock_version` injected; a `definition` other than the one injected is
+ * refused. Any other skill: `skills:read`, as `GET …/files`, at `definition`
+ * when named (the draft only for whoever may write the package), else at the
+ * file explorer's default.
  */
 async function resolveSkillReadAccess(
   c: Context<AppEnv>,
-  scope: SpaceScope,
+  space: SkillReadSpace,
   packageId: string,
+  definition: SkillDefinitionSelector | undefined,
 ): Promise<SkillReadAccess | null> {
-  const claim = turnClaim(c, scope);
+  const claim = turnClaim(c, space);
   if (claim && Object.hasOwn(claim, packageId)) {
     const served = claim[packageId]!;
-    const pkg = await findFileExplorerPackage(scope, packageId);
+    const pkg = await findFileExplorerPackage(space, packageId);
     if (pkg?.type !== "skill") return null;
-    if (pkg.source === "system") return { pkg, spec: undefined };
+    if (pkg.source === "system") return definition === "draft" ? null : { pkg, spec: undefined };
+    if (definition !== undefined && definition !== served.definition) return null;
     if (served.definition === "draft") {
       return { pkg, spec: undefined, draftLock: served.lockVersion };
     }
     return served.version === null ? null : { pkg, spec: served.version };
   }
-  if (c.get("permissions")?.has(SKILLS_READ)) {
-    const pkg = await findFileExplorerPackage(scope, packageId);
+  if (space.permissions.has(SKILLS_READ)) {
+    const pkg = await findFileExplorerPackage(space, packageId);
     if (pkg?.type === "skill") {
-      return { pkg, spec: await resolveFileExplorerVersion(c, pkg, undefined) };
+      const explicit =
+        definition === undefined
+          ? undefined
+          : definition === "draft"
+            ? VERSION_SELECTOR_DRAFT
+            : "latest";
+      return { pkg, spec: await resolveFileExplorerVersion(c, pkg, explicit) };
     }
   }
   return null;
@@ -126,13 +146,19 @@ export interface SkillSnapshot {
   snapshot: PackageFileSnapshot;
 }
 
-/** `null` when refused; the caller answers it as REST does (403, else 404). */
+export type SkillDefinitionSelector = "published" | "draft";
+
+/**
+ * `null` when refused; the caller answers it as REST does (403, else 404).
+ * `definition` names the definition to read (see `resolveSkillReadAccess`).
+ */
 export async function readSkillSnapshot(
   c: Context<AppEnv>,
-  scope: SpaceScope,
+  space: SkillReadSpace,
   packageId: string,
+  definition?: SkillDefinitionSelector,
 ): Promise<SkillSnapshot | null> {
-  const access = await resolveSkillReadAccess(c, scope, packageId);
+  const access = await resolveSkillReadAccess(c, space, packageId, definition);
   if (!access) return null;
   const { pkg, spec, draftLock } = access;
   const validator = await resolvePackageFileValidator(pkg, spec);

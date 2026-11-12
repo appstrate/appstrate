@@ -10,10 +10,13 @@ import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 import { ApiError, notFound } from "../../lib/errors.ts";
 import { classifyPackageFile, snapshotFile } from "../../services/package-files.ts";
-import { readSkillSnapshot, type SkillSnapshot } from "../../services/skill-read.ts";
+import {
+  readSkillSnapshot,
+  type SkillReadSpace,
+  type SkillSnapshot,
+} from "../../services/skill-read.ts";
 import { VERSION_SELECTOR_DRAFT } from "../../services/agent-version-resolver.ts";
 import { assertPermission } from "../../middleware/require-permission.ts";
-import type { SpaceScope } from "../../lib/scope.ts";
 import type { AppEnv } from "../../types/index.ts";
 import { asString, RESOURCE_BLOB_MAX_BYTES, jsonResult, refusalResult } from "./tool-results.ts";
 
@@ -28,10 +31,10 @@ export interface SkillToolContext {
 /** `readSkillSnapshot` bound to the request, its refusal answered as REST answers it. */
 export function skillReaderFor(
   c: Context<AppEnv>,
-  scope: SpaceScope,
+  space: SkillReadSpace,
 ): SkillToolContext["readSkill"] {
   return async (packageId) => {
-    const skill = await readSkillSnapshot(c, scope, packageId);
+    const skill = await readSkillSnapshot(c, space, packageId);
     if (skill) return skill;
     // The route guard's 403 (with its denial audit) comes before any lookup.
     assertPermission(c, "skills", "read");

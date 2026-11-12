@@ -115,22 +115,39 @@ function installSpaces(
     }
     const refusal = refuse(spaceId);
     if (refusal) return refusal;
-    if (url.pathname === "/api/packages/skills") {
+    if (url.pathname === "/api/mcp/skills") {
       if (spaceId === options.failingSpace)
         return Response.json({ message: "Unavailable" }, { status: 503 });
-      return Response.json({ data: (memberships[spaceId] ?? []).map((id) => ({ id })) });
+      // The space's list holds the skills attributed to it, at their URIs in it.
+      const listed = (await (await serve(input, init)).json()) as { data: { uri: string }[] };
+      return Response.json({
+        object: "list",
+        data: listed.data.filter((entry) =>
+          (memberships[spaceId] ?? []).includes(packageOf(entry.uri)),
+        ),
+        hasMore: false,
+      });
     }
-    const packageId = fixtures.find((fixture) => url.pathname.includes(fixture.id));
-    if (packageId) {
-      // Return an authorization failure on the wrong origin, like the real API.
-      if (!memberships[spaceId]?.includes(packageId.id)) {
-        return Response.json({ message: "Wrong space" }, { status: 403 });
+    if (url.pathname === "/api/mcp/skills/archive") {
+      const uri = url.searchParams.get("uri") ?? "";
+      // A URI of another space, or a skill not attributed to this one, is not readable here.
+      if (
+        !uri.startsWith(`skill://${spaceId}/`) ||
+        !memberships[spaceId]?.includes(packageOf(uri))
+      ) {
+        return Response.json({ message: "Not found" }, { status: 404 });
       }
-      options.seen?.push(`${spaceId}:${url.pathname}`);
+      options.seen?.push(`${spaceId}:${uri}`);
     }
     return serve(input, init);
   }) as typeof fetch;
   return server;
+}
+
+/** The package id a `skill://<space>/<scope>/<package-name>[@draft]/…` URI names. */
+function packageOf(uri: string): string {
+  const [, , , scope, packageSegment] = uri.split("/");
+  return `@${scope}/${packageSegment!.replace(/@draft$/, "")}`;
 }
 
 async function snapshot(root: string): Promise<Record<string, string>> {
@@ -148,7 +165,7 @@ async function snapshot(root: string): Promise<Record<string, string>> {
 }
 
 describe("multi-space skill distribution regressions", () => {
-  it("reads draft metadata, file index and archive in their source space", async () => {
+  it("reads the draft list and the draft files in their source space", async () => {
     const seen: string[] = [];
     const server = installSpaces(
       [
@@ -167,11 +184,9 @@ describe("multi-space skill distribution regressions", () => {
       createMemoryIO().io,
     );
 
-    expect(server.indexReads()).toBe(1);
     expect(server.draftDownloads()).toBe(1);
-    expect(seen).toContain("spc_library:/api/packages/skills/@acme/library");
-    expect(seen).toContain("spc_library:/api/packages/@acme/library/files");
-    expect(seen).toContain("spc_library:/api/packages/@acme/library/draft/download");
+    // One archive per skill, named by its SKILL.md URI.
+    expect(seen).toEqual(["spc_library:skill://spc_library/acme/library@draft/library/SKILL.md"]);
     expect(await readFile(join(pluginRoot(), "skills/library/references/detail.md"), "utf8")).toBe(
       "Library-only draft reference",
     );

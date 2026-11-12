@@ -566,7 +566,11 @@ codeGroup
     "Narrow this sync to a space — ID or name (repeatable; overrides syncSpaces).",
     (value: string, previous: string[] = []) => [...previous, value],
   )
-  .option("--source <source>", "Which artifact to sync: published | draft.", parseSkillSource)
+  .option(
+    "--source <source>",
+    "Which artifact to sync: published | draft (the drafts of the skills you may write).",
+    parseSkillSource,
+  )
   .option(
     "--print-path",
     "Print the Claude Code plugin directory as the only stdout line (what a marketplace `command` source consumes). Requires --target claude-plugin.",

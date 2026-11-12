@@ -229,7 +229,11 @@ function readThroughService(
     ["authExtra", { [INJECTED_SKILLS_AUTH_EXTRA]: injected }],
   ]);
   const c = { get: (key: string) => values.get(key) } as unknown as Context<AppEnv>;
-  return readSkillSnapshot(c, { orgId: owner.orgId, spaceId: owner.defaultSpaceId }, packageId);
+  return readSkillSnapshot(
+    c,
+    { orgId: owner.orgId, spaceId: owner.defaultSpaceId, permissions: new Set(permissions) },
+    packageId,
+  );
 }
 
 describe("read_skill — a skill the chat turn injected", () => {

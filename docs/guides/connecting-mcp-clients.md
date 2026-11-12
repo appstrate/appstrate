@@ -233,6 +233,50 @@ A prompt is user-controlled: clients expose it as a command (Claude Code as
 choosing the command is the user asking for the metered run. The launch itself
 is still a `run_and_wait` call, which your client may ask you to approve.
 
+## Skills
+
+The server declares the MCP Skills extension (`io.modelcontextprotocol/skills`,
+SEP-2640) in `capabilities.extensions` of its `initialize` result, together with
+the `resources` capability. Results carry no cache attributes.
+
+- **`skills/list`** returns the published definition of every skill you may
+  read in the spaces the connection reaches (the space of a space URL, every
+  space of an organization URL), each skill under its own space's permissions:
+  `skills:read` in that space (a delegated credential is held to its scopes),
+  or, on the chat's own connection, a skill the current turn injected. No
+  pagination.
+- **Entry.** `uri` names the skill's `SKILL.md`; `frontmatter` is that file's
+  YAML frontmatter, verbatim; `resources` lists every file of the skill with its
+  `uri`, `digest` (`sha256:<hex>` of the bytes `resources/read` returns) and
+  `size` in bytes.
+- **URIs.** `skill://<spaceId>/<scope>/<package-name>/<name>/<path>` for the
+  published definition, where `<scope>` drops the `@` and `<name>` is the
+  frontmatter `name` of the served `SKILL.md`. A draft is never listed: whoever
+  may write the package reads it at
+  `skill://<spaceId>/<scope>/<package-name>@draft/<name>/SKILL.md` through
+  `skills/get` and `resources/read`.
+- **Served files.** The skill is an Agent Skills directory: the package
+  manifest and signature record are dropped, and the `name` line of `SKILL.md`
+  is set to the served name when the stored one is not a valid Agent Skills
+  name (1-64 characters of `[a-z0-9-]`, else derived from the package name).
+  The frontmatter `metadata.version` holds the package version: the semver of
+  a published definition; a draft has none. A file is returned whole, as `text` when its bytes are UTF-8, else as `blob`.
+- **Limits.** A skill is served whole or not at all: one with more than 512
+  files or more than 16 MiB of served bytes in total (the extension's limits,
+  counted after `SKILL.md` normalization) is absent from `skills/list`, refused
+  by `skills/get` and `resources/read`, and logged (`mcp.skill_unservable`).
+  Within that total, a file of any size is served.
+- **Errors.** `skills/get` answers `-32602` for a URI that names no skill you
+  may read; `resources/read` answers `-32002` for a `skill://` URI that names no
+  file you may read.
+- **REST.** `appstrate code sync` reads the same entries and bytes over REST,
+  for the space `X-Space-Id` names and behind `skills:read` there:
+  `GET /api/mcp/skills` (the entries of `skills/list`; with
+  `?definition=draft`, the drafts you may read, at their `@draft` URIs) and
+  `GET /api/mcp/skills/archive?uri=` (a ZIP of every file `resources/read`
+  serves for the skill whose `SKILL.md` is at `uri`). These
+  routes are not operations of the MCP catalog.
+
 ## The tool surface
 
 The server exposes a handful of tools rather than one per REST operation (which
