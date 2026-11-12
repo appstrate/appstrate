@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
+- **Fixed: the runner bootstrap keeps its env across sudo-rs** (#2153).
+  `get.appstrate.dev/runner` elevated with `sudo -E`, which sudo-rs (the default
+  sudo since Ubuntu 25.10) ignores with only a warning, so `runner install` lost
+  `APPSTRATE_RUNNER_TOKEN` and `FIRECRACKER_ARTIFACTS_PUBKEY` when run as a
+  non-root user, and its downloads lost the operator's proxy settings. It now
+  names them in `sudo --preserve-env=…`, which both sudo implementations honour,
+  together with `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY` (and their lowercase
+  forms), `NODE_EXTRA_CA_CERTS` and `SSL_CERT_FILE`. `ALL_PROXY` is not
+  forwarded: the runtime ignores it. Nothing changes when the script already
+  runs as root.
+
 - **Pi SDK bumped from 1.1.0 to 1.5.2: some models leave the embedded
   registry** (#2149). Pi 1.5.2 now announces Claude Code `2.1.322` on its own,
   which Anthropic requires for recent models such as `claude-fable-5-2`

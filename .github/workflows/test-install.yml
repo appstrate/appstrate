@@ -821,7 +821,7 @@ jobs:
           echo "✓ skip-verify + latest refused"
 
           # ── Scenario 7e: bootstrap-runner.sh resolves latest the same way ─
-          # Non-root here, so it elevates with (passwordless) `sudo -E` only to
+          # Non-root here, so it elevates with (passwordless) sudo only to
           # install the verified binary and exec `appstrate runner install`.
           echo "::group::runner: latest via channel manifest"
           set +e
