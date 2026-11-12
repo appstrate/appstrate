@@ -356,11 +356,24 @@ describe("the served skill cache", () => {
     return { server, fileReads, cache };
   }
 
+  /** `skills/get` of `uri` over a real MCP client of `server`. */
+  async function getOverMcp(server: ReturnType<typeof buildSkillServer>, uri: string) {
+    const p = await createInProcessPair([], {
+      resources: { read: (u) => server.read(u) },
+      skills: server.provider,
+    });
+    try {
+      return await p.client.request({ method: "skills/get", params: { uri } }, ResultSchema);
+    } finally {
+      await p.close();
+    }
+  }
+
   it("serves a published version from the cache on the next call, without reading its files", async () => {
     const { server, fileReads } = counted();
     const listed = await server.list("published");
     const read = await server.read(TONE);
-    expect(await server.provider.get(TONE)).toEqual(listed[0]!);
+    expect((await getOverMcp(server, TONE)).skill).toEqual(listed[0]!);
     expect(read.contents).toHaveLength(1);
     expect(fileReads).toEqual(["published"]);
   });
@@ -389,7 +402,7 @@ describe("the served skill cache", () => {
     const { server, fileReads } = counted();
     await server.read(DRAFT);
     await server.read(DRAFT);
-    await server.provider.get(DRAFT);
+    await getOverMcp(server, DRAFT);
     expect(fileReads).toEqual(["draft", "draft", "draft"]);
   });
 
