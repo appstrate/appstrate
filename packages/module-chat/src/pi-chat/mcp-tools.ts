@@ -356,6 +356,19 @@ function makeForwardExtension(
 }
 
 /**
+ * The platform `run_and_wait` schema minus its `wait` argument: the chat's wait
+ * descends from the turn's deadline, so the model is never offered one, and the
+ * shared launch refuses it as an unknown argument.
+ */
+function withoutWaitArgument(inputSchema: unknown): Record<string, unknown> {
+  const schema = (inputSchema as Record<string, unknown> | undefined) ?? { type: "object" };
+  const properties = schema.properties as Record<string, unknown> | undefined;
+  if (!properties || !("wait" in properties)) return schema;
+  const { wait: _wait, ...rest } = properties;
+  return { ...schema, properties: rest };
+}
+
+/**
  * `run_and_wait` Pi tool: launch a run, stream the preliminary + progress cards
  * live into the UI stream, and return the FINAL run payload as the tool result.
  * The intermediate cards and the final tool output share the tool call id, so
@@ -378,9 +391,7 @@ function makeRunAndWaitExtension(
       name: RUN_AND_WAIT_TOOL,
       label: RUN_AND_WAIT_TOOL,
       description: tool.description ?? "Launch an Appstrate run and wait for completion.",
-      parameters: unsafeSchema<Record<string, unknown>>(
-        (tool.inputSchema as Record<string, unknown>) ?? { type: "object" },
-      ),
+      parameters: unsafeSchema<Record<string, unknown>>(withoutWaitArgument(tool.inputSchema)),
       async execute(toolCallId: string, params: unknown, execSignal?: AbortSignal) {
         let finalPayload: Record<string, unknown> = {
           error: "run_and_wait produced no result",

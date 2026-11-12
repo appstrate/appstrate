@@ -102,6 +102,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **`run_and_wait` waits within a `wait` budget, with or without a progress token** (#2169).
+  A new `wait` argument (integer seconds, counted from the start of the call) sets how long the
+  MCP tool waits for the run: 50 s when omitted, `0` for none, clamped to 30 min. When the wait
+  ends first, the call returns `done:false` with the run `id`, to be resumed with `getRun`. A
+  call carrying a `progressToken` used to wait up to 30 min, past the fixed per-call timeout of
+  some clients (the Claude connector cuts a tool call at 230 s, whatever the progress), which
+  lost the call; a call without one waited 45 s. Progress notifications are still sent during
+  the wait. `wait` takes non-negative integer seconds only; a wait longer than 55 s chains reads
+  of `GET /api/runs/{id}?wait=`, whose behaviour does not change (`true`/`false` or integer
+  seconds, 55 s ceiling, no wait when omitted).
+  The in-app chat is not offered `wait`: its wait still descends from the turn budget.
 - **`api_call` returns a redirect off `authorized_uris` instead of failing** (#2154). When an
   allowlisted upstream answers with a 3xx whose `Location` lies outside the auth's
   `authorized_uris`, the call no longer fails with `unauthorized_target`
