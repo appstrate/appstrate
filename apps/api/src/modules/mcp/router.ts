@@ -106,7 +106,7 @@ import {
 import { buildOperationIndex, buildOrgWideOperationIndex, operationIdGranted } from "./catalog.ts";
 import { skillReaderFor } from "./skill-tools.ts";
 import { createSkillRouter, skillServerFor } from "./skill-routes.ts";
-import { SKILL_URI_PREFIX } from "./skill-resources.ts";
+import { SKILL_URI_PREFIX } from "@appstrate/core/skill-uri";
 import {
   listReachableSpaces,
   pinnedSpaceIds,

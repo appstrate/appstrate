@@ -9,7 +9,8 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
 import { packageDistTags } from "@appstrate/db/schema";
-import { zipArtifact } from "@appstrate/core/zip";
+import { unzipArtifact, zipArtifact } from "@appstrate/core/zip";
+import { parseSkillUri } from "@appstrate/core/skill-uri";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import * as storage from "@appstrate/db/storage";
 import { getTestApp } from "../../helpers/app.ts";
@@ -194,7 +195,7 @@ describe("skills/get on a draft", () => {
 describe("REST reflection (`appstrate code sync`)", () => {
   const rest = (headers: Record<string, string>, path: string) =>
     app.request(path, { headers: { ...headers, "X-Space-Id": owner.defaultSpaceId } });
-  const contentPath = (uri: string) => `/api/mcp/skills/content?uri=${encodeURIComponent(uri)}`;
+  const archivePath = (uri: string) => `/api/mcp/skills/archive?uri=${encodeURIComponent(uri)}`;
 
   it("serves the entries and bytes the MCP endpoint serves to the same caller", async () => {
     const mcp = await call(inSpace(ownerHeaders(), owner.defaultSpaceId), "skills/list", {});
@@ -204,11 +205,15 @@ describe("REST reflection (`appstrate code sync`)", () => {
     expect(body.object).toBe("list");
     expect(body.data).toEqual(mcp.result?.skills as Entry[]);
     const entry = body.data.find((e) => e.uri === toneUri())!;
+    const res = await rest(ownerHeaders(), archivePath(entry.uri));
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/zip");
+    const files = unzipArtifact(new Uint8Array(await res.arrayBuffer()));
+    expect(Object.keys(files).sort()).toEqual(
+      entry.resources.map((resource) => parseSkillUri(resource.uri)!.path).sort(),
+    );
     for (const resource of entry.resources) {
-      const res = await rest(ownerHeaders(), contentPath(resource.uri));
-      expect(res.status).toBe(200);
-      expect(res.headers.get("content-type")).toBe("application/octet-stream");
-      const bytes = new Uint8Array(await res.arrayBuffer());
+      const bytes = files[parseSkillUri(resource.uri)!.path]!;
       expect(sha256(bytes)).toBe(resource.digest);
       const read = await call(inSpace(ownerHeaders(), owner.defaultSpaceId), "resources/read", {
         uri: resource.uri,
@@ -223,7 +228,21 @@ describe("REST reflection (`appstrate code sync`)", () => {
     };
     expect(body.data.map((e) => e.uri)).toContain(toneUri());
     expect(body.data.map((e) => e.uri)).not.toContain(teamUri());
-    expect((await rest(ownerHeaders(), contentPath(teamUri()))).status).toBe(404);
+    expect((await rest(ownerHeaders(), archivePath(teamUri()))).status).toBe(404);
+  });
+
+  it("serves an archive only for the canonical SKILL.md URI of a skill in the space", async () => {
+    const dir = `skill://${owner.defaultSpaceId}/skillsext/tone/tone`;
+    for (const uri of [
+      `${dir}/../tone/SKILL.md`,
+      `${dir}/%2E%2E/tone/SKILL.md`,
+      `skill://${owner.defaultSpaceId}/skillsext/tone/tone%2FSKILL.md`,
+      `${dir}/refs%2FSKILL.md`,
+      toneUri().replace(owner.defaultSpaceId, "spc_other"),
+    ]) {
+      expect((await rest(ownerHeaders(), archivePath(uri))).status).toBe(404);
+    }
+    expect((await rest(ownerHeaders(), archivePath(toneUri()))).status).toBe(200);
   });
 
   it("lists the drafts an author may read with definition=draft, and none to a reader", async () => {
@@ -238,7 +257,7 @@ describe("REST reflection (`appstrate code sync`)", () => {
     const reader = await guest({ [owner.defaultSpaceId]: ["skills:read"] });
     const readerDrafts = await rest(reader, "/api/mcp/skills?definition=draft");
     expect(((await readerDrafts.json()) as { data: Entry[] }).data).toEqual([]);
-    expect((await rest(reader, contentPath(draftUri))).status).toBe(404);
+    expect((await rest(reader, archivePath(draftUri))).status).toBe(404);
   });
 
   it("serves the published version in metadata.version", async () => {
@@ -252,8 +271,8 @@ describe("REST reflection (`appstrate code sync`)", () => {
   it("refuses a caller without skills:read, a request without uri, and an unknown definition", async () => {
     const headers = await guest({ [owner.defaultSpaceId]: ["mcp:read"] });
     expect((await rest(headers, "/api/mcp/skills")).status).toBe(403);
-    expect((await rest(headers, contentPath(toneUri()))).status).toBe(403);
-    expect((await rest(ownerHeaders(), "/api/mcp/skills/content")).status).toBe(400);
+    expect((await rest(headers, archivePath(toneUri()))).status).toBe(403);
+    expect((await rest(ownerHeaders(), "/api/mcp/skills/archive")).status).toBe(400);
     expect((await rest(ownerHeaders(), "/api/mcp/skills?definition=latest")).status).toBe(400);
   });
 });

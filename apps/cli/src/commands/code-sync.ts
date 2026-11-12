@@ -24,6 +24,7 @@ import { listSpaces, resolveSpaceRef, type Space } from "../lib/spaces.ts";
 import { DEFAULT_IO, type CommandIO } from "../lib/io.ts";
 import { formatError } from "../lib/ui.ts";
 import { checkSkillMarkdown, normalizeSkillMd } from "@appstrate/afps-shared/companion-files";
+import type { SkillEntry } from "@appstrate/core/skill-uri";
 import { SKILL_ENTRY } from "../lib/skills-sync/materialize.ts";
 import { withSyncLock } from "../lib/skills-sync/lock.ts";
 import { renderNotice, type NoticeKind } from "../lib/skills-sync/notice.ts";
@@ -40,7 +41,6 @@ import {
   type EntriesBySlug,
   type PlannedSkill,
   type ResolvedSkill,
-  type SkillEntry,
   type SkillSource,
   type TargetPlan,
 } from "../lib/skills-sync/plan.ts";

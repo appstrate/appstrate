@@ -36,6 +36,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import type { JsonSchemaType, JsonSchemaValidator } from "@modelcontextprotocol/sdk/validation";
+import type { SkillEntry } from "@appstrate/core/skill-uri";
 import {
   CallToolRequestSchema,
   GetPromptRequestSchema,
@@ -177,23 +178,6 @@ export interface AppstratePromptProvider {
 /** The MCP Skills extension identifier (SEP-2640). */
 export const SKILLS_EXTENSION_ID = "io.modelcontextprotocol/skills";
 
-/** A file of a skill: its resource URI, `sha256:{hex}` digest of its raw bytes, and byte length. */
-export interface SkillResource {
-  uri: string;
-  digest: string;
-  size: number;
-}
-
-/** A SEP-2640 skill entry, identical in `skills/list` and `skills/get`. */
-export interface SkillEntry {
-  /** Resource URI of the skill's `SKILL.md`, readable via `resources/read`. */
-  uri: string;
-  /** The `SKILL.md` YAML frontmatter, verbatim. */
-  frontmatter: { name: string; description: string; [key: string]: unknown };
-  /** Every file of the skill, `SKILL.md` included. */
-  resources: SkillResource[];
-}
-
 /**
  * Skill provider hooks (SEP-2640). Pass `skills` with `resources` to
  * `createMcpServer` to declare the `io.modelcontextprotocol/skills`
@@ -334,7 +318,7 @@ export function createMcpServer(
     server.fallbackRequestHandler = async (request, extra) => {
       if (request.method === "skills/list") {
         const skills = await provider.list(extra);
-        return { resultType: "complete", skills };
+        return { skills };
       }
       if (request.method === "skills/get") {
         const uri = request.params?.uri;
@@ -342,7 +326,7 @@ export function createMcpServer(
           throw new McpError(ErrorCode.InvalidParams, "skills/get requires a `uri`");
         }
         const skill = await provider.get(uri, extra);
-        return { resultType: "complete", skill };
+        return { skill };
       }
       throw new McpError(ErrorCode.MethodNotFound, "Method not found");
     };

@@ -262,10 +262,11 @@ attributes.
   name (1-64 characters of `[a-z0-9-]`, else derived from the package name).
   The frontmatter `metadata.version` holds the package version: the semver of
   a published definition; a draft has none. A file is returned whole, as `text` when its bytes are UTF-8, else as `blob`.
-- **Limits.** A skill is served whole or not at all: one with a file over
-  1 MiB (the largest file a package draft write accepts), more than 512 files
-  or more than 16 MiB in total is absent from `skills/list`, refused by
-  `skills/get` and `resources/read`, and logged (`mcp.skill_unservable`).
+- **Limits.** A skill is served whole or not at all: one with more than 512
+  files or more than 16 MiB of served bytes in total (the extension's limits,
+  counted after `SKILL.md` normalization) is absent from `skills/list`, refused
+  by `skills/get` and `resources/read`, and logged (`mcp.skill_unservable`).
+  Within that total, a file of any size is served.
 - **Errors.** `skills/get` answers `-32602` for a URI that names no skill you
   may read; `resources/read` answers `-32002` for a `skill://` URI that names no
   file you may read.
@@ -273,7 +274,8 @@ attributes.
   for the space `X-Space-Id` names and behind `skills:read` there:
   `GET /api/mcp/skills` (the entries of `skills/list`; with
   `?definition=draft`, the drafts you may read, at their `@draft` URIs) and
-  `GET /api/mcp/skills/content?uri=` (the bytes of `resources/read`). These
+  `GET /api/mcp/skills/archive?uri=` (a ZIP of every file `resources/read`
+  serves for the skill whose `SKILL.md` is at `uri`). These
   routes are not operations of the MCP catalog.
 
 ## The tool surface

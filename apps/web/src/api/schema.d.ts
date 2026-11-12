@@ -2213,7 +2213,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/mcp/skills/content": {
+    "/api/mcp/skills/archive": {
         parameters: {
             query?: never;
             header?: never;
@@ -2221,10 +2221,10 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Download one skill file as the MCP Skills extension serves it
-         * @description The bytes `resources/read` serves for the `skill://` URI `uri`, whose `sha256` is the `digest` of its entry. Always `application/octet-stream` with `nosniff`. Serves `appstrate code sync` and reflects the MCP Skills extension (SEP-2640) of the MCP endpoint: same server function, same entries, same bytes, for the space `X-Space-Id` names. Requires `skills:read` in that space. Rate-limited to 50 requests/minute.
+         * Download every file of a skill as the MCP Skills extension serves it
+         * @description A ZIP of every file `resources/read` serves for the skill whose `SKILL.md` is at the `skill://` URI `uri`, at its path inside the skill directory; each file's `sha256` is the `digest` of its entry. Serves `appstrate code sync` and reflects the MCP Skills extension (SEP-2640) of the MCP endpoint: same server function, same entries, same bytes, for the space `X-Space-Id` names. Requires `skills:read` in that space. Rate-limited to 50 requests/minute.
          */
-        get: operations["getServedSkillFile"];
+        get: operations["getServedSkillArchive"];
         put?: never;
         post?: never;
         delete?: never;
@@ -16741,7 +16741,7 @@ export interface operations {
                             resources: {
                                 /** @description `skill://` URI of the file. */
                                 uri: string;
-                                /** @description `sha256:<hex>` of the bytes `GET /api/mcp/skills/content` serves. */
+                                /** @description `sha256:<hex>` of the bytes `resources/read` serves for `uri`. */
                                 digest: string;
                                 /** @description Size of the file in bytes. */
                                 size: number;
@@ -16757,10 +16757,10 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
-    getServedSkillFile: {
+    getServedSkillArchive: {
         parameters: {
             query: {
-                /** @description `skill://` URI of a file listed in a skill entry's `resources`. */
+                /** @description `skill://` URI of a skill entry's `SKILL.md` (the entry's `uri`). */
                 uri: string;
             };
             header?: {
@@ -16774,19 +16774,19 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description File bytes */
+            /** @description ZIP archive of the skill's files */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/octet-stream": Blob;
+                    "application/zip": Blob;
                 };
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
-            /** @description No skill file the caller may read in this space is served at `uri`. */
+            /** @description No skill the caller may read in this space is served at `uri`. */
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };

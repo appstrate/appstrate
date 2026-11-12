@@ -114,20 +114,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   organization URL), and each read follows the `read_skill` rule with the caller's permissions in
   the skill's space (`skills:read` under the credential's ceiling, or a skill the chat turn
   injected, at the definition injected). A
-  skill with a file over 1 MiB, more than 512 files or more than 16 MiB is not served.
-  `GET /api/mcp/skills` and `GET /api/mcp/skills/content` serve the same entries and bytes over
-  REST for one space (`X-Space-Id`, `skills:read`), for `appstrate code sync`;
-  `GET /api/mcp/skills?definition=draft` lists the drafts the caller may read.
+  skill with more than 512 files or more than 16 MiB of served bytes is not served; any file
+  size within that total is. Only the canonical spelling of a `skill://` URI resolves.
+  `GET /api/mcp/skills` and `GET /api/mcp/skills/archive` (a ZIP of every file of one skill)
+  serve the same entries and bytes over REST for one space (`X-Space-Id`, `skills:read`), for
+  `appstrate code sync`; `GET /api/mcp/skills?definition=draft` lists the drafts the caller
+  may read. The `skill://` grammar and the entry type live in `@appstrate/core/skill-uri`.
 
 - **`appstrate code sync` reads skills through the MCP Skills extension's REST
   reflection** (#2175). It lists each space's skills with `GET /api/mcp/skills`
-  (`?definition=draft` for `--source draft`), downloads files with
-  `GET /api/mcp/skills/content`, checks each against its served `sha256` digest,
+  (`?definition=draft` for `--source draft`), downloads each changed skill in one
+  `GET /api/mcp/skills/archive` request, checks each file against its served
+  `sha256` digest and the received `SKILL.md` frontmatter against the entry's,
   and writes the bytes as served; only the `name` line of a skill renamed after a
-  collision is rewritten. The ledger compares the served digests, and the plan
+  collision is rewritten. An entry with a file path outside its skill directory,
+  a duplicate path or a name that is not a valid Agent Skills name (or not the
+  last segment of its URI) is reported and not written; the other skills sync. The ledger compares the served digests, and the plan
   shows the served `metadata.version`. The CLI no longer normalizes skills
   itself: the server does. `--source draft` syncs the drafts the instance lists
-  for you, published or not.
+  for you, published or not: those of the skills you may write; a draft you may
+  not write is absent from the list, so it is not synced.
 
 - **BREAKING (CLI, MCP): agents are prompts of the MCP server, and `code sync`
   syncs skills only** (#2172). The Claude Code plugin's `/appstrate:run-<agent>`

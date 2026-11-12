@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The MCP Skills extension (SEP-2640) with the read injected: `skill://` URIs,
- * the served Agent Skills directory (normalized `SKILL.md`, digests, limits),
+ * The MCP Skills extension (SEP-2640) with the read injected: the served Agent Skills directory (normalized `SKILL.md`, digests, limits),
  * and `skills/list` / `skills/get` / `resources/read` over a real MCP client.
  * Access itself is `services/skill-read.ts`, covered by the integration suite.
  */
@@ -10,15 +9,13 @@
 import { describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
 import { ResultSchema } from "@modelcontextprotocol/sdk/types.js";
-import { createInProcessPair, type SkillEntry } from "@appstrate/mcp-transport";
+import { createInProcessPair } from "@appstrate/mcp-transport";
+import type { SkillEntry } from "@appstrate/core/skill-uri";
 import { normalizeSkillMd, parseSkillFrontmatter } from "@appstrate/afps-shared/companion-files";
 import { forbidden } from "../../../../src/lib/errors.ts";
 import {
-  parseSkillUri,
   serveSkill,
-  SKILL_FILE_MAX_BYTES,
   SKILL_MAX_FILES,
-  skillFileUri,
   skillName,
 } from "../../../../src/modules/mcp/skill-resources.ts";
 import { buildSkillServer, type SkillProviderContext } from "../../../../src/modules/mcp/skills.ts";
@@ -27,48 +24,6 @@ import type { SkillSnapshot } from "../../../../src/services/skill-read.ts";
 const encode = (text: string) => new TextEncoder().encode(text);
 const sha256 = (bytes: Uint8Array) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
 const SPACE = "spc_1";
-
-describe("skill:// URIs", () => {
-  it("round-trips the published and the draft form, the name before SKILL.md", () => {
-    const published = {
-      spaceId: SPACE,
-      packageId: "@acme/tone-kit",
-      name: "tone",
-      path: "SKILL.md",
-    };
-    const uri = skillFileUri({ ...published, definition: "published" });
-    expect(uri).toBe("skill://spc_1/acme/tone-kit/tone/SKILL.md");
-    expect(parseSkillUri(uri)).toEqual({ ...published, definition: "published" });
-    const draft = skillFileUri({ ...published, definition: "draft", path: "refs/a b.md" });
-    expect(draft).toBe("skill://spc_1/acme/tone-kit@draft/tone/refs/a%20b.md");
-    expect(parseSkillUri(draft)).toEqual({
-      ...published,
-      definition: "draft",
-      path: "refs/a b.md",
-    });
-  });
-
-  it("reads a published skill named `draft` as published", () => {
-    expect(parseSkillUri("skill://spc_1/acme/kit/draft/x/SKILL.md")).toMatchObject({
-      definition: "published",
-      name: "draft",
-      path: "x/SKILL.md",
-    });
-  });
-
-  it("refuses other schemes, missing segments, traversal and invalid names", () => {
-    for (const uri of [
-      "appfile://file_1",
-      "skill://spc_1/acme/kit/SKILL.md",
-      "skill://spc_1/acme/kit/tone/../x",
-      "skill://spc_1/acme/kit/tone/%2e%2e/x",
-      "skill://spc_1/acme/kit/Tone/SKILL.md",
-      "skill://spc_1/acme/kit/tone//SKILL.md",
-    ]) {
-      expect(parseSkillUri(uri)).toBeNull();
-    }
-  });
-});
 
 describe("serveSkill", () => {
   const md = (name: string) =>
@@ -129,10 +84,28 @@ describe("serveSkill", () => {
     expect(served.skill.frontmatter.metadata).toEqual({ author: "me" });
   });
 
+  it("serves a file of any size within the spec's total", () => {
+    const big = new Uint8Array(2 * 1024 * 1024);
+    const served = serveSkill("@acme/tone", { "SKILL.md": encode(md("tone")), "a.bin": big }, null);
+    expect(served.ok).toBe(true);
+  });
+
+  it("counts the normalized SKILL.md against the total", () => {
+    const authored = encode(md("tone"));
+    const filler = new Uint8Array(16 * 1024 * 1024 - authored.byteLength);
+    const stored = { "SKILL.md": authored, "a.bin": filler };
+    expect(serveSkill("@acme/tone", stored, null).ok).toBe(true);
+    expect(serveSkill("@acme/tone", stored, "1.0.0").ok).toBe(false);
+  });
+
   it("refuses a tree it cannot serve whole", () => {
-    const big = new Uint8Array(SKILL_FILE_MAX_BYTES + 1);
+    const total = 16 * 1024 * 1024;
     expect(
-      serveSkill("@acme/tone", { "SKILL.md": encode(md("tone")), "a.bin": big }, null).ok,
+      serveSkill(
+        "@acme/tone",
+        { "SKILL.md": encode(md("tone")), "a.bin": new Uint8Array(total + 1) },
+        null,
+      ).ok,
     ).toBe(false);
     const many: Record<string, Uint8Array> = { "SKILL.md": encode(md("tone")) };
     for (let i = 0; i < SKILL_MAX_FILES; i += 1) many[`f/${i}`] = encode("x");

@@ -4,13 +4,22 @@
  * Server half of `appstrate code sync`: a client of the MCP Skills extension
  * (SEP-2640) through its REST reflection (`GET /api/mcp/skills…`, documented in
  * the OpenAPI). One list call per space (its published skills, or its drafts),
- * and downloads only for what changed, each file checked against its served
- * digest; concurrency is capped because the routes are rate limited.
+ * and one archive download per changed skill, each file checked against its
+ * served digest; concurrency is capped because the routes are rate limited.
  */
 
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+import { parseSkillFrontmatter } from "@appstrate/afps-shared/companion-files";
 import { apiFetchRaw, apiList, problemFields, sessionRevokedError } from "../api.ts";
 import { isReservedScope, parseScopedName } from "@appstrate/core/naming";
+import { unzipArtifact } from "@appstrate/core/zip";
+import {
+  parseSkillUri,
+  type SkillAddress,
+  type SkillEntry,
+  type SkillResource,
+} from "@appstrate/core/skill-uri";
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { collisionSlug, SKILL_ENTRY } from "./materialize.ts";
@@ -30,8 +39,6 @@ export const MAX_CONCURRENCY = 8;
 export type SkillSource = TargetState["source"];
 
 const SKILLS_PATH = "/api/mcp/skills";
-const SKILL_URI_PREFIX = "skill://";
-const DRAFT_MARKER = "@draft";
 const DRAFT_VERSION = "draft";
 
 class SkillSyncError extends Error {
@@ -42,20 +49,6 @@ class SkillSyncError extends Error {
     super(message);
     this.name = "SkillSyncError";
   }
-}
-
-/** A file of a SEP-2640 skill entry. */
-interface SkillResource {
-  uri: string;
-  digest: string;
-  size: number;
-}
-
-/** A SEP-2640 skill entry, as `skills/list` and `skills/get` serve it. */
-export interface SkillEntry {
-  uri: string;
-  frontmatter: { name: string; [key: string]: unknown };
-  resources: SkillResource[];
 }
 
 export interface ResolvedSkill {
@@ -77,24 +70,6 @@ export interface PlannedSkill extends ResolvedSkill {
   renamedFrom?: string;
 }
 
-/** The parts of a `skill://<spaceId>/<scope>/<package-name>[@draft]/<name>/SKILL.md` URI the sync reads. */
-interface SkillUriParts {
-  spaceId: string;
-  packageId: string;
-  packageSegment: string;
-}
-
-function skillUriParts(uri: string): SkillUriParts | null {
-  if (!uri.startsWith(SKILL_URI_PREFIX)) return null;
-  const [spaceId, scope, packageSegment] = uri.slice(SKILL_URI_PREFIX.length).split("/");
-  if (!spaceId || !scope || !packageSegment) return null;
-  const name = packageSegment.endsWith(DRAFT_MARKER)
-    ? packageSegment.slice(0, -DRAFT_MARKER.length)
-    : packageSegment;
-  const packageId = `@${scope}/${name}`;
-  return parseScopedName(packageId) ? { spaceId, packageId, packageSegment } : null;
-}
-
 function malformed(what: string): SkillSyncError {
   return new SkillSyncError(
     `Malformed skill entry: ${what}`,
@@ -102,24 +77,44 @@ function malformed(what: string): SkillSyncError {
   );
 }
 
-/** The files of `entry` by path inside the skill directory, `SKILL.md` included. */
-function resourcePaths(entry: SkillEntry): Map<string, SkillResource> {
-  if (!entry.uri.endsWith(`/${SKILL_ENTRY}`))
-    throw malformed(`${entry.uri} is not a ${SKILL_ENTRY}`);
-  const dir = entry.uri.slice(0, -SKILL_ENTRY.length);
-  const paths = new Map<string, SkillResource>();
-  for (const resource of entry.resources) {
-    if (!resource.uri.startsWith(dir)) throw malformed(`${resource.uri} is outside ${dir}`);
-    const path = resource.uri.slice(dir.length).split("/").map(decodeURIComponent).join("/");
-    paths.set(path, resource);
+/**
+ * The address of `entry` and its files by path inside the skill directory,
+ * `SKILL.md` included. Every URI must parse (a canonical `skill://` URI whose
+ * path stays inside the skill directory) and name the entry's skill, whose
+ * name is its frontmatter `name`; a path listed twice is refused.
+ */
+function entryFiles(entry: SkillEntry): {
+  address: SkillAddress;
+  files: Map<string, SkillResource>;
+} {
+  const address = parseSkillUri(entry.uri);
+  if (!address) throw malformed(`${entry.uri} is not a skill:// URI`);
+  if (address.path !== SKILL_ENTRY) throw malformed(`${entry.uri} is not a ${SKILL_ENTRY}`);
+  if (entry.frontmatter?.name !== address.name) {
+    throw malformed(`${entry.uri} does not end with its frontmatter name`);
   }
-  if (!paths.has(SKILL_ENTRY)) throw malformed(`${entry.uri} lists no ${SKILL_ENTRY}`);
-  return paths;
+  const files = new Map<string, SkillResource>();
+  for (const resource of entry.resources) {
+    const file = parseSkillUri(resource.uri);
+    if (
+      !file ||
+      file.spaceId !== address.spaceId ||
+      file.packageId !== address.packageId ||
+      file.definition !== address.definition ||
+      file.name !== address.name
+    ) {
+      throw malformed(`${resource.uri} is not a file of ${entry.uri}`);
+    }
+    if (files.has(file.path)) throw malformed(`${resource.uri} is listed twice`);
+    files.set(file.path, resource);
+  }
+  if (!files.has(SKILL_ENTRY)) throw malformed(`${entry.uri} lists no ${SKILL_ENTRY}`);
+  return { address, files };
 }
 
 /** The version label of an entry: its served `metadata.version`, `"draft"` for a draft. */
-function versionLabel(entry: SkillEntry, parts: SkillUriParts): string {
-  if (parts.packageSegment.endsWith(DRAFT_MARKER)) return DRAFT_VERSION;
+function versionLabel(entry: SkillEntry, address: SkillAddress): string {
+  if (address.definition === "draft") return DRAFT_VERSION;
   const metadata = entry.frontmatter.metadata;
   const version =
     typeof metadata === "object" && metadata !== null
@@ -133,27 +128,26 @@ function versionLabel(entry: SkillEntry, parts: SkillUriParts): string {
 
 /** A listed entry, checked and pinned by the digests of its files. */
 export function resolveSkill(entry: SkillEntry): ResolvedSkill {
-  const parts = skillUriParts(entry.uri);
-  if (!parts) throw malformed(`${entry.uri} is not a skill:// URI`);
-  const lines = [...resourcePaths(entry)]
+  const { address, files } = entryFiles(entry);
+  const lines = [...files]
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([path, resource]) => `${resource.digest} ${path}`);
   const integrity = `sha256:${createHash("sha256").update(lines.join("\n")).digest("hex")}`;
   return {
-    packageId: parts.packageId,
-    spaceId: parts.spaceId,
-    version: versionLabel(entry, parts),
+    packageId: address.packageId,
+    spaceId: address.spaceId,
+    version: versionLabel(entry, address),
     integrity,
-    frontmatterName: entry.frontmatter.name,
+    frontmatterName: address.name,
     entry,
   };
 }
 
 /** The package id a listed entry's URI names. */
 export function skillPackageId(entry: SkillEntry): string {
-  const parts = skillUriParts(entry.uri);
-  if (!parts) throw malformed(`${entry.uri} is not a skill:// URI`);
-  return parts.packageId;
+  const address = parseSkillUri(entry.uri);
+  if (!address) throw malformed(`${entry.uri} is not a skill:// URI`);
+  return address.packageId;
 }
 
 /**
@@ -171,42 +165,61 @@ export async function listSyncableSkills(
   const path = source === "draft" ? `${SKILLS_PATH}?definition=draft` : SKILLS_PATH;
   const entries = await apiList<SkillEntry>(profileName, path, { spaceId });
   return entries.filter((entry) => {
-    const parts = skillUriParts(entry.uri);
-    return parts !== null && !isReservedScope(parseScopedName(parts.packageId)!.scope);
+    const address = parseSkillUri(entry.uri);
+    return address !== null && !isReservedScope(parseScopedName(address.packageId)!.scope);
   });
 }
 
 /**
- * Every file of the skill, each checked against the size and digest its entry
- * serves, by path inside the skill directory.
+ * Every file of the skill, read in one archive request and each checked
+ * against the size and digest its entry serves, by path inside the skill
+ * directory. The archive holds exactly the entry's files, and the frontmatter
+ * of the received `SKILL.md` equals the entry's, field by field (SEP-2640).
  */
 export async function fetchSkillFiles(
   profileName: string,
   skill: ResolvedSkill,
 ): Promise<Record<string, Uint8Array>> {
-  const files: Record<string, Uint8Array> = {};
-  for (const [path, resource] of resourcePaths(skill.entry)) {
-    const res = await apiFetchRaw(
-      profileName,
-      `${SKILLS_PATH}/content?uri=${encodeURIComponent(resource.uri)}`,
-      { spaceId: skill.spaceId },
+  const expected = entryFiles(skill.entry).files;
+  const res = await apiFetchRaw(
+    profileName,
+    `${SKILLS_PATH}/archive?uri=${encodeURIComponent(skill.entry.uri)}`,
+    { spaceId: skill.spaceId },
+  );
+  if (res.status === 401) throw await sessionRevokedError(profileName);
+  if (!res.ok) {
+    const problem = problemFields(await res.json().catch(() => undefined));
+    throw new SkillSyncError(
+      `Reading ${skill.entry.uri} failed: ${problem.detail ?? `HTTP ${res.status} ${res.statusText}`}`,
     );
-    if (res.status === 401) throw await sessionRevokedError(profileName);
-    if (!res.ok) {
-      const problem = problemFields(await res.json().catch(() => undefined));
-      throw new SkillSyncError(
-        `Reading ${resource.uri} failed: ${problem.detail ?? `HTTP ${res.status} ${res.statusText}`}`,
-      );
-    }
-    const bytes = new Uint8Array(await res.arrayBuffer());
+  }
+  const changed = new SkillSyncError(
+    `${skill.entry.uri} does not match its served digests`,
+    "Re-run the sync; the skill may have changed during it.",
+  );
+  let files: Record<string, Uint8Array>;
+  try {
+    // The entry bounds the archive: no more files or bytes than it lists.
+    files = unzipArtifact(new Uint8Array(await res.arrayBuffer()), {
+      maxFiles: expected.size,
+      maxDecompressedBytes: [...expected.values()].reduce((sum, file) => sum + file.size, 0),
+    });
+  } catch {
+    throw changed;
+  }
+  if (Object.keys(files).length !== expected.size) throw changed;
+  for (const [path, resource] of expected) {
+    const bytes = files[path];
+    if (!bytes || bytes.byteLength !== resource.size) throw changed;
     const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
-    if (bytes.byteLength !== resource.size || digest !== resource.digest) {
-      throw new SkillSyncError(
-        `${resource.uri} does not match its served digest`,
-        "Re-run the sync; the skill may have changed during it.",
-      );
-    }
-    files[path] = bytes;
+    if (digest !== resource.digest) throw changed;
+  }
+  const { fields } = parseSkillFrontmatter(new TextDecoder().decode(files[SKILL_ENTRY]));
+  if (!isDeepStrictEqual(fields, skill.entry.frontmatter)) {
+    throw new SkillSyncError(
+      `${skill.entry.uri} does not match the frontmatter of its entry`,
+      "Re-run the sync; the skill may have changed during it.",
+    );
   }
   return files;
 }
@@ -247,7 +260,7 @@ export interface TargetPlan {
   target: SyncTarget;
   ledger: TargetState;
   write: string[];
-  /** Carried over untouched: already current, or listed but unresolvable now. */
+  /** Carried over untouched: already current, or listed with an entry the sync refuses. */
   keep: string[];
   /** Shared targets only: destination exists and is not ours. */
   blocked: string[];
@@ -260,7 +273,7 @@ export interface TargetPlan {
 
 export interface Catalogue {
   bySlug: EntriesBySlug;
-  /** Package ids listed but unresolvable, unlike "not published". Decides deletion. */
+  /** Package ids listed with an entry the sync refuses, unlike unlisted ones. Decides deletion. */
   unresolved: Set<string>;
 }
 
@@ -288,7 +301,7 @@ export async function diffTarget(
   context: SyncContext,
 ): Promise<TargetPlan> {
   const ledger = ownedLedger(target, state, source, context);
-  // A ledger from a build whose materializer differs is stale, but still owned.
+  // A ledger of another state version or source is stale, but still owned.
   // An installation belonging to another connection is replaced whole, so its
   // preparation is all-or-nothing rather than graded per skill.
   const contextChanged =
@@ -331,7 +344,7 @@ export async function diffTarget(
   }
 
   // Deletion is decided against the CATALOGUE, never against what resolved: a
-  // 500 on `versions/latest` is not evidence that a skill is gone.
+  // refused entry is not evidence that a skill is gone.
   for (const slug of Object.keys(ledger.managed).sort()) {
     if (wanted.has(slug)) continue;
     // The plugin is rebuilt by COPYING carried-over directories.

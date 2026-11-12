@@ -22,6 +22,7 @@ import {
   SKILL_NAME_MAX_LENGTH,
 } from "@appstrate/afps-shared/companion-files";
 import { toSlug } from "@appstrate/core/naming";
+import { zipArtifact } from "@appstrate/core/zip";
 
 const encoder = new TextEncoder();
 
@@ -281,23 +282,22 @@ export function createSkillServer(
     }
 
     const uri = url.searchParams.get("uri") ?? "";
-    if (path === "/api/mcp/skills/content") {
+    if (path === "/api/mcp/skills/archive") {
       const found = locate(uri, spaceId);
-      if (!found) return json({ code: "not_found", message: `No skill readable at ${uri}` }, 404);
-      const { p, draft, filePath } = found;
+      if (!found || found.filePath !== "SKILL.md") {
+        return json({ code: "not_found", message: `No skill readable at ${uri}` }, 404);
+      }
+      const { p, draft } = found;
       if (!draft && p.fixture.resolveError) {
         return json({ code: "internal_error", message: "read blew up" }, p.fixture.resolveError);
       }
-      const bytes = (draft ? p.draft! : p.published).files[filePath];
-      if (!bytes) return json({ code: "not_found", message: "Not found" }, 404);
-      if (filePath === "SKILL.md") {
-        if (draft) draftDownloads += 1;
-        else downloads += 1;
-      }
-      const body = !draft && p.fixture.corruptDownload ? encoder.encode("tampered") : bytes;
-      return new Response(new Uint8Array(body), {
+      if (draft) draftDownloads += 1;
+      else downloads += 1;
+      const files = { ...(draft ? p.draft! : p.published).files };
+      if (!draft && p.fixture.corruptDownload) files["SKILL.md"] = encoder.encode("tampered");
+      return new Response(new Uint8Array(zipArtifact(files)), {
         status: 200,
-        headers: { "Content-Type": "application/octet-stream" },
+        headers: { "Content-Type": "application/zip" },
       });
     }
 

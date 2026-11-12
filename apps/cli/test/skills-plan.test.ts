@@ -3,7 +3,7 @@
 /**
  * `lib/skills-sync/plan.ts` — catalogue reading (`GET /api/mcp/skills`),
  * pinning by served digests, slug assignment and the verified download
- * (`GET /api/mcp/skills/content`).
+ * (`GET /api/mcp/skills/archive`).
  *
  * `globalThis.fetch` is stubbed with the shared skill server
  * (`helpers/skills-server.ts`) rather than injected: the CLI's whole auth
@@ -49,7 +49,7 @@ function resolved(overrides: Partial<ResolvedSkill> & { packageId: string }): Re
     version: "1.0.0",
     integrity: "sha256:x",
     frontmatterName: "",
-    entry: { uri: "", frontmatter: { name: "" }, resources: [] },
+    entry: { uri: "", frontmatter: { name: "", description: "" }, resources: [] },
     ...overrides,
   };
 }
@@ -142,10 +142,37 @@ describe("resolveSkill", () => {
     const uri = "skill://spc_1/acme/pdf/pdf/SKILL.md";
     const entry = {
       uri,
-      frontmatter: { name: "pdf" },
+      frontmatter: { name: "pdf", description: "d" },
       resources: [{ uri, digest: "sha256:00", size: 1 }],
     };
     expect(() => resolveSkill(entry)).toThrow(/metadata\.version/);
+  });
+
+  it("refuses an entry naming a path outside its directory, a duplicate or an invalid name", () => {
+    const dir = "skill://spc_1/acme/pdf@draft/pdf";
+    const skillMdUri = `${dir}/SKILL.md`;
+    const file = (uri: string) => ({ uri, digest: "sha256:00", size: 1 });
+    const entry = (uri: string, name: string, extra: string[]) => ({
+      uri,
+      frontmatter: { name, description: "d" },
+      resources: [file(uri), ...extra.map(file)],
+    });
+    for (const hostile of [
+      entry(skillMdUri, "pdf", [`${dir}/../../x`]),
+      entry(skillMdUri, "pdf", [`${dir}/%2E%2E/x`]),
+      entry(skillMdUri, "pdf", [`${dir}/refs%2F..%2F..%2Fx`]),
+      entry(skillMdUri, "pdf", [`${dir}/%2Fetc/passwd`]),
+      entry(skillMdUri, "pdf", [`${dir}/refs/`]),
+      entry(skillMdUri, "pdf", [skillMdUri]),
+      entry(skillMdUri, "pdf", ["skill://spc_1/acme/other@draft/pdf/a.md"]),
+      entry(skillMdUri, "pdf", ["skill://spc_2/acme/pdf@draft/pdf/a.md"]),
+      entry(skillMdUri, "../pdf", []),
+      entry("skill://spc_1/acme/pdf@draft/Pdf/SKILL.md", "Pdf", []),
+      entry(`${dir}/a.md`, "pdf", []),
+    ]) {
+      expect(() => resolveSkill(hostile)).toThrow(/Malformed skill entry/);
+    }
+    expect(resolveSkill(entry(skillMdUri, "pdf", [`${dir}/refs/a%20b.md`])).version).toBe("draft");
   });
 });
 
@@ -259,6 +286,24 @@ describe("fetchSkillFiles", () => {
     expect(new TextDecoder().decode(draft["reference/notes.md"]!)).toBe("draft notes");
   });
 
+  it("reads a skill of more than 50 files in one request", async () => {
+    const extraFiles: Record<string, string> = {};
+    for (let i = 0; i < 60; i += 1) extraFiles[`refs/${i}.md`] = `file ${i}`;
+    const server = createSkillServer([{ id: "@acme/pdf", skillMd: skillMd("pdf"), extraFiles }]);
+    server.install();
+    const served = globalThis.fetch;
+    let archiveReads = 0;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (new URL(String(input)).pathname === "/api/mcp/skills/archive") archiveReads += 1;
+      return served(input, init);
+    }) as unknown as typeof fetch;
+
+    const files = await fetchSkillFiles("default", resolveSkill(await onlyEntry("published")));
+    expect(Object.keys(files)).toHaveLength(61);
+    expect(new TextDecoder().decode(files["refs/59.md"]!)).toBe("file 59");
+    expect(archiveReads).toBe(1);
+  });
+
   it("refuses bytes that do not match the served digest", async () => {
     createSkillServer([
       { id: "@acme/pdf", skillMd: skillMd("pdf"), corruptDownload: true },
@@ -268,5 +313,16 @@ describe("fetchSkillFiles", () => {
     await expect(fetchSkillFiles("default", skill)).rejects.toThrow(
       /does not match its served digest/,
     );
+  });
+
+  it("refuses a SKILL.md whose frontmatter differs from its entry's", async () => {
+    createSkillServer([{ id: "@acme/pdf", skillMd: skillMd("pdf"), version: "1.0.0" }]).install();
+
+    const skill = resolveSkill(await onlyEntry("published"));
+    expect(Object.keys(await fetchSkillFiles("default", skill))).toContain("SKILL.md");
+    const altered = { ...skill.entry.frontmatter, description: "Something else." };
+    await expect(
+      fetchSkillFiles("default", { ...skill, entry: { ...skill.entry, frontmatter: altered } }),
+    ).rejects.toThrow(/does not match the frontmatter of its entry/);
   });
 });

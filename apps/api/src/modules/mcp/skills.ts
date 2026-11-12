@@ -22,19 +22,13 @@
  */
 
 import { ErrorCode, McpError, type ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
-import type { AppstrateSkillProvider, SkillEntry } from "@appstrate/mcp-transport";
+import type { AppstrateSkillProvider } from "@appstrate/mcp-transport";
+import { parseSkillUri, type SkillAddress, type SkillEntry } from "@appstrate/core/skill-uri";
 import { ApiError } from "../../lib/errors.ts";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
 import type { SkillDefinitionSelector, SkillSnapshot } from "../../services/skill-read.ts";
-import {
-  parseSkillUri,
-  serveSkill,
-  SKILL_ENTRY,
-  skillEntry,
-  type ServedSkill,
-  type SkillAddress,
-} from "./skill-resources.ts";
+import { serveSkill, SKILL_ENTRY, skillEntry, type ServedSkill } from "./skill-resources.ts";
 import { RESOURCE_NOT_FOUND_ERROR_CODE } from "./tools.ts";
 
 /** Snapshot reads `skills/list` runs at once. */
@@ -70,6 +64,11 @@ export interface SkillServer {
   list: (definition: SkillDefinitionSelector) => Promise<SkillEntry[]>;
   /** The bytes `resources/read` serves for a `skill://` URI, `null` when none are readable there. */
   file: (uri: string) => Promise<Uint8Array | null>;
+  /**
+   * Every file `resources/read` serves for the skill whose `SKILL.md` is at
+   * `uri`, by path inside the skill directory; `null` when none is readable there.
+   */
+  skillFiles: (uri: string) => Promise<Record<string, Uint8Array> | null>;
 }
 
 /** Bytes the round trip through a JSON string keeps exactly: UTF-8 without a BOM to strip. */
@@ -134,6 +133,12 @@ export function buildSkillServer(ctx: SkillProviderContext): SkillServer {
     return served ? skillEntry(served.address, served.skill) : null;
   };
 
+  const skillFiles = async (uri: string): Promise<Record<string, Uint8Array> | null> => {
+    const address = parseSkillUri(uri);
+    const served = address?.path === SKILL_ENTRY ? await resolve(address) : null;
+    return served ? served.skill.files : null;
+  };
+
   const file = async (uri: string): Promise<Uint8Array | null> => {
     const address = parseSkillUri(uri);
     const served = await resolve(address);
@@ -189,5 +194,5 @@ export function buildSkillServer(ctx: SkillProviderContext): SkillServer {
     };
   };
 
-  return { provider, read, list, file };
+  return { provider, read, list, file, skillFiles };
 }

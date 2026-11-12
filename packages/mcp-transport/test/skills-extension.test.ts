@@ -7,8 +7,8 @@ import {
   createInProcessPair,
   createMcpServer,
   type AppstrateResourceProvider,
-  type SkillEntry,
 } from "../src/index.ts";
+import type { SkillEntry } from "@appstrate/core/skill-uri";
 
 const ENTRY: SkillEntry = {
   uri: "skill://space/acme/refunds/refunds/SKILL.md",
@@ -55,22 +55,16 @@ describe("createMcpServer — skills extension (SEP-2640)", () => {
     }
   });
 
-  it("answers skills/list and skills/get with complete results and no cache attributes", async () => {
+  it("answers skills/list and skills/get with no attribute of a later protocol revision", async () => {
     const pair = await createInProcessPair([], { resources, skills });
     try {
       const list = await pair.client.request({ method: "skills/list", params: {} }, ResultSchema);
-      expect(list).toEqual({
-        resultType: "complete",
-        skills: [ENTRY],
-      });
+      expect(list).toEqual({ skills: [ENTRY] });
       const get = await pair.client.request(
         { method: "skills/get", params: { uri: ENTRY.uri } },
         ResultSchema,
       );
-      expect(get).toEqual({
-        resultType: "complete",
-        skill: ENTRY,
-      });
+      expect(get).toEqual({ skill: ENTRY });
     } finally {
       await pair.close();
     }

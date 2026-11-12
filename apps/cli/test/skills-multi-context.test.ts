@@ -128,7 +128,7 @@ function installSpaces(
         hasMore: false,
       });
     }
-    if (url.pathname === "/api/mcp/skills/content") {
+    if (url.pathname === "/api/mcp/skills/archive") {
       const uri = url.searchParams.get("uri") ?? "";
       // A URI of another space, or a skill not attributed to this one, is not readable here.
       if (
@@ -185,10 +185,8 @@ describe("multi-space skill distribution regressions", () => {
     );
 
     expect(server.draftDownloads()).toBe(1);
-    expect(seen.sort()).toEqual([
-      "spc_library:skill://spc_library/acme/library@draft/library/SKILL.md",
-      "spc_library:skill://spc_library/acme/library@draft/library/references/detail.md",
-    ]);
+    // One archive per skill, named by its SKILL.md URI.
+    expect(seen).toEqual(["spc_library:skill://spc_library/acme/library@draft/library/SKILL.md"]);
     expect(await readFile(join(pluginRoot(), "skills/library/references/detail.md"), "utf8")).toBe(
       "Library-only draft reference",
     );

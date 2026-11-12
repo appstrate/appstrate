@@ -313,7 +313,7 @@ const skillEntrySchema = {
           uri: { type: "string", description: "`skill://` URI of the file." },
           digest: {
             type: "string",
-            description: "`sha256:<hex>` of the bytes `GET /api/mcp/skills/content` serves.",
+            description: "`sha256:<hex>` of the bytes `resources/read` serves for `uri`.",
           },
           size: { type: "integer", description: "Size of the file in bytes." },
         },
@@ -384,31 +384,32 @@ const skillsRestPaths = {
       },
     },
   },
-  "/api/mcp/skills/content": {
+  "/api/mcp/skills/archive": {
     get: {
-      operationId: "getServedSkillFile",
+      operationId: "getServedSkillArchive",
       tags: ["MCP"],
-      summary: "Download one skill file as the MCP Skills extension serves it",
+      summary: "Download every file of a skill as the MCP Skills extension serves it",
       description:
-        "The bytes `resources/read` serves for the `skill://` URI `uri`, whose `sha256` is the " +
-        "`digest` of its entry. Always `application/octet-stream` with `nosniff`. " +
+        "A ZIP of every file `resources/read` serves for the skill whose `SKILL.md` is at the " +
+        "`skill://` URI `uri`, at its path inside the skill directory; each file's `sha256` is " +
+        "the `digest` of its entry. " +
         SKILLS_REST_DESCRIPTION,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
-        skillUriParameter("`skill://` URI of a file listed in a skill entry's `resources`."),
+        skillUriParameter("`skill://` URI of a skill entry's `SKILL.md` (the entry's `uri`)."),
       ],
       responses: {
         "200": {
-          description: "File bytes",
+          description: "ZIP archive of the skill's files",
           content: {
-            "application/octet-stream": { schema: { type: "string", format: "binary" } },
+            "application/zip": { schema: { type: "string", format: "binary" } },
           },
         },
         ...skillReadErrors,
         "404": {
           $ref: "#/components/responses/NotFound",
-          description: "No skill file the caller may read in this space is served at `uri`.",
+          description: "No skill the caller may read in this space is served at `uri`.",
         },
       },
     },

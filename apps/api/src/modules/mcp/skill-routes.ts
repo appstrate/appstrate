@@ -9,7 +9,9 @@
  * - `GET /api/mcp/skills`: the entries of `skills/list`; with
  *   `?definition=draft`, the entries of the drafts the caller may read, at
  *   their `@draft` URIs (those `skills/get` serves);
- * - `GET /api/mcp/skills/content?uri=`: the bytes of `resources/read`.
+ * - `GET /api/mcp/skills/archive?uri=`: a ZIP of every file `resources/read`
+ *   serves for the skill whose `SKILL.md` is at `uri`, so a sync reads one
+ *   skill in one request.
  *
  * The paths sit under the module's `/api/mcp` and outside `/api/mcp/o`, the
  * RFC 8707 resource family, so they take the token every other REST route takes.
@@ -26,6 +28,7 @@ import { rateLimit } from "../../middleware/rate-limit.ts";
 import { requirePermission } from "../../middleware/require-permission.ts";
 import { readSkillSnapshot, type SkillReadSpace } from "../../services/skill-read.ts";
 import { listActivePackages } from "../../services/space-packages.ts";
+import { zipArtifact } from "@appstrate/core/zip";
 import { buildSkillServer, type SkillServer } from "./skills.ts";
 
 const SKILLS_REST_PATH = "/api/mcp/skills";
@@ -84,14 +87,14 @@ export function createSkillRouter(): Hono<AppEnv> {
     return c.json(listResponse(await requestSkillServer(c).list(definition)));
   });
 
-  app.get(`${SKILLS_REST_PATH}/content`, async (c) => {
+  app.get(`${SKILLS_REST_PATH}/archive`, async (c) => {
     const uri = uriParam(c);
-    const bytes = await requestSkillServer(c).file(uri);
-    if (!bytes) throw notFound(`No skill file readable at ${uri}`);
-    return new Response(new Uint8Array(bytes), {
+    const files = await requestSkillServer(c).skillFiles(uri);
+    if (!files) throw notFound(`No skill readable at ${uri}`);
+    return new Response(new Uint8Array(zipArtifact(files)), {
       status: 200,
       headers: {
-        "Content-Type": "application/octet-stream",
+        "Content-Type": "application/zip",
         "X-Content-Type-Options": "nosniff",
         "Cache-Control": "private, no-cache",
       },

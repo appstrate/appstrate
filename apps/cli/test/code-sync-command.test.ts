@@ -1406,7 +1406,7 @@ describe("code sync — session notice", () => {
     const serve = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const path = new URL(String(input)).pathname;
-      if (path === "/api/mcp/skills/content") return new Response("", { status: 401 });
+      if (path === "/api/mcp/skills/archive") return new Response("", { status: 401 });
       if (path === "/api/auth/cli/token") {
         return Response.json({ error: "invalid_grant" }, { status: 400 });
       }
@@ -1754,7 +1754,7 @@ describe("code sync — multiple spaces", () => {
     }) as unknown as typeof fetch;
     const { io } = createMemoryIO();
     await codeSyncCommand({ target: ["claude-plugin"], space: ["spc_1", "Library", "spc_2"] }, io);
-    expect(seen.filter((path) => path === "/api/mcp/skills/content")).toHaveLength(2);
+    expect(seen.filter((path) => path === "/api/mcp/skills/archive")).toHaveLength(2);
     expect(
       JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.url,
     ).toBe("https://app.example.com/api/mcp/o/org_1");
@@ -1816,7 +1816,7 @@ describe("code sync — active context replacement", () => {
     createSkillServer(ONE_SKILL).install();
     const serve = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-      if (new URL(String(input)).pathname === "/api/mcp/skills/content") {
+      if (new URL(String(input)).pathname === "/api/mcp/skills/archive") {
         await updateProfile("default", { orgId: "org_changed" });
       }
       return serve(input, init);
@@ -1840,7 +1840,7 @@ describe("code sync — active context replacement", () => {
     serve.install();
     const passthrough = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-      if (new URL(String(input)).pathname === "/api/mcp/skills/content") {
+      if (new URL(String(input)).pathname === "/api/mcp/skills/archive") {
         await updateProfile("default", { spaceId: "spc_2" });
       }
       return passthrough(input, init);
@@ -1980,7 +1980,7 @@ it("serializes logout behind an in-flight sync and leaves no connected installat
   });
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const path = new URL(String(input)).pathname;
-    if (path === "/api/mcp/skills/content") {
+    if (path === "/api/mcp/skills/archive") {
       started();
       await held;
     }
