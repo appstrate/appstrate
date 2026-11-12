@@ -131,6 +131,24 @@ function mcpStub() {
         error: { code: -32002, message: "Resource not found" },
       });
     }
+    if (msg.method === "skills/list") {
+      const meta = (msg.params as { _meta?: Record<string, unknown> } | undefined)?._meta;
+      const draft = meta?.["dev.appstrate/definition"] === "draft";
+      const uri = `skill://spc_1/acme/tone${draft ? "@draft" : ""}/tone/SKILL.md`;
+      return reply({
+        skills: [
+          {
+            uri,
+            frontmatter: {
+              name: "tone",
+              description: "Tone.",
+              ...(draft ? {} : { metadata: { version: "1.2.0" } }),
+            },
+            resources: [{ uri, digest: "sha256:00", size: 1 }],
+          },
+        ],
+      });
+    }
     if (msg.method === "tools/call") {
       const params = msg.params as { name: string };
       return reply({ content: [{ type: "text", text: JSON.stringify({ called: params.name }) }] });
@@ -157,6 +175,7 @@ function buildTurn(
   surface: string,
   surfaceKey: string | undefined,
   signal = new AbortController().signal,
+  listsSkills = false,
 ) {
   return buildPlatformMcpTools({
     url: MCP_URL,
@@ -167,6 +186,7 @@ function buildTurn(
     turnBudget: { deadlineAt: Date.now() + 10 * 60_000, stepCount: () => 0 },
     fetch: stub.fetch,
     ...(surfaceKey !== undefined ? { surfaceKey } : {}),
+    listsSkills,
   });
 }
 
@@ -505,6 +525,57 @@ describe("read_resource", () => {
       );
       expect(String(invalid)).toContain("`uri` must be a non-empty string");
       expect(stub.count("resources/read")).toBe(before);
+    } finally {
+      await turn.close();
+    }
+  });
+});
+
+describe("list_skills", () => {
+  it("is registered only on a turn that lists skills", async () => {
+    const stub = mcpStub();
+    const plain = await buildTurn(stub, "alpha", undefined);
+    const listing = await buildTurn(stub, "alpha", undefined, undefined, true);
+    try {
+      const names = (turn: typeof plain) => register(turn.extensionFactories).map((t) => t.name);
+      expect(names(plain)).not.toContain("list_skills");
+      expect(names(listing)).toContain("list_skills");
+    } finally {
+      await plain.close();
+      await listing.close();
+    }
+  });
+
+  it("relays `skills/list` as each skill's id, description, version and uri, drafts on request", async () => {
+    const stub = mcpStub();
+    const turn = await buildTurn(stub, "alpha", undefined, undefined, true);
+    try {
+      const list = register(turn.extensionFactories).find((t) => t.name === "list_skills")!;
+      const published = await list.execute("call_1", {});
+      expect(JSON.parse(published.content[0]!.text)).toEqual([
+        {
+          id: "@acme/tone",
+          description: "Tone.",
+          version: "1.2.0",
+          uri: "skill://spc_1/acme/tone/tone/SKILL.md",
+        },
+      ]);
+      const drafts = await list.execute("call_2", { definition: "draft" });
+      expect(JSON.parse(drafts.content[0]!.text)).toEqual([
+        {
+          id: "@acme/tone",
+          description: "Tone.",
+          version: null,
+          uri: "skill://spc_1/acme/tone@draft/tone/SKILL.md",
+        },
+      ]);
+      expect(stub.count("skills/list")).toBe(2);
+      const invalid = await list.execute("call_3", { definition: "latest" }).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(String(invalid)).toContain('`definition` must be "published" or "draft"');
+      expect(stub.count("skills/list")).toBe(2);
     } finally {
       await turn.close();
     }

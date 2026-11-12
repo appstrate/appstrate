@@ -208,16 +208,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   skill never published is not listed. A chosen skill the caller reads neither as
   a draft nor published (a never-published skill chosen by someone who may not
   write it) gets its not-available notice. In the `manual` mode, the model lists
-  the skills on the user's request with `listServedSkills` and loads one with
-  `read_resource`. The read of a turn's skills is bounded to 10 seconds; a
+  the skills on the user's request with the chat's `list_skills` tool, which
+  relays `skills/list` (drafts with `definition: "draft"`) over the turn's own
+  MCP connection, so it lists only what the turn's `read_resource` reads, and
+  loads one with `read_resource`; `list_skills` is registered on a `manual` turn
+  holding `skills:read` alone. The read of a turn's skills is bounded to 10 seconds; a
   failed list or read is logged. `AppstrateMcpClient` gains `listSkills`, which
   follows `nextCursor` and accepts an entry whose `resources` is `"dynamic"`.
-
-- **`listServedSkills` is an operation of the MCP catalogue** (#2175).
-  `GET /api/mcp/skills`, the entries of `skills/list` with their `skill://` URIs,
-  is the one route of the MCP module that `search_operations`,
-  `describe_operation` and `invoke_operation` reach; the MCP transport endpoint
-  and `GET /api/mcp/skills/archive` stay out of the catalogue.
 
 - **BREAKING (CLI, MCP): agents are prompts of the MCP server, and `code sync`
   syncs skills only** (#2172). The Claude Code plugin's `/appstrate:run-<agent>`

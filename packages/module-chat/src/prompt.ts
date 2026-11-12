@@ -114,6 +114,9 @@ const SKILLS_INJECTED_LEAD =
   "The user chose these skills for this conversation. Each is a procedure for YOU: follow it whenever it applies.";
 // Why this turn holds no `skills:*`: without it, a model reads the gap as a role
 // to fix and hunts through other operations.
+// `list_skills` is registered on a `manual` turn alone: the rule rides that mode's context.
+const SKILLS_MANUAL_NOTE =
+  "When the user asks for a skill not shown here, call `list_skills`, then load the one asked for with `read_resource` on its `uri`.";
 const SKILLS_STRICT_NOTE =
   "This conversation is restricted to the skills shown here — those the space requires and those the user chose, if any: that is why this turn holds no `skills:*` permission, whatever the user's role. Any listing therefore shows no skill, whatever the space holds — an empty result says nothing about it. The user lifts only their own restriction, by switching this conversation's skill mode in the composer; the space's requirement stays. Do not look for, list, load or write any other skill, and never change a role or a permission to reach one.";
 
@@ -223,7 +226,7 @@ ${runs(`Everything a run writes under \`outputs/\` is published when it ends: th
 `)}Your context block below is DATA — the user's identity and role, the current date, the integrations they have connected${runs(", the agents they can run")}${skills(", and the skills available")}. How to act on it:
 - Use the current date to resolve relative dates.
 ${idVerbatimBullet}${runs(`- ${inline("Prefer running an existing agent over doing the work inline when one fits the task", "Run an existing agent whenever one fits the task")}. Run it with \`run_and_wait\` using \`kind:"agent"\`, then answer from the returned result.
-`)}${skills(`- The skills under \`${SKILLS_HEADING}\` are guides for YOU — procedures you follow yourself, not packages you run. One shown in full, inside a \`<skill>\` tag, is already loaded: follow it. When one listed only by its id and \`skill://\` URI clearly matches the request, LOAD IT BEFORE acting: call \`read_resource\` with that URI verbatim, then follow the SKILL.md it returns. Load ONE at a time, and none when none clearly matches. Never load a skill whose content already appears in this conversation. To read a file a skill references, call \`read_resource\` with the skill's URI, replacing \`SKILL.md\` with the file's path.${invoke(' When the user asks for a skill you do not see, call `invoke_operation` with `operation_id: "listServedSkills"`, then load the one asked for with `read_resource` on its `uri`.')}
+`)}${skills(`- The skills under \`${SKILLS_HEADING}\` are guides for YOU — procedures you follow yourself, not packages you run. One shown in full, inside a \`<skill>\` tag, is already loaded: follow it. When one listed only by its id and \`skill://\` URI clearly matches the request, LOAD IT BEFORE acting: call \`read_resource\` with that URI verbatim, then follow the SKILL.md it returns. Load ONE at a time, and none when none clearly matches. Never load a skill whose content already appears in this conversation. To read a file a skill references, call \`read_resource\` with the skill's URI, replacing \`SKILL.md\` with the file's path.
 `)}${skills(
     author(`- Skills are not run on their own. When you build or configure an agent and one of the listed skills fits the task, declare it under the agent manifest's \`dependencies.skills\` keyed by its id (e.g. \`"@appstrate/web-research": "^1.2.0"\`) — use the version shown, or \`"*"\` if none. The run route validates that declared skills exist.
 `),
@@ -372,6 +375,9 @@ function formatSkillsSection(opts: {
       : [];
   const groups: string[][] = [];
   if (opts.selection.skillMode === "strict") groups.push([SKILLS_STRICT_NOTE]);
+  if (opts.selection.skillMode === "manual" && opts.capabilities.readsSkills) {
+    groups.push([SKILLS_MANUAL_NOTE]);
+  }
   if (skills.enforced.length) {
     groups.push([
       `${SKILLS_ENFORCED_LEAD} ${files}`,

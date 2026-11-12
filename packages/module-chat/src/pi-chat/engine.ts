@@ -95,6 +95,8 @@ export interface PiChatInput {
     spaceId: string;
     fetch?: typeof fetch;
     surfaceKey?: string;
+    /** Registers the `list_skills` tool (`manual` skill mode with `skills:read`). */
+    listsSkills?: boolean;
   };
   /** Aborts when the turn is explicitly stopped (decoupled from client disconnect). */
   abortSignal: AbortSignal;

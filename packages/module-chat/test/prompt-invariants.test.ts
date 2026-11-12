@@ -252,14 +252,12 @@ describe("full persona invariants", () => {
     expect(noDispatch).toContain("and the skills available");
   });
 
-  it("sends an invoking turn to `listServedSkills` for a skill it does not see, never `listSkills`", () => {
-    // `listSkills` answers without the `skill://` URI `read_resource` takes.
-    expect(FULL).not.toContain("listSkills");
-    const listRule =
-      'When the user asks for a skill you do not see, call `invoke_operation` with `operation_id: "listServedSkills"`, then load the one asked for with `read_resource` on its `uri`.';
-    expect(FULL).toContain(listRule);
-    // Without dispatch, the turn cannot call the operation: it is not taught.
-    expect(promptFor(["mcp:read", "skills:read"])).not.toContain("listServedSkills");
+  it("names no skills listing in the persona: `manual` turns learn `list_skills` from their context", () => {
+    // `listSkills` answers without the `skill://` URI `read_resource` takes, and
+    // `list_skills` exists on a `manual` turn alone, which the persona cannot tell.
+    for (const listing of ["listSkills", "listServedSkills", "list_skills"]) {
+      expect(FULL).not.toContain(listing);
+    }
   });
 
   it("teaches nothing about skills to a turn without `skills:read`", () => {

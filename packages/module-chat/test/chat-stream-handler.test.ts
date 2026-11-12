@@ -771,6 +771,8 @@ describe("handleChatStream", () => {
     expect(row?.skillMode).toBe("strict");
     expect(row?.pinnedSkills).toEqual(["@acme/a", "@acme/z"]);
     expect(await tokenPermissions(calls[0]!)).toEqual(["mcp:invoke", "mcp:read"]);
+    // `strict` lists no skill: `list_skills` is not registered.
+    expect(calls[0]!.platformMcp.listsSkills).toBe(false);
 
     await waitForAssistantPersist(sessionId);
   });
@@ -798,6 +800,8 @@ describe("handleChatStream", () => {
     expect(row?.skillMode).toBe("auto");
     expect(row?.pinnedSkills).toEqual([]);
     expect(await tokenPermissions(calls[0]!)).toContain("skills:read");
+    // `auto` shows the catalogue in the context: `list_skills` is not registered.
+    expect(calls[0]!.platformMcp.listsSkills).toBe(false);
 
     await waitForAssistantPersist(sessionId);
   });
@@ -828,6 +832,9 @@ describe("handleChatStream", () => {
     await collectUiChunks(res);
     expect(await tokenPermissions(calls[0]!)).toEqual(["mcp:invoke", "mcp:read", "skills:read"]);
     expect(calls[0]!.system).toContain("call `read_resource` with that URI verbatim");
+    // The model finds a skill the user asks for with `list_skills`, registered on this turn alone.
+    expect(calls[0]!.platformMcp.listsSkills).toBe(true);
+    expect(calls[0]!.system).toContain("call `list_skills`, then load the one asked for");
 
     await waitForAssistantPersist(sessionId);
   });
@@ -870,9 +877,17 @@ describe("handleChatStream", () => {
     expect(skillReads).toEqual([]);
     const system = calls[0]!.system;
     expect(system).toContain(CONTEXT_ORG_MARKER);
-    for (const absent of ["## Skills", PIN, "@acme/catalogued", "read_resource", "listSkills"]) {
+    for (const absent of [
+      "## Skills",
+      PIN,
+      "@acme/catalogued",
+      "read_resource",
+      "listSkills",
+      "list_skills",
+    ]) {
       expect(system).not.toContain(absent);
     }
+    expect(calls[0]!.platformMcp.listsSkills).toBe(false);
 
     await waitForAssistantPersist(sessionId);
   });

@@ -285,10 +285,8 @@ the `resources` capability. Results carry no cache attributes.
   `GET /api/mcp/skills` (the entries of `skills/list`; with
   `?definition=draft`, the drafts you may read, at their `@draft` URIs) and
   `GET /api/mcp/skills/archive?uri=` (a ZIP of every file `resources/read`
-  serves for the skill whose `SKILL.md` is at `uri`). The list route is the
-  operation `listServedSkills` of the MCP catalog, which `invoke_operation`
-  reaches (the chat's model lists skills with it on request); the archive
-  route is not an operation of the catalog.
+  serves for the skill whose `SKILL.md` is at `uri`). Neither route is an
+  operation of the MCP catalog.
 
 ## The tool surface
 

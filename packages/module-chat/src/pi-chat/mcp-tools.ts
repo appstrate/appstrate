@@ -14,10 +14,12 @@
  * run id appears the moment the run is launched, then the card updates as the
  * run progresses) while the tool result stays blocked on completion — the same
  * behaviour the live run card needs. `read_resource` reads a resource of the
- * platform server (a skill's files, by `skill://` URI) through `resources/read`.
+ * platform server (a skill's files, by `skill://` URI) through `resources/read`,
+ * and `list_skills` lists the space's skills through `skills/list`.
  */
 
 import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
+import { parseSkillUriPackage, SKILL_DEFINITION_META_KEY } from "@appstrate/core/skill-uri";
 import {
   createMcpHttpClient,
   RESOURCE_BLOB_MAX_BYTES,
@@ -41,6 +43,7 @@ import { platformMcpSurfaceCache, type PlatformMcpSurface } from "./mcp-surface-
 
 const RUN_AND_WAIT_TOOL = "run_and_wait";
 const READ_RESOURCE_TOOL = "read_resource";
+const LIST_SKILLS_TOOL = "list_skills";
 
 /** Pi `AgentToolResult`-shaped payload (text content + structured details). */
 interface PiToolResult {
@@ -182,6 +185,8 @@ interface BuildPlatformMcpToolsOptions {
    */
   fetch?: typeof fetch;
   surfaceKey?: string;
+  /** Registers `list_skills`: the `manual` skill mode, on a turn holding `skills:read`. */
+  listsSkills?: boolean;
 }
 
 /**
@@ -323,6 +328,7 @@ export async function buildPlatformMcpTools(
   const extensionFactories = [
     ...toolFactories,
     makeReadResourceExtension(getClient, opts.signal, opts.turnBudget),
+    ...(opts.listsSkills ? [makeListSkillsExtension(getClient, opts.signal, opts.turnBudget)] : []),
   ];
 
   const close = async () => {
@@ -426,6 +432,66 @@ function makeReadResourceExtension(
           text: inlineResourceContent(c),
         }));
         return withTurnBudgetNote({ content, details: { uri } }, turnBudget);
+      },
+    });
+  };
+}
+
+/**
+ * `list_skills` Pi tool: `skills/list` on the platform MCP server, with the
+ * turn's own bearer — how the model finds a skill the user asks for that its
+ * context does not show, before loading it with `read_resource` on its `uri`.
+ * Listing and reading share that bearer, so every URI it lists is one
+ * `read_resource` reads: a draft is listed only to a turn that may read it.
+ */
+function makeListSkillsExtension(
+  getClient: () => Promise<AppstrateMcpClient>,
+  signal: AbortSignal,
+  turnBudget: PiTurnBudget,
+): ExtensionFactory {
+  return (pi: ExtensionAPI) => {
+    pi.registerTool({
+      name: LIST_SKILLS_TOOL,
+      label: LIST_SKILLS_TOOL,
+      description:
+        'List the skills of the current space: each with its `id`, `description`, `version` (null for a draft) and the `uri` of its SKILL.md, which `read_resource` loads. Lists the published skills, or with `definition: "draft"` the drafts this conversation may read.',
+      parameters: unsafeSchema<{ definition?: "published" | "draft" }>({
+        type: "object",
+        properties: {
+          definition: {
+            type: "string",
+            enum: ["published", "draft"],
+            description: "The definition listed. Defaults to `published`.",
+          },
+        },
+        additionalProperties: false,
+      }),
+      async execute(_toolCallId: string, params: unknown, execSignal?: AbortSignal) {
+        const callSignal = execSignal ?? signal;
+        const definition = (params as { definition?: unknown } | null)?.definition ?? "published";
+        if (definition !== "published" && definition !== "draft") {
+          throw new Error('`definition` must be "published" or "draft"');
+        }
+        const client = await untilAborted(getClient(), callSignal);
+        const { skills } = await client.listSkills(
+          definition === "draft"
+            ? { meta: { [SKILL_DEFINITION_META_KEY]: "draft" }, signal: callSignal }
+            : { signal: callSignal },
+        );
+        const listed = skills.map((entry) => {
+          const version = (entry.frontmatter.metadata as { version?: unknown } | undefined)
+            ?.version;
+          return {
+            id: parseSkillUriPackage(entry.uri)?.packageId ?? null,
+            description: entry.frontmatter.description,
+            version: definition === "published" && typeof version === "string" ? version : null,
+            uri: entry.uri,
+          };
+        });
+        return withTurnBudgetNote(
+          { content: [{ type: "text", text: JSON.stringify(listed) }], details: { definition } },
+          turnBudget,
+        );
       },
     });
   };

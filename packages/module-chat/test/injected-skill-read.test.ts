@@ -27,7 +27,8 @@ import { mcpRpc, inSpace } from "../../../apps/api/test/helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../../apps/api/test/helpers/platform-app.ts";
 import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/registry.ts";
 import { buildChatPlatformDeps } from "../src/platform-services.ts";
-import { connectPlatformMcp } from "../src/pi-chat/mcp-tools.ts";
+import { buildPlatformMcpTools, connectPlatformMcp } from "../src/pi-chat/mcp-tools.ts";
+import type { ExtensionAPI } from "@appstrate/runner-pi";
 import { platformMcpUrl } from "../src/platform-mcp.ts";
 import { buildCallerContextBlock } from "../src/prompt.ts";
 import { turnCapabilities } from "../src/capabilities.ts";
@@ -268,5 +269,93 @@ describe("one skill, the same bytes for the chat, an MCP client and `code sync`"
     // The chat: the injected SKILL.md is that same text.
     expect(served["SKILL.md"]).toContain("Published body.");
     expect(block.text).toContain(`version="1.3.0">\n${served["SKILL.md"]!.trim()}\n</skill>`);
+  });
+});
+
+describe("`list_skills` then `read_resource` in a manual turn, over the turn's own bearer", () => {
+  type Tool = {
+    name: string;
+    execute: (id: string, params: unknown) => Promise<{ content: Array<{ text: string }> }>;
+  };
+
+  /** The Pi tools of a manual turn by the owner, its bearer minted from the turn's set. */
+  async function manualTurn(authoring: boolean) {
+    const permissions = turnPermissions(
+      ["chat:write", "mcp:read", "mcp:invoke", "skills:read", "skills:write"],
+      { authoring, skillMode: "manual" },
+    );
+    const turn = await buildPlatformMcpTools({
+      url: platformMcpUrl("http://localhost", owner.orgId, owner.defaultSpaceId),
+      headers: {
+        Authorization: `Bearer ${mintMcpLoopbackToken({
+          userId: owner.user.id,
+          email: owner.user.email,
+          name: owner.user.name,
+          orgId: owner.orgId,
+          orgRole: "owner",
+          permissions,
+        })}`,
+        "x-org-id": owner.orgId,
+      },
+      spaceId: owner.defaultSpaceId,
+      writeChunk: () => {},
+      signal: new AbortController().signal,
+      turnBudget: { deadlineAt: Date.now() + 60_000, stepCount: () => 0 },
+      fetch: ((input: RequestInfo | URL, init?: RequestInit) =>
+        app.request(new Request(input, init))) as typeof fetch,
+      listsSkills: true,
+    });
+    const tools: Tool[] = [];
+    const pi = { registerTool: (tool: Tool) => tools.push(tool) } as unknown as ExtensionAPI;
+    for (const factory of turn.extensionFactories) factory(pi);
+    const tool = (name: string) => tools.find((t) => t.name === name)!;
+    const call = async (name: string, params: unknown) =>
+      (await tool(name).execute("call", params)).content[0]!.text;
+    return { turn, call };
+  }
+
+  it("lists the published skill and reads it at the listed URI", async () => {
+    await seedPublishedVersion(SKILL_ID, "1.3.0", { content: skillMd("Published body.") });
+    const { turn, call } = await manualTurn(true);
+    try {
+      const listed = JSON.parse(await call("list_skills", {})) as Array<{
+        id: string;
+        uri: string;
+        version: string | null;
+      }>;
+      const uri = `skill://${owner.defaultSpaceId}/injectedread/tone/tone/SKILL.md`;
+      expect(listed).toEqual([{ id: SKILL_ID, description: "Tone.", version: "1.3.0", uri }]);
+      expect(await call("read_resource", { uri })).toContain("Published body.");
+    } finally {
+      await turn.close();
+    }
+  });
+
+  it("lists a draft only to a turn that may read it", async () => {
+    const draftUri = `skill://${owner.defaultSpaceId}/injectedread/tone@draft/tone/SKILL.md`;
+    const authoring = await manualTurn(true);
+    try {
+      const drafts = JSON.parse(
+        await authoring.call("list_skills", { definition: "draft" }),
+      ) as Array<{
+        uri: string;
+      }>;
+      expect(drafts.map((d) => d.uri)).toEqual([draftUri]);
+      expect(await authoring.call("read_resource", { uri: draftUri })).toContain("Draft body.");
+    } finally {
+      await authoring.turn.close();
+    }
+    // Authoring off: the turn holds no package write, so it neither lists nor reads the draft.
+    const reading = await manualTurn(false);
+    try {
+      expect(JSON.parse(await reading.call("list_skills", { definition: "draft" }))).toEqual([]);
+      const refused = await reading.call("read_resource", { uri: draftUri }).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(String(refused)).toContain("Resource not found");
+    } finally {
+      await reading.turn.close();
+    }
   });
 });

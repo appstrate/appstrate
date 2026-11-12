@@ -79,6 +79,8 @@ const BUILDER = [
   "runs:read",
   "skills:read",
 ];
+/** The same caller without any `skills:*`. */
+const WITHOUT_SKILLS = BUILDER.filter((permission) => !permission.startsWith("skills:"));
 /** The same caller with the authoring toggle off (or a persona without it). */
 const NO_AUTHORING = BUILDER.filter((permission) => permission !== "agents:write");
 
@@ -459,13 +461,44 @@ describe("formatCallerContext", () => {
   });
 
   it("omits the heading entirely when nothing is chosen and nothing is listed", () => {
-    for (const skillMode of ["auto", "manual"] as const) {
+    // `manual` always renders its `list_skills` rule to a turn holding `skills:read`.
+    for (const capabilities of [caps(BUILDER), caps(WITHOUT_SKILLS)]) {
       const out = contextText(
         { user: { name: "Ada" }, org: { role: "member" } },
-        { ...BASE_OPTS, skills: { skillMode, pinnedSkills: [] }, skillCatalogue: [] },
+        {
+          ...BASE_OPTS,
+          capabilities,
+          skills: { skillMode: "auto", pinnedSkills: [] },
+          skillCatalogue: [],
+        },
       );
       expect(out).not.toContain("## Skills");
     }
+    const manual = contextText(
+      { user: { name: "Ada" }, org: { role: "member" } },
+      {
+        ...BASE_OPTS,
+        capabilities: caps(WITHOUT_SKILLS),
+        skills: { skillMode: "manual", pinnedSkills: [] },
+      },
+    );
+    expect(manual).not.toContain("## Skills");
+  });
+
+  it("teaches a manual turn holding `skills:read` to list a skill it does not see, and no other turn", () => {
+    const rule =
+      "When the user asks for a skill not shown here, call `list_skills`, then load the one asked for with `read_resource` on its `uri`.";
+    const render = (skillMode: "auto" | "manual" | "strict", permissions: readonly string[]) =>
+      contextText(
+        { user: { name: "Ada" }, org: { role: "member" } },
+        { ...BASE_OPTS, capabilities: caps(permissions), skills: { skillMode, pinnedSkills: [] } },
+      );
+    expect(render("manual", BUILDER)).toContain(`## Skills\n\n${rule}`);
+    // `auto` lists the whole catalogue in the context; `strict` and a turn
+    // without `skills:read` hold no `list_skills`.
+    expect(render("auto", BUILDER)).not.toContain("list_skills");
+    expect(render("strict", WITHOUT_SKILLS)).not.toContain("list_skills");
+    expect(render("manual", WITHOUT_SKILLS)).not.toContain("list_skills");
   });
 
   it("tells a strict turn why it holds no skill permission, even with nothing chosen", () => {

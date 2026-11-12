@@ -13,11 +13,11 @@ native skill directory is not an option.
 Each conversation has a skill mode (`chat_sessions.skill_mode`) and a set of
 chosen skills (`chat_sessions.pinned_skills`):
 
-| Mode             | The model sees                          | Skill tools on the turn                                   |
-| ---------------- | --------------------------------------- | --------------------------------------------------------- |
-| `auto` (default) | the space's skills, one line each       | `read_resource`                                           |
-| `manual`         | the chosen skills in full, no listing   | `read_resource`, `listServedSkills` on the user's request |
-| `strict`         | the chosen skills in full, nothing else | `read_resource` on the injected skills only               |
+| Mode             | The model sees                          | Skill tools on the turn                              |
+| ---------------- | --------------------------------------- | ---------------------------------------------------- |
+| `auto` (default) | the space's skills, one line each       | `read_resource`                                      |
+| `manual`         | the chosen skills in full, no listing   | `read_resource`, `list_skills` on the user's request |
+| `strict`         | the chosen skills in full, nothing else | `read_resource` on the injected skills only          |
 
 **auto** is progressive disclosure, as in the Agent Skills spec: one line per
 skill (id, version, `skill://` URI, description) under `## Skills`, the
@@ -56,9 +56,20 @@ long skill passes while the whole fits. A chosen skill that is not active, whose
 read fails, or that does not fit what is left renders one notice line instead.
 At most `MAX_PINNED_SKILLS` (5) chosen skills: every one is in every turn.
 
+A **manual** turn holding `skills:read` also holds the chat's `list_skills`
+tool (`pi-chat/mcp-tools.ts`, registered by `chat-stream.ts`). It relays
+`skills/list` over the turn's own MCP connection — its bearer, its claim — as
+`read_resource` relays `resources/read`, and lists the drafts with
+`definition: "draft"`. Listing and reading share that bearer, so every URI it
+lists is one `read_resource` reads: a draft is listed only to a turn that keeps
+`skills:write`. The `## Skills` section of the turn teaches it: a skill the user
+asks for that is not shown → `list_skills`, then `read_resource` on its `uri`.
+An `auto` turn does not hold it, since its context already lists every skill
+the turn may load, and a `strict` turn lists no skill.
+
 **strict** also withholds every `skills:*` from the turn's permissions
 (`turnPermissions`, the mechanism the agent-authoring switch uses), so the MCP
-surface derived from the route guards drops `listSkills`, `getSkill` and `listServedSkills`,
+surface derived from the route guards drops `listSkills` and `getSkill`, the turn holds no `list_skills`,
 `read_resource` reads only the skills injected in the turn (named in the turn's
 signed MCP bearer, see `docs/plans/chat-enforced-skills.md`), declaring a skill in an agent (`dependencies.skills`, checked by
 `assertPackageDependenciesAccessible`) is refused, and so is writing one — a
