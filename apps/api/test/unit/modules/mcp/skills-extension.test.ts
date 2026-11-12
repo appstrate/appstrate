@@ -188,10 +188,10 @@ describe("skills/list, skills/get and resources/read", () => {
         expect(sha256(bytes)).toBe(resource.digest);
         expect(bytes.byteLength).toBe(resource.size);
       }
-      const md = await p.client.readResource({ uri: entry!.uri });
-      expect(parseSkillFrontmatter(md.contents[0]!.text as string).fields).toEqual(
-        entry!.frontmatter,
-      );
+      const [md] = (await p.client.readResource({ uri: entry!.uri })).contents;
+      expect(md && "text" in md).toBe(true);
+      const text = md && "text" in md ? md.text : "";
+      expect(parseSkillFrontmatter(text).fields).toEqual(entry!.frontmatter);
     } finally {
       await p.close();
     }
