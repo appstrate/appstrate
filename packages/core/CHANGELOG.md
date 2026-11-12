@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **`parseSkillUriPackage`** (the package and definition of a URI, from its package segments),
   the SEP-2640 size limits **`SKILL_MAX_FILES`** (512) and **`SKILL_MAX_TOTAL_BYTES`** (16 MiB),
   the `_meta` keys **`SKILL_DEFINITION_META_KEY`** (`dev.appstrate/definition`, a `skills/list`
-  of drafts) and **`SKILL_LOCK_VERSION_META_KEY`** (`dev.appstrate/lockVersion`, the draft an
+  of drafts) and **`SKILL_LOCK_VERSION_META_KEY`** (`dev.appstrate/lock_version`, the draft an
   entry was read from), and the **`SkillAddress`**, **`SkillEntry`** and **`SkillResource`** types, shared by the API, `@appstrate/mcp-transport` and the CLI. (#2175)
 - **Image MIME types in `extensionForMime`** (`@appstrate/core/naming`): `image/png`, `image/jpeg` and `image/jpg` (`jpg`), `image/gif`, `image/webp`, `image/bmp` and `image/svg+xml` (`svg`) now resolve to an extension, so spilled images are no longer extensionless. (#2120)
 - **`AJV_FORMATS_OPTIONS`** (`@appstrate/core/ajv`): the ajv-formats options `createAjv` uses, so

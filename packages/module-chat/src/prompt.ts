@@ -582,8 +582,9 @@ function entriesByPackage(
  * the caller may read, else its published version, and its `SKILL.md` is the
  * text `resources/read` serves at the entry's URI. Read with the caller's own
  * permissions, even in `strict`, whose turn holds no `skills:*`. A skill in
- * neither list, or whose read is refused, is left out; a malformed answer is
- * kept as `null`, for its own notice.
+ * neither list, or whose read is refused, is left out; a malformed answer (a
+ * draft entry without `lock_version`, a `SKILL.md` served as a blob) is kept as
+ * `null`, for its own notice.
  */
 async function loadSkillContents(
   openSkillsClient: () => Promise<ChatSkillsClient>,
@@ -613,20 +614,21 @@ async function loadSkillContents(
       ids.map(async (id) => {
         const entry = drafts.get(id) ?? published.get(id);
         if (!entry) return;
-        const text = await client.readResource({ uri: entry.uri }).then(
-          ({ contents }) => contents.find((content) => content.uri === entry.uri)?.text,
+        const read = await client.readResource({ uri: entry.uri }).then(
+          ({ contents }) => contents.find((content) => content.uri === entry.uri),
           () => undefined,
         );
-        if (text === undefined) return;
+        if (!read) return;
         const served = servedAs(entry, drafts.has(id));
+        // A `SKILL.md` served as a blob is not a skill's text: its own notice.
         loaded.set(
           id,
-          served && typeof text === "string"
+          served && "text" in read && typeof read.text === "string"
             ? {
                 packageId: id,
                 version: served.definition === "published" ? served.version : null,
                 uri: entry.uri,
-                content: text,
+                content: read.text,
                 served,
               }
             : null,

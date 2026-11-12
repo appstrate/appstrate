@@ -15,7 +15,7 @@
  * instead, at their `@draft` URIs: the list the REST route of
  * `./skill-routes.ts` serves with `?definition=draft`, through the same
  * `list`. A draft's entry carries, in its `_meta`, the `lock_version` of the
- * draft its files were read from (`dev.appstrate/lockVersion`). Whatever is
+ * draft its files were read from (`dev.appstrate/lock_version`). Whatever is
  * listed is readable; a skill over the limits of `services/served-skill.ts` is
  * absent, refused by `skills/get` and `resources/read`, and logged.
  *

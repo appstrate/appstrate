@@ -1010,13 +1010,14 @@ const skillEntry = (uri: string, version: string | null, lockVersion?: number): 
 
 /**
  * A skills connection listing `published` and, under the draft `_meta`,
- * `drafts`, serving `texts` by URI (a missing URI is refused). Records each
- * call, and whether it was closed.
+ * `drafts`, serving `texts` by URI and `blobs` as base64 (a missing URI is
+ * refused). Records each call, and whether it was closed.
  */
 function fakeSkillsClient(opts: {
   published: SkillEntry[];
   drafts?: SkillEntry[];
   texts: Record<string, string>;
+  blobs?: Record<string, string>;
 }) {
   const calls: string[] = [];
   const client: ChatSkillsClient = {
@@ -1027,6 +1028,8 @@ function fakeSkillsClient(opts: {
     },
     readResource: async ({ uri }) => {
       calls.push(`resources/read ${uri}`);
+      const blob = opts.blobs?.[uri];
+      if (blob !== undefined) return { contents: [{ uri, mimeType: "text/markdown", blob }] };
       const text = opts.texts[uri];
       if (text === undefined) throw new Error("Resource not found");
       return { contents: [{ uri, mimeType: "text/markdown", text }] };
@@ -1153,6 +1156,34 @@ describe("buildCallerContextBlock", () => {
     });
     expect(out).not.toContain("<skill");
     expect(out).toContain("`@acme/a` was chosen for this conversation but is not available here");
+  });
+
+  it("gives a chosen skill whose SKILL.md is served as a blob its could-not-be-read notice", async () => {
+    const A = "skill://spc_1/acme/a/a/SKILL.md";
+    const skills = fakeSkillsClient({
+      published: [skillEntry(A, "1.0.0")],
+      texts: {},
+      blobs: { [A]: Buffer.from("a body").toString("base64") },
+    });
+    const { deps } = fakeDeps(() => Response.json({ user: { name: "Ada" } }));
+    const { text: out, injected } = await buildCallerContextBlock(
+      fakeContext({ orgRole: "member" }),
+      {
+        origin: "http://127.0.0.1:3000",
+        headers: {},
+        spaceId: "spc_1",
+        user,
+        deps,
+        capabilities: caps(BUILDER),
+        permissions: ["mcp:read", "mcp:invoke"],
+        skills: { skillMode: "manual", pinnedSkills: ["@acme/a"] },
+        enforced: NO_ENFORCED,
+        openSkillsClient: skills.open,
+      },
+    );
+    expect(out).not.toContain("<skill");
+    expect(out).toContain("`@acme/a` was chosen for this conversation but could not be read.");
+    expect(injected).toEqual({ spaceId: "spc_1", skills: {} });
   });
 
   it("asks nothing about the chosen skills in auto", async () => {

@@ -42,7 +42,7 @@ export interface SkillResource {
 export const SKILL_DEFINITION_META_KEY = "dev.appstrate/definition";
 
 /** Entry `_meta` key of a draft: the `lock_version` of the draft its files and digests were read from. */
-export const SKILL_LOCK_VERSION_META_KEY = "dev.appstrate/lockVersion";
+export const SKILL_LOCK_VERSION_META_KEY = "dev.appstrate/lock_version";
 
 /** A SEP-2640 skill entry, identical in `skills/list` and `skills/get`. */
 export interface SkillEntry {

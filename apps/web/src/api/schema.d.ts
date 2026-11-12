@@ -16746,9 +16746,9 @@ export interface operations {
                                 /** @description Size of the file in bytes. */
                                 size: number;
                             }[];
-                            /** @description Present on a draft's entry only: `dev.appstrate/lockVersion` is the `lock_version` of the draft whose files `resources` describes. */
+                            /** @description Present on a draft's entry only: `dev.appstrate/lock_version` is the `lock_version` of the draft whose files `resources` describes. */
                             _meta?: {
-                                "dev.appstrate/lockVersion": number;
+                                "dev.appstrate/lock_version": number;
                             };
                         }[];
                         hasMore: boolean;

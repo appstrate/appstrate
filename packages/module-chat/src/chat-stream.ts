@@ -415,7 +415,7 @@ export async function handleChatStream(
                 name: user.name,
                 orgId,
                 orgRole,
-                permissions: c.get("permissions"),
+                permissions: [...c.get("permissions")],
                 viewAs: persona,
               })}`,
               "x-org-id": orgId,

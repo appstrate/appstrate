@@ -155,7 +155,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   request `_meta`, `skills/list` lists the drafts the caller may read at their `@draft`
   URIs, the entries `GET /api/mcp/skills?definition=draft` serves (one server
   function); without it, the list holds the published skills. A draft's entry
-  carries `_meta["dev.appstrate/lockVersion"]`, the `lock_version` of the draft its
+  carries `_meta["dev.appstrate/lock_version"]`, the `lock_version` of the draft its
   files and digests were read from, read under the draft lock.
 
 - **The chat injects an enforced skill as the MCP Skills extension serves it**
@@ -175,7 +175,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `resources/read`, over a platform MCP connection with the caller's own
   permissions and no injected-skills claim, closed before the turn's connection
   opens; the chat no longer reads `GET /api/packages/skills`. An injected draft is
-  pinned by its entry's `dev.appstrate/lockVersion`. Each injected `<skill>` tag
+  pinned by its entry's `dev.appstrate/lock_version`. Each injected `<skill>` tag
   carries its `uri`, and the prompt teaches `read_resource` on that URI for the
   files a skill references. `AppstrateMcpClient` gains `listSkills`.
 
