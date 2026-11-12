@@ -34,20 +34,18 @@ TEST_TIER=0 bun test apps/api/src/modules/firecracker/test/unit
 echo "==> End-to-end smoke (real microVM, jailed VMM)"
 # Root: the orchestrator's default FIRECRACKER_JAILER=on chroots each VMM
 # and drops it to a per-VM uid — same posture as the production daemon
-# (systemd User=root). The FIRECRACKER_* env and PATH (the caller's
-# bun/jailer resolution) are forwarded EXPLICITLY through `env`, never via
-# `sudo -E`: sudo-rs (the default sudo since Ubuntu 26.04, hence on the
-# ubuntu-latest runners) ignores `-E` with only a warning, which silently
-# dropped FIRECRACKER_DATA_DIR and failed the jail socket-path guard (#2153).
+# (systemd User=root). sudo-rs (the default sudo since Ubuntu 25.10, hence
+# on the ubuntu-latest runners) ignores `-E` with only a warning, which
+# silently dropped FIRECRACKER_DATA_DIR and failed the jail socket-path guard
+# (#2153): the FIRECRACKER_* vars are named in `--preserve-env=<list>`, and
+# PATH (the caller's bun/jailer resolution) goes through `env` because sudo
+# resets it either way.
 if [ "$(id -u)" = "0" ]; then
   bun run apps/api/src/modules/firecracker/scripts/dev/smoke.ts
 else
-  fc_env=()
-  while IFS= read -r name; do
-    case "$name" in FIRECRACKER_*) fc_env+=("$name=${!name}") ;; esac
-  done < <(compgen -e)
-  sudo env "PATH=$PATH" ${fc_env[@]+"${fc_env[@]}"} \
-    bun run apps/api/src/modules/firecracker/scripts/dev/smoke.ts
+  # `|| true`: compgen exits 1 when no FIRECRACKER_* is set (pipefail + -e).
+  fc_vars=$(compgen -e -X '!FIRECRACKER_*' | paste -sd, -) || true
+  sudo ${fc_vars:+"--preserve-env=$fc_vars"} env "PATH=$PATH" bun run apps/api/src/modules/firecracker/scripts/dev/smoke.ts
 fi
 
 echo "ALL FIRECRACKER CHECKS PASSED"
