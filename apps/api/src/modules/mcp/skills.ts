@@ -10,11 +10,13 @@
  * credential's ceiling).
  *
  * `skills/list` holds the published definition of each active skill, in each
- * space reached, that the caller may read and the server can serve whole. A
- * draft is never in `skills/list`: it is read by its `@draft` URI through
- * `skills/get` and `resources/read`, and the REST list of `./skill-routes.ts`
- * lists the drafts for `appstrate code sync --source draft`. Whatever is
- * listed is readable; a skill over the limits of `./skill-resources.ts` is
+ * space reached, that the caller may read and the server can serve whole. With
+ * the request `_meta` `dev.appstrate/definition: "draft"`, it holds the drafts
+ * instead, at their `@draft` URIs: the list the REST route of
+ * `./skill-routes.ts` serves with `?definition=draft`, through the same
+ * `list`. A draft's entry carries, in its `_meta`, the `lock_version` of the
+ * draft its files were read from (`dev.appstrate/lockVersion`). Whatever is
+ * listed is readable; a skill over the limits of `services/served-skill.ts` is
  * absent, refused by `skills/get` and `resources/read`, and logged.
  *
  * The served `SKILL.md` carries the package version in `metadata.version`: the
@@ -29,13 +31,24 @@
 
 import { ErrorCode, McpError, type ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
 import type { AppstrateSkillProvider } from "@appstrate/mcp-transport";
-import { parseSkillUri, type SkillAddress, type SkillEntry } from "@appstrate/core/skill-uri";
+import {
+  parseSkillUri,
+  SKILL_DEFINITION_META_KEY,
+  SKILL_LOCK_VERSION_META_KEY,
+  type SkillAddress,
+  type SkillEntry,
+} from "@appstrate/core/skill-uri";
 import { ApiError } from "../../lib/errors.ts";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
 import type { SkillDefinitionSelector, SkillRead } from "../../services/skill-read.ts";
 import { servedSkillCacheKey, type ServedSkillCache } from "./skill-cache.ts";
-import { serveSkill, SKILL_ENTRY, skillEntry, type ServedSkill } from "./skill-resources.ts";
+import {
+  serveSkill,
+  SKILL_ENTRY,
+  skillEntry,
+  type ServedSkill,
+} from "../../services/served-skill.ts";
 import { RESOURCE_NOT_FOUND_ERROR_CODE } from "./tools.ts";
 
 /** The 409 of a draft the chat turn injected and that moved since: explained to the client, never a not-found. */
@@ -66,7 +79,32 @@ export interface SkillProviderContext {
   }) => void;
 }
 
-type Served = { skill: ServedSkill; address: Omit<SkillAddress, "name" | "path"> };
+/** A skill served, with the draft `lock_version` it was read at (`null` outside a draft). */
+type Served = {
+  skill: ServedSkill;
+  address: Omit<SkillAddress, "name" | "path">;
+  lockVersion: number | null;
+};
+
+/** The entry of a served skill, a draft's carrying its `lock_version`. */
+function servedEntry({ address, skill, lockVersion }: Served): SkillEntry {
+  const entry = skillEntry(address, skill);
+  return lockVersion === null
+    ? entry
+    : { ...entry, _meta: { [SKILL_LOCK_VERSION_META_KEY]: lockVersion } };
+}
+
+/** The definition a `skills/list` request names in its `_meta`; `published` when absent. */
+function listedDefinition(meta: Record<string, unknown> | undefined): SkillDefinitionSelector {
+  const definition = meta?.[SKILL_DEFINITION_META_KEY] ?? "published";
+  if (definition !== "published" && definition !== "draft") {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `\`${SKILL_DEFINITION_META_KEY}\` must be "published" or "draft"`,
+    );
+  }
+  return definition;
+}
 
 export interface SkillServer {
   provider: AppstrateSkillProvider;
@@ -125,15 +163,15 @@ export function buildSkillServer(ctx: SkillProviderContext): SkillServer {
           ? servedSkillCacheKey(spaceId, packageId, read.version, read.integrity)
           : null;
       const cached = key === null ? undefined : ctx.cache.get(key);
-      if (cached) return { skill: cached, address };
-      const { files } = await read.readSnapshot();
+      if (cached) return { skill: cached, address, lockVersion: null };
+      const { files, lockVersion } = await read.readSnapshot();
       const served = serveSkill(packageId, files, servedVersion(read, files));
       if (!served.ok) {
         ctx.logUnservable({ ...address, reason: served.reason });
         return null;
       }
       if (key !== null) ctx.cache.set(key, served.skill);
-      return { skill: served.skill, address };
+      return { skill: served.skill, address, lockVersion };
     } catch (err) {
       if (err instanceof ApiError && err.code === INJECTED_DRAFT_CHANGED) {
         throw new McpError(ErrorCode.InvalidRequest, err.message, { code: err.code });
@@ -153,7 +191,7 @@ export function buildSkillServer(ctx: SkillProviderContext): SkillServer {
   const entry = async (uri: string): Promise<SkillEntry | null> => {
     const address = parseSkillUri(uri);
     const served = address?.path === SKILL_ENTRY ? await resolve(address) : null;
-    return served ? skillEntry(served.address, served.skill) : null;
+    return served ? servedEntry(served) : null;
   };
 
   const skillFiles = async (uri: string): Promise<Record<string, Uint8Array> | null> => {
@@ -182,13 +220,11 @@ export function buildSkillServer(ctx: SkillProviderContext): SkillServer {
     const loaded = await mapWithConcurrency(listed.flat(), LIST_CONCURRENCY, (skill) =>
       load(skill.spaceId, skill.packageId, definition),
     );
-    return loaded
-      .filter((served): served is Served => served !== null)
-      .map((served): SkillEntry => skillEntry(served.address, served.skill));
+    return loaded.filter((served): served is Served => served !== null).map(servedEntry);
   };
 
   const provider: AppstrateSkillProvider = {
-    list: () => list("published"),
+    list: (extra) => list(listedDefinition(extra._meta)),
     get: async (uri) => {
       const found = await entry(uri);
       if (!found) {

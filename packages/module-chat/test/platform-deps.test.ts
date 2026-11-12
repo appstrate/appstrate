@@ -19,7 +19,13 @@ function depsOver(
 
 describe("buildChatPlatformDeps — loadEnforcedSkills", () => {
   it("passes the platform's skills through, for the org and space asked", async () => {
-    const skill = { packageId: "@acme/house", name: "House", version: "1.0.0", content: "Body." };
+    const skill = {
+      packageId: "@acme/house",
+      name: "House",
+      version: "1.0.0",
+      uri: "skill://spc_1/acme/house/house/SKILL.md",
+      content: "Body.",
+    };
     const asked: [string, string][] = [];
     const deps = depsOver(async (orgId, spaceId) => {
       asked.push([orgId, spaceId]);

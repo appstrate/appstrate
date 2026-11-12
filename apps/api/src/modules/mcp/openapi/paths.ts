@@ -320,6 +320,14 @@ const skillEntrySchema = {
         required: ["uri", "digest", "size"],
       },
     },
+    _meta: {
+      type: "object",
+      description:
+        "Present on a draft's entry only: `dev.appstrate/lockVersion` is the `lock_version` of " +
+        "the draft whose files `resources` describes.",
+      properties: { "dev.appstrate/lockVersion": { type: "integer" } },
+      required: ["dev.appstrate/lockVersion"],
+    },
   },
   required: ["uri", "frontmatter", "resources"],
 } as const;

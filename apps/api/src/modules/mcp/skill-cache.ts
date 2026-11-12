@@ -8,7 +8,7 @@
  * whoever reads it has already applied the access rule.
  */
 
-import type { ServedSkill } from "./skill-resources.ts";
+import type { ServedSkill } from "../../services/served-skill.ts";
 
 export interface ServedSkillCache {
   get: (key: string) => ServedSkill | undefined;

@@ -484,6 +484,7 @@ describe("formatCallerContext", () => {
       packageId: "@acme/house",
       name: "House rules",
       version: "2.0.0",
+      uri: "skill://space-1/acme/house/house/SKILL.md",
       content: "---\nname: house\n---\nHouse body.",
     };
     const HOUSE_BLOCK =
@@ -1275,6 +1276,7 @@ describe("buildCallerContextBlock", () => {
       packageId: "@acme/house",
       name: "House rules",
       version: "2.0.0",
+      uri: "skill://space-1/acme/house/house/SKILL.md",
       content: "House body.",
     };
     const HOUSE_BLOCK = '<skill id="@acme/house" version="2.0.0">\nHouse body.\n</skill>';

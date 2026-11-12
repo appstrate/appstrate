@@ -54,13 +54,16 @@ authority. `listEnforcedChatSkills` answers `EnforcedChatSkillRef
 
 - It returns the space's **active** skills whose placement is flagged, ordered
   by id.
-- Each comes as `EnforcedChatSkill { packageId, name, version, content }` at its
-  `latest` published version, never the draft.
-- `content: null` means only that no published version resolves (none
+- Each comes as `EnforcedChatSkill { packageId, name, version, uri, content }`
+  at its `latest` published version, never the draft. `content` is the
+  `SKILL.md` the MCP Skills extension serves (`services/served-skill.ts`: its
+  `name` and `metadata.version` normalized), and `uri` is its `skill://` URI in
+  the space, the one `resources/read` answers with the same bytes.
+- `content: null` (with `uri: null`) means only that no published version resolves (none
   published, or deleted). The turn then renders a notice ("required by this
   space but has no published version to follow") instead of the skill.
-- Any other failure rejects, an unreadable archive
-  (`version_artifact_unavailable`, a storage fault) included. The chat module's
+- Any other failure rejects, an unreadable archive or one that cannot be
+  served as a skill (`version_artifact_unavailable`, a storage fault) included. The chat module's
   deps wrapper (`buildChatPlatformDeps`) turns a rejection of either read into a
   **503 `enforced_skills_unavailable`**. When the cause is an API error (a lost
   archive), its detail, which names the skill, is appended, so an admin knows

@@ -15,12 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`EnforcedChatSkill.uri`** (`@appstrate/core/chat-contract`): the `skill://` URI of an
+  enforced skill's `SKILL.md`, and `content` is that `SKILL.md` as the MCP Skills extension
+  serves it, so the chat injects the bytes `resources/read` answers. (#2175)
 - **`@appstrate/core/skill-uri`**: the `skill://` URIs of the MCP Skills extension (SEP-2640)
   as Appstrate serves them — **`SKILL_URI_PREFIX`**, **`skillFileUri`**, **`parseSkillUri`**
   (the canonical spelling only, a file path `isSafeArchivePath` accepts, a valid skill name),
   **`parseSkillUriPackage`** (the package and definition of a URI, from its package segments),
   the SEP-2640 size limits **`SKILL_MAX_FILES`** (512) and **`SKILL_MAX_TOTAL_BYTES`** (16 MiB),
-  and the **`SkillAddress`**, **`SkillEntry`** and **`SkillResource`** types, shared by the API, `@appstrate/mcp-transport` and the CLI. (#2175)
+  the `_meta` keys **`SKILL_DEFINITION_META_KEY`** (`dev.appstrate/definition`, a `skills/list`
+  of drafts) and **`SKILL_LOCK_VERSION_META_KEY`** (`dev.appstrate/lockVersion`, the draft an
+  entry was read from), and the **`SkillAddress`**, **`SkillEntry`** and **`SkillResource`** types, shared by the API, `@appstrate/mcp-transport` and the CLI. (#2175)
 - **Image MIME types in `extensionForMime`** (`@appstrate/core/naming`): `image/png`, `image/jpeg` and `image/jpg` (`jpg`), `image/gif`, `image/webp`, `image/bmp` and `image/svg+xml` (`svg`) now resolve to an extension, so spilled images are no longer extensionless. (#2120)
 - **`AJV_FORMATS_OPTIONS`** (`@appstrate/core/ajv`): the ajv-formats options `createAjv` uses, so
   the RJSF validator registers the same formats and client and server agree.

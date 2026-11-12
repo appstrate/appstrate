@@ -832,6 +832,7 @@ describe("handleChatStream", () => {
       packageId: "@acme/house",
       name: "House rules",
       version: "2.0.0",
+      uri: "skill://space-1/acme/house/house/SKILL.md",
       content: "Always sign with the house motto.",
     };
 

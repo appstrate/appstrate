@@ -24,6 +24,7 @@ const enforcedSkill = (id: string, body: string | null = `# ${id}`): EnforcedCha
   packageId: id,
   name: id,
   version: body === null ? null : "2.0.0",
+  uri: body === null ? null : `skill://space-1/${id.slice(1)}/skill/SKILL.md`,
   content: body,
 });
 

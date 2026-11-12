@@ -209,9 +209,13 @@ export const INJECTED_SKILLS_AUTH_EXTRA = "injectedSkills";
 
 /** An enforced skill with its SKILL.md, read with platform authority at its latest published version. */
 export interface EnforcedChatSkill extends EnforcedChatSkillRef {
+  /** The `skill://` URI of the served SKILL.md, which `resources/read` answers; null with `content`. */
+  uri: string | null;
   /**
-   * The published SKILL.md; null only when no published version resolves.
-   * A version that resolves but cannot be read rejects the whole load instead.
+   * The published SKILL.md as the MCP Skills extension serves it (its `name`
+   * and `metadata.version` normalized); null only when no published version
+   * resolves. A version that resolves but cannot be read or served rejects
+   * the whole load instead.
    */
   content: string | null;
 }

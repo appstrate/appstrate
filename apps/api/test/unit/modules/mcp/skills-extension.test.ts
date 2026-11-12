@@ -10,15 +10,16 @@ import { describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
 import { ResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { createInProcessPair } from "@appstrate/mcp-transport";
-import { SKILL_MAX_FILES, type SkillEntry } from "@appstrate/core/skill-uri";
+import {
+  SKILL_DEFINITION_META_KEY,
+  SKILL_LOCK_VERSION_META_KEY,
+  SKILL_MAX_FILES,
+  type SkillEntry,
+} from "@appstrate/core/skill-uri";
 import { normalizeSkillMd, parseSkillFrontmatter } from "@appstrate/afps-shared/companion-files";
 import { conflict, forbidden } from "../../../../src/lib/errors.ts";
 import { createServedSkillCache } from "../../../../src/modules/mcp/skill-cache.ts";
-import {
-  serveSkill,
-  skillName,
-  type ServedSkill,
-} from "../../../../src/modules/mcp/skill-resources.ts";
+import { serveSkill, skillName, type ServedSkill } from "../../../../src/services/served-skill.ts";
 import { buildSkillServer, type SkillProviderContext } from "../../../../src/modules/mcp/skills.ts";
 import type { SkillRead } from "../../../../src/services/skill-read.ts";
 
@@ -145,7 +146,11 @@ describe("skills/list, skills/get and resources/read", () => {
       version: definition === "draft" ? null : "1.0.0",
       integrity: definition === "draft" ? null : "sha256-a",
       definition,
-      readSnapshot: async () => ({ files: stored, snapshotId: "s" }),
+      readSnapshot: async () => ({
+        files: stored,
+        snapshotId: "s",
+        lockVersion: definition === "draft" ? 7 : null,
+      }),
     };
   }
 
@@ -220,13 +225,51 @@ describe("skills/list, skills/get and resources/read", () => {
     expect(drafts[0]!.frontmatter.metadata).toBeUndefined();
   });
 
-  it("serves an unlisted draft by its @draft URI through skills/get", async () => {
+  it("serves an unlisted draft by its @draft URI through skills/get, with its lock_version", async () => {
     const s = server();
     const p = await pair(s);
     try {
       const uri = "skill://spc_1/acme/tone@draft/tone/SKILL.md";
       const get = await p.client.request({ method: "skills/get", params: { uri } }, ResultSchema);
-      expect((get.skill as SkillEntry).uri).toBe(uri);
+      const skill = get.skill as SkillEntry;
+      expect(skill.uri).toBe(uri);
+      expect(skill._meta).toEqual({ [SKILL_LOCK_VERSION_META_KEY]: 7 });
+    } finally {
+      await p.close();
+    }
+  });
+
+  it("lists the drafts on skills/list when the request _meta names them, each with its lock_version", async () => {
+    const definitions: string[] = [];
+    const s = server({
+      listActiveSkillIds: async (_spaceId, definition) => {
+        definitions.push(definition);
+        return ["@acme/tone"];
+      },
+    });
+    const p = await pair(s);
+    const list = (meta?: Record<string, unknown>) =>
+      p.client.request(
+        { method: "skills/list", params: meta ? { _meta: meta } : {} },
+        ResultSchema,
+      );
+    try {
+      const drafts = (await list({ [SKILL_DEFINITION_META_KEY]: "draft" })).skills as SkillEntry[];
+      expect(drafts).toEqual(await s.list("draft"));
+      expect(drafts.map((entry) => [entry.uri, entry._meta])).toEqual([
+        ["skill://spc_1/acme/tone@draft/tone/SKILL.md", { [SKILL_LOCK_VERSION_META_KEY]: 7 }],
+      ]);
+      const published = (await list({ [SKILL_DEFINITION_META_KEY]: "published" }))
+        .skills as SkillEntry[];
+      expect(published.map((entry) => [entry.uri, entry._meta])).toEqual([
+        ["skill://spc_1/acme/tone/tone/SKILL.md", undefined],
+      ]);
+      expect(definitions).toEqual(["draft", "draft", "published"]);
+      const refused = await list({ [SKILL_DEFINITION_META_KEY]: "latest" }).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(refused).toMatchObject({ code: -32602 });
     } finally {
       await p.close();
     }
@@ -347,7 +390,11 @@ describe("the served skill cache", () => {
           definition,
           readSnapshot: async () => {
             fileReads.push(definition);
-            return { files: { "SKILL.md": skillMd }, snapshotId: "s" };
+            return {
+              files: { "SKILL.md": skillMd },
+              snapshotId: "s",
+              lockVersion: definition === "draft" ? 7 : null,
+            };
           },
         })),
       logUnservable: () => {},
@@ -390,7 +437,7 @@ describe("the served skill cache", () => {
         definition: "published",
         readSnapshot: async () => {
           fileReads.push(integrity);
-          return { files: { "SKILL.md": skillMd }, snapshotId: "s" };
+          return { files: { "SKILL.md": skillMd }, snapshotId: "s", lockVersion: null };
         },
       });
     await counted(cache, republished("sha256-a")).server.read(TONE);

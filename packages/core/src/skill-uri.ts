@@ -35,6 +35,15 @@ export interface SkillResource {
   size: number;
 }
 
+/**
+ * `skills/list` request `_meta` key: `"draft"` lists the drafts the caller may
+ * read, at their `@draft` URIs; absent, the list holds the published skills.
+ */
+export const SKILL_DEFINITION_META_KEY = "dev.appstrate/definition";
+
+/** Entry `_meta` key of a draft: the `lock_version` of the draft its files and digests were read from. */
+export const SKILL_LOCK_VERSION_META_KEY = "dev.appstrate/lockVersion";
+
 /** A SEP-2640 skill entry, identical in `skills/list` and `skills/get`. */
 export interface SkillEntry {
   /** Resource URI of the skill's `SKILL.md`, readable via `resources/read`. */
@@ -43,6 +52,8 @@ export interface SkillEntry {
   frontmatter: { name: string; description: string; [key: string]: unknown };
   /** Every file of the skill, `SKILL.md` included. */
   resources: SkillResource[];
+  /** Appstrate fields: a draft's entry carries {@link SKILL_LOCK_VERSION_META_KEY}. */
+  _meta?: { [SKILL_LOCK_VERSION_META_KEY]?: number };
 }
 
 /** What a `skill://` URI names. */

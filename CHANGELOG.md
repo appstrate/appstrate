@@ -150,6 +150,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `-32600` with the `injected_draft_changed` message (the next turn injects the
   current draft) instead of `Resource not found`.
 
+- **`skills/list` lists drafts on request, and a draft's entry names its
+  `lock_version`** (#2175). With `dev.appstrate/definition: "draft"` in the
+  request `_meta`, `skills/list` lists the drafts the caller may read at their `@draft`
+  URIs, the entries `GET /api/mcp/skills?definition=draft` serves (one server
+  function); without it, the list holds the published skills. A draft's entry
+  carries `_meta["dev.appstrate/lockVersion"]`, the `lock_version` of the draft its
+  files and digests were read from, read under the draft lock.
+
+- **The chat injects an enforced skill as the MCP Skills extension serves it**
+  (#2175). Its `SKILL.md` is the served one (`name` and `metadata.version`
+  normalized), with its `skill://` URI, so it is the bytes `resources/read`
+  answers there. A published version that cannot be served as a skill (over the
+  SEP-2640 limits, no valid name) refuses the turn's enforced skills like an
+  unreadable archive (`version_artifact_unavailable`).
+
 - **The chat's model reads platform resources with a `read_resource` tool** (#2175).
   It runs `resources/read` on the platform MCP server only, and returns each content
   whole: its text, or a binary file's base64 in `blob`.
