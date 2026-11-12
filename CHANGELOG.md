@@ -150,6 +150,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `-32600` with the `injected_draft_changed` message (the next turn injects the
   current draft) instead of `Resource not found`.
 
+- **The chat's model reads platform resources with a `read_resource` tool** (#2175).
+  It runs `resources/read` on the platform MCP server only, and returns each content
+  whole: its text, or a binary file's base64 in `blob`.
+
 - **BREAKING (CLI, MCP): agents are prompts of the MCP server, and `code sync`
   syncs skills only** (#2172). The Claude Code plugin's `/appstrate:run-<agent>`
   commands become MCP prompts of the organization's server: `prompts/list`

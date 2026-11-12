@@ -13,7 +13,8 @@
  * extension that streams a LIVE preliminary run card into the UI stream (the
  * run id appears the moment the run is launched, then the card updates as the
  * run progresses) while the tool result stays blocked on completion — the same
- * behaviour the live run card needs.
+ * behaviour the live run card needs. `read_resource` reads a resource of the
+ * platform server (a skill's files, by `skill://` URI) through `resources/read`.
  */
 
 import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
@@ -33,6 +34,7 @@ import { logger } from "../logger.ts";
 import { platformMcpSurfaceCache, type PlatformMcpSurface } from "./mcp-surface-cache.ts";
 
 const RUN_AND_WAIT_TOOL = "run_and_wait";
+const READ_RESOURCE_TOOL = "read_resource";
 
 /** Pi `AgentToolResult`-shaped payload (text content + structured details). */
 interface PiToolResult {
@@ -283,7 +285,7 @@ export async function buildPlatformMcpTools(
   };
 
   const runOrigin = new URL(opts.url).origin;
-  const extensionFactories = surface.tools.map((tool) =>
+  const toolFactories = surface.tools.map((tool) =>
     tool.name === RUN_AND_WAIT_TOOL
       ? makeRunAndWaitExtension(tool, {
           origin: runOrigin,
@@ -297,6 +299,10 @@ export async function buildPlatformMcpTools(
         })
       : makeForwardExtension(tool, getClient, opts.signal, opts.turnBudget),
   );
+  const extensionFactories = [
+    ...toolFactories,
+    makeReadResourceExtension(getClient, opts.signal, opts.turnBudget),
+  ];
 
   const close = async () => {
     if (closed) return;
@@ -350,6 +356,60 @@ function makeForwardExtension(
           { signal: callSignal },
         );
         return withTurnBudgetNote(mcpResultToPi(result as never), turnBudget);
+      },
+    });
+  };
+}
+
+/**
+ * `read_resource` Pi tool: `resources/read` on the platform MCP server, the
+ * only server it reaches — how the model reads a skill's `SKILL.md` or one of
+ * its files by its `skill://` URI (SEP-2640). Each content is returned whole:
+ * its text, or a binary file's base64 in `blob`. A refusal reaches the model
+ * as the server's error.
+ */
+function makeReadResourceExtension(
+  getClient: () => Promise<AppstrateMcpClient>,
+  signal: AbortSignal,
+  turnBudget: PiTurnBudget,
+): ExtensionFactory {
+  return (pi: ExtensionAPI) => {
+    pi.registerTool({
+      name: READ_RESOURCE_TOOL,
+      label: READ_RESOURCE_TOOL,
+      description:
+        "Read a resource of the Appstrate platform by its URI, such as a skill's SKILL.md or one of its files (`skill://…`). Returns each content whole: its text, or a binary file's base64 in `blob`.",
+      parameters: unsafeSchema<{ uri: string }>({
+        type: "object",
+        properties: {
+          uri: {
+            type: "string",
+            description:
+              "The resource URI. A skill's file sits next to its SKILL.md: replace `SKILL.md` in the skill's URI with the file's path.",
+          },
+        },
+        required: ["uri"],
+        additionalProperties: false,
+      }),
+      async execute(_toolCallId: string, params: unknown, execSignal?: AbortSignal) {
+        const callSignal = execSignal ?? signal;
+        const uri = (params as { uri?: unknown } | null)?.uri;
+        if (typeof uri !== "string" || uri === "") {
+          throw new Error("`uri` must be a non-empty string");
+        }
+        const client = await untilAborted(getClient(), callSignal);
+        const result = await client.readResource({ uri }, { signal: callSignal });
+        const content = result.contents.map((c) => {
+          const { text, blob } = c as { text?: unknown; blob?: unknown };
+          return {
+            type: "text" as const,
+            text:
+              typeof text === "string"
+                ? text
+                : JSON.stringify({ uri: c.uri, mimeType: c.mimeType, blob }),
+          };
+        });
+        return withTurnBudgetNote({ content, details: { uri } }, turnBudget);
       },
     });
   };

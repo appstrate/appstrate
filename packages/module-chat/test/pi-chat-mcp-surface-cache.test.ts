@@ -94,6 +94,22 @@ function mcpStub() {
         ],
       });
     }
+    if (msg.method === "resources/read") {
+      const { uri } = msg.params as { uri: string };
+      if (uri.endsWith("/data.bin")) {
+        return reply({ contents: [{ uri, mimeType: "application/octet-stream", blob: "AP8=" }] });
+      }
+      if (uri.endsWith("/SKILL.md")) {
+        return reply({
+          contents: [{ uri, mimeType: "text/markdown", text: "---\nname: tone\n---\n" }],
+        });
+      }
+      return json({
+        jsonrpc: "2.0",
+        id: msg.id,
+        error: { code: -32002, message: "Resource not found" },
+      });
+    }
     if (msg.method === "tools/call") {
       const params = msg.params as { name: string };
       return reply({ content: [{ type: "text", text: JSON.stringify({ called: params.name }) }] });
@@ -233,7 +249,10 @@ describe("platform MCP surface cache", () => {
       expect(b.surfaceCached).toBe(false);
       expect(stub.count("initialize")).toBe(1);
       expect(stub.count("tools/list")).toBe(1);
-      expect(register(b.extensionFactories).map((t) => t.name)).toEqual(["search_beta"]);
+      expect(register(b.extensionFactories).map((t) => t.name)).toEqual([
+        "search_beta",
+        "read_resource",
+      ]);
       expect(b.instructions).toStartWith("Instructions for beta.");
     } finally {
       await b.close();
@@ -388,5 +407,52 @@ describe("McpSurfaceCache", () => {
     const read = cache.get("k")!;
     read.tools[0]!.inputSchema.properties = { injected: {} };
     expect(cache.get("k")).toEqual(surface("t"));
+  });
+});
+
+describe("read_resource", () => {
+  const SKILL = "skill://spc_1/acme/tone/tone/SKILL.md";
+
+  it("reads a platform resource whole: text as is, a binary file's base64 in blob", async () => {
+    const stub = mcpStub();
+    const turn = await buildTurn(stub, "alpha", undefined);
+    try {
+      const read = register(turn.extensionFactories).find((t) => t.name === "read_resource")!;
+      const md = await read.execute("call_1", { uri: SKILL });
+      expect(md.content[0]).toEqual({ type: "text", text: "---\nname: tone\n---\n" });
+      const bin = await read.execute("call_2", { uri: SKILL.replace("SKILL.md", "data.bin") });
+      expect(JSON.parse(bin.content[0]!.text)).toEqual({
+        uri: SKILL.replace("SKILL.md", "data.bin"),
+        mimeType: "application/octet-stream",
+        blob: "AP8=",
+      });
+      expect(stub.count("resources/read")).toBe(2);
+    } finally {
+      await turn.close();
+    }
+  });
+
+  it("surfaces the server's refusal, and refuses a call without a uri before any hop", async () => {
+    const stub = mcpStub();
+    const turn = await buildTurn(stub, "alpha", undefined);
+    try {
+      const read = register(turn.extensionFactories).find((t) => t.name === "read_resource")!;
+      const refused = await read
+        .execute("call_1", { uri: "skill://spc_1/acme/tone/tone/missing.txt" })
+        .then(
+          () => undefined,
+          (e: unknown) => e,
+        );
+      expect(String(refused)).toContain("Resource not found");
+      const before = stub.count("resources/read");
+      const invalid = await read.execute("call_2", {}).then(
+        () => undefined,
+        (e: unknown) => e,
+      );
+      expect(String(invalid)).toContain("`uri` must be a non-empty string");
+      expect(stub.count("resources/read")).toBe(before);
+    } finally {
+      await turn.close();
+    }
   });
 });
