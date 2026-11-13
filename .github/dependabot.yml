@@ -8,6 +8,14 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    ignore:
+      # The 1.x and 2.x releases of the AFPS packages on npm are stale
+      # publications from before the version line was reset to 0.x (npm
+      # `latest` is 0.x). Without this rule Dependabot ranks them as the newest
+      # versions, proposes downgrades disguised as majors (#2135), and never
+      # offers the real 0.x updates.
+      - dependency-name: "@afps-spec/*"
+        versions: [">=1.0.0"]
     groups:
       better-auth:
         patterns:
