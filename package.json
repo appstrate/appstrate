@@ -147,7 +147,7 @@
     "@appstrate/core": "workspace:*",
     "@appstrate/db": "workspace:*",
     "@appstrate/mcp-transport": "workspace:*",
-    "@electric-sql/pglite": "^0.5.8"
+    "@electric-sql/pglite": "^0.5.16"
   },
   "overrides": {
     "zod": "4.6.7",
