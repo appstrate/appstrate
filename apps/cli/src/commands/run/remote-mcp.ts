@@ -11,9 +11,14 @@
  * platform sidecar's McpHost names it. Descriptors pass the same sanitiser as on the platform
  * before they reach the model.
  *
+ * An integration bound to the runtime (`isRuntimeBoundIntegration`, e.g. `@appstrate/platform`)
+ * takes the same path with another target: the run's MCP server on the instance the run reports
+ * to (`/api/runs/{runId}/mcp`), authenticated with the CLI's own session. A run that reports to
+ * no instance leaves it unbound.
+ *
  * Every request goes through `guardedFetchChain`, as the CLI's `api_call` engine does: the host
- * the manifest names in `source.remote.url` is the caller's own (a dev server on localhost is
- * reachable), any other host a redirect leads to is checked against the SSRF blocklist.
+ * of the target URL is the caller's own (a dev server on localhost is reachable), any other host
+ * a redirect leads to is checked against the SSRF blocklist.
  *
  * An integration whose server cannot be reached, does not answer the connection and `tools/list`
  * within {@link REMOTE_MCP_STARTUP_TIMEOUT_MS}, fails its `tools/list` or exposes no admitted tool
@@ -37,6 +42,7 @@ import {
 } from "@appstrate/afps-shared/mcp-naming";
 import { parseManifestIntegrations, isToolsWildcard } from "@appstrate/core/dependencies";
 import {
+  isRuntimeBoundIntegration,
   isUnauthenticatedIntegration,
   resolveEffectiveToolSelection,
   type IntegrationManifest,
@@ -64,6 +70,11 @@ export interface RemoteMcpExtensions {
 
 interface BuildRemoteMcpExtensionsOptions {
   bundle: Bundle;
+  /**
+   * The MCP server of the run on the instance it reports to, with the session's auth headers;
+   * absent when the run reports to no instance.
+   */
+  runToolsMcp?: { url: string; headers: Record<string, string> };
   /** Aborts the connections in flight (the CLI's shutdown signal). */
   signal?: AbortSignal;
   /** DNS resolver of the egress guard. Production omits it. */
@@ -97,13 +108,13 @@ export async function buildRemoteMcpExtensions(
   const toolNames = new Set<string>();
 
   for (const ref of readIntegrationRefs(opts.bundle)) {
-    const target = remoteTarget(opts.bundle, ref, agentTools.get(ref.name));
+    const target = remoteTarget(opts.bundle, ref, agentTools.get(ref.name), opts.runToolsMcp);
     if (!target) continue;
     if ("reason" in target) {
       unavailable.push({ id: ref.name, reason: target.reason });
       continue;
     }
-    const connected = await connectAndList(target.url, opts);
+    const connected = await connectAndList(target.url, target.headers, opts);
     if ("reason" in connected) {
       unavailable.push({ id: ref.name, reason: connected.reason });
       continue;
@@ -151,18 +162,24 @@ export async function buildRemoteMcpExtensions(
 }
 
 type RemoteTarget =
-  | { url: string; allowlist: ReadonlySet<string> | null; hidden: ReadonlySet<string> }
+  | {
+      url: string;
+      headers: Record<string, string>;
+      allowlist: ReadonlySet<string> | null;
+      hidden: ReadonlySet<string>;
+    }
   | { reason: string };
 
 /**
- * The server and tool filters of `ref` when it is an unauthenticated remote integration the agent
- * selects at least one tool of; `undefined` for any other integration. `allowlist: null` is the
- * `"*"` wildcard: every upstream tool but the hidden ones.
+ * The server, request headers and tool filters of `ref` when it is an unauthenticated remote
+ * integration the agent selects at least one tool of; `undefined` for any other integration.
+ * `allowlist: null` is the `"*"` wildcard: every upstream tool but the hidden ones.
  */
 function remoteTarget(
   bundle: Bundle,
   ref: IntegrationRef,
   agentSelection: readonly string[] | "*" | undefined,
+  runToolsMcp: BuildRemoteMcpExtensionsOptions["runToolsMcp"],
 ): RemoteTarget | undefined {
   const manifest = readIntegrationManifest(bundle, ref) as IntegrationManifest | undefined;
   if (!manifest || typeof manifest !== "object") return undefined;
@@ -172,6 +189,15 @@ function remoteTarget(
   const selection = resolveEffectiveToolSelection(agentSelection, manifest);
   const wildcard = isToolsWildcard(selection);
   if (!wildcard && !selection?.length) return undefined;
+  const filters = {
+    allowlist: wildcard ? null : new Set(selection),
+    hidden: new Set(manifest.hidden_tools ?? []),
+  };
+
+  if (isRuntimeBoundIntegration(manifest)) {
+    if (!runToolsMcp) return { reason: UNAVAILABLE_INTEGRATION_REASONS.unbound };
+    return { url: runToolsMcp.url, headers: runToolsMcp.headers, ...filters };
+  }
 
   if (typeof source.remote?.url !== "string") {
     return { reason: UNAVAILABLE_INTEGRATION_REASONS.remote_source_invalid };
@@ -189,16 +215,13 @@ function remoteTarget(
   if (source.remote?.transport !== "streamable-http") {
     return { reason: UNAVAILABLE_INTEGRATION_REASONS.resolve_error };
   }
-  return {
-    url,
-    allowlist: wildcard ? null : new Set(selection),
-    hidden: new Set(manifest.hidden_tools ?? []),
-  };
+  return { url, headers: {}, ...filters };
 }
 
 /** One connection and its complete `tools/list`, or the reason the integration is unavailable. */
 async function connectAndList(
   url: string,
+  headers: Record<string, string>,
   opts: BuildRemoteMcpExtensionsOptions,
 ): Promise<{ client: AppstrateMcpClient; tools: Tool[] } | { reason: string }> {
   const declaredHost = new URL(url).hostname;
@@ -219,6 +242,7 @@ async function connectAndList(
   try {
     client = await createMcpHttpClient(url, {
       fetch: guardedFetch,
+      extraHeaders: headers,
       clientInfo: CLIENT_INFO,
       signal,
     });

@@ -104,8 +104,11 @@ interface RegisteredTool {
   ) => Promise<{ content: Array<{ type: string; text?: string }> }>;
 }
 
-async function wire(bundle: Bundle) {
-  const extensions = await buildRemoteMcpExtensions({ bundle });
+async function wire(
+  bundle: Bundle,
+  options: Omit<Parameters<typeof buildRemoteMcpExtensions>[0], "bundle"> = {},
+) {
+  const extensions = await buildRemoteMcpExtensions({ bundle, ...options });
   const tools: RegisteredTool[] = [];
   for (const factory of extensions.factories) {
     factory({ registerTool: (t: RegisteredTool) => tools.push(t) } as never);
@@ -254,5 +257,71 @@ describe("run --local — unauthenticated remote MCP integrations", () => {
     } finally {
       silent.stop(true);
     }
+  });
+});
+
+describe("run --local — integration bound to the runtime", () => {
+  const runtimeBound = {
+    source: {
+      kind: "remote",
+      remote: { url: "https://platform.appstrate.invalid/mcp", transport: "streamable-http" },
+    },
+    _meta: { "dev.appstrate/platform": {} },
+  };
+  let runServer: ReturnType<typeof Bun.serve>;
+  let runServerUrl: string;
+  const authorizations: Array<string | null> = [];
+
+  beforeAll(() => {
+    const handler = legacyMcpHandler({ tools: [echoTool("a"), echoTool("b")] });
+    runServer = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (req) => {
+        authorizations.push(req.headers.get("authorization"));
+        if (req.headers.get("authorization") !== "Bearer session-token") {
+          return new Response("unauthorized", { status: 401 });
+        }
+        return handler(req);
+      },
+    });
+    runServerUrl = `http://127.0.0.1:${runServer.port}/api/runs/run_1/mcp`;
+  });
+
+  afterAll(() => {
+    runServer.stop(true);
+  });
+
+  it("reaches the run's MCP server with the session headers, filtered by the selection", async () => {
+    authorizations.length = 0;
+    const { extensions, tools } = await wire(
+      makeBundle({ tools: ["a"], integration: runtimeBound }),
+      {
+        runToolsMcp: {
+          url: runServerUrl,
+          headers: { Authorization: "Bearer session-token", "X-Space-Id": "spc_1" },
+        },
+      },
+    );
+    try {
+      expect(extensions.unavailable).toEqual([]);
+      expect(tools.map((t) => t.name)).toEqual(["acme_docs__a"]);
+      const result = await tools[0]!.execute("call_1", { q: "hi" });
+      expect(result.content[0]?.text).toBe("a:hi");
+      expect(authorizations.length).toBeGreaterThan(0);
+      expect(authorizations.every((value) => value === "Bearer session-token")).toBe(true);
+    } finally {
+      await extensions.close();
+    }
+  });
+
+  it("leaves the integration unbound when the run reports to no instance", async () => {
+    authorizations.length = 0;
+    const { extensions, tools } = await wire(makeBundle({ integration: runtimeBound }));
+    expect(tools).toEqual([]);
+    expect(extensions.unavailable).toEqual([
+      { id: DOCS, reason: UNAVAILABLE_INTEGRATION_REASONS.unbound },
+    ]);
+    expect(authorizations).toEqual([]);
   });
 });

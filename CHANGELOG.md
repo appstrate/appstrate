@@ -121,6 +121,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   integration that carries it answers `400`, and a bundle is refused when any of its non-system
   packages carries it, dependencies included.
 
+- **`appstrate run` in local mode serves the platform tools** (#2199). An integration bound
+  to the runtime (`@appstrate/platform`) takes the path of the unauthenticated remote MCP
+  integrations, with the run's MCP server on the instance (`/api/runs/{runId}/mcp`) as its
+  target, authenticated with the CLI's own session (`agents:run`). A run that reports to no
+  instance starts without it (`no connection is bound to this run`). The CLI emits the
+  runtime-ready event, which moves the reported run to `running`, before it connects its
+  remote MCP integrations.
+
 - **BREAKING: `run_and_wait` inline defaults declare `@appstrate/platform`** (#2199). An
   inline manifest gets the `@appstrate/platform` dependency with its `log` tool selected
   unless it already names that integration in `dependencies.integrations` or

@@ -80,6 +80,12 @@ export interface ReportSession {
   runSecret: string;
   /** The registration's `warnings`: integrations the run starts without. */
   warnings: LaunchItem[];
+  /**
+   * The instance's MCP server of this run (`/api/runs/{runId}/mcp`) and the headers that
+   * authenticate the CLI's own session to it: the endpoint of an integration bound to the
+   * runtime (`isRuntimeBoundIntegration`).
+   */
+  runToolsMcp: { url: string; headers: Record<string, string> };
 }
 
 /** User-provided execution-environment metadata attached to the run record. */
@@ -144,16 +150,17 @@ export async function startReportSession(
   opts: ReportOptions,
   contextSnapshot: ReportContextSnapshot,
 ): Promise<ReportSession> {
-  const url = `${ctx.instance.replace(/\/$/, "")}/api/runs/remote`;
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+  const runsUrl = `${ctx.instance.replace(/\/$/, "")}/api/runs`;
+  const url = `${runsUrl}/remote`;
+  const authHeaders: Record<string, string> = {
     Authorization: `Bearer ${ctx.bearerToken}`,
     // `/api/runs/*` is space-scoped; dashboard-user JWTs don't pin a space,
     // so the middleware requires `X-Space-Id` explicitly. Missing this
     // rejects every remote run with "Space context required".
     "X-Space-Id": ctx.spaceId,
   };
-  if (ctx.orgId) headers["X-Org-Id"] = ctx.orgId;
+  if (ctx.orgId) authHeaders["X-Org-Id"] = ctx.orgId;
+  const headers: Record<string, string> = { "Content-Type": "application/json", ...authHeaders };
 
   const sink = opts.ttlSeconds ? { sink: { ttl_seconds: opts.ttlSeconds } } : {};
   const baseBody = {
@@ -224,6 +231,10 @@ export async function startReportSession(
     sinkUrl: payload.url,
     runSecret: payload.secret,
     warnings: parseLaunchItems(payload.warnings),
+    runToolsMcp: {
+      url: `${runsUrl}/${encodeURIComponent(payload.id)}/mcp`,
+      headers: authHeaders,
+    },
   };
 }
 

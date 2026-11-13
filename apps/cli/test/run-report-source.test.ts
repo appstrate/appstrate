@@ -241,6 +241,20 @@ describe("startReportSession — integration readiness", () => {
     expect(session.warnings).toEqual([WARNING]);
   });
 
+  it("returns the run's MCP server on the instance with the session's auth headers", async () => {
+    stub = installStubFetch(() => ok());
+    const session = await startReportSession(
+      SOURCE,
+      REPORT_CTX,
+      { mode: "true", fallback: "abort" },
+      SNAPSHOT,
+    );
+    expect(session.runToolsMcp).toEqual({
+      url: "https://app.example.com/api/runs/run_test_1234567890/mcp",
+      headers: { Authorization: "Bearer ask_test", "X-Space-Id": "spc_1", "X-Org-Id": "org_1" },
+    });
+  });
+
   /** What `appstrate run --report` prints for this session, per stream. */
   function announce(session: ReportSession | null, json: boolean) {
     const out = { stdout: "", stderr: "" };
