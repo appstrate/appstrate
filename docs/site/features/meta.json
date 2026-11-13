@@ -25,6 +25,7 @@
     "roles-and-permissions",
     "end-users",
     "embedded-sign-in",
+    "enterprise-sign-in",
     "api-keys",
     "sandbox-and-sidecar"
   ]
