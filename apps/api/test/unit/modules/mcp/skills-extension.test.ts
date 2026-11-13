@@ -18,9 +18,10 @@ import {
 } from "@appstrate/core/skill-uri";
 import { normalizeSkillMd, parseSkillFrontmatter } from "@appstrate/afps-shared/companion-files";
 import { conflict, forbidden } from "../../../../src/lib/errors.ts";
-import { createServedSkillCache } from "../../../../src/modules/mcp/skill-cache.ts";
+import { createServedSkillCache } from "../../../../src/services/served-skill-cache.ts";
 import { serveSkill, skillName, type ServedSkill } from "../../../../src/services/served-skill.ts";
-import { buildSkillServer, type SkillProviderContext } from "../../../../src/modules/mcp/skills.ts";
+import type { ServedSkillsContext } from "../../../../src/services/served-skills.ts";
+import { buildSkillServer } from "../../../../src/modules/mcp/skills.ts";
 import type { SkillRead } from "../../../../src/services/skill-read.ts";
 
 const encode = (text: string) => new TextEncoder().encode(text);
@@ -154,9 +155,9 @@ describe("skills/list, skills/get and resources/read", () => {
     };
   }
 
-  function server(overrides: Partial<SkillProviderContext> = {}) {
+  function server(overrides: Partial<ServedSkillsContext> = {}) {
     const unservable: string[] = [];
-    const ctx: SkillProviderContext = {
+    const ctx: ServedSkillsContext = {
       spaceIds: [SPACE],
       listActiveSkillIds: async () => ["@acme/tone", "@acme/hidden"],
       readSkill: async (_spaceId, packageId, definition) => {
@@ -375,7 +376,7 @@ describe("the served skill cache", () => {
   /** A skill server whose file reads are counted, over `cache`. */
   function counted(
     cache = createServedSkillCache(1024 * 1024),
-    readSkill?: SkillProviderContext["readSkill"],
+    readSkill?: ServedSkillsContext["readSkill"],
   ) {
     const fileReads: string[] = [];
     const server = buildSkillServer({
@@ -429,7 +430,7 @@ describe("the served skill cache", () => {
     const cache = createServedSkillCache(1024 * 1024);
     const fileReads: string[] = [];
     const republished =
-      (integrity: string): SkillProviderContext["readSkill"] =>
+      (integrity: string): ServedSkillsContext["readSkill"] =>
       async (_spaceId, packageId) => ({
         packageId,
         version: "1.0.0",

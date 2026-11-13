@@ -94,6 +94,14 @@
       "description": "LLM model configuration"
     },
     {
+      "name": "Model Provider Credentials",
+      "description": "Connect model providers (API key or OAuth subscription) to an organization"
+    },
+    {
+      "name": "Integrations",
+      "description": "Connect, list and disconnect the third-party services an agent can use"
+    },
+    {
       "name": "Proxies",
       "description": "Org-level HTTP proxy configuration"
     },
@@ -854,6 +862,7 @@
                       "source": "local",
                       "scope": "@acme",
                       "version": "1.2.0",
+                      "published": true,
                       "type": "agent",
                       "running_runs": 1,
                       "dependencies": {
@@ -874,6 +883,7 @@
                       "source": "system",
                       "scope": "@appstrate",
                       "version": "2.0.0",
+                      "published": true,
                       "type": "agent",
                       "running_runs": 0,
                       "dependencies": {
@@ -19785,6 +19795,181 @@
         }
       }
     },
+    "/api/packages/skills/served": {
+      "get": {
+        "operationId": "listServedSkills",
+        "tags": ["Packages"],
+        "summary": "List skills as the MCP Skills extension serves them",
+        "description": "The entries of `skills/list`: the published definition of each active skill of the space that the caller may read and the server can serve whole. With `definition=draft`, the drafts of the space that the caller may read (only a caller who may write a package reads its draft), at their `@draft` URIs, as `skills/list` lists them with the request `_meta` `{\"dev.appstrate/definition\": \"draft\"}`. Serves `appstrate code sync` and reflects the MCP Skills extension (SEP-2640) of the MCP endpoint: same server function, same entries, same bytes, for the space `X-Space-Id` names. Requires `skills:read` in that space. Rate-limited to 50 requests/minute.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "name": "definition",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["published", "draft"],
+              "default": "published"
+            },
+            "description": "The definition listed."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Skill entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "enum": ["list"]
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "description": "A skill as the MCP Skills extension (SEP-2640) serves it: the entry of `skills/list` and `skills/get`.",
+                        "properties": {
+                          "uri": {
+                            "type": "string",
+                            "description": "`skill://` URI of the skill's `SKILL.md`: `skill://<spaceId>/<scope>/<package-name>/<name>/SKILL.md` for the published definition, `<package-name>@draft` in place of `<package-name>` for the draft."
+                          },
+                          "frontmatter": {
+                            "type": "object",
+                            "description": "The YAML frontmatter of the served `SKILL.md`, verbatim. `metadata.version` is the package version: the semver of a published definition; a draft has none.",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["name", "description"],
+                            "additionalProperties": true
+                          },
+                          "resources": {
+                            "type": "array",
+                            "description": "Every file of the skill, `SKILL.md` included.",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "uri": {
+                                  "type": "string",
+                                  "description": "`skill://` URI of the file."
+                                },
+                                "digest": {
+                                  "type": "string",
+                                  "description": "`sha256:<hex>` of the bytes `resources/read` serves for `uri`."
+                                },
+                                "size": {
+                                  "type": "integer",
+                                  "description": "Size of the file in bytes."
+                                }
+                              },
+                              "required": ["uri", "digest", "size"]
+                            }
+                          },
+                          "_meta": {
+                            "type": "object",
+                            "description": "Present on a draft's entry only: `dev.appstrate/lock_version` is the `lock_version` of the draft whose files `resources` describes.",
+                            "properties": {
+                              "dev.appstrate/lock_version": {
+                                "type": "integer"
+                              }
+                            },
+                            "required": ["dev.appstrate/lock_version"]
+                          }
+                        },
+                        "required": ["uri", "frontmatter", "resources"]
+                      }
+                    },
+                    "hasMore": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["object", "data", "hasMore"]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/packages/skills/served/archive": {
+      "get": {
+        "operationId": "getServedSkillArchive",
+        "tags": ["Packages"],
+        "summary": "Download every file of a skill as the MCP Skills extension serves it",
+        "description": "A ZIP of every file `resources/read` serves for the skill whose `SKILL.md` is at the `skill://` URI `uri`, at its path inside the skill directory; each file's `sha256` is the `digest` of its entry. Serves `appstrate code sync` and reflects the MCP Skills extension (SEP-2640) of the MCP endpoint: same server function, same entries, same bytes, for the space `X-Space-Id` names. Requires `skills:read` in that space. Rate-limited to 50 requests/minute.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "name": "uri",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "`skill://` URI of a skill entry's `SKILL.md` (the entry's `uri`)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ZIP archive of the skill's files",
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound",
+            "description": "No skill the caller may read in this space is served at `uri`."
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
     "/api/packages/skills/{scope}/{name}/versions/info": {
       "get": {
         "operationId": "getSkillVersionInfo",
@@ -24110,7 +24295,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "Enforcing the skill in the chat is refused: it has no published version (`no_published_version`), the space already enforces the maximum number of skills (`enforced_skills_limit`, the cap in the `limit` extension), or the enforced skills' published `SKILL.md` bodies would exceed the chat's skills budget (`enforced_skills_budget`, with `budget` and `total` extensions). Nothing in the patch is written.",
+            "description": "Enforcing the skill in the chat is refused: it has no published version (`no_published_version`), the space already enforces the maximum number of skills (`enforced_skills_limit`, the cap in the `limit` extension), the latest published version of the skill, or of another skill already enforced here, cannot be served as an Agent Skills skill (`skill_not_servable`), or the enforced skills' `SKILL.md` bodies, as the chat injects them, would exceed the chat's skills budget (`enforced_skills_budget`, with `budget` and `total` extensions). Nothing in the patch is written.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -27059,7 +27244,7 @@
             "name": "X-Target",
             "in": "header",
             "required": true,
-            "description": "Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty.",
+            "description": "Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. A redirect to a URL outside `authorized_uris` is not followed: the upstream's 3xx is returned as is (status, `Location`, body) and nothing is sent to that URL, so the caller can fetch a signed URL itself. On a call that substitutes a `{{credential_field}}` such a redirect is refused instead (`403 unauthorized_target`): its `Location` could carry the substituted value.",
             "schema": {
               "type": "string"
             }
@@ -27185,7 +27370,7 @@
             }
           },
           "401": {
-            "description": "The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the credentials were refreshed server-side but the body could not be replayed — the caller replays the call itself.",
+            "description": "The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the forced refresh served a credential to retry with but the body could not be replayed — the caller replays the call itself. A relayed 401 the forced refresh could not recover from carries `X-Appstrate-Credential-Status`.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -27194,8 +27379,15 @@
                   "example": "appstrate; received-status=401"
                 }
               },
+              "X-Appstrate-Credential-Status": {
+                "description": "Set by the platform (never relayed from the upstream) on a relayed 401 after a forced refresh that left the rejected credential in place. An RFC 8941 Item: `in_use; cause=<cause>[; failures=<n>; max-failures=<max>]` — the credential stays in use, and `failures` counts this rejection toward `INTEGRATION_REFRESH_MAX_FAILURES` when it was counted — or `needs_reconnection; cause=<cause>` — the connection is now flagged `needs_reconnection` and its owner must reconnect it. `cause` is the credential-failure vocabulary (`refresh_token_revoked`, `unrefreshable`, `upstream_transient`, …). Absent: no refresh verdict, the upstream refused the request itself.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^(in_use; cause=[a-z_]+(; failures=[0-9]+; max-failures=[0-9]+)?|needs_reconnection; cause=[a-z_]+)$"
+                }
+              },
               "X-Auth-Refreshed": {
-                "description": "Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry.",
+                "description": "Present and set to `true` on a streaming-upload 401 where the forced refresh served a credential to retry with but the body could not be replayed (absent when it did not: `X-Appstrate-Credential-Status` says why). Signals the caller to retry.",
                 "schema": {
                   "type": "string",
                   "enum": ["true"]
@@ -27211,7 +27403,7 @@
             }
           },
           "403": {
-            "description": "Forbidden. `unauthorized_target` — the target or a redirect hop is not in `authorized_uris`, or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
+            "description": "Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -27418,7 +27610,7 @@
             "name": "X-Target",
             "in": "header",
             "required": true,
-            "description": "Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty.",
+            "description": "Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. A redirect to a URL outside `authorized_uris` is not followed: the upstream's 3xx is returned as is (status, `Location`, body) and nothing is sent to that URL, so the caller can fetch a signed URL itself. On a call that substitutes a `{{credential_field}}` such a redirect is refused instead (`403 unauthorized_target`): its `Location` could carry the substituted value.",
             "schema": {
               "type": "string"
             }
@@ -27544,7 +27736,7 @@
             }
           },
           "401": {
-            "description": "The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the credentials were refreshed server-side but the body could not be replayed — the caller replays the call itself.",
+            "description": "The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the forced refresh served a credential to retry with but the body could not be replayed — the caller replays the call itself. A relayed 401 the forced refresh could not recover from carries `X-Appstrate-Credential-Status`.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -27553,8 +27745,15 @@
                   "example": "appstrate; received-status=401"
                 }
               },
+              "X-Appstrate-Credential-Status": {
+                "description": "Set by the platform (never relayed from the upstream) on a relayed 401 after a forced refresh that left the rejected credential in place. An RFC 8941 Item: `in_use; cause=<cause>[; failures=<n>; max-failures=<max>]` — the credential stays in use, and `failures` counts this rejection toward `INTEGRATION_REFRESH_MAX_FAILURES` when it was counted — or `needs_reconnection; cause=<cause>` — the connection is now flagged `needs_reconnection` and its owner must reconnect it. `cause` is the credential-failure vocabulary (`refresh_token_revoked`, `unrefreshable`, `upstream_transient`, …). Absent: no refresh verdict, the upstream refused the request itself.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^(in_use; cause=[a-z_]+(; failures=[0-9]+; max-failures=[0-9]+)?|needs_reconnection; cause=[a-z_]+)$"
+                }
+              },
               "X-Auth-Refreshed": {
-                "description": "Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry.",
+                "description": "Present and set to `true` on a streaming-upload 401 where the forced refresh served a credential to retry with but the body could not be replayed (absent when it did not: `X-Appstrate-Credential-Status` says why). Signals the caller to retry.",
                 "schema": {
                   "type": "string",
                   "enum": ["true"]
@@ -27570,7 +27769,7 @@
             }
           },
           "403": {
-            "description": "Forbidden. `unauthorized_target` — the target or a redirect hop is not in `authorized_uris`, or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
+            "description": "Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -27784,7 +27983,7 @@
             "name": "X-Target",
             "in": "header",
             "required": true,
-            "description": "Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty.",
+            "description": "Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. A redirect to a URL outside `authorized_uris` is not followed: the upstream's 3xx is returned as is (status, `Location`, body) and nothing is sent to that URL, so the caller can fetch a signed URL itself. On a call that substitutes a `{{credential_field}}` such a redirect is refused instead (`403 unauthorized_target`): its `Location` could carry the substituted value.",
             "schema": {
               "type": "string"
             }
@@ -27910,7 +28109,7 @@
             }
           },
           "401": {
-            "description": "The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the credentials were refreshed server-side but the body could not be replayed — the caller replays the call itself.",
+            "description": "The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the forced refresh served a credential to retry with but the body could not be replayed — the caller replays the call itself. A relayed 401 the forced refresh could not recover from carries `X-Appstrate-Credential-Status`.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -27919,8 +28118,15 @@
                   "example": "appstrate; received-status=401"
                 }
               },
+              "X-Appstrate-Credential-Status": {
+                "description": "Set by the platform (never relayed from the upstream) on a relayed 401 after a forced refresh that left the rejected credential in place. An RFC 8941 Item: `in_use; cause=<cause>[; failures=<n>; max-failures=<max>]` — the credential stays in use, and `failures` counts this rejection toward `INTEGRATION_REFRESH_MAX_FAILURES` when it was counted — or `needs_reconnection; cause=<cause>` — the connection is now flagged `needs_reconnection` and its owner must reconnect it. `cause` is the credential-failure vocabulary (`refresh_token_revoked`, `unrefreshable`, `upstream_transient`, …). Absent: no refresh verdict, the upstream refused the request itself.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^(in_use; cause=[a-z_]+(; failures=[0-9]+; max-failures=[0-9]+)?|needs_reconnection; cause=[a-z_]+)$"
+                }
+              },
               "X-Auth-Refreshed": {
-                "description": "Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry.",
+                "description": "Present and set to `true` on a streaming-upload 401 where the forced refresh served a credential to retry with but the body could not be replayed (absent when it did not: `X-Appstrate-Credential-Status` says why). Signals the caller to retry.",
                 "schema": {
                   "type": "string",
                   "enum": ["true"]
@@ -27936,7 +28142,7 @@
             }
           },
           "403": {
-            "description": "Forbidden. `unauthorized_target` — the target or a redirect hop is not in `authorized_uris`, or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
+            "description": "Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -28150,7 +28356,7 @@
             "name": "X-Target",
             "in": "header",
             "required": true,
-            "description": "Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty.",
+            "description": "Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. A redirect to a URL outside `authorized_uris` is not followed: the upstream's 3xx is returned as is (status, `Location`, body) and nothing is sent to that URL, so the caller can fetch a signed URL itself. On a call that substitutes a `{{credential_field}}` such a redirect is refused instead (`403 unauthorized_target`): its `Location` could carry the substituted value.",
             "schema": {
               "type": "string"
             }
@@ -28276,7 +28482,7 @@
             }
           },
           "401": {
-            "description": "The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the credentials were refreshed server-side but the body could not be replayed — the caller replays the call itself.",
+            "description": "The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the forced refresh served a credential to retry with but the body could not be replayed — the caller replays the call itself. A relayed 401 the forced refresh could not recover from carries `X-Appstrate-Credential-Status`.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -28285,8 +28491,15 @@
                   "example": "appstrate; received-status=401"
                 }
               },
+              "X-Appstrate-Credential-Status": {
+                "description": "Set by the platform (never relayed from the upstream) on a relayed 401 after a forced refresh that left the rejected credential in place. An RFC 8941 Item: `in_use; cause=<cause>[; failures=<n>; max-failures=<max>]` — the credential stays in use, and `failures` counts this rejection toward `INTEGRATION_REFRESH_MAX_FAILURES` when it was counted — or `needs_reconnection; cause=<cause>` — the connection is now flagged `needs_reconnection` and its owner must reconnect it. `cause` is the credential-failure vocabulary (`refresh_token_revoked`, `unrefreshable`, `upstream_transient`, …). Absent: no refresh verdict, the upstream refused the request itself.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^(in_use; cause=[a-z_]+(; failures=[0-9]+; max-failures=[0-9]+)?|needs_reconnection; cause=[a-z_]+)$"
+                }
+              },
               "X-Auth-Refreshed": {
-                "description": "Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry.",
+                "description": "Present and set to `true` on a streaming-upload 401 where the forced refresh served a credential to retry with but the body could not be replayed (absent when it did not: `X-Appstrate-Credential-Status` says why). Signals the caller to retry.",
                 "schema": {
                   "type": "string",
                   "enum": ["true"]
@@ -28302,7 +28515,7 @@
             }
           },
           "403": {
-            "description": "Forbidden. `unauthorized_target` — the target or a redirect hop is not in `authorized_uris`, or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
+            "description": "Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -28516,7 +28729,7 @@
             "name": "X-Target",
             "in": "header",
             "required": true,
-            "description": "Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty.",
+            "description": "Upstream endpoint: an absolute URL, or one whose `{{credential_field}}` placeholders (e.g. `{{site_url}}/wp-json/…`) the platform substitutes from the connection before any check; the substituted URL must be absolute. It must match the integration manifest auth's `authorized_uris` (rendered for the connection) unless `allow_all_uris: true`. `allow_all_uris` is ignored when a `{{credential_field}}` placeholder appears in this URL, a header, or a substituted body: the target and every redirect hop must then match `authorized_uris`, and the call is refused when that list is empty. A redirect to a URL outside `authorized_uris` is not followed: the upstream's 3xx is returned as is (status, `Location`, body) and nothing is sent to that URL, so the caller can fetch a signed URL itself. On a call that substitutes a `{{credential_field}}` such a redirect is refused instead (`403 unauthorized_target`): its `Location` could carry the substituted value.",
             "schema": {
               "type": "string"
             }
@@ -28642,7 +28855,7 @@
             }
           },
           "401": {
-            "description": "The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the credentials were refreshed server-side but the body could not be replayed — the caller replays the call itself.",
+            "description": "The caller's credential was refused (problem body, `WWW-Authenticate` challenge, `Proxy-Status: appstrate; error=proxy_internal_response`), or the upstream refused the connection's (relayed body, `Proxy-Status: appstrate; received-status=401`, no challenge). On a relayed streaming-upload 401, `X-Auth-Refreshed: true` means the forced refresh served a credential to retry with but the body could not be replayed — the caller replays the call itself. A relayed 401 the forced refresh could not recover from carries `X-Appstrate-Credential-Status`.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -28651,8 +28864,15 @@
                   "example": "appstrate; received-status=401"
                 }
               },
+              "X-Appstrate-Credential-Status": {
+                "description": "Set by the platform (never relayed from the upstream) on a relayed 401 after a forced refresh that left the rejected credential in place. An RFC 8941 Item: `in_use; cause=<cause>[; failures=<n>; max-failures=<max>]` — the credential stays in use, and `failures` counts this rejection toward `INTEGRATION_REFRESH_MAX_FAILURES` when it was counted — or `needs_reconnection; cause=<cause>` — the connection is now flagged `needs_reconnection` and its owner must reconnect it. `cause` is the credential-failure vocabulary (`refresh_token_revoked`, `unrefreshable`, `upstream_transient`, …). Absent: no refresh verdict, the upstream refused the request itself.",
+                "schema": {
+                  "type": "string",
+                  "pattern": "^(in_use; cause=[a-z_]+(; failures=[0-9]+; max-failures=[0-9]+)?|needs_reconnection; cause=[a-z_]+)$"
+                }
+              },
               "X-Auth-Refreshed": {
-                "description": "Present and set to `true` on a streaming-upload 401 where credentials were refreshed but the body could not be replayed. Signals the caller to retry.",
+                "description": "Present and set to `true` on a streaming-upload 401 where the forced refresh served a credential to retry with but the body could not be replayed (absent when it did not: `X-Appstrate-Credential-Status` says why). Signals the caller to retry.",
                 "schema": {
                   "type": "string",
                   "enum": ["true"]
@@ -28668,7 +28888,7 @@
             }
           },
           "403": {
-            "description": "Forbidden. `unauthorized_target` — the target or a redirect hop is not in `authorized_uris`, or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
+            "description": "Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes.",
             "headers": {
               "Proxy-Status": {
                 "description": "RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit).",
@@ -33139,7 +33359,8 @@
           "dependencies",
           "scope",
           "keywords",
-          "version"
+          "version",
+          "published"
         ],
         "properties": {
           "id": {
@@ -33182,6 +33403,10 @@
           "version": {
             "type": ["string", "null"],
             "description": "Version from manifest"
+          },
+          "published": {
+            "type": "boolean",
+            "description": "True when the agent has a published version (or is a system agent) — run it via `runAgent` with `version` omitted. False means draft-only: omitting `version` answers 404 `no_published_version`."
           },
           "type": {
             "type": "string",

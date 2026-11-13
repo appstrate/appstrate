@@ -86,13 +86,17 @@ describe("mcp catalog", () => {
   it("excludes the MCP server's own transport + discovery paths", () => {
     for (const op of getCatalog().operations.values()) {
       // The per-org transport endpoint (`/api/mcp/o/:org`) must never be
-      // surfaced as an invokable operation — recursive self-invocation — and
-      // the skills routes serve `code sync` alone: the chat lists skills with
-      // its `list_skills` tool, over the Skills extension.
+      // surfaced as an invokable operation — recursive self-invocation.
       expect(op.pathTemplate.startsWith("/api/mcp")).toBe(false);
       expect(op.pathTemplate.startsWith("/.well-known/oauth-protected-resource")).toBe(false);
     }
-    expect([...getCatalog().operations.keys()]).not.toContain("listServedSkills");
+  });
+
+  it("keeps the served-skill routes out: they serve `code sync` alone", () => {
+    // The chat lists skills with its `list_skills` tool, over the Skills extension.
+    const operations = [...getCatalog().operations.keys()];
+    expect(operations).not.toContain("listServedSkills");
+    expect(operations).not.toContain("getServedSkillArchive");
   });
 
   it("keeps the credential proxy out: `api_call` is its one MCP path", async () => {

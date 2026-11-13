@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The skills served for published versions (`./skills.ts`), kept in memory:
+ * The skills served for published versions (`./served-skills.ts`), kept in memory:
  * a published version is immutable, so an entry never goes stale and needs no
  * invalidation. The cache is bounded by the bytes of the files it holds and
  * evicts the least recently used skill first. It holds served content only;
  * whoever reads it has already applied the access rule.
  */
 
-import type { ServedSkill } from "../../services/served-skill.ts";
+import type { ServedSkill } from "./served-skill.ts";
 
 export interface ServedSkillCache {
   get: (key: string) => ServedSkill | undefined;

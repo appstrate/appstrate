@@ -5,7 +5,7 @@
  * an Agent Skills directory, and its entry. The MCP module serves it, and the
  * chat's enforced skills (`./chat-enforced-skills.ts`) inject the same
  * `SKILL.md`. Pure: the reads and the access rule live in
- * `modules/mcp/skills.ts` and `./skill-read.ts`; the `skill://` grammar in
+ * `./served-skills.ts` and `./skill-read.ts`; the `skill://` grammar in
  * `@appstrate/core/skill-uri`.
  */
 

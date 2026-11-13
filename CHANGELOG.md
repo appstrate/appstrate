@@ -127,15 +127,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   injected, at the definition injected). A
   skill with more than 512 files or more than 16 MiB of served bytes is not served; any file
   size within that total is. Only the canonical spelling of a `skill://` URI resolves.
-  `GET /api/mcp/skills` and `GET /api/mcp/skills/archive` (a ZIP of every file of one skill)
-  serve the same entries and bytes over REST for one space (`X-Space-Id`, `skills:read`), for
-  `appstrate code sync`; `GET /api/mcp/skills?definition=draft` lists the drafts the caller
-  may read. The `skill://` grammar and the entry type live in `@appstrate/core/skill-uri`.
+  `GET /api/packages/skills/served` and `GET /api/packages/skills/served/archive` (a ZIP of
+  every file of one skill) serve the same entries and bytes through the package API for one
+  space (`X-Space-Id`, `skills:read`), for `appstrate code sync` (#2180);
+  `GET /api/packages/skills/served?definition=draft` lists the drafts the caller may read. The `skill://` grammar and the entry type live in `@appstrate/core/skill-uri`.
 
-- **`appstrate code sync` reads skills through the MCP Skills extension's REST
-  reflection** (#2175). It lists each space's skills with `GET /api/mcp/skills`
+- **`appstrate code sync` reads skills as the MCP Skills extension serves them**
+  (#2175, #2180). It lists each space's skills with `GET /api/packages/skills/served`
   (`?definition=draft` for `--source draft`), downloads each changed skill in one
-  `GET /api/mcp/skills/archive` request, checks each file against its served
+  `GET /api/packages/skills/served/archive` request, checks each file against its served
   `sha256` digest and the received `SKILL.md` frontmatter against the entry's,
   and writes the bytes as served; only the `name` line of a skill renamed after a
   collision is rewritten. An entry with a file path outside its skill directory,
@@ -143,7 +143,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   that is not a valid Agent Skills name (or not the last segment of its URI), a
   size or digest that is not one, or more than 512 files or 16 MiB is reported and
   not written, and the skill already on disk is kept; the other skills sync. The
-  sync needs the instance's `mcp` module and explains a 404 of its list route. The ledger compares the served digests, and the plan
+  sync explains a 404 of its list route (an instance older than the CLI). The ledger compares the served digests, and the plan
   shows the served `metadata.version`. The CLI no longer normalizes skills
   itself: the server does. `--source draft` syncs the drafts the instance lists
   for you, published or not: those of the skills you may write; a draft you may
@@ -151,7 +151,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **The skills served for published versions are kept in memory** (#2175). A
   published version is immutable, so `skills/list`, `skills/get`, `resources/read`
-  on `skill://` and their REST reflection read and digest it once per API process,
+  on `skill://` and the served-skill routes of the package API read and digest it once per API process,
   then serve it from a least-recently-used cache bounded at 64 MiB of files (four
   skills at the SEP-2640 limit). The access rule runs on every call, before the
   cache. Drafts and system skills are read on every call.
@@ -165,7 +165,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`skills/list` lists drafts on request, and a draft's entry names its
   `lock_version`** (#2175). With `dev.appstrate/definition: "draft"` in the
   request `_meta`, `skills/list` lists the drafts the caller may read at their `@draft`
-  URIs, the entries `GET /api/mcp/skills?definition=draft` serves (one server
+  URIs, the entries `GET /api/packages/skills/served?definition=draft` serves (one server
   function); without it, the list holds the published skills. A draft's entry
   carries `_meta["dev.appstrate/lock_version"]`, the `lock_version` of the draft its
   files and digests were read from, read under the draft lock.

@@ -115,7 +115,7 @@ function installSpaces(
     }
     const refusal = refuse(spaceId);
     if (refusal) return refusal;
-    if (url.pathname === "/api/mcp/skills") {
+    if (url.pathname === "/api/packages/skills/served") {
       if (spaceId === options.failingSpace)
         return Response.json({ message: "Unavailable" }, { status: 503 });
       // The space's list holds the skills attributed to it, at their URIs in it.
@@ -128,7 +128,7 @@ function installSpaces(
         hasMore: false,
       });
     }
-    if (url.pathname === "/api/mcp/skills/archive") {
+    if (url.pathname === "/api/packages/skills/served/archive") {
       const uri = url.searchParams.get("uri") ?? "";
       // A URI of another space, or a skill not attributed to this one, is not readable here.
       if (
