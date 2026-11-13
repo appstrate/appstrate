@@ -200,11 +200,10 @@ const UNDECLARED_OPERATIONS: Readonly<Record<string, Classification>> = {
     reason: "signed connect-run grant or verifyRunToken",
   },
   getOAuthModelProviderToken: { category: "internal", reason: "verifyRunToken" },
-  getRunHistory: { category: "internal", reason: "verifyRunToken" },
   heartbeatRemoteRun: { category: "internal", reason: "verifyRunSignature" },
   ingestRunEvent: { category: "internal", reason: "verifyRunSignature" },
+  internalRunToolsMcpPost: { category: "internal", reason: "verifyRunToken" },
   publishRunFile: { category: "internal", reason: "verifyRunUploadSignature" },
-  recallMemories: { category: "internal", reason: "verifyRunToken" },
   refreshIntegrationCredentials: {
     category: "internal",
     reason: "signed connect-run grant or verifyRunToken",

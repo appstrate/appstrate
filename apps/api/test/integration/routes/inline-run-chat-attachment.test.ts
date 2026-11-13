@@ -55,11 +55,13 @@ import {
   waitForRunPipelineSettled,
 } from "../../helpers/run-connection-fixtures.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
+import { installRuntimeBoundSystemPackages } from "../../helpers/runtime-bound-system-packages.ts";
 
 const app = getTestApp();
 
 describe("inline run launched from the chat with an attached file", () => {
   let ctx: TestContext;
+  let restoreSystemPackages: () => void;
 
   beforeAll(() => {
     _setOrchestratorForTesting(createFakeOrchestrator());
@@ -71,6 +73,7 @@ describe("inline run launched from the chat with an attached file", () => {
 
   beforeEach(async () => {
     await truncateAll();
+    restoreSystemPackages = await installRuntimeBoundSystemPackages();
     ctx = await createTestContext({ orgSlug: "chatattach" });
     await seedDefaultOrgModel(ctx);
   });
@@ -78,7 +81,10 @@ describe("inline run launched from the chat with an attached file", () => {
   // Drain in `afterEach`, never at the tail of a test body: the trigger is
   // fire-and-forget, so a FAILING assertion would leave the pipeline's
   // background writes racing the next `truncateAll()`.
-  afterEach(waitForRunPipelineSettled);
+  afterEach(async () => {
+    await waitForRunPipelineSettled();
+    restoreSystemPackages();
+  });
 
   /** The composer's 2-step upload, as `ui/upload.ts` performs it. */
   async function stageUpload(name: string, content: string): Promise<string> {
