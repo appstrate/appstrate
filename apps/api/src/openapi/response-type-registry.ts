@@ -341,6 +341,9 @@ export const EXEMPT_SCHEMAS: Record<string, string> = {
   EeBillingManagerList: "module-ee list envelope around EeBillingManager",
   EeBillingContact:
     "module-ee billing-contact wire DTO; the row lives in a table of the module's own",
+  SsoSettings:
+    "ee enterprise sign-in wire DTO; its rows live in tables of the commercial package's own",
+  SsoDomain: "ee enterprise sign-in domain wire DTO; the row lives in a table of the package's own",
   // File-explorer wire DTOs. Derived from ZIP entries, not from any table, so
   // there is no Drizzle shared-type to compare against; the canonical TS shape
   // lives in apps/api/src/services/package-files.ts and the SPA reads the

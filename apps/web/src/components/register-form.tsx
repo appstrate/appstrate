@@ -159,13 +159,25 @@ export function RegisterForm({
             </div>
             <div className="flex flex-col gap-2">
               {features.googleAuth && (
-                <SocialSignInButton provider="google" callbackURL={socialCallbackURL} />
+                <SocialSignInButton
+                  provider="google"
+                  callbackURL={socialCallbackURL}
+                  errorCallbackURL="/login"
+                />
               )}
               {features.githubAuth && (
-                <SocialSignInButton provider="github" callbackURL={socialCallbackURL} />
+                <SocialSignInButton
+                  provider="github"
+                  callbackURL={socialCallbackURL}
+                  errorCallbackURL="/login"
+                />
               )}
               {features.microsoftAuth && (
-                <SocialSignInButton provider="microsoft" callbackURL={socialCallbackURL} />
+                <SocialSignInButton
+                  provider="microsoft"
+                  callbackURL={socialCallbackURL}
+                  errorCallbackURL="/login"
+                />
               )}
             </div>
           </>
