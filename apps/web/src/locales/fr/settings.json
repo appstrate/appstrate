@@ -729,7 +729,7 @@
   "orgSso.enforce": "Exiger",
   "orgSso.enforceTitle": "Exiger la connexion Microsoft ?",
   "orgSso.enforceDesc": "Les adresses de {{domains}} ne pourront plus se connecter qu'avec Microsoft, depuis le tenant de l'organisation.",
-  "orgSso.enforceSessions": "Toutes les autres sessions des comptes de ces domaines seront fermées.",
+  "orgSso.enforceSessions": "Les comptes de ces domaines sont déconnectés partout sauf votre session actuelle : autres sessions, connexions CLI et clients MCP ou OAuth.",
   "orgSso.enforceRefused": "Les mots de passe et les connexions Google ou GitHub seront refusés pour ces adresses. Les comptes ne sont pas supprimés.",
   "orgSso.enforceEmergency": "Les propriétaires gardent une connexion d'urgence par mot de passe, depuis la page de connexion.",
   "orgSso.lift": "Lever l'obligation",

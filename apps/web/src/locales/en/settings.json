@@ -728,7 +728,7 @@
   "orgSso.enforce": "Require",
   "orgSso.enforceTitle": "Require Microsoft sign-in?",
   "orgSso.enforceDesc": "Addresses at {{domains}} will only sign in with Microsoft, from the organization's tenant.",
-  "orgSso.enforceSessions": "Every other session of these domains' accounts will end.",
+  "orgSso.enforceSessions": "These domains' accounts are signed out everywhere except your current session: other sessions, CLI logins and MCP or OAuth clients.",
   "orgSso.enforceRefused": "Passwords and Google or GitHub sign-ins will be refused for these addresses. The accounts are not deleted.",
   "orgSso.enforceEmergency": "Owners keep an emergency password sign-in, from the sign-in page.",
   "orgSso.lift": "Lift the requirement",
