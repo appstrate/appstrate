@@ -8,7 +8,7 @@
 
 import { eq, and, or, ilike, desc, lt, gt } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { endUsers, notifications, uploads, organizations } from "@appstrate/db/schema";
+import { endUsers, notifications, runReads, uploads, organizations } from "@appstrate/db/schema";
 import type { EndUserInfo, ListEnvelope } from "@appstrate/shared-types";
 import { logger } from "../lib/logger.ts";
 import { notFound, ApiError } from "../lib/errors.ts";
@@ -295,9 +295,9 @@ export async function updateEndUser(
 }
 
 export async function deleteEndUser(scope: SpaceScope, endUserId: string): Promise<void> {
-  // Notifications carry the recipient as a polymorphic (recipientType,
-  // recipientId) tuple with NO foreign key, so deleting the end-user does not
-  // cascade them. Delete every notification for that recipient explicitly,
+  // Notifications and run read state carry the recipient as a polymorphic
+  // (recipientType, recipientId) tuple with NO foreign key, so deleting the
+  // end-user does not cascade them. Delete that recipient's rows explicitly,
   // scoped to the space for tenant safety.
   await db.transaction(async (tx) => {
     // Follow the org-first lock order used by file/upload writes, then lock
@@ -355,6 +355,16 @@ export async function deleteEndUser(scope: SpaceScope, endUserId: string): Promi
           eq(notifications.recipientId, endUserId),
           eq(notifications.orgId, scope.orgId),
           eq(notifications.spaceId, scope.spaceId),
+        ),
+      );
+    await tx
+      .delete(runReads)
+      .where(
+        and(
+          eq(runReads.recipientType, "end_user"),
+          eq(runReads.recipientId, endUserId),
+          eq(runReads.orgId, scope.orgId),
+          eq(runReads.spaceId, scope.spaceId),
         ),
       );
 

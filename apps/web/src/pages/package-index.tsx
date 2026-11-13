@@ -14,7 +14,6 @@ import { LibraryBig, Plus, Upload } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import { packagePermission, spacePackagePermission } from "@appstrate/core/permissions";
 import { useAgents, usePackageList } from "../hooks/use-packages";
-import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { useListParams } from "../lib/list-params";
 import { catalogueHref } from "../lib/catalogue-link";
 import { PACKAGE_TYPE_ICON } from "../lib/package-type-icon";
@@ -61,8 +60,7 @@ export function PackageIndexPage({ type }: { type: IndexType }) {
 /** Agents also carry their unread runs. */
 function AgentIndex() {
   const { data: agents, isLoading, error } = useAgents();
-  const { data: unreadCounts } = useUnreadCountsByAgent();
-  const items = agents?.map((agent) => agentCardItem(agent, unreadCounts?.[agent.id]));
+  const items = agents?.map((agent) => agentCardItem(agent));
   return <PackageIndexBody type="agent" items={items} isLoading={isLoading} error={error} />;
 }
 

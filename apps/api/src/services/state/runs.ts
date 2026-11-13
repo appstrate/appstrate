@@ -31,7 +31,6 @@ import {
   apiKeys,
   schedules,
   llmUsage,
-  notifications,
   organizations,
   files,
   fileLinks,
@@ -52,6 +51,7 @@ import { listResponse } from "../../lib/list-response.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { orgOrSystemFilter } from "../../lib/package-helpers.ts";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
+import { recordRunFinished, unreadRunCondition } from "./run-reads.ts";
 import { runLogDataSchema } from "../../lib/jsonb-schemas.ts";
 import { ApiError, conflict, forbidden, invalidRequest, notFound } from "../../lib/errors.ts";
 import { getPlatformRunLimits } from "../run-limits.ts";
@@ -215,7 +215,7 @@ function enrichedRunSelect(actor: Actor | null) {
     apiKeyName: apiKeys.name,
     scheduleName: schedules.name,
     packageEphemeral: packages.ephemeral,
-    unread: unreadForActor(actor),
+    unread: unreadRunCondition(actor),
     // OUTPUT file count — correlated scalar subquery over `files`,
     // served by the `idx_files_run` (run_id-leading) index so the list
     // read stays a single query with no N+1. Coerced to Number in the mapper
@@ -231,28 +231,6 @@ function enrichedRunSelect(actor: Actor | null) {
       where ${files.runId} = ${runs.id} and ${files.purpose} = 'agent_output'
     )`,
   };
-}
-
-/**
- * Per-recipient unread flag for the run's notification, computed as a
- * correlated EXISTS against the `notifications` table. The
- * recipient is matched on the polymorphic `(recipientType, recipientId)`
- * tuple — the same match the notifications service uses — so a dashboard
- * user and an end-user never see each other's read-state. Read state lives
- * ONLY in `notifications`; runs carry no notification flag of their own. When
- * the read is not actor-scoped (e.g. a system/sidecar read with
- * `actor === null`), unread is constant `false` — the badge is a
- * dashboard-recipient concept.
- */
-function unreadForActor(actor: Actor | null): SQL<boolean> {
-  if (!actor) return sql<boolean>`false`;
-  return sql<boolean>`exists (
-    select 1 from ${notifications}
-    where ${notifications.runId} = ${runs.id}
-      and ${notifications.recipientType} = ${actor.type}
-      and ${notifications.recipientId} = ${actor.id}
-      and ${notifications.readAt} is null
-  )`;
 }
 
 /**
@@ -842,7 +820,8 @@ export async function createRun(scope: SpaceScope, params: CreateRunParams): Pro
 
 /**
  * Create a run record that is immediately failed (preflight error).
- * Single INSERT with status=failed — triggers one pg_notify for realtime.
+ * Single INSERT with status=failed — triggers one pg_notify for realtime — and
+ * its read state with it, like any finished run.
  */
 export async function createFailedRun(
   scope: SpaceScope,
@@ -877,6 +856,8 @@ export async function createFailedRun(
       agentScope: agentDenorm?.scope ?? null,
       agentName: agentDenorm?.name ?? null,
     });
+    // Born terminal, so it never reaches `finalizeRun`: record it here.
+    await recordRunFinished(scope, id, tx);
   });
 }
 
@@ -1772,6 +1753,8 @@ interface ListGlobalRunsOptions {
    * (`runSearchCondition`). A substring match inside one space, unindexed.
    */
   search?: string;
+  /** Only the runs the actor has not read (`unreadRunCondition`). */
+  unread?: boolean;
   actor?: Actor | null;
   /** Caller's run-read predicate (`lib/run-visibility.ts`); absent = `runs:read-all`. */
   visibility?: SQL;
@@ -1791,6 +1774,7 @@ export async function listGlobalRuns(
     endDate,
     chatSessionId,
     search,
+    unread = false,
     actor = null,
     visibility,
     canReadAgentInput = false,
@@ -1799,6 +1783,7 @@ export async function listGlobalRuns(
   const conditions = [eq(runs.orgId, scope.orgId), eq(runs.spaceId, scope.spaceId)];
   if (visibility) conditions.push(visibility);
   conditions.push(...runListConditions({ status, search }));
+  if (unread) conditions.push(unreadRunCondition(actor));
   if (startDate) conditions.push(gte(runs.startedAt, startDate));
   if (endDate) conditions.push(lte(runs.startedAt, endDate));
   if (chatSessionId) {

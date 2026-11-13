@@ -1,22 +1,22 @@
 ---
 title: Notifications
-description: The in-app feed that tells people when a run finished or a package was shared with them.
+description: The in-app feed that tells people a run needs their attention or a package was shared with them, and the unread state of their runs.
 ---
 
-Notifications are the **in-app** inbox of a person or an [end-user](/features/end-users): the bell in the web app, the unread dots on runs, and the unread counts on agents and schedules. They are not emails or push messages. To notify an external system, use [webhooks](/features/webhooks).
+Notifications are the **in-app** inbox of a person or an [end-user](/features/end-users): the bell in the web app. They are not emails or push messages. To notify an external system, use [webhooks](/features/webhooks).
 
 Each notification belongs to one **recipient** and one space, and has its own read state. Marking a notification read affects only the person who read it.
 
-## What creates a notification
+## The feed
 
-| Type             | When                                                                                              | Recipient                                                                                                        |
-| ---------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `run_completed`  | A run reaches a terminal status (`success`, `failed`, `timeout` or `cancelled`).                  | The member or end-user who launched it. A run with no actor is notified to the organization's owners and admins. |
-| `package_shared` | A package is shared **with a person**. The payload names the package, its type and who shared it. | The person, in their personal space.                                                                             |
+The feed holds what needs the recipient's attention, decided when the notification is written.
 
-A `run_completed` payload carries the `packageId` and the final `status`, which is enough to render the bell without another request. Runs of an inline agent do not notify, since their result is already in front of the caller.
+| Type             | When                                                                                                      | Recipient                                                                                                        |
+| ---------------- | --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `run_failed`     | A run ends `failed` or `timeout`. The payload carries the `packageId`, the `agent_name` and the `status`. | The member or end-user who launched it. A run with no actor is notified to the organization's owners and admins. |
+| `package_shared` | A package is shared **with a person**. The payload names the package, its type and who shared it.         | The person, in their personal space.                                                                             |
 
-## Reading the feed
+A scheduled run that is refused before it starts (a missing package, a connection that no longer resolves) is a `failed` run like any other, and is notified. A run that succeeds or is cancelled is not notified: it is only unread (below). Runs of an inline agent are never notified, since their result is already in front of the caller.
 
 ```bash
 # Newest first, unread only, 20 per page
@@ -26,21 +26,34 @@ curl "https://your-instance/api/notifications?unread=true&limit=20" \
 
 Each item has `id`, `type`, `runId`, `payload`, `read_at` and `createdAt`. Page with `startingAfter=<id>` and the `Link: rel="next"` header.
 
-| Route                                           | Purpose                                                                           |
-| ----------------------------------------------- | --------------------------------------------------------------------------------- |
-| `GET /api/notifications`                        | The recipient's feed. `unread=true` filters.                                      |
-| `GET /api/notifications/unread-count`           | `{ "count": n }`.                                                                 |
-| `GET /api/notifications/unread-counts-by-agent` | Unread counts grouped by agent.                                                   |
-| `PUT /api/notifications/{id}/read`              | Mark one read. `204`, idempotent, `404` when it is not yours.                     |
-| `PUT /api/notifications/read/{runId}`           | Mark the notification of a run read, when you only hold the run id. Always `204`. |
-| `PUT /api/notifications/read-all`               | Mark everything read. Returns `{ "updated_count": n }`.                           |
+| Route                                 | Purpose                                                       |
+| ------------------------------------- | ------------------------------------------------------------- |
+| `GET /api/notifications`              | The recipient's feed. `unread=true` filters.                  |
+| `GET /api/notifications/unread-count` | `{ "count": n }`.                                             |
+| `PUT /api/notifications/{id}/read`    | Mark one read. `204`, idempotent, `404` when it is not yours. |
+| `PUT /api/notifications/read-all`     | Mark the whole feed read. Returns `{ "updated_count": n }`.   |
 
-The feed is the recipient's own, so no role permission is needed beyond being in the space. A delegated credential (an API key, for example) must be allowed to read runs, because what its entries point at are runs.
+The feed is the recipient's own, so no role permission is needed beyond being in the space. A delegated credential (an API key, for example) must be allowed to read runs.
 
-Runs and schedules expose the same state as `unread` (a run) and `unread_count` (a schedule), computed for the caller. The run page marks its notification read when you open it.
+There is no dedicated notification stream. The web app re-reads the feed when a run finishes (`run_update` on the [realtime](/features/realtime) streams) and polls it otherwise.
 
-There is no dedicated notification stream. To learn about completed runs live, follow `run_update` events on the [realtime](/features/realtime) streams.
+## Unread runs
+
+Every finished run, notified or not, becomes **unread** for its recipients (the same people as above) when it reaches a terminal status (`success`, `failed`, `timeout` or `cancelled`). Runs of an inline agent are never unread. Opening a run reads it, and reads its notification too when it had one; reading a notification in the feed leaves the run unread.
+
+That state is served with the runs, computed for the caller:
+
+| Where                        | Field or route                                                                             |
+| ---------------------------- | ------------------------------------------------------------------------------------------ |
+| A run                        | `unread`                                                                                   |
+| An agent (`GET /api/agents`) | `unread_count`                                                                             |
+| A schedule                   | `unread_count`                                                                             |
+| The caller's unread runs     | `GET /api/runs?unread=true` (its `total` is the count)                                     |
+| Mark one read                | `PUT /api/runs/{id}/read` — `204`, idempotent, opening a run does it                       |
+| Mark them all read           | `PUT /api/runs/read-all` — returns `{ "updated_count": n }`, reads their notifications too |
+
+To learn about completed runs live, follow `run_update` events on the [realtime](/features/realtime) streams.
 
 ## Housekeeping
 
-Deleting an end-user deletes its notifications. A member who leaves an organization loses theirs in it. Deleting a space deletes the notifications of that space.
+Deleting an end-user deletes its notifications and run read state. A member who leaves an organization loses theirs in it. Deleting a space deletes those of that space.

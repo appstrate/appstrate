@@ -6,6 +6,7 @@ import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { getRunningRunCounts } from "../services/state/runs.ts";
+import { getUnreadRunCountsByAgent } from "../services/state/run-reads.ts";
 import {
   listPinnedSlots,
   listMemories,
@@ -210,9 +211,11 @@ export function createAgentsRouter() {
     // an agent placed here but switched off (or never switched on) lives on the
     // space library instead (`GET /api/spaces/{spaceId}/library`), which
     // carries its origin, its state and the switch.
-    const [rows, runningCounts] = await Promise.all([
+    const visibility = runVisibilityFilter(c);
+    const [rows, runningCounts, unreadCounts] = await Promise.all([
       listActivePackages(scope, "agent"),
-      getRunningRunCounts(scope, runVisibilityFilter(c)),
+      getRunningRunCounts(scope, visibility),
+      getUnreadRunCountsByAgent(scope, getActor(c), visibility),
     ]);
 
     const agentList = rows.map((row) => {
@@ -242,6 +245,9 @@ export function createAgentsRouter() {
           integrations: (manifest.dependencies?.integrations ?? {}) as Record<string, string>,
         },
         running_runs: runningCounts[row.id] ?? 0,
+        // The caller's own unread runs of this agent (per recipient, like a
+        // schedule's `unread_count`).
+        unread_count: unreadCounts[row.id] ?? 0,
         source: row.source ?? "local",
         // Canonical scope format includes the `@` sigil (e.g. "@myorg") so
         // list output is directly usable as `{scope}` path-param input — one
