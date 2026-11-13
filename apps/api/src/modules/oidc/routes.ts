@@ -32,6 +32,7 @@ import { conflict, notFound, invalidRequest, forbidden } from "../../lib/errors.
 import { auditSpaceAssignments, spaceAssignmentSchema } from "../../lib/space-role-assignment.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { listResponse } from "../../lib/list-response.ts";
+import { getAppConfig } from "../../lib/app-config.ts";
 import { logger } from "../../lib/logger.ts";
 import { EncryptionKeyUnavailableError } from "../../lib/stored-credential.ts";
 import { getClientIp } from "../../lib/client-ip.ts";
@@ -261,6 +262,8 @@ interface PageContext {
     socialGoogle: boolean;
     socialGithub: boolean;
     socialMicrosoft: boolean;
+    /** An organization sign-in policy module is loaded: offer its emergency sign-in. */
+    emergencySignIn: boolean;
   };
   smtp: ResolvedSmtpConfig | null;
   /**
@@ -380,7 +383,13 @@ async function loadPageContext(
       client: record,
       branding: await resolveBrandingForClient(record),
       csrfToken: issueCsrfToken(c),
-      features: { smtp: !!smtp, socialGoogle, socialGithub, socialMicrosoft },
+      features: {
+        smtp: !!smtp,
+        socialGoogle,
+        socialGithub,
+        socialMicrosoft,
+        emergencySignIn: getAppConfig().features.enterpriseSso === true,
+      },
       smtp,
       socialProviders: { google: socialGoogle, github: socialGithub, microsoft: socialMicrosoft },
     },
@@ -1075,6 +1084,7 @@ export function createOidcRouter() {
       csrfToken: ctx.csrfToken,
       socialProviders: ctx.socialProviders,
       smtpEnabled: ctx.features.smtp,
+      emergencySignIn: ctx.features.emergencySignIn,
       allowSignup: allowSignupForClient(ctx.client),
       error: errorMessage,
       email: loginHint ?? notice?.email,
@@ -1133,6 +1143,7 @@ export function createOidcRouter() {
         csrfToken: ctx.csrfToken,
         socialProviders: ctx.socialProviders,
         smtpEnabled: ctx.features.smtp,
+        emergencySignIn: ctx.features.emergencySignIn,
         allowSignup,
         error: "Votre session a expiré. Veuillez réessayer.",
       });
@@ -1151,6 +1162,7 @@ export function createOidcRouter() {
         csrfToken: ctx.csrfToken,
         socialProviders,
         smtpEnabled,
+        emergencySignIn: ctx.features.emergencySignIn,
         allowSignup,
         error,
         email,
@@ -1160,6 +1172,9 @@ export function createOidcRouter() {
 
     const email = readFormString(form, "email")?.toLowerCase().trim();
     const password = readFormString(form, "password");
+    // The emergency variant of the same sign-in: the policy module behind it
+    // answers non-owners exactly like a wrong password, so this page does too.
+    const emergency = ctx.features.emergencySignIn && readFormString(form, "emergency") === "1";
     if (!email || !password) {
       return renderError("Email et mot de passe requis.", 400, email ?? undefined);
     }
@@ -1193,6 +1208,7 @@ export function createOidcRouter() {
             email: string;
             password: string;
           },
+          ...(emergency ? { query: { emergency: "1" } } : {}),
           headers: c.req.raw.headers,
           asResponse: true,
         }),
