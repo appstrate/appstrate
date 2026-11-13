@@ -421,17 +421,17 @@ describe("mcp connection tools", () => {
     it("declares neither in a space that closes the credential proxy, to the org owner too", async () => {
       const caller = await instanceCaller(owner);
       expect(await toolNames(caller)).toEqual(
-        expect.arrayContaining(["list_connections", "api_call"]),
+        expect.arrayContaining(["search_integration_tools", "call_integration_tool"]),
       );
       await db
         .update(spaces)
         .set({ credentialProxyOpen: false })
         .where(eq(spaces.id, owner.defaultSpaceId));
       const names = await toolNames(caller);
-      expect(names).not.toContain("list_connections");
-      expect(names).not.toContain("api_call");
+      expect(names).not.toContain("search_integration_tools");
+      expect(names).not.toContain("call_integration_tool");
       const getMe = (await listTools(caller)).find((tool) => tool.name === "get_me")!;
-      expect(getMe.description).not.toContain("api_call");
+      expect(getMe.description).not.toContain("search_integration_tools");
     });
 
     it("withholds them per space on the organization's endpoint when one space is closed", async () => {
@@ -442,15 +442,17 @@ describe("mcp connection tools", () => {
         headers: { Authorization: `Bearer ${await mintInstanceToken(owner)}` },
       };
 
-      const apiCall = (await listTools(caller)).find((tool) => tool.name === "api_call")!;
-      const availableIn = apiCall.description.slice(
+      const callIntegrationTool = (await listTools(caller)).find(
+        (tool) => tool.name === "call_integration_tool",
+      )!;
+      const availableIn = callIntegrationTool.description.slice(
         0,
-        apiCall.description.indexOf("Call third-party APIs"),
+        callIntegrationTool.description.indexOf("Call a tool search_integration_tools"),
       );
       expect(availableIn).toContain(owner.defaultSpaceId);
       expect(availableIn).not.toContain(closed.id);
 
-      const refused = await callTool(caller, "api_call", {
+      const refused = await callApi(caller, {
         space_id: closed.id,
         requests: [get("/contacts")],
       });

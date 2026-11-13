@@ -998,7 +998,7 @@
   "spaces.visibilityDesc.private": "Visible et accessible uniquement aux utilisateurs qui y sont ajoutés.",
   "spaces.adminAccessHint": "Les propriétaires et administrateurs de l'organisation conservent leur accès, quelle que soit la visibilité.",
   "spaces.credentialProxyOpenLabel": "Accès direct aux connexions",
-  "spaces.credentialProxyOpenHint": "Activé, les membres peuvent utiliser les connexions de cet espace en dehors d'un run : appels au proxy de credentials et outils MCP list_connections et api_call. Désactivé, ces appels sont refusés à tous, propriétaires et administrateurs de l'organisation compris ; les runs gardent leurs connexions.",
+  "spaces.credentialProxyOpenHint": "Activé, les membres peuvent utiliser les connexions de cet espace en dehors d'un run : appels au proxy de credentials et outils MCP search_integration_tools et call_integration_tool. Désactivé, ces appels sont refusés à tous, propriétaires et administrateurs de l'organisation compris ; les runs gardent leurs connexions.",
   "spaces.credentialProxyOpenDetails": "Le désactiver ferme seulement l'accès direct. Un membre autorisé à lancer des runs inline peut toujours faire faire l'appel par un agent, dans un run isolé et journalisé. Fermer aussi cette voie relève de la permission de run inline, réglée sur les rôles.",
   "spaces.closeUnsharesConnections": "Fermer l'espace met fin à l'accès de ses membres implicites : leurs connexions partagées dans cet espace ne le seront plus, les agents qui les utilisent devront en choisir une autre, et les planifications d'autres personnes qui les utilisent seront désactivées.",
   "spaces.closeConfirmTitle": "Restreindre l'accès à cet espace ?",

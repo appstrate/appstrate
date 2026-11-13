@@ -997,7 +997,7 @@
   "spaces.visibilityDesc.private": "Visible and accessible only to users who have been added.",
   "spaces.adminAccessHint": "Organization owners and administrators keep access regardless of visibility.",
   "spaces.credentialProxyOpenLabel": "Direct connection access",
-  "spaces.credentialProxyOpenHint": "When on, members can use this space's connections outside a run: credential proxy calls and the MCP tools list_connections and api_call. When off, those calls are refused for everyone, organization owners and administrators included; runs keep their connections.",
+  "spaces.credentialProxyOpenHint": "When on, members can use this space's connections outside a run: credential proxy calls and the MCP tools search_integration_tools and call_integration_tool. When off, those calls are refused for everyone, organization owners and administrators included; runs keep their connections.",
   "spaces.credentialProxyOpenDetails": "Turning it off closes direct access only. A member allowed to launch inline runs can still have an agent make the call inside a run, sandboxed and logged. Closing that path too is a matter of the inline-run permission, set on roles.",
   "spaces.closeUnsharesConnections": "Closing the space ends the access of its implicit members: connections they shared in it will no longer be shared, agents using them will need to pick another one, and other people's schedules using them will be disabled.",
   "spaces.closeConfirmTitle": "Restrict access to this space?",

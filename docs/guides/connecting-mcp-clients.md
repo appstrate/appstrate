@@ -124,7 +124,8 @@ What happens under the hood:
 > not allow the action, `granted_in` lists the spaces where it does, and the
 > result asks the model to report the refusal rather than redo the action in
 > another space. `credential_proxy_closed` is final in the same way: the space
-> named by `space` closes `list_connections` and `api_call` to every role. Only
+> named by `space` closes `search_integration_tools` and `call_integration_tool`
+> to every role. Only
 > an unknown tool name is a JSON-RPC `-32602`.
 >
 > A refusal is about the call itself. An operation the route answered with an

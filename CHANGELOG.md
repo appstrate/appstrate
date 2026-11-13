@@ -490,7 +490,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`GET /api/credential-proxy/connections`, `/api/credential-proxy/proxy`
   without `X-Run-Id`) with `403 credential_proxy_closed` for every role,
   organization owners and admins included, and the MCP tools
-  `list_connections` and `api_call` are not declared for that space;
+  `search_integration_tools` and `call_integration_tool` are not declared for
+  that space;
   `get_me` stops naming them there. On the organization URL, a call whose
   `space_id` names that space is refused with `credential_proxy_closed`. Runs are unaffected: platform runs reach
   their connections through the sidecar, remote runs (`X-Run-Id`) their bound

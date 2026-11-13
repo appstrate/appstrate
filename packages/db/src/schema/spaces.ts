@@ -39,8 +39,8 @@ export const spaces = pgTable(
     isDefault: boolean("is_default").notNull().default(false),
     /**
      * Whether members may use the space's connections through the credential proxy outside a
-     * run (`/api/credential-proxy/*` without `X-Run-Id`, the MCP `list_connections` and
-     * `api_call` tools). A column, not a `settings` key: `PATCH /api/spaces/{id}` replaces
+     * run (`/api/credential-proxy/*` without `X-Run-Id`, the MCP
+     * `search_integration_tools` and `call_integration_tool` tools). A column, not a `settings` key: `PATCH /api/spaces/{id}` replaces
      * `settings` whole, and a client sending only another setting must not reopen the space.
      */
     credentialProxyOpen: boolean("credential_proxy_open").notNull().default(true),

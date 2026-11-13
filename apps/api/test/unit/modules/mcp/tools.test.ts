@@ -143,18 +143,20 @@ describe("credential proxy closed in the space", () => {
   });
 
   for (const permission of ["credential-proxy:call-own", "credential-proxy:call"]) {
-    it(`withholds list_connections and api_call under ${permission}, and get_me stops naming them`, () => {
+    it(`withholds search_integration_tools and call_integration_tool under ${permission}, and get_me stops naming them`, () => {
       const ctx = ctxFor(["mcp:read", "mcp:invoke", permission]);
       const names = (open: boolean) => toolsFor(ctx, true, open).map((t) => t.descriptor.name);
-      expect(names(true)).toEqual(expect.arrayContaining(["list_connections", "api_call"]));
-      expect(names(false)).not.toContain("list_connections");
-      expect(names(false)).not.toContain("api_call");
+      expect(names(true)).toEqual(
+        expect.arrayContaining(["search_integration_tools", "call_integration_tool"]),
+      );
+      expect(names(false)).not.toContain("search_integration_tools");
+      expect(names(false)).not.toContain("call_integration_tool");
       const getMe = (open: boolean) =>
         toolsFor(ctx, true, open).find((t) => t.descriptor.name === "get_me")!.descriptor
           .description!;
-      expect(getMe(true)).toContain("`list_connections`");
-      expect(getMe(false)).not.toContain("api_call");
-      expect(getMe(false)).not.toContain("list_connections");
+      expect(getMe(true)).toContain("`search_integration_tools`");
+      expect(getMe(false)).not.toContain("search_integration_tools");
+      expect(getMe(false)).not.toContain("call_integration_tool");
     });
   }
 });
