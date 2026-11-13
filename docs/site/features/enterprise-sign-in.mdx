@@ -43,13 +43,13 @@ Once enforced, for every address of the verified domains:
 
 - only a Microsoft sign-in from the bound tenant opens a session;
 - passwords, magic links, Google and GitHub are refused with `sso_required`, and the sign-in pages point to "Continue with Microsoft". The password is refused before it is checked, so the answer never says whether it was right;
-- every session of those addresses ends when enforcement starts, except the one of the owner enforcing it;
-- a session lives 24 hours at most, without extension, so a person disabled in Entra loses access within a day;
+- when enforcement starts, and when a domain is verified while it is on, those addresses lose what a password change takes away: every session (except the one of the owner enforcing it), their CLI logins and the refresh tokens of their OAuth and MCP clients. Access tokens already handed out are short-lived and run until they expire;
+- a session lives 24 hours at most from the sign-in that opened it, without extension, emergency sessions included, so a person disabled in Entra loses access to the dashboard within a day;
 - an address can neither leave the domain nor move onto it by an email change.
 
 Nothing is deleted: passwords and other linked accounts work again when enforcement is lifted. To avoid locking yourself out, enforcing is only possible from a session opened by Microsoft from the bound tenant. The tenant cannot be unlinked, nor a verified domain removed, while enforcement is on.
 
-**Emergency sign-in.** The owners of the enforcing organization keep their password, through the discreet **Emergency sign-in** link of the login page, for the day the tenant or the Microsoft app is unavailable. Anyone else gets the same answer as for a wrong password, whether their password is right or not.
+**Emergency sign-in.** The owners of the enforcing organization keep their password, through the discreet **Emergency sign-in** link of the login page, for the day the tenant or the Microsoft app is unavailable. Anyone else gets the same answer as for a wrong password, whether their password is right or not. That password can be reset by email, so it is only as strong as the owner's mailbox: protect that mailbox accordingly.
 
 ## For the IT administrator
 
@@ -58,12 +58,13 @@ In your Entra tenant:
 - **Consent.** Grant admin consent once to the instance's application (multitenant). Tenants that restrict user consent need it before their members can sign in.
 - **Assignment.** To control who can sign in, set **Assignment required** on the application's enterprise app and assign the users or groups allowed in. Conditional access applies as for any app.
 - **Claims.** The application must issue the optional ID-token claims `email` and `xms_edov`. A self-hosted instance configures its own app registration as described in [Sign in with Microsoft Entra ID](/self-hosting/production-checklist#sign-in-with-microsoft-entra-id). Only members of the tenant whose address domain is verified in Entra are accepted; guests and personal accounts are refused.
-- **DNS.** Publish the TXT record shown on the settings page. It is checked when the owner chooses **Verify**, not again afterwards.
+- **DNS.** Publish the TXT record shown on the settings page. It is checked when the owner chooses **Verify** and never again: if the organization stops owning the domain, remove it from the settings page.
 
 What disabling a person in Entra does, and does not do:
 
-- their next Microsoft sign-in fails, and their current session ends within 24 hours;
-- API keys, and CLI and MCP tokens, stay valid until an administrator removes the person from the organization, which revokes them. Provisioning from Entra (SCIM) is not available.
+- their next Microsoft sign-in fails, and their current dashboard session ends within 24 hours of the sign-in that opened it;
+- CLI logins and OAuth or MCP client tokens they obtained after enforcement started are not limited to 24 hours, and neither are API keys: they stay valid until an administrator removes the person from the organization, after which they no longer reach it. Provisioning from Entra (SCIM) is not available, so remove the person in Appstrate too;
+- removing a person in Appstrate alone is not enough while their Entra account stays enabled: at their next Microsoft sign-in they join the organization again, with the join role. Disable or unassign them in Entra as well.
 
 ## Self-hosting
 
