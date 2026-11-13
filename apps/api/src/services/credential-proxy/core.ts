@@ -59,7 +59,7 @@ import {
   type ProxyCallPath,
 } from "./integration-resolver.ts";
 import type { CredentialStatus } from "../../lib/credential-status-header.ts";
-import { clearUpstreamRejections } from "../integration-connections.ts";
+import { clearUpstreamRejections, type ConnectionNaming } from "../integration-connections.ts";
 
 /**
  * Minimal async cookie-jar shape consumed by {@link proxyCall}. The full
@@ -88,6 +88,8 @@ type ProxyCallInput = {
    * run's bound set, or outside a run one the caller reaches.
    */
   connectionId?: string;
+  /** How the caller names `connectionId`; the header when omitted. */
+  connectionNaming?: ConnectionNaming;
 
   /** Scoped integration package name (e.g. `@afps/gmail`). */
   integrationId: string;
@@ -230,6 +232,7 @@ export async function proxyCall(input: ProxyCallInput): Promise<ProxyCallResult>
     spaceId: input.spaceId,
     actor: input.actor,
     ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+    ...(input.connectionNaming ? { connectionNaming: input.connectionNaming } : {}),
     ...(input.run
       ? { run: input.run }
       : { reach: input.reach, ...(input.version ? { version: input.version } : {}) }),

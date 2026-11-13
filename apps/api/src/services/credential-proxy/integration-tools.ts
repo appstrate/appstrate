@@ -135,6 +135,12 @@ const NOT_READY_STATUSES: ReadonlySet<ProxyConnectionStatus> = new Set([
 
 /** Remote servers listed at once. */
 const LIST_CONCURRENCY = 3;
+/**
+ * How long a listing waits for remote servers, all of them, well below an MCP client's 60 s
+ * request timeout: each cold server costs up to its own listing timeout, and a failure is not
+ * cached. A catalog not read by then is listed as one whose server could not be listed.
+ */
+const LISTING_DEADLINE_MS = 20_000;
 /** Hex digits of the package id's hash a colliding namespace takes. */
 const NAMESPACE_HASH_LENGTH = 6;
 
@@ -197,12 +203,13 @@ async function readRemoteCatalog(
   integrationId: string,
   connections: readonly ToolConnection[],
   connectionId: string | undefined,
+  waitUntil: AbortSignal,
 ): Promise<RemoteToolCatalog> {
   const named = connections.find(
     (c) => c.connection_id.toLowerCase() === connectionId?.toLowerCase(),
   );
   const list = (id: string | undefined) =>
-    listRemoteTools({ ...caller, integrationId, ...(id ? { connectionId: id } : {}) });
+    listRemoteTools({ ...caller, integrationId, waitUntil, ...(id ? { connectionId: id } : {}) });
   try {
     return await list(named?.connection_id);
   } catch (err) {
@@ -250,11 +257,18 @@ async function remoteTools(
   connections: readonly ToolConnection[],
   taken: Set<string>,
   query: Pick<IntegrationToolQuery, "name" | "connectionId">,
+  waitUntil: AbortSignal,
 ): Promise<RemoteListing> {
   const { id: integrationId, namespace, manifest } = entry;
   let catalog: RemoteToolCatalog;
   try {
-    catalog = await readRemoteCatalog(caller, integrationId, connections, query.connectionId);
+    catalog = await readRemoteCatalog(
+      caller,
+      integrationId,
+      connections,
+      query.connectionId,
+      waitUntil,
+    );
   } catch (err) {
     if (!(err instanceof ApiError)) throw err;
     if (query.name !== undefined && !mayNameRemoteTool(manifest, namespace, query.name)) {
@@ -327,11 +341,13 @@ async function remoteTools(
  * tools first within one; the integrations active here without a usable connection, under the
  * connect-offer policy of the caller (`connectOffers`); and the remote integrations whose server
  * the proxy refused to list, with that refusal. Read under the access rule of
- * `/api/credential-proxy/proxy` without a run (`reach`).
+ * `/api/credential-proxy/proxy` without a run (`reach`). Remote servers are waited for until
+ * `waitUntil`, {@link LISTING_DEADLINE_MS} from now when omitted.
  */
 export async function listIntegrationTools(
   caller: RemoteToolsCaller,
   query: IntegrationToolQuery = {},
+  waitUntil: AbortSignal = AbortSignal.timeout(LISTING_DEADLINE_MS),
 ): Promise<IntegrationToolListing> {
   const { scope, actor, reach, connectOffers } = caller;
   if (query.integrationId !== undefined) {
@@ -379,7 +395,7 @@ export async function listIntegrationTools(
   const listed = new Map(
     await mapWithConcurrency(remote, LIST_CONCURRENCY, async (entry) => {
       const taken = new Set(httpTools.get(entry.id)!.map((tool) => tool.name));
-      const result = await remoteTools(caller, entry, entry.connections, taken, query);
+      const result = await remoteTools(caller, entry, entry.connections, taken, query, waitUntil);
       return [entry.id, result] as const;
     }),
   );

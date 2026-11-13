@@ -879,12 +879,10 @@ describe("mcp integration tools", () => {
       const result = envelope.result as {
         isError?: boolean;
         content: Array<{ type: string; text: string }>;
-        _meta?: Record<string, unknown>;
       };
       expect(result.isError ?? false).toBe(false);
-      // The server's own result, relayed and marked as third-party content.
+      // The server's own result, relayed.
       expect(result.content).toEqual([{ type: "text", text: JSON.stringify({ q: "invoices" }) }]);
-      expect(result._meta).toEqual({ "dev.appstrate/third-party": true });
       // Sent with the connection's credential, never the caller's MCP token.
       const sent = server.requests.slice(exchanges);
       expect(sent.length).toBeGreaterThan(0);

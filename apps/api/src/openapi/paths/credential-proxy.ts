@@ -626,8 +626,9 @@ const integrationToolSchema = {
       type: "boolean",
       enum: [true],
       description:
-        "`remote` only: the server's `tools/list` could not be read, so the tool is a declared " +
-        "name, without description and with an empty object schema.",
+        "`remote` only: the server's `tools/list` could not be read, or not within the " +
+        "listing's 20 s, so the tool is a declared name, without description and with an empty " +
+        "object schema.",
     },
     connections: {
       type: "array",
@@ -731,8 +732,10 @@ export const credentialProxyPaths = {
         "`tools/list`. Each server is listed with the connection the proxy selects (or the " +
         "`connection_id` named, when it is one of that integration's; when the selection asks " +
         "for a choice, the first of the caller's connections it accepts), cached per " +
-        "connection and integration version for 5 minutes, and journaled as one call of the " +
-        "connection when the listing reaches the server. Each tool carries the connections it " +
+        "connection, integration version and server URL for 5 minutes, and journaled as one " +
+        "call of the connection when the listing reaches the server, its handshake refused " +
+        "included. The listing waits 20 s for the servers in all; a catalog not read by then is " +
+        "listed as one whose server could not be listed, and read on for the next listing. Each tool carries the connections it " +
         "reaches, the rows of `GET /api/credential-proxy/connections`. `not_ready` lists the " +
         "integrations active in the space the caller has no usable connection of, with the " +
         "verdict of a call naming none; with `X-Appstrate-Connect-Offers: 1`, a refusal item a " +
@@ -781,7 +784,7 @@ export const credentialProxyPaths = {
           description:
             "The tools, sorted by integration, `api_call` tools first within one; a remote " +
             "integration's typed tools follow in the order its server's `tools/list` gives them, " +
-            "or, when the server could not be listed (`catalog_unreadable`), its declared names " +
+            "or, when the server could not be listed in time (`catalog_unreadable`), its declared names " +
             "in no guaranteed order. A server the proxy refused to list is an entry of " +
             "`unlisted`, never an error status.",
           headers: STD_RESPONSE_HEADERS,
@@ -864,7 +867,7 @@ export const credentialProxyPaths = {
         "`404` before any exchange. The exchange goes through the credential proxy with the " +
         "access rule and the connection selection of `/api/credential-proxy/proxy` without " +
         "`X-Run-Id`, against the integration's latest published version, and is journaled as " +
-        "one call of the connection. The server's result is relayed without its " +
+        "one call of the connection once anything was sent, its handshake refused included. The server's result is relayed without its " +
         '`_meta["dev.appstrate/events"]`; a tool error is a result with `isError: true`. ' +
         "A refusal produced by the credential proxy's own checks or a transport fault carries " +
         "RFC 9209 `Proxy-Status: appstrate; error=<type>` (the 403, 502, 503 and 504 below name " +

@@ -44,12 +44,14 @@ import { attachConnectOffers } from "../connect/preflight-connect-offer.ts";
 import { requireCallerRun } from "./access.ts";
 import {
   assertIntegrationActive,
+  connectionParam,
   listActiveIntegrationIds,
   listIntegrationIdsActiveInSpace,
   listReachableConnections,
   proxyConnectionVerdicts,
   selectAccessibleConnection,
   upstreamRejectionStreak,
+  type ConnectionNaming,
   type ProxyConnectionStatus,
   type ProxyReach,
   type ResolvedConnectionRow,
@@ -135,8 +137,10 @@ type ResolveIntegrationProxyInput = {
   orgId: string;
   spaceId: string;
   actor: Actor;
-  /** Optional connection id pin (from `X-Connection-Id`). */
+  /** Optional connection id pin (from `X-Connection-Id`, or a body's `connection_id`). */
   connectionId?: string;
+  /** How the caller names `connectionId`; the header when omitted. */
+  connectionNaming?: ConnectionNaming;
 } & ProxyCallPath;
 
 interface ResolvedIntegrationProxyCredentials {
@@ -396,13 +400,14 @@ export async function listIntegrationsOutsideRun(
 export function noConnectionMessage(input: ResolveIntegrationProxyInput): string {
   const { integrationId, run } = input;
   if (run) return `Run '${run.id}' binds no usable connection of integration '${integrationId}'`;
+  const named = connectionParam(input.connectionNaming).label;
   if (input.reach === "usable") {
     return input.connectionId
-      ? `X-Connection-Id names no connection of integration '${integrationId}' usable in this space`
+      ? `${named} names no connection of integration '${integrationId}' usable in this space`
       : `No connection of integration '${integrationId}' is usable in this space`;
   }
   const subject = input.connectionId
-    ? `X-Connection-Id names none of your own connections of integration '${integrationId}' usable in this space`
+    ? `${named} names none of your own connections of integration '${integrationId}' usable in this space`
     : `You have no connection of integration '${integrationId}' usable in this space`;
   return (
     `${subject}. A connection shared into the space is reached by a caller holding ` +
@@ -449,6 +454,7 @@ function resolveConnection(
   return selectAccessibleConnection(input.integrationId, manifest, input.connectionId ?? null, {
     spaceId: input.spaceId,
     actor: input.actor,
+    ...(input.connectionNaming ? { naming: input.connectionNaming } : {}),
     ...(input.run ? { run: input.run } : { reach: input.reach }),
   });
 }

@@ -833,32 +833,6 @@ describe("call_integration_tool — result", () => {
     });
   });
 
-  it("marks a batch holding an upstream answer as third-party content, and one holding only the platform's refusals not", async () => {
-    const connectUrl = "https://test.local/api/integrations/connect/start?t=one-use";
-    const refusal = () =>
-      problem(409, "needs_reconnection", "Reconnect it.", {
-        errors: [{ field: `integrations.${INTEGRATION}`, connect_url: connectUrl }],
-      });
-
-    // An upstream's answer, even beside a refusal: its body is the upstream's own text.
-    const mixed = await apiCall(
-      { requests: [get(), get({ target: `${TARGET}/refused` })] },
-      (req) => (req.headers.get("X-Target") === TARGET ? relayedJson({ ok: true }) : refusal()),
-    );
-    expect(mixed.result._meta).toEqual({ "dev.appstrate/third-party": true });
-
-    // Only the platform's refusals: nothing third-party, so the connect link stays an offer.
-    const refusalsOnly = await apiCall({ requests: [get(), get({ target: `${TARGET}/x` })] }, () =>
-      refusal(),
-    );
-    expect(refusalsOnly.result.isError).toBe(true);
-    expect(refusalsOnly.result._meta?.["dev.appstrate/third-party"]).toBeUndefined();
-    expect(entries(refusalsOnly.payload)[0]!.error).toMatchObject({
-      code: "needs_reconnection",
-      errors: [{ connect_url: connectUrl }],
-    });
-  });
-
   it("is an error only when no request got a successful answer", async () => {
     const allFailed = await apiCall({ requests: [get(), get({ target: `${TARGET}/x` })] }, (req) =>
       req.headers.get("X-Target") === TARGET
@@ -1061,8 +1035,8 @@ describe("typed tools of a remote MCP integration", () => {
     const result = await made.byName
       .get("call_integration_tool")!
       .handler({ tool: "acme_docs__search", arguments: { q: "invoices" } }, noExtra);
-    // Relayed as the server answered, marked as third-party content.
-    expect(result).toEqual({ ...upstream, _meta: { "dev.appstrate/third-party": true } });
+    // Relayed as the server answered.
+    expect(result).toEqual(upstream);
     const call = callTool(made.calls)!;
     expect(await call.json()).toEqual({
       integration_package_id: REMOTE,
@@ -1199,7 +1173,7 @@ describe("call_integration_tool — a result past the budget", () => {
     expect(texts[2]).toBe("tail");
     expect(texts[3]).toContain("The tool ran");
     expect(result.isError).toBeUndefined();
-    expect(result._meta).toEqual({ truncated: true, "dev.appstrate/third-party": true });
+    expect(result._meta).toEqual({ truncated: true });
   });
 });
 
@@ -1238,6 +1212,5 @@ describe("call_integration_tool — a batch's deadline", () => {
     expect(codes.slice(4)).toEqual(["not_sent", "not_sent"]);
     expect(calls).toHaveLength(4);
     expect(payload.note).toContain("deadline");
-    expect(outcome.result._meta).toEqual({ "dev.appstrate/third-party": true });
   });
 });

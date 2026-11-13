@@ -21,6 +21,8 @@ import { clearAllCachesLocally } from "@appstrate/core/cache";
 import { forgetProtocolEras } from "@appstrate/mcp-transport/testing";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { drainAudits } from "../../../src/services/audit.ts";
+import { listIntegrationTools } from "../../../src/services/credential-proxy/integration-tools.ts";
+import { remoteCatalogKey } from "../../../src/services/credential-proxy/remote-tools.ts";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
@@ -308,6 +310,44 @@ describe("the typed tools of a remote MCP integration", () => {
       .from(connectionCalls)
       .where(eq(connectionCalls.connectionId, connectionId));
     expect(rows.map((row) => row.outcome)).toEqual(["200"]);
+  });
+
+  /** The outcomes journaled for `connectionId`, once every pending write landed. */
+  const journaled = async (connectionId: string) => {
+    await drainAudits(5_000);
+    const rows = await db
+      .select()
+      .from(connectionCalls)
+      .where(eq(connectionCalls.connectionId, connectionId));
+    return rows.map((row) => row.outcome);
+  };
+
+  it("journals one row for a cold listing whose handshake the server refuses", async () => {
+    await withServer({ tools: ["search"], bearer: "another-token" }, async (other) => {
+      await seedProxyIntegration(ctx, on(other, { tools_policy: { search: {} } }));
+      const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+      const { remote: tools } = await list();
+      expect(tools.map((tool) => [tool.remote_name, tool.catalog_unreadable])).toEqual([
+        ["search", true],
+      ]);
+      // The credential was sent, and no tools/list ever was.
+      expect(other.requests.length).toBeGreaterThan(0);
+      expect(other.requests.some((r) => r.body.includes('"tools/list"'))).toBe(false);
+      expect(await journaled(connectionId)).toEqual(["401"]);
+    });
+  });
+
+  it("journals one row for a tool call whose handshake the server refuses", async () => {
+    await withServer({ tools: ["search"], bearer: "another-token" }, async (other) => {
+      await seedProxyIntegration(ctx, on(other, { tools_policy: { search: {} } }));
+      const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+      const res = await post("call", { integration_package_id: ID, name: "search" });
+      expect(res.status).toBe(502);
+      expect(other.requests.some((r) => r.body.includes('"tools/call"'))).toBe(false);
+      expect(await journaled(connectionId)).toEqual(["401"]);
+    });
   });
 
   it("resolves an `api_call` tool of a remote integration by name without listing its server", async () => {
@@ -722,6 +762,35 @@ describe("the typed tools of a remote MCP integration", () => {
     });
   });
 
+  it("lists a catalog not read by the listing's deadline as unreadable, and reads it for the next", async () => {
+    await withServer({ tools: ["search"], delayMs: 100 }, async (other) => {
+      await seedProxyIntegration(ctx, on(other, { tools_policy: { search: {} } }));
+      await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+      const caller = {
+        scope: { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
+        actor: { type: "user" as const, id: ctx.user.id },
+        reach: "own" as const,
+        caller: { apiKeyId: null, authMethod: "api_key", requestId: "req_deadline" },
+        signal: new AbortController().signal,
+        connectOffers: null,
+      };
+
+      const late = await listIntegrationTools(caller, {}, AbortSignal.timeout(20));
+      expect(late.unlisted).toEqual([]);
+      expect(late.tools.map((tool) => [tool.name, "catalog_unreadable" in tool])).toEqual([
+        ["acme_docs__search", true],
+      ]);
+      // The listing left running under its own deadline: the next one shares it, then reads it.
+      const next = await listIntegrationTools(caller);
+      expect(next.tools.map((tool) => [tool.name, "catalog_unreadable" in tool])).toEqual([
+        ["acme_docs__search", false],
+      ]);
+      const exchanges = other.requests.length;
+      await listIntegrationTools(caller, {}, AbortSignal.timeout(20));
+      expect(other.requests.length).toBe(exchanges);
+    });
+  });
+
   it("lists and calls the tools of two integrations whose namespaces normalise alike", async () => {
     const outlook = "@appstrate/microsoft-outlook";
     const teams = "@appstrate/microsoft-teams";
@@ -868,6 +937,7 @@ describe("the typed tools of a remote MCP integration", () => {
       (await res.json()) as {
         code: string;
         detail: string;
+        param?: string;
         errors?: Record<string, unknown>[];
       };
     const orgDefault = (connectionIds: string[]) =>
@@ -969,11 +1039,35 @@ describe("the typed tools of a remote MCP integration", () => {
         callKey,
       );
       expect(res.status).toBe(400);
-      expect((await problemOf(res)).code).toBe("connection_not_in_org_default");
+      const problem = await problemOf(res);
+      expect(problem.code).toBe("connection_not_in_org_default");
+      expect(problem.param).toBe("connection_id");
+      expect(problem.detail).toStartWith("`connection_id` names a connection outside");
+      expect(problem.detail).not.toContain("X-Connection-Id");
       expect(server.requests).toEqual([]);
       // The default's member is the call's connection.
       const served = await post("call", { integration_package_id: ID, name: "search" }, callKey);
       expect(served.status).toBe(200);
+    });
+
+    it("answers 404 credential_not_found naming the body's `connection_id` for a colleague's connection", async () => {
+      await seedProxyIntegration(ctx, remote());
+      await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+      const colleague = await memberContext(ctx, "member");
+      const theirs = await seedProxyConnection(colleague, ID, "api_key", { token: TOKEN });
+
+      const res = await post("call", {
+        integration_package_id: ID,
+        name: "search",
+        connection_id: theirs,
+      });
+      expect(res.status).toBe(404);
+      const problem = await problemOf(res);
+      expect(problem.code).toBe("credential_not_found");
+      expect(problem.param).toBe("connection_id");
+      expect(problem.detail).toStartWith("`connection_id` names none of your own connections");
+      expect(problem.detail).not.toContain("X-Connection-Id");
+      expect(server.requests).toEqual([]);
     });
 
     it("refuses a body that is not JSON, or not the schema's object, before any exchange", async () => {
@@ -1044,5 +1138,16 @@ describe("the typed tools of a remote MCP integration", () => {
       expect((await problemOf(hidden)).code).toBe("not_found");
       expect(server.requests.length).toBe(exchanges);
     });
+  });
+});
+
+describe("remoteCatalogKey", () => {
+  it("tells apart the servers one connection's variables render at the same version", () => {
+    // A manifest lets a variable choose the host alone, which the proxy refuses on loopback: the
+    // route cannot be driven to two rendered servers here.
+    const entry = { orgId: "o", connectionId: "c", integrationId: ID, version: "1.0.0" };
+    expect(remoteCatalogKey({ ...entry, url: "https://a.example.com/mcp" })).not.toBe(
+      remoteCatalogKey({ ...entry, url: "https://b.example.com/mcp" }),
+    );
   });
 });

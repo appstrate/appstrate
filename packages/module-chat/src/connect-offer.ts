@@ -37,14 +37,13 @@ export const REDACTED_CONNECT_LINK = "[connect link hidden — the chat renders 
  * Two, and no camelCase twin, because an offer is only ever read from
  * Appstrate's own wire: the chat opens ONE MCP connection, to the platform's
  * own org-scoped endpoint (`platform-mcp.ts`), dispatched in-process through
- * the REST pipeline. That endpoint also relays third-party text —
- * `call_integration_tool` returns an integration's upstream answers, a remote
- * MCP server's tool result included — and it marks every such result
- * (`markThirdPartyResult`, `@appstrate/mcp-transport`): `mcpResultToPi` still
- * redacts its links but turns none into an offer, since a card would present a
- * stranger's link as the platform's own connect flow. A spelling-based set
- * could not be that safety net anyway: a stranger is as free to call the field
- * `url` or `href`.
+ * the REST pipeline, and that endpoint does not offer the chat's loopback
+ * bearer the integration tools, `search_integration_tools` and
+ * `call_integration_tool` (`proxyAcceptsCredential`,
+ * `apps/api/src/modules/mcp/router.ts`), so no third-party tool result reaches
+ * this walk. And a spelling-based denylist
+ * could not be a foreign-payload safety net anyway: a stranger is as free to
+ * call the field `url` or `href`.
  *
  * What pins the spelling is the endpoints themselves, not a casing gate:
  * `bun run check` has no HTTP-response casing check at all. The two spellings

@@ -53,10 +53,11 @@ import { noConnectionMessage } from "./integration-resolver.ts";
 /** Who calls, as the call journal records it. */
 export type ProxyCaller = Pick<ConnectionCall, "apiKeyId" | "authMethod" | "requestId">;
 
-interface ProxiedMcpFetchInput {
+interface ProxiedMcpOperationInput {
   scope: SpaceScope;
   actor: Actor;
   integrationId: string;
+  /** The connection, as a `connection_id` names it; the proxy selects one when omitted. */
   connectionId?: string;
   reach: ProxyReach;
   /** The version the exchange is authorized against; the latest published one when omitted. */
@@ -116,41 +117,52 @@ export async function listToolPages(
   };
 }
 
+/** An exchange that reached a connection: its credential may have been sent. */
+interface JournaledExchange {
+  connectionId: string;
+  method: string;
+  target: string;
+  outcome: string;
+  durationMs: number;
+}
+
 /**
- * A `fetch` for `createMcpHttpClient` that sends each MCP exchange through `proxyCall`. The SDK
- * echoes the server's own values (`Mcp-Session-Id`, `nextCursor`), so headers go literally: no
+ * One MCP operation spoken over the credential proxy: a `tools/list` listing or one `tools/call`.
+ * Its `fetch`, for `createMcpHttpClient`, sends each exchange through `proxyCall`. The SDK echoes
+ * the server's own values (`Mcp-Session-Id`, `nextCursor`), so headers go literally: no
  * placeholder they carry reaches a credential.
  *
- * The call journal keeps one row per listing and one per tool call: the exchange carrying a
- * `tools/call`, or the first page of a `tools/list` ({@link isJournaledExchange}). The handshake
- * and later pages add none, and a catalog served from cache makes no exchange at all.
+ * The call journal keeps one row per operation that reached upstream, written by `settle()` once
+ * the operation is over: its own exchange (the `tools/call`, or the first page of a `tools/list`),
+ * or, when the operation ended before it (a handshake refused, a transport failure after
+ * dispatch), the last exchange that may have sent the credential. An operation that made no
+ * exchange, a catalog served from cache, writes none.
  */
-export function proxiedMcpFetch(input: ProxiedMcpFetchInput): typeof fetch {
+export function proxiedMcpOperation(input: ProxiedMcpOperationInput): {
+  fetch: typeof fetch;
+  settle: () => void;
+} {
   const { scope, deadline } = input;
-  return (async (target: Parameters<typeof fetch>[0], init?: RequestInit) => {
+  let nominal: JournaledExchange | undefined;
+  let last: JournaledExchange | undefined;
+  let settled = false;
+  const fetchImpl = (async (target: Parameters<typeof fetch>[0], init?: RequestInit) => {
     // The standalone GET stream carries server-initiated messages, which a bounded exchange never reads.
     if (init?.method === "GET") return new Response(null, { status: 405 });
     const method = init?.method ?? "POST";
     const href = target instanceof Request ? target.url : String(target);
     const body = typeof init?.body === "string" ? init.body : null;
     const started = Date.now();
-    const journal = (connectionId: string, outcome: string) => {
-      if (!isJournaledExchange(body)) return;
-      void trackAudit(
-        recordConnectionCall({
-          ...input.caller,
-          orgId: scope.orgId,
-          spaceId: scope.spaceId,
-          connectionId,
-          integrationId: input.integrationId,
-          actor: input.actor,
-          runId: null,
-          method,
-          target: href,
-          outcome,
-          durationMs: Date.now() - started,
-        }),
-      );
+    const reached = (connectionId: string, outcome: string) => {
+      const exchange = {
+        connectionId,
+        method,
+        target: href,
+        outcome,
+        durationMs: Date.now() - started,
+      };
+      last = exchange;
+      if (!nominal && isOperationExchange(body)) nominal = exchange;
     };
     const maxResponseBytes = Math.min(
       MAX_EXCHANGE_BYTES,
@@ -163,6 +175,7 @@ export function proxiedMcpFetch(input: ProxiedMcpFetchInput): typeof fetch {
         spaceId: scope.spaceId,
         actor: input.actor,
         ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+        connectionNaming: "connection_id",
         reach: input.reach,
         ...(input.version ? { version: input.version } : {}),
         integrationId: input.integrationId,
@@ -175,10 +188,10 @@ export function proxiedMcpFetch(input: ProxiedMcpFetchInput): typeof fetch {
         signal: init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline,
       });
     } catch (err) {
-      if (err instanceof ProxyCallError && err.connectionId) journal(err.connectionId, err.code);
+      if (err instanceof ProxyCallError && err.connectionId) reached(err.connectionId, err.code);
       throw err;
     }
-    journal(result.connectionId, String(result.status));
+    reached(result.connectionId, String(result.status));
     // A body cut at the bound fails its read, rather than handing the client half a message.
     const relayed =
       result.body?.pipeThrough(
@@ -190,10 +203,27 @@ export function proxiedMcpFetch(input: ProxiedMcpFetchInput): typeof fetch {
       ) ?? null;
     return new Response(relayed, { status: result.status, headers: result.headers });
   }) as typeof fetch;
+  const settle = () => {
+    const exchange = nominal ?? last;
+    if (settled || !exchange) return;
+    settled = true;
+    void trackAudit(
+      recordConnectionCall({
+        ...input.caller,
+        ...exchange,
+        orgId: scope.orgId,
+        spaceId: scope.spaceId,
+        integrationId: input.integrationId,
+        actor: input.actor,
+        runId: null,
+      }),
+    );
+  };
+  return { fetch: fetchImpl, settle };
 }
 
 /** Whether a JSON-RPC body is a `tools/call`, or a `tools/list` asking for no cursor. */
-function isJournaledExchange(body: string | null): boolean {
+function isOperationExchange(body: string | null): boolean {
   if (body === null) return false;
   let message: unknown;
   try {
@@ -213,14 +243,28 @@ const CALL_TIMEOUT_MS = 45_000;
 const CATALOG_TTL_MS = 5 * 60 * 1000;
 
 /**
- * The sanitised upstream descriptors of a connection's catalog, keyed by connection and
- * integration version. Holds no credential and decides no access: it is read only with a
- * connection the caller's selection resolved.
+ * The sanitised upstream descriptors of a connection's catalog ({@link remoteCatalogKey}). Holds
+ * no credential and decides no access: it is read only with a connection the caller's selection
+ * resolved.
  */
 const catalogCache = createCache<{ tools: Tool[]; truncated: boolean }>({
   name: "remote-integration-tools",
   ttlMs: CATALOG_TTL_MS,
 });
+
+/**
+ * A catalog's cache key. The URL is in it because a reconnect may rewrite the variables it is
+ * rendered from: a connection whose variables were cleared takes them anew on its next reconnect.
+ */
+export function remoteCatalogKey(entry: {
+  orgId: string;
+  connectionId: string;
+  integrationId: string;
+  version: string;
+  url: string;
+}): string {
+  return `${entry.orgId}:${entry.connectionId}:${entry.integrationId}@${entry.version}:${entry.url}`;
+}
 
 /** Who lists or calls a remote integration's tools outside a run, and how. */
 export interface RemoteToolsCaller {
@@ -283,10 +327,11 @@ async function remoteConnection(
       spaceId: input.scope.spaceId,
       actor: input.actor,
       reach: input.reach,
+      naming: "connection_id",
       ...(tool !== undefined ? { tool } : {}),
     },
   ).catch(async (err: unknown) => {
-    throw await withConnectOffers(namingBodyConnectionId(err, input.integrationId), input);
+    throw await withConnectOffers(err, input);
   });
   if (!connection) {
     throw proxyProblem(
@@ -298,7 +343,9 @@ async function remoteConnection(
         actor: input.actor,
         reach: input.reach,
         ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+        connectionNaming: "connection_id",
       }),
+      input.connectionId ? "connection_id" : undefined,
     );
   }
   const remote = renderRemoteSource(manifest, connection.variables);
@@ -311,21 +358,6 @@ async function remoteConnection(
     });
   }
   return { connectionId: connection.id, url: remote.url };
-}
-
-/**
- * A `must_choose_connection` reworded for a door that takes the request body's `connection_id`,
- * where the proxy's own wording names its `X-Connection-Id` header; any other error as it is.
- */
-export function namingBodyConnectionId(err: unknown, integrationId: string): unknown {
-  if (!(err instanceof ApiError) || err.code !== "must_choose_connection") return err;
-  const detail = `No single connection of '${integrationId}' applies: name one in the request body's \`connection_id\`.`;
-  return err.with({
-    detail,
-    ...(err.fieldErrors
-      ? { errors: err.fieldErrors.map((item) => ({ ...item, message: detail })) }
-      : {}),
-  });
 }
 
 /**
@@ -378,24 +410,27 @@ async function withClient<T>(
 ): Promise<T> {
   const timeout = AbortSignal.timeout(input.timeoutMs);
   const deadline = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout;
+  const operation = proxiedMcpOperation({
+    scope: input.scope,
+    actor: input.actor,
+    integrationId: input.integrationId,
+    connectionId: input.connectionId,
+    reach: input.reach,
+    caller: input.caller,
+    deadline,
+  });
   let client: AppstrateMcpClient | undefined;
   try {
     client = await createMcpHttpClient(url, {
-      fetch: proxiedMcpFetch({
-        scope: input.scope,
-        actor: input.actor,
-        integrationId: input.integrationId,
-        connectionId: input.connectionId,
-        reach: input.reach,
-        caller: input.caller,
-        deadline,
-      }),
+      fetch: operation.fetch,
       signal: deadline,
       onWarning: (message, data) =>
         logger.warn(message, { integrationId: input.integrationId, ...data }),
     });
     return await use(client, deadline);
   } finally {
+    // Before the session's close, which is no exchange of the operation.
+    operation.settle();
     await client?.close().catch(() => {});
   }
 }
@@ -421,30 +456,45 @@ export interface RemoteToolCatalog {
 
 /**
  * The tools the caller's connection of a remote integration offers, described by the server's
- * `tools/list` (cached per connection and integration version). The connection is selected before
- * the cache is read, so a cached catalog answers only a caller who reaches that connection. The
- * listing runs under its own timeout alone: callers sharing it never depend on the first one
- * staying. A server that cannot be listed leaves the declared names; a refusal of the proxy
- * (connection, permission, `authorized_uris`) is thrown.
+ * `tools/list` (cached per connection, integration version and server URL). The connection is
+ * selected before the cache is read, so a cached catalog answers only a caller who reaches that
+ * connection. The listing runs under its own timeout alone: callers sharing it never depend on the
+ * first one staying, and a caller whose `waitUntil` ends first leaves it running for the next. A
+ * server that cannot be listed, or not before `waitUntil`, leaves the declared names; a refusal of
+ * the proxy (connection, permission, `authorized_uris`) is thrown.
  */
 export async function listRemoteTools(
-  input: RemoteToolsInput & { connectionId?: string },
+  input: RemoteToolsInput & { connectionId?: string; waitUntil?: AbortSignal },
 ): Promise<RemoteToolCatalog> {
   const manifest = await remoteManifest(input.integrationId, input.scope);
   const { connectionId, url } = await remoteConnection(input, manifest);
-  const key = `${input.scope.orgId}:${connectionId}:${input.integrationId}@${manifest.version}`;
+  const key = remoteCatalogKey({
+    orgId: input.scope.orgId,
+    connectionId,
+    integrationId: input.integrationId,
+    version: manifest.version,
+    url,
+  });
   let described: { tools: Tool[]; truncated: boolean } | undefined;
   try {
-    described = await catalogCache.get(key, () =>
-      withClient(
-        { ...input, connectionId, timeoutMs: LIST_TIMEOUT_MS, signal: null },
-        url,
-        async (client, deadline) => {
-          const { tools, truncated } = await listToolPages(client, deadline);
-          return { tools: tools.flatMap((tool) => sanitiseToolDescriptor(tool) ?? []), truncated };
-        },
-      ),
-    );
+    described =
+      catalogCache.peek(key) ??
+      (await beforeDeadline(
+        catalogCache.get(key, () =>
+          withClient(
+            { ...input, connectionId, timeoutMs: LIST_TIMEOUT_MS, signal: null },
+            url,
+            async (client, deadline) => {
+              const { tools, truncated } = await listToolPages(client, deadline);
+              return {
+                tools: tools.flatMap((tool) => sanitiseToolDescriptor(tool) ?? []),
+                truncated,
+              };
+            },
+          ),
+        ),
+        input.waitUntil,
+      ));
   } catch (err) {
     // A refusal made before any exchange is the caller's to see; a server fault leaves the names.
     if (err instanceof ApiError || (err instanceof ProxyCallError && !err.connectionId)) {
@@ -475,6 +525,27 @@ export async function listRemoteTools(
     listed: true,
     truncated: described.truncated,
   };
+}
+
+/** A listing no longer waited for: its catalog is read for a later one. */
+class ListingDeadlineError extends Error {
+  constructor() {
+    super("the listing's deadline passed before the server's catalog was read");
+    this.name = "ListingDeadlineError";
+  }
+}
+
+/** `work`'s outcome, or a {@link ListingDeadlineError} once `deadline` ends first. */
+function beforeDeadline<T>(work: Promise<T>, deadline: AbortSignal | undefined): Promise<T> {
+  if (!deadline) return work;
+  // Its outcome after the deadline belongs to the cache alone.
+  work.catch(() => {});
+  return new Promise<T>((resolve, reject) => {
+    const expire = () => reject(new ListingDeadlineError());
+    if (deadline.aborted) return expire();
+    deadline.addEventListener("abort", expire, { once: true });
+    work.then(resolve, reject).finally(() => deadline.removeEventListener("abort", expire));
+  });
 }
 
 /**

@@ -517,8 +517,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `POST /api/integrations/{packageId}/discover` answers the same codes where it
   answered `bad_gateway`. A result over 256 KiB keeps the blocks that fit. The
   call journal records one row per `tools/call` and one per listing that
-  reached the server. Two routes back the tools, `GET /api/credential-proxy/tools`
-  (the tools, `not_ready` and `unlisted`) and
+  reached the server, a refused handshake included (one row for the sync as
+  well). A listing waits 20 s for all its servers: a catalog not read by then
+  is listed `catalog_unreadable` and read on for the next listing. Two routes
+  back the tools, `GET /api/credential-proxy/tools` (the tools, `not_ready`
+  and `unlisted`) and
   `POST /api/credential-proxy/tools/call`, under the access rule of
   `/api/credential-proxy/proxy` outside a run, each with its own rate-limit
   bucket, and both kept out of the MCP operation catalog like `/proxy`.
@@ -527,10 +530,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `proxy_connection` verdict of a call naming none (`none`,
   `needs_reconnection`, `not_permitted`, `default_unavailable`, `unusable`) and
   the selection's `refusal` item, whose `connect_url` (run launch's minter and
-  policy, `integrations:connect`) connects or reconnects it. A result relayed
-  from an upstream is marked `_meta["dev.appstrate/third-party"]`: the chat
-  redacts its links and builds no connect card from it. The MCP exchange of the
-  editor's server sync and of these routes share one proxy adapter;
+  policy, `integrations:connect`) connects or reconnects it. The MCP exchange
+  of the editor's server sync and of these routes share one proxy adapter;
   `stripForgedRuntimeEvents` moves from the sidecar to
   `@appstrate/mcp-transport`, which both consume.
 

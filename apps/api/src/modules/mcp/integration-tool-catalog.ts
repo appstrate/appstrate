@@ -10,7 +10,7 @@
 
 import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { markThirdPartyResult, type AppstrateRequestExtra } from "@appstrate/mcp-transport";
+import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
 import type {
   IntegrationToolListing,
@@ -194,9 +194,9 @@ async function executeRemoteTool(
     return { result: jsonResult(body ?? { status: response.status }, true), shownCount: 0 };
   }
   if (new TextEncoder().encode(text).byteLength > MAX_RESULT_BYTES) {
-    return { result: markThirdPartyResult(boundedResult(result as CallToolResult)), shownCount: 1 };
+    return { result: boundedResult(result as CallToolResult), shownCount: 1 };
   }
-  return { result: markThirdPartyResult(result as CallToolResult), shownCount: 1 };
+  return { result: result as CallToolResult, shownCount: 1 };
 }
 
 /** A listed tool with how the MCP tool calls it. */

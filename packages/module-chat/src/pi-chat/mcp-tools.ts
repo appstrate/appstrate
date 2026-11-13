@@ -22,7 +22,6 @@ import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
 import { parseSkillUriPackage, SKILL_DEFINITION_META_KEY } from "@appstrate/core/skill-uri";
 import {
   createMcpHttpClient,
-  isThirdPartyResult,
   RESOURCE_BLOB_MAX_BYTES,
   RESOURCE_OVERSIZED_NOTE,
   RESOURCE_TEXT_MAX_BYTES,
@@ -87,7 +86,6 @@ export function toPiToolResult(payload: unknown): PiToolResult {
 export function mcpResultToPi(result: {
   content: Array<Record<string, unknown>>;
   structuredContent?: unknown;
-  _meta?: unknown;
 }): PiToolResult {
   // One list per text block, merged below — a result may split a readiness
   // error across blocks, and each block's connect links must all reach the UI.
@@ -124,9 +122,6 @@ export function mcpResultToPi(result: {
   } else {
     details = { ...result, content };
   }
-  // A third party wrote it (an integration's answer, relayed): its links are redacted like any
-  // other, and none becomes a connect card.
-  if (isThirdPartyResult(result)) offers = [];
   return { content, details, ...(offers.length > 0 ? { connectOffers: offers } : {}) };
 }
 

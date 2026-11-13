@@ -382,6 +382,24 @@ export interface RunBoundSelection {
 
 export type ProxyReach = "own" | "usable";
 
+/**
+ * How a caller names a connection: the credential proxy's `X-Connection-Id` header, or a
+ * `connection_id` field (`/api/credential-proxy/tools*`, the server sync). A refusal about the
+ * named connection speaks of it the way the caller wrote it.
+ */
+export type ConnectionNaming = "X-Connection-Id" | "connection_id";
+
+/** The `param` and the wording of a refusal about the connection a caller names. */
+export function connectionParam(naming: ConnectionNaming = "X-Connection-Id"): {
+  param: ConnectionNaming;
+  label: string;
+  remedy: string;
+} {
+  return naming === "connection_id"
+    ? { param: naming, label: "`connection_id`", remedy: "name one in `connection_id`" }
+    : { param: naming, label: naming, remedy: "name one with the X-Connection-Id header" };
+}
+
 /** What a proxy call selects from: a run's bound set, or the caller's reach outside a run. */
 type ProxySelectionPath =
   { run: RunBoundSelection; reach?: never } | { reach: ProxyReach; run?: never };
@@ -396,6 +414,8 @@ type ConnectionSelectionContext = {
   orgDefaults?: Record<string, OrgDefaultPick>;
   /** The tool the call runs, when it names one: the selection then serves it (`proxyRequirement`). */
   tool?: string;
+  /** How the caller names a connection; the header when omitted. */
+  naming?: ConnectionNaming;
 } & ProxySelectionPath;
 
 /**
@@ -433,6 +453,7 @@ async function selectConnection(
   const candidatesOf = (set: readonly SelectableRow[]) =>
     set.map((r) => candidateOf(identity, r, []));
   const { run, reach } = context;
+  const param = connectionParam(context.naming);
   let rows: SelectableRow[];
   // A run's bound set passed governance at kickoff, and the `own` reach skips every layer.
   let orgDefaults: Record<string, OrgDefaultPick> | null = null;
@@ -444,7 +465,7 @@ async function selectConnection(
         packageId,
         connectionId: named,
         bound,
-        param: "X-Connection-Id",
+        param: param.param,
       });
     } else if (bound.length === 1) {
       named = bound[0]!.connectionId;
@@ -458,6 +479,7 @@ async function selectConnection(
         packageId,
         candidatesOf(rows.filter((r) => ids.has(r.id))),
         `Run '${run.id}' bound several connections`,
+        param.remedy,
       );
     }
   } else {
@@ -472,9 +494,9 @@ async function selectConnection(
         if (!enforcedIds.includes(named)) {
           throw proxyProblem(
             "connection_not_in_org_default",
-            `X-Connection-Id names a connection outside the enforced org default of '${packageId}', ` +
+            `${param.label} names a connection outside the enforced org default of '${packageId}', ` +
               `which binds every call in this space: name one of its members, or none.`,
-            "X-Connection-Id",
+            param.param,
           );
         }
         // The named member alone: the resolver would bind the imposed set whole.
@@ -510,13 +532,18 @@ async function selectConnection(
     const reason = candidates.some((c) => c.ownedByActor)
       ? "No single connection applies"
       : "Only connections shared by other members exist";
-    throw mustChoose(packageId, candidates, reason);
+    throw mustChoose(packageId, candidates, reason, param.remedy);
   }
   if (error) throw resolutionConflict(error);
 
   const set = resolved[packageId]!.map((m) => rows.find((r) => r.id === m.connectionId)!);
   if (set.length === 1) return { row: toResolvedRow(set[0]!) };
-  throw mustChoose(packageId, candidatesOf(set), "The org default holds several connections");
+  throw mustChoose(
+    packageId,
+    candidatesOf(set),
+    "The org default holds several connections",
+    param.remedy,
+  );
 }
 
 /**
@@ -713,11 +740,12 @@ function mustChoose(
   packageId: string,
   candidateConnections: ConnectionCandidate[],
   reason: string,
+  remedy: string,
 ): ApiError {
   return resolutionConflict({
     integrationId: packageId,
     code: "must_choose_connection",
-    message: `${reason} for '${packageId}' — name one with the X-Connection-Id header.`,
+    message: `${reason} for '${packageId}' — ${remedy}.`,
     candidateConnections,
   });
 }

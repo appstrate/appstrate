@@ -29,8 +29,7 @@ import {
   MAX_LISTED_TOOLS,
   McpExchangeTooLargeError,
   mcpServerFailure,
-  namingBodyConnectionId,
-  proxiedMcpFetch,
+  proxiedMcpOperation,
   type ProxyCaller,
 } from "./credential-proxy/remote-tools.ts";
 import type { ProxyReach } from "./integration-connections.ts";
@@ -142,23 +141,24 @@ export async function syncIntegrationFromServer(input: {
   const hasDoc = draftHasIntegrationDoc(scope.orgId, packageId);
   hasDoc.catch(() => {});
 
+  const proxied =
+    reach === null
+      ? null
+      : proxiedMcpOperation({
+          scope,
+          actor: input.actor,
+          integrationId: packageId,
+          ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+          reach,
+          version: DRAFT,
+          caller: input.caller,
+          deadline,
+        });
   let client: AppstrateMcpClient | undefined;
   let exchanged;
   try {
     client = await createMcpHttpClient(url, {
-      fetch:
-        reach === null
-          ? direct
-          : proxiedMcpFetch({
-              scope,
-              actor: input.actor,
-              integrationId: packageId,
-              ...(input.connectionId ? { connectionId: input.connectionId } : {}),
-              reach,
-              version: DRAFT,
-              caller: input.caller,
-              deadline,
-            }),
+      fetch: proxied?.fetch ?? direct,
       signal: deadline,
       onWarning: (message, data) => logger.warn(message, { packageId, ...data }),
     });
@@ -172,6 +172,8 @@ export async function syncIntegrationFromServer(input: {
   } catch (err) {
     throw syncFailure(err, packageId, url, unauthenticated);
   } finally {
+    // Before the session's close, which is no exchange of the listing.
+    proxied?.settle();
     await client?.close().catch(() => {});
   }
   return proposalFromServer(
@@ -296,8 +298,6 @@ function syncFailure(
   url: string,
   unauthenticated: boolean,
 ): Error {
-  const named = namingBodyConnectionId(err, packageId);
-  if (named !== err) return named as ApiError;
   if (err instanceof ProxyCallError && err.code === "credential_not_found") {
     return notConnected(err.message);
   }

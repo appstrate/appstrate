@@ -8,7 +8,7 @@
 
 import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { markThirdPartyResult, type AppstrateRequestExtra } from "@appstrate/mcp-transport";
+import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { isPlatformRequestHeader } from "@appstrate/connect/platform-request-headers";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { isTextShapedContentType } from "@appstrate/core/mime";
@@ -550,8 +550,5 @@ export async function executeApiCall(
     // An error only when no request got a successful answer.
     failed === results.length,
   );
-  // An upstream's answer is its own text. A result holding only the platform's refusals keeps
-  // their connect links readable as offers.
-  const relayed = results.some((entry) => "status" in entry);
-  return { result: relayed ? markThirdPartyResult(result) : result, shownCount: results.length };
+  return { result, shownCount: results.length };
 }

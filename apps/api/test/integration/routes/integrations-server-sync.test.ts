@@ -261,7 +261,11 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     ]);
     const res = await sync(member, { connection_id: ownerConnection });
     expect(res.status).toBe(409);
-    expect(((await res.json()) as { code: string }).code).toBe("integration_not_connected");
+    const body = (await res.json()) as { code: string; detail: string };
+    expect(body.code).toBe("integration_not_connected");
+    // The connection is named in the body, not in the proxy's header.
+    expect(body.detail).toStartWith("`connection_id` names none of your own connections");
+    expect(body.detail).not.toContain("X-Connection-Id");
     expect(server.methods).toEqual([]);
   });
 
@@ -492,6 +496,19 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     const body = (await res.json()) as { code: string; detail: string };
     expect(body.code).toBe("bad_gateway");
     expect(body.detail).toContain("refused the connection's credential");
+  });
+
+  it("journals one row when the server refuses the handshake, no listing ever sent", async () => {
+    await seedProxyIntegration(ctx, remote());
+    const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: "wrong" });
+    expect((await sync(ctx, { connection_id: connectionId })).status).toBe(502);
+    expect(server.methods.length).toBeGreaterThan(0);
+    await drainAudits(5_000);
+    const rows = await db
+      .select()
+      .from(connectionCalls)
+      .where(eq(connectionCalls.connectionId, connectionId));
+    expect(rows.map((row) => row.outcome)).toEqual(["401"]);
   });
 
   it("sends the server's own header values back as written: no placeholder reaches a credential", async () => {
