@@ -358,7 +358,7 @@ this is the copy kept in step with it: `turbo typecheck lint format:check` plus
 `verify:module-isolation`, `verify:module-sql-boundary`, `verify:license-boundary`,
 `typecheck:scripts`, `verify:module-contract`, `verify:dead-code`, `verify:no-migration-dml`,
 `verify:overrides`.
-turbo fans those out to **43** actual tasks (`typecheck` alone runs in 22 workspaces) — count them
+turbo fans those out to **44** actual tasks (`typecheck` alone runs in 23 workspaces) — count them
 with `bunx turbo run <the 22 names> --dry=json`, never by reading this line.
 There is no `turbo check` task — the root script drives turbo directly.
 
