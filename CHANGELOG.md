@@ -127,8 +127,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `integration_package_id`, so a batch targets one integration. **An integration that
   declares no `api_call` is no longer callable through the MCP** (the old generic
   `api_call` took any integration); `/api/credential-proxy/proxy` is unchanged and still
-  serves it. A namespace is the normalised package id; two integrations the caller
-  reaches that normalise alike each take a 6-hex suffix hashed from their own id, where a
+  serves it. A namespace is the normalised package id; two integrations active
+  in the space that normalise alike each take a 6-hex suffix hashed from their own id, where a
   run suffixes `_2`, `_3`, so on such a collision the names differ from a run's. Refusal
   codes: an unknown tool name passed to `call_integration_tool` is the tool result
   `unknown_tool`; an `{ns}__api_call` batch has 45 s, past which an entry is `not_sent`

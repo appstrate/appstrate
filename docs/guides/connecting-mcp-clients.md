@@ -399,7 +399,7 @@ role. Runs keep their connections there:
   nor `integration` it lists every tool you can call. A tool is named
   `{ns}__api_call`, or `{ns}__api_call__{auth}` when several auths of the
   integration expose it, `{ns}` being the package id in snake case; when two
-  integrations you reach share it, each takes a 6-hex suffix hashed from its own
+  integrations active in the space share it, each takes a 6-hex suffix hashed from its own
   package id. A run suffixes `_2`, `_3`… instead, so on such a collision the
   names differ from a run's. An integration lists the `api_call` tools its
   catalog exposes (every tool, less `hidden_tools` and its connect tools; not

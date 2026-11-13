@@ -586,8 +586,8 @@ const integrationToolSchema = {
       description:
         "The tool's name: `{ns}__api_call` (`{ns}__api_call__{auth}` when several auths of " +
         "the integration expose one) or `{ns}__{tool}` for a typed tool, `{ns}` being the " +
-        "package id normalised, with a suffix hashed from the package id when another listed " +
-        "package normalises alike.",
+        "package id normalised, with a suffix hashed from the package id when another " +
+        "integration active in the space normalises alike.",
     },
     kind: {
       type: "string",

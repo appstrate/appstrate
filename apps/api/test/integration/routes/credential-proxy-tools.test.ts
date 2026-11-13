@@ -370,6 +370,18 @@ describe("GET /api/credential-proxy/tools", () => {
       );
     });
 
+    it("names a tool the same whether or not the caller holds a connection of the colliding integration", async () => {
+      const ids = ["@acme-items/x", "@acme/items-x"];
+      for (const id of ids) await seedProxyIntegration(ctx, keyManifest(id));
+      await seedProxyConnection(ctx, "@acme-items/x", "api", { api_key: "a" });
+
+      const name = `acme_items_x_${fnv1a64Hex("@acme-items/x").slice(0, 6)}__api_call`;
+      expect((await list()).body.tools.map((tool) => tool.name)).toEqual([name]);
+
+      await seedProxyConnection(ctx, "@acme/items-x", "api", { api_key: "a" });
+      expect((await list()).body.tools.map((tool) => tool.name)).toContain(name);
+    });
+
     it("resolves a tool by its full name, a namespace ending in `_` included", async () => {
       // `acme_crm_suite_tool_` (cut at 20 characters) and `acme_crm_suite_tool`: the second
       // name's namespace and separator start the first's.

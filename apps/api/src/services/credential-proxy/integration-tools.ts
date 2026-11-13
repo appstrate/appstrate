@@ -9,9 +9,9 @@
  * them, a typed tool's with the scopes its `tools_policy` entry requires that the connection
  * lacks. The integrations active here that the caller has no usable connection of come apart.
  *
- * A namespace is the package id normalised (`normaliseMcpToolNamespace`); package ids that
- * normalise alike each take a suffix hashed from their own id, so a tool's name depends on its
- * integration alone, never on which other connections the caller holds.
+ * A namespace is the package id normalised (`normaliseMcpToolNamespace`); the integrations
+ * active in the space whose ids normalise alike each take a suffix hashed from their own id, so a
+ * tool's name depends on the space's integrations, never on which connections the caller holds.
  */
 
 import {
@@ -27,7 +27,11 @@ import { fnv1a64Hex } from "@appstrate/afps-shared/mcp-naming";
 import type { ProblemDetail } from "@appstrate/core/api-errors";
 import { ApiError, type ResolutionFieldError } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
-import { assertIntegrationActive, type ProxyConnectionStatus } from "../integration-connections.ts";
+import {
+  assertIntegrationActive,
+  listIntegrationIdsActiveInSpace,
+  type ProxyConnectionStatus,
+} from "../integration-connections.ts";
 import {
   connectionsOutsideRun,
   listIntegrationsOutsideRun,
@@ -333,8 +337,9 @@ export async function listIntegrationTools(
   if (query.integrationId !== undefined) {
     await assertIntegrationActive(query.integrationId, scope.spaceId);
   }
-  const [reachable, notReady] = await Promise.all([
+  const [reachable, activeIds, notReady] = await Promise.all([
     connectionsOutsideRun(scope, actor, reach),
+    listIntegrationIdsActiveInSpace(scope),
     query.name === undefined
       ? listIntegrationsOutsideRun(scope, actor, reach, connectOffers, query.integrationId)
       : [],
@@ -344,8 +349,8 @@ export async function listIntegrationTools(
   for (const { integration_package_id: id, ...connection } of reachable.connections) {
     byIntegration.set(id, [...(byIntegration.get(id) ?? []), connection]);
   }
-  // Every integration listed takes its namespace, whichever one the query keeps.
-  const namespaces = namespacesOf([...byIntegration.keys()]);
+  // Every integration active in the space takes its namespace, connected by the caller or not.
+  const namespaces = namespacesOf([...new Set([...activeIds, ...byIntegration.keys()])]);
   const integrations = [...byIntegration]
     .filter(([id]) => query.integrationId === undefined || id === query.integrationId)
     .flatMap(([id, connections]) => {
