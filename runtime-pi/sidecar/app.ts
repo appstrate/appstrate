@@ -3,8 +3,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { Hono, type Context } from "hono";
 import pLimit, { type LimitFunction } from "p-limit";
-import { mountMcp, validateMcpHostHeader } from "./mcp.ts";
-import { RuntimeEventJournal } from "./runtime-event-journal.ts";
+import { mountMcp } from "./mcp.ts";
 import type { ApiCallBaseDeps } from "./credential-proxy.ts";
 import type { CookieJar } from "@appstrate/afps-runtime/resolvers";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
@@ -154,14 +153,6 @@ export interface AppDeps {
    * tests / sidecars launched without integrations.
    */
   integrationBootReportProvider?: () => IntegrationBootReport;
-  /**
-   * Per-run runtime-event journal. The runtime-tool defs (`server.ts`) are
-   * wrapped to journal their canonical events on a single handler execution;
-   * the `GET /runtime-events` endpoint serves them to whichever runner is
-   * draining. Omitted by tests / sidecars without runtime tools → the endpoint
-   * answers an empty batch.
-   */
-  runtimeEventJournal?: RuntimeEventJournal;
 }
 
 /**
@@ -659,8 +650,8 @@ export function createApp(deps: AppDeps): Hono {
   //
   // DENY BY DEFAULT, with `/health` as the single exemption: a route added to
   // this app later is protected without anyone remembering to say so, which is
-  // the opposite of how `/llm/*`, `/mcp`, `/integrations/boot-report` and
-  // `/runtime-events` each ended up open one at a time.
+  // the opposite of how `/llm/*`, `/mcp` and `/integrations/boot-report` each
+  // ended up open one at a time.
   //
   // `/health` is exempt because it is the container health gate — the
   // orchestrator probes it before the run exists and it discloses one bit
@@ -1001,22 +992,6 @@ export function createApp(deps: AppDeps): Hono {
   // `bootIntegrations` (when `server.ts` pre-builds them) so the
   // in-process api_call server and the outer resource provider use the
   // same blob store.
-  // Runtime-event drain surface — the Pi runner pulls the
-  // canonical events the sidecar journaled while executing runtime tools, and
-  // re-emits them on its single run-event sink. Same posture as `/mcp`: the
-  // agent-auth middleware gates it, and the `Host` check on top is the
-  // DNS-rebinding defence. An empty journal (no runtime tools selected)
-  // answers an empty batch.
-  app.get("/runtime-events", (c) => {
-    const denied = validateMcpHostHeader(c.req.raw);
-    if (denied) return denied;
-    const journal = deps.runtimeEventJournal;
-    if (!journal) return c.json({ events: [], cursor: 0, firstSeq: 1 });
-    const after = Number.parseInt(c.req.query("after") ?? "0", 10);
-    const cursor = Number.isFinite(after) && after >= 0 ? after : 0;
-    return c.json(journal.after(cursor));
-  });
-
   const { blobStore } = deps.runtimeDeps ?? buildSidecarRuntimeDeps(deps);
   mountMcp(app, {
     blobStore,

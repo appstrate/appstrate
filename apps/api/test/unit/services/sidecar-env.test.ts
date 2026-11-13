@@ -17,7 +17,6 @@ describe("applySpecToSidecarEnv", () => {
         baseUrl: "https://api.openai.com",
       },
       integrations: [{ id: "gmail" } as never],
-      runtimeTools: ["log"],
     };
 
     // Mirror the two orchestrators' distinct base envs.
@@ -38,7 +37,6 @@ describe("applySpecToSidecarEnv", () => {
       "PI_BASE_URL",
       "PI_LLM_PLATFORM_API_SHAPE",
       "INTEGRATIONS_TO_SPAWN_JSON",
-      "RUNTIME_TOOLS_JSON",
     ];
     for (const key of specKeys) {
       expect(dockerEnv[key]).toBe(processEnv[key]);
@@ -48,7 +46,6 @@ describe("applySpecToSidecarEnv", () => {
     expect(dockerEnv.MODEL_CONTEXT_WINDOW).toBe("200000");
     expect(dockerEnv.MODEL_MAX_TOKENS).toBe("8192");
     expect(dockerEnv.PI_BASE_URL).toBe("https://api.openai.com");
-    expect(dockerEnv.RUNTIME_TOOLS_JSON).toBe(JSON.stringify(["log"]));
 
     // Base-env keys are left untouched (orchestrator-local responsibility).
     expect(dockerEnv.RUN_ID).toBe("run_1");

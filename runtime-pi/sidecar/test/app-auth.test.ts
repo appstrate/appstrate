@@ -24,7 +24,6 @@
 import { describe, it, expect, mock } from "bun:test";
 import { SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
 import { createApp, type AppDeps } from "../app.ts";
-import { RuntimeEventJournal } from "../runtime-event-journal.ts";
 
 const TOKEN = "s3cr3t-agent-token";
 /** Same LENGTH as {@link TOKEN} — the comparison must not pass on length alone. */
@@ -52,7 +51,6 @@ function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
         }),
     ) as unknown as typeof fetch,
     isReady: () => true,
-    runtimeEventJournal: new RuntimeEventJournal(),
     ...overrides,
   };
 }
@@ -73,11 +71,6 @@ const PROTECTED_ROUTES = [
     name: "GET /integrations/boot-report",
     path: "/integrations/boot-report",
     init: {} as RequestInit,
-  },
-  {
-    name: "GET /runtime-events",
-    path: "/runtime-events?after=0",
-    init: { headers: { Host: "sidecar" } } as RequestInit,
   },
   {
     name: "ALL /mcp",

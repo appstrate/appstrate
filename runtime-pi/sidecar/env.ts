@@ -22,8 +22,6 @@ export interface SidecarEnv {
   sidecarAuthToken?: string;
   /** Upstream egress proxy — set only when the run resolved one. */
   proxyUrl?: string;
-  /** `RUNTIME_TOOLS_JSON`: the runtime tools the agent selected. */
-  runtimeToolNames: string[];
   /** `CONNECT_RESULT_KEY`, required with `CONNECT_LOGIN_JSON` (connect mode). */
   connectResultKey?: Buffer;
 }
@@ -59,9 +57,6 @@ export function parseSidecarEnv(source: NodeJS.ProcessEnv = process.env): Sideca
     issues.push(`LISTEN_HOST: must be an IP address (got "${listenHost}")`);
   }
 
-  const runtimeTools = parseJson("RUNTIME_TOOLS_JSON", source.RUNTIME_TOOLS_JSON, issues, (v) =>
-    Array.isArray(v) && v.every((x) => typeof x === "string") ? (v as string[]) : null,
-  );
   const connectResultKey = parseConnectResultKey(source, issues);
   for (const m of parseEgressAllowInternalHosts(source.EGRESS_ALLOW_INTERNAL_HOSTS).invalid) {
     issues.push(`EGRESS_ALLOW_INTERNAL_HOSTS: ${m}`);
@@ -77,29 +72,8 @@ export function parseSidecarEnv(source: NodeJS.ProcessEnv = process.env): Sideca
     listenHost,
     ...(source.SIDECAR_AUTH_TOKEN ? { sidecarAuthToken: source.SIDECAR_AUTH_TOKEN } : {}),
     ...(source.PROXY_URL ? { proxyUrl: source.PROXY_URL } : {}),
-    runtimeToolNames: runtimeTools ?? [],
     ...(connectResultKey ? { connectResultKey } : {}),
   };
-}
-
-/** Absent → `undefined`; present but unparseable or of the wrong shape → an issue. */
-function parseJson<T>(
-  name: string,
-  raw: string | undefined,
-  issues: string[],
-  shape: (value: unknown) => T | null,
-): T | undefined {
-  if (!raw) return undefined;
-  let value: unknown;
-  try {
-    value = JSON.parse(raw);
-  } catch {
-    issues.push(`${name}: must be valid JSON`);
-    return undefined;
-  }
-  const parsed = shape(value);
-  if (parsed === null) issues.push(`${name}: unexpected shape`);
-  return parsed ?? undefined;
 }
 
 /** Without it a connect-run cannot emit its bundle without leaking it, so it refuses. */

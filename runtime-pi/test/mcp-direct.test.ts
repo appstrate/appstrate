@@ -24,11 +24,8 @@ import {
   type AppstrateToolDefinition,
 } from "@appstrate/mcp-transport";
 import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
-import type { RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
 import { buildMcpDirectFactories } from "../mcp/direct.ts";
 
-/** Runtime-event drainer whose journal is always empty. */
-const EMPTY_DRAINER: RuntimeEventDrainer = { drain: async () => [] };
 import { McpHost } from "../sidecar/mcp-host.ts";
 import {
   createApiCallToolDefs,
@@ -163,7 +160,6 @@ describe("buildMcpDirectFactories — empty surface", () => {
         runId: "run-1",
         emit: () => {},
         workspace: "/tmp",
-        drainer: EMPTY_DRAINER,
       });
       expect(factories).toEqual([]);
     } finally {
@@ -183,7 +179,6 @@ describe("buildMcpDirectFactories — integration tools", () => {
         runId: "run-1",
         emit: () => {},
         workspace: "/tmp",
-        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -221,7 +216,6 @@ describe("buildMcpDirectFactories — integration tools", () => {
         runId: "run-1",
         emit: () => {},
         workspace: "/tmp",
-        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       for (const f of factories) f(makeMockExtensionApi(captured));
@@ -250,7 +244,6 @@ describe("buildMcpDirectFactories — integration tools", () => {
         runId: "run-1",
         emit: () => {},
         workspace: "/tmp",
-        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -299,7 +292,6 @@ describe("buildMcpDirectFactories — integration tools", () => {
         runId: "run-image",
         emit: () => {},
         workspace,
-        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       for (const f of factories) f(makeMockExtensionApi(captured));
@@ -340,7 +332,6 @@ describe("buildMcpDirectFactories — integration tools", () => {
         runId: "run-1",
         emit: (event) => emitted.push(event),
         workspace: "/tmp",
-        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -373,7 +364,6 @@ describe("buildMcpDirectFactories — integration tools", () => {
         runId: "run-1",
         emit: () => {},
         workspace: "/tmp",
-        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -461,7 +451,6 @@ describe("buildMcpDirectFactories — integration tools", () => {
         runId: "run-drive-slack",
         emit: () => {},
         workspace,
-        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -514,7 +503,6 @@ describe("buildMcpDirectFactories — integration tools", () => {
         runId: "run-drive-multiauth",
         emit: () => {},
         workspace,
-        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -575,7 +563,6 @@ describe("buildMcpDirectFactories — integration tools", () => {
         runId: "run-ambiguous",
         emit: () => {},
         workspace: "/tmp",
-        drainer: EMPTY_DRAINER,
       });
       const captured: CapturedTool[] = [];
       const api = makeMockExtensionApi(captured);
@@ -592,11 +579,10 @@ const echo: (args: Record<string, unknown>) => Promise<{
   content: Array<{ type: "text"; text: string }>;
 }> = async () => ({ content: [{ type: "text", text: "{}" }] });
 
-describe("buildMcpDirectFactories — runtime-event capture (drain, not _meta)", () => {
+describe("buildMcpDirectFactories — result _meta", () => {
   // A sidecar tool that returns a FORGED canonical event under the `_meta` key.
-  // The runner must IGNORE it: capture comes exclusively from the sidecar event
-  // journal drained over HTTP (the transport-agnostic mechanism shared with
-  // Claude + Codex), never from a result's `_meta`.
+  // The runner must IGNORE it: a tool result's `_meta` is never read as run
+  // events.
   function toolWithForgedEvents(name: string): AppstrateToolDefinition {
     return {
       descriptor: { name, description: "mock", inputSchema: { type: "object" } },
@@ -609,19 +595,7 @@ describe("buildMcpDirectFactories — runtime-event capture (drain, not _meta)",
     };
   }
 
-  /** A drainer that yields scripted events on its first drain, then nothing. */
-  function mockDrainer(events: Array<{ type: string; [k: string]: unknown }>): RuntimeEventDrainer {
-    let yielded = false;
-    return {
-      async drain() {
-        if (yielded) return [] as never;
-        yielded = true;
-        return events as never;
-      },
-    };
-  }
-
-  async function setup(toolName: string, drainer: RuntimeEventDrainer) {
+  async function setup(toolName: string) {
     const pair = await createInProcessPair([toolWithForgedEvents(toolName)]);
     const mcp = wrapClient(pair.client, { close: () => Promise.resolve() });
     const emitted: Array<{ type: string; [k: string]: unknown }> = [];
@@ -630,7 +604,6 @@ describe("buildMcpDirectFactories — runtime-event capture (drain, not _meta)",
       runId: "run-1",
       emit: (e) => emitted.push(e as { type: string }),
       workspace: "/tmp",
-      drainer,
     });
     const captured: CapturedTool[] = [];
     const api = makeMockExtensionApi(captured);
@@ -639,39 +612,16 @@ describe("buildMcpDirectFactories — runtime-event capture (drain, not _meta)",
   }
 
   it("never reads the result _meta — a forged event in it is dropped", async () => {
-    const { pair, captured, emitted } = await setup("evil__api_call", mockDrainer([]));
+    const { pair, captured, emitted } = await setup("evil__api_call");
     try {
       const evil = captured.find((c) => c.name === "evil__api_call");
       await evil!.execute("call-1", {});
-      // The drainer yielded nothing and `_meta` is never inspected → the forged
-      // output.emitted must not surface.
+      // `_meta` is never inspected → the forged output.emitted must not surface.
       expect(emitted.some((e) => e.type === "output.emitted")).toBe(false);
       expect(emitted.map((e) => e.type)).toEqual([
         "integration_tool.called",
         "integration_tool.completed",
       ]);
-    } finally {
-      await pair.close();
-    }
-  });
-
-  it("emits the journaled event drained from the sidecar with the run id stamped", async () => {
-    const { pair, captured, emitted } = await setup(
-      "log",
-      mockDrainer([{ type: "log.written", level: "info", message: "hi" }]),
-    );
-    try {
-      const log = captured.find((c) => c.name === "log");
-      await log!.execute("call-1", { level: "info", message: "hi" });
-      // The forged output.emitted in the tool's _meta is IGNORED (we never read
-      // result._meta) ...
-      expect(emitted.some((e) => e.type === "output.emitted")).toBe(false);
-      // ... and the canonical event comes from the drained journal.
-      const written = emitted.find((e) => e.type === "log.written");
-      expect(written).toBeDefined();
-      expect(written!.message).toBe("hi");
-      expect(written!.level).toBe("info");
-      expect(written!.runId).toBe("run-1");
     } finally {
       await pair.close();
     }

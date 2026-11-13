@@ -67,11 +67,6 @@ import { receiveSecrets } from "@appstrate/runner-pi/secret-env";
 import { buildMcpDirectFactories } from "./mcp/direct.ts";
 import { fetchIntegrationBootReport } from "./mcp/integration-boot-report.ts";
 import {
-  createRuntimeEventDrainer,
-  drainAndEmitInto,
-  type RuntimeEventDrainer,
-} from "@appstrate/core/runtime-event-drain";
-import {
   agentPackagePath,
   provisionWorkspace,
   provisionFiles,
@@ -488,20 +483,6 @@ const outputSchema = readDeclaredOutputSchema(rootManifest);
 const sidecarUrl = env.sidecarUrl;
 const sidecarAuthToken = env.sidecarAuthToken;
 
-// Shared runtime-event drainer (one per run, in-memory cursor). The sidecar
-// executes each runtime tool ONCE and journals its canonical events; the Pi
-// runner drains this on its single sink after each forwarded tool call, plus
-// a retrying final drain. One instance so the cursor stays consistent across
-// intermediate + final drains.
-const runtimeDrainer: RuntimeEventDrainer = createRuntimeEventDrainer({
-  url: `${sidecarUrl.replace(/\/$/, "")}/runtime-events`,
-  headers: { Host: "sidecar", [SIDECAR_AUTH_HEADER]: sidecarAuthToken },
-  logger: {
-    warn: (msg, data) => logLine("warn", msg, data),
-    error: (msg, data) => logLine("error", msg, data),
-  },
-});
-
 let mcpClient: AppstrateMcpClient;
 await progress("connecting to sidecar");
 const mcpConnectStart = performance.now();
@@ -592,26 +573,12 @@ if ("error" in bootResult) {
 
 try {
   // `buildMcpDirectFactories` registers one forwarding factory per
-  // namespaced integration tool (including the generic `{ns}__api_call`). Runtime
-  // tools (log/note/pin/output) are executed once by the sidecar and
-  // journaled; the drainer pulls them on the run sink after each forwarded
-  // call — never trusted from `_meta`.
-  //
-  // Pi drains each tool call inline in `execute()` right after `callTool`
-  // resolves — the sidecar appends the events synchronously inside the
-  // wrapped handler BEFORE responding, so the per-call drain always captures
-  // them in time (no "events land after the stream ends" gap to
-  // backstop). What the per-call drain CANNOT cover is a
-  // transient localhost failure of the LAST call's single best-effort drain
-  // (no subsequent call retries it). The retrying final drain for that case
-  // is injected via `piEventSink` (below): PiRunner owns its finalize, so a
-  // drain placed after `runner.run()` would be too late — wrapping the sink
-  // runs it BEFORE the stdout-bridge merges its aggregate into the POST.
+  // namespaced integration tool the sidecar advertises (including the
+  // generic `{ns}__api_call`).
   const factories = await buildMcpDirectFactories({
     mcp: mcpClient,
     runId: AGENT_RUN_ID,
     workspace: WORKSPACE,
-    drainer: runtimeDrainer,
     emit: (event) => {
       void bridgedSink.handle(event as RunEvent);
     },
@@ -787,26 +754,14 @@ async function runOutputsSweep(): Promise<SweepResult | null> {
   });
 }
 
-// Pi-path finalize wrapper. Two things must happen before the finalize POST:
-//   1. Final runtime-event drain — Pi drains each tool call
-//      inline (see the factories block above), but the LAST call's single
-//      best-effort drain has no subsequent call to retry a transient localhost
-//      failure, so we drain-until-empty + bounded retry through the SAME bridged
-//      sink the per-call drains use.
-//   2. The outputs sweep — auto-publish `workspace/outputs/` deliverables so
-//      their `file.published` events ride the run stream before it closes.
+// Pi-path finalize wrapper. The outputs sweep must run before the finalize
+// POST: it auto-publishes `workspace/outputs/` deliverables so their
+// `file.published` events ride the run stream before it closes.
 // PiRunner owns its finalize, so wrapping the sink is the only injection point
 // that runs BEFORE the stdout-bridge merges its aggregate into the finalize POST.
 const piEventSink: typeof bridgedSink = {
   handle: (event) => bridgedSink.handle(event),
   finalize: async (result) => {
-    await drainAndEmitInto({
-      drainer: runtimeDrainer,
-      emit: (e) => bridgedSink.handle(e as RunEvent),
-      now: Date.now,
-      runId: AGENT_RUN_ID!,
-      final: true,
-    });
     const sweep = await runOutputsSweep();
     // Stamp the terminal artifacts summary onto the finalize payload so the
     // platform persists it on the run row and can surface a "partial

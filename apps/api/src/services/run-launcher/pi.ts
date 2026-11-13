@@ -316,12 +316,6 @@ async function runPlatformContainerImpl(
       ...(plan.integrations && plan.integrations.length > 0
         ? { integrations: plan.integrations }
         : {}),
-      // Platform runtime tools (log/note/pin) the sidecar
-      // hosts as in-process MCP tools — unified with the integration tool
-      // surface.
-      ...(plan.runtimeTools && plan.runtimeTools.length > 0
-        ? { runtimeTools: plan.runtimeTools }
-        : {}),
     };
 
     // The agent container never receives a credential: its sidecar

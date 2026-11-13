@@ -131,11 +131,6 @@ export function applySpecToSidecarEnv(
   if (spec.integrations && spec.integrations.length > 0) {
     target.INTEGRATIONS_TO_SPAWN_JSON = JSON.stringify(spec.integrations);
   }
-  // Platform runtime tools (log/note/pin) the sidecar hosts
-  // as in-process MCP tools.
-  if (spec.runtimeTools && spec.runtimeTools.length > 0) {
-    target.RUNTIME_TOOLS_JSON = JSON.stringify(spec.runtimeTools);
-  }
   // P4 — connect-run mode. When set, the sidecar runs `runConnectOnce`
   // against this single integration and exits (no agent /mcp server).
   if (spec.connectLoginSpec) {

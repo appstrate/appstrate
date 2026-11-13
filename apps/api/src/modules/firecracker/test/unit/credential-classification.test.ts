@@ -52,8 +52,6 @@ const CLASSIFIED_NON_SECRET: readonly string[] = [
   // Api shape of the platform llm-proxy route — a protocol name; the sidecar
   // authenticates there with RUN_TOKEN.
   "PI_LLM_PLATFORM_API_SHAPE",
-  // Selected runtime tool names (log/note/…) — plain configuration.
-  "RUNTIME_TOOLS_JSON",
   // Integration runtime adapter selector (docker/process) — layered by each
   // orchestrator after the base build; plain configuration.
   "INTEGRATION_RUNTIME_ADAPTER",
@@ -84,7 +82,6 @@ function buildSpec(llm: LlmProxyConfig): SidecarLaunchSpec {
     modelContextWindow: 200_000,
     modelMaxTokens: 8_192,
     integrations: [integrationSpec],
-    runtimeTools: ["log"],
     connectLoginSpec: integrationSpec,
   };
 }

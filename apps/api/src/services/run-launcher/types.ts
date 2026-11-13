@@ -45,12 +45,6 @@ export interface AppstrateRunPlan {
   bundle: Bundle;
   /** Raw Mustache prompt from the bundle. */
   rawPrompt: string;
-  /**
-   * Platform runtime tools the agent selected (`manifest.runtime_tools`):
-   * `log` / `note` / `pin`. Forwarded to the sidecar, which
-   * hosts the selected ones as MCP tools.
-   */
-  runtimeTools?: string[];
 
   // --- LLM ---
   /**

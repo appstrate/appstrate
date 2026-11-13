@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declared schema, always mandatory; the condition for the tool is
   `readDeclaredOutputSchema` (`@appstrate/afps-shared/output-schema`).
 
+- **BREAKING: `@appstrate/core/runtime-event-drain` is removed** (#2199), with
+  `createRuntimeEventDrainer`, `drainAndEmitInto`, `RuntimeEventDrainer`,
+  `RuntimeEventDrainerOptions`, `DrainOptions`, `DrainAndEmitOptions` and `DrainLogger`:
+  the sidecar no longer hosts runtime tools, so it has no event journal to drain.
+  `SidecarLaunchSpec.runtimeTools` (`@appstrate/core/sidecar-types`) is removed.
+
 - **BREAKING: `EnforcedChatSkill` gains the required `uri`** (`@appstrate/core/chat-contract`):
   the `skill://` URI of an enforced skill's `SKILL.md` (`null` with `content` when no version
   resolves), and `content` is that `SKILL.md` as the MCP Skills extension serves it, so the

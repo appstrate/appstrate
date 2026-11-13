@@ -23,7 +23,7 @@ export type ManifestDeliveryHttp = NonNullable<
 
 /**
  * Header the AGENT container stamps on every request to its sidecar's control
- * surface (`/llm/*`, `/mcp`, `/integrations/boot-report`, `/runtime-events`),
+ * surface (`/llm/*`, `/mcp`, `/integrations/boot-report`),
  * carrying {@link SidecarConfig.sidecarAuthToken}.
  *
  * A dedicated header rather than `Authorization`: on `/llm/*` that slot already
@@ -124,15 +124,6 @@ export interface SidecarLaunchSpec {
    * `runtime-pi/sidecar/server.ts`.
    */
   integrations?: ReadonlyArray<IntegrationSpawnSpec>;
-  /**
-   * Platform runtime tools the agent selected (`manifest.runtime_tools`):
-   * any of `output` / `log` / `note` / `pin`. The sidecar hosts
-   * the selected ones as in-process MCP tools on the agent-facing `/mcp`
-   * surface (`@appstrate/core/runtime-tool-defs`), so they are unified with
-   * the integration tools instead of being Pi-SDK-specific extensions.
-   * Empty / omitted = none. Serialised as the `RUNTIME_TOOLS_JSON` env var.
-   */
-  runtimeTools?: readonly string[];
   /**
    * P4 — connect-run mode (`runAt: "link"`). When set, the sidecar runs in
    * "connect mode": it boots the SINGLE integration carried in `integrations`,

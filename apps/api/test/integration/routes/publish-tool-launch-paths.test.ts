@@ -123,10 +123,9 @@ describe("publish_file across every launch path", () => {
   });
 
   /**
-   * The shared assertion for the three real launch paths: the plan handed to
-   * the sidecar and the bytes handed to the container must BOTH carry the
-   * publish tool. Checking only the plan would pass while the container gate
-   * — an exact string match against the bundle's own manifest — sees nothing.
+   * The shared assertion for the three real launch paths: the bytes handed to
+   * the container carry the publish tool, because the container gate is an
+   * exact string match against the bundle's own manifest.
    */
   async function assertPublishToolSurvivesLaunch(agent: LoadedPackage, versionLabel?: string) {
     const built = await buildRunContext({
@@ -141,12 +140,9 @@ describe("publish_file across every launch path", () => {
       ...(versionLabel ? { overrideVersionLabel: versionLabel } : {}),
     });
 
-    // 1. What the sidecar is told (RUNTIME_TOOLS_JSON is serialized from this).
-    expect(built.plan.runtimeTools).toEqual(["log", "publish_file"]);
-
-    // 2. What the CONTAINER reads — the root manifest inside the bundle ZIP.
-    //    This is the exact byte stream `readBundleFromFile` parses in
-    //    `runtime-pi/entrypoint.ts` before the `publish_file` gate.
+    // What the CONTAINER reads — the root manifest inside the bundle ZIP.
+    // This is the exact byte stream `readBundleFromFile` parses in
+    // `runtime-pi/entrypoint.ts` before the `publish_file` gate.
     expect(built.agentPackage).not.toBeNull();
     const bundle = readBundleFromBuffer(built.agentPackage!);
     const rootManifest = bundle.packages.get(bundle.root)!.manifest as {

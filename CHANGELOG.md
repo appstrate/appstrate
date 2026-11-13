@@ -504,6 +504,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `GET /internal/memories` are removed; `@appstrate/runner-pi` drops
   `RUNTIME_INJECTED_TOOLS`, `buildRuntimeToolFactories` and its `./runtime-tools`
   export.
+- **The sidecar no longer hosts `log`, `note` and `pin`** (#2199). On a platform
+  run these are tools of `@appstrate/platform`, served by the run MCP server. The
+  sidecar's runtime-event journal, `GET /runtime-events`, the `RUNTIME_TOOLS_JSON`
+  env var and `@appstrate/core/runtime-event-drain` are removed.
 
 ### Added
 
