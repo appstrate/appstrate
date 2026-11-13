@@ -31,6 +31,8 @@ import {
 import { recordAuditFromContext } from "../../services/audit.ts";
 import { reachAcrossSpaces, toReachableSpaceWire } from "../reachable-spaces.ts";
 import { callerPersonalOwnerId, credentialConfinedToSpaces } from "../view-as.ts";
+import { provisionMember } from "../../services/organizations.ts";
+import { endSessionsForEmailDomain } from "../../services/user-sessions.ts";
 import type { AppEnv } from "../../types/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -110,6 +112,14 @@ function buildPlatformServices(): PlatformServices {
     // carries the same org / actor / request variables a core route audits from.
     audit: {
       record: (c, entry) => recordAuditFromContext(c as Context<AppEnv>, entry),
+    },
+    // The one membership door (RBAC spec §3.6), in a transaction of its own.
+    members: {
+      provision: (orgId, userId, role) =>
+        db.transaction((tx) => provisionMember(tx, orgId, userId, role)),
+    },
+    sessions: {
+      endForEmailDomain: endSessionsForEmailDomain,
     },
   };
 }

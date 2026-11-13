@@ -35,7 +35,7 @@ import { credentialChangeHook, endOtherAccessAfterCredentialChange } from "./cre
 import { hookSlot } from "./hook-slot.ts";
 import { logger } from "./logger.ts";
 
-export { CREDENTIAL_CHANGE_REVOCATION_FAILED } from "./credential-change.ts";
+export { CREDENTIAL_CHANGE_REVOCATION_FAILED, endOtherSessions } from "./credential-change.ts";
 
 /**
  * True when a `pending` non-expired invitation exists for `email`. Used by
@@ -1259,27 +1259,34 @@ function buildAuth(options: CreateAuthOptions) {
             // `RealmResolutionContext`. The extra fields ride alongside the
             // `BeforeSignupContext` contract; modules that only read
             // `headers` are unaffected.
+            // No resolver (no OIDC module) means "platform". A bootstrap-token
+            // redeem is "platform" whatever the request carries: an
+            // instance-owner row in another realm is unrecoverable. Resolved
+            // once, on the first ask: a module hook may need it first.
+            let realmOnce: Promise<string> | null = null;
+            const resolveRealm = (): Promise<string> => {
+              if (realmOnce) return realmOnce;
+              const resolver = realmResolver.get();
+              realmOnce =
+                bootstrapTokenBypass || !resolver
+                  ? Promise.resolve("platform")
+                  : resolver({ headers, path: ctx?.path ?? null, query: ctx?.query ?? null });
+              return realmOnce;
+            };
             const signupHookCtx: BeforeSignupContext & {
               path: string | null;
               query: Record<string, unknown> | null;
-            } = { headers, path: ctx?.path ?? null, query: ctx?.query ?? null };
+            } = {
+              headers,
+              path: ctx?.path ?? null,
+              query: ctx?.query ?? null,
+              realm: resolveRealm,
+            };
             const beforeSignup = beforeSignupHook.get();
             if (beforeSignup) {
               await beforeSignup(user.email, signupHookCtx);
             }
-            // No resolver (no OIDC module) means "platform". A bootstrap-token
-            // redeem is "platform" whatever the request carries: an
-            // instance-owner row in another realm is unrecoverable.
-            const resolver = realmResolver.get();
-            const realm = bootstrapTokenBypass
-              ? "platform"
-              : resolver
-                ? await resolver({
-                    headers,
-                    path: ctx?.path ?? null,
-                    query: ctx?.query ?? null,
-                  })
-                : "platform";
+            const realm = await resolveRealm();
             return { data: { realm } };
           }),
           after: async (user, context) => {
