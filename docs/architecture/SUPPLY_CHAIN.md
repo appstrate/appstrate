@@ -23,7 +23,7 @@ and the published `@appstrate/core` library import it **zero** times.
 
 ```
 apps/api   (Hono backend)      → 0 pi-* imports
-packages/module-ee (billing)   → 0 pi-* imports
+packages/module-billing (billing)   → 0 pi-* imports
 packages/core (@appstrate/core)→ 0 pi-* imports
 ```
 

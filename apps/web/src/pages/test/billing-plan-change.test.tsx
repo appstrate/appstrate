@@ -4,7 +4,7 @@
  * The billing page header offers the subscription portal to an org that already
  * subscribes and a checkout upgrade to one that does not. Which endpoint a plan
  * click goes to is the server's `plan_action`, tested in
- * `packages/module-ee/test/integration/routes/billing.test.ts`.
+ * `packages/module-billing/test/integration/routes/billing.test.ts`.
  */
 
 import { describe, expect, it, spyOn } from "bun:test";

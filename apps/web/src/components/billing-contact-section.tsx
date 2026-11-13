@@ -35,7 +35,7 @@ import { SectionCard } from "./section-card";
  *
  * Mounted only where `can("billing:manage")` holds — the condition the module's
  * admin routes check; the route around it already requires `billing:read`, a
- * permission only `@appstrate/module-ee` contributes. An empty primary address is not a
+ * permission only `@appstrate/module-billing` contributes. An empty primary address is not a
  * missing value: it is the org asking for the owners fallback, which is why
  * the form can clear the field and why the save sends `null` for it.
  *

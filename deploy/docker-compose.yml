@@ -124,7 +124,7 @@ services:
 
   # ── Migrations ──
   #
-  # The platform's own schema. `@appstrate/module-ee` migrates its seven `ee_*`
+  # The platform's own schema. `@appstrate/module-billing` migrates its seven `ee_*`
   # tables itself at `init()`, into this same database under its own journal
   # (`drizzle.ee_migrations`) — so there is no second migrate service.
 
@@ -221,7 +221,7 @@ services:
       # deployment must run agents in Docker.
       - RUN_ADAPTER=${RUN_ADAPTER:-docker}
       # ── Required, no fallback ──
-      # MODULES: must be set and must name @appstrate/module-ee; no fallback to
+      # MODULES: must be set and must name @appstrate/module-billing; no fallback to
       # the code default, which has no billing. Bare `:?` is the form Coolify
       # documents. See deploy/README.md.
       - MODULES=${MODULES:?}

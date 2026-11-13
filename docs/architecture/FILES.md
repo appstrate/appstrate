@@ -75,7 +75,7 @@ The cookie-less preview route uses `loadFileForPreview` (org-scoped only) — it
 All quotas are **synchronous at the write** (async quotas are a documented footgun):
 
 - **`FILE_MAX_BYTES`** (default 100 MiB) — per-file cap → 413.
-- **`ORG_STORAGE_QUOTA_BYTES`** (default unlimited) — per-org byte quota tracked transactionally on `organizations.files_bytes_used`, re-checked under `FOR UPDATE` inside the commit → 403 `storage_limit_exceeded`. The effective limit is `organizations.files_bytes_limit ?? ORG_STORAGE_QUOTA_BYTES ?? unlimited` (`effectiveOrgStorageLimit`). A metering module (`@appstrate/module-ee`) is the logical owner of the per-org override: it maps its own plan to a byte value and writes it through the `PlatformServices.setFileStorageLimit` capability (enforcement 100% core, pricing 100% module — zero-billing-vocab constraint). The env var stays the fallback when no override is set.
+- **`ORG_STORAGE_QUOTA_BYTES`** (default unlimited) — per-org byte quota tracked transactionally on `organizations.files_bytes_used`, re-checked under `FOR UPDATE` inside the commit → 403 `storage_limit_exceeded`. The effective limit is `organizations.files_bytes_limit ?? ORG_STORAGE_QUOTA_BYTES ?? unlimited` (`effectiveOrgStorageLimit`). A metering module (`@appstrate/module-billing`) is the logical owner of the per-org override: it maps its own plan to a byte value and writes it through the `PlatformServices.setFileStorageLimit` capability (enforcement 100% core, pricing 100% module — zero-billing-vocab constraint). The env var stays the fallback when no override is set.
 - **`RUN_MAX_OUTPUT_BYTES`** (default 256 MiB) — ceiling on total bytes a single run may publish, enforced mid-stream on the ingestion path.
 
 The S3 write completes **before** the DB commit, so any DB failure deletes the just-written object (`commitFileRow`) — bytes are never stranded uncounted.
@@ -264,7 +264,7 @@ The platform MCP server (`apps/api/src/modules/mcp/`) surfaces files to external
 
 Exactly two entries on this page stay written down after their alias is gone, under `docs/NO_TRANSITIONAL_CODE.md` §4's carve-out for what is load-bearing for CURRENT data: the `run_logs` `event: "document"` row above, and the `document://` / `doc_` bullet under "Retired, and refused on purpose" below. Production still holds historical `run_logs` rows, so how today's reader treats that tag and that id prefix is a fact about live data, not a transition note. Every other spelling named here has no data behind it and is written down only to say it is refused.
 
-Two more went with them, outside this table: the `setDocumentStorageLimit` platform-services alias (see "Module contract" — its consumer `@appstrate/module-ee` binds `setFileStorageLimit`, and being a `workspace:*` package it moves in the same commit, not in a cross-repo lockstep), and every retired run-detail tab hash.
+Two more went with them, outside this table: the `setDocumentStorageLimit` platform-services alias (see "Module contract" — its consumer `@appstrate/module-billing` binds `setFileStorageLimit`, and being a `workspace:*` package it moves in the same commit, not in a cross-repo lockstep), and every retired run-detail tab hash.
 
 **Retired, and refused on purpose.** Each of these was an alias with no caller behind it, so keeping it bought nothing and cost a second path to keep honest:
 
@@ -334,7 +334,7 @@ A non-creator run reader of a `user_upload` stays `visible` but gets an **opaque
 
 ### Quota resolution order
 
-`effectiveOrgStorageLimit(orgLimit, envQuota)` resolves the per-org ceiling as `organizations.files_bytes_limit ?? ORG_STORAGE_QUOTA_BYTES ?? unlimited`. The per-org override wins (a hard `0` is honored, not treated as unset); `setOrgFileStorageLimit` (the `PlatformServices.setFileStorageLimit` capability `@appstrate/module-ee` pilots) sets/clears it — billing-neutral (a byte ceiling, never a plan or price). Enforced through one seam (`assertWithinOrgQuota`): a pre-flight fast reject on the declared size AND a re-check under the org `FOR UPDATE` lock at commit, so concurrent writes serialize and each observes the other's committed bytes.
+`effectiveOrgStorageLimit(orgLimit, envQuota)` resolves the per-org ceiling as `organizations.files_bytes_limit ?? ORG_STORAGE_QUOTA_BYTES ?? unlimited`. The per-org override wins (a hard `0` is honored, not treated as unset); `setOrgFileStorageLimit` (the `PlatformServices.setFileStorageLimit` capability `@appstrate/module-billing` pilots) sets/clears it — billing-neutral (a byte ceiling, never a plan or price). Enforced through one seam (`assertWithinOrgQuota`): a pre-flight fast reject on the declared size AND a re-check under the org `FOR UPDATE` lock at commit, so concurrent writes serialize and each observes the other's committed bytes.
 
 ### Upload integrity + staging budgets (inbound)
 

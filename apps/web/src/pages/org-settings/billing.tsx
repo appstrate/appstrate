@@ -66,7 +66,7 @@ export function OrgSettingsBillingPage() {
 function BillingOverview() {
   const { t } = useTranslation(["settings", "common"]);
   // The route opens on `billing:read` under the `billing` feature
-  // (`lib/route-access.ts`), both only `@appstrate/module-ee` contributes, so
+  // (`lib/route-access.ts`), both only `@appstrate/module-billing` contributes, so
   // `/api/billing` answers.
   const { data: billing, isLoading, error } = useBilling();
   const checkoutMutation = useCheckout();

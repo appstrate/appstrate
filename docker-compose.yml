@@ -425,7 +425,7 @@ services:
       # schema):
       - OTEL_EXPORTER_OTLP_HEADERS
       - OTEL_EXPORTER_OTLP_PROTOCOL
-      # ── Commercial module (@appstrate/module-ee, optional) ──
+      # ── Billing module (@appstrate/module-billing, optional) ──
       # Inert until the module is in MODULES; the vars are read from
       # process.env by the module's own Zod schema (not in @appstrate/env).
       # Full list and defaults: .env.example, docs/ENV.md.

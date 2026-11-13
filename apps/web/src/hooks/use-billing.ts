@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-/** Billing hooks over the `/api/billing*` routes `@appstrate/module-ee` contributes: the types are always there, the routes only when the module loads (`features.billing`). */
+/** Billing hooks over the `/api/billing*` routes `@appstrate/module-billing` contributes: the types are always there, the routes only when the module loads (`features.billing`). */
 
 import { Sparkles, Zap, Crown, type LucideIcon } from "lucide-react";
 import { $api, type components } from "../api/client";

@@ -30,7 +30,7 @@ interface Consumer {
  * A consumer that sits majors behind keeps declaring fields core has removed,
  * and nobody notices until someone reads its `package.json` by hand.
  *
- * In-tree packages (`packages/module-claude-code`, `packages/module-ee`)
+ * In-tree packages (`packages/module-claude-code`, `packages/module-billing`)
  * resolve core as `workspace:*` and are NOT in the list below, per rule 3;
  * neither is a retired repo. `connect-helper` is the only repo this gate
  * reads.
