@@ -833,6 +833,32 @@ describe("call_integration_tool — result", () => {
     });
   });
 
+  it("marks a batch holding an upstream answer as third-party content, and one holding only the platform's refusals not", async () => {
+    const connectUrl = "https://test.local/api/integrations/connect/start?t=one-use";
+    const refusal = () =>
+      problem(409, "needs_reconnection", "Reconnect it.", {
+        errors: [{ field: `integrations.${INTEGRATION}`, connect_url: connectUrl }],
+      });
+
+    // An upstream's answer, even beside a refusal: its body is the upstream's own text.
+    const mixed = await apiCall(
+      { requests: [get(), get({ target: `${TARGET}/refused` })] },
+      (req) => (req.headers.get("X-Target") === TARGET ? relayedJson({ ok: true }) : refusal()),
+    );
+    expect(mixed.result._meta).toEqual({ "dev.appstrate/third-party": true });
+
+    // Only the platform's refusals: nothing third-party, so the connect link stays an offer.
+    const refusalsOnly = await apiCall({ requests: [get(), get({ target: `${TARGET}/x` })] }, () =>
+      refusal(),
+    );
+    expect(refusalsOnly.result.isError).toBe(true);
+    expect(refusalsOnly.result._meta?.["dev.appstrate/third-party"]).toBeUndefined();
+    expect(entries(refusalsOnly.payload)[0]!.error).toMatchObject({
+      code: "needs_reconnection",
+      errors: [{ connect_url: connectUrl }],
+    });
+  });
+
   it("is an error only when no request got a successful answer", async () => {
     const allFailed = await apiCall({ requests: [get(), get({ target: `${TARGET}/x` })] }, (req) =>
       req.headers.get("X-Target") === TARGET

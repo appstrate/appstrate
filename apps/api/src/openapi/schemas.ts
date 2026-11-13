@@ -135,8 +135,10 @@ export const EMOJI_ICON_WRITE_RULE =
 /** `credential_proxy_open` on the space object and on `PATCH /api/spaces/{id}`. */
 export const CREDENTIAL_PROXY_OPEN_DESCRIPTION =
   "Whether members may use the space's connections directly, outside a run: " +
-  "`/api/credential-proxy/connections` and `/api/credential-proxy/proxy` without `X-Run-Id`, and " +
-  "the MCP tools `search_integration_tools` and `call_integration_tool`. `false` answers those routes " +
+  "`/api/credential-proxy/connections`, `/api/credential-proxy/tools`, " +
+  "`/api/credential-proxy/tools/call`, `/api/credential-proxy/proxy` without `X-Run-Id`, " +
+  "`POST /api/integrations/{packageId}/discover` for an integration declaring auths, and the MCP " +
+  "tools `search_integration_tools` and `call_integration_tool`. `false` answers those routes " +
   "`403 credential_proxy_closed` and withholds those tools, for every role, organization owners " +
   "and admins included. Runs keep their connections: a run the platform executes reaches them " +
   "through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a " +

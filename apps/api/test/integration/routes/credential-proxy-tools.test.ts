@@ -10,14 +10,19 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { and, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { integrationConnections, spacePackages, spaces } from "@appstrate/db/schema";
+import {
+  integrationConnections,
+  integrationOrgDefaults,
+  spacePackages,
+  spaces,
+} from "@appstrate/db/schema";
 import type { IntegrationManifest } from "@appstrate/core/integration";
 import { fnv1a64Hex } from "@appstrate/afps-shared/mcp-naming";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
 import { flushRedis } from "../../helpers/redis.ts";
-import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { authHeaders, createTestContext, type TestContext } from "../../helpers/auth.ts";
 import {
   seedProxyConnection,
   seedProxyIntegration,
@@ -105,6 +110,15 @@ describe("GET /api/credential-proxy/tools", () => {
     return { status: res.status, body: (await res.json()) as Listing };
   };
 
+  /** The space's org default of {@link ID}. */
+  const orgDefault = (connectionIds: string[], enforce: boolean) =>
+    db.insert(integrationOrgDefaults).values({
+      spaceId: ctx.defaultSpaceId,
+      integrationId: ID,
+      connectionIds,
+      enforce,
+    });
+
   beforeEach(async () => {
     await truncateAll();
     await flushRedis();
@@ -149,6 +163,94 @@ describe("GET /api/credential-proxy/tools", () => {
       const { body } = await list({}, OFFERS);
       expect(body.not_ready[0]!.refusal).toMatchObject({ code: "not_connected", packageId: ID });
       expect(body.not_ready[0]!.refusal!.connect_url).toStartWith("http");
+    });
+
+    it("renders a connect link that, opened, sends the user to the provider's consent screen", async () => {
+      // An administrator registered the auth's OAuth client: the link has a provider to reach.
+      const registered = await getTestApp().request(
+        `/api/integrations/${ID}/auths/oauth/oauth-clients`,
+        {
+          method: "POST",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify({ client_id: "abc", client_secret: "shh" }),
+        },
+      );
+      expect(registered.status).toBe(201);
+      const { body } = await list({}, OFFERS);
+      const link = new URL(String(body.not_ready[0]!.refusal!.connect_url));
+      expect(link.pathname).toBe("/api/integrations/connect/start");
+      // Redeemed as the user would open it: no credential, the link alone.
+      const opened = await getTestApp().request(link.pathname + link.search, {
+        redirect: "manual",
+      });
+      expect(opened.status).toBe(302);
+      const location = new URL(opened.headers.get("location")!);
+      expect(location.origin + location.pathname).toBe("https://idp.example.com/authorize");
+      expect(location.searchParams.get("client_id")).toBe("abc");
+    });
+
+    it("carries no connect link for a caller without `integrations:connect`, asked for or not", async () => {
+      apiKey = (
+        await seedApiKey({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          createdBy: ctx.user.id,
+          scopes: ["credential-proxy:call-own"],
+        })
+      ).rawKey;
+      const { body } = await list({}, OFFERS);
+      // The verdict and its item stay: only the capability to connect is withheld.
+      expect(body.not_ready[0]!.refusal).toMatchObject({
+        code: "not_connected",
+        auth_key: "oauth",
+      });
+      expect(body.not_ready[0]!.refusal).not.toHaveProperty("connect_url");
+    });
+
+    it("lists an integration an enforced org default governs as `not_permitted` for `credential-proxy:call-own` alone", async () => {
+      const connectionId = await seedProxyConnection(ctx, ID, "oauth", { access_token: "t" });
+      await orgDefault([connectionId], true);
+      const { body } = await list();
+      expect(body.not_ready).toEqual([
+        expect.objectContaining({
+          integration_package_id: ID,
+          proxy_connection: { status: "not_permitted", imposed: true },
+        }),
+      ]);
+      // A permission refusal names no item a connect flow could clear.
+      expect(body.not_ready[0]).not.toHaveProperty("refusal");
+    });
+
+    it("lists one whose enforced org default cannot bind as `default_unavailable`", async () => {
+      await seedProxyConnection(ctx, ID, "oauth", { access_token: "t" });
+      // `credential-proxy:call`: the default binds before the caller's own connection.
+      apiKey = (
+        await seedApiKey({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          createdBy: ctx.user.id,
+          scopes: ["credential-proxy:call"],
+        })
+      ).rawKey;
+      // A member that is no connection the caller reaches.
+      await orgDefault([crypto.randomUUID()], true);
+      const { body } = await list();
+      expect(body.not_ready).toEqual([
+        expect.objectContaining({
+          integration_package_id: ID,
+          proxy_connection: { status: "default_unavailable", imposed: true },
+        }),
+      ]);
+    });
+
+    it("leaves out an integration whose call asks for a choice: its connections are listed on the tool", async () => {
+      const first = await seedProxyConnection(ctx, ID, "oauth", { access_token: "a" }, "a");
+      const second = await seedProxyConnection(ctx, ID, "oauth", { access_token: "b" }, "b");
+      const { body } = await list();
+      expect(body.not_ready).toEqual([]);
+      expect(body.tools.map((tool) => tool.connections.map((c) => c.connection_id).sort())).toEqual(
+        [[first, second].sort()],
+      );
     });
 
     it("reconnects the caller's own connection that needs it, when asked for", async () => {

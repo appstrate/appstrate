@@ -208,7 +208,7 @@ describe("Spaces API", () => {
       });
     });
 
-    it("closes and reopens the credential proxy, audited, without touching settings", async () => {
+    it("closes and reopens the credential proxy, audited, and a `settings` write leaves the switch as it is", async () => {
       const space = await seedSpace({ orgId: ctx.orgId, name: "Proxy switch" });
       const patch = (body: unknown) =>
         app.request(`/api/spaces/${space.id}`, {

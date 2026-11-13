@@ -39,7 +39,9 @@ const proxySharedDescription =
   "only: a connection another member shared into the space is out of reach, and so is " +
   "every connection of an integration governed by an enforced org default; a call for a " +
   "run is refused. `GET /api/credential-proxy/connections` lists the candidates of a call " +
-  "outside a run and, per row, what such a call would still refuse.\n\n" +
+  "outside a run and, per row, what such a call would still refuse. A call outside a run in a " +
+  "space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`, " +
+  "whatever the caller's role; a call for a run is not affected.\n\n" +
   "Optional `Appstrate-User` header (API-key auth only) makes that end-user the caller: " +
   "outside a run the call reaches the end-user's own connections, and with " +
   "`credential-proxy:call` those a member shared into the space.\n\n" +
@@ -327,7 +329,9 @@ const proxyResponses = {
       "then names the host to list) (`http_request_denied`); `call_permission_required` — no " +
       "`X-Run-Id`, an enforced org default governs the integration in this space and the " +
       "caller holds `credential-proxy:call-own` without `credential-proxy:call` " +
-      "(`http_request_denied`); `forbidden` — the principal lacks the permission of the path " +
+      "(`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's " +
+      "`credential_proxy_open` is `false`, whatever the caller's role " +
+      "(`proxy_internal_response`); `forbidden` — the principal lacks the permission of the path " +
       "the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` " +
       "or `credential-proxy:call` without), session " +
       "bound to a different principal, cookie session used, or `X-Run-Id` names another " +
@@ -774,7 +778,12 @@ export const credentialProxyPaths = {
       ],
       responses: {
         "200": {
-          description: "The tools, sorted by integration, `api_call` tools first within one.",
+          description:
+            "The tools, sorted by integration, `api_call` tools first within one; a remote " +
+            "integration's typed tools follow in the order its server's `tools/list` gives them, " +
+            "or, when the server could not be listed (`catalog_unreadable`), its declared names " +
+            "in no guaranteed order. A server the proxy refused to list is an entry of " +
+            "`unlisted`, never an error status.",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
@@ -817,18 +826,28 @@ export const credentialProxyPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          description:
+            "`validation_failed` — an unknown query parameter, an empty `integration_package_id` " +
+            "or `name`, or a `connection_id` that is not a uuid (`errors[]` names each).",
+          content: problemContent,
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": {
           description:
             "`forbidden` — the principal holds neither `credential-proxy:call-own` nor " +
-            "`credential-proxy:call`, or authenticates with a session cookie; " +
-            "`credential_proxy_closed` — the space's `credential_proxy_open` is `false`.",
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
+            "`credential-proxy:call`, or authenticates with a session cookie or another credential " +
+            "the bearer-only proxy refuses (the chat's MCP loopback bearer included); " +
+            "`credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever " +
+            "the caller's role. No `Proxy-Status`: nothing is relayed on this route.",
+          content: problemContent,
         },
-        "404": { $ref: "#/components/responses/NotFound" },
+        "404": {
+          description:
+            "`not_found` — `integration_package_id` names an integration that is not active in " +
+            "this space. Without it, an inactive integration is left out of the listing.",
+          content: problemContent,
+        },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -847,6 +866,9 @@ export const credentialProxyPaths = {
         "`X-Run-Id`, against the integration's latest published version, and is journaled as " +
         "one call of the connection. The server's result is relayed without its " +
         '`_meta["dev.appstrate/events"]`; a tool error is a result with `isError: true`. ' +
+        "A refusal produced by the credential proxy's own checks or a transport fault carries " +
+        "RFC 9209 `Proxy-Status: appstrate; error=<type>` (the 403, 502, 503 and 504 below name " +
+        "it); the platform's other refusals and the result carry none. " +
         "Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose " +
         "`credential_proxy_open` is `false` answers `403 credential_proxy_closed`.",
       parameters: [
@@ -910,10 +932,42 @@ export const credentialProxyPaths = {
             },
           },
         },
-        "400": { $ref: "#/components/responses/ValidationError" },
+        "400": {
+          description:
+            "`invalid_request` — the body is not valid JSON; `validation_failed` — it is not the " +
+            "schema's object (a missing or empty `integration_package_id` or `name`, a " +
+            "`connection_id` that is not a uuid, `arguments` that is not an object, an unknown " +
+            "field such as the retired `integration_id`); `connection_not_in_org_default` — an " +
+            "enforced org default governs the integration and `connection_id` names a connection " +
+            "outside its set (a holder of `credential-proxy:call`).",
+          content: problemContent,
+        },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
+        "403": {
+          description:
+            "`forbidden` — the principal holds neither `credential-proxy:call-own` nor " +
+            "`credential-proxy:call`, or authenticates with a session cookie or another credential " +
+            "the bearer-only proxy refuses (the chat's MCP loopback bearer included); " +
+            "`credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever " +
+            "the caller's role; `call_permission_required` — an enforced org default governs the " +
+            "integration and the caller holds `credential-proxy:call-own` without " +
+            "`credential-proxy:call` (`Proxy-Status` error `http_request_denied`); the proxy's " +
+            "refusals of the server URL, before anything is sent: `unauthorized_target` " +
+            "(`http_request_denied`), `blocked_target` (`destination_ip_prohibited`), " +
+            "`credential_exfiltration_refused` (`http_request_denied`).",
+          headers: PROXY_STATUS_HEADER,
+          content: problemContent,
+        },
+        "404": {
+          description:
+            "`not_found` — the integration is not active in this space, has no published version, " +
+            "or its catalog offers no tool of that `name` (hidden, the connect tool, an " +
+            "`api_call` tool, or undeclared while `allow_undeclared_tools` is not `true`), " +
+            "before any exchange; `credential_not_found` — no connection the caller reaches, or " +
+            "`connection_id` names nothing the caller reaches (the same body whether it is " +
+            "another member's connection out of reach or no connection at all).",
+          content: problemContent,
+        },
         "409": {
           description:
             "The connection selection of `/api/credential-proxy/proxy` refused, judged for the " +
@@ -922,10 +976,10 @@ export const credentialProxyPaths = {
             "`needs_reconnection`, `pinned_connection_unavailable`; `insufficient_scopes` — the " +
             "connection lacks scopes the tool's `tools_policy` entry requires " +
             "(`errors[0].missing_scopes`, `required_scopes`, `auth_key`, `connection_id`, " +
-            "`owned_by_actor`, `remedy`); `auth_serves_no_selected_tool` — the connection's auth " +
-            "does not serve the tool. With `X-Appstrate-Connect-Offers: 1`, an item a connect " +
-            "flow clears carries a `connect_url` (a reconnection of the caller's own connection; " +
-            "never `insufficient_scopes`, whose `remedy` says what to do).",
+            "`owned_by_actor`, `remedy`). With `X-Appstrate-Connect-Offers: 1` and " +
+            "`integrations:connect`, an item a connect flow clears carries a `connect_url` (a " +
+            "reconnection of the caller's own connection; never `insufficient_scopes`, whose " +
+            "`remedy` says what to do).",
           content: problemContent,
         },
         "422": {
@@ -933,21 +987,35 @@ export const credentialProxyPaths = {
             "`integration_not_remote` — the integration is not backed by a Streamable HTTP MCP " +
             "server; `remote_url_unrenderable` — its server URL is built from the connection's " +
             "variables and they do not render it.",
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
+          content: problemContent,
         },
         "429": { $ref: "#/components/responses/RateLimited" },
         "502": {
           description:
-            "`bad_gateway` — the MCP server failed the exchange or refused the connection's " +
-            "credential; `upstream_mcp_error` — it answered a JSON-RPC error " +
+            "`bad_gateway` — the MCP server failed the exchange, or refused the connection's " +
+            "credential (HTTP 401 or 403); `upstream_mcp_error` — it answered a JSON-RPC error " +
             "(`mcp_error: { code, message }`, its message untrusted text); " +
             "`upstream_response_too_large` — the tool ran, but its answer exceeds the exchange " +
-            "bound.",
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
+            "bound; the proxy's own `upstream_unresolvable` (`Proxy-Status` error `dns_error`), " +
+            "`upstream_unreachable` (`destination_unavailable`) and `credential_unusable` " +
+            "(`proxy_configuration_error`).",
+          headers: PROXY_STATUS_HEADER,
+          content: problemContent,
+        },
+        "503": {
+          description:
+            "`encryption_key_unavailable` — the connection's stored credential is encrypted under " +
+            "a key id missing from the platform's keyring; nothing was sent (`Proxy-Status` error " +
+            "`proxy_configuration_error`).",
+          headers: PROXY_STATUS_HEADER,
+          content: problemContent,
+        },
+        "504": {
+          description:
+            "`upstream_timeout` — the MCP server did not answer within the call's deadline " +
+            "(`Proxy-Status` error `http_response_timeout`).",
+          headers: PROXY_STATUS_HEADER,
+          content: problemContent,
         },
       },
     },
