@@ -62,7 +62,7 @@ async function runRecipients(
  *
  * Best-effort by contract: the caller wraps it — the run is already terminal.
  */
-export async function recordRunFinished(scope: SpaceScope, runId: string): Promise<number> {
+export async function recordRunFinished(scope: SpaceScope, runId: string): Promise<void> {
   const [run] = await db
     .select({
       userId: runs.userId,
@@ -81,11 +81,11 @@ export async function recordRunFinished(scope: SpaceScope, runId: string): Promi
       }),
     )
     .limit(1);
-  if (!run || run.packageEphemeral === true) return 0;
+  if (!run || run.packageEphemeral === true) return;
 
   const recipients = await runRecipients(scope, run);
-  if (recipients.length === 0) return 0;
-  const inserted = await db
+  if (recipients.length === 0) return;
+  await db
     .insert(runReads)
     .values(
       recipients.map((r) => ({
@@ -96,22 +96,22 @@ export async function recordRunFinished(scope: SpaceScope, runId: string): Promi
         recipientId: r.id,
       })),
     )
-    .onConflictDoNothing()
-    .returning({ runId: runReads.runId });
+    .onConflictDoNothing();
   await notifyRunFinished(
     scope,
     { id: runId, packageId: run.packageId, status: run.status },
     recipients,
   );
-  return inserted.length;
 }
 
 /**
  * Correlated predicate over `runs`: the run is unread by `actor`. The
  * recipient is matched on the polymorphic `(type, id)` tuple, so a dashboard
- * user and an end-user never see each other's read state.
+ * user and an end-user never see each other's read state. A read with no actor
+ * (system, sidecar) is constant `false`: read state belongs to a recipient.
  */
-export function unreadRunCondition(actor: Actor): SQL<boolean> {
+export function unreadRunCondition(actor: Actor | null): SQL<boolean> {
+  if (!actor) return sql<boolean>`false`;
   return sql<boolean>`exists (
     select 1 from ${runReads}
     where ${runReads.runId} = ${runs.id}

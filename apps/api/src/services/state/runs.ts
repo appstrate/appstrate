@@ -215,7 +215,7 @@ function enrichedRunSelect(actor: Actor | null) {
     apiKeyName: apiKeys.name,
     scheduleName: schedules.name,
     packageEphemeral: packages.ephemeral,
-    unread: unreadForActor(actor),
+    unread: unreadRunCondition(actor),
     // OUTPUT file count — correlated scalar subquery over `files`,
     // served by the `idx_files_run` (run_id-leading) index so the list
     // read stays a single query with no N+1. Coerced to Number in the mapper
@@ -231,15 +231,6 @@ function enrichedRunSelect(actor: Actor | null) {
       where ${files.runId} = ${runs.id} and ${files.purpose} = 'agent_output'
     )`,
   };
-}
-
-/**
- * Per-recipient unread flag (`unreadRunCondition`). When the read is not
- * actor-scoped (a system/sidecar read with `actor === null`), unread is
- * constant `false` — read state belongs to a recipient.
- */
-function unreadForActor(actor: Actor | null): SQL<boolean> {
-  return actor ? unreadRunCondition(actor) : sql<boolean>`false`;
 }
 
 /**
@@ -1789,7 +1780,7 @@ export async function listGlobalRuns(
   const conditions = [eq(runs.orgId, scope.orgId), eq(runs.spaceId, scope.spaceId)];
   if (visibility) conditions.push(visibility);
   conditions.push(...runListConditions({ status, search }));
-  if (unread) conditions.push(unreadForActor(actor));
+  if (unread) conditions.push(unreadRunCondition(actor));
   if (startDate) conditions.push(gte(runs.startedAt, startDate));
   if (endDate) conditions.push(lte(runs.startedAt, endDate));
   if (chatSessionId) {

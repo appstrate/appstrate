@@ -178,7 +178,9 @@ export function NotificationContent({
 
 export function NotificationBell() {
   const { t } = useTranslation("common");
-  const { data: agents } = useAgents();
+  // `isLoading`, not `isPending`: the read is off for a role that sees no agent,
+  // and a disabled query stays pending forever.
+  const { data: agents, isLoading: agentsLoading } = useAgents();
   const { data: count } = useUnreadCount();
   const {
     data: notifications,
@@ -221,7 +223,8 @@ export function NotificationBell() {
     canReach,
     onItemClick: handleClick,
     markAllRead: () => markAllRead.mutate({}),
-    loading: notificationsPending,
+    // Rows wait for the agent names: a title never shows the raw package id first.
+    loading: notificationsPending || agentsLoading,
     failed: notificationsFailed && notifications === undefined,
   };
 

@@ -814,9 +814,8 @@ const UNENRICHED_SCHEDULE_FIELDS = {
  *    schedule with 25 unread runs reported 20.
  *  - `unreadCount` is scoped to the VIEWER (`unreadRunCondition` on the polymorphic
  *    recipient tuple), never to the schedule's own actor — the same rule
- *    `unreadForActor` applies to run lists, so a member and an end-user never
- *    observe each other's read state. A null viewer (no actor context) reports
- *    0: unread is a recipient-side concept.
+ *    as run lists, so a member and an end-user never observe each other's
+ *    read state. A null viewer (no actor context) reports 0.
  *
  * `visibility` is the caller's run-read predicate (`runVisibilityFilter`), so
  * the counters span exactly the runs the caller may open from the card. Without
@@ -831,15 +830,13 @@ async function loadScheduleRunStats(
 ): Promise<Map<string, ScheduleRunStats>> {
   if (scheduleIds.length === 0) return new Map();
 
-  const unreadPredicate = viewer ? unreadRunCondition(viewer) : sql`false`;
-
   const rows = await db
     .select({
       scheduleId: runs.scheduleId,
       runningRuns: sql<string>`count(*) filter (where ${inArray(runs.status, [
         ...activeRunStatusValues,
       ])})`,
-      unreadCount: sql<string>`count(*) filter (where ${unreadPredicate})`,
+      unreadCount: sql<string>`count(*) filter (where ${unreadRunCondition(viewer)})`,
       lastRunNumber: sql<string>`coalesce(max(${runs.runNumber}), 0)`,
     })
     .from(runs)

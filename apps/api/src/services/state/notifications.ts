@@ -5,6 +5,8 @@ import { db } from "@appstrate/db/client";
 import type { RunStatus } from "@appstrate/core/run-status";
 import {
   notifications,
+  runAlertStatusValues,
+  type RunAlertStatus,
   type NotificationPayloads,
   type NotificationType,
   type PackageType,
@@ -43,12 +45,9 @@ interface NotificationDto {
   createdAt: string;
 }
 
-/**
- * The run statuses that reach the bell: the ones that need the recipient's
- * attention. A run that succeeded or was cancelled is only unread
- * (`run_reads`), on the runs page.
- */
-const RUN_ALERT_STATUSES: ReadonlySet<RunStatus> = new Set<RunStatus>(["failed", "timeout"]);
+function needsAttention(status: RunStatus): status is RunAlertStatus {
+  return (runAlertStatusValues as readonly RunStatus[]).includes(status);
+}
 
 /**
  * Notify a finished run's recipients when it needs attention — the bell
@@ -60,13 +59,11 @@ export async function notifyRunFinished(
   scope: SpaceScope,
   run: { id: string; packageId: string | null; status: RunStatus },
   recipients: Actor[],
-): Promise<number> {
-  if (!RUN_ALERT_STATUSES.has(run.status) || recipients.length === 0) return 0;
-  const payload: NotificationPayloads["run_completed"] = {
-    packageId: run.packageId,
-    status: run.status,
-  };
-  const inserted = await db
+): Promise<void> {
+  const { status } = run;
+  if (!needsAttention(status) || recipients.length === 0) return;
+  const payload: NotificationPayloads["run_completed"] = { packageId: run.packageId, status };
+  await db
     .insert(notifications)
     .values(
       recipients.map((r) => ({
@@ -79,9 +76,7 @@ export async function notifyRunFinished(
         payload,
       })),
     )
-    .onConflictDoNothing()
-    .returning({ id: notifications.id });
-  return inserted.length;
+    .onConflictDoNothing();
 }
 
 /**

@@ -173,9 +173,9 @@ describe("Run read state (per-recipient)", () => {
 
     it("is idempotent — a second fan-out for the same run creates no duplicate", async () => {
       const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
-      const again = await recordRunFinished(scope(), run.id);
+      await recordRunFinished(scope(), run.id);
 
-      expect(again).toBe(0); // unique guard → onConflictDoNothing
+      expect(await rowsOf(run.id)).toHaveLength(1); // primary key → onConflictDoNothing
       expect(await unreadCount(authHeaders(ctx))).toBe(1);
     });
 
@@ -232,13 +232,8 @@ describe("Run read state (per-recipient)", () => {
         userId: ctx.user.id,
       });
 
-      const [a, b] = await Promise.all([
-        recordRunFinished(scope(), run.id),
-        recordRunFinished(scope(), run.id),
-      ]);
+      await Promise.all([recordRunFinished(scope(), run.id), recordRunFinished(scope(), run.id)]);
       // Exactly one of the two racers wins the insert; the other no-ops.
-      expect(a + b).toBe(1);
-
       expect(await rowsOf(run.id)).toHaveLength(1);
     });
   });
@@ -575,9 +570,9 @@ describe("Run read state (per-recipient)", () => {
   // ─── recordRunFinished edge cases ──────────────────────
 
   describe("recordRunFinished edge cases", () => {
-    it("returns 0 for an unknown run id and never throws (best-effort contract)", async () => {
-      const n = await recordRunFinished(scope(), "run_does_not_exist");
-      expect(n).toBe(0);
+    it("records nothing for an unknown run id and never throws (best-effort contract)", async () => {
+      await recordRunFinished(scope(), "run_does_not_exist");
+      expect(await rowsOf("run_does_not_exist")).toHaveLength(0);
     });
 
     it("positively creates exactly one row for the end-user recipient", async () => {
@@ -605,8 +600,7 @@ describe("Run read state (per-recipient)", () => {
         userId: ctx.user.id,
       });
 
-      const n = await recordRunFinished(scope(), run.id);
-      expect(n).toBe(0);
+      await recordRunFinished(scope(), run.id);
 
       expect(await rowsOf(run.id)).toHaveLength(0);
       expect(await notificationsOf(run.id)).toHaveLength(0);

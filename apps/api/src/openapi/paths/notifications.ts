@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { packageTypeValues } from "@appstrate/db/schema";
+import { packageTypeValues, runAlertStatusValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 
 /**
@@ -48,7 +48,7 @@ const notificationObject = {
           type: ["string", "null"],
           description: "The run's agent; null once the agent is deleted.",
         },
-        status: { type: "string", enum: ["failed", "timeout"] },
+        status: { type: "string", enum: [...runAlertStatusValues] },
       },
     }),
     notificationOf("package_shared", {

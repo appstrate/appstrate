@@ -54,12 +54,16 @@ export const notificationTypeValues = ["run_completed", "package_shared"] as con
 export type NotificationType = (typeof notificationTypeValues)[number];
 
 /**
- * The render-without-join payload of each kind. `run_completed` is written only
- * for a run that needs attention (`failed`, `timeout`): a run's read state is
- * `run_reads`, not a notification.
+ * The run statuses that reach the bell: a finished run is notified only when it
+ * needs its recipient's attention. Any other finished run is only unread
+ * (`run_reads`).
  */
+export const runAlertStatusValues = ["failed", "timeout"] as const satisfies readonly RunStatus[];
+export type RunAlertStatus = (typeof runAlertStatusValues)[number];
+
+/** The render-without-join payload of each kind. */
 export interface NotificationPayloads {
-  run_completed: { packageId: string | null; status: RunStatus };
+  run_completed: { packageId: string | null; status: RunAlertStatus };
   package_shared: { packageId: string; package_type: PackageType; shared_by_name: string };
 }
 

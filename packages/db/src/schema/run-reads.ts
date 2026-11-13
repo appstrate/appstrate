@@ -14,8 +14,7 @@ import { runs } from "./runs.ts";
  *
  * It is NOT a notification: `notifications` holds what the bell shows (a
  * failed run, a share), decided when it is written. A run is unread whether or
- * not anyone was notified about it, and a member who would mute notifications
- * keeps their unread runs.
+ * not anyone was notified about it.
  *
  * The recipient is the same polymorphic `(recipientType, recipientId)` tuple as
  * on `notifications` (the `Actor` shape): no FK on the id, so the deletion
