@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { connectionConflictContent, problemContent } from "../responses.ts";
+import {
+  RUN_TOOLS_MCP_DESCRIPTION,
+  runToolsMcpRequestBody,
+  runToolsMcpResponses,
+} from "./run-tools-mcp.ts";
 import { STD_RESPONSE_HEADERS, REQUEST_ID_ONLY_HEADERS } from "../headers.ts";
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { connectionIdSetJsonSchema } from "./integrations.ts";
@@ -1890,6 +1895,36 @@ const canonicalRunsPaths = {
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+      },
+    },
+  },
+  "/api/runs/{runId}/mcp": {
+    post: {
+      operationId: "runToolsMcpPost",
+      tags: ["Runs"],
+      summary: "Run MCP server of a remote run",
+      description:
+        RUN_TOOLS_MCP_DESCRIPTION +
+        " Mounted here for the host executing a remote run. Requires `agents:run`, and serves only a `running` remote run that the caller launched, in the caller's org and space; any other run returns 404 rather than confirming it exists.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        { name: "runId", in: "path", required: true, schema: { type: "string" } },
+      ],
+      requestBody: runToolsMcpRequestBody,
+      responses: {
+        ...runToolsMcpResponses,
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": {
+          description: "`forbidden` — the caller lacks `agents:run`, or the run is not `running`.",
+          content: {
+            "application/problem+json": {
+              schema: { $ref: "#/components/schemas/ProblemDetail" },
+            },
+          },
+        },
         "404": { $ref: "#/components/responses/NotFound" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },

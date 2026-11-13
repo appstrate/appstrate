@@ -4707,6 +4707,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/{runId}/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run MCP server of a remote run
+         * @description Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the `@appstrate/platform` system integration — `log`, `note`, `pin`, `recall_memory`, `run_history` — for one `running` run. Each tool writes at call time: `log` appends a run log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's checkpoint snapshot that `run_history` returns. Mounted here for the host executing a remote run. Requires `agents:run`, and serves only a `running` remote run that the caller launched, in the caller's org and space; any other run returns 404 rather than confirming it exists.
+         */
+        post: operations["runToolsMcpPost"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/{runId}/sink/extend": {
         parameters: {
             query?: never;
@@ -5469,6 +5489,26 @@ export interface paths {
          * @description Container-to-host only. Auth via Bearer run token. Serves a running platform-origin run whose model is platform-provided: the run's own model is resolved and injected server-side whatever `body.model` names, and each call is metered from the provider's response and attributed to the run. Same request guards and response forwarding as the corresponding `/api/llm-proxy/…` endpoint.
          */
         post: operations["runLlmProxyOpenaiResponses"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/internal/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run MCP server of a platform run
+         * @description Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the `@appstrate/platform` system integration — `log`, `note`, `pin`, `recall_memory`, `run_history` — for one `running` run. Each tool writes at call time: `log` appends a run log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's checkpoint snapshot that `run_history` returns. Mounted here for the sidecar. Container-to-host only. Auth via Bearer run token, which names the run; a run that is not `running` is refused with 403.
+         */
+        post: operations["internalRunToolsMcpPost"];
         delete?: never;
         options?: never;
         head?: never;
@@ -25540,6 +25580,72 @@ export interface operations {
             503: components["responses"]["EncryptionKeyUnavailable"];
         };
     };
+    runToolsMcpPost: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    jsonrpc: "2.0";
+                    id?: string | number | null;
+                    method: string;
+                    params?: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description JSON-RPC response. Served as `text/event-stream` when a request carries `params._meta.progressToken`, as `application/json` otherwise. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                    "text/event-stream": string;
+                };
+            };
+            /** @description `application/json`: the MCP transport's JSON-RPC error — unparseable JSON, an invalid JSON-RPC message, or an unsupported `MCP-Protocol-Version` header. `application/problem+json`: a request the platform refuses before the transport. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description `forbidden` — the caller lacks `agents:run`, or the run is not `running`. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
     extendRunSink: {
         parameters: {
             query?: never;
@@ -28748,6 +28854,57 @@ export interface operations {
                     "application/json": Record<string, never>;
                 };
             };
+        };
+    };
+    internalRunToolsMcpPost: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    jsonrpc: "2.0";
+                    id?: string | number | null;
+                    method: string;
+                    params?: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description JSON-RPC response. Served as `text/event-stream` when a request carries `params._meta.progressToken`, as `application/json` otherwise. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                    "text/event-stream": string;
+                };
+            };
+            /** @description `application/json`: the MCP transport's JSON-RPC error — unparseable JSON, an invalid JSON-RPC message, or an unsupported `MCP-Protocol-Version` header. `application/problem+json`: a request the platform refuses before the transport. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
         };
     };
     getMcpServerBundle: {

@@ -3,6 +3,11 @@
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { CREDENTIAL_FAILURE_CAUSES } from "@appstrate/core/sidecar-types";
 import { CREDENTIAL_FAILURE_SENTENCES } from "../../lib/credential-failure.ts";
+import {
+  RUN_TOOLS_MCP_DESCRIPTION,
+  runToolsMcpRequestBody,
+  runToolsMcpResponses,
+} from "./run-tools-mcp.ts";
 
 /** A credential endpoint's `410`/`502`: a problem whose `cause` member says why. */
 function credentialFailure(description: string) {
@@ -105,6 +110,25 @@ const connectionSelector400 = {
 } as const;
 
 export const internalPaths = {
+  "/internal/mcp": {
+    post: {
+      operationId: "internalRunToolsMcpPost",
+      tags: ["Internal"],
+      summary: "Run MCP server of a platform run",
+      description:
+        RUN_TOOLS_MCP_DESCRIPTION +
+        " Mounted here for the sidecar. Container-to-host only. Auth via Bearer run token, which names the run; a run that is not `running` is refused with 403.",
+      security: [{ bearerExecToken: [] }],
+      requestBody: runToolsMcpRequestBody,
+      responses: {
+        ...runToolsMcpResponses,
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+        "429": { $ref: "#/components/responses/RateLimited" },
+      },
+    },
+  },
   "/internal/run-history": {
     get: {
       operationId: "getRunHistory",

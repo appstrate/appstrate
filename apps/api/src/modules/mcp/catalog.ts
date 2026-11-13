@@ -83,17 +83,22 @@ const SERVED_SKILLS_PATHS: ReadonlySet<string> = new Set([
   "/api/packages/skills/served/archive",
 ]);
 
+/** The run MCP server of a remote run: an MCP transport, driven by the host executing the run. */
+const RUN_TOOLS_MCP_PATH = "/api/runs/{runId}/mcp";
+
 /**
  * Kept out of the catalog: the MCP module's own routes and the transport's RFC
- * 9728 well-known (no recursive self-invocation), the served-skill routes (the
- * endpoint serves skills through the Skills extension, not as operations), the
- * spec document and its viewer, which `describe_operation` already serves
- * piecewise, and the credential proxy, which the `api_call` tool alone reaches
- * (`connection-tools.ts`).
+ * 9728 well-known (no recursive self-invocation), the run MCP server of a remote
+ * run (a transport for the executing host, not an operation), the served-skill
+ * routes (the endpoint serves skills through the Skills extension, not as
+ * operations), the spec document and its viewer, which `describe_operation`
+ * already serves piecewise, and the credential proxy, which the `api_call` tool
+ * alone reaches (`connection-tools.ts`).
  */
 function isExcludedPath(pathTemplate: string): boolean {
   return (
     pathTemplate.startsWith("/api/mcp/") ||
+    pathTemplate === RUN_TOOLS_MCP_PATH ||
     SERVED_SKILLS_PATHS.has(pathTemplate) ||
     pathTemplate.startsWith("/.well-known/oauth-protected-resource") ||
     pathTemplate === "/api/openapi.json" ||

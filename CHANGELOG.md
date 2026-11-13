@@ -501,6 +501,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (`_meta["dev.appstrate/platform"]`), without auths, its catalog is `log`, `note`, `pin`,
   `recall_memory` and `run_history`, all selected by default.
 
+- **Run MCP server: `POST /internal/mcp` and `POST /api/runs/{runId}/mcp`** (#2199).
+  One stateless Streamable HTTP MCP server serves the `@appstrate/platform` tools
+  for one `running` run, and each tool writes at call time: `log` a run log,
+  `note` an archive memory, `pin` a pinned slot (and, for `checkpoint`, the run's
+  checkpoint snapshot `run_history` returns). The sidecar authenticates
+  `/internal/mcp` with the run token; the host executing a remote run reaches
+  `/api/runs/{runId}/mcp` with `agents:run`, on a remote run it launched (any
+  other run answers 404, `runs:read-all` included).
+
 - **`appstrate run --local` wires unauthenticated remote MCP integrations**
   (#2198). For an integration with `source.kind: "remote"` and no `auths`, the
   CLI connects to `source.remote.url` itself and exposes each tool the agent

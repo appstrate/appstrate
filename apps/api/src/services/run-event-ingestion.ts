@@ -961,7 +961,7 @@ export async function applyRecoveredOutput(run: RunSinkContext, result: RunResul
   if (isPlainRecord(emitted)) result.output = emitted;
 }
 
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
+export function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 

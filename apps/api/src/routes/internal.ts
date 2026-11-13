@@ -22,6 +22,7 @@ import { parseListPagination } from "../lib/list-query.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
 import { verifyRunToken } from "../lib/verify-run-token.ts";
 import { requireRunBoundMember } from "../lib/run-bound-connection.ts";
+import { serveRunMcp } from "../services/run-tools-mcp.ts";
 import { rateLimitByBearer } from "../middleware/rate-limit.ts";
 import {
   getRecentRuns,
@@ -233,6 +234,21 @@ export function createInternalRouter() {
 
   // Rate limit all internal endpoints (200 req/min per token)
   router.use("/*", rateLimitByBearer(200));
+
+  // POST /internal/mcp — the run MCP server (`@appstrate/platform` tools) for
+  // the sidecar. The run token names the run; `verifyRunToken` refuses a run
+  // that is not `running`.
+  router.post("/mcp", async (c) => {
+    const { runId, run } = await verifyRunToken(c);
+    return serveRunMcp(c, {
+      runId,
+      orgId: run.orgId,
+      spaceId: run.spaceId,
+      packageId: run.packageId,
+      userId: run.userId,
+      endUserId: run.endUserId,
+    });
+  });
 
   // GET /internal/run-history — called from inside containers
   // Auth: Bearer <signedToken> (HMAC-verified, then checked against runs table)

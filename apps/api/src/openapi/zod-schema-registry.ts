@@ -788,6 +788,10 @@ export const EXEMPT_REQUEST_BODIES: Record<string, string> = {
     "JSON-RPC 2.0 envelope; params are validated per MCP method, not by a single body schema",
   "POST /api/mcp/o/{org}/s/{space}":
     "JSON-RPC 2.0 envelope; params are validated per MCP method, not by a single body schema",
+  "POST /api/runs/{runId}/mcp":
+    "JSON-RPC 2.0 envelope; params are validated per MCP method, not by a single body schema",
+  "POST /internal/mcp":
+    "JSON-RPC 2.0 envelope; params are validated per MCP method, not by a single body schema",
 
   // ─── Module-owned surfaces with no single comparable body ───────────────
   //
