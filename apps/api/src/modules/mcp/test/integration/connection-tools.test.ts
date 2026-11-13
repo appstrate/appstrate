@@ -25,7 +25,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { getEnv } from "@appstrate/env";
 import { eq, like } from "drizzle-orm";
-import { integrationConnections, oauthResource } from "@appstrate/db/schema";
+import { integrationConnections, oauthResource, spaces } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { db, truncateAll } from "../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../test/helpers/redis.ts";
@@ -399,6 +399,47 @@ describe("mcp connection tools", () => {
       });
       expect(entries(served.data)[0]).toMatchObject({ status: 200, body: { ok: true } });
       expect(upstreamAuth()).toEqual(["Bearer tok-mine"]);
+    });
+
+    it("declares neither in a space that closes the credential proxy, to the org owner too", async () => {
+      const caller = await instanceCaller(owner);
+      expect(await toolNames(caller)).toEqual(
+        expect.arrayContaining(["list_connections", "api_call"]),
+      );
+      await db
+        .update(spaces)
+        .set({ credentialProxyOpen: false })
+        .where(eq(spaces.id, owner.defaultSpaceId));
+      const names = await toolNames(caller);
+      expect(names).not.toContain("list_connections");
+      expect(names).not.toContain("api_call");
+      const getMe = (await listTools(caller)).find((tool) => tool.name === "get_me")!;
+      expect(getMe.description).not.toContain("api_call");
+    });
+
+    it("withholds them per space on the organization's endpoint when one space is closed", async () => {
+      const closed = await seedSpace({ orgId: owner.orgId, name: "Coffre" });
+      await db.update(spaces).set({ credentialProxyOpen: false }).where(eq(spaces.id, closed.id));
+      const caller: Caller = {
+        path: `/api/mcp/o/${owner.orgId}`,
+        headers: { Authorization: `Bearer ${await mintInstanceToken(owner)}` },
+      };
+
+      const apiCall = (await listTools(caller)).find((tool) => tool.name === "api_call")!;
+      const availableIn = apiCall.description.slice(
+        0,
+        apiCall.description.indexOf("Call third-party APIs"),
+      );
+      expect(availableIn).toContain(owner.defaultSpaceId);
+      expect(availableIn).not.toContain(closed.id);
+
+      const refused = await callTool(caller, "api_call", {
+        space_id: closed.id,
+        requests: [get("/contacts")],
+      });
+      expect(refused.isError).toBe(true);
+      expect(refused.data).toMatchObject({ code: "not_granted" });
+      expect(upstreamCalls).toHaveLength(0);
     });
   });
 
