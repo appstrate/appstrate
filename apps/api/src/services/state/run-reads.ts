@@ -3,7 +3,9 @@
 import { and, eq, inArray, isNull, count, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs, runReads, organizationMembers, packages } from "@appstrate/db/schema";
-import { scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
+import { scopedWhere, type DbOrTx, type Tx } from "../../lib/db-helpers.ts";
+import { logger } from "../../lib/logger.ts";
+import { getErrorMessage } from "@appstrate/core/errors";
 import { actorMatch, type Actor } from "../../lib/actor.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import { markRunNotificationsRead, notifyRunFinished } from "./notifications.ts";
@@ -53,23 +55,33 @@ async function runRecipients(
 
 /**
  * Record a freshly finished run: unread for each recipient, and notified when
- * the run needs attention (`notifyRunFinished` decides). `finalizeRun` calls it
- * once per run, on the transaction that writes the terminal status: a client
- * that sees the run finished finds its read state, so opening it marks it read.
- * The primary key makes a re-fire a no-op anyway.
+ * the run needs attention (`notifyRunFinished` decides). Every writer of a
+ * terminal run calls it on the transaction that writes the terminal status
+ * (`finalizeRun`, `createFailedRun`): a client that sees the run finished finds
+ * its read state, so opening it marks it read. The primary key makes a re-fire
+ * a no-op.
  *
  * An ephemeral run (chat, playground, direct inline call) records nothing: its
  * result is already in front of the caller. Keyed on `packages.ephemeral`; a
  * null join (shadow package already gone) records it.
  *
- * Best-effort by contract: the caller isolates it — a failure here never
- * keeps a run from finishing.
+ * Best-effort: it runs in a transaction of its own (a savepoint inside the
+ * caller's), and a failure is logged, never thrown — it costs a missing unread
+ * dot and bell entry, never the run's terminal status.
  */
 export async function recordRunFinished(
   scope: SpaceScope,
   runId: string,
   executor: DbOrTx = db,
 ): Promise<void> {
+  await executor
+    .transaction((tx) => writeRunFinished(scope, runId, tx))
+    .catch((err) => {
+      logger.error("run read-state fan-out failed", { runId, err: getErrorMessage(err) });
+    });
+}
+
+async function writeRunFinished(scope: SpaceScope, runId: string, executor: Tx): Promise<void> {
   const [run] = await executor
     .select({
       userId: runs.userId,

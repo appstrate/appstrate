@@ -123,6 +123,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - The bell (`/api/notifications`) receives a run only when it ended `failed`
     or `timeout`, plus package shares. Opening the run reads its notification.
     Its notification type is renamed `run_completed` → `run_failed`.
+  - A scheduled run refused before it starts is now unread and notified like
+    any other failed run; it used to be recorded for nobody.
   - Removed: `GET /api/notifications/unread-counts-by-agent` (use
     `unread_count` on `GET /api/agents`) and
     `PUT /api/notifications/read/{runId}` (use `PUT /api/runs/{id}/read`).

@@ -16,7 +16,7 @@ The feed holds what needs the recipient's attention, decided when the notificati
 | `run_failed`     | A run ends `failed` or `timeout`. The payload carries the `packageId` and the `status`.           | The member or end-user who launched it. A run with no actor is notified to the organization's owners and admins. |
 | `package_shared` | A package is shared **with a person**. The payload names the package, its type and who shared it. | The person, in their personal space.                                                                             |
 
-A run that succeeds or is cancelled is not notified: it is only unread (below). Runs of an inline agent are never notified, since their result is already in front of the caller.
+A scheduled run that is refused before it starts (a missing package, a connection that no longer resolves) is a `failed` run like any other, and is notified. A run that succeeds or is cancelled is not notified: it is only unread (below). Runs of an inline agent are never notified, since their result is already in front of the caller.
 
 ```bash
 # Newest first, unread only, 20 per page

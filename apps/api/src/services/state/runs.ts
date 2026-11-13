@@ -51,7 +51,7 @@ import { listResponse } from "../../lib/list-response.ts";
 import { scopedWhere } from "../../lib/db-helpers.ts";
 import { orgOrSystemFilter } from "../../lib/package-helpers.ts";
 import { type Actor, actorFilter } from "../../lib/actor.ts";
-import { unreadRunCondition } from "./run-reads.ts";
+import { recordRunFinished, unreadRunCondition } from "./run-reads.ts";
 import { runLogDataSchema } from "../../lib/jsonb-schemas.ts";
 import { ApiError, conflict, forbidden, invalidRequest, notFound } from "../../lib/errors.ts";
 import { getPlatformRunLimits } from "../run-limits.ts";
@@ -820,7 +820,8 @@ export async function createRun(scope: SpaceScope, params: CreateRunParams): Pro
 
 /**
  * Create a run record that is immediately failed (preflight error).
- * Single INSERT with status=failed — triggers one pg_notify for realtime.
+ * Single INSERT with status=failed — triggers one pg_notify for realtime — and
+ * its read state with it, like any finished run.
  */
 export async function createFailedRun(
   scope: SpaceScope,
@@ -855,6 +856,8 @@ export async function createFailedRun(
       agentScope: agentDenorm?.scope ?? null,
       agentName: agentDenorm?.name ?? null,
     });
+    // Born terminal, so it never reaches `finalizeRun`: record it here.
+    await recordRunFinished(scope, id, tx);
   });
 }
 

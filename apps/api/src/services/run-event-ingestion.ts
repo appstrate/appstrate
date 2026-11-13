@@ -652,17 +652,8 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
       await enqueueStorageDeletion(tx, runWorkspaceDeletionJobs(run.id, "run_workspace_deleted"));
       // The run's read state (`run_reads`) and its bell entry commit WITH the
       // terminal status: the status change is what tells a client the run is
-      // over, and a run-detail page marks the run read on that signal, so the
-      // rows must exist by then. In a savepoint, because they stay best-effort:
-      // a failure costs a missing unread dot and bell entry, never the close.
-      await tx
-        .transaction((savepoint) => recordRunFinished(scope, run.id, savepoint))
-        .catch((err) => {
-          logger.error("finalize: run read-state fan-out failed", {
-            runId: run.id,
-            err: getErrorMessage(err),
-          });
-        });
+      // over, and a run-detail page marks the run read on that signal.
+      await recordRunFinished(scope, run.id, tx);
     }
     return closed;
   });

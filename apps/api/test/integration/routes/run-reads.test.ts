@@ -19,6 +19,7 @@ import {
   seedSpacePackage,
 } from "../../helpers/seed.ts";
 import { recordRunFinished, markRunRead } from "../../../src/services/state/run-reads.ts";
+import { createFailedRun } from "../../../src/services/state/runs.ts";
 import { deleteEndUser } from "../../../src/services/end-users.ts";
 import { removeMember } from "../../../src/services/organizations.ts";
 import { synthesiseFinalize } from "../../../src/services/run-event-ingestion.ts";
@@ -333,6 +334,22 @@ describe("Run read state (per-recipient)", () => {
       expect(row!.status).toBe("failed");
       expect(await rowsOf(run.id)).toHaveLength(0);
       expect(await notificationsOf(run.id)).toHaveLength(0);
+    });
+
+    it("a run created already failed (a schedule's preflight refusal) is unread and notified", async () => {
+      await seedAgent({ id: "@notiforg/preflight", orgId: ctx.orgId, createdBy: ctx.user.id });
+      const runId = `run_${crypto.randomUUID()}`;
+
+      await createFailedRun(
+        scope(),
+        runId,
+        "@notiforg/preflight",
+        { type: "user", id: ctx.user.id },
+        "Package not found",
+      );
+
+      expect(await unreadRunIds(authHeaders(ctx))).toEqual([runId]);
+      expect(await notificationsOf(runId)).toHaveLength(1);
     });
 
     it("a re-finalize (idempotent CAS) does not create a second row", async () => {
