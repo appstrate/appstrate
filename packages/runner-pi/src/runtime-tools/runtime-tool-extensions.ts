@@ -93,25 +93,16 @@ function runtimeToolExtension(
   };
 }
 
-export interface BuildPublishFileExtensionOptions {
-  /** Uploads a workspace file to the platform, returning its file metadata. */
-  uploader: FileUploader;
-  /** Sink for the `file.published` event the tool emits (defaults to stdout-JSONL). */
-  emit?: (event: RuntimeToolEvent) => void;
-}
-
 /**
- * Build the `publish_file` Pi extension around an injected uploader. The
- * uploader (holding the run's HMAC sink signer) is wired in the runtime
- * entrypoint, so this tool is registered in-process even when the sidecar
- * hosts the other runtime tools over MCP — the sidecar has no path back to the
- * platform files route.
+ * Build the `publish_file` Pi extension around an injected uploader (holding
+ * the run's HMAC sink signer). {@link PiRunner} registers it itself from its
+ * `fileUploader` option, with `emit` writing into the run's event sink.
  */
 export function buildPublishFileExtension(
-  opts: BuildPublishFileExtensionOptions,
+  uploader: FileUploader,
+  emit: (event: RuntimeToolEvent) => void,
 ): ExtensionFactory {
-  const emit = opts.emit ?? defaultStdoutEmit;
-  return runtimeToolExtension(buildPublishFileDef(opts.uploader), emit);
+  return runtimeToolExtension(buildPublishFileDef(uploader), emit);
 }
 
 /**

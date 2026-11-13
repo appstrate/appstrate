@@ -117,6 +117,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   integration that carries it answers `400`, and a bundle is refused when any of its non-system
   packages carries it, dependencies included.
 
+- **BREAKING: `publish_file` is a harness tool, not selected in `runtime_tools`** (#2199).
+  The runner registers it whenever its host supplies an uploader (`PiRunner` option
+  `fileUploader`): every platform run has it, whatever the manifest declares, and a CLI run
+  has none. `@appstrate/runner-pi` no longer exports `buildPublishFileExtension`.
+
 - **BREAKING: `output` is injected from `output.schema`, not selected in
   `runtime_tools`** (#2197). A run has the `output` tool exactly when its agent
   declares a non-empty `output.schema`, and must then call it; without a schema

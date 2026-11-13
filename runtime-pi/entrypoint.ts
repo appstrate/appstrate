@@ -38,7 +38,6 @@ import type { ExtensionFactory, Api, Model } from "./pi-sdk.ts";
 import {
   bundleMemberDir,
   prepareBundleForPi,
-  buildPublishFileExtension,
   emitRuntimeReady,
   emitBootProgress,
   startSinkHeartbeat,
@@ -46,7 +45,6 @@ import {
   type PiRunner,
 } from "@appstrate/runner-pi";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { canonicalizeRuntimeToolIds } from "@appstrate/core/runtime-tools-catalog";
 import { readDeclaredOutputSchema } from "@appstrate/afps-shared/output-schema";
 import { SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
 import { readBundleFromFile } from "@appstrate/afps-runtime/bundle";
@@ -448,23 +446,7 @@ phaseTimings.bundlePrepareMs = Math.round(performance.now() - bundlePrepareStart
 // not the load. The honest total is emitted on `runtime ready`.
 await progress("bundle loaded", { bundlePrepareMs: phaseTimings.bundlePrepareMs });
 
-// The agent's selected runtime tools (`manifest.runtime_tools`), read once from
-// the root package manifest for the `publish_file` gate.
-//
-// Canonicalized here too. The platform already strips ids it cannot build
-// from the bundle (`buildAgentPackage`), so this is a second line of defence
-// at the trust boundary rather than the only one — and the gates below are
-// exact string matches, so an unrecognised id reaching them silently
-// unregisters the publish tool. The version skew that would deliver one (a NEW
-// image against an OLDER platform) is refused at boot by the image-trio tag
-// rule, except where that rule is blind: a floating tag rebuilt on one side, a
-// digest-pinned ref, and a platform with no build identity. Filtering once, at
-// the single read, costs a function call and does not depend on which of those
-// is true.
 const rootManifest = bundle.packages.get(bundle.root)?.manifest;
-const declaredRuntimeTools: string[] = canonicalizeRuntimeToolIds(
-  (rootManifest as { runtime_tools?: unknown[] } | undefined)?.runtime_tools ?? [],
-).ids;
 
 // The agent's declared output schema: its presence gives the run the `output`
 // tool, built by the PiRunner (`outputSchema` option).
@@ -589,24 +571,6 @@ try {
   process.exit(1);
 }
 
-// --- 2d. publish_file runtime tool (opt-in via manifest.runtime_tools) ---
-// Unlike the pure event-emitter runtime tools (served by the sidecar over
-// MCP), `publish_file` performs an HTTP upload back to the platform — so it is
-// ALWAYS registered
-// in-process here (the sidecar has no path to the files route), gated on
-// the agent selecting it. It carries the run's HMAC signer via the injected
-// `uploadRunFile`; its `file.published` event rides the bridged sink.
-if (declaredRuntimeTools.includes("publish_file")) {
-  extensionFactories.push(
-    buildPublishFileExtension({
-      uploader: uploadRunFile,
-      emit: (event) => {
-        void bridgedSink.handle(event as RunEvent);
-      },
-    }),
-  );
-}
-
 // --- 3. Model + system prompt from env ---
 
 const systemPrompt = env.agentPrompt;
@@ -694,6 +658,8 @@ function buildPiRunner(): PiRunner {
     // The runner registers `output` and stops on its first successful call
     // when the agent declares an output schema.
     ...(outputSchema ? { outputSchema } : {}),
+    // A platform run always has an uploader, so it always has `publish_file`.
+    fileUploader: uploadRunFile,
     modelRetry: env.modelRetry,
     modelCompaction: env.modelCompaction,
     ...(env.toolResultByteLimit !== undefined

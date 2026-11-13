@@ -10,8 +10,9 @@
  * {@link buildRuntimeToolDefs}; `output`, built by {@link buildOutputToolDef}
  * when the agent declares an `output.schema` (the runner registers it as a Pi
  * extension, see `@appstrate/runner-pi`); and `publish_file`, built on its own
- * by {@link buildPublishFileDef} because it needs an injected HTTP uploader
- * only the runtime entrypoint can supply.
+ * by {@link buildPublishFileDef} around an injected HTTP uploader (the runner
+ * registers it whenever its host supplies one, see `fileUploader` in
+ * `@appstrate/runner-pi`).
  *
  * They are plain tool definitions so the SAME logic can be hosted two ways:
  *
@@ -347,7 +348,7 @@ const RUNTIME_TOOL_BUILDERS: Record<EventEmitterRuntimeTool, () => RuntimeToolDe
 /**
  * Build the {@link RuntimeToolDef}s for an agent's selected runtime tools.
  * Only the pure event-emitter tools are built here — `publish_file` is
- * excluded (it needs an injected uploader; the entrypoint builds it). Unknown
+ * excluded (it needs an injected uploader; the runner builds it). Unknown
  * entries are ignored — that is the contract that keeps a manifest naming a
  * retired tool (e.g. the removed `report`) runnable; `validateManifest` drops
  * the same ids rather than rejecting the manifest. Order follows the agent's

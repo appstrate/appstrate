@@ -38,7 +38,10 @@ import {
   type Transport,
 } from "./pi-sdk.ts";
 import { scheduleDeadlineNudges } from "./deadline-nudges.ts";
-import { buildOutputExtension } from "./runtime-tools/runtime-tool-extensions.ts";
+import {
+  buildOutputExtension,
+  buildPublishFileExtension,
+} from "./runtime-tools/runtime-tool-extensions.ts";
 import { piSkillsDir } from "./bundle-extensions.ts";
 import { createIsolatedResourceLoader } from "./isolated-resource-loader.ts";
 import { addRequestUsage, DEFAULT_CONTEXT_WINDOW } from "./pi-model.ts";
@@ -53,6 +56,7 @@ import {
 import { deriveResponseReserveTokens } from "@appstrate/core/token-budget";
 import { classifyModelError } from "@appstrate/core/model-error";
 import type { RunEvent, ExecutionContext } from "@appstrate/afps-runtime/types";
+import type { FileUploader, RuntimeToolEvent } from "@appstrate/core/runtime-tool-defs";
 import {
   buildError,
   buildMetric,
@@ -279,6 +283,12 @@ export interface PiRunnerOptions {
    * stop.
    */
   outputSchema?: Record<string, unknown>;
+  /**
+   * Uploads a workspace file as a durable file of the run. When set, the
+   * runner registers the `publish_file` tool around it, emitting
+   * `file.published` into the run's sink. Omitted: no `publish_file` tool.
+   */
+  fileUploader?: FileUploader;
   /** Pi SDK retry on transient 429/5xx. Default `true`; off when an outer layer retries. */
   modelRetry?: boolean;
   /** Pi SDK context compaction. Default `true`; see {@link derivePiCompactionSettings}. */
@@ -671,16 +681,17 @@ export class PiRunner {
       enabled: this.opts.modelCompaction ?? true,
     });
 
-    // `output` events go straight into the run's sink, like every event the
-    // bridge emits; `run()` reads them back at finalize.
-    const outputSchema = this.opts.outputSchema;
-    const outputExtension: ExtensionFactory[] = outputSchema
-      ? [
-          buildOutputExtension(outputSchema, (event) => {
-            void internalSink.emit({ ...event, runId: context.runId } as RunEvent);
-          }),
-        ]
-      : [];
+    // Harness tool events (`output`, `publish_file`) go straight into the
+    // run's sink, like every event the bridge emits; `run()` reads them back
+    // at finalize.
+    const emitHarnessEvent = (event: RuntimeToolEvent): void => {
+      void internalSink.emit({ ...event, runId: context.runId } as RunEvent);
+    };
+    const { outputSchema, fileUploader } = this.opts;
+    const harnessExtensions: ExtensionFactory[] = [
+      ...(outputSchema ? [buildOutputExtension(outputSchema, emitHarnessEvent)] : []),
+      ...(fileUploader ? [buildPublishFileExtension(fileUploader, emitHarnessEvent)] : []),
+    ];
     const temperatureExtension: ExtensionFactory[] =
       this.opts.temperature === undefined
         ? []
@@ -700,7 +711,7 @@ export class PiRunner {
       systemPrompt,
       extensionFactories: [
         ...(this.opts.extensionFactories ?? []),
-        ...outputExtension,
+        ...harnessExtensions,
         ...temperatureExtension,
       ],
       skillPaths: [piSkillsDir(cwd)],

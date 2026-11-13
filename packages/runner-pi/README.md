@@ -60,7 +60,7 @@ From `.`:
   `buildRuntimePiEnv`, `pickOperatorSidecarEnv`, `emitRuntimeReady`,
   `emitBootProgress`, `startSinkHeartbeat`.
 - **Runtime tools** — `callToolResultToPi`, `buildRuntimeToolExtensions`,
-  `buildPublishFileExtension`, `spillResourcesToWorkspace`.
+  `spillResourcesToWorkspace`.
 
 ## What it handles
 
