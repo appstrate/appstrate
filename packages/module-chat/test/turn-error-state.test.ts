@@ -3,7 +3,12 @@
 import { describe, expect, it } from "bun:test";
 
 import { turnErrorState } from "../src/ui/turn-error-state.ts";
-import { clientTurnErrorMarker, clientTurnErrorForCategory } from "../src/turn-error.ts";
+import {
+  classifyClientTurnError,
+  clientTurnErrorForCategory,
+  clientTurnErrorFromMarker,
+  clientTurnErrorMarker,
+} from "../src/turn-error.ts";
 
 /** Echo the key so a test asserts WHICH sentence was chosen, not its wording. */
 const t = (key: string) => key;
@@ -118,6 +123,70 @@ describe("turnErrorState", () => {
         true,
       ),
     ).toMatchObject({ text: "turn.error.credentialUnavailableMember", retryable: false });
+  });
+
+  it("names a runtime-version refusal the same way, live or reloaded, without a retry", () => {
+    // The provider refused the model for the client version the SDK announces
+    // (#2148): only a platform release clears it, so neither a retry nor a
+    // reconnection link is offered, whichever path the turn is read through.
+    const refusal =
+      '400 {"type":"error","error":{"type":"invalid_request_error","message":"Claude Code 2.1.280 does not support this model","details":{"error_code":"claude_code_version_too_old"}}}';
+    const shown = classifyClientTurnError({ message: refusal });
+    expect(shown).toEqual({
+      category: "invalid_request",
+      retryable: false,
+      reason: "runtime_version_too_old",
+    });
+    expect(clientTurnErrorFromMarker(clientTurnErrorMarker(shown))).toEqual(shown);
+    const expected = {
+      text: "turn.error.runtimeVersionTooOld",
+      retryable: false,
+      requestId: undefined,
+    };
+    expect(
+      turnErrorState(
+        message(
+          turn({
+            finishReason: "error",
+            errorCategory: "invalid_request",
+            errorRetryable: false,
+            errorReason: "runtime_version_too_old",
+          }),
+        ),
+        t,
+        manager,
+        true,
+      ),
+    ).toEqual(expected);
+    expect(
+      turnErrorState(failed(assistantError(clientTurnErrorMarker(shown))), t, manager, true),
+    ).toEqual(expected);
+  });
+
+  it("keeps the category's sentence for a reason it has no sentence for", () => {
+    expect(
+      turnErrorState(
+        message(
+          turn({
+            finishReason: "error",
+            errorCategory: "invalid_request",
+            errorRetryable: false,
+            errorReason: "something_else",
+          }),
+        ),
+        t,
+        member,
+        true,
+      ),
+    ).toMatchObject({ text: "turn.error.invalidRequest", retryable: false });
+    const marker = clientTurnErrorFromMarker(
+      "appstrate:chat-turn-error:invalid_request+something_else:req_abc123",
+    );
+    expect(marker).toEqual({
+      category: "invalid_request",
+      retryable: false,
+      requestId: "req_abc123",
+    });
   });
 
   it("gives a dead model credential a way out instead of a retry", () => {

@@ -65,6 +65,14 @@ function PickRow({
           <span className="text-muted-foreground block truncate font-mono text-xs">{row.id}</span>
         )}
       </Label>
+      {row.subscriptionUnverified && (
+        <span
+          className="text-warning shrink-0 text-xs"
+          title={t("models.form.subscriptionUnverifiedHint")}
+        >
+          {t("models.form.subscriptionUnverified")}
+        </span>
+      )}
       {row.contextWindow !== null && (
         <span className="text-muted-foreground shrink-0 text-xs">
           {Math.round(row.contextWindow / 1000)}k

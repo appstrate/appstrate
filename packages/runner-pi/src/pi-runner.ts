@@ -1613,7 +1613,11 @@ export function installSessionBridge(
           const classified = classifyModelError({ message: errorMessage });
           fire({
             ...buildError({ runId, timestamp: Date.now() }, errorMessage),
-            data: { error_category: classified.category, error_retryable: classified.retryable },
+            data: {
+              error_category: classified.category,
+              error_retryable: classified.retryable,
+              ...(classified.reason ? { error_reason: classified.reason } : {}),
+            },
           });
         }
 

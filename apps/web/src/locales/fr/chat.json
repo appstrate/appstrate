@@ -93,6 +93,7 @@
   "turn.error.rateLimited": "Le modèle a atteint sa limite de débit. Réessayez dans quelques instants.",
   "turn.error.upstreamUnavailable": "Le fournisseur du modèle est temporairement indisponible. Réessayez dans quelques instants.",
   "turn.error.invalidRequest": "Le modèle a refusé la demande. Modifiez-la avant de réessayer.",
+  "turn.error.runtimeVersionTooOld": "Le fournisseur refuse ce modèle pour la version du runtime Appstrate utilisée avec cet abonnement. Le runtime doit être mis à jour par une version d'Appstrate. En attendant, choisissez un autre modèle.",
   "turn.error.unknown": "La génération a échoué. Réessayez ou vérifiez la configuration du modèle.",
   "turn.error.quotaExceeded": "Votre organisation n'a plus de crédits.",
   "turn.error.subscriptionBlocked": "L'abonnement de votre organisation n'est plus actif.",

@@ -1200,6 +1200,12 @@ export interface ProviderRegistryModelEntry extends CatalogModelEntry {
    * contribution); the rest of the catalog falls under "All models".
    */
   featured: boolean;
+  /**
+   * Set on a model of a subscription (OAuth) provider that the live catalog
+   * adds to the bundled registry: its request builds offline, but whether the
+   * provider serves it to a subscription is not established. Absent otherwise.
+   */
+  subscription_unverified?: true;
 }
 
 // --- Connection Test Types ---

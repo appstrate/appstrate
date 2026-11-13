@@ -49,6 +49,7 @@ import { RunProvenanceBadges } from "../components/run-provenance-badges";
 import type { JournalOverviewFilter } from "../components/log-viewer";
 import { isQueryInFlight } from "../lib/query-state";
 import { findModelFallback } from "../lib/run-model-fallback";
+import { findRunErrorReason } from "../lib/run-error";
 
 /** Wire shape of a persisted log row (spec `RunLog`); `createdAt` is an ISO string. */
 type RunLogEntry = components["schemas"]["RunLog"];
@@ -159,6 +160,7 @@ function RunDetailBody() {
   const hasOutput = !!finalOutput && Object.keys(finalOutput).length > 0;
   const allLogs = historicalLogs;
   const modelFallback = useMemo(() => findModelFallback(logs), [logs]);
+  const errorReason = useMemo(() => findRunErrorReason(logs), [logs]);
   // Run-level memory rows (only those touched during this run).
   const { data: runMemories, isLoading: memoriesLoading } = useRunMemories(packageId, runId);
   const { data: runPinned, isLoading: pinnedLoading } = useRunPinned(packageId, runId);
@@ -368,6 +370,7 @@ function RunDetailBody() {
             logsLoading={logsQuery.isLoading}
             memoryLoading={memoryLoading}
             modelFallback={modelFallback}
+            errorReason={errorReason}
             onOpenJournal={(filter) => openTab("#journal", filter)}
             onOpenResults={() => openTab("#results")}
           />

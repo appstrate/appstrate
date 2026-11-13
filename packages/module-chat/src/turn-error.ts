@@ -6,13 +6,20 @@
  * cross the stream/persistence boundary.
  */
 
-import { classifyModelError, MODEL_ERROR_RETRYABLE_BY_CATEGORY } from "@appstrate/core/model-error";
+import {
+  classifyModelError,
+  MODEL_ERROR_REASONS,
+  MODEL_ERROR_RETRYABLE_BY_CATEGORY,
+  type ModelErrorReason,
+} from "@appstrate/core/model-error";
 import type { ChatTurnErrorCategory } from "@appstrate/core/chat-turn-metadata";
 
 export interface ClientTurnError {
   category: ChatTurnErrorCategory;
   retryable: boolean;
   requestId?: string;
+  /** The structured cause the provider named (`ModelErrorReason`); it picks the sentence only. */
+  reason?: ModelErrorReason;
 }
 
 const ERROR_MARKER_PREFIX = "appstrate:chat-turn-error:";
@@ -51,12 +58,13 @@ export function clientTurnErrorForCategory(category: ChatTurnErrorCategory): Cli
  * The rules are not here — they are `classifyModelError`'s, shared with the run
  * surface so one provider string cannot get two verdicts. What is left is the
  * chat-specific part: unwrapping the error object, and keeping the raw text
- * server-side (only the category and the retry flag cross the boundary).
+ * server-side (only the category, the retry flag and the structured reason
+ * cross the boundary).
  *
  * It must stay verdict-identical to {@link clientTurnErrorFromMarker}: the UI
  * reads a failed turn through whichever of the two arrived first (persisted
- * metadata, or the transient stream marker), and only the category and the
- * request id survive the marker. Anything this path knew that those do not
+ * metadata, or the transient stream marker), and only the category, the reason
+ * and the request id survive the marker. Anything this path knew that those do not
  * would make one failed turn offer a retry on one render and refuse it on the
  * next. `turnRequestId` (the chat request's `Request-Id`) is the id reported
  * when the upstream envelope named none.
@@ -88,16 +96,27 @@ export function turnErrorLogIds(
   };
 }
 
-/** Safe string carried by transient AI-SDK error chunks: `<prefix><category>[:<request id>]`. */
+/**
+ * Safe string carried by transient AI-SDK error chunks:
+ * `<prefix><category>[+<reason>][:<request id>]`.
+ */
 export function clientTurnErrorMarker(error: ClientTurnError): string {
-  return `${ERROR_MARKER_PREFIX}${error.category}${error.requestId ? `:${error.requestId}` : ""}`;
+  return `${ERROR_MARKER_PREFIX}${error.category}${error.reason ? `+${error.reason}` : ""}${error.requestId ? `:${error.requestId}` : ""}`;
 }
 
-/** Recover the safe category and request id from a transient stream marker. */
+function isModelErrorReason(value: string | undefined): value is ModelErrorReason {
+  return (MODEL_ERROR_REASONS as readonly (string | undefined)[]).includes(value);
+}
+
+/** Recover the safe category, reason and request id from a transient stream marker. */
 export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | undefined {
   const marker = messageFromError(value);
   if (!marker.startsWith(ERROR_MARKER_PREFIX)) return undefined;
-  const [category, requestId] = marker.slice(ERROR_MARKER_PREFIX.length).split(":", 2) as [
+  const [classification, requestId] = marker.slice(ERROR_MARKER_PREFIX.length).split(":", 2) as [
+    string,
+    string | undefined,
+  ];
+  const [category, reason] = classification.split("+", 2) as [
     ChatTurnErrorCategory,
     string | undefined,
   ];
@@ -106,6 +125,7 @@ export function clientTurnErrorFromMarker(value: unknown): ClientTurnError | und
   }
   return {
     ...clientTurnErrorForCategory(category),
+    ...(isModelErrorReason(reason) ? { reason } : {}),
     ...(requestId && REQUEST_ID.test(requestId) ? { requestId } : {}),
   };
 }

@@ -125,6 +125,7 @@ function buildPiTurnMetadata(input: {
       ? {
           errorCategory: input.clientError.category,
           errorRetryable: input.clientError.retryable,
+          ...(input.clientError.reason ? { errorReason: input.clientError.reason } : {}),
           ...(input.clientError.requestId ? { requestId: input.clientError.requestId } : {}),
         }
       : {}),

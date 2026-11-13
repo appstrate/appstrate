@@ -2732,7 +2732,7 @@ export interface paths {
         put?: never;
         /**
          * Test model configuration inline
-         * @description Test a model configuration without saving it first. The probe uses `api_key` when given, the credential's stored key otherwise. A built-in credential is refused (403). Rate limited to 5 requests per minute.
+         * @description Test a model configuration without saving it first by checking its credential. `ok: true` means the credential is usable. The model itself is not part of the check, so `ok: true` does not establish that the provider serves this model with that credential. A subscription credential (OAuth) is validated offline from its token, with no request to the provider (`latency` is 0). An API key is checked with one lightweight request to the provider: its model listing, or, for a provider whose listing answers any key, a minimal completion on a model of the provider's offer. The check uses `api_key` when given, the credential's stored key otherwise. A built-in credential is refused (403). Rate limited to 5 requests per minute.
          */
         post: operations["testModelInline"];
         delete?: never;
@@ -2776,7 +2776,7 @@ export interface paths {
         put?: never;
         /**
          * Test model connection
-         * @description Test that the model's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute. Not available for a managed (aliased) model: the result would report the hidden backing's round-trip time and upstream status.
+         * @description Test the credential and base URL a saved model is bound to. `ok: true` means the credential is usable. The model itself is not part of the check, so `ok: true` does not establish that the provider serves this model with that credential. A subscription credential (OAuth) is validated offline from its token, with no request to the provider (`latency` is 0). An API key is checked with one lightweight request to the provider: its model listing, or, for a provider whose listing answers any key, a minimal completion on a model of the provider's offer. Rate limited to 5 requests per minute. Not available for a managed (aliased) model: the result would report the hidden backing's round-trip time and upstream status.
          */
         post: operations["testModel"];
         delete?: never;
@@ -17913,6 +17913,11 @@ export interface operations {
                                 } | null;
                                 /** @description Surface in the picker's 'Featured' group for this provider AND auto-seed in `org_models` on first connection. True when the model id appears in the provider's pinned `featuredModels` list; the rest of the offer falls under 'All models'. */
                                 featured: boolean;
+                                /**
+                                 * @description Present and `true` on a model of a subscription (OAuth) provider that comes from the live catalog, not from the registry bundled with the platform's agent SDK: the platform builds its request offline, but whether the provider serves it to this subscription is not established. A provider may refuse it at first use, for instance for the client version the SDK announces. Absent otherwise.
+                                 * @enum {boolean}
+                                 */
+                                subscription_unverified?: true;
                             }[];
                         }[];
                         total: number;
