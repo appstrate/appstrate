@@ -102,6 +102,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **A model test says what it checked** (#2148). A successful model test reads
+  « Credential valid — model not tested », and the `testModel` /
+  `testModelInline` descriptions state that `ok: true` covers the credential
+  (validated offline for a subscription, by one lightweight provider request
+  for an API key), never the model itself. The response is unchanged.
+
 - **BREAKING (MCP): the `read_skill` tool is removed** (#2175). A skill and its files
   are read through the MCP Skills extension: `skills/list` and `skills/get` for the
   entries, `resources/read` on a file's `skill://` URI for its bytes. The access rule
@@ -471,6 +477,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   reload. The run trail records it as
   `run_logs.data.error_reason: "runtime_version_too_old"` beside the unchanged
   `error_category`. It is read from the refusal's structured code only.
+
+- **Live-catalog models of a subscription provider carry a warning** (#2148).
+  `GET /api/model-provider-credentials/registry` flags them
+  `subscription_unverified: true` and the model picker shows « Not verified with
+  a subscription »: the catalog proves their request builds offline, not that
+  the vendor serves them to a subscription. They stay offered; API-key
+  providers are not flagged.
 
 - **`GET /api/agents` rows carry `published`** (#2172): `true` when the agent
   has a published version (or is a system agent), so launching it without a

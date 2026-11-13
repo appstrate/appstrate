@@ -21,13 +21,37 @@ import {
   applyModelCatalog,
   readModelCatalog,
 } from "../../../src/services/model-catalog-overlay.ts";
-import { getModelProvider } from "../../../src/services/model-providers/registry.ts";
+import {
+  getModelProvider,
+  registerModelProvider,
+} from "../../../src/services/model-providers/registry.ts";
 import { initSystemModelProviderKeys } from "../../../src/services/model-registry.ts";
 import { loadModel } from "../../../src/services/org-models.ts";
 
 const app = getTestApp();
 const NEXT = "claude-sonnet-9-next";
 const record = catalogRecordLike("anthropic", "claude-sonnet-5-5", "anthropic-messages", NEXT);
+/** Synthetic subscription (OAuth) provider served from Pi's Anthropic records. */
+const SUBSCRIPTION_PROVIDER_ID = "test-subscription-catalog";
+
+function registerSubscriptionProvider(): void {
+  try {
+    registerModelProvider({
+      providerId: SUBSCRIPTION_PROVIDER_ID,
+      displayName: "Test Subscription",
+      iconUrl: "anthropic",
+      apiShape: "anthropic-messages",
+      defaultBaseUrl: "https://subscription.example.test",
+      baseUrlOverridable: false,
+      authMode: "oauth2",
+      catalogProviderId: "anthropic",
+      featuredModels: ["claude-sonnet-5-5"],
+      modelDiscovery: { mode: "static" },
+    });
+  } catch {
+    // Already registered in this process — the registry rejects duplicates.
+  }
+}
 
 describe("live model catalog — what an org and a system model get", () => {
   let signer: CatalogSigner;
@@ -103,6 +127,32 @@ describe("live model catalog — what an org and a system model get", () => {
     applyModelCatalog(null);
     expect(await listed()).toMatchObject({ modelId: NEXT, pi_dialect: null });
     expect(await refused()).toEqual(notOffered);
+  });
+
+  it("flags a subscription provider's live models as unverified, not an API-key provider's", async () => {
+    registerSubscriptionProvider();
+    await apply([record]);
+    const res = await app.request("/api/model-provider-credentials/registry", {
+      headers: authHeaders(ctx),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { providerId: string; models: Array<{ id: string; subscription_unverified?: true }> }[];
+    };
+    const modelsOf = (providerId: string) =>
+      body.data.find((p) => p.providerId === providerId)!.models;
+
+    // The subscription provider offers the live model, flagged; its bundled ones are not.
+    const subscription = modelsOf(SUBSCRIPTION_PROVIDER_ID);
+    expect(subscription.find((m) => m.id === NEXT)?.subscription_unverified).toBe(true);
+    const bundled = subscription.filter((m) => m.id !== NEXT);
+    expect(bundled.length).toBeGreaterThan(0);
+    for (const m of bundled) expect(m).not.toHaveProperty("subscription_unverified");
+
+    // The API-key provider offers the same live model without the flag.
+    const apiKey = modelsOf("anthropic").find((m) => m.id === NEXT);
+    expect(apiKey).toBeDefined();
+    expect(apiKey).not.toHaveProperty("subscription_unverified");
   });
 
   // OpenRouter takes any id as a system model, so one could name an id only

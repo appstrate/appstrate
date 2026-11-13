@@ -6,7 +6,8 @@ import { TestResultSpan } from "../test-result-span";
 
 /**
  * A model's connection-test result. The generic sentence for `NEEDS_RECONNECTION` words an
- * integration connection and its owner; a model's key is neither.
+ * integration connection and its owner; a model's key is neither. A success says what the
+ * test checked: the credential, never the model itself (`testModelConfig`).
  */
 export function ModelTestResult({ result }: { result: TestResult }) {
   const { t } = useTranslation("settings");
@@ -18,7 +19,7 @@ export function ModelTestResult({ result }: { result: TestResult }) {
   return (
     <TestResultSpan
       result={result}
-      successKey="credentials.testSuccess"
+      successKey="models.testSuccess"
       failedKey="credentials.testFailed"
     />
   );

@@ -87,6 +87,17 @@ describe("ModelPickList", () => {
     expect(row).not.toContain("k</span>");
   });
 
+  it("warns on a subscription model the live catalog adds, and only there", () => {
+    expect(list()).not.toContain(settingsFr["models.form.subscriptionUnverified"]);
+    const live = pickRow({ id: "claude-next", source: "catalog", subscriptionUnverified: true });
+    const html = list({ rows: [FROM_CATALOG, live] });
+    expect(html).toContain(settingsFr["models.form.subscriptionUnverified"]);
+    expect(html.split(settingsFr["models.form.subscriptionUnverified"]).length - 1).toBe(1);
+    expect(html.slice(html.indexOf("claude-next"))).toContain(
+      settingsFr["models.form.subscriptionUnverified"],
+    );
+  });
+
   it("checks exactly the picked rows", () => {
     expect(list({ selectedIds: [FROM_CATALOG.id] }).split('aria-checked="true"').length - 1).toBe(
       1,
