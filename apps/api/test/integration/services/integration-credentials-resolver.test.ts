@@ -835,9 +835,15 @@ describe("resolveLiveIntegrationCredentials", () => {
       await clearUpstreamRejections(connId, INTEGRATION_ID, lostReach);
       expect((await storedCredential(connId)).count).toBe(2);
       const revision = (await readCredentialRevision(connId))!;
-      expect(await recordUnrefreshableRejection(connId, INTEGRATION_ID, lostReach, revision)).toBe(
-        null,
-      );
+      expect(
+        await recordUnrefreshableRejection(
+          connId,
+          INTEGRATION_ID,
+          lostReach,
+          revision,
+          getEnv().INTEGRATION_REFRESH_MAX_FAILURES,
+        ),
+      ).toBe(null);
       expect((await storedCredential(connId)).count).toBe(2);
     });
 

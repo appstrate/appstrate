@@ -638,6 +638,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **A remote MCP integration whose credential is rejected at boot is flagged on
+  the first run** (#2181). A 401 on the MCP handshake of an API key, basic or
+  other unrefreshable credential counted toward `INTEGRATION_REFRESH_MAX_FAILURES`
+  like a 401 on a tool call, and every count cost a whole run (the boot gate
+  stops it), so the connection reached `needs_reconnection` only after five lost
+  runs. The sidecar now sends `rejected_request=handshake` on
+  `POST /internal/integration-credentials/{scope}/{name}/refresh` for a 401
+  received before the remote client connects; the platform flags the connection
+  and answers `410` on that first rejection, and the run fails with an error
+  that names the connection and asks to reconnect it. A 401 on a call made for
+  the agent still counts toward the threshold; OAuth2 refresh and connect.tool
+  re-login are unchanged.
+
 - **`{ns}__api_call` steers request bodies through a workspace file.** An agent
   re-typed a file's base64 into `body` and the upstream accepted the truncated
   value. The `body` description of both api_call surfaces (sidecar and

@@ -285,8 +285,11 @@ type ConnectionRefreshOutcome =
 
 export type RefreshTrigger =
   | { kind: "expiring" }
-  /** Upstream rejected the credential of `revision`; `null`: the one the connection holds. */
-  | { kind: "rejected"; revision: string | null };
+  /**
+   * Upstream rejected the credential of `revision`; `null`: the one the connection holds.
+   * `handshake`: the rejected request is the MCP handshake the sidecar writes itself.
+   */
+  | { kind: "rejected"; revision: string | null; handshake?: boolean };
 
 /**
  * The one decision over a connection's credential. A rejection is evidence only against the
@@ -316,8 +319,9 @@ export async function refreshConnectionCredential(input: {
     (trigger.revision === null || trigger.revision === connection.credentialRevision);
   if (!forced && !expiresWithinLeadWindow(connection.expiresAt)) return { status: "kept" };
 
-  // One 401 can be a transient upstream fault, or a permission error the agent provoked, so a
-  // forced refresh nothing can perform is counted: `retry` until the threshold, then `dead`.
+  // One 401 on a call can be a transient upstream fault, or a permission error the agent provoked,
+  // so a forced refresh nothing can perform is counted: `retry` until the threshold, then `dead`.
+  // A rejected handshake is a request no agent shapes: it flags at once.
   const unrefreshable = async (detail: string): Promise<ConnectionRefreshOutcome> => {
     const cause = "unrefreshable";
     if (!forced) return { status: "kept", cause, detail };
@@ -326,6 +330,9 @@ export async function refreshConnectionCredential(input: {
       integrationId,
       { spaceId: scope.spaceId, actor },
       connection.credentialRevision,
+      trigger.kind === "rejected" && trigger.handshake
+        ? 1
+        : getEnv().INTEGRATION_REFRESH_MAX_FAILURES,
     );
     if (!counted) return { status: "kept" };
     if (counted.needsReconnection) return { status: "dead", cause, detail };

@@ -42,7 +42,6 @@ import {
   decryptCredentialsToStringMap,
   isClientMetadataRedirectTag,
 } from "@appstrate/connect";
-import { getEnv } from "@appstrate/env";
 import { issuerOfClientMetadataDocumentRef } from "../lib/integration-client-metadata.ts";
 import {
   resolveSystemClientForAuth,
@@ -2342,16 +2341,16 @@ export async function recordIntegrationRefreshFailure(
 }
 
 /**
- * Count an upstream rejection of an unrefreshable credential toward the max, while `reach` reaches
- * the connection and it still holds `revision`. `null` when nothing was counted.
+ * Count an upstream rejection of an unrefreshable credential toward `maxFailures`, while `reach`
+ * reaches the connection and it still holds `revision`. `null` when nothing was counted.
  */
 export async function recordUnrefreshableRejection(
   connectionId: string,
   integrationId: string,
   reach: { spaceId: string; actor: Actor },
   revision: string,
+  maxFailures: number,
 ): Promise<{ failures: number; maxFailures: number; needsReconnection: boolean } | null> {
-  const maxFailures = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
   const counted = await recordIntegrationRefreshFailure(connectionId, maxFailures, {
     reachable: and(
       reachableConnection(connectionId, integrationId, reach),
