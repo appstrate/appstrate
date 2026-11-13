@@ -100,7 +100,7 @@ export const PLATFORM_META_KEY = "dev.appstrate/platform";
  * Id of the system integration that ships the run tools and carries {@link PLATFORM_META_KEY}
  * (its catalog: `scripts/system-packages/integration-platform-1.0.0/manifest.json`). An agent
  * declares it to receive those tools; the manifests the platform writes on an author's behalf
- * (inline-run defaults, the default agent, the `runtime_tools` migration script) name it.
+ * (inline-run defaults, the default agent) name it.
  * Whether an integration is bound to the runtime is never read from this id:
  * {@link isRuntimeBoundIntegration} decides.
  */

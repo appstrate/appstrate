@@ -15,11 +15,7 @@ import {
   type SchemaWrapper,
 } from "@appstrate/core/form";
 import { AFPS_SCHEMA_URLS, AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
-import {
-  dropRetiredDependencyKeys,
-  parseManifestIntegrations,
-  writeManifestIntegrations,
-} from "@appstrate/core/dependencies";
+import { parseManifestIntegrations, writeManifestIntegrations } from "@appstrate/core/dependencies";
 
 // ─── Version ranges ─────────────────────────────────────────
 
@@ -108,15 +104,6 @@ export function defaultIntegrationManifest(
       },
     },
   };
-}
-
-/**
- * Strips the retired AFPS 1.x `dependencies` keys once, when an existing agent is loaded — otherwise
- * the user sees an error for a field the editor cannot display. `package-editor.tsx` calls this only
- * in its agent branch.
- */
-export function withNormalizedManifest(m: Record<string, unknown>): Record<string, unknown> {
-  return dropRetiredDependencyKeys(m);
 }
 
 // ─── Manifest accessors ─────────────────────────────────────

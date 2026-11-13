@@ -36,6 +36,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   still serves the archive as published (its integrity hash covers those bytes), so the archive
   of a version that carried `runtime_tools` still carries it, and an import refuses it.
 
+- **BREAKING: upgrade the CLI with the platform** (#2199). A CLI older than this release runs
+  agents without the `@appstrate/platform` tools and without `output`.
+
 - **Fixed: the runner bootstrap keeps its env across sudo-rs** (#2153).
   `get.appstrate.dev/runner` elevated with `sudo -E`, which sudo-rs (the default
   sudo since Ubuntu 25.10) ignores with only a warning, so `runner install` lost

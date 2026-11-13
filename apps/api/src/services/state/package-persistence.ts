@@ -9,7 +9,7 @@
  * - Pinned memos        = `key IS NULL`, `pinned=true`   (rendered in prompt)
  * - Archive memos       = `key IS NULL`, `pinned=false`  (recall_memory only)
  *
- * `key`/`pinned` are orthogonal storage attributes; the agent-facing AFPS
+ * `key`/`pinned` are orthogonal storage attributes; the agent-facing
  * tools (`pin`, `note`) wrap them so external runners never see this
  * column shape.
  *
@@ -43,19 +43,18 @@ function assertValidContent(value: unknown, label: string): void {
   }
 }
 
-// Per-entry char cap and per-scope row cap (archive memories only;
-// pinned/checkpoint paths cap differently because they are bounded by
-// design — at most one checkpoint, and pinned memories are written by
-// admins or future tooling, not by agent loops).
+// Per-entry char cap and per-scope row cap of archive memories. Pinned slots
+// have no row cap: the `pin` tool upserts one row per (scope, key), and the
+// number of keys is not bounded.
 export const MAX_MEMORY_CONTENT = 2000;
 const MAX_MEMORIES_PER_SCOPE = 100;
 
 /** Reserved storage key for the carry-over slot (`pin({ key: "checkpoint" })`). */
 export const CHECKPOINT_KEY = "checkpoint";
 
-/** Pattern enforced on agent-supplied pinned slot keys — must match the AFPS `pin` tool schema. */
-const PINNED_KEY_PATTERN = /^[a-z0-9_]+$/;
-const MAX_PINNED_KEY_LENGTH = 64;
+/** Pattern enforced on agent-supplied pinned slot keys; the `pin` tool's `pinArgs` reads it too. */
+export const PINNED_KEY_PATTERN = /^[a-z0-9_]+$/;
+export const MAX_PINNED_KEY_LENGTH = 64;
 
 /**
  * Persistence scope. Narrower than `Actor` by one case: a storage scope may
@@ -407,22 +406,19 @@ export async function recallMemories(
 }
 
 /**
- * Append memories for a scope. Always `pinned=false` (archive tier); the
- * AFPS `note` tool has no pinning parameter so every agent-written memory
- * lands in the archive. Bounded at {@link MAX_MEMORIES_PER_SCOPE} per
- * `(package, space, scope)` and trimmed to {@link MAX_MEMORY_CONTENT}
- * characters per entry.
+ * Append one archive memory (`pinned=false`) for a scope — the `note` tool's
+ * write. Bounded at {@link MAX_MEMORIES_PER_SCOPE} per `(package, space,
+ * scope)` and trimmed to {@link MAX_MEMORY_CONTENT} characters. Returns
+ * `false`, writing nothing, when the scope is full.
  */
-export async function addMemories(
+export async function addMemory(
   packageId: string,
   spaceId: string,
   orgId: string,
   scope: PersistenceScope,
-  contents: unknown[],
-  runId: string | null,
-): Promise<number> {
-  if (contents.length === 0) return 0;
-
+  content: string,
+  runId: string,
+): Promise<boolean> {
   const { actorType, actorId } = storageActor(scope);
 
   const [row] = await db
@@ -436,38 +432,23 @@ export async function addMemories(
         buildScopeFilter(scope),
       ),
     );
-  const existing = row?.count ?? 0;
-  const available = Math.max(0, MAX_MEMORIES_PER_SCOPE - existing);
-  if (available === 0) return 0;
+  if ((row?.count ?? 0) >= MAX_MEMORIES_PER_SCOPE) return false;
 
-  const toInsert = contents.slice(0, available).map((c) => {
-    // Sanitised after the trim: the slice can split a surrogate pair.
-    const trimmed = toPgSafe(
-      typeof c === "string"
-        ? (c.slice(0, MAX_MEMORY_CONTENT) as unknown as Record<string, unknown>)
-        : (c as Record<string, unknown>),
-    );
-    assertValidContent(trimmed, "memory");
-    return {
-      packageId,
-      spaceId,
-      orgId,
-      key: null,
-      pinned: false,
-      actorType,
-      actorId,
-      content: trimmed,
-      runId,
-    };
+  // Sanitised after the trim: the slice can split a surrogate pair.
+  const trimmed = toPgSafe(content.slice(0, MAX_MEMORY_CONTENT));
+  assertValidContent(trimmed, "memory");
+  await db.insert(packagePersistence).values({
+    packageId,
+    spaceId,
+    orgId,
+    key: null,
+    pinned: false,
+    actorType,
+    actorId,
+    content: trimmed,
+    runId,
   });
-
-  if (toInsert.length === 0) return 0;
-
-  const inserted = await db
-    .insert(packagePersistence)
-    .values(toInsert)
-    .returning({ id: packagePersistence.id });
-  return inserted.length;
+  return true;
 }
 
 /** Delete a single memory by id, scoped to (package, space). */

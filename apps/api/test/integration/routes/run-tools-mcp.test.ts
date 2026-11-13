@@ -17,7 +17,7 @@ import { truncateAll } from "../../helpers/db.ts";
 import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
 import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../helpers/mcp.ts";
 import { seedAgent, seedEndUser, seedRun } from "../../helpers/seed.ts";
-import { addMemories, listPinnedSlots } from "../../../src/services/state/package-persistence.ts";
+import { addMemory, listPinnedSlots } from "../../../src/services/state/package-persistence.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
 
 const app = getTestApp();
@@ -182,6 +182,23 @@ describe("run MCP server", () => {
       ).toHaveLength(0);
     });
 
+    it("refuses a JSON-RPC batch with 400 `-32600`", async () => {
+      const run = await seedRunningRun();
+      const message = { jsonrpc: "2.0", id: 1, method: "tools/list", params: {} };
+      const res = await app.request(path, {
+        method: "POST",
+        headers: {
+          ...bearer(run.id),
+          "content-type": "application/json",
+          Accept: MCP_ACCEPT,
+        },
+        body: JSON.stringify([message, { ...message, id: 2 }]),
+      });
+      expect(res.status).toBe(400);
+      const envelope = (await res.json()) as JsonRpcEnvelope;
+      expect(envelope.error?.code).toBe(-32600);
+    });
+
     it("answers 405 with `Allow: POST` to a GET", async () => {
       const res = await app.request(path, { method: "GET", headers: { Accept: MCP_ACCEPT } });
       expect(res.status).toBe(405);
@@ -273,12 +290,12 @@ describe("run MCP server", () => {
         externalId: "ext_recall",
       });
       const run = await seedRunningRun();
-      await addMemories(
+      await addMemory(
         pkgId,
         ctx.defaultSpaceId,
         ctx.orgId,
         { type: "end_user", id: eu.id },
-        ["secret end-user memory"],
+        "secret end-user memory",
         run.id,
       );
       const result = await callTool(path, bearer(run.id), "recall_memory", {});
@@ -358,15 +375,18 @@ describe("run MCP server", () => {
 
     it("`note` at the archive limit is a tool error and writes nothing", async () => {
       const run = await seedRunningRun();
-      const saved = await addMemories(
-        pkgId,
-        ctx.defaultSpaceId,
-        ctx.orgId,
-        { type: "user", id: ctx.user.id },
-        Array.from({ length: 100 }, (_, i) => `memory ${i}`),
-        run.id,
+      await db.insert(packagePersistence).values(
+        Array.from({ length: 100 }, (_, i) => ({
+          packageId: pkgId,
+          spaceId: ctx.defaultSpaceId,
+          orgId: ctx.orgId,
+          pinned: false,
+          actorType: "user" as const,
+          actorId: ctx.user.id,
+          content: `memory ${i}`,
+          runId: run.id,
+        })),
       );
-      expect(saved).toBe(100);
       const result = await callTool(path, bearer(run.id), "note", { content: "one too many" });
       expect(result.isError).toBe(true);
       expect(result.content[0]!.text).toContain("archive memory limit");
@@ -544,6 +564,22 @@ describe("run MCP server", () => {
       const run = await seedRemoteRun();
       const { status } = await rpc(path(run.id), () => signed(SECRET)("{}"), "tools/list");
       expect(status).toBe(401);
+    });
+
+    it("refuses a replayed request with 409 `message_replayed`", async () => {
+      const run = await seedRemoteRun();
+      const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} });
+      const send = (headers: Record<string, string>) =>
+        app.request(path(run.id), {
+          method: "POST",
+          headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
+          body,
+        });
+      const headers = signed(SECRET)(body);
+      expect((await send(headers)).status).toBe(200);
+      const replay = await send(headers);
+      expect(replay.status).toBe(409);
+      expect(((await replay.json()) as { code: string }).code).toBe("message_replayed");
     });
 
     it("returns 401 for another run's secret", async () => {

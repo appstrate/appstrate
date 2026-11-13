@@ -4635,7 +4635,7 @@
         "operationId": "runToolsMcpPost",
         "tags": ["Runs"],
         "summary": "Run MCP server of a remote run (HMAC)",
-        "description": "Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the `@appstrate/platform` system integration — `log`, `note`, `pin`, `recall_memory`, `run_history`, `notify` — for one run. Each tool writes at call time: `log` appends a run log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's checkpoint snapshot that `run_history` returns, `notify` an `agent_message` notification to each recipient of the run's completion notification, once per run. Rate-limited to 200 messages a minute per run. Mounted here for the host executing a remote run. Same Standard Webhooks HMAC auth as the event routes, keyed on the run's sink secret: the signature covers the exact request body bytes. It holds as long as the sink is open, whatever the caller's session. A platform-origin run answers 404 (its sidecar serves these tools on `/internal/mcp`).",
+        "description": "Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the `@appstrate/platform` system integration — `log`, `note`, `pin`, `recall_memory`, `run_history`, `notify` — for one run. Each tool writes at call time: `log` appends a run log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's checkpoint snapshot that `run_history` returns, `notify` an `agent_message` notification to each recipient of the run's completion notification, once per run. Rate-limited to 200 requests a minute per run, one JSON-RPC message per request: a batch (a JSON array) is refused with 400 (`-32600`). Mounted here for the host executing a remote run. Same Standard Webhooks HMAC auth as the event routes, keyed on the run's sink secret: the signature covers the exact request body bytes, and each `webhook-id` is single-use (a replay answers 409 `message_replayed`). It holds as long as the sink is open, whatever the caller's session. A platform-origin run answers 404 (its sidecar serves these tools on `/internal/mcp`).",
         "parameters": [
           {
             "name": "runId",
@@ -4720,7 +4720,7 @@
             "description": "The body held only JSON-RPC notifications or responses (e.g. `notifications/initialized`): accepted, no body."
           },
           "400": {
-            "description": "`application/json`: the MCP transport's JSON-RPC error — unparseable JSON (`-32700`), an invalid JSON-RPC message or batch (`-32700`/`-32600`), or an unsupported `MCP-Protocol-Version` header (`-32000`). `application/problem+json`: a request the platform refuses before the transport.",
+            "description": "`application/json`: the MCP transport's JSON-RPC error — unparseable JSON (`-32700`), an invalid JSON-RPC message (`-32700`/`-32600`), a batch (`-32600`), or an unsupported `MCP-Protocol-Version` header (`-32000`). `application/problem+json`: a request the platform refuses before the transport.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4808,6 +4808,16 @@
                     }
                   },
                   "required": ["jsonrpc", "id", "error"]
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`message_replayed` — this `webhook-id` was already used for this run. Each id is single-use for `REMOTE_RUN_REPLAY_WINDOW_SECONDS`, so a captured request cannot be replayed inside the timestamp tolerance; the CLI signs a fresh id on every request.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             }
@@ -17484,7 +17494,7 @@
         "operationId": "internalRunToolsMcpPost",
         "tags": ["Internal"],
         "summary": "Run MCP server of a platform run",
-        "description": "Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the `@appstrate/platform` system integration — `log`, `note`, `pin`, `recall_memory`, `run_history`, `notify` — for one run. Each tool writes at call time: `log` appends a run log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's checkpoint snapshot that `run_history` returns, `notify` an `agent_message` notification to each recipient of the run's completion notification, once per run. Rate-limited to 200 messages a minute per run. Mounted here for the sidecar. Container-to-host only. Auth via Bearer run token, which names the run; a run that is not `running` is refused with 403.",
+        "description": "Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the `@appstrate/platform` system integration — `log`, `note`, `pin`, `recall_memory`, `run_history`, `notify` — for one run. Each tool writes at call time: `log` appends a run log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's checkpoint snapshot that `run_history` returns, `notify` an `agent_message` notification to each recipient of the run's completion notification, once per run. Rate-limited to 200 requests a minute per run, one JSON-RPC message per request: a batch (a JSON array) is refused with 400 (`-32600`). Mounted here for the sidecar. Container-to-host only. Auth via Bearer run token, which names the run; a run that is not `running` is refused with 403.",
         "security": [
           {
             "bearerExecToken": []
@@ -17539,7 +17549,7 @@
             "description": "The body held only JSON-RPC notifications or responses (e.g. `notifications/initialized`): accepted, no body."
           },
           "400": {
-            "description": "`application/json`: the MCP transport's JSON-RPC error — unparseable JSON (`-32700`), an invalid JSON-RPC message or batch (`-32700`/`-32600`), or an unsupported `MCP-Protocol-Version` header (`-32000`). `application/problem+json`: a request the platform refuses before the transport.",
+            "description": "`application/json`: the MCP transport's JSON-RPC error — unparseable JSON (`-32700`), an invalid JSON-RPC message (`-32700`/`-32600`), a batch (`-32600`), or an unsupported `MCP-Protocol-Version` header (`-32000`). `application/problem+json`: a request the platform refuses before the transport.",
             "content": {
               "application/json": {
                 "schema": {

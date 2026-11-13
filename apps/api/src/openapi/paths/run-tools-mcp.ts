@@ -14,7 +14,8 @@ export const RUN_TOOLS_MCP_DESCRIPTION =
   "log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's " +
   "checkpoint snapshot that `run_history` returns, `notify` an `agent_message` notification to " +
   "each recipient of the run's completion notification, once per run. Rate-limited to 200 " +
-  "messages a minute per run.";
+  "requests a minute per run, one JSON-RPC message per request: a batch (a JSON array) " +
+  "is refused with 400 (`-32600`).";
 
 export const runToolsMcpRequestBody = {
   required: true,
@@ -53,7 +54,7 @@ export const runToolsMcpResponses = {
   "400": {
     description:
       "`application/json`: the MCP transport's JSON-RPC error — unparseable JSON (`-32700`), an " +
-      "invalid JSON-RPC message or batch (`-32700`/`-32600`), or an unsupported " +
+      "invalid JSON-RPC message (`-32700`/`-32600`), a batch (`-32600`), or an unsupported " +
       "`MCP-Protocol-Version` header (`-32000`). `application/problem+json`: a request the " +
       "platform refuses before the transport.",
     content: {

@@ -206,7 +206,6 @@ Agent manifest splits dependency from config: version on `dependencies.integrati
 - Tools are registered as Pi tools at container boot (`runtime-pi/mcp/direct.ts`): `{ns}__api_call` (+ `{ns}__api_upload`) per opted-in integration auth, plus every tool of the run's integrations under `{ns}__{tool}` — `run_history` and `recall_memory` included, served by the `@appstrate/platform` system integration through the platform's run MCP server (`POST /internal/mcp`)
 - Every route except `/health` requires the per-run `x-appstrate-sidecar-auth` token; deny-by-default middleware in `runtime-pi/sidecar/app.ts`
 - Zero-knowledge enforcement: `runtime-pi/launcher.ts` hands `SIDECAR_URL`, `SIDECAR_AUTH_TOKEN` and the sink credentials to the entrypoint over stdin, never in its environment, and both processes are non-dumpable — withholding the URL removes the convenience, the token removes the capability
-- The legacy HTTP `/proxy` and `/run-history` routes are fully retired — runners 1.x are not compatible
 
 ### Docker Integration
 

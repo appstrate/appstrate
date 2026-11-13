@@ -18,7 +18,7 @@
  * On failure this throws {@link ApiError} with one of the codes:
  *   - 400 `missing_run_id`
  *   - 404 `run_not_found`
- *   - 409 `message_replayed`      (upload guard only — see below)
+ *   - 409 `message_replayed`      (upload and call guards only — see below)
  *   - 410 `run_sink_closed` | `run_sink_expired`
  *   - 429 `rate_limited`
  *   - 401 `missing_signature_headers` | `invalid_timestamp`
@@ -53,27 +53,26 @@ import {
 } from "../services/run-event-ingestion.ts";
 
 /**
- * Key prefix for the upload guard's `webhook-id` single-use claim. Distinct
- * from the event pipeline's replay namespace (`ingestRunEvent`) on purpose:
- * the two surfaces have different semantics (an event replay is an idempotent
- * 200, an upload replay is a refusal) and must not be able to consume each
- * other's message ids.
+ * Key prefix for the `webhook-id` single-use claim of the upload and call
+ * guards. Distinct from the event pipeline's replay namespace
+ * (`ingestRunEvent`) on purpose: the surfaces have different semantics (an
+ * event replay is an idempotent 200, a claimed-id replay is a refusal) and
+ * must not be able to consume each other's message ids.
  */
-const UPLOAD_REPLAY_KEY_PREFIX = "appstrate:run-upload:replay:";
+const CLAIMED_MSG_ID_KEY_PREFIX = "appstrate:run-upload:replay:";
 
 /**
  * Build a run-authentication middleware: resolve the run sink from `:runId`,
  * fast-reject a closed sink, and verify the Standard Webhooks HMAC over the body
- * `readBody` returns. Both the event-ingestion guard (signs the raw JSON body)
- * and the streaming file-upload guard (signs an EMPTY body) are this factory
- * with a different `readBody` — the only real difference between them.
+ * `readBody` returns (the raw body, or an EMPTY body for the streaming file
+ * upload).
  *
  * `exposeWebhookId` sets `c.get("webhookId")` for the event handler's replay
- * dedup; the upload path never reads it, so it is left unset there.
+ * dedup; the other routes never read it, so it is left unset there.
  *
  * `consumeMsgId` claims the `webhook-id` here, in the guard, so the header set
- * authenticates exactly one request — required wherever the signature does not
- * cover the body (see {@link verifyRunUploadSignature}).
+ * authenticates exactly one request — required wherever no handler dedups the
+ * id (see {@link verifyRunCallSignature} and {@link verifyRunUploadSignature}).
  */
 function makeRunSignatureGuard(
   readBody: (c: Context<AppEnv>) => Promise<string>,
@@ -130,14 +129,15 @@ function makeRunSignatureGuard(
  *
  * The claim is NOT released on a downstream failure. Unlike the event sink
  * (whose runner retries an in-flight envelope with the SAME `webhook-id`, so
- * `ingestRunEvent` must release the key for the retry to land), the file
- * uploader signs a fresh `randomUUID()` per attempt — see
- * `runtime-pi/publish.ts` — so a retry after any failure carries a new id and
- * is unaffected.
+ * `ingestRunEvent` must release the key for the retry to land), both callers
+ * sign a fresh `randomUUID()` per attempt — the file uploader in
+ * `runtime-pi/publish.ts`, the CLI's MCP client in
+ * `apps/cli/src/commands/run/remote-mcp.ts` — so a retry after any failure
+ * carries a new id and is unaffected.
  */
 async function claimMsgId(runId: string, msgId: string): Promise<void> {
   const cache = await getCache();
-  const claimed = await cache.set(`${UPLOAD_REPLAY_KEY_PREFIX}${runId}:${msgId}`, "1", {
+  const claimed = await cache.set(`${CLAIMED_MSG_ID_KEY_PREFIX}${runId}:${msgId}`, "1", {
     ttlSeconds: getEnv().REMOTE_RUN_REPLAY_WINDOW_SECONDS,
     nx: true,
   });
@@ -146,16 +146,27 @@ async function claimMsgId(runId: string, msgId: string): Promise<void> {
   }
 }
 
+/** The raw body bytes (not a JSON re-serialisation), left readable for the handler. */
+const readRawBody = async (c: Context<AppEnv>) =>
+  new TextDecoder().decode(await c.req.raw.clone().arrayBuffer());
+
 /**
- * `POST /api/runs/:runId/events`, `/finalize` and `/mcp` — the HMAC signs the
- * raw body bytes (not a JSON re-serialisation), and the `webhook-id` is exposed for the
- * handler's replay dedup (`ingestRunEvent` owns the claim there, because it
- * also owns the release-on-error the runner's same-id retry depends on).
+ * `POST /api/runs/:runId/events`, `/finalize`, `/heartbeat` and the signed
+ * GETs — the HMAC signs the raw body bytes, and the `webhook-id` is exposed for
+ * the event handler's replay dedup (`ingestRunEvent` owns the claim there,
+ * because it also owns the release-on-error the runner's same-id retry
+ * depends on).
  */
-export const verifyRunSignature = makeRunSignatureGuard(
-  async (c) => new TextDecoder().decode(await c.req.raw.clone().arrayBuffer()),
-  { exposeWebhookId: true },
-);
+export const verifyRunSignature = makeRunSignatureGuard(readRawBody, { exposeWebhookId: true });
+
+/**
+ * `POST /api/runs/:runId/mcp` — the HMAC signs the raw body bytes, and the
+ * guard claims the `webhook-id`: no handler dedups it, so without the claim a
+ * captured request would replay within the timestamp tolerance (a replayed
+ * `pin` overwriting a later value). A replay is refused with 409
+ * `message_replayed`.
+ */
+export const verifyRunCallSignature = makeRunSignatureGuard(readRawBody, { consumeMsgId: true });
 
 /**
  * Signature guard for the streaming file-ingestion POST

@@ -167,8 +167,8 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
 
   // `RunSinkContext.packageId` is typed as a non-null string, so a raw
   // `row as RunSinkContext` cast would smuggle a runtime null past every
-  // finalize consumer (getRunEffectiveAgent, memory/pinned persistence,
-  // onRunStatusChange event params) — silently skipping finalization
+  // finalize consumer (getRunEffectiveAgent, onRunStatusChange event
+  // params) — silently skipping finalization
   // side-effects for a deleted-agent run. `runAgentIdentity` owns the recovery
   // (and the sentinel); see `state/runs.ts`.
   const { agentScope, agentName, ...rest } = row;

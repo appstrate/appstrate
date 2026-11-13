@@ -1905,7 +1905,7 @@ const canonicalRunsPaths = {
       summary: "Run MCP server of a remote run (HMAC)",
       description:
         RUN_TOOLS_MCP_DESCRIPTION +
-        " Mounted here for the host executing a remote run. Same Standard Webhooks HMAC auth as the event routes, keyed on the run's sink secret: the signature covers the exact request body bytes. It holds as long as the sink is open, whatever the caller's session. A platform-origin run answers 404 (its sidecar serves these tools on `/internal/mcp`).",
+        " Mounted here for the host executing a remote run. Same Standard Webhooks HMAC auth as the event routes, keyed on the run's sink secret: the signature covers the exact request body bytes, and each `webhook-id` is single-use (a replay answers 409 `message_replayed`). It holds as long as the sink is open, whatever the caller's session. A platform-origin run answers 404 (its sidecar serves these tools on `/internal/mcp`).",
       parameters: [
         { name: "runId", in: "path", required: true, schema: { type: "string" } },
         { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
@@ -1919,6 +1919,13 @@ const canonicalRunsPaths = {
         "401": runSinkUnauthorized,
         "404": {
           description: "`not_found` — no run with this id, or a platform-origin run.",
+          content: problemContent,
+        },
+        "409": {
+          description:
+            "`message_replayed` — this `webhook-id` was already used for this run. Each id is " +
+            "single-use for `REMOTE_RUN_REPLAY_WINDOW_SECONDS`, so a captured request cannot be " +
+            "replayed inside the timestamp tolerance; the CLI signs a fresh id on every request.",
           content: problemContent,
         },
         "410": runSinkGone,

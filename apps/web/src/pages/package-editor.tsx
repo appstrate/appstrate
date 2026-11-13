@@ -8,6 +8,7 @@ import type {
   IntegrationToolCatalogEntry,
   OrgPackageItemDetail,
 } from "@appstrate/shared-types";
+import { dropRetiredDependencyKeys } from "@appstrate/core/dependencies";
 import { $api } from "../api/client";
 import type { AgentDefinitionSection } from "../lib/settings-section-href";
 import { EditorDirtyReportContext, type EditorState } from "../hooks/use-editor-state";
@@ -35,7 +36,6 @@ import {
   manifestSchemaWrapper,
   getResourceEntries,
   setResourceEntries,
-  withNormalizedManifest,
   fieldsToSchema,
 } from "../components/agent-editor/utils";
 import type { ResourceEntry, SchemaField } from "../components/agent-editor/types";
@@ -263,7 +263,8 @@ export function AgentDefinitionEditor({
     <DraftEditorMount id={detail.id} etag={detail.etag}>
       <AgentEditorInner
         initialState={{
-          manifest: withNormalizedManifest(detail.manifest ?? {}),
+          // The retired AFPS 1.x `dependencies` keys go on load: the editor cannot display them.
+          manifest: dropRetiredDependencyKeys(detail.manifest ?? {}),
           etag: detail.etag,
         }}
         packageId={detail.id}

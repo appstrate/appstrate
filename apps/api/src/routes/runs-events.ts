@@ -28,6 +28,7 @@ import { invalidRequest, methodNotAllowed, notFound, conflict } from "../lib/err
 import { readJsonBody } from "@appstrate/core/request-body";
 import { rateLimitByRunId, rateLimitRunFiles } from "../middleware/rate-limit.ts";
 import {
+  verifyRunCallSignature,
   verifyRunSignature,
   verifyRunUploadSignature,
 } from "../middleware/verify-run-signature.ts";
@@ -232,7 +233,8 @@ export function createRunsEventsRouter() {
   // — or get starved by — the high-rate event-ingestion budget above.
   const fileLimiter = rateLimitRunFiles(30, 6);
   // The run MCP server gets a per-minute budget of its own: one point per
-  // MCP message (`initialize`, `tools/list`, each tool call), 200 a minute —
+  // POST, which carries one MCP message (`initialize`, `tools/list`, a tool
+  // call; `serveRunMcp` refuses batches), 200 a minute —
   // the figure the sidecar's mount of the same server has (`/internal/mcp`,
   // `rateLimitByBearer(200)`). The 60 s window keeps its bucket apart from the
   // 1 s event budget above, which is sized for telemetry, not tool calls.
@@ -497,14 +499,15 @@ export function createRunsEventsRouter() {
 
   // POST /api/runs/:runId/mcp — the run MCP server (`@appstrate/platform`
   // tools) for the host executing a remote run, authenticated like the routes
-  // above: the signature covers the exact request body. The tools write in
+  // above: the signature covers the exact request body, and each `webhook-id`
+  // is single-use (a replay is a 409). The tools write in
   // the run's actor scope at call time.
   //
   // Remote runs only. A platform run's container holds the sink secret too
   // (it signs its events), but it reaches these tools through its sidecar,
   // which serves only the tools the agent selected; signing here would hand
   // it all six. A platform run answers the 404 of an unknown run.
-  router.post("/runs/:runId/mcp", verifyRunSignature, mcpLimiter, async (c) => {
+  router.post("/runs/:runId/mcp", verifyRunCallSignature, mcpLimiter, async (c) => {
     const run = c.get("run")!;
     if (run.runOrigin !== "remote") throw notFound(`run ${run.id} not found`);
     return serveRunMcp(c, {

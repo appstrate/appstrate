@@ -479,8 +479,7 @@ export type RetiredVocabularyPolicy = "reject" | "tolerate";
  */
 const RETIRED_RUNTIME_TOOLS_ERROR =
   'runtime_tools: `runtime_tools` is retired — declare `dependencies.integrations["@appstrate/platform"]` ' +
-  "and select its tools (`log`, `note`, `pin`, `recall_memory`, `run_history`, `notify`) under " +
-  '`integrations_configuration["@appstrate/platform"].tools`. `output` is injected when ' +
+  'and select its tools under `integrations_configuration["@appstrate/platform"].tools`. `output` is injected when ' +
   "`output.schema` is declared and `publish_file` is always available, so neither is selected.";
 
 /** Options for {@link validateManifest}. */

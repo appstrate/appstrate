@@ -25,7 +25,6 @@ import {
   manifestToSchemaFields,
   manifestToMetadata,
   metadataToManifestPatch,
-  withNormalizedManifest,
 } from "../utils";
 import type { SchemaField } from "../types";
 import type { JSONSchema7, JSONSchemaObject } from "@appstrate/core/form";
@@ -840,52 +839,6 @@ describe("manifestToMetadata", () => {
     };
     const meta = manifestToMetadata(m);
     expect(meta.author).toBe("Jane Doe <jane@example.com>");
-  });
-});
-
-// ─── withNormalizedManifest ──────────────────
-
-// Delegates to `dropRetiredDependencyKeys` (`@appstrate/core`).
-describe("withNormalizedManifest", () => {
-  it("returns the same reference when there is nothing to drop", () => {
-    const noField = { type: "agent", name: "@o/a" };
-    expect(withNormalizedManifest(noField)).toBe(noField);
-  });
-
-  // A draft can acquire a retired AFPS 1.x dependency key by importing a bundle
-  // assembled from a legacy published version (that path tolerates it). The
-  // author-direction save then REJECTS it, on a field the editor cannot
-  // display — so it has to go on load, or the agent becomes uneditable (#1021).
-  it("strips a retired AFPS 1.x dependency key on load", () => {
-    const m = {
-      type: "agent",
-      name: "@o/a",
-      dependencies: { tools: { "@appstrate/report": "^1.0.0" }, skills: { "@o/s": "^1.0.0" } },
-    };
-    expect(withNormalizedManifest(m)).toEqual({
-      type: "agent",
-      name: "@o/a",
-      dependencies: { skills: { "@o/s": "^1.0.0" } },
-    });
-  });
-
-  it("leaves an emptied dependencies map as {} — the shape the editor itself mints", () => {
-    expect(
-      withNormalizedManifest({
-        type: "agent",
-        name: "@o/a",
-        dependencies: { providers: { "@o/gmail": "^1.0.0" } },
-      }),
-    ).toEqual({ type: "agent", name: "@o/a", dependencies: {} });
-  });
-
-  it("leaves the canonical dependency maps and an extension key untouched", () => {
-    const m = {
-      type: "agent",
-      name: "@o/a",
-      dependencies: { skills: {}, mcp_servers: {}, integrations: {}, _meta: { "dev.x/y": 1 } },
-    };
-    expect(withNormalizedManifest(m)).toBe(m);
   });
 });
 

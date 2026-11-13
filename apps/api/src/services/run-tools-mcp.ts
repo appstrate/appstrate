@@ -29,13 +29,16 @@ import {
   type CallToolResult,
 } from "@appstrate/mcp-transport";
 import { ApiError } from "../lib/errors.ts";
+import { logger } from "../lib/logger.ts";
 import { actorFromIds } from "../lib/actor.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { appendRunLog, getRecentRuns, RUN_HISTORY_FIELDS, setRunCheckpoint } from "./state/runs.ts";
 import {
-  addMemories,
+  addMemory,
   CHECKPOINT_KEY,
   MAX_MEMORY_CONTENT,
+  MAX_PINNED_KEY_LENGTH,
+  PINNED_KEY_PATTERN,
   RECALL_LIMIT_DEFAULT,
   RECALL_LIMIT_MAX,
   recallMemories,
@@ -106,8 +109,8 @@ const pinArgs = z.object({
   key: z
     .string()
     .min(1)
-    .max(64)
-    .regex(/^[a-z0-9_]+$/)
+    .max(MAX_PINNED_KEY_LENGTH)
+    .regex(PINNED_KEY_PATTERN)
     .describe(
       'Pinned slot identifier. Lowercase, digits and underscores only. "checkpoint" is the carry-over slot.',
     ),
@@ -136,14 +139,17 @@ const recallArgs = z.object({
     .describe(`Max memories to return (1..${RECALL_LIMIT_MAX}, default ${RECALL_LIMIT_DEFAULT}).`),
 });
 
+/** Most past runs one `run_history` call returns. */
+const RUN_HISTORY_LIMIT_MAX = 50;
+
 const runHistoryArgs = z.object({
   limit: z
     .number()
     .int()
     .min(1)
-    .max(50)
+    .max(RUN_HISTORY_LIMIT_MAX)
     .optional()
-    .describe("Number of past runs to return (1..50, default 10)."),
+    .describe(`Number of past runs to return (1..${RUN_HISTORY_LIMIT_MAX}, default 10).`),
   fields: z
     .array(z.enum(RUN_HISTORY_FIELDS))
     .meta({ uniqueItems: true })
@@ -254,6 +260,29 @@ const DESCRIPTORS = {
 } satisfies Record<string, ToolDescriptor>;
 
 /**
+ * A thrown handler error (a database failure, a foreign-key violation when the
+ * agent was deleted mid-run) is logged and reaches the model as a generic tool
+ * error, never with the driver's message.
+ */
+function guarded(run: RunToolsRun, tool: AppstrateToolDefinition): AppstrateToolDefinition {
+  return {
+    descriptor: tool.descriptor,
+    handler: async (raw, extra) => {
+      try {
+        return await tool.handler(raw, extra);
+      } catch (err) {
+        logger.error("run MCP tool failed", {
+          runId: run.runId,
+          tool: tool.descriptor.name,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return errorResult(`${tool.descriptor.name}: the platform could not complete this call`);
+      }
+    },
+  };
+}
+
+/**
  * The six tools bound to `run`. The run's actor decides the default
  * persistence scope; `scope: "shared"` writes the space-wide bucket.
  */
@@ -262,7 +291,7 @@ function buildRunTools(run: RunToolsRun): AppstrateToolDefinition[] {
   const scopeFor = (scope: "actor" | "shared" | undefined): PersistenceScope =>
     scope === "shared" ? { type: "shared" } : actorScope;
 
-  return [
+  const tools: AppstrateToolDefinition[] = [
     {
       descriptor: DESCRIPTORS.log,
       handler: async (raw) => {
@@ -289,15 +318,15 @@ function buildRunTools(run: RunToolsRun): AppstrateToolDefinition[] {
         const parsed = parseArgs("note", noteArgs, raw);
         if (!parsed.ok) return parsed.result;
         const { content, scope } = parsed.args;
-        const saved = await addMemories(
+        const saved = await addMemory(
           run.packageId,
           run.spaceId,
           run.orgId,
           scopeFor(scope),
-          [content],
+          content,
           run.runId,
         );
-        if (saved === 0) {
+        if (!saved) {
           return errorResult(
             "note: the archive memory limit for this scope is reached; the note was not saved.",
           );
@@ -372,7 +401,7 @@ function buildRunTools(run: RunToolsRun): AppstrateToolDefinition[] {
           run.packageId,
           actorFromIds(run.userId, run.endUserId),
           {
-            limit: parsed.args.limit ?? 10,
+            ...(parsed.args.limit !== undefined ? { limit: parsed.args.limit } : {}),
             ...(fields.length > 0 ? { fields } : {}),
             excludeRunId: run.runId,
           },
@@ -404,15 +433,30 @@ function buildRunTools(run: RunToolsRun): AppstrateToolDefinition[] {
       },
     },
   ];
+  return tools.map((tool) => guarded(run, tool));
 }
 
 /**
  * Answer one MCP POST for `run`. The mount has already authenticated and
  * authorised it with a credential a cross-site page does not hold (the run
  * token, or the run's sink signature).
+ *
+ * A JSON-RPC batch is refused (MCP has no batching since protocol 2025-06-18):
+ * the mounts' rate limiters charge one point per POST, which holds one message.
  */
 export async function serveRunMcp(c: Context, run: RunToolsRun): Promise<Response> {
   const body = await c.req.arrayBuffer();
+  const post = parseMcpPost(body);
+  if (Array.isArray(post?.payload)) {
+    return c.json(
+      {
+        jsonrpc: "2.0",
+        error: { code: -32600, message: "Invalid Request: JSON-RPC batching is not supported" },
+        id: null,
+      },
+      400,
+    );
+  }
   const server = createMcpServer(buildRunTools(run), RUN_TOOLS_SERVER_INFO);
-  return serveAuthenticatedStatelessPost(server, c.req.raw, body, parseMcpPost(body));
+  return serveAuthenticatedStatelessPost(server, c.req.raw, body, post);
 }
