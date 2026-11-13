@@ -113,7 +113,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the integrations the caller holds a connection of, named as in a run
   (`{ns}__api_call`, `{ns}__api_call__{auth}` when several auths expose one), each with
   every field `list_connections` returned for its connections; a search by `query` or
-  `integration` carries the first result's input schema in `best_match`.
+  `integration` carries the first result's input schema and usage in `best_match`.
   `call_integration_tool` takes the tool name and its `arguments`: for `{ns}__api_call`,
   the `requests` batch, `session_id` and `max_response_bytes` of `api_call`, without
   `integration_package_id`, so a batch targets one integration. Only the `api_call` tools

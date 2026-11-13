@@ -313,7 +313,7 @@ guards require today. The package `:write` permissions are `agents:write`,
 | `run_and_wait`             | `mcp:invoke` + `agents:run` + `runs:read` or `runs:read-all`          | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and waits for its outcome (see below).                                         |
 | `list_files`               | `files:read`                                                          | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                                                  |
 | `import_package_file`      | `mcp:invoke` + a package `:write` permission; not end-users           | Import a validated archive as a package.                                                                                                                                    |
-| `search_integration_tools` | `mcp:invoke` + `credential-proxy:call-own` or `credential-proxy:call` | The tools of the integrations you hold a connection of, each with the connections it reaches; `best_match` carries an input schema (see below).                             |
+| `search_integration_tools` | `mcp:invoke` + `credential-proxy:call-own` or `credential-proxy:call` | The tools of the integrations you hold a connection of, each with the connections it reaches; `best_match` carries an input schema and usage (see below).                   |
 | `call_integration_tool`    | `mcp:invoke` + `credential-proxy:call-own` or `credential-proxy:call` | Call one of those tools by name: `{ns}__api_call` calls a third-party API with a connection's credential injected by the platform (see below).                              |
 
 `run_and_wait` needs both halves because it launches AND polls the run back
@@ -394,7 +394,9 @@ who holds each is stated in `docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.4.
   its `default_tools`, which only matter to an agent) whose auth has a
   connection you reach. Each result carries `tool`, `integration`,
   `description` and `connections`; with `query` or `integration`, `best_match`
-  adds the first result's `input_schema`, so no separate describe call exists.
+  adds the first result's `input_schema` and `usage` (how to call the tool and
+  read its result), so a search by a tool's exact name stands for a describe
+  call, which does not exist.
   `connections` lists what a call would accept: per connection, the
   `connection_id` to pass, `label`, `auth_key`, `scopes_granted`, `owned_by_actor`
   (`false` for another member's), the `authorized_uris` a target must match,
@@ -404,7 +406,9 @@ who holds each is stated in `docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.4.
   is `{$credential.webhook_url}` alone, `https://{{host}}/v1/items` for
   `https://{$credential.host}/**`); the platform fills it in.
 - **A call.** `call_integration_tool` takes the `tool` name and its
-  `arguments`. For `{ns}__api_call`, `arguments.requests` holds 1 to 50
+  `arguments`, validates them against that tool's `input_schema` and hands
+  them to the tool, whose result it returns; what holds for one tool only is in
+  that tool's `usage`. For `{ns}__api_call`, `arguments.requests` holds 1 to 50
   requests to its integration, each naming a `method` and a `target`, with
   optional `headers`, `body`, `substitute_body` and `connection_id` (one of the
   tool's `connections`: which one, when several are callable, or to use a
@@ -416,7 +420,8 @@ who holds each is stated in `docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.4.
   refused before anything is sent when an argument is malformed. Requests run
   concurrently, three at a time and not in order, and each counts against the
   proxy's rate limit.
-- **A result.** `{ session_id, results }`, one entry per request, in order. An
+- **A result.** A `{ns}__api_call` returns `{ session_id, results }`, one
+  entry per request, in order. An
   entry with `status` is the upstream's own answer, whatever the status, with a
   few response headers and a text `body` cut at `max_response_bytes` (32 KiB by
   default) and marked `truncated`; a non-text body is replaced by its size. All

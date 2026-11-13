@@ -129,6 +129,7 @@ function makeTools(
 ) {
   const calls: Request[] = [];
   const listings: Request[] = [];
+  const manifestReads: string[] = [];
   const events: McpToolEvent[] = [];
   const listing = fixture.listing ?? listingOf([connectionRow()]);
   const manifests = fixture.manifests ?? { [INTEGRATION]: apiManifest(INTEGRATION) };
@@ -157,11 +158,14 @@ function makeTools(
     placeRootAs: async () => null,
     requestId: "req_test",
     followRunLogs: () => () => {},
-    readIntegrationManifest: async (packageId) => manifests[packageId] ?? null,
+    readIntegrationManifest: async (packageId) => {
+      manifestReads.push(packageId);
+      return manifests[packageId] ?? null;
+    },
   };
   const tools = toolsFor(ctx, proxyAcceptsCredential);
   const byName = new Map(tools.map((tool) => [tool.descriptor.name, tool]));
-  return { byName, calls, listings, events };
+  return { byName, calls, listings, manifestReads, events };
 }
 
 /** The tool `@acme/items` exposes. */
@@ -284,6 +288,7 @@ describe("search_integration_tools", () => {
         "session_id",
       ]);
       expect(best.input_schema.additionalProperties).toBe(false);
+      expect(best.usage).toContain("`{ session_id, results }`");
     }
     expect((await search({ query: "nothing-matches" })).payload).toEqual({ total: 0, tools: [] });
   });
@@ -331,6 +336,20 @@ describe("search_integration_tools", () => {
       "acme_items__api_call",
       "acme_items_x_2__api_call",
     ]);
+  });
+
+  it("allocates namespaces over every listed integration, its manifest read or not", async () => {
+    const { payload } = await search(
+      {},
+      {
+        listing: listingOf([
+          connectionRow({ integration_package_id: "@acme-items/x" }),
+          connectionRow({ integration_package_id: "@acme_items/x", connection_id: "c-2" }),
+        ]),
+        manifests: { "@acme_items/x": apiManifest("@acme_items/x") },
+      },
+    );
+    expect(toolNames(payload)).toEqual(["acme_items_x_2__api_call"]);
   });
 
   it("lists no hidden api_call, no auth without a connection, no unreadable manifest", async () => {
@@ -390,6 +409,31 @@ describe("call_integration_tool — tool", () => {
       expect(payload).toMatchObject({ code: "unknown_tool", arguments: ["tool"] });
       expect(calls).toHaveLength(0);
     }
+  });
+
+  it("reads the manifest of the integration it calls, and no other", async () => {
+    const { calls, manifestReads } = await callWith(
+      { tool: "acme_other__api_call", arguments: { requests: [get()] } },
+      {
+        listing: listingOf([
+          connectionRow(),
+          connectionRow({ integration_package_id: "@acme/other", connection_id: "c-2" }),
+        ]),
+        manifests: {
+          [INTEGRATION]: apiManifest(INTEGRATION),
+          "@acme/other": apiManifest("@acme/other"),
+        },
+      },
+    );
+    expect(manifestReads).toEqual(["@acme/other"]);
+    expect(calls[0]!.headers.get("X-Integration-Id")).toBe("@acme/other");
+  });
+
+  it("documents in its description only what holds for every tool", () => {
+    const description =
+      makeTools(CALL_OWN).byName.get("call_integration_tool")!.descriptor.description!;
+    expect(description).toContain("input_schema");
+    expect(description).not.toContain("session_id");
   });
 
   it("refuses a connection_id outside the tool's connections", async () => {

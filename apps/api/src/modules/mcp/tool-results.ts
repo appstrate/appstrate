@@ -47,6 +47,7 @@ export function trySetHeader(headers: Headers, name: string, value: string): boo
 type RefusalCode =
   | RunAndWaitArgumentCode
   | "unknown_operation"
+  | "unknown_tool"
   | "unknown_space"
   | "space_mismatch"
   | "not_granted"
