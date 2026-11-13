@@ -240,10 +240,10 @@ describe("Run read state (per-recipient)", () => {
 
   // ─── Fan-out through the REAL finalizeRun path ──────────────
   //
-  // The tests above call recordRunFinished directly. This one drives the
-  // actual terminal-run convergence (synthesiseFinalize → finalizeRun → CAS →
-  // broadcast → awaited fan-out) so the wiring at run-event-ingestion.ts — not
-  // just the fan-out function — is covered.
+  // The tests above call recordRunFinished directly. These drive the actual
+  // terminal-run convergence (synthesiseFinalize → finalizeRun → CAS, with the
+  // fan-out on the CAS transaction) so the wiring at run-event-ingestion.ts —
+  // not just the fan-out function — is covered.
 
   describe("fan-out via finalizeRun", () => {
     async function seedRunningRun(agentName: string) {
@@ -286,6 +286,53 @@ describe("Run read state (per-recipient)", () => {
       expect(await rowsOf(run.id)).toHaveLength(1);
       expect(await notificationsOf(run.id)).toHaveLength(0);
       expect(await unreadRunIds(authHeaders(ctx))).toEqual([run.id]);
+    });
+
+    it("the read state commits with the terminal status", async () => {
+      const run = await seedRunningRun("finalize-atomic");
+      // A deferred constraint trigger fires at COMMIT of the transaction that
+      // closed the run, and aborts it unless that commit carries the read state.
+      await db.execute(sql`
+        CREATE FUNCTION finalize_probe_fn() RETURNS trigger AS $$
+        BEGIN
+          IF NOT EXISTS (SELECT 1 FROM run_reads WHERE run_id = NEW.id) THEN
+            RAISE EXCEPTION 'run closed without its read state';
+          END IF;
+          RETURN NULL;
+        END $$ LANGUAGE plpgsql`);
+      await db.execute(sql`
+        CREATE CONSTRAINT TRIGGER finalize_probe_trg AFTER UPDATE ON runs
+        DEFERRABLE INITIALLY DEFERRED FOR EACH ROW
+        WHEN (OLD.sink_closed_at IS NULL AND NEW.sink_closed_at IS NOT NULL)
+        EXECUTE FUNCTION finalize_probe_fn()`);
+      try {
+        await synthesiseFinalize(run.id, { status: "failed" });
+      } finally {
+        await db.execute(sql`DROP TRIGGER finalize_probe_trg ON runs`);
+        await db.execute(sql`DROP FUNCTION finalize_probe_fn()`);
+      }
+
+      const [row] = await db.select({ status: runs.status }).from(runs).where(eq(runs.id, run.id));
+      expect(row!.status).toBe("failed");
+      expect(await rowsOf(run.id)).toHaveLength(1);
+      expect(await notificationsOf(run.id)).toHaveLength(1);
+    });
+
+    it("a failing read-state write does not keep the run from finishing", async () => {
+      const run = await seedRunningRun("finalize-isolated");
+      await db.execute(
+        sql`ALTER TABLE run_reads ADD CONSTRAINT run_reads_refuse_all CHECK (false) NOT VALID`,
+      );
+      try {
+        await synthesiseFinalize(run.id, { status: "failed" });
+      } finally {
+        await db.execute(sql`ALTER TABLE run_reads DROP CONSTRAINT run_reads_refuse_all`);
+      }
+
+      const [row] = await db.select({ status: runs.status }).from(runs).where(eq(runs.id, run.id));
+      expect(row!.status).toBe("failed");
+      expect(await rowsOf(run.id)).toHaveLength(0);
+      expect(await notificationsOf(run.id)).toHaveLength(0);
     });
 
     it("a re-finalize (idempotent CAS) does not create a second row", async () => {

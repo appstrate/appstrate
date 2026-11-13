@@ -650,6 +650,19 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     // winner already queued (deduped by the outbox, but pointless work).
     if (closed.length > 0) {
       await enqueueStorageDeletion(tx, runWorkspaceDeletionJobs(run.id, "run_workspace_deleted"));
+      // The run's read state (`run_reads`) and its bell entry commit WITH the
+      // terminal status: the status change is what tells a client the run is
+      // over, and a run-detail page marks the run read on that signal, so the
+      // rows must exist by then. In a savepoint, because they stay best-effort:
+      // a failure costs a missing unread dot and bell entry, never the close.
+      await tx
+        .transaction((savepoint) => recordRunFinished(scope, run.id, savepoint))
+        .catch((err) => {
+          logger.error("finalize: run read-state fan-out failed", {
+            runId: run.id,
+            err: getErrorMessage(err),
+          });
+        });
     }
     return closed;
   });
@@ -807,10 +820,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   }
 
   // 7. Status-change broadcast with the enriched params (including
-  //    validation-failure errors). Fired BEFORE the
-  //    notification fan-out so the multi-row INSERT can never sit between the
-  //    CAS close and the broadcast — the broadcast is what updates the UI and
-  //    fires webhooks, so it must not wait on bell bookkeeping.
+  //    validation-failure errors).
   // Merge error + result into ONE `extra` object. Two separate conditional
   // spreads of `extra` would make the second clobber the first (last spread
   // wins), silently dropping the error payload whenever a run carries both an
@@ -825,22 +835,6 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     ...(Object.keys(broadcastExtra).length > 0 ? { extra: broadcastExtra } : {}),
   };
   void emitEvent("onRunStatusChange", broadcastParams);
-
-  // Record the finished run for its recipients: unread (`run_reads`), and
-  // notified when it needs attention. Only the CAS winner reaches here, so this
-  // runs exactly once per run. Awaited (after the broadcast) rather than
-  // detached: the run is already terminal and the broadcast has already fired,
-  // so the small INSERTs add negligible latency, and awaiting keeps the write
-  // from outliving the request — a detached promise would race a concurrent
-  // run-delete / test teardown. Best-effort by contract: a transient failure is
-  // logged and swallowed, never failing the runner finalize; it costs a missing
-  // unread dot and bell entry, never a stuck run.
-  await recordRunFinished(scope, run.id).catch((err) => {
-    logger.error("finalize: run read-state fan-out failed (run already terminal)", {
-      runId: run.id,
-      err: getErrorMessage(err),
-    });
-  });
 
   // 8. Drop whatever the gap drain in step 1 could not commit. The sink is
   //    closed, so no drain will ever look at this buffer again and its entries

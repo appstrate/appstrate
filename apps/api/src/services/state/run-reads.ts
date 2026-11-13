@@ -3,7 +3,7 @@
 import { and, eq, inArray, isNull, count, sql, type SQL } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs, runReads, organizationMembers, packages } from "@appstrate/db/schema";
-import { scopedWhere } from "../../lib/db-helpers.ts";
+import { scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
 import { actorMatch, type Actor } from "../../lib/actor.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import { markRunNotificationsRead, notifyRunFinished } from "./notifications.ts";
@@ -35,10 +35,11 @@ function recipientFilter(actor: Actor): SQL {
 async function runRecipients(
   scope: SpaceScope,
   run: { userId: string | null; endUserId: string | null },
+  executor: DbOrTx,
 ): Promise<Actor[]> {
   if (run.userId) return [{ type: "user", id: run.userId }];
   if (run.endUserId) return [{ type: "end_user", id: run.endUserId }];
-  const admins = await db
+  const admins = await executor
     .select({ userId: organizationMembers.userId })
     .from(organizationMembers)
     .where(
@@ -52,18 +53,24 @@ async function runRecipients(
 
 /**
  * Record a freshly finished run: unread for each recipient, and notified when
- * the run needs attention (`notifyRunFinished` decides). Called exactly once
- * per run from the `finalizeRun` CAS winner; the primary key makes a re-fire a
- * no-op anyway.
+ * the run needs attention (`notifyRunFinished` decides). `finalizeRun` calls it
+ * once per run, on the transaction that writes the terminal status: a client
+ * that sees the run finished finds its read state, so opening it marks it read.
+ * The primary key makes a re-fire a no-op anyway.
  *
  * An ephemeral run (chat, playground, direct inline call) records nothing: its
  * result is already in front of the caller. Keyed on `packages.ephemeral`; a
  * null join (shadow package already gone) records it.
  *
- * Best-effort by contract: the caller wraps it — the run is already terminal.
+ * Best-effort by contract: the caller isolates it — a failure here never
+ * keeps a run from finishing.
  */
-export async function recordRunFinished(scope: SpaceScope, runId: string): Promise<void> {
-  const [run] = await db
+export async function recordRunFinished(
+  scope: SpaceScope,
+  runId: string,
+  executor: DbOrTx = db,
+): Promise<void> {
+  const [run] = await executor
     .select({
       userId: runs.userId,
       endUserId: runs.endUserId,
@@ -83,9 +90,9 @@ export async function recordRunFinished(scope: SpaceScope, runId: string): Promi
     .limit(1);
   if (!run || run.packageEphemeral === true) return;
 
-  const recipients = await runRecipients(scope, run);
+  const recipients = await runRecipients(scope, run, executor);
   if (recipients.length === 0) return;
-  await db
+  await executor
     .insert(runReads)
     .values(
       recipients.map((r) => ({
@@ -101,6 +108,7 @@ export async function recordRunFinished(scope: SpaceScope, runId: string): Promi
     scope,
     { id: runId, packageId: run.packageId, status: run.status },
     recipients,
+    executor,
   );
 }
 

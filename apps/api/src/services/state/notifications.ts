@@ -11,7 +11,7 @@ import {
   type NotificationType,
   type PackageType,
 } from "@appstrate/db/schema";
-import { scopedWhere } from "../../lib/db-helpers.ts";
+import { scopedWhere, type DbOrTx } from "../../lib/db-helpers.ts";
 import { actorMatch, type Actor } from "../../lib/actor.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import { listResponse } from "../../lib/list-response.ts";
@@ -59,11 +59,12 @@ export async function notifyRunFinished(
   scope: SpaceScope,
   run: { id: string; packageId: string | null; status: RunStatus },
   recipients: Actor[],
+  executor: DbOrTx,
 ): Promise<void> {
   const { status } = run;
   if (!needsAttention(status) || recipients.length === 0) return;
   const payload: NotificationPayloads["run_failed"] = { packageId: run.packageId, status };
-  await db
+  await executor
     .insert(notifications)
     .values(
       recipients.map((r) => ({
