@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`PlatformServices.members.provision(orgId, userId, role)`** (`@appstrate/core/module`): a
+  module admits a person into an organization as `member` or `guest` through the platform's one
+  membership door, personal space included; idempotent, an existing member keeps their role.
+- **`PlatformServices.sessions.endForEmailDomain(domain, keepSessionId)`**: ends every session of
+  the platform accounts at exactly that email domain but one, through the auth layer so its
+  session-delete hooks run.
+- **`BeforeSignupContext.path` and `.realm()`**: the Better Auth endpoint creating the account,
+  and the audience it is about to be created in (`platform` or `end_user:<spaceId>`), resolved on
+  demand.
+
 - **Image MIME types in `extensionForMime`** (`@appstrate/core/naming`): `image/png`, `image/jpeg` and `image/jpg` (`jpg`), `image/gif`, `image/webp`, `image/bmp` and `image/svg+xml` (`svg`) now resolve to an extension, so spilled images are no longer extensionless. (#2120)
 - **`AJV_FORMATS_OPTIONS`** (`@appstrate/core/ajv`): the ajv-formats options `createAjv` uses, so
   the RJSF validator registers the same formats and client and server agree.

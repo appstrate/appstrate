@@ -85,6 +85,8 @@ export type AppEnv = {
      * `"oidc"`, `"mtls"`).
      */
     authMethod: string;
+    /** The Better Auth session behind a cookie-authenticated request; unset otherwise. */
+    sessionId?: string;
     /** Declared by the strategy, or by core for its two paths — see `PrincipalKind`. */
     principalKind: import("@appstrate/core/module").PrincipalKind;
     apiKeyId: string | null;

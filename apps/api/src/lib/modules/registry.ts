@@ -29,6 +29,8 @@ import {
   setOrgFileStorageLimit,
 } from "../../services/files.ts";
 import { recordAuditFromContext } from "../../services/audit.ts";
+import { provisionMember } from "../../services/organizations.ts";
+import { endSessionsForEmailDomain } from "../../services/user-sessions.ts";
 import {
   listEnforcedChatSkills,
   loadEnforcedChatSkills,
@@ -102,6 +104,14 @@ function buildPlatformServices(): PlatformServices {
     // carries the same org / actor / request variables a core route audits from.
     audit: {
       record: (c, entry) => recordAuditFromContext(c as Context<AppEnv>, entry),
+    },
+    // The one membership door (RBAC spec §3.6), in a transaction of its own.
+    members: {
+      provision: (orgId, userId, role) =>
+        db.transaction((tx) => provisionMember(tx, orgId, userId, role)),
+    },
+    sessions: {
+      endForEmailDomain: endSessionsForEmailDomain,
     },
   };
 }
