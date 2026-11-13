@@ -5,6 +5,18 @@ import { $api } from "../api/client";
 import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgScope } from "./use-org-scope";
 import { paginatedRunsKeys, runKeys } from "../lib/query-keys";
+import type { operations } from "../api/schema";
+
+/**
+ * A notification kind (`?type=`). Runs are `run_completed`: the run screens
+ * count them; the bell reads the other kinds, never runs.
+ */
+export type NotificationType = NonNullable<
+  NonNullable<operations["listNotifications"]["parameters"]["query"]>["type"]
+>;
+
+/** The kind the bell shows — everything but runs, which the runs page lists. */
+export const BELL_NOTIFICATION_TYPE = "package_shared" satisfies NotificationType;
 
 /**
  * Safety-net poll, a BACKSTOP: freshness comes from `use-global-run-sync`, which invalidates
@@ -13,14 +25,15 @@ import { paginatedRunsKeys, runKeys } from "../lib/query-keys";
  */
 const NOTIFICATION_POLL_INTERVAL_MS = 300_000;
 
-export function useUnreadCount() {
+/** Unread notifications of one kind: `run_completed` for the run badges, the bell's own otherwise. */
+export function useUnreadCount(type: NotificationType) {
   const scope = useOrgScope();
   // Badge counters only need a space context.
   const spaceId = useCurrentSpaceId();
   return $api.useQuery(
     "get",
     "/api/notifications/unread-count",
-    { params: { header: scope.header } },
+    { params: { header: scope.header, query: { type } } },
     {
       refetchInterval: NOTIFICATION_POLL_INTERVAL_MS,
       enabled: !!spaceId,
@@ -29,15 +42,19 @@ export function useUnreadCount() {
   );
 }
 
-/** Recipient's notifications (newest first). `unread` filters to unread only. */
-export function useNotifications(opts: { unread?: boolean; limit?: number } = {}) {
+/** Recipient's notifications of one kind (newest first). `unread` filters to unread only. */
+export function useNotifications(opts: {
+  type: NotificationType;
+  unread?: boolean;
+  limit?: number;
+}) {
   const scope = useOrgScope();
   const spaceId = useCurrentSpaceId();
-  const { unread = true, limit = 50 } = opts;
+  const { type, unread = true, limit = 50 } = opts;
   return $api.useQuery(
     "get",
     "/api/notifications",
-    { params: { header: scope.header, query: { unread, limit } } },
+    { params: { header: scope.header, query: { type, unread, limit } } },
     {
       refetchInterval: NOTIFICATION_POLL_INTERVAL_MS,
       enabled: !!spaceId,

@@ -28,7 +28,7 @@ const FILTER_PARAMS = ["user", "kind", "status", "q"] as const;
 /** `?status=failed,timeout` — the wire shape the endpoint takes. */
 export function RunsPage() {
   const { t } = useTranslation(["agents", "common"]);
-  const { data: unreadCount } = useUnreadCount();
+  const { data: unreadCount } = useUnreadCount("run_completed");
   const markAllRead = useMarkAllRead();
   const list = useListParams(FILTER_PARAMS);
   const searchPlaceholder = useSearchPlaceholder(t("common:nav.runs"));
@@ -84,7 +84,8 @@ export function RunsPage() {
                 id: "mark-all-read",
                 label: t("common:notifications.markAllRead"),
                 icon: CheckCheck,
-                onSelect: () => markAllRead.mutate({}),
+                onSelect: () =>
+                  markAllRead.mutate({ params: { query: { type: "run_completed" } } }),
                 disabled: markAllRead.isPending || !unreadCount,
               },
             ]}

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { runStatusValues } from "@appstrate/core/run-status";
-import { packageTypeValues } from "@appstrate/db/schema";
+import { notificationTypeValues, packageTypeValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 
 /**
@@ -58,6 +58,16 @@ const notificationObject = {
   ],
 };
 
+/** `?type=` — narrow to one notification kind. */
+const typeParam = {
+  name: "type",
+  in: "query",
+  required: false,
+  schema: { type: "string", enum: [...notificationTypeValues] },
+  description:
+    "Only notifications of this kind. The dashboard bell reads the non-run kinds; the run screens read `run_completed`.",
+};
+
 export const notificationsPaths = {
   "/api/notifications": {
     get: {
@@ -65,7 +75,7 @@ export const notificationsPaths = {
       tags: ["Notifications"],
       summary: "List notifications",
       description:
-        'Keyset-paginated list of the current recipient\'s notifications, newest first. Follow the `Link: rel="next"` header (`?startingAfter=<id>`) to page. `?unread=true` returns unread only.',
+        'Keyset-paginated list of the current recipient\'s notifications, newest first. Follow the `Link: rel="next"` header (`?startingAfter=<id>`) to page. `?unread=true` returns unread only, `?type=` one kind.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -76,6 +86,7 @@ export const notificationsPaths = {
           schema: { type: "boolean" },
           description: "When true, only unread notifications are returned",
         },
+        typeParam,
         {
           name: "limit",
           in: "query",
@@ -140,10 +151,12 @@ export const notificationsPaths = {
       operationId: "getUnreadNotificationCount",
       tags: ["Notifications"],
       summary: "Get unread notification count",
-      description: "Returns the number of unread run notifications for the current user.",
+      description:
+        "Returns the number of unread notifications for the current recipient, of one kind when `?type=` is given.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
+        typeParam,
       ],
       responses: {
         "200": {
@@ -273,10 +286,11 @@ export const notificationsPaths = {
       tags: ["Notifications"],
       summary: "Mark all notifications as read",
       description:
-        "Marks all unread notifications as read for the current user. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
+        "Marks all unread notifications as read for the current user — only those of one kind when `?type=` is given. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
+        typeParam,
       ],
       responses: {
         "200": {

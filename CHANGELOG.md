@@ -102,6 +102,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **The notification bell no longer lists finished runs.** It repeated the
+  unread runs the runs page already shows (unread dot, per-agent and
+  per-schedule counts, the Runs badge), so it now lists the other kinds only —
+  today, packages shared with you — and its badge counts those alone. The run
+  badges count `run_completed` notifications only, and the runs page's « mark
+  all read » no longer clears unread shares. API: `GET /api/notifications`,
+  `GET /api/notifications/unread-count` and `PUT /api/notifications/read-all`
+  take an optional `?type=` (`run_completed` | `package_shared`); without it
+  they behave as before.
+
 - **A model test says what it checked** (#2148). A successful model test reads
   « Credential valid — model not tested », and the `testModel` /
   `testModelInline` descriptions state that `ok: true` covers the credential

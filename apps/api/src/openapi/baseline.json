@@ -17827,6 +17827,16 @@
             },
             "required": false,
             "description": "The `credential_revision` of the credential that was rejected. Omitted only by a caller that holds no credentials payload (a local MCP server reporting a rejected credential it received at spawn); its rejection is then counted against the connection's current credential."
+          },
+          {
+            "name": "rejected_request",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["handshake"]
+            },
+            "description": "`handshake`: the rejected request is the MCP handshake (`initialize`) the sidecar sends to a remote MCP server at boot, which no agent input shapes. An auth nothing can refresh is then flagged on this first rejection (`410`) instead of counted toward `INTEGRATION_REFRESH_MAX_FAILURES`. Omitted for a request made on the agent's behalf (tool call, `api_call`, MITM request). An OAuth2 credential that can be refreshed is refreshed either way."
           }
         ],
         "responses": {
@@ -17841,7 +17851,7 @@
             }
           },
           "400": {
-            "description": "The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. A malformed `credential_revision` (empty included) is an `invalid_request` too.",
+            "description": "The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. A malformed `credential_revision` (empty included) or a `rejected_request` other than `handshake` is an `invalid_request` too.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -17870,7 +17880,7 @@
             }
           },
           "410": {
-            "description": "`integration_connection_needs_reconnection`: the credential is dead and the connection is flagged `needsReconnection`; the run records the integration as degraded and the sidecar stops retrying. Counted failures flag it at `INTEGRATION_REFRESH_MAX_FAILURES` (an OAuth2 token only once expired past `INTEGRATION_REFRESH_GRACE_SECONDS`).",
+            "description": "`integration_connection_needs_reconnection`: the credential is dead and the connection is flagged `needsReconnection`; the run records the integration as degraded and the sidecar stops retrying. Counted failures flag it at `INTEGRATION_REFRESH_MAX_FAILURES` (an OAuth2 token only once expired past `INTEGRATION_REFRESH_GRACE_SECONDS`); a rejected handshake (`rejected_request=handshake`) of an auth nothing can refresh flags it at once.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -18231,7 +18241,7 @@
         "operationId": "listNotifications",
         "tags": ["Notifications"],
         "summary": "List notifications",
-        "description": "Keyset-paginated list of the current recipient's notifications, newest first. Follow the `Link: rel=\"next\"` header (`?startingAfter=<id>`) to page. `?unread=true` returns unread only.",
+        "description": "Keyset-paginated list of the current recipient's notifications, newest first. Follow the `Link: rel=\"next\"` header (`?startingAfter=<id>`) to page. `?unread=true` returns unread only, `?type=` one kind.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -18247,6 +18257,16 @@
               "type": "boolean"
             },
             "description": "When true, only unread notifications are returned"
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["run_completed", "package_shared"]
+            },
+            "description": "Only notifications of this kind. The dashboard bell reads the non-run kinds; the run screens read `run_completed`."
           },
           {
             "name": "limit",
@@ -18441,13 +18461,23 @@
         "operationId": "getUnreadNotificationCount",
         "tags": ["Notifications"],
         "summary": "Get unread notification count",
-        "description": "Returns the number of unread run notifications for the current user.",
+        "description": "Returns the number of unread notifications for the current recipient, of one kind when `?type=` is given.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
             "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["run_completed", "package_shared"]
+            },
+            "description": "Only notifications of this kind. The dashboard bell reads the non-run kinds; the run screens read `run_completed`."
           }
         ],
         "responses": {
@@ -18663,13 +18693,23 @@
         "operationId": "markAllNotificationsRead",
         "tags": ["Notifications"],
         "summary": "Mark all notifications as read",
-        "description": "Marks all unread notifications as read for the current user. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
+        "description": "Marks all unread notifications as read for the current user — only those of one kind when `?type=` is given. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
           },
           {
             "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["run_completed", "package_shared"]
+            },
+            "description": "Only notifications of this kind. The dashboard bell reads the non-run kinds; the run screens read `run_completed`."
           }
         ],
         "responses": {

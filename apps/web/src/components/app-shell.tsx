@@ -197,7 +197,7 @@ export function AppSidebar({ product }: { product: "studio" | "chat" }) {
 
 export function ShellHeader() {
   const { isMobile, openMobile, state } = useSidebar();
-  const { data: unreadCount } = useUnreadCount();
+  const { data: unreadCount } = useUnreadCount("run_completed");
   const collapsed = !isMobile && state === "collapsed";
 
   return (

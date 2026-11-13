@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The bell's list reads by notification KIND (`notifications.type`), not by
- * assuming every row is a finished run.
+ * The bell lists what the runs page does not: a finished run is already there,
+ * unread dot included, so the bell reads the share notifications only
+ * (`?type=package_shared`) and renders a stray run row as nothing.
  *
- * `package_shared` has no run and no status behind it, so a row that reached
- * for the run's package fell through to `runs.deletedAgent` and announced a
- * share as "Agent supprimé", linking to `/runs`. These two cases pin the
- * branch and its control: the share names the sharer and the package and links
- * to the package's detail page, and a run notification is unchanged.
+ * A share names the sharer and the package and links to the package's sheet.
  *
  * Same no-DOM harness as the other component suites — `renderToStaticMarkup`
  * through the SPA's own i18n singleton, so the assertions read the bundle
@@ -35,10 +32,8 @@ function renderList(
     <NotificationContent
       unread={notifications.length}
       notifications={notifications}
-      agentNameMap={new Map([[PACKAGE_ID, "Worker"]])}
       canReach={canReach}
       onItemClick={() => {}}
-      onClose={() => {}}
       markAllRead={() => {}}
     />,
   );
@@ -85,7 +80,7 @@ describe("NotificationContent", () => {
     expect(html).toContain('href="/catalogue/skill?package=%40acme%2Fhelper"');
   });
 
-  it("still renders a run notification as the agent and its status", () => {
+  it("renders no run row, and no way to the runs page", () => {
     const html = renderList([
       {
         id: "n3",
@@ -97,22 +92,14 @@ describe("NotificationContent", () => {
       },
     ]);
 
-    expect(html).toContain("Worker");
-    expect(html).toContain(`href="/agents/${PACKAGE_ID}/runs/run_1"`);
+    expect(html).not.toContain("href=");
+    expect(html).toContain("Aucune notification");
   });
 
-  // Notifications follow the session's ceiling, not the space's run reads: a
-  // caller can hold one for a run whose page would refuse them.
+  // Notifications follow the session's ceiling: a caller can hold a share of a
+  // package whose sheet would refuse them.
   it("links nowhere the caller cannot reach", () => {
     const notifications: Notifications = [
-      {
-        id: "n4",
-        type: "run_completed",
-        runId: "run_2",
-        payload: { packageId: PACKAGE_ID, status: "failed" },
-        read_at: null,
-        createdAt: "2026-09-10T10:00:00.000Z",
-      },
       {
         id: "n5",
         type: "package_shared",
@@ -123,8 +110,7 @@ describe("NotificationContent", () => {
       },
     ];
     const denied = renderList(notifications, () => false);
-    expect(denied).toContain("Worker");
+    expect(denied).toContain(`Bob vous a partagé ${PACKAGE_ID}`);
     expect(denied).not.toContain("href=");
-    expect(renderList(notifications)).toContain('href="/runs"');
   });
 });

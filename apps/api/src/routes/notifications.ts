@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
+import { z } from "zod";
+import { notificationTypeValues, type NotificationType } from "@appstrate/db/schema";
 import type { AppEnv } from "../types/index.ts";
 import { RUNS_READ_PERMISSIONS } from "@appstrate/core/permissions";
 import { getActor } from "../lib/actor.ts";
@@ -13,10 +15,23 @@ import {
   markAllNotificationsRead,
   listNotifications,
 } from "../services/state/notifications.ts";
-import { notFound } from "../lib/errors.ts";
+import { invalidRequest, notFound } from "../lib/errors.ts";
 import { getSpaceScope } from "../lib/scope.ts";
 import { setCursorLinkHeader } from "../lib/pagination-link.ts";
 import { parseListPagination } from "../lib/list-query.ts";
+
+const typeQuerySchema = z.enum(notificationTypeValues).optional();
+
+/**
+ * `?type=` narrows the feed, the unread count and the bulk ack to one kind. The
+ * bell reads the non-run kinds; the run screens read `run_completed`, whose
+ * unread rows are already listed on the runs page.
+ */
+function parseTypeQuery(c: Context<AppEnv>): NotificationType | undefined {
+  const parsed = typeQuerySchema.safeParse(c.req.query("type"));
+  if (!parsed.success) throw invalidRequest("Invalid notification type", "type");
+  return parsed.data;
+}
 
 export function createNotificationsRouter() {
   const router = new Hono<AppEnv>();
@@ -27,15 +42,16 @@ export function createNotificationsRouter() {
 
   // GET /api/notifications — recipient-scoped feed, newest first.
   // Keyset-paginated: `?startingAfter=<id>` follows the `Link: rel="next"`
-  // cursor (Stripe-style). `?unread=true` filters to unread only.
+  // cursor (Stripe-style). `?unread=true` filters to unread only, `?type=` to one kind.
   router.get("/notifications", feedCeiling, async (c) => {
     const actor = getActor(c);
     const scope = getSpaceScope(c);
     const unread = c.req.query("unread") === "true";
+    const type = parseTypeQuery(c);
     // Keyset-paginated on `startingAfter`, so only the helper's `limit` applies.
     const { limit } = parseListPagination(c, { defaultLimit: 20 });
     const startingAfter = c.req.query("startingAfter");
-    const result = await listNotifications(scope, actor, { unread, limit, startingAfter });
+    const result = await listNotifications(scope, actor, { unread, type, limit, startingAfter });
     const lastId = result.data.at(-1)?.id;
     setCursorLinkHeader({ c, hasMore: result.hasMore, lastId });
     return c.json(result);
@@ -45,7 +61,7 @@ export function createNotificationsRouter() {
   router.get("/notifications/unread-count", feedCeiling, async (c) => {
     const actor = getActor(c);
     const scope = getSpaceScope(c);
-    const count = await getUnreadNotificationCount(scope, actor);
+    const count = await getUnreadNotificationCount(scope, actor, parseTypeQuery(c));
     return c.json({ count });
   });
 
@@ -88,7 +104,7 @@ export function createNotificationsRouter() {
   router.put("/notifications/read-all", feedCeiling, async (c) => {
     const actor = getActor(c);
     const scope = getSpaceScope(c);
-    const updated = await markAllNotificationsRead(scope, actor);
+    const updated = await markAllNotificationsRead(scope, actor, parseTypeQuery(c));
     return c.json({ updated_count: updated });
   });
 

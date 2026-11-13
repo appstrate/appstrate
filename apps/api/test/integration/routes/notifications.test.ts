@@ -329,6 +329,66 @@ describe("Notifications API (per-recipient, issue #667)", () => {
     });
   });
 
+  // ─── ?type= ─────────────────────────────────────────────────
+
+  describe("?type= narrows to one kind", () => {
+    async function seedOneOfEach() {
+      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      await createPackageShareNotification({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        recipientUserId: ctx.user.id,
+        packageId: "@notiforg/shared",
+        packageType: "skill",
+        sharedByName: "Ada",
+      });
+    }
+
+    async function count(query: string): Promise<number> {
+      const res = await app.request(`/api/notifications/unread-count${query}`, {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      return ((await res.json()) as { count: number }).count;
+    }
+
+    it("filters the feed and the unread count", async () => {
+      await seedOneOfEach();
+      const res = await app.request("/api/notifications?unread=true&type=package_shared", {
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      const { data } = (await res.json()) as { data: NotificationDto[] };
+      expect(data.map((n) => n.type)).toEqual(["package_shared"]);
+
+      expect(await count("")).toBe(2);
+      expect(await count("?type=package_shared")).toBe(1);
+      expect(await count("?type=run_completed")).toBe(1);
+    });
+
+    it("read-all with a type leaves the other kind unread", async () => {
+      await seedOneOfEach();
+      const res = await app.request("/api/notifications/read-all?type=run_completed", {
+        method: "PUT",
+        headers: authHeaders(ctx),
+      });
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { updated_count: number }).updated_count).toBe(1);
+      expect(await count("?type=run_completed")).toBe(0);
+      expect(await count("?type=package_shared")).toBe(1);
+    });
+
+    it("refuses an unknown kind", async () => {
+      for (const path of [
+        "/api/notifications?type=nope",
+        "/api/notifications/unread-count?type=nope",
+      ]) {
+        const res = await app.request(path, { headers: authHeaders(ctx) });
+        expect(res.status).toBe(400);
+      }
+    });
+  });
+
   // ─── PUT /api/notifications/{id}/read ───────────────────────
 
   describe("PUT /api/notifications/{id}/read", () => {

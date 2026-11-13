@@ -43,7 +43,7 @@ export function NavOrg() {
   // cold settings link is not where the user is.
   const { pathname } = useLocation();
   const visiblePathname = useOverlayPath() ?? pathname;
-  const { data: unreadCount } = useUnreadCount();
+  const { data: unreadCount } = useUnreadCount("run_completed");
   const { data: agents } = useAgents();
   const canReach = useCanReach();
   const ready = useReachReady();

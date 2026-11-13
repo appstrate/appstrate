@@ -2794,7 +2794,7 @@ export interface paths {
         };
         /**
          * List notifications
-         * @description Keyset-paginated list of the current recipient's notifications, newest first. Follow the `Link: rel="next"` header (`?startingAfter=<id>`) to page. `?unread=true` returns unread only.
+         * @description Keyset-paginated list of the current recipient's notifications, newest first. Follow the `Link: rel="next"` header (`?startingAfter=<id>`) to page. `?unread=true` returns unread only, `?type=` one kind.
          */
         get: operations["listNotifications"];
         put?: never;
@@ -2815,7 +2815,7 @@ export interface paths {
         get?: never;
         /**
          * Mark all notifications as read
-         * @description Marks all unread notifications as read for the current user. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.
+         * @description Marks all unread notifications as read for the current user — only those of one kind when `?type=` is given. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.
          */
         put: operations["markAllNotificationsRead"];
         post?: never;
@@ -2854,7 +2854,7 @@ export interface paths {
         };
         /**
          * Get unread notification count
-         * @description Returns the number of unread run notifications for the current user.
+         * @description Returns the number of unread notifications for the current recipient, of one kind when `?type=` is given.
          */
         get: operations["getUnreadNotificationCount"];
         put?: never;
@@ -18919,6 +18919,8 @@ export interface operations {
             query?: {
                 /** @description When true, only unread notifications are returned */
                 unread?: boolean;
+                /** @description Only notifications of this kind. The dashboard bell reads the non-run kinds; the run screens read `run_completed`. */
+                type?: "run_completed" | "package_shared";
                 limit?: number;
                 /** @description Keyset cursor — return notifications after this id (newest-first order). Supplied by the `Link: rel="next"` header. */
                 startingAfter?: string;
@@ -19026,7 +19028,10 @@ export interface operations {
     };
     markAllNotificationsRead: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only notifications of this kind. The dashboard bell reads the non-run kinds; the run screens read `run_completed`. */
+                type?: "run_completed" | "package_shared";
+            };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
@@ -19091,7 +19096,10 @@ export interface operations {
     };
     getUnreadNotificationCount: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only notifications of this kind. The dashboard bell reads the non-run kinds; the run screens read `run_completed`. */
+                type?: "run_completed" | "package_shared";
+            };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];

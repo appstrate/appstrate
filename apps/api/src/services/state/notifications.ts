@@ -242,7 +242,16 @@ export async function markNotificationReadByRun(
     );
 }
 
-export async function markAllNotificationsRead(scope: SpaceScope, actor: Actor): Promise<number> {
+/** Optional narrowing to one notification kind (`?type=`). */
+function typeFilter(type: NotificationType | undefined): SQL[] {
+  return type ? [eq(notifications.type, type)] : [];
+}
+
+export async function markAllNotificationsRead(
+  scope: SpaceScope,
+  actor: Actor,
+  type?: NotificationType,
+): Promise<number> {
   const updated = await db
     .update(notifications)
     .set({ readAt: sql`now()` })
@@ -250,14 +259,18 @@ export async function markAllNotificationsRead(scope: SpaceScope, actor: Actor):
       scopedWhere(notifications, {
         orgId: scope.orgId,
         spaceId: scope.spaceId,
-        extra: [recipientFilter(actor), isNull(notifications.readAt)],
+        extra: [recipientFilter(actor), isNull(notifications.readAt), ...typeFilter(type)],
       }),
     )
     .returning({ id: notifications.id });
   return updated.length;
 }
 
-export async function getUnreadNotificationCount(scope: SpaceScope, actor: Actor): Promise<number> {
+export async function getUnreadNotificationCount(
+  scope: SpaceScope,
+  actor: Actor,
+  type?: NotificationType,
+): Promise<number> {
   const [row] = await db
     .select({ count: count() })
     .from(notifications)
@@ -265,7 +278,7 @@ export async function getUnreadNotificationCount(scope: SpaceScope, actor: Actor
       scopedWhere(notifications, {
         orgId: scope.orgId,
         spaceId: scope.spaceId,
-        extra: [recipientFilter(actor), isNull(notifications.readAt)],
+        extra: [recipientFilter(actor), isNull(notifications.readAt), ...typeFilter(type)],
       }),
     );
   return row?.count ?? 0;
@@ -316,13 +329,18 @@ export async function getUnreadCountsByAgent(
 export async function listNotifications(
   scope: SpaceScope,
   actor: Actor,
-  options: { unread?: boolean; limit?: number; startingAfter?: string } = {},
+  options: {
+    unread?: boolean;
+    type?: NotificationType;
+    limit?: number;
+    startingAfter?: string;
+  } = {},
 ): Promise<ListEnvelope<NotificationDto>> {
-  const { unread = false, startingAfter } = options;
+  const { unread = false, type, startingAfter } = options;
   const limit = Math.min(Math.max(options.limit ?? 20, 1), 100);
   const fetchLimit = limit + 1; // one extra row to detect hasMore
 
-  const extra: SQL[] = [recipientFilter(actor)];
+  const extra: SQL[] = [recipientFilter(actor), ...typeFilter(type)];
   if (unread) extra.push(isNull(notifications.readAt));
   if (startingAfter) {
     // Resolve the cursor's (created_at, id) coordinate with a scalar subquery
