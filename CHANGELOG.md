@@ -476,7 +476,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   sentence, with neither a retry nor a reconnection link, live and after
   reload. The run trail records it as
   `run_logs.data.error_reason: "runtime_version_too_old"` beside the unchanged
-  `error_category`. It is read from the refusal's structured code only.
+  `error_category`, and a failed run's page reads it there to show the same
+  sentence in place of the provider's own advice. It is read from the refusal's
+  structured code only.
 
 - **Live-catalog models of a subscription provider carry a warning** (#2148).
   `GET /api/model-provider-credentials/registry` flags them

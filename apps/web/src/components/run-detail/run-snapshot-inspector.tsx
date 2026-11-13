@@ -16,6 +16,7 @@ import {
   Trophy,
 } from "lucide-react";
 import { ACTIVE_RUN_STATUSES, type EnrichedRun } from "@appstrate/shared-types";
+import type { ModelErrorReason } from "@appstrate/core/model-error";
 import { extractFileIds } from "@appstrate/core/file-uri";
 import { RunTurnsDetail } from "./run-turns-detail";
 import { journalLevel, type RunTurnRow } from "../log-utils";
@@ -56,6 +57,7 @@ export function RunSnapshotInspector({
   memoryChangeCount,
   memoryLoading,
   modelFallback,
+  errorReason,
   onOpenJournal,
   onOpenResults,
 }: {
@@ -70,6 +72,8 @@ export function RunSnapshotInspector({
   memoryLoading: boolean;
   /** The `model_fallback` marker of the run's journal, when it has one. */
   modelFallback: RunModelFallback | null;
+  /** The structured reason of the run's model refusal, read off its journal, when it names one. */
+  errorReason: ModelErrorReason | null;
   onOpenJournal: (filter?: JournalOverviewFilter) => void;
   onOpenResults: () => void;
 }) {
@@ -112,7 +116,7 @@ export function RunSnapshotInspector({
     ? {
         title: t("run.overview.problem"),
         tone: "blocking",
-        itemTitle: runErrorText(run, t),
+        itemTitle: runErrorText(run, t, errorReason),
         actions: (
           <HealthAction onClick={() => onOpenJournal("errors")}>
             {t("run.overview.problemJournal")}
