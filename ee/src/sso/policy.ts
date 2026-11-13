@@ -6,6 +6,7 @@
  * here; nothing in this file reads a request or a table.
  */
 
+import { normalizeAddress } from "./domain.ts";
 import type { DomainPolicy } from "./store.ts";
 
 /** A session of an enforced domain lives at most this long from its creation, never slid. */
@@ -13,8 +14,11 @@ export const ENFORCED_SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /** How a session is being opened, as far as these rules care. */
 export type SessionOrigin =
-  /** The Microsoft callback, with the tenant (`tid`) of the identity it signed in. */
-  | { kind: "microsoft"; tenantId: string | null }
+  /**
+   * The Microsoft callback, with the tenant (`tid`) and the address (`email`
+   * claim) of the identity it signed in.
+   */
+  | { kind: "microsoft"; tenantId: string | null; email: string | null }
   /** The emergency password sign-in of an owner of the enforcing organization. */
   | { kind: "break_glass" }
   /** A live session of the same account replaced by a new one (password change). */
@@ -33,7 +37,25 @@ export type SessionDecision =
   { allow: true; expiresAt: Date; createdAt?: Date } | { allow: false; code: SsoRefusal };
 
 /**
- * May a session be opened for an address of a domain under `policy`, and until
+ * Whether a Microsoft identity speaks for `address`: the bound tenant, and the
+ * address itself. A member of the tenant linking their own identity to another
+ * person's account must not open that account's sessions, nor join for it.
+ */
+export function microsoftVouchesFor(
+  policy: DomainPolicy,
+  identity: { tenantId: string | null; email: string | null },
+  address: string,
+): boolean {
+  const claimed = identity.email ? normalizeAddress(identity.email) : null;
+  return (
+    identity.tenantId === policy.tenantId &&
+    claimed !== null &&
+    claimed === normalizeAddress(address)
+  );
+}
+
+/**
+ * May a session be opened for `address`, of a domain under `policy`, and until
  * when? A fail-closed allowlist: once the domain is enforced, only the origins
  * named here open a session, so a sign-in method added later is refused until
  * someone decides otherwise.
@@ -41,13 +63,14 @@ export type SessionDecision =
 export function decideSession(
   policy: DomainPolicy | null,
   origin: SessionOrigin,
+  address: string,
   requestedExpiresAt: Date,
   now: Date,
 ): SessionDecision {
   if (!policy) return { allow: true, expiresAt: requestedExpiresAt };
-  // Bound tenant or nothing, enforced or not: an address of a proven domain
-  // belongs to the tenant the organization bound.
-  if (origin.kind === "microsoft" && origin.tenantId !== policy.tenantId) {
+  // Enforced or not, a Microsoft sign-in for an address of a proven domain is
+  // that address's own identity in the tenant the organization bound.
+  if (origin.kind === "microsoft" && !microsoftVouchesFor(policy, origin, address)) {
     return { allow: false, code: "sso_tenant_mismatch" };
   }
   if (!policy.enforced) return { allow: true, expiresAt: requestedExpiresAt };

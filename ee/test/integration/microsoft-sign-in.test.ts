@@ -145,6 +145,25 @@ describe("Microsoft sign-in for an address of a bound domain", () => {
     expect(sessionCookieFrom(res)).toBeNull();
   });
 
+  it("does not let a tenant member's identity, linked to someone else's account, open it or join for it", async () => {
+    await seedSso({ orgId: ctx.orgId });
+    const ceo = await createTestUser({ email: `ceo@${DOMAIN}`, emailVerified: true });
+    const mallory = { email: `mallory@${DOMAIN}`, tenantId: TENANT, oid: "oid-mallory" };
+    // Mallory, signed in to the CEO's password account, links her own Microsoft identity to it.
+    const linked = await microsoftSignIn(app, mallory, ceo.cookie);
+    expect(redirectError(linked)).toBeNull();
+    expect(
+      (await db.select().from(account).where(eq(account.userId, ceo.id))).map((a) => a.providerId),
+    ).toContain("microsoft");
+    await db.delete(session).where(eq(session.userId, ceo.id));
+
+    const res = await microsoftSignIn(app, mallory);
+    expect(sessionCookieFrom(res)).toBeNull();
+    expect(redirectError(res)).toBe("sso_tenant_mismatch");
+    expect(await sessionsOf(ceo.id)).toHaveLength(0);
+    expect(await roleIn(ctx.orgId, ceo.id)).toBeNull();
+  });
+
   it("caps an enforced session at 24 h from creation", async () => {
     await seedSso({ orgId: ctx.orgId, enforced: true });
     const before = Date.now();
