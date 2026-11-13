@@ -2,59 +2,32 @@
 // Copyright 2026 Appstrate
 
 /**
- * Runtime tool definitions — the platform's first-party "runtime tools"
- * expressed as transport-neutral, Pi-agnostic MCP tool definitions.
- *
- * Three groups, all defined here: the pure event emitters selected through
- * `manifest.runtime_tools` (`log` / `note` / `pin`), assembled together by
- * {@link buildRuntimeToolDefs}; `output`, built by {@link buildOutputToolDef}
- * when the agent declares an `output.schema` (the runner registers it as a Pi
- * extension, see `@appstrate/runner-pi`); and `publish_file`, built on its own
- * by {@link buildPublishFileDef} around an injected HTTP uploader (the runner
- * registers it whenever its host supplies one, see `fileUploader` in
- * `@appstrate/runner-pi`).
- *
- * They are plain tool definitions so the SAME logic can be hosted two ways:
- *
- *   1. As in-process MCP tools served by the credential-isolating sidecar
- *      (`runtime-pi/sidecar/server.ts`), exposed on the agent-facing `/mcp`
- *      surface alongside `run_history` / `recall_memory` and the
- *      integration tools. Any harness that speaks MCP gets them for free —
- *      this is what decouples the runtime tools from the Pi SDK.
- *   2. As Pi extensions registered directly in the agent by the public
- *      `appstrate run` CLI, which has no sidecar, via the thin wrapper in
- *      `@appstrate/runner-pi/runtime-tools/runtime-tool-extensions`.
- *
- * Both adapters share this module's per-tool logic (input schema +
- * validation + the canonical run events each call produces), so there is a
- * single source of truth for these event-emitter tools.
+ * Runtime tool definitions — the two tools the runner itself offers the
+ * model, expressed as transport-neutral, Pi-agnostic tool definitions:
+ * `output`, built by {@link buildOutputToolDef} when the agent declares an
+ * `output.schema`, and `publish_file`, built by {@link buildPublishFileDef}
+ * around an injected HTTP uploader. `@appstrate/runner-pi` registers both as
+ * Pi extensions (see `outputSchema` and `fileUploader` on its `PiRunner`).
  *
  * Event delivery: a tool call NEVER emits directly. It returns the
  * canonical run events under the result `_meta` key
- * {@link RUNTIME_TOOL_EVENTS_META_KEY}; the host re-emits them into the
- * run's single event sink (the sidecar path relays them agent-side via
- * `reEmitRuntimeToolEvents`; the CLI's Pi wrapper does the same). This
- * keeps a single sequence source for the run-event pipeline — no behavioural
- * change to ingestion, the reducer, or finalize.
+ * {@link RUNTIME_TOOL_EVENTS_META_KEY}; the runner re-emits them into the
+ * run's single event sink through {@link reEmitRuntimeToolEvents}, which keeps
+ * a single sequence source for the run-event pipeline.
  *
  * Lives in `@appstrate/core` (dependency-light, already ships `ajv`) so the
- * sidecar can import it without pulling the Pi SDK into its bundle.
+ * tool logic carries no Pi SDK dependency.
  */
 
 import type { ValidateFunction } from "ajv";
 import { asJSONSchemaObject } from "./form.ts";
 import { compileCached } from "./schema-validation.ts";
-import {
-  EVENT_EMITTER_RUNTIME_TOOLS,
-  type EventEmitterRuntimeTool,
-} from "./runtime-tools-catalog.ts";
 import type { RunAndWaitFile } from "./run-and-wait-client.ts";
 
 /**
- * MCP `_meta` key under which a runtime tool call surfaces the canonical
- * run events it produced (`output.emitted`, `log.written`, `memory.added`,
- * `pinned.set`). The agent-side bridge reads this key
- * and re-emits each event into the run's event sink.
+ * `_meta` key under which a runtime tool call surfaces the canonical run
+ * events it produced (`output.emitted`, `file.published`). The runner reads
+ * this key and re-emits each event into the run's event sink.
  *
  * AFPS (Phase F1): reverse-DNS namespace — `_meta` keys must be
  * either a single bare token or a reverse-DNS prefix (RFC §2.2 / Appendix
@@ -71,9 +44,6 @@ export const RUNTIME_TOOL_EVENTS_META_KEY = "dev.appstrate/events";
  */
 export const CANONICAL_RUNTIME_TOOL_EVENT_TYPES = [
   "output.emitted",
-  "log.written",
-  "memory.added",
-  "pinned.set",
   // Emitted by the `publish_file` tool (and the entrypoint outputs sweep) once
   // a run file has been stored on the platform. Carries the durable file
   // metadata so ingestion persists a run_log the UI/chat can render.
@@ -106,8 +76,8 @@ export interface RuntimeToolResult {
 
 /**
  * Transport-neutral runtime tool definition. Structurally compatible with
- * `@appstrate/mcp-transport`'s `AppstrateToolDefinition` (the sidecar uses
- * it directly) without coupling core to the transport package.
+ * `@appstrate/mcp-transport`'s `AppstrateToolDefinition` without coupling
+ * core to the transport package.
  */
 export interface RuntimeToolDef {
   descriptor: {
@@ -118,20 +88,11 @@ export interface RuntimeToolDef {
   handler: (rawArgs: unknown) => Promise<RuntimeToolResult>;
 }
 
-export interface BuildRuntimeToolDefsOptions {
-  /** Agent-selected runtime tools (`manifest.runtime_tools`). */
-  runtimeTools?: readonly string[];
-}
-
 function withEvents(text: string, events: RuntimeToolEvent[]): RuntimeToolResult {
   // Stamp a production-time `timestamp` on every canonical event at the single
-  // point they are wrapped. Canonical run events (`log.written`, …) carry a
-  // required `timestamp` (consumed by the reducer → RunResult.logs), but the
-  // sidecar/MCP re-emit path (`reEmitRuntimeToolEvents` → bridged sink) does
-  // not stamp one — unlike the CLI's stdout path. An event left without a
-  // timestamp surfaced as `undefined` in the finalize RunResult and failed the
-  // whole run. Stamping here fixes both paths; an event that already carries
-  // its own timestamp keeps it.
+  // point they are wrapped: canonical run events carry a required `timestamp`,
+  // and the re-emit path (`reEmitRuntimeToolEvents` → run sink) does not stamp
+  // one. An event that already carries its own timestamp keeps it.
   const now = Date.now();
   const stamped = events.map((e) => ({ timestamp: now, ...e }));
   return {
@@ -226,147 +187,6 @@ export function buildOutputToolDef(outputSchema: Record<string, unknown>): Runti
   };
 }
 
-function buildLogDef(): RuntimeToolDef {
-  return {
-    descriptor: {
-      name: "log",
-      description:
-        "Send a progress message to the user. Write naturally — the user reads these in real time.",
-      inputSchema: {
-        type: "object",
-        additionalProperties: false,
-        required: ["level", "message"],
-        properties: {
-          level: {
-            type: "string",
-            enum: ["info", "warn", "error"],
-            description:
-              "info: progress and milestones, warn: non-blocking issues, error: failures",
-          },
-          message: { type: "string", description: "Message for the user" },
-        },
-      },
-    },
-    handler: async (rawArgs) => {
-      const { level, message } = (rawArgs ?? {}) as {
-        level: "info" | "warn" | "error";
-        message: string;
-      };
-      return withEvents(`Logged [${level}]: ${message}`, [{ type: "log.written", level, message }]);
-    },
-  };
-}
-
-function buildNoteDef(): RuntimeToolDef {
-  return {
-    descriptor: {
-      name: "note",
-      description:
-        "Append a long-term archive memory — a discovery, fact, or user preference worth keeping across future runs. " +
-        "Archive memories are NOT injected into the system prompt; retrieve them on demand with `recall_memory`. " +
-        'Scope defaults to "actor" — personal observations stay private to the calling actor (scheduled runs, ' +
-        "manual triggers, and different members each see only their own notes). " +
-        'Pass scope="shared" for facts universal to the space — API quirks, org conventions, shared-resource structure — ' +
-        "so every actor can recall them. " +
-        "Use for insights worth remembering (e.g. 'Gmail API paginates at 100 results', 'User prefers CSV format').",
-      inputSchema: {
-        type: "object",
-        additionalProperties: false,
-        required: ["content"],
-        properties: {
-          content: { type: "string", description: "Memory text to save (max 2000 characters)" },
-          scope: {
-            type: "string",
-            enum: ["actor", "shared"],
-            description:
-              'Persistence scope. "actor" (default) keeps the note private to the calling actor — well-suited for personal preferences. "shared" makes the note visible to every actor of the space; use for facts universal regardless of who triggered the run.',
-          },
-        },
-      },
-    },
-    handler: async (rawArgs) => {
-      const { content, scope } = (rawArgs ?? {}) as { content: string; scope?: "actor" | "shared" };
-      const event: RuntimeToolEvent = { type: "memory.added", content };
-      if (scope !== undefined) event.scope = scope;
-      return withEvents("Note saved", [event]);
-    },
-  };
-}
-
-function buildPinDef(): RuntimeToolDef {
-  return {
-    descriptor: {
-      name: "pin",
-      description:
-        "Upsert a named slot pinned into the system prompt on every run. Last-write-wins per (scope, key). " +
-        'Use key="checkpoint" for the carry-over checkpoint; other keys (e.g. "persona", "goals") create additional pinned blocks. ' +
-        'Scope defaults to "actor" — scheduled runs, manual triggers, and different members each get their own copy. ' +
-        'Pass scope="shared" when the slot tracks a resource shared across actors (synced repo, shared inbox, shared DB), ' +
-        "otherwise the agent will desynchronise across triggers.",
-      inputSchema: {
-        type: "object",
-        additionalProperties: false,
-        required: ["key", "content"],
-        properties: {
-          key: {
-            type: "string",
-            minLength: 1,
-            maxLength: 64,
-            pattern: "^[a-z0-9_]+$",
-            description:
-              'Pinned slot identifier. Lowercase, digits and underscores only. "checkpoint" is the carry-over slot.',
-          },
-          content: { description: "Arbitrary JSON value stored under the pinned slot." },
-          scope: {
-            type: "string",
-            enum: ["actor", "shared"],
-            description:
-              'Persistence scope. "actor" (default) gives every actor their own private copy of the slot — scheduled runs, manual triggers, and different members do not share state. "shared" makes the slot space-wide; use when the slot tracks a resource shared across actors.',
-          },
-        },
-      },
-    },
-    handler: async (rawArgs) => {
-      const { key, content, scope } = (rawArgs ?? {}) as {
-        key: string;
-        content: unknown;
-        scope?: "actor" | "shared";
-      };
-      const event: RuntimeToolEvent = { type: "pinned.set", key, content };
-      if (scope !== undefined) event.scope = scope;
-      return withEvents(`Pinned slot "${key}" updated`, [event]);
-    },
-  };
-}
-
-const RUNTIME_TOOL_BUILDERS: Record<EventEmitterRuntimeTool, () => RuntimeToolDef> = {
-  log: () => buildLogDef(),
-  note: () => buildNoteDef(),
-  pin: () => buildPinDef(),
-};
-
-/**
- * Build the {@link RuntimeToolDef}s for an agent's selected runtime tools.
- * Only the pure event-emitter tools are built here — `publish_file` is
- * excluded (it needs an injected uploader; the runner builds it). Unknown
- * entries are ignored — that is the contract that keeps a manifest naming a
- * retired tool (e.g. the removed `report`) runnable; `validateManifest` drops
- * the same ids rather than rejecting the manifest. Order follows the agent's
- * selection, de-duplicated.
- */
-export function buildRuntimeToolDefs(opts: BuildRuntimeToolDefsOptions): RuntimeToolDef[] {
-  const selected: EventEmitterRuntimeTool[] = [];
-  const seen = new Set<string>();
-  for (const entry of opts.runtimeTools ?? []) {
-    if (seen.has(entry)) continue;
-    if ((EVENT_EMITTER_RUNTIME_TOOLS as readonly string[]).includes(entry)) {
-      seen.add(entry);
-      selected.push(entry as EventEmitterRuntimeTool);
-    }
-  }
-  return selected.map((name) => RUNTIME_TOOL_BUILDERS[name]());
-}
-
 // ---------------------------------------------------------------------------
 // publish_file — the one runtime tool with a side effect (HTTP upload)
 // ---------------------------------------------------------------------------
@@ -419,8 +239,8 @@ export type FileUploader = (path: string, name?: string) => Promise<PublishedFil
 
 /**
  * Build the `publish_file` runtime tool def around an injected
- * {@link FileUploader}. Unlike the pure event emitters this tool performs
- * the upload itself (via `uploader`), then surfaces the canonical
+ * {@link FileUploader}. Unlike `output` this tool performs the upload
+ * itself (via `uploader`), then surfaces the canonical
  * `file.published` event under `_meta` so ingestion persists a run_log.
  * An upload failure (cap / quota / HTTP) is returned as a tool error, never a
  * throw — the agent sees a clear message and can continue.
@@ -483,9 +303,8 @@ export function buildPublishFileDef(uploader: FileUploader): RuntimeToolDef {
 
 /**
  * Re-emit the canonical run events a runtime tool call returned under
- * {@link RUNTIME_TOOL_EVENTS_META_KEY}. Called by the host (agent-side MCP
- * bridge or the CLI's Pi wrapper) so the events land in the run's
- * single event sink. No-op when the meta key is absent or malformed.
+ * {@link RUNTIME_TOOL_EVENTS_META_KEY}. Called by the runner's Pi wrapper so
+ * the events land in the run's single event sink. No-op when the meta key is absent or malformed.
  */
 export function reEmitRuntimeToolEvents(
   meta: Record<string, unknown> | undefined,
@@ -498,9 +317,7 @@ export function reEmitRuntimeToolEvents(
       ev &&
       typeof ev === "object" &&
       typeof (ev as { type?: unknown }).type === "string" &&
-      // Trust boundary: forward only the CLOSED canonical set. A type outside
-      // it is dropped — it can only come from an untrusted upstream attempting
-      // to forge a run event.
+      // Forward only the CLOSED canonical set: a type outside it is dropped.
       CANONICAL_RUNTIME_TOOL_EVENT_TYPE_SET.has((ev as { type: string }).type)
     ) {
       emit(ev as RuntimeToolEvent);

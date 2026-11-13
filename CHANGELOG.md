@@ -513,6 +513,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   run these are tools of `@appstrate/platform`, served by the run MCP server. The
   sidecar's runtime-event journal, `GET /runtime-events`, the `RUNTIME_TOOLS_JSON`
   env var and `@appstrate/core/runtime-event-drain` are removed.
+- **`appstrate run` no longer registers `log`, `note` and `pin` as local tools**
+  (#2199). They are tools of `@appstrate/platform`; `@appstrate/core` drops
+  `buildRuntimeToolDefs` and `@appstrate/runner-pi` drops
+  `buildRuntimeToolExtensions`. The sidecar no longer strips `dev.appstrate/events`
+  from third-party tool results: no relayed result is read for that key.
 
 ### Added
 

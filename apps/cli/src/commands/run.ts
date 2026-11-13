@@ -22,7 +22,6 @@ import {
   PiRunner,
   prepareBundleForPi,
   buildApiCallExtensionFactory,
-  buildRuntimeToolExtensions,
   emitRuntimeReady,
   startSinkHeartbeat,
   type SinkHeartbeatHandle,
@@ -396,23 +395,8 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   const promptInputs = cliPromptInputs(bundle, context, runUnavailable, callableIntegrationIds);
   const systemPrompt = renderPlatformPrompt(promptInputs);
 
-  // ─── 7b. Platform runtime tools (log/note/pin) ─────────────────
-  // Selected via `manifest.runtime_tools`. With no sidecar (the CLI always
-  // runs in-process), register the shared MCP tool definitions
-  // (`@appstrate/core/runtime-tool-defs`) as Pi extensions. The default
-  // emitter writes the canonical events as stdout-JSONL, harvested by the
-  // `attachStdoutBridge` wired below into the run sink.
-  const rootManifest = bundle.packages.get(bundle.root)?.manifest;
-  const rootRuntimeTools = (rootManifest as { runtime_tools?: string[] } | undefined)
-    ?.runtime_tools;
-  const runtimeToolFactories = buildRuntimeToolExtensions({
-    ...(rootRuntimeTools ? { runtimeTools: rootRuntimeTools } : {}),
-  });
   // Its presence gives the run the `output` tool, registered by the PiRunner.
-  const outputSchema = readDeclaredOutputSchema(rootManifest);
-  if (!opts.json && runtimeToolFactories.length > 0) {
-    process.stderr.write(`→ wired ${runtimeToolFactories.length} runtime tool(s)\n`);
-  }
+  const outputSchema = readDeclaredOutputSchema(bundle.packages.get(bundle.root)?.manifest);
 
   // ─── 8. Cancellation wiring ───────────────────────────────────────
   // The CLI's central shutdown coordinator owns SIGINT/SIGTERM/SIGHUP
@@ -443,12 +427,11 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     envValue: process.env.APPSTRATE_VERBOSE,
   });
   // Stdout-JSONL bridge wiring (see `attachStdoutBridge` for the full
-  // rationale). The built-in runtime tools (`log`, `note`, `pin`)
-  // emit canonical events via
-  // `process.stdout.write(JSON+\n)`. Without the bridge these events
-  // never reach the configured sink — they're printed as raw JSON noise
-  // and lost. The bridge intercepts stdout, parses canonical events,
-  // and folds them into the runner's sink stream so:
+  // rationale). A canonical event written as
+  // `process.stdout.write(JSON+\n)` would otherwise never reach the
+  // configured sink — printed as raw JSON noise and lost. The bridge
+  // intercepts stdout, parses canonical events, and folds them into the
+  // runner's sink stream so:
   //   - `--report` mode POSTs `output.emitted` to
   //     the platform → `run_logs` populated, finalize body carries
   //     `result.output` / `result.pinned`.
@@ -574,7 +557,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       systemPrompt,
       cwd: workspaceDir,
       agentDir: path.join(workspaceDir, ".pi-agent"),
-      extensionFactories: [...apiCallFactories, ...remoteMcp.factories, ...runtimeToolFactories],
+      extensionFactories: [...apiCallFactories, ...remoteMcp.factories],
       authStoragePath: path.join(workspaceDir, ".pi-auth.json"),
       ...(outputSchema ? { outputSchema } : {}),
       ...piLoopOptions,
@@ -596,7 +579,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     // phase entirely because ES module imports are evaluated before any
     // top-level statement runs.
     const emittedRunId = reportSession?.runId ?? runId;
-    const extensionsCount = apiCallFactories.length + runtimeToolFactories.length;
+    const extensionsCount = apiCallFactories.length;
     await emitRuntimeReady(sink, emittedRunId, {
       bundleLoaded: true,
       extensions: extensionsCount,

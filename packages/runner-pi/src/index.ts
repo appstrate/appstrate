@@ -83,6 +83,4 @@ export { piToolResultOrThrow } from "./pi-tool-result.ts";
 
 export { callToolResultToPi, type RuntimeEventEmitter } from "./runtime-tools/mcp-forward.ts";
 
-export { buildRuntimeToolExtensions } from "./runtime-tools/runtime-tool-extensions.ts";
-
 export { spillResourcesToWorkspace } from "./runtime-tools/resource-spill.ts";

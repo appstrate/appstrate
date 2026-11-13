@@ -7,23 +7,18 @@
  *
  * Every tool is opt-in per agent via the manifest's top-level
  * `runtime_tools: string[]` field — none is injected by default. The editor
- * renders this catalog as a checklist and the runner filters the built-in
- * factories by the selection. `output` is not part of this catalog: the
+ * renders this catalog as a checklist. `output` is not part of this catalog: the
  * runner injects it whenever the agent declares an `output.schema`
  * (`@appstrate/core/runtime-tool-defs` `buildOutputToolDef`).
  *
  * This is the single source of truth shared by:
  *   - `@appstrate/core/validation` — the `runtime_tools` enum
  *   - the agent editor (checklist labels)
- *   - the runner (`packages/runner-pi` built-in factory filter)
  */
 
 /**
- * The pure event-emitter runtime tools: a call returns only canonical run
- * events (`log.written` / …) under `_meta`, with no
- * side-effect. These are the tools {@link buildRuntimeToolDefs} can construct
- * standalone (sidecar MCP surface + the CLI's Pi extensions) — they need no
- * injected dependency.
+ * The runtime tools served by the `@appstrate/platform` system integration
+ * (`appstrate_platform__log`, …): selectable ids with no builder in the runner.
  */
 export const EVENT_EMITTER_RUNTIME_TOOLS = ["log", "note", "pin"] as const;
 
@@ -33,11 +28,8 @@ export type EventEmitterRuntimeTool = (typeof EVENT_EMITTER_RUNTIME_TOOLS)[numbe
 /**
  * Opt-in tools selectable per agent via `manifest.runtime_tools`.
  *
- * `publish_file` is the odd one out: unlike the pure event emitters it
- * performs an HTTP upload of a workspace file to the platform, so it is built
- * with an injected uploader in the runtime entrypoint (not by
- * {@link buildRuntimeToolDefs}) — it is selectable (validation + editor) but
- * never appears in the standalone def builder.
+ * `publish_file` is the odd one out: the runner registers it whenever its host
+ * supplies an uploader, whatever the selection.
  *
  * **Canonical ids only, and there is no second list.** A retired spelling does
  * not come back here under any circumstance: it is dropped on read, and the

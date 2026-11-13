@@ -21,9 +21,8 @@ describe("runtime-tools-catalog", () => {
     expect([...SELECTABLE_RUNTIME_TOOLS]).toEqual(["log", "note", "pin", "publish_file"]);
   });
 
-  it("EVENT_EMITTER set is the three standalone-buildable emitters", () => {
-    // These are the tools `buildRuntimeToolDefs` builds standalone;
-    // The publishing tool is deliberately excluded (it needs injected dependencies).
+  it("EVENT_EMITTER set is the three tools served by the platform integration", () => {
+    // `publish_file` is excluded: the runner registers it from its uploader.
     expect([...EVENT_EMITTER_RUNTIME_TOOLS]).toEqual(["log", "note", "pin"]);
   });
 

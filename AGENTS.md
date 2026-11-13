@@ -218,7 +218,7 @@ Agent manifest splits dependency from config: version on `dependencies.integrati
 
 - Single `package_persistence` table with `(actor_type, actor_id)` scope (`member` / `end_user` / `shared`) and orthogonal `(key, pinned)` attributes
 - Three quadrants: archive (key=null, pinned=false), pinned memo (key=null, pinned=true), pinned named slot (key=string, pinned=true)
-- Write tools: `note(content, scope?)` and `pin(key, content, scope?)` are **runtime tools**, defined in `packages/core/src/runtime-tool-defs.ts` and selected per agent via `runtime_tools`. They are not packages — there is no `@appstrate/note` or `@appstrate/pin` in `system-packages/`
+- Write tools: `note(content, scope?)` and `pin(key, content, scope?)` are tools of the `@appstrate/platform` system integration, served by the run MCP server (`apps/api/src/services/run-tools-mcp.ts`), which writes at call time
 - Legacy `add-memory` / `set-checkpoint` system tools are retired; `runs.state` + `package_memories` are merged into `package_persistence`
 - Wire format: `RunResult.pinned: Record<string, PinnedSlot>` (top-level `RunResult.checkpoint` mirror was dropped)
 

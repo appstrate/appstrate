@@ -493,9 +493,7 @@ function parseWithSchema(
  * persisted before it (DB drafts, and published ZIPs which are immutable by
  * construction) keep the retired id forever. Read paths re-validate the stored
  * manifest, so a hard enum rejection there would make every such agent
- * permanently unrunnable. The runner already ignores ids it cannot build
- * ({@link buildRuntimeToolDefs} in `runtime-tool-defs.ts`); this mirrors that
- * contract for the read direction.
+ * permanently unrunnable.
  *
  * Purely structural — no Zod round-trip. Key order, unknown fields and the
  * absence of schema defaults are preserved exactly, because the version
