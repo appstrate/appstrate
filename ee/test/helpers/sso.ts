@@ -75,8 +75,11 @@ let handlers: Handler[] = [];
 export function interceptProviderFetches(): void {
   const original = globalThis.fetch;
   beforeAll(() => {
-    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      const req = new Request(input, init);
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const req =
+        typeof input === "string" || input instanceof URL
+          ? new Request(input.toString(), init)
+          : new Request(input, init);
       for (const handler of handlers) {
         const res = await handler(req);
         if (res) return res;
