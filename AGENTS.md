@@ -335,7 +335,7 @@ loudly.
 
 A migration that changes the schema also regenerates **`packages/db/schema-catalog.txt`** — the
 fingerprint of what the chain builds (columns, indexes, constraints, enum labels, and the triggers
-migrations install: every non-internal trigger of `public`, outside the `ee_*` tables, whose
+migrations install: every non-internal trigger of `public`, outside the `ee_*` and `sso_*` tables, whose
 function is not one of the `notify_*` functions the platform installs at boot; the query is
 `scripts/schema-catalog.sql`). Migrate an EMPTY Postgres 16 database with
 `bun packages/db/src/migrate.ts`, then `bun run verify:schema-catalog --write` against it, and commit

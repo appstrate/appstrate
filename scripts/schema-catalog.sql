@@ -20,6 +20,8 @@
 -- Deliberately left out:
 --   * `ee_*` tables — `@appstrate/module-ee` migrates them under its own
 --     journal (`drizzle.ee_migrations`) at init, not through `migrate.ts`;
+--   * `sso_*` tables — `@appstrate/ee` (root `ee/`) likewise, under
+--     `drizzle.appstrate_ee_migrations`;
 --   * the NOTIFY triggers — the platform installs them at boot
 --     (`packages/db/src/notify.ts`), so a migrate-only database has none. They
 --     are the triggers whose function is named `notify_*`;
@@ -38,20 +40,20 @@ SELECT line FROM (
   JOIN pg_namespace n ON n.oid = c.relnamespace
   LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
   WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND a.attnum > 0 AND NOT a.attisdropped
-    AND c.relname NOT LIKE 'ee\_%'
+    AND c.relname NOT LIKE 'ee\_%' AND c.relname NOT LIKE 'sso\_%'
   UNION ALL
   SELECT 'index ' || pg_get_indexdef(i.indexrelid)
   FROM pg_index i
   JOIN pg_class c ON c.oid = i.indrelid
   JOIN pg_namespace n ON n.oid = c.relnamespace
-  WHERE n.nspname = 'public' AND c.relname NOT LIKE 'ee\_%'
+  WHERE n.nspname = 'public' AND c.relname NOT LIKE 'ee\_%' AND c.relname NOT LIKE 'sso\_%'
   UNION ALL
   -- `pg_get_constraintdef` appends `NOT VALID` to an unvalidated constraint.
   SELECT 'constraint ' || c.relname || ' ' || con.conname || ' ' || pg_get_constraintdef(con.oid)
   FROM pg_constraint con
   JOIN pg_class c ON c.oid = con.conrelid
   JOIN pg_namespace n ON n.oid = c.relnamespace
-  WHERE n.nspname = 'public' AND c.relname NOT LIKE 'ee\_%'
+  WHERE n.nspname = 'public' AND c.relname NOT LIKE 'ee\_%' AND c.relname NOT LIKE 'sso\_%'
   UNION ALL
   SELECT 'enum ' || t.typname || ' ' || string_agg(e.enumlabel, ',' ORDER BY e.enumsortorder)
   FROM pg_type t
@@ -69,7 +71,7 @@ SELECT line FROM (
   JOIN pg_class c ON c.oid = t.tgrelid
   JOIN pg_namespace n ON n.oid = c.relnamespace
   JOIN pg_proc p ON p.oid = t.tgfoid
-  WHERE n.nspname = 'public' AND NOT t.tgisinternal AND c.relname NOT LIKE 'ee\_%'
+  WHERE n.nspname = 'public' AND NOT t.tgisinternal AND c.relname NOT LIKE 'ee\_%' AND c.relname NOT LIKE 'sso\_%'
     AND p.proname NOT LIKE 'notify\_%'
 ) catalog
 ORDER BY line COLLATE "C";
