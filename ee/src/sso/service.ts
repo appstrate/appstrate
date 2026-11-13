@@ -202,8 +202,31 @@ export async function verifyDomain(
   if (!(await markDomainVerified(domain.id, new Date()))) {
     throw conflict("domain_taken", "Another organization has already verified this domain.");
   }
-  await actor.audit({ action: "org_sso.domain_verified", after: { domain: domain.domain } });
+  // Verified under enforcement, the domain is enforced from now: its accounts
+  // come back through Microsoft like the other domains' did.
+  const enforced = (await getConnection(actor.orgId))?.enforcedAt != null;
+  const endedAccounts = enforced ? await endDomainAccess([domain.domain], actor) : 0;
+  await actor.audit({
+    action: "org_sso.domain_verified",
+    after: { domain: domain.domain, ...(enforced ? { endedAccounts } : {}) },
+  });
   return (await getDomain(actor.orgId, domainId))!;
+}
+
+/**
+ * End everything a password change ends for every account of `domains`, but
+ * the caller's own session. Idempotent, so a run cut short is finished by the
+ * next one.
+ */
+async function endDomainAccess(domains: string[], actor: Actor): Promise<number> {
+  let endedAccounts = 0;
+  for (const domain of domains) {
+    endedAccounts += await getPlatform().services.access.endForEmailDomain(
+      domain,
+      actor.sessionId ?? null,
+    );
+  }
+  return endedAccounts;
 }
 
 export async function removeDomain(actor: Actor, domainId: string): Promise<void> {
@@ -223,8 +246,8 @@ export async function removeDomain(actor: Actor, domainId: string): Promise<void
 /**
  * Enforce Microsoft sign-in for the organization's verified domains. Allowed
  * only from a session the bound tenant opened, so the owner enforcing it has
- * just proven the way in still works. Every other session of the domains'
- * accounts ends, so each one comes back through Microsoft.
+ * just proven the way in still works. The domains' accounts then lose every
+ * other session and token, so each one comes back through Microsoft.
  */
 export async function enforce(actor: Actor): Promise<{ endedAccounts: number }> {
   assertOwnerSession(actor);
@@ -244,21 +267,12 @@ export async function enforce(actor: Actor): Promise<{ endedAccounts: number }> 
   }
   if (before.enforcedAt) return { endedAccounts: 0 };
   await saveConnection(actor.orgId, { enforcedAt: new Date(), enforcedBy: actor.userId });
-  let endedAccounts = 0;
-  for (const { domain } of verified) {
-    endedAccounts += await getPlatform().services.sessions.endForEmailDomain(
-      domain,
-      actor.sessionId ?? null,
-    );
-  }
+  const domains = verified.map((d) => d.domain);
+  const endedAccounts = await endDomainAccess(domains, actor);
   await actor.audit({
     action: "org_sso.enforced",
     before: auditView(before),
-    after: {
-      ...auditView(await getConnection(actor.orgId)),
-      domains: verified.map((d) => d.domain),
-      endedAccounts,
-    },
+    after: { ...auditView(await getConnection(actor.orgId)), domains, endedAccounts },
   });
   return { endedAccounts };
 }

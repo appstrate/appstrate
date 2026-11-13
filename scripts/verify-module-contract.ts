@@ -318,7 +318,7 @@ const SERVICE_LEDGER: Record<ServiceMember, NamedLedgerEntry> = {
   setFileStorageLimit: { owners: ["module-ee"] },
   audit: { owners: ["module-ee", "enterprise"] },
   members: { owners: ["enterprise"] },
-  sessions: { owners: ["enterprise"] },
+  access: { owners: ["enterprise"] },
 };
 
 /**

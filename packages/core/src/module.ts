@@ -1637,16 +1637,18 @@ export interface PlatformServices {
     ): Promise<{ created: boolean }>;
   };
   /**
-   * Sign-in session revocation. The session table belongs to the platform's
-   * auth layer, and ending a session must run its delete hooks (back-channel
-   * logout), so a module asks rather than deletes.
+   * Access revocation. Sessions and tokens belong to the platform's auth layer
+   * and to the modules that mint tokens, and ending them must run their hooks
+   * (back-channel logout), so a module asks rather than deletes.
    */
-  sessions: {
+  access: {
     /**
-     * End every session of the platform accounts whose email address is at
-     * exactly `domain` (no subdomain), except `keepSessionId`. Accounts of an
-     * application's end-user realm are untouched. Resolves to the number of
-     * accounts whose sessions were ended.
+     * End everything a password change ends, for every platform account whose
+     * email address is at exactly `domain` (no subdomain): its sessions but
+     * `keepSessionId`, its pending sign-in links, and the tokens modules
+     * revoke on a credential change (e.g. OAuth refresh tokens, CLI tokens).
+     * Idempotent. Accounts of an application's end-user realm are untouched.
+     * Resolves to the number of accounts.
      */
     endForEmailDomain(domain: string, keepSessionId: string | null): Promise<number>;
   };

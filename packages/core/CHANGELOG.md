@@ -18,9 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`PlatformServices.members.provision(orgId, userId, role)`** (`@appstrate/core/module`): a
   module admits a person into an organization as `member` or `guest` through the platform's one
   membership door, personal space included; idempotent, an existing member keeps their role.
-- **`PlatformServices.sessions.endForEmailDomain(domain, keepSessionId)`**: ends every session of
-  the platform accounts at exactly that email domain but one, through the auth layer so its
-  session-delete hooks run.
+- **`PlatformServices.access.endForEmailDomain(domain, keepSessionId)`**: ends, for the platform
+  accounts at exactly that email domain, everything a password change ends (sessions but one,
+  pending sign-in links, the tokens modules revoke on a credential change), through the auth
+  layer so its hooks run.
 - **`BeforeSignupContext.path` and `.realm()`**: the Better Auth endpoint creating the account,
   and the audience it is about to be created in (`platform` or `end_user:<spaceId>`), resolved on
   demand.

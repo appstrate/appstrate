@@ -35,7 +35,10 @@ import { credentialChangeHook, endOtherAccessAfterCredentialChange } from "./cre
 import { hookSlot } from "./hook-slot.ts";
 import { logger } from "./logger.ts";
 
-export { CREDENTIAL_CHANGE_REVOCATION_FAILED, endOtherSessions } from "./credential-change.ts";
+export {
+  CREDENTIAL_CHANGE_REVOCATION_FAILED,
+  endOtherAccessAfterCredentialChange,
+} from "./credential-change.ts";
 
 /**
  * True when a `pending` non-expired invitation exists for `email`. Used by
