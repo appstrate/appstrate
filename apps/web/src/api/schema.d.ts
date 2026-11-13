@@ -17255,14 +17255,12 @@ export interface operations {
                      *         {
                      *           "integration_package_id": "@appstrate/gmail",
                      *           "name": "Gmail",
-                     *           "source": "own",
-                     *           "active": true
+                     *           "source": "own"
                      *         },
                      *         {
                      *           "integration_package_id": "@appstrate/clickup",
                      *           "name": "ClickUp",
-                     *           "source": "shared",
-                     *           "active": false
+                     *           "source": "shared"
                      *         }
                      *       ],
                      *       "recent_runs": [
@@ -17335,14 +17333,12 @@ export interface operations {
                             /** @description Failure message for non-success runs, when available. */
                             error?: string | null;
                         }[];
-                        /** @description Integrations the caller could attach to an agent, one entry per integration with a connection the caller may bind in the current space. The connections a call outside a run can use (`api_call`) are listed by GET /api/credential-proxy/connections. */
+                        /** @description Integrations the caller could attach to an agent. */
                         connections: {
                             integration_package_id: string;
                             name: string;
                             /** @enum {string} */
                             source: "own" | "shared" | "both";
-                            /** @description Whether the integration is active in the current space. Neither the credential proxy nor a run uses the connections of an inactive integration until someone allowed to manage the space activates it (`activatePackage`). */
-                            active: boolean;
                             /** @description The integration package's own manifest version, when known. Use it to pin a satisfiable dependencies.integrations range. */
                             version?: string;
                             /** @description AFPS §4.4 — tool(s) an agent inherits when it declares this integration without an `integrations_configuration.<id>.tools` selection. Absent or `[]` means an agent that declares this integration without its own selection ends up with nothing callable, which publish/import reject and the run aborts on — such an agent must select a tool explicitly. To use any other tool, inspect the full `tool_catalog` via GET /api/integrations/{packageId}. */

@@ -141,36 +141,6 @@ describe("formatCallerContext", () => {
     expect(out).not.toContain("Use the `@scope/name` id verbatim");
   });
 
-  it("marks an integration not activated in the space as unusable", () => {
-    const out = contextText(
-      {
-        user: { name: "Ada" },
-        org: { role: "member" },
-        connections: [
-          {
-            integration_package_id: "@acme/twilio",
-            name: "Twilio",
-            source: "own",
-            active: false,
-            default_tools: ["api_call"],
-          },
-          {
-            integration_package_id: "@acme/gmail",
-            name: "Gmail",
-            source: "own",
-            active: true,
-            default_tools: ["api_call"],
-          },
-        ],
-      },
-      BASE_OPTS,
-    );
-    expect(out).toContain(
-      "Twilio — `@acme/twilio` (own; default: api_call; not activated in this space: unusable until someone allowed to manage the space activates it)",
-    );
-    expect(out).toContain("Gmail — `@acme/gmail` (own; default: api_call)");
-  });
-
   it("renders the wildcard and empty default-tools markers", () => {
     const out = contextText(
       {

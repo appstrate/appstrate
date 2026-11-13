@@ -2505,12 +2505,6 @@ interface UsableIntegration {
   integration_package_id: string;
   name: string;
   source: "own" | "shared" | "both";
-  /**
-   * Whether the integration is active in the space ({@link resolveIntegrationActivations}). An
-   * inactive one stays listed: its connection exists, and an admin who activates the integration
-   * makes it usable.
-   */
-  active: boolean;
   /** The integration's own manifest version, so a caller pins a satisfiable range. */
   version?: string;
   /** AFPS §4.4 `default_tools`: what an agent inherits without a `tools` selection. */
@@ -2519,8 +2513,8 @@ interface UsableIntegration {
 
 /**
  * The integrations the actor could attach to an agent here, one per integration with a connection
- * it may bind ({@link usableInSpace}); `source`: own, shared, or both; `active`: whether the
- * integration is active in the space, which a call or a run through it requires.
+ * it may bind ({@link usableInSpace}) and active in the space, as a run or a proxy call requires;
+ * `source`: own, shared, or both.
  */
 export async function listUsableIntegrationsForActor(
   scope: SpaceScope,
@@ -2548,14 +2542,13 @@ export async function listUsableIntegrationsForActor(
 
   // Sorted on purpose: the chat renders this list into its system prompt, one cache block, and an
   // unordered SELECT may permute it between identical calls, invalidating the cached prefix.
-  const ids = [...acc.keys()].sort();
-  const [pkgRows, activations] = await Promise.all([
-    db
-      .select({ id: packages.id, draftManifest: packages.draftManifest })
-      .from(packages)
-      .where(inArray(packages.id, ids)),
-    resolveIntegrationActivations(ids, scope.spaceId),
-  ]);
+  const active = await listActiveIntegrationIds([...acc.keys()], scope.spaceId);
+  const ids = [...active].sort();
+  if (ids.length === 0) return [];
+  const pkgRows = await db
+    .select({ id: packages.id, draftManifest: packages.draftManifest })
+    .from(packages)
+    .where(inArray(packages.id, ids));
   const nameMap = new Map(pkgRows.map((p) => [p.id, getPackageDisplayName(p)]));
   // The integration's own version, off the selected draft manifest: a caller pinning a
   // `dependencies.integrations` range needs no guess.
@@ -2577,7 +2570,6 @@ export async function listUsableIntegrationsForActor(
       integration_package_id: integrationId,
       name: nameMap.get(integrationId) ?? integrationId,
       source,
-      active: activations.get(integrationId)!.active,
       version: versionMap.get(integrationId),
       default_tools: defaultToolsMap.get(integrationId),
     };

@@ -241,6 +241,9 @@ describe("Me API (/api/me)", () => {
         userId: ctx.user.id,
       });
 
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/gmail");
+      await seedSpacePackage(ctx.defaultSpaceId, "@ctx/clickup");
+
       const res = await app.request("/api/me/context", { headers: authHeaders(ctx) });
       expect(res.status).toBe(200);
       const body = (await res.json()) as {
@@ -259,20 +262,18 @@ describe("Me API (/api/me)", () => {
       expect(byId.has("@ctx/other-space")).toBe(false);
     });
 
-    describe("connections[].active", () => {
+    describe("connections lists only integrations active in the space", () => {
       afterEach(() => {
         __resetSystemIntegrationsForTest();
       });
 
-      async function readConnections(spaceId = ctx.defaultSpaceId) {
+      async function listedIntegrations(spaceId = ctx.defaultSpaceId) {
         const res = await app.request("/api/me/context", {
           headers: authHeaders(ctx, { "X-Space-Id": spaceId }),
         });
         expect(res.status).toBe(200);
-        const body = (await res.json()) as {
-          connections: { integration_package_id: string; active: boolean }[];
-        };
-        return new Map(body.connections.map((c) => [c.integration_package_id, c.active]));
+        const body = (await res.json()) as { connections: { integration_package_id: string }[] };
+        return body.connections.map((c) => c.integration_package_id);
       }
 
       /** An org-scope connection (serving every space of the org) of the caller. */
@@ -285,33 +286,26 @@ describe("Me API (/api/me)", () => {
           userId: ctx.user.id,
         });
 
-      it("lists an org-scope connection of an integration not activated in the space as inactive", async () => {
+      it("omits an org-scope connection where its integration is not activated", async () => {
         await seedOrgConnection("@ctx/twilio");
         const team = await seedSpace({ orgId: ctx.orgId, name: "Team" });
         await seedSpacePackage(team.id, "@ctx/twilio");
 
-        expect((await readConnections()).get("@ctx/twilio")).toBe(false);
-        expect((await readConnections(team.id)).get("@ctx/twilio")).toBe(true);
+        expect(await listedIntegrations()).toEqual([]);
+        expect(await listedIntegrations(team.id)).toEqual(["@ctx/twilio"]);
       });
 
-      it("lists the same connection as active once the integration is activated in the space", async () => {
-        await seedOrgConnection("@ctx/twilio");
-        await seedSpacePackage(ctx.defaultSpaceId, "@ctx/twilio");
-
-        expect((await readConnections()).get("@ctx/twilio")).toBe(true);
-      });
-
-      it("follows a system integration's activation: active without a row, inactive when switched off", async () => {
+      it("follows a system integration's activation: listed without a row, omitted when switched off", async () => {
         initSystemIntegrations([{ id: "@ctx/system-mail" }]);
         await seedOrgConnection("@ctx/system-mail");
 
-        expect((await readConnections()).get("@ctx/system-mail")).toBe(true);
+        expect(await listedIntegrations()).toEqual(["@ctx/system-mail"]);
 
         await seedSpacePackage(ctx.defaultSpaceId, "@ctx/system-mail", { enabled: false });
-        expect((await readConnections()).get("@ctx/system-mail")).toBe(false);
+        expect(await listedIntegrations()).toEqual([]);
       });
 
-      it("lists as active every integration GET /api/credential-proxy/connections lists", async () => {
+      it("lists the integrations GET /api/credential-proxy/connections lists", async () => {
         const manifest = (name: string) =>
           localIntegrationManifest({
             name,
@@ -333,16 +327,12 @@ describe("Me API (/api/me)", () => {
           headers: authHeaders(ctx),
         });
         expect(res.status).toBe(200);
-        const proxied = new Set(
-          ((await res.json()) as { data: { integration_package_id: string }[] }).data.map(
-            (c) => c.integration_package_id,
-          ),
-        );
-        expect([...proxied].sort()).toEqual(["@ctx/active-a", "@ctx/active-b"]);
+        const proxied = ((await res.json()) as { data: { integration_package_id: string }[] }).data
+          .map((c) => c.integration_package_id)
+          .sort();
 
-        const listed = await readConnections();
-        for (const id of proxied) expect(listed.get(id)).toBe(true);
-        expect(listed.get("@ctx/inactive")).toBe(false);
+        expect(proxied).toEqual(["@ctx/active-a", "@ctx/active-b"]);
+        expect(await listedIntegrations()).toEqual(proxied);
       });
     });
 

@@ -244,8 +244,6 @@ interface CallerContext {
         integration_package_id: string;
         name: string;
         source: string;
-        /** False = the integration is not activated in this space: no run or call can use it. */
-        active?: boolean | null;
         version?: string;
         default_tools?: readonly string[] | "*" | null;
       }[]
@@ -504,11 +502,7 @@ export function formatCallerContext(raw: unknown, opts: CallerContextOpts): Rend
     const list = ctx.connections
       .map((c) => {
         const ver = c.version ? `@${c.version}` : "";
-        const inactive =
-          c.active === false
-            ? "; not activated in this space: unusable until someone allowed to manage the space activates it"
-            : "";
-        return `${c.name} — \`${c.integration_package_id}\`${ver} (${c.source}; ${formatConnectionDefaultTools(c.default_tools)}${inactive})`;
+        return `${c.name} — \`${c.integration_package_id}\`${ver} (${c.source}; ${formatConnectionDefaultTools(c.default_tools)})`;
       })
       .join(", ");
     // Render the connected integrations as data only — the `@scope/name` id (+

@@ -887,20 +887,14 @@ export const mePaths = {
                   },
                   connections: {
                     type: "array",
-                    description:
-                      "Integrations the caller could attach to an agent, one entry per integration with a connection the caller may bind in the current space. The connections a call outside a run can use (`api_call`) are listed by GET /api/credential-proxy/connections.",
+                    description: "Integrations the caller could attach to an agent.",
                     items: {
                       type: "object",
-                      required: ["integration_package_id", "name", "source", "active"],
+                      required: ["integration_package_id", "name", "source"],
                       properties: {
                         integration_package_id: { type: "string" },
                         name: { type: "string" },
                         source: { type: "string", enum: ["own", "shared", "both"] },
-                        active: {
-                          type: "boolean",
-                          description:
-                            "Whether the integration is active in the current space. Neither the credential proxy nor a run uses the connections of an inactive integration until someone allowed to manage the space activates it (`activatePackage`).",
-                        },
                         version: {
                           type: "string",
                           description:
@@ -1045,17 +1039,11 @@ export const mePaths = {
                   personal: false,
                 },
                 connections: [
-                  {
-                    integration_package_id: "@appstrate/gmail",
-                    name: "Gmail",
-                    source: "own",
-                    active: true,
-                  },
+                  { integration_package_id: "@appstrate/gmail", name: "Gmail", source: "own" },
                   {
                     integration_package_id: "@appstrate/clickup",
                     name: "ClickUp",
                     source: "shared",
-                    active: false,
                   },
                 ],
                 recent_runs: [

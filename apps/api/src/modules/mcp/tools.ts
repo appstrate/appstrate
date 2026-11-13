@@ -1757,10 +1757,8 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
       "Return the caller's working context: identity (name, email), role in this organization, " +
       "the space the request resolved to (every list returned is scoped to it), " +
       "and the integrations the caller already has connected and could attach to an agent: one " +
-      "entry per integration with a connection the caller may bind in that space, its own or " +
-      "shared into the space. An entry with `active: false` names an integration that is not " +
-      "activated in the space: its connections serve neither a run nor `api_call` until someone " +
-      "allowed to manage the space activates it. The connections `api_call` can use are listed by " +
+      "entry per integration active in that space with a connection the caller may bind there, " +
+      "its own or shared into the space. The connections `api_call` can use are listed by " +
       "`list_connections`. Call this first to ground who you are acting for, what the " +
       "caller's role allows (operations beyond it fail at invoke time), and which integrations " +
       "to prefer when building or configuring an agent.",
