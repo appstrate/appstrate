@@ -22,8 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `buildRuntimeToolDefs` (`@appstrate/core/runtime-tool-defs`) loses its `outputSchema`
   option, and `SidecarLaunchSpec.outputSchema` (`@appstrate/core/sidecar-types`) is
   removed. **`buildOutputToolDef(outputSchema)`** builds the `output` tool from a
-  declared schema, always mandatory, and **`readDeclaredOutputSchema(manifest)`** returns
-  a manifest's non-empty `output.schema`, the condition for the tool.
+  declared schema, always mandatory; the condition for the tool is
+  `readDeclaredOutputSchema` (`@appstrate/afps-shared/output-schema`).
 
 - **BREAKING: `EnforcedChatSkill` gains the required `uri`** (`@appstrate/core/chat-contract`):
   the `skill://` URI of an enforced skill's `SKILL.md` (`null` with `content` when no version

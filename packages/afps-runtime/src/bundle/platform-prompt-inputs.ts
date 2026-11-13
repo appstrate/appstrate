@@ -33,6 +33,7 @@ import type {
 import { PI_INTEGRATIONS_DIR } from "./workspace-layout.ts";
 import { readIntegrationRefs } from "../resolvers/integration-api-call.ts";
 import { resolvePackageRef } from "../resolvers/bundle-adapter.ts";
+import { readDeclaredOutputSchema } from "@appstrate/afps-shared/output-schema";
 
 /** Plain-object narrowing used throughout the helper. */
 function isPlainObject(v: unknown): v is Record<string, unknown> {
@@ -145,7 +146,7 @@ export function buildPlatformPromptInputs(
   const available = new Set(availableIntegrationIds ?? []);
 
   const inputSchema = asPromptSchema(readSchemaSection(rootManifest, "input"));
-  const outputSchema = readSchemaSection(rootManifest, "output");
+  const outputSchema = readDeclaredOutputSchema(rootManifest);
 
   const derived: PlatformPromptOptions = {
     template: readRootPromptTemplate(bundle),

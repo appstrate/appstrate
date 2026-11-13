@@ -5,7 +5,7 @@
 --
 -- `output` is not a selectable runtime tool: the runner injects it whenever
 -- the manifest declares a non-empty `output.schema`
--- (`readDeclaredOutputSchema`, packages/core/src/runtime-tool-defs.ts), and
+-- (`readDeclaredOutputSchema`, packages/afps-shared/src/output-schema.ts), and
 -- `SELECTABLE_RUNTIME_TOOLS` does not list it. A stored manifest that still
 -- names it keeps running — the read path drops the id and reports it
 -- (`retiredRuntimeTools: "drop"`) — but every save of such a draft is refused

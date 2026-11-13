@@ -69,6 +69,7 @@ import { actorFromIds } from "../lib/actor.ts";
 import { getRunEffectiveAgent, runPinnedVersionGoneDetail } from "./run-effective-agent.ts";
 import { validateOutput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
+import { readDeclaredOutputSchema } from "@appstrate/afps-shared/output-schema";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { isInlineShadowPackageId } from "./inline-run.ts";
 import type { RunStatusChangeParams } from "@appstrate/core/module";
@@ -361,6 +362,8 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   //    let a post-kickoff schema edit flip a pinned run's outcome (false
   //    failure on a tightened draft schema, false success on a loosened one).
   const effective = await getRunEffectiveAgent(run);
+  const outputSchema =
+    effective.status === "ok" ? readDeclaredOutputSchema(effective.manifest) : undefined;
 
   // 3. Derive final status + error message. Pure computation — no DB writes
   //    before the CAS so concurrent synthesis + container-posted finalize
@@ -387,7 +390,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     // `agent_deleted` is a designed state (see `runAgentIdentity` in
     // `state/runs.ts`). Failing the run here would fabricate a verdict about
     // work that may have completed fine, so the runner's own status stands.
-  } else if (status === "success" && effective.manifest.output?.schema) {
+  } else if (status === "success" && outputSchema) {
     // Distinguish two failure shapes that both surface as a schema mismatch:
     //   1. the agent never called `output` (`result.output` is null) — the
     //      empty `{}` only fails because required fields are absent, so a bare
@@ -399,10 +402,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     // in both branches — only the error string differs.
     const outputEmitted = isPlainRecord(result.output);
     const outputRecord = isPlainRecord(result.output) ? result.output : {};
-    const validation = validateOutput(
-      outputRecord,
-      asJSONSchemaObject(effective.manifest.output.schema),
-    );
+    const validation = validateOutput(outputRecord, asJSONSchemaObject(outputSchema));
     if (!validation.valid) {
       status = "failed";
       // Every run delivers structured output through the `output` runtime

@@ -47,7 +47,7 @@ import {
 } from "@appstrate/runner-pi";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { canonicalizeRuntimeToolIds } from "@appstrate/core/runtime-tools-catalog";
-import { readDeclaredOutputSchema } from "@appstrate/core/runtime-tool-defs";
+import { readDeclaredOutputSchema } from "@appstrate/afps-shared/output-schema";
 import { SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
 import { readBundleFromFile } from "@appstrate/afps-runtime/bundle";
 import { HttpSink, attachStdoutBridge } from "@appstrate/afps-runtime/sinks";

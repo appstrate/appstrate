@@ -700,15 +700,9 @@ describe("renderPlatformPrompt", () => {
       expect(out).toContain("do not probe");
     });
 
-    it("omits the section when outputSchema is absent or empty", () => {
+    it("omits the section when outputSchema is absent", () => {
       const without = renderPlatformPrompt({ template: "T", context: ctx() });
       expect(without).not.toContain("## Output Format");
-      const withEmpty = renderPlatformPrompt({
-        template: "T",
-        context: ctx(),
-        outputSchema: {},
-      });
-      expect(withEmpty).not.toContain("## Output Format");
     });
 
     it("lists each property with type, required flag, and description", () => {

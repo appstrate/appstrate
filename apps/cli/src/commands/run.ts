@@ -29,7 +29,7 @@ import {
 } from "@appstrate/runner-pi";
 import { parsePiLoopEnv, type PiLoopOptions } from "@appstrate/runner-pi/loop-env";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { readDeclaredOutputSchema } from "@appstrate/core/runtime-tool-defs";
+import { readDeclaredOutputSchema } from "@appstrate/afps-shared/output-schema";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
 import {
   readBundleFromBuffer,

@@ -5,7 +5,6 @@ import {
   buildPublishFileDef,
   buildOutputToolDef,
   buildRuntimeToolDefs,
-  readDeclaredOutputSchema,
   CANONICAL_RUNTIME_TOOL_EVENT_TYPES,
   filePublishedEvent,
   reEmitRuntimeToolEvents,
@@ -327,27 +326,6 @@ describe("output — schema dialect and compile failure", () => {
     for (const def of [first, second]) {
       expect((await def.handler({ data: { n: "nope" } })).isError).toBe(true);
       expect((await def.handler({ data: { n: 1 } })).isError).toBeUndefined();
-    }
-  });
-});
-
-describe("readDeclaredOutputSchema", () => {
-  it("returns a non-empty `output.schema`", () => {
-    const schema = { type: "object", properties: { n: { type: "number" } } };
-    expect(readDeclaredOutputSchema({ output: { schema } })).toBe(schema);
-  });
-
-  it("returns undefined when no usable schema is declared", () => {
-    for (const manifest of [
-      undefined,
-      {},
-      { output: null },
-      { output: {} },
-      { output: { schema: {} } },
-      { output: { schema: [] } },
-      { output: { schema: "object" } },
-    ]) {
-      expect(readDeclaredOutputSchema(manifest)).toBeUndefined();
     }
   });
 });

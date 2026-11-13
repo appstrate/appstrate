@@ -2,7 +2,6 @@
 
 import type { TokenUsage } from "@appstrate/shared-types";
 import type { ResourceEntry as ToolMeta } from "@appstrate/shared-types";
-import type { JSONSchemaObject } from "@appstrate/core/form";
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import type { ResolvedModel } from "../org-models.ts";
 import type { ResolvedAgentResources } from "../run-limits.ts";
@@ -47,13 +46,8 @@ export interface AppstrateRunPlan {
   /** Raw Mustache prompt from the bundle. */
   rawPrompt: string;
   /**
-   * Output JSON Schema — becomes the input schema of the `output` runtime
-   * tool (AJV-validated at call time, re-validated at ingestion).
-   */
-  outputSchema?: JSONSchemaObject;
-  /**
    * Platform runtime tools the agent selected (`manifest.runtime_tools`):
-   * `output` / `log` / `note` / `pin`. Forwarded to the sidecar, which
+   * `log` / `note` / `pin`. Forwarded to the sidecar, which
    * hosts the selected ones as MCP tools.
    */
   runtimeTools?: string[];

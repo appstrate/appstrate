@@ -123,7 +123,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   the CLI, and the sidecar no longer hosts it (`OUTPUT_SCHEMA` is not part of
   the sidecar env). Inline runs default `runtime_tools` to `log`,
   `publish_file` and keep their open object output schema, so they keep
-  `output`.
+  `output`. The runner, the platform prompt's `## Output Format` section and
+  the output validation at finalize read the schema the same way: an empty
+  `output.schema` (`{}`) declares none.
 
 - **A model test says what it checked** (#2148). A successful model test reads
   « Credential valid — model not tested », and the `testModel` /

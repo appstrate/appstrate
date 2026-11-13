@@ -122,21 +122,6 @@ export interface BuildRuntimeToolDefsOptions {
   runtimeTools?: readonly string[];
 }
 
-/**
- * The output schema an agent manifest declares: `output.schema` when it is a
- * non-empty JSON object, `undefined` otherwise. Its presence is what gives a
- * run the `output` tool ({@link buildOutputToolDef}).
- */
-export function readDeclaredOutputSchema(manifest: unknown): Record<string, unknown> | undefined {
-  if (!isPlainRecord(manifest) || !isPlainRecord(manifest.output)) return undefined;
-  const schema = manifest.output.schema;
-  return isPlainRecord(schema) && Object.keys(schema).length > 0 ? schema : undefined;
-}
-
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function withEvents(text: string, events: RuntimeToolEvent[]): RuntimeToolResult {
   // Stamp a production-time `timestamp` on every canonical event at the single
   // point they are wrapped. Canonical run events (`log.written`, …) carry a
