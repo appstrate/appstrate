@@ -71,6 +71,7 @@ import {
 } from "../lib/integration-collection";
 import { CollectionTabs } from "./detail-tabs";
 import type { CardItem } from "../lib/package-card-item";
+import { PackageCardSkeleton } from "./package-card";
 import { CataloguePreview } from "./catalogue-preview";
 import { CatalogueMenuItems } from "./catalogue-row";
 import { CatalogueAddButton } from "./catalogue-add-button";
@@ -632,6 +633,7 @@ export function OrgCatalogueModal({
           extraFilters={discovering ? [] : [stateFilter]}
           // A package this space has not activated cannot be run from here.
           cardRun={false}
+          cardPlaceholder={<PackageCardSkeleton meta="line" keywords={false} />}
           columns={[
             selectColumn,
             ...nameColumns,

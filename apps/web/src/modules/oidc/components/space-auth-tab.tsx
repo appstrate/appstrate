@@ -27,8 +27,8 @@ import { Input } from "@appstrate/ui/components/input";
 import { FormItem } from "@/components/app-ui/form-item";
 import { OptionSelect } from "@/components/app-ui/option-select";
 import { Badge } from "@appstrate/ui/components/badge";
-import { Skeleton } from "@appstrate/ui/components/skeleton";
-import { SettingsSkeleton } from "@/components/loading-skeletons";
+import { SkeletonBadge } from "@/components/skeleton-line";
+import { FormSkeleton } from "@/components/form-skeleton";
 import { ConfirmModal } from "@/components/confirm-modal";
 import { ErrorState } from "@/components/page-states";
 import { Modal } from "@/components/modal";
@@ -445,7 +445,7 @@ function ProviderConfigSection({
           {icon}
           {title}
           {failed ? null : loading ? (
-            <Skeleton className="h-5 w-20" />
+            <SkeletonBadge className="w-24" />
           ) : configured ? (
             <Badge variant="running">{t("spaceAuth.configured")}</Badge>
           ) : (
@@ -458,7 +458,10 @@ function ProviderConfigSection({
       {failed ? (
         <ErrorState error={error} compact />
       ) : loading ? (
-        <SettingsSkeleton />
+        // The form itself, empty and inert — the shape it keeps when nothing is configured.
+        personal ? null : (
+          <FormSkeleton>{children(null)}</FormSkeleton>
+        )
       ) : personal ? (
         <div>{deleteButton}</div>
       ) : (

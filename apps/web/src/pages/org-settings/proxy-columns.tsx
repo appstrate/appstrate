@@ -86,7 +86,13 @@ export function useProxyColumns({
       header: t("proxies.col.default"),
       width: 96,
       cell: (p) =>
-        p.is_default ? <Badge variant="success">{t("models.default")}</Badge> : <CellEmpty />,
+        p.is_default ? (
+          <Badge variant="success" className="whitespace-nowrap">
+            {t("models.default")}
+          </Badge>
+        ) : (
+          <CellEmpty />
+        ),
     },
     rowActionsColumn((p: OrgProxyInfo) => {
       const isTesting = testingIds.has(p.id);

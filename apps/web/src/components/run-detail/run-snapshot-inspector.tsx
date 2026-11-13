@@ -46,6 +46,7 @@ import { readRunContext } from "../run-context";
 import { ContextGaugeReadout } from "./run-context-gauge";
 import { Fact, FactGrid } from "@appstrate/ui/components/fact-grid";
 import { OperationalStat } from "../operational-stat";
+import { SkeletonLine } from "../skeleton-line";
 import { cn } from "@appstrate/ui/cn";
 
 export function RunSnapshotInspector({
@@ -293,7 +294,7 @@ export function RunSnapshotInspector({
                   )}
                   {logsLoading ? (
                     <Fact label={t("run.usageContext")}>
-                      <Skeleton className="h-4 w-24" />
+                      <SkeletonLine className="w-24" />
                     </Fact>
                   ) : (
                     readRunContext(turns) && (
@@ -429,7 +430,7 @@ function StatGrid({ stats, loading = false }: { stats: Stat[]; loading?: boolean
             i % 2 === 0 && i === stats.length - 1 && "col-span-2",
           )}
           label={label}
-          value={busy ? <Skeleton className="h-6 w-10" /> : formatNumber(count)}
+          value={busy ? <SkeletonLine className="w-10" /> : formatNumber(count)}
           target={count > 0 ? { onClick } : undefined}
         />
       ))}
@@ -543,4 +544,87 @@ function snapshotValue(value: unknown): ReactNode {
   }
   if (value == null) return "—";
   return <JsonView data={value} />;
+}
+
+/**
+ * The run's overview while it loads (`RunDetailSkeleton`), for the common case
+ * — a finished run someone started: `RunHeaderSummary`'s line, then the cards of
+ * `RunSnapshotInspector` drawn by the same components, labels included. A run id
+ * (`run_` + a UUID) breaks over three lines in a quarter of the card.
+ */
+export function RunOverviewSkeleton() {
+  const { t } = useTranslation("agents");
+  const fact = (labelKey: string, width: string) => (
+    <Fact label={t(labelKey)}>
+      <SkeletonLine className={width} />
+    </Fact>
+  );
+  const noop = () => {};
+  return (
+    <>
+      <div className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 pb-2 text-sm">
+        <SkeletonLine className="w-72 max-w-full" />
+      </div>
+      <div className="grid items-start gap-8 xl:grid-cols-[minmax(0,2fr)_minmax(20rem,1fr)]">
+        <div className="grid min-w-0 content-start gap-6 lg:grid-cols-2">
+          <DetailSectionCard
+            title={t("run.infoExecution")}
+            icon={CirclePlay}
+            className="lg:col-span-2"
+          >
+            <FactGrid columns={4}>
+              {fact("run.sourceAgent", "w-24")}
+              {fact("run.infoVersion", "w-12")}
+              {fact("run.infoTriggerType", "w-16")}
+              {fact("run.infoTriggeredBy", "w-24")}
+              {fact("run.infoRunner", "w-20")}
+              {fact("run.infoStartedAt", "w-28")}
+              {fact("run.infoCompletedAt", "w-28")}
+              {fact("run.infoDuration", "w-12")}
+              <Fact label={t("run.infoRunId")}>
+                <SkeletonLine className="w-full" inline="font-mono" />
+                <SkeletonLine className="w-full" inline="font-mono" />
+                <SkeletonLine className="w-1/2" inline="font-mono" />
+              </Fact>
+            </FactGrid>
+          </DetailSectionCard>
+          <DetailSectionCard title={t("run.overview.activity")} icon={Activity} bodyClassName="p-0">
+            <StatGrid
+              loading
+              stats={[
+                [t("run.overview.logEvents"), 0, noop],
+                [t("run.overview.toolCalls"), 0, noop],
+                [t("run.overview.warnings"), 0, noop],
+                [t("run.overview.errors"), 0, noop],
+              ]}
+            />
+          </DetailSectionCard>
+          <DetailSectionCard title={t("run.overview.results")} icon={Trophy} bodyClassName="p-0">
+            <StatGrid
+              loading
+              stats={[
+                [t("run.overview.outputFiles"), 0, noop],
+                [t("run.overview.structuredFields"), 0, noop],
+                [t("run.overview.memoryChanges"), 0, noop],
+              ]}
+            />
+          </DetailSectionCard>
+        </div>
+        <div className="grid min-w-0 content-start gap-6">
+          <DetailSectionCard
+            title={t("run.infoUsage")}
+            icon={ChartNoAxesCombined}
+            bodyClassName="flex flex-col p-0"
+          >
+            <div className="flex-1 p-4">
+              <FactGrid columns={2}>{fact("run.usageModel", "w-28")}</FactGrid>
+            </div>
+          </DetailSectionCard>
+          <DetailSectionCard title={t("run.infoInput")} icon={FileInput}>
+            <SkeletonLine className="w-48 text-sm" />
+          </DetailSectionCard>
+        </div>
+      </div>
+    </>
+  );
 }

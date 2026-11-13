@@ -9,6 +9,7 @@ import { ManifestOverview } from "../package-manifest/manifest-overview";
 import { McpServerDetails } from "../package-manifest/mcp-server-details";
 import { readMcpServerDetails } from "../../lib/package-manifest";
 import { skillBody } from "../../lib/skill-frontmatter";
+import { SkeletonLine } from "../skeleton-line";
 
 const roleFallbackKeys = {
   skill: "packageOverview.roleFallback.skill",
@@ -114,6 +115,67 @@ export function PackageOverview({
         )}
       </div>
       <ManifestOverview manifest={manifest} />
+    </div>
+  );
+}
+
+/**
+ * `PackageOverview` while the package loads: the same cards, titles and labels,
+ * drawn by the same components — only what the package says waits, in its
+ * own line boxes. The manifest summary under the cards has no fixed shape and
+ * is left out.
+ */
+export function PackageOverviewSkeleton({
+  type,
+}: {
+  type: "skill" | "mcp-server" | "integration";
+}) {
+  const { t } = useTranslation("agents");
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="grid items-start gap-6 lg:grid-cols-2">
+        <DetailSectionCard
+          title={t("packageOverview.role")}
+          icon={type === "skill" ? BookOpen : Server}
+        >
+          <SkeletonLine className="w-3/4 text-sm" />
+        </DetailSectionCard>
+        <DetailSectionCard title={t("packageOverview.package")} icon={Tags}>
+          <FactGrid columns={2}>
+            <Fact label={t("run.infoVersion")}>
+              <SkeletonLine className="w-12" />
+            </Fact>
+            <Fact label={t("packageOverview.view")}>
+              <SkeletonLine className="w-24" />
+            </Fact>
+          </FactGrid>
+        </DetailSectionCard>
+        {type === "skill" && (
+          <DetailSectionCard title={t("packageOverview.instructions")} icon={FileCode}>
+            {/* A real SKILL.md fills the clipped `max-h-52` box. */}
+            <div className="h-52 overflow-hidden">
+              {Array.from({ length: 11 }, (_, i) => (
+                <SkeletonLine
+                  key={i}
+                  className={i % 4 === 3 ? "w-2/3 text-sm" : "w-full text-sm"}
+                />
+              ))}
+            </div>
+            <p className="text-muted-foreground mt-3 text-xs">
+              {t("packageOverview.instructionsHint")}
+            </p>
+          </DetailSectionCard>
+        )}
+        <DetailSectionCard title={t("run.infoUsage")} icon={Layers}>
+          <SkeletonLine className="w-8 text-2xl font-semibold tabular-nums" />
+          <SkeletonLine className="mt-1 w-24 text-sm" />
+        </DetailSectionCard>
+        <DetailSectionCard title={t("detail.tabFiles")} icon={FolderOpen}>
+          <p className="text-sm">
+            {t(type === "skill" ? "packageOverview.skillFiles" : "packageOverview.serverFiles")}
+          </p>
+        </DetailSectionCard>
+      </div>
     </div>
   );
 }

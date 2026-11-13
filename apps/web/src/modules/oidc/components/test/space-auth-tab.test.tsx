@@ -196,11 +196,14 @@ describe("a section whose read fails", () => {
 });
 
 describe("a section whose read is in flight", () => {
-  it("shows neither a badge nor a form", () => {
+  it("shows no badge, and its form only as an inert skeleton nothing can submit", () => {
     const { smtp, google } = renderSections({ smtp: "pending", google: "pending" });
     for (const section of [smtp, google]) {
       expect(section).not.toContain("Configuré");
-      expect(section).not.toContain("<form");
+      // The form waits drawn as itself (`FormSkeleton`): inert, hidden from assistive tech.
+      expect(section.indexOf('inert=""')).toBeGreaterThan(-1);
+      expect(section.indexOf('inert=""')).toBeLessThan(section.indexOf("<form"));
+      expect(section).toContain('aria-busy="true"');
     }
   });
 });

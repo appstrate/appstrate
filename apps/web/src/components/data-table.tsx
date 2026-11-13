@@ -26,7 +26,6 @@ import { useRef, useState, type CSSProperties, type MouseEvent, type ReactNode }
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { cn } from "@appstrate/ui/cn";
-import { Skeleton } from "@appstrate/ui/components/skeleton";
 import {
   Table,
   TableBody,
@@ -37,6 +36,7 @@ import {
 } from "@appstrate/ui/components/table";
 import { collectionVerdict, type CollectionState } from "./collection";
 import { ErrorState } from "./page-states";
+import { CellPlaceholder } from "./table-cells";
 import { identityColumnIndex } from "../lib/column-visibility";
 import { useColumnWidths } from "../stores/column-widths-store";
 
@@ -73,6 +73,11 @@ export interface DataColumn<T> {
   control?: boolean;
   /** Names the row though a read column precedes it (a run's status before the run). */
   identity?: true;
+  /**
+   * What the cell draws while the rows load: `cell`'s shape (its icon, its lines),
+   * so a loaded row stands where its placeholder did. One muted line when unset.
+   */
+  placeholder?: ReactNode;
 }
 
 interface DataTableProps<T> extends CollectionState {
@@ -392,9 +397,18 @@ export function DataTable<T>({
                   aria-hidden
                   className="border-border/60 h-12 hover:bg-transparent"
                 >
+                  {/* The data row's own cell box (`py-2`, the content wrapper), so a
+                      placeholder taller than the row grows it exactly as its cell would. */}
                   {columns.map((column) => (
-                    <TableCell key={column.id} className={cellClass(column)}>
-                      <Skeleton className="h-3.5 w-full" />
+                    <TableCell key={column.id} className={cn(cellClass(column), "py-2")}>
+                      <div
+                        className={cn(
+                          "flex min-w-0 items-center gap-1.5",
+                          column.align === "end" && "justify-end",
+                        )}
+                      >
+                        {column.placeholder ?? <CellPlaceholder />}
+                      </div>
                     </TableCell>
                   ))}
                 </TableRow>

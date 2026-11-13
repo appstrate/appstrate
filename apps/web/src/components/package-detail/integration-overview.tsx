@@ -11,8 +11,8 @@ import { packageDetailPath } from "../../lib/package-paths";
 import { integrationSettingsHref } from "../../lib/settings-section-href";
 import { isOauthAuthConnectable } from "../integration-connect/connectable-auth-keys";
 import { DetailSectionCard } from "../detail-section-card";
+import { SkeletonLine } from "../skeleton-line";
 import { OperationalStat } from "../operational-stat";
-import { Skeleton } from "@appstrate/ui/components/skeleton";
 
 export function IntegrationOverview({
   detail,
@@ -125,13 +125,13 @@ export function IntegrationOverview({
           <dl className="divide-y">
             <OperationalStat
               label={t("integration.summary.agentsCount")}
-              value={agentsLoading ? <Skeleton className="h-7 w-10" /> : (agents?.length ?? "—")}
+              value={agentsLoading ? <SkeletonLine className="w-10" /> : (agents?.length ?? "—")}
             />
             <OperationalStat
               label={t("integration.summary.agentPreview")}
               value={
                 agentsLoading ? (
-                  <Skeleton className="h-4 w-28" />
+                  <SkeletonLine className="w-28 text-sm font-medium" />
                 ) : (
                   <span
                     className="block truncate text-sm font-medium"
@@ -158,5 +158,52 @@ export function IntegrationOverview({
         </DetailSectionCard>
       </div>
     </div>
+  );
+}
+
+/**
+ * The integration's overview while it loads: its description line, then the
+ * three summary cards drawn by the same components, labels included. The health
+ * card above them only exists when something needs fixing, so it is not drawn.
+ */
+export function IntegrationOverviewSkeleton() {
+  const { t } = useTranslation("settings");
+  const value = <SkeletonLine className="w-10" />;
+  return (
+    <>
+      <SkeletonLine className="mb-6 w-1/2 text-sm" />
+      <div className="flex flex-col gap-6">
+        <div className="grid items-start gap-4 lg:grid-cols-3">
+          <DetailSectionCard
+            title={t("integration.tabs.connections")}
+            icon={Plug}
+            bodyClassName="p-0"
+          >
+            <dl className="divide-y">
+              <OperationalStat label={t("integration.summary.connections")} value={value} />
+              <OperationalStat label={t("integration.summary.reauthorize")} value={value} />
+            </dl>
+          </DetailSectionCard>
+          <DetailSectionCard
+            title={t("integration.summary.agents")}
+            icon={Layers}
+            bodyClassName="p-0"
+          >
+            <dl className="divide-y">
+              <OperationalStat label={t("integration.summary.agentsCount")} value={value} />
+              <OperationalStat
+                label={t("integration.summary.agentPreview")}
+                value={<SkeletonLine className="w-28 text-sm font-medium" />}
+              />
+            </dl>
+          </DetailSectionCard>
+          <DetailSectionCard title={t("integration.tabs.tools")} icon={Wrench} bodyClassName="p-0">
+            <dl className="divide-y">
+              <OperationalStat label={t("integration.summary.availableTools")} value={value} />
+            </dl>
+          </DetailSectionCard>
+        </div>
+      </div>
+    </>
   );
 }

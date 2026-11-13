@@ -13,6 +13,13 @@
 import { ConversationSkeleton } from "@appstrate/module-chat/conversation-skeleton";
 import { Card } from "@appstrate/ui/components/card";
 import { CardList } from "./card-list";
+import { PackageCardSkeleton } from "./package-card";
+import { AgentOverviewSkeleton } from "./agent-detail/agent-overview-tab";
+import { PackageOverviewSkeleton } from "./package-detail/package-overview";
+import { IntegrationOverviewSkeleton } from "./package-detail/integration-overview";
+import { ScheduleOverviewSkeleton } from "./schedule-overview-skeleton";
+import { RunOverviewSkeleton } from "./run-detail/run-snapshot-inspector";
+import { SkeletonBadge, SkeletonLine } from "./skeleton-line";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router-dom";
@@ -111,17 +118,22 @@ export function DetailPageSkeleton({
   title,
   trail,
   tabCount,
+  panel,
+  meta,
 }: {
   title?: string;
   trail?: readonly BreadcrumbEntry[];
   tabCount: number;
+  /** Whether the page draws a line under its title (`DetailBarSkeleton`). */
+  meta?: boolean;
+  /** The first tab's own skeleton, when the page has one; generic blocks otherwise. */
+  panel?: ReactNode;
 }) {
   return (
     <Waiting>
-      <DetailBarSkeleton title={title} trail={trail} tabCount={tabCount} />
-      <Card className="p-6">
-        <CardBlocks count={3} />
-      </Card>
+      <DetailBarSkeleton title={title} trail={trail} tabCount={tabCount} meta={meta} />
+      {/* `DetailTabPanel`'s frame. */}
+      <Card className="overflow-hidden p-6 shadow-sm">{panel ?? <CardBlocks count={3} />}</Card>
     </Waiting>
   );
 }
@@ -159,6 +171,15 @@ export function PackageDetailSkeleton({ type }: { type: PackageType }) {
       trail={[listCrumb]}
       // An agent offers four tabs, every other family three.
       tabCount={type === "agent" ? 4 : 3}
+      panel={
+        type === "agent" ? (
+          <AgentOverviewSkeleton />
+        ) : type === "integration" ? (
+          <IntegrationOverviewSkeleton />
+        ) : (
+          <PackageOverviewSkeleton type={type} />
+        )
+      }
     />
   );
 }
@@ -175,6 +196,8 @@ export function RunDetailSkeleton({ agentName }: { agentName?: string }) {
           : [listCrumb]
       }
       tabCount={3}
+      meta={false}
+      panel={<RunOverviewSkeleton />}
     />
   );
 }
@@ -186,6 +209,8 @@ export function ScheduleDetailSkeleton() {
     <DetailPageSkeleton
       trail={[{ label: t("common:nav.schedules"), href: "/schedules" }]}
       tabCount={3}
+      meta={false}
+      panel={<ScheduleOverviewSkeleton />}
     />
   );
 }
@@ -205,11 +230,18 @@ export function ListPageSkeleton({ list }: { list?: string }) {
 
 function ViewedCollectionBlocks({ list }: { list: string }) {
   const [view] = useListView(list);
-  return <CollectionBlocks cards={view === "cards"} />;
+  return <CollectionBlocks cards={view === "cards"} runnable={list === "agent"} />;
 }
 
 /** A collection under its title: `ListToolbar`, then `DataTable`'s frame, head and rows. */
-function CollectionBlocks({ cards = false }: { cards?: boolean }) {
+function CollectionBlocks({
+  cards = false,
+  runnable = false,
+}: {
+  cards?: boolean;
+  /** The cards carry a run button (agents). */
+  runnable?: boolean;
+}) {
   return (
     <>
       {/* `ListToolbar`: an `h-8` search of at most 280px, then its filter button. */}
@@ -218,7 +250,7 @@ function CollectionBlocks({ cards = false }: { cards?: boolean }) {
         <Skeleton className="h-8 w-20" />
       </div>
       {cards ? (
-        <CardGridSkeleton />
+        <CardGridSkeleton placeholder={<PackageCardSkeleton runnable={runnable} />} />
       ) : (
         <Card className="overflow-hidden">
           <div className="border-border flex h-10 items-center border-b px-3">
@@ -324,46 +356,105 @@ export function FormPageSkeleton() {
   );
 }
 
-/** The dashboard below its greeting: the figures, recent agents, the two lists. */
+/** `SectionHeading` of the dashboard: its `<h2>` and its link. */
+function DashboardSectionHeadingSkeleton() {
+  return (
+    <div className="mb-3 flex items-center justify-between gap-4">
+      <SkeletonLine className="w-36 text-base font-semibold" />
+      <SkeletonLine className="w-20 text-xs font-medium" />
+    </div>
+  );
+}
+
+/** The dashboard's `MetricCard`: label, figure, detail. */
+function MetricCardSkeleton() {
+  return (
+    <Card className="flex min-h-32 flex-col justify-between rounded-xl p-4">
+      <SkeletonLine className="w-20 text-xs font-medium" />
+      <div>
+        <SkeletonLine className="w-12 text-3xl font-semibold" />
+        <SkeletonLine className="mt-1 w-32 text-xs" />
+      </div>
+    </Card>
+  );
+}
+
+/** `RunRow`: icon, agent and date, status badge, duration. */
+function RunRowSkeleton() {
+  return (
+    <div className="flex min-h-16 items-center gap-3 px-4 py-3">
+      <Skeleton className="size-8 shrink-0 rounded-lg" />
+      <div className="min-w-0 flex-1">
+        <SkeletonLine className="w-40 text-sm font-medium" />
+        <SkeletonLine className="mt-0.5 w-28 text-xs" />
+      </div>
+      {/* `RunStatusBadge`'s own wrapper: its line box makes the row's badge column taller than the badge. */}
+      <span className="relative shrink-0">
+        <SkeletonBadge className="w-16" />
+      </span>
+      <SkeletonLine className="w-14 text-xs" />
+    </div>
+  );
+}
+
+/** The dashboard's schedule row: icon, label and agent, state badge and next run. */
+function ScheduleRowSkeleton() {
+  return (
+    <div className="flex min-h-[74px] items-center gap-3 px-4 py-3">
+      <Skeleton className="size-9 shrink-0 rounded-lg" />
+      <div className="min-w-0 flex-1">
+        <SkeletonLine className="w-36 text-sm font-medium" />
+        <SkeletonLine className="mt-0.5 w-24 text-xs" />
+      </div>
+      <div className="flex shrink-0 flex-col items-end">
+        <SkeletonBadge className="w-14" />
+        <SkeletonLine className="mt-1 w-24 text-[11px]" />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The dashboard below its greeting: the figures, recent agents, the two lists —
+ * each block built like the component it stands for, in the same layout
+ * (`DashboardContent`), so nothing moves when the data lands. Recent runs at
+ * their cap (`RecentRuns`, 7); schedules at two, their count being the data's.
+ */
 export function DashboardBodySkeleton() {
   return (
-    <Waiting>
+    <Waiting className="flex flex-col gap-8">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {Array.from({ length: 4 }, (_, i) => (
-          <Skeleton key={i} className="h-32 rounded-xl" />
+          <MetricCardSkeleton key={i} />
         ))}
       </div>
       <div>
-        <Skeleton className="mb-3 h-6 w-36" />
-        <div className="flex gap-3 overflow-hidden">
+        <DashboardSectionHeadingSkeleton />
+        <div className="flex gap-3 overflow-hidden pb-1">
           {Array.from({ length: 4 }, (_, i) => (
-            <Skeleton key={i} className="h-28 w-[19rem] shrink-0 rounded-xl" />
+            <div key={i} className="w-[19rem] shrink-0">
+              <PackageCardSkeleton runnable />
+            </div>
           ))}
         </div>
       </div>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.45fr)_minmax(20rem,0.8fr)]">
-        {/* Recent runs (`RunRow`, `min-h-16`), then upcoming schedules (`min-h-[74px]`). */}
-        {(
-          [
-            [3, "min-h-16"],
-            [2, "min-h-[74px]"],
-          ] as const
-        ).map(([rows, rowHeight], i) => (
-          <div key={i}>
-            <Skeleton className="mb-3 h-6 w-40" />
-            <CardList>
-              {Array.from({ length: rows }, (_, j) => (
-                <div key={j} className={cn("flex items-center gap-3 px-4", rowHeight)}>
-                  <Skeleton className="size-8 shrink-0 rounded-md" />
-                  <div className="flex flex-1 flex-col gap-2">
-                    <Skeleton className="h-3.5 w-1/2" />
-                    <Skeleton className="h-3 w-1/3" />
-                  </div>
-                </div>
-              ))}
-            </CardList>
-          </div>
-        ))}
+        <div className="min-w-0">
+          <DashboardSectionHeadingSkeleton />
+          <CardList>
+            {Array.from({ length: 7 }, (_, i) => (
+              <RunRowSkeleton key={i} />
+            ))}
+          </CardList>
+        </div>
+        <div className="min-w-0">
+          <DashboardSectionHeadingSkeleton />
+          <CardList>
+            {Array.from({ length: 2 }, (_, i) => (
+              <ScheduleRowSkeleton key={i} />
+            ))}
+          </CardList>
+        </div>
       </div>
     </Waiting>
   );
