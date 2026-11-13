@@ -64,6 +64,33 @@ interface LoginPageProps {
    * server uses to re-mint a fresh link. Required alongside `expUnix`.
    */
   refreshUrl?: string;
+  /**
+   * Offer the discreet emergency password sign-in (an enterprise sign-in
+   * module is loaded): owners of an organization that requires Microsoft keep
+   * it for the day Microsoft is unavailable. It submits the same form with
+   * `emergency=1`; anyone else gets the ordinary wrong-password answer.
+   */
+  emergencySignIn?: boolean;
+}
+
+/** A closed `<details>`: no script, nothing shown until it is opened. */
+function renderEmergencySignIn(action: string, csrfToken: string) {
+  return html`
+    <details class="emergency">
+      <summary>Connexion d'urgence</summary>
+      <p>
+        Réservée aux propriétaires d'une organisation qui exige Microsoft, quand Microsoft est
+        indisponible.
+      </p>
+      <form method="POST" action="${action}" autocomplete="on">
+        <input type="hidden" name="_csrf" value="${csrfToken}" />
+        <input type="hidden" name="emergency" value="1" />
+        <input type="email" name="email" placeholder="Email" required />
+        <input type="password" name="password" placeholder="Mot de passe" required />
+        <button type="submit">Connexion d'urgence</button>
+      </form>
+    </details>
+  `;
 }
 
 export function renderLoginPage(props: LoginPageProps): RawHtml {
@@ -143,6 +170,7 @@ export function renderLoginPage(props: LoginPageProps): RawHtml {
             : null
       }
     </div>
+    ${props.emergencySignIn ? renderEmergencySignIn(action, props.csrfToken) : null}
     ${google || github || microsoft ? renderSocialSignInScript() : null}
     ${expiryEnabled ? renderLoginExpiryScript() : null}
   `;

@@ -16,6 +16,8 @@ import { getAuth } from "@appstrate/db/auth";
 
 interface SignInEmailArgs {
   body: { email: string; password: string; rememberMe?: boolean };
+  /** `{ emergency: "1" }`: an owner's emergency sign-in under an organization's sign-in policy. */
+  query?: Record<string, string>;
   headers: Headers;
   request?: Request;
   asResponse?: boolean;

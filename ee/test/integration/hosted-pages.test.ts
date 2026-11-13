@@ -7,6 +7,7 @@ import { getTestApp } from "../../../apps/api/test/helpers/app.ts";
 import { truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import { flushRedis } from "../../../apps/api/test/helpers/redis.ts";
 import {
+  addOrgMember,
   authHeaders,
   createTestContext,
   createTestUser,
@@ -62,5 +63,55 @@ describe("hosted login page", () => {
       `/api/oauth/login?client_id=${encodeURIComponent(clientId)}&error=sso_tenant_mismatch`,
     );
     expect(await res.text()).toContain("compte professionnel");
+  });
+
+  describe("emergency sign-in", () => {
+    let instanceClientId: string;
+
+    beforeEach(async () => {
+      const { ensureInstanceClient } =
+        await import("../../../apps/api/src/modules/oidc/services/oauth-admin.ts");
+      instanceClientId = await ensureInstanceClient("http://localhost:3000");
+    });
+
+    async function submitEmergency(email: string, password: string) {
+      const qs = `?client_id=${encodeURIComponent(instanceClientId)}`;
+      const page = await app.request(`/api/oauth/login${qs}`);
+      const cookie = (page.headers.get("set-cookie") ?? "").split(";")[0]!;
+      const html = await page.text();
+      expect(html).toContain("Connexion d'urgence");
+      const csrf = html.match(/name="_csrf" value="([^"]+)"/)![1]!;
+      const res = await app.request(`/api/oauth/login${qs}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", cookie },
+        body: `_csrf=${encodeURIComponent(csrf)}&emergency=1&email=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`,
+      });
+      const setCookie = res.headers.get("set-cookie") ?? "";
+      return {
+        status: res.status,
+        body: res.status === 302 ? "" : await res.text(),
+        session: /better-auth\.session_token=[^;]+/.test(setCookie),
+      };
+    }
+
+    it("lets an owner of the enforcing organization in", async () => {
+      const owner = await createTestUser({ email: `owner@${DOMAIN}`, emailVerified: true });
+      await addOrgMember(ctx.orgId, owner.id, "owner");
+      const res = await submitEmergency(owner.email, "TestPassword123!");
+      expect(res.session).toBe(true);
+      expect(res.status).toBe(302);
+    });
+
+    it("answers a non-owner the same whether the password is right or wrong", async () => {
+      const member = await createTestUser({ email: `bob@${DOMAIN}`, emailVerified: true });
+      await addOrgMember(ctx.orgId, member.id, "member");
+      const right = await submitEmergency(member.email, "TestPassword123!");
+      const wrong = await submitEmergency(member.email, "not-the-password");
+      for (const res of [right, wrong]) {
+        expect(res.status).toBe(401);
+        expect(res.session).toBe(false);
+        expect(res.body).toContain("Email ou mot de passe incorrect");
+      }
+    });
   });
 });
