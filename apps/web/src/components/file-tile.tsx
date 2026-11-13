@@ -15,6 +15,7 @@ import { formatBytes } from "../lib/format-bytes";
 import { formatDateField } from "../lib/format-date";
 import { DocumentRowActions } from "./document-row-actions";
 import { ExpiryBadge, MimeIcon } from "./file-badges";
+import { SkeletonLine } from "./skeleton-line";
 
 function MimePlaceholder({ mime }: { mime: string }) {
   return (
@@ -96,6 +97,26 @@ export function FileTile({
           <span>{formatDateField(file.createdAt, "datetime")}</span>
           <ExpiryBadge expiresAt={file.expiresAt} />
         </CardDescription>
+      </CardHeader>
+    </Card>
+  );
+}
+
+/**
+ * `FileTile` while the files load: the square preview, then the header — a title
+ * row as tall as its `size-7` actions button, then the size and date line.
+ */
+export function FileTileSkeleton() {
+  return (
+    <Card className="flex flex-col overflow-hidden">
+      <CardContent className="p-0">
+        <Skeleton className="aspect-square w-full rounded-none" />
+      </CardContent>
+      <CardHeader>
+        <div className="flex min-h-7 min-w-0 items-center gap-1">
+          <SkeletonLine className="w-3/4 text-sm leading-none font-semibold" />
+        </div>
+        <SkeletonLine className="w-2/3 text-sm" />
       </CardHeader>
     </Card>
   );

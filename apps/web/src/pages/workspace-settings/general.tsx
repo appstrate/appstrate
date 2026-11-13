@@ -9,10 +9,11 @@ import { usePermissions } from "../../hooks/use-permissions";
 import { ConfirmModal } from "../../components/confirm-modal";
 import { Button } from "@appstrate/ui/components/button";
 import { Input } from "@appstrate/ui/components/input";
-import { useSpace, useUpdateSpace, useDeleteSpace } from "../../hooks/use-spaces";
+import { useSpace, useSpaces, useUpdateSpace, useDeleteSpace } from "../../hooks/use-spaces";
 import { useCurrentSpaceId } from "../../hooks/use-current-space";
 import { ErrorState, EmptyState } from "../../components/page-states";
 import { SettingsSkeleton } from "../../components/loading-skeletons";
+import { FormSkeleton } from "../../components/form-skeleton";
 import { ManualSave } from "../../components/settings/manual-save";
 import { SaveFeedback } from "../../components/settings/save-feedback";
 import { fieldWriteState } from "../../lib/field-write-state";
@@ -41,9 +42,19 @@ export function WorkspaceSettingsGeneralPage() {
   const { t } = useTranslation(["settings", "common"]);
   const spaceId = useCurrentSpaceId();
   const { data: space, isLoading, error } = useSpace(spaceId ?? "");
+  // The shell's listing already holds this space: the form waits drawn from it.
+  const { data: spaces } = useSpaces();
+  const listed = spaces?.find((row) => row.id === spaceId);
 
   if (!spaceId) return <EmptyState message={t("spaces.noSpaceSelected")} icon={AppWindow} />;
-  if (isLoading) return <SettingsSkeleton />;
+  if (isLoading)
+    return listed ? (
+      <FormSkeleton>
+        <GeneralForm spaceId={spaceId} space={listed} />
+      </FormSkeleton>
+    ) : (
+      <SettingsSkeleton />
+    );
   if (error) return <ErrorState error={error} />;
   if (!space) return <ErrorState />;
 

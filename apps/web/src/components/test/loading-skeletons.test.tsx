@@ -52,8 +52,9 @@ describe("loading skeletons", () => {
 
   it("waits as cards for a collection its reader sees as cards, as a table otherwise", () => {
     // Integrations default to cards; agents to a table.
-    expect(render(<ListPageSkeleton list="integrations" />)).toContain("h-28");
-    expect(render(<ListPageSkeleton list="agent" />)).not.toContain("h-28");
+    const cardGrid = "grid-cols-[repeat(auto-fill";
+    expect(render(<ListPageSkeleton list="integrations" />)).toContain(cardGrid);
+    expect(render(<ListPageSkeleton list="agent" />)).not.toContain(cardGrid);
   });
 
   it("draws a settings table frameless, as the panel's integrated surface does", () => {

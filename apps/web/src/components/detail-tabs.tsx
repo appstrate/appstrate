@@ -163,12 +163,15 @@ export function CollectionTabs<T extends string>({
   options,
   label,
   onChange,
+  countsPending = false,
 }: {
   value: T;
   options: CollectionTabOption<T>[];
   /** Names the tab list for screen readers. */
   label: string;
   onChange: (value: T) => void;
+  /** The counts are on their way: each tab holds a digit's room, so the bar does not widen when they land. */
+  countsPending?: boolean;
 }) {
   return (
     <Tabs value={value} onValueChange={(next) => onChange(next as T)}>
@@ -176,10 +179,19 @@ export function CollectionTabs<T extends string>({
         {options.map((option) => (
           <TabsTrigger key={option.value} value={option.value} className="h-7 px-2.5 text-sm">
             {option.label}
-            {option.count !== undefined && (
+            {option.count !== undefined ? (
               <span className="text-muted-foreground ml-1.5 text-xs tabular-nums">
                 {option.count}
               </span>
+            ) : (
+              countsPending && (
+                <span
+                  aria-hidden
+                  className="bg-muted ml-1.5 animate-pulse rounded-sm text-xs text-transparent tabular-nums"
+                >
+                  0
+                </span>
+              )
             )}
           </TabsTrigger>
         ))}

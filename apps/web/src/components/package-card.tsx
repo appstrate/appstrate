@@ -5,6 +5,9 @@ import { useTranslation } from "react-i18next";
 import { ShieldCheck } from "lucide-react";
 import { Badge as UIBadge } from "@appstrate/ui/components/badge";
 import { Card } from "@appstrate/ui/components/card";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { cn } from "@appstrate/ui/cn";
+import { SkeletonBadge, SkeletonLine } from "./skeleton-line";
 import { RunStatusBadge, MetaBadge } from "./status-badge";
 import { CountBadge } from "./count-badge";
 import { PackageIcon } from "./package-icon";
@@ -171,6 +174,52 @@ export function PackageCard({
           className="border-border relative z-10 mt-auto flex min-h-8 items-center justify-between gap-2 border-t pt-3"
         >
           {actions}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * `PackageCard` while its collection loads, at its fullest: two lines of
+ * description, a version, keywords — and, when `runnable`, the run button that
+ * makes the title row `size-7` tall.
+ */
+export function PackageCardSkeleton({
+  runnable = false,
+  meta = "version",
+  keywords = true,
+}: {
+  runnable?: boolean;
+  /** What the line under the description carries: a version badge, or a line of text (the catalogue's origin). */
+  meta?: "version" | "line";
+  /** The keyword pills under the card's body. */
+  keywords?: boolean;
+}) {
+  return (
+    <Card className="flex h-full w-full flex-col p-4">
+      <div className="flex min-w-0 gap-3">
+        <Skeleton className="size-10 shrink-0 rounded-[10px]" />
+        <div className="min-w-0 flex-1">
+          <div className={cn("flex items-center", runnable && "min-h-7")}>
+            <SkeletonLine className="w-28 text-sm font-medium" />
+          </div>
+          <SkeletonLine className="mt-0.5 w-full text-xs" />
+          <SkeletonLine className="w-2/3 text-xs" />
+          <div className="mt-2 flex min-w-0 items-center gap-2 text-xs">
+            {meta === "version" ? (
+              <SkeletonBadge className="w-14 font-mono text-[10px]" />
+            ) : (
+              <SkeletonLine className="w-36" />
+            )}
+          </div>
+        </div>
+      </div>
+      {keywords && (
+        <div className="mt-2 flex gap-1">
+          {["w-12", "w-16", "w-24"].map((width) => (
+            <SkeletonBadge key={width} className={cn(KEYWORD_PILL, width)} />
+          ))}
         </div>
       )}
     </Card>
