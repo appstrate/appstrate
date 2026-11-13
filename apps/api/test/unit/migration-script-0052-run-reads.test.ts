@@ -58,8 +58,8 @@ beforeAll(async () => {
     INSERT INTO packages (id, type) VALUES ('${AGENT}', 'agent');
     ${statuses
       .map(
-        (s, i) => `INSERT INTO runs (id, package_id, org_id, space_id, user_id, status)
-          VALUES ('${run(i)}', '${AGENT}', '${ORG}', '${SPACE}', '${ALICE}', '${s}');
+        (s, i) => `INSERT INTO runs (id, package_id, org_id, space_id, user_id, status, agent_name)
+          VALUES ('${run(i)}', '${AGENT}', '${ORG}', '${SPACE}', '${ALICE}', '${s}', 'Agent 0052');
         INSERT INTO notifications (org_id, space_id, recipient_type, recipient_id, type, run_id, payload, read_at)
           VALUES ('${ORG}', '${SPACE}', 'user', '${ALICE}', 'run_completed', '${run(i)}',
             '{"packageId":"${AGENT}","status":"${s}"}'::jsonb, ${i === 0 ? "now()" : "NULL"});`,
@@ -111,6 +111,17 @@ describe("scripts/migration/0052-run-reads.sql", () => {
     });
     const { rows } = await pg.query(`SELECT 1 FROM notifications WHERE type = 'package_shared'`);
     expect(rows).toHaveLength(1);
+  });
+
+  it("stamps the run's agent name on the run notifications it keeps", async () => {
+    const { rows } = await pg.query<{ name: string | null; has: boolean }>(
+      `SELECT payload ->> 'agent_name' AS name, payload ? 'agent_name' AS has
+       FROM notifications WHERE type = 'run_failed' ORDER BY run_id`,
+    );
+    expect(rows).toEqual([
+      { name: "Agent 0052", has: true },
+      { name: "Agent 0052", has: true },
+    ]);
   });
 
   it("changes nothing when run again", async () => {

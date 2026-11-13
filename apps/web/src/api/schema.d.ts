@@ -18984,6 +18984,8 @@ export interface operations {
                             payload: {
                                 /** @description The run's agent; null once the agent is deleted. */
                                 packageId: string | null;
+                                /** @description The agent's name as stamped on the run, for display when the agent is no longer listed (switched off in the space, deleted). */
+                                agent_name: string | null;
                                 /** @enum {string} */
                                 status: "failed" | "timeout";
                             } | null;

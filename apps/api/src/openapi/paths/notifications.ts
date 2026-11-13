@@ -42,11 +42,16 @@ function notificationOf(kind: string, payload: Record<string, unknown>) {
 const notificationObject = {
   oneOf: [
     notificationOf("run_failed", {
-      required: ["packageId", "status"],
+      required: ["packageId", "agent_name", "status"],
       properties: {
         packageId: {
           type: ["string", "null"],
           description: "The run's agent; null once the agent is deleted.",
+        },
+        agent_name: {
+          type: ["string", "null"],
+          description:
+            "The agent's name as stamped on the run, for display when the agent is no longer listed (switched off in the space, deleted).",
         },
         status: { type: "string", enum: [...runAlertStatusValues] },
       },

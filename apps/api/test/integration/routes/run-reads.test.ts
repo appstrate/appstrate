@@ -856,7 +856,7 @@ describe("Run read state (per-recipient)", () => {
         recipientType: "end_user",
         recipientId: eu.id,
         type: "run_failed",
-        payload: { packageId: null, status: "failed" },
+        payload: { packageId: null, agent_name: null, status: "failed" },
       });
       expect(await countForRecipient("end_user", eu.id)).toBe(2);
 

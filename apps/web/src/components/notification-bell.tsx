@@ -43,7 +43,7 @@ interface NotificationRow {
  */
 function notificationRow(
   notification: NotificationItem,
-  agentName: (packageId: string) => string,
+  agentName: (packageId: string) => string | undefined,
   canReach: (target: string) => boolean,
   t: TFunction<["common", "agents"]>,
 ): NotificationRow {
@@ -65,7 +65,12 @@ function notificationRow(
   const href =
     packageId && notification.runId ? `/agents/${packageId}/runs/${notification.runId}` : null;
   return {
-    title: packageId ? agentName(packageId) : t("runs.deletedAgent", { ns: "agents" }),
+    // Live name, else the one stamped on the run (agent switched off or deleted).
+    title:
+      (packageId ? agentName(packageId) : undefined) ??
+      notification.payload?.agent_name ??
+      packageId ??
+      t("runs.deletedAgent", { ns: "agents" }),
     status: notification.payload?.status ?? null,
     target: href && canReach(href) ? href : null,
   };
@@ -88,8 +93,8 @@ export function NotificationContent({
 }: {
   unread: number;
   notifications: NotificationItem[];
-  /** An agent's display name, from its package id. */
-  agentName: (packageId: string) => string;
+  /** A listed agent's display name, from its package id. */
+  agentName: (packageId: string) => string | undefined;
   canReach: (target: string) => boolean;
   onItemClick: (notificationId: string) => void;
   markAllRead: () => void;
@@ -219,7 +224,7 @@ export function NotificationBell() {
   const contentProps = {
     unread,
     notifications: notifications ?? [],
-    agentName: (packageId: string) => agentNames.get(packageId) ?? packageId,
+    agentName: (packageId: string) => agentNames.get(packageId),
     canReach,
     onItemClick: handleClick,
     markAllRead: () => markAllRead.mutate({}),

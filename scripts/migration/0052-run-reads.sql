@@ -30,6 +30,18 @@ WITH removed AS (
 )
 SELECT count(*) AS run_notifications_removed FROM removed;
 
+-- 3. A run notification carries the agent's name as stamped on its run (`runs.agent_name`), so the
+--    bell names an agent the recipient's list no longer holds. The release writes it; the rows of
+--    the previous one lack the key.
+WITH named AS (
+  UPDATE notifications n
+  SET payload = n.payload || jsonb_build_object('agent_name', r.agent_name)
+  FROM runs r
+  WHERE n.type = 'run_failed' AND r.id = n.run_id AND NOT (n.payload ? 'agent_name')
+  RETURNING 1
+)
+SELECT count(*) AS run_notifications_named FROM named;
+
 -- Every remaining run notification has its read state.
 SELECT count(*) AS run_notifications_without_read_state
 FROM notifications n

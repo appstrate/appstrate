@@ -122,7 +122,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `GET /api/agents` items carry `unread_count`, like a schedule.
   - The bell (`/api/notifications`) receives a run only when it ended `failed`
     or `timeout`, plus package shares. Opening the run reads its notification.
-    Its notification type is renamed `run_completed` → `run_failed`.
+    Its notification type is renamed `run_completed` → `run_failed`. Its payload
+    carries `agent_name`, the name stamped on the run, so the bell names an
+    agent that is switched off or deleted.
   - A scheduled run refused before it starts is now unread and notified like
     any other failed run; it used to be recorded for nobody.
   - Removed: `GET /api/notifications/unread-counts-by-agent` (use

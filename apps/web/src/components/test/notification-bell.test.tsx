@@ -30,7 +30,7 @@ function renderList(
     <NotificationContent
       unread={notifications.length}
       notifications={notifications}
-      agentName={(id) => (id === PACKAGE_ID ? "Worker" : id)}
+      agentName={(id) => (id === PACKAGE_ID ? "Worker" : undefined)}
       canReach={canReach}
       onItemClick={() => {}}
       markAllRead={() => {}}
@@ -85,14 +85,31 @@ describe("NotificationContent", () => {
         id: "n3",
         type: "run_failed",
         runId: "run_1",
-        payload: { packageId: PACKAGE_ID, status: "failed" },
+        payload: { packageId: PACKAGE_ID, agent_name: "Stamped", status: "failed" },
         read_at: null,
         createdAt: "2026-09-10T10:00:00.000Z",
       },
     ]);
 
     expect(html).toContain("Worker");
+    expect(html).not.toContain("Stamped");
     expect(html).toContain(`href="/agents/${PACKAGE_ID}/runs/run_1"`);
+  });
+
+  it("names an agent the list no longer holds by the name stamped on the run", () => {
+    const html = renderList([
+      {
+        id: "n6",
+        type: "run_failed",
+        runId: "run_3",
+        payload: { packageId: "@acme/switched-off", agent_name: "Hello World", status: "failed" },
+        read_at: null,
+        createdAt: "2026-09-10T10:00:00.000Z",
+      },
+    ]);
+
+    expect(html).toContain("Hello World");
+    expect(html).not.toContain("@acme/switched-off<");
   });
 
   // Notifications follow the session's ceiling: a caller can hold a share of a
@@ -103,7 +120,7 @@ describe("NotificationContent", () => {
         id: "n4",
         type: "run_failed",
         runId: "run_2",
-        payload: { packageId: PACKAGE_ID, status: "timeout" },
+        payload: { packageId: PACKAGE_ID, agent_name: "Stamped", status: "timeout" },
         read_at: null,
         createdAt: "2026-09-10T10:00:00.000Z",
       },

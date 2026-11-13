@@ -1520,7 +1520,7 @@ describe("Organizations API", () => {
         recipientType: "user",
         recipientId: leaver.id,
         type: "run_failed",
-        payload: { packageId: pkg.id, status: "failed" },
+        payload: { packageId: pkg.id, agent_name: null, status: "failed" },
       });
       const leaverRun = await seedRun({
         packageId: pkg.id,

@@ -57,13 +57,17 @@ function needsAttention(status: RunStatus): status is RunAlertStatus {
  */
 export async function notifyRunFinished(
   scope: SpaceScope,
-  run: { id: string; packageId: string | null; status: RunStatus },
+  run: { id: string; packageId: string | null; agentName: string | null; status: RunStatus },
   recipients: Actor[],
   executor: DbOrTx,
 ): Promise<void> {
   const { status } = run;
   if (!needsAttention(status) || recipients.length === 0) return;
-  const payload: NotificationPayloads["run_failed"] = { packageId: run.packageId, status };
+  const payload: NotificationPayloads["run_failed"] = {
+    packageId: run.packageId,
+    agent_name: run.agentName,
+    status,
+  };
   await executor
     .insert(notifications)
     .values(

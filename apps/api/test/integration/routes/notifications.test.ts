@@ -146,6 +146,8 @@ describe("Notifications feed API (per-recipient)", () => {
         });
       const failed = data.find((n) => n.type === "run_failed")!;
       expect(failed.payload?.status).toBe("failed");
+      // The name stamped on the run rides along (null when the run has none).
+      expect(failed.payload).toHaveProperty("agent_name");
       // A kind's payload does not validate under the other kind's branch.
       expect(validate({ ...failed, type: "package_shared" })).toBe(false);
       // A succeeded run is not a status the bell carries.

@@ -87,6 +87,7 @@ async function writeRunFinished(scope: SpaceScope, runId: string, executor: Tx):
       userId: runs.userId,
       endUserId: runs.endUserId,
       packageId: runs.packageId,
+      agentName: runs.agentName,
       status: runs.status,
       packageEphemeral: packages.ephemeral,
     })
@@ -118,7 +119,7 @@ async function writeRunFinished(scope: SpaceScope, runId: string, executor: Tx):
     .onConflictDoNothing();
   await notifyRunFinished(
     scope,
-    { id: runId, packageId: run.packageId, status: run.status },
+    { id: runId, packageId: run.packageId, agentName: run.agentName, status: run.status },
     recipients,
     executor,
   );

@@ -61,9 +61,13 @@ export type NotificationType = (typeof notificationTypeValues)[number];
 export const runAlertStatusValues = ["failed", "timeout"] as const satisfies readonly RunStatus[];
 export type RunAlertStatus = (typeof runAlertStatusValues)[number];
 
-/** The render-without-join payload of each kind. */
+/**
+ * The render-without-join payload of each kind. `agent_name` is the name stamped
+ * on the run (`runs.agent_name`): what the bell shows for an agent the
+ * recipient's list no longer holds (switched off in the space, deleted).
+ */
 export interface NotificationPayloads {
-  run_failed: { packageId: string | null; status: RunAlertStatus };
+  run_failed: { packageId: string | null; agent_name: string | null; status: RunAlertStatus };
   package_shared: { packageId: string; package_type: PackageType; shared_by_name: string };
 }
 
