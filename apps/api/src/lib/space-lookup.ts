@@ -32,7 +32,7 @@ export interface SpaceContextRow {
   ownerUserId: string | null;
   /** When the owner left the organization — the sweeper's window (RBAC spec §3.6). */
   orphanedAt: Date | null;
-  /** Whether the credential proxy serves calls made outside a run here (`assertCredentialProxyOpen`). */
+  /** Whether the credential proxy serves calls made outside a run here (`reachOutsideRun`). */
   credentialProxyOpen: boolean;
 }
 

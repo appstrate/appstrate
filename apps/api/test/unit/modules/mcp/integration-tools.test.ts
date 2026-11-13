@@ -21,6 +21,7 @@ import {
 } from "../../../../src/modules/mcp/tools.ts";
 import { internalDispatchHeader } from "../../../../src/lib/internal-dispatch.ts";
 import { isValidSessionId } from "../../../../src/services/credential-proxy/session.ts";
+import { executeApiCall } from "../../../../src/modules/mcp/api-call-batch.ts";
 import { registerTestPlatformApp } from "../../../helpers/platform-app.ts";
 import { noExtra, parseResult, toolsFor } from "./helpers.ts";
 
@@ -119,10 +120,19 @@ interface Fixture {
 const listingOf =
   (
     tools: Record<string, unknown>[],
-    rest: { not_ready?: Record<string, unknown>[]; unlisted?: Record<string, unknown>[] } = {},
+    rest: {
+      not_ready?: Record<string, unknown>[];
+      unlisted?: Record<string, unknown>[];
+      truncated_catalogs?: Record<string, unknown>[];
+    } = {},
   ) =>
   () =>
-    Response.json({ tools, not_ready: rest.not_ready ?? [], unlisted: rest.unlisted ?? [] });
+    Response.json({
+      tools,
+      not_ready: rest.not_ready ?? [],
+      unlisted: rest.unlisted ?? [],
+      truncated_catalogs: rest.truncated_catalogs ?? [],
+    });
 
 function makeTools(
   permissions: string[],
@@ -954,7 +964,7 @@ describe("typed tools of a remote MCP integration", () => {
     ]);
     const best = payload.best_match as { input_schema: unknown; usage: string };
     expect(best.input_schema).toEqual(inputSchema);
-    expect(best.usage).toContain("MCP server's own tool result");
+    expect(best.usage).toContain("the server's own tool result");
     expect(made.calls).toHaveLength(0);
   });
 
@@ -1025,7 +1035,8 @@ describe("typed tools of a remote MCP integration", () => {
     const result = await made.byName
       .get("call_integration_tool")!
       .handler({ tool: "acme_docs__search", arguments: { q: "invoices" } }, noExtra);
-    expect(result).toEqual(upstream);
+    // Relayed as the server answered, marked as third-party content.
+    expect(result).toEqual({ ...upstream, _meta: { "dev.appstrate/third-party": true } });
     const call = callTool(made.calls)!;
     expect(await call.json()).toEqual({
       integration_package_id: REMOTE,
@@ -1056,5 +1067,151 @@ describe("typed tools of a remote MCP integration", () => {
       .handler({ tool: "acme_docs__search", arguments: { q: "x" } }, noExtra);
     expect(result.isError).toBe(true);
     expect(parseResult(result)).toMatchObject({ code: "bad_gateway", status: 502 });
+  });
+});
+
+describe("search_integration_tools — what a search says it leaves out", () => {
+  const search = async (args: Record<string, unknown>, fixture: Fixture) => {
+    const made = makeTools(CALL_OWN, undefined, true, fixture);
+    return parseResult(await made.byName.get("search_integration_tools")!.handler(args, noExtra));
+  };
+  const named = (name: string, description = "Acme Items.") => apiCallTool({ name, description });
+
+  it("ranks a tool whose name is the query first, whatever the listing order", async () => {
+    const payload = await search(
+      { query: "acme_items__folder" },
+      { listing: listingOf([named("acme_items__folder_list"), named("acme_items__folder")]) },
+    );
+    expect((payload.best_match as { tool: string }).tool).toBe("acme_items__folder");
+  });
+
+  it("says when more tools match than are shown, naming the integration filter", async () => {
+    const tools = Array.from({ length: 4 }, (_, i) => named(`acme_items__t${i}`));
+    const payload = await search({ limit: 2 }, { listing: listingOf(tools) });
+    expect(payload.total).toBe(4);
+    expect((payload.tools as unknown[]).length).toBe(2);
+    expect(payload.note).toContain("2 more tool(s)");
+    expect(payload.note).toContain("`integration`");
+    expect((await search({}, { listing: listingOf(tools) })).note).toBeUndefined();
+  });
+
+  it("says when a server lists more tools than are read", async () => {
+    const payload = await search(
+      {},
+      {
+        listing: listingOf([named(TOOL)], {
+          truncated_catalogs: [{ integration_package_id: INTEGRATION, max_tools: 500 }],
+        }),
+      },
+    );
+    expect(payload.note).toContain(`${INTEGRATION}'s server lists more tools than the 500 read`);
+  });
+
+  it("says when the integration it filters on offers nothing", async () => {
+    const payload = await search({ integration: "@acme/empty" }, { listing: listingOf([]) });
+    expect(payload).toMatchObject({ total: 0, tools: [] });
+    expect(payload.note).toContain("@acme/empty offers you no tool");
+  });
+
+  it("lists a remote integration whose server the platform refused to list, with that refusal", async () => {
+    const refusal = { status: 429, code: "rate_limited", detail: "Too many requests." };
+    const payload = await search(
+      {},
+      {
+        listing: listingOf([named(TOOL)], {
+          unlisted: [{ integration_package_id: "@acme/docs", refusal }],
+        }),
+      },
+    );
+    expect(payload.unlisted).toEqual([{ integration: "@acme/docs", refusal }]);
+  });
+});
+
+describe("integration tools — descriptors", () => {
+  it("keeps both descriptions under the 2 048 bytes the platform allows a third-party one", () => {
+    for (const permissions of [CALL_OWN, [...CALL_OWN, "agents:run", "runs:read"]]) {
+      const { byName } = makeTools(permissions);
+      for (const name of BOTH) {
+        const bytes = new TextEncoder().encode(byName.get(name)!.descriptor.description!).length;
+        expect(bytes, name).toBeLessThan(2048);
+      }
+    }
+  });
+});
+
+describe("call_integration_tool — a result past the budget", () => {
+  const fixture: Fixture = {
+    listing: listingOf([
+      {
+        kind: "remote",
+        name: "acme_docs__search",
+        integration_package_id: "@acme/docs",
+        description: "Acme Docs.",
+        remote_name: "search",
+        input_schema: { type: "object" },
+        connections: [connection({ missing_scopes: [] })],
+      },
+    ]),
+  };
+
+  it("says the tool ran, and drops only the blocks that do not fit", async () => {
+    const big = "x".repeat(300 * 1024);
+    const upstream = {
+      content: [
+        { type: "text", text: "head" },
+        { type: "text", text: big },
+        { type: "text", text: "tail" },
+      ],
+    };
+    const made = makeTools(CALL_OWN, () => Response.json({ result: upstream }), true, fixture);
+    const result = await made.byName
+      .get("call_integration_tool")!
+      .handler({ tool: "acme_docs__search", arguments: {} }, noExtra);
+    const texts = (result.content as Array<{ text: string }>).map((block) => block.text);
+    expect(texts[0]).toBe("head");
+    expect(texts[1]).toContain("content block 1 omitted");
+    expect(texts[2]).toBe("tail");
+    expect(texts[3]).toContain("The tool ran");
+    expect(result.isError).toBeUndefined();
+    expect(result._meta).toEqual({ truncated: true, "dev.appstrate/third-party": true });
+  });
+});
+
+describe("call_integration_tool — a batch's deadline", () => {
+  it("stops sending at the deadline and keeps what was answered", async () => {
+    const calls: Request[] = [];
+    const ctx = {
+      origin: "https://test.local",
+      authHeaders: new Headers({ authorization: "Bearer tok" }),
+      dispatch: async (req: Request) => {
+        calls.push(req);
+        if (calls.length === 1) return relayedJson({ ok: true });
+        await new Promise((resolve) => {
+          req.signal.addEventListener("abort", resolve, { once: true });
+        });
+        throw req.signal.reason;
+      },
+    };
+    const outcome = await executeApiCall(
+      ctx,
+      { name: TOOL, integration: INTEGRATION, connections: [], connectionRequired: false },
+      { requests: Array.from({ length: 6 }, () => get()) as never },
+      noExtra,
+      undefined,
+      50,
+    );
+    if ("code" in outcome) throw new Error("refused");
+    const payload = parseResult(outcome.result);
+    const codes = (payload.results as Entry[]).map((entry) => entry.error?.code ?? entry.status);
+    expect(codes[0]).toBe(200);
+    expect(codes.slice(1, 4)).toEqual([
+      "no_answer_before_deadline",
+      "no_answer_before_deadline",
+      "no_answer_before_deadline",
+    ]);
+    expect(codes.slice(4)).toEqual(["not_sent", "not_sent"]);
+    expect(calls).toHaveLength(4);
+    expect(payload.note).toContain("deadline");
+    expect(outcome.result._meta).toEqual({ "dev.appstrate/third-party": true });
   });
 });

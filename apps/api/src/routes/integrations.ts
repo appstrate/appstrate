@@ -1087,7 +1087,7 @@ export function createIntegrationsRouter() {
       ...(body.connection_id ? { connectionId: body.connection_id } : {}),
       proxyReach: () => {
         assertPermission(c, "credential-proxy", "call-own");
-        return reachOutsideRun(callerPermissions(c));
+        return reachOutsideRun(callerPermissions(c), c.get("space")!);
       },
       caller: {
         apiKeyId: c.get("apiKeyId") || null,

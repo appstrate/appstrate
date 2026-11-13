@@ -434,6 +434,7 @@ export type {
 export {
   createMcpHttpClient,
   httpStatusOf,
+  jsonRpcErrorOf,
   wrapClient,
   type AppstrateMcpClient,
   type ListedSkillEntry,
@@ -463,6 +464,8 @@ export {
   sanitiseTextField,
   sanitiseToolDescriptor,
   stripForgedRuntimeEvents,
+  markThirdPartyResult,
+  isThirdPartyResult,
   MAX_TOOL_DESCRIPTION_BYTES,
   MAX_PARAMETER_DESCRIPTION_BYTES,
   MAX_SCHEMA_SERIALISED_BYTES,

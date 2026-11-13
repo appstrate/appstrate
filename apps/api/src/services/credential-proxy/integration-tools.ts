@@ -15,6 +15,7 @@
  */
 
 import {
+  allowsUndeclaredTools,
   getApiCallConfigs,
   missingScopesForConnection,
   resolveIntegrationToolCatalog,
@@ -25,13 +26,20 @@ import { allocateMcpToolName, normaliseMcpToolNamespace } from "@appstrate/core/
 import { fnv1a64Hex } from "@appstrate/afps-shared/mcp-naming";
 import type { ProblemDetail } from "@appstrate/core/api-errors";
 import { ApiError, type ResolutionFieldError } from "../../lib/errors.ts";
-import type { ProxyConnectionStatus } from "../integration-connections.ts";
+import { logger } from "../../lib/logger.ts";
+import { assertIntegrationActive, type ProxyConnectionStatus } from "../integration-connections.ts";
 import {
   connectionsOutsideRun,
   listIntegrationsOutsideRun,
   type ConnectionOutsideRun,
 } from "./integration-resolver.ts";
-import { listRemoteTools, type RemoteToolCatalog, type RemoteToolsCaller } from "./remote-tools.ts";
+import {
+  listRemoteTools,
+  MAX_LISTED_TOOLS,
+  offeredRemoteToolNames,
+  type RemoteToolCatalog,
+  type RemoteToolsCaller,
+} from "./remote-tools.ts";
 
 /** One connection a tool reaches. */
 export type ToolConnection = Omit<ConnectionOutsideRun, "integration_package_id"> & {
@@ -83,14 +91,22 @@ interface UnlistedIntegration {
   refusal: ProblemDetail;
 }
 
+/** A remote integration whose server lists more tools than are read. */
+interface TruncatedCatalog {
+  integration_package_id: string;
+  /** The tools read: the first ones the server lists. */
+  max_tools: number;
+}
+
 export interface IntegrationToolListing {
   tools: IntegrationTool[];
   not_ready: NotReadyIntegration[];
   unlisted: UnlistedIntegration[];
+  truncated_catalogs: TruncatedCatalog[];
 }
 
 interface IntegrationToolQuery {
-  /** Lists this integration alone. */
+  /** Lists this integration alone, which must be active in the space. */
   integrationId?: string;
   /**
    * Resolves the tool of this name alone: an `api_call` tool reads no server, and only the remote
@@ -198,57 +214,108 @@ async function readRemoteCatalog(
   }
 }
 
-/** The typed tools a remote integration's server offers, or the proxy's refusal to list it. */
+/** What one remote integration contributes to a listing. */
+type RemoteListing =
+  { tools: RemoteTool[]; truncated: boolean } | { unlisted: UnlistedIntegration };
+
+/**
+ * Whether `name` may be one of a remote integration's tools, its server unread: any name of its
+ * namespace when it allows undeclared tools, else one of its declared tools' names.
+ */
+function mayNameRemoteTool(
+  manifest: IntegrationManifest,
+  namespace: string,
+  name: string,
+): boolean {
+  if (!name.startsWith(`${namespace}__`)) return false;
+  if (allowsUndeclaredTools(manifest)) return true;
+  return [...offeredRemoteToolNames(manifest, undefined)].some((declared) => {
+    const plain = allocateMcpToolName(namespace, declared, () => false);
+    return name === plain || name === allocateMcpToolName(namespace, declared, (n) => n === plain);
+  });
+}
+
+/**
+ * The typed tools a remote integration's server offers, or the proxy's refusal to list it. With
+ * `name`, a refusal is kept only when that name may be one of the integration's tools, and an
+ * undeclared tool of an integration allowing them is still named when its server cannot be read.
+ */
 async function remoteTools(
   caller: RemoteToolsCaller,
-  integrationId: string,
-  namespace: string,
-  manifest: IntegrationManifest,
+  entry: { id: string; namespace: string; manifest: IntegrationManifest },
   connections: readonly ToolConnection[],
   taken: Set<string>,
-  connectionId: string | undefined,
-): Promise<RemoteTool[] | UnlistedIntegration> {
+  query: Pick<IntegrationToolQuery, "name" | "connectionId">,
+): Promise<RemoteListing> {
+  const { id: integrationId, namespace, manifest } = entry;
   let catalog: RemoteToolCatalog;
   try {
-    catalog = await readRemoteCatalog(caller, integrationId, connections, connectionId);
+    catalog = await readRemoteCatalog(caller, integrationId, connections, query.connectionId);
   } catch (err) {
     if (!(err instanceof ApiError)) throw err;
+    if (query.name !== undefined && !mayNameRemoteTool(manifest, namespace, query.name)) {
+      return { tools: [], truncated: false };
+    }
     return {
-      integration_package_id: integrationId,
-      refusal: err.toProblemDetail(caller.caller.requestId),
+      unlisted: {
+        integration_package_id: integrationId,
+        refusal: err.toProblemDetail(caller.caller.requestId),
+      },
     };
   }
   const about = manifest.display_name ?? manifest.name;
-  return catalog.tools.flatMap((upstream): RemoteTool[] => {
+  const remoteTool = (
+    name: string,
+    upstream: RemoteToolCatalog["tools"][number],
+    unreadable: boolean,
+  ): RemoteTool => ({
+    kind: "remote",
+    name,
+    integration_package_id: integrationId,
+    description: upstream.description ? `${about}. ${upstream.description}` : `${about}.`,
+    remote_name: upstream.name,
+    input_schema: upstream.input_schema,
+    ...(unreadable ? { catalog_unreadable: true as const } : {}),
+    connections: connections.map((connection) => ({
+      ...connection,
+      missing_scopes: missingScopesForConnection({
+        manifest,
+        authKey: connection.auth_key,
+        granted: connection.scopes_granted,
+        agentTools: [upstream.name],
+        agentScopes: [],
+      }),
+    })),
+  });
+  const tools = catalog.tools.flatMap((upstream): RemoteTool[] => {
     let name: string;
     try {
       name = allocateMcpToolName(namespace, upstream.name, (n) => taken.has(n));
     } catch {
+      // An unresolvable collision costs that one tool, as in a run (`McpHost`).
+      logger.warn("credential-proxy: MCP tool name collides after re-hashing, tool dropped", {
+        integrationId,
+        namespace,
+        originalName: upstream.name,
+      });
       return [];
     }
     taken.add(name);
-    return [
-      {
-        kind: "remote",
-        name,
-        integration_package_id: integrationId,
-        description: upstream.description ? `${about}. ${upstream.description}` : `${about}.`,
-        remote_name: upstream.name,
-        input_schema: upstream.input_schema,
-        ...(catalog.listed ? {} : { catalog_unreadable: true as const }),
-        connections: connections.map((connection) => ({
-          ...connection,
-          missing_scopes: missingScopesForConnection({
-            manifest,
-            authKey: connection.auth_key,
-            granted: connection.scopes_granted,
-            agentTools: [upstream.name],
-            agentScopes: [],
-          }),
-        })),
-      },
-    ];
+    return [remoteTool(name, upstream, !catalog.listed)];
   });
+  const named = query.name;
+  if (
+    named !== undefined &&
+    !catalog.listed &&
+    allowsUndeclaredTools(manifest) &&
+    named.startsWith(`${namespace}__`) &&
+    !tools.some((tool) => tool.name === named)
+  ) {
+    // Its server unread, an undeclared tool is called by the name it was given.
+    const remoteName = named.slice(namespace.length + 2);
+    tools.push(remoteTool(named, { name: remoteName, input_schema: { type: "object" } }, true));
+  }
+  return { tools, truncated: catalog.truncated };
 }
 
 /**
@@ -263,6 +330,9 @@ export async function listIntegrationTools(
   query: IntegrationToolQuery = {},
 ): Promise<IntegrationToolListing> {
   const { scope, actor, reach, connectOffers } = caller;
+  if (query.integrationId !== undefined) {
+    await assertIntegrationActive(query.integrationId, scope.spaceId);
+  }
   const [reachable, notReady] = await Promise.all([
     connectionsOutsideRun(scope, actor, reach),
     query.name === undefined
@@ -293,7 +363,7 @@ export async function listIntegrationTools(
     query.name === undefined ? tools : tools.filter((tool) => tool.name === query.name);
   const httpMatch = named([...httpTools.values()].flat());
   if (query.name !== undefined && httpMatch.length > 0) {
-    return { tools: httpMatch, not_ready: [], unlisted: [] };
+    return { tools: httpMatch, not_ready: [], unlisted: [], truncated_catalogs: [] };
   }
 
   const remote = integrations.filter(
@@ -304,27 +374,26 @@ export async function listIntegrationTools(
   const listed = new Map(
     await mapWithConcurrency(remote, LIST_CONCURRENCY, async (entry) => {
       const taken = new Set(httpTools.get(entry.id)!.map((tool) => tool.name));
-      const result = await remoteTools(
-        caller,
-        entry.id,
-        entry.namespace,
-        entry.manifest,
-        entry.connections,
-        taken,
-        query.connectionId,
-      );
+      const result = await remoteTools(caller, entry, entry.connections, taken, query);
       return [entry.id, result] as const;
     }),
   );
 
   const tools: IntegrationTool[] = [];
   const unlisted: UnlistedIntegration[] = [];
+  const truncatedCatalogs: TruncatedCatalog[] = [];
   for (const { id } of integrations) {
     tools.push(...httpTools.get(id)!);
     const result = listed.get(id);
     if (result === undefined) continue;
-    if (Array.isArray(result)) tools.push(...result);
-    else unlisted.push(result);
+    if ("unlisted" in result) {
+      unlisted.push(result.unlisted);
+      continue;
+    }
+    tools.push(...result.tools);
+    if (result.truncated) {
+      truncatedCatalogs.push({ integration_package_id: id, max_tools: MAX_LISTED_TOOLS });
+    }
   }
   return {
     tools: named(tools),
@@ -342,5 +411,6 @@ export async function listIntegrationTools(
           : [],
     ),
     unlisted,
+    truncated_catalogs: query.name === undefined ? truncatedCatalogs : [],
   };
 }

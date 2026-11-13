@@ -9,7 +9,13 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { connectionCalls, integrationConnections, spaces } from "@appstrate/db/schema";
+import {
+  connectionCalls,
+  integrationConnections,
+  spacePackages,
+  spaces,
+} from "@appstrate/db/schema";
+import { fnv1a64Hex } from "@appstrate/afps-shared/mcp-naming";
 import { clearAllCachesLocally } from "@appstrate/core/cache";
 import { forgetProtocolEras } from "@appstrate/mcp-transport/testing";
 import type { IntegrationManifest } from "@appstrate/core/integration";
@@ -25,7 +31,11 @@ import {
   seedProxyIntegration,
 } from "../../helpers/credential-proxy-fixtures.ts";
 import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
-import { startFakeMcpServer, type FakeMcpServer } from "../../helpers/fake-mcp-server.ts";
+import {
+  startFakeMcpServer,
+  type FakeMcpServer,
+  type FakeMcpServerOptions,
+} from "../../helpers/fake-mcp-server.ts";
 
 const TOKEN = "tok-live-123";
 const ID = "@acme/docs";
@@ -127,6 +137,7 @@ interface ListedTool {
 }
 interface Listing {
   tools: ListedTool[];
+  truncated_catalogs: { integration_package_id: string; max_tools: number }[];
   unlisted: {
     integration_package_id: string;
     refusal: { status: number; code: string; detail: string };
@@ -586,5 +597,238 @@ describe("the typed tools of a remote MCP integration", () => {
     expect((await list({ integration_id: ID })).status).toBe(400);
     expect((await list({ connection_id: "not-a-uuid" })).status).toBe(400);
     expect(server.requests).toEqual([]);
+  });
+
+  /** Runs `use` against another fake server, bearer `TOKEN`, stopped afterwards. */
+  const withServer = async (
+    opts: FakeMcpServerOptions,
+    use: (other: FakeMcpServer) => Promise<void>,
+  ) => {
+    const other = startFakeMcpServer({ bearer: TOKEN, ...opts });
+    try {
+      await use(other);
+    } finally {
+      other.stop();
+    }
+  };
+  const on = (other: FakeMcpServer, extra: Record<string, unknown> = {}): IntegrationManifest =>
+    ({
+      ...remote({ url: other.url, authorizedUris: [`${other.origin}/**`] }),
+      ...extra,
+    }) as IntegrationManifest;
+
+  it("answers 404 for an integration switched off in the space, its catalog cached or not", async () => {
+    await seedProxyIntegration(ctx, remote());
+    await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+    expect((await list({ integration_package_id: ID })).remote).toHaveLength(3);
+    const exchanges = server.requests.length;
+    await db.update(spacePackages).set({ enabled: false }).where(eq(spacePackages.packageId, ID));
+
+    const listed = await list({ integration_package_id: ID });
+    expect(listed.status).toBe(404);
+    const called = await post("call", { integration_package_id: ID, name: "search" });
+    expect(called.status).toBe(404);
+    // Neither the warm cache nor the server answered.
+    expect(server.requests.length).toBe(exchanges);
+    // Unfiltered, the listing leaves it out.
+    expect((await list()).body.tools).toEqual([]);
+  });
+
+  it("offers no connect link for an integration switched off in the space", async () => {
+    await seedProxyIntegration(ctx, remote());
+    const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+    await db
+      .update(integrationConnections)
+      .set({ needsReconnection: true })
+      .where(eq(integrationConnections.id, connectionId));
+    await db.update(spacePackages).set({ enabled: false }).where(eq(spacePackages.packageId, ID));
+    const connectKey = (
+      await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes: ["credential-proxy:call-own", "integrations:connect"],
+      })
+    ).rawKey;
+
+    const res = await post("call", { integration_package_id: ID, name: "search" }, connectKey, {
+      "X-Appstrate-Connect-Offers": "1",
+    });
+    expect(res.status).toBe(404);
+    expect(JSON.stringify(await res.json())).not.toContain("connect_url");
+  });
+
+  it("reads at most 500 tools of a server and says so, dropping a name longer than MCP's bound", async () => {
+    const many = Array.from({ length: 501 }, (_, i) => `t${i}`);
+    await withServer(
+      { tools: [`x${"y".repeat(200)}`, ...many], pageSize: 100, era: "modern" },
+      async (other) => {
+        await seedProxyIntegration(ctx, on(other, { allow_undeclared_tools: true }));
+        await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+        const { status, body, remote: tools } = await list();
+        expect(status).toBe(200);
+        expect(tools).toHaveLength(500);
+        expect(tools.some((tool) => tool.remote_name!.length > 128)).toBe(false);
+        expect(body.truncated_catalogs).toEqual([{ integration_package_id: ID, max_tools: 500 }]);
+      },
+    );
+  });
+
+  it("lists a shared catalog under its own deadline, whoever leaves first", async () => {
+    await withServer({ tools: ["search"], delayMs: 150 }, async (other) => {
+      await seedProxyIntegration(ctx, on(other, { tools_policy: { search: {} } }));
+      await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+      const request = (signal?: AbortSignal) =>
+        getTestApp().request(
+          new Request("http://localhost/api/credential-proxy/tools", {
+            headers: {
+              Authorization: `Bearer ${apiKey}`,
+              "X-Org-Id": ctx.orgId,
+              "X-Space-Id": ctx.defaultSpaceId,
+            },
+            ...(signal ? { signal } : {}),
+          }),
+        );
+      const leaving = new AbortController();
+      const first = Promise.resolve(request(leaving.signal)).catch(() => null);
+      const second = request();
+      await Bun.sleep(50);
+      leaving.abort();
+      await first;
+      const body = (await (await second).json()) as Listing;
+      expect(body.tools.map((tool) => [tool.remote_name, tool.catalog_unreadable])).toEqual([
+        ["search", undefined],
+      ]);
+    });
+  });
+
+  it("lists and calls the tools of two integrations whose namespaces normalise alike", async () => {
+    const outlook = "@appstrate/microsoft-outlook";
+    const teams = "@appstrate/microsoft-teams";
+    for (const id of [outlook, teams]) {
+      await seedProxyIntegration(ctx, { ...remote(), name: id } as IntegrationManifest);
+      await seedProxyConnection(ctx, id, "api_key", { token: TOKEN });
+    }
+    // Both normalise to `appstrate_microsoft_` (its trailing `_` kept): each takes its id's hash.
+    const nameOf = (id: string) => `appstrate_microsoft__${fnv1a64Hex(id).slice(0, 6)}__search`;
+
+    const { remote: tools } = await list();
+    expect(
+      tools
+        .filter((tool) => tool.remote_name === "search")
+        .map((tool) => tool.name)
+        .sort(),
+    ).toEqual([nameOf(outlook), nameOf(teams)].sort());
+    for (const id of [outlook, teams]) {
+      // What call_integration_tool resolves a name with, then calls.
+      const resolved = await list({ name: nameOf(id) });
+      expect(
+        resolved.body.tools.map((t) => [
+          t.name,
+          (t as { integration_package_id?: string }).integration_package_id,
+        ]),
+      ).toEqual([[nameOf(id), id]]);
+      const res = await post("call", { integration_package_id: id, name: "search", arguments: {} });
+      expect(res.status).toBe(200);
+    }
+  });
+
+  describe("a name resolved while its server cannot be listed", () => {
+    const closed = "http://127.0.0.1:9/mcp";
+    const unreachable = (extra: Record<string, unknown> = {}) =>
+      ({
+        ...remote({ url: closed, authorizedUris: ["http://127.0.0.1:9/**"] }),
+        ...extra,
+      }) as IntegrationManifest;
+
+    it("still names an undeclared tool of an integration allowing them, and calling it says the server failed", async () => {
+      await seedProxyIntegration(ctx, unreachable({ allow_undeclared_tools: true }));
+      await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+      const { body } = await list({ name: "acme_docs__other" });
+      expect(body.tools).toEqual([
+        expect.objectContaining({
+          name: "acme_docs__other",
+          remote_name: "other",
+          catalog_unreadable: true,
+        }),
+      ]);
+      const res = await post("call", { integration_package_id: ID, name: "other" });
+      expect(res.status).toBe(502);
+    });
+
+    it("keeps a listing refusal only for a name that may be one of the integration's tools", async () => {
+      // A server URL the connection's variables do not render: the proxy refuses to list it.
+      await seedProxyIntegration(
+        ctx,
+        remote({
+          url: `{$variable.base_url}/mcp`,
+          authorizedUris: ["{$variable.base_url}/**"],
+          variables: {
+            schema: {
+              type: "object",
+              properties: { base_url: { type: "string" } },
+              required: ["base_url"],
+            },
+          },
+        }),
+      );
+      await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+      const declared = await list({ name: "acme_docs__search" });
+      expect(declared.body.unlisted.map((entry) => entry.refusal.code)).toEqual([
+        "remote_url_unrenderable",
+      ]);
+      const wrong = await list({ name: "acme_docs__nope" });
+      expect(wrong.body.tools).toEqual([]);
+      expect(wrong.body.unlisted).toEqual([]);
+    });
+  });
+
+  it("says a tool ran but answered past the exchange bound, rather than that it did not answer", async () => {
+    const huge = "x".repeat(3 * 1024 * 1024);
+    await withServer(
+      { tools: [{ name: "search", result: { content: [{ type: "text", text: huge }] } }] },
+      async (other) => {
+        await seedProxyIntegration(ctx, on(other));
+        await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+        const res = await post("call", { integration_package_id: ID, name: "search" });
+        expect(res.status).toBe(502);
+        const problem = (await res.json()) as { code: string; detail: string };
+        expect(problem.code).toBe("upstream_response_too_large");
+        expect(problem.detail).toContain("the tool ran");
+      },
+    );
+  });
+
+  it("answers a server's JSON-RPC error with its code and message", async () => {
+    await withServer({ tools: ["search"], era: "modern" }, async (other) => {
+      await seedProxyIntegration(ctx, on(other, { allow_undeclared_tools: true }));
+      await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+      const res = await post("call", { integration_package_id: ID, name: "missing" });
+      expect(res.status).toBe(502);
+      const problem = (await res.json()) as {
+        code: string;
+        mcp_error: { code: number; message: string };
+      };
+      expect(problem.code).toBe("upstream_mcp_error");
+      expect(problem.mcp_error.code).toBe(-32602);
+      expect(problem.mcp_error.message).toContain("Unknown tool");
+    });
+  });
+
+  it("rate-limits the connections listing like the other proxy routes", async () => {
+    const res = await getTestApp().request("/api/credential-proxy/connections", {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-Org-Id": ctx.orgId,
+        "X-Space-Id": ctx.defaultSpaceId,
+      },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("RateLimit-Policy")).toBeTruthy();
   });
 });

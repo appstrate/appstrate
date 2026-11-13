@@ -707,6 +707,7 @@ export const credentialProxyPaths = {
             "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
           },
         },
+        "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
   },
@@ -746,7 +747,9 @@ export const credentialProxyPaths = {
           name: "integration_package_id",
           in: "query",
           required: false,
-          description: "Lists the tools of this integration alone (`@scope/name`).",
+          description:
+            "Lists the tools of this integration alone (`@scope/name`); `404` when it is not " +
+            "active in the space.",
           schema: { type: "string", minLength: 1 },
         },
         {
@@ -777,7 +780,7 @@ export const credentialProxyPaths = {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["tools", "not_ready", "unlisted"],
+                required: ["tools", "not_ready", "unlisted", "truncated_catalogs"],
                 additionalProperties: false,
                 properties: {
                   tools: { type: "array", items: integrationToolSchema },
@@ -791,6 +794,21 @@ export const credentialProxyPaths = {
                       properties: {
                         integration_package_id: { type: "string" },
                         refusal: { $ref: "#/components/schemas/ProblemDetail" },
+                      },
+                    },
+                  },
+                  truncated_catalogs: {
+                    type: "array",
+                    description:
+                      "The remote integrations whose server lists more tools than are read: only " +
+                      "its first `max_tools` are listed. Empty when `name` is given.",
+                    items: {
+                      type: "object",
+                      required: ["integration_package_id", "max_tools"],
+                      additionalProperties: false,
+                      properties: {
+                        integration_package_id: { type: "string" },
+                        max_tools: { type: "integer" },
                       },
                     },
                   },
@@ -810,6 +828,7 @@ export const credentialProxyPaths = {
             "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
           },
         },
+        "404": { $ref: "#/components/responses/NotFound" },
         "429": { $ref: "#/components/responses/RateLimited" },
       },
     },
@@ -920,7 +939,12 @@ export const credentialProxyPaths = {
         },
         "429": { $ref: "#/components/responses/RateLimited" },
         "502": {
-          description: "The MCP server failed the exchange or refused the connection's credential.",
+          description:
+            "`bad_gateway` — the MCP server failed the exchange or refused the connection's " +
+            "credential; `upstream_mcp_error` — it answered a JSON-RPC error " +
+            "(`mcp_error: { code, message }`, its message untrusted text); " +
+            "`upstream_response_too_large` — the tool ran, but its answer exceeds the exchange " +
+            "bound.",
           content: {
             "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
           },

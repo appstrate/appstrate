@@ -8,7 +8,7 @@
 
 import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
+import { markThirdPartyResult, type AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { isPlatformRequestHeader } from "@appstrate/connect/platform-request-headers";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { isTextShapedContentType } from "@appstrate/core/mime";
@@ -59,6 +59,11 @@ export interface ToolCallOutcome {
 const MAX_REQUESTS = 50;
 /** Requests in flight: the sidecar's own `api_call` fan-out. */
 const CONCURRENCY = 3;
+/**
+ * What one batch may take, below an MCP client's 60 s request timeout: past it nothing more is
+ * sent, and a request still in flight is abandoned.
+ */
+const BATCH_DEADLINE_MS = 45_000;
 /** Default cap on one text body: the sidecar's inline budget for a tool output (~8 000 tokens). */
 const DEFAULT_MAX_RESPONSE_BYTES = 32 * 1024;
 /**
@@ -180,9 +185,13 @@ interface PreparedCall {
   body?: Uint8Array<ArrayBuffer>;
 }
 
-/** What one dispatch came back with: the upstream's response, or the proxy's own answer. */
+/**
+ * What one dispatch came back with: the upstream's response, the proxy's own answer, or none
+ * before the batch's deadline (`sent`: it was dispatched, and may have run).
+ */
 type Outcome =
   | { error: Record<string, unknown> }
+  | { deadline: { sent: boolean } }
   | {
       status: number;
       headers: Record<string, string>;
@@ -343,14 +352,29 @@ function projectOutcomes(outcomes: readonly Outcome[]): {
   results: Record<string, unknown>[];
   failed: number;
   budgetSpent: boolean;
+  deadlineReached: boolean;
 } {
   let budget = MAX_RESULT_BYTES;
   let failed = 0;
   let budgetSpent = false;
+  let deadlineReached = false;
   const results = outcomes.map((outcome, index): Record<string, unknown> => {
     if ("error" in outcome) {
       failed += 1;
       return { index, error: outcome.error };
+    }
+    if ("deadline" in outcome) {
+      failed += 1;
+      deadlineReached = true;
+      return {
+        index,
+        error: outcome.deadline.sent
+          ? {
+              code: "no_answer_before_deadline",
+              detail: "Sent, but not answered before the batch's deadline: it may have run.",
+            }
+          : { code: "not_sent", detail: "Not sent: the batch reached its deadline first." },
+      };
     }
     if (outcome.status >= 400) failed += 1;
     const entry = {
@@ -385,7 +409,7 @@ function projectOutcomes(outcomes: readonly Outcome[]): {
     }
     return { ...entry, body, ...(truncated ? { truncated: true } : {}) };
   });
-  return { results, failed, budgetSpent };
+  return { results, failed, budgetSpent, deadlineReached };
 }
 
 export const API_CALL_DESCRIPTION =
@@ -411,7 +435,10 @@ export const API_CALL_USAGE =
   "`call_permission_required`, `credential_not_found`, `must_choose_connection` (retry with one " +
   "`errors[0].candidate_connections[].id` as `connection_id`), " +
   "`connection_not_in_org_default`, `pinned_connection_unavailable`, `needs_reconnection`, " +
-  "`unauthorized_target`, `rate_limited`. A `detail` naming `X-Connection-Id` means " +
+  "`unauthorized_target`, `rate_limited`. A batch has " +
+  `${BATCH_DEADLINE_MS / 1000} s: past it, an entry's \`error\` is \`not_sent\` (repeat it) or ` +
+  "`no_answer_before_deadline` (sent, and may have run: check before repeating a write). A " +
+  "`detail` naming `X-Connection-Id` means " +
   "`connection_id`. The result is an error only when no request got a successful answer. Pass " +
   "its `session_id` to a later call to keep the upstream's cookies.";
 
@@ -436,6 +463,7 @@ export async function executeApiCall(
   args: ApiCallArguments,
   extra: AppstrateRequestExtra,
   defaultConnectionId: string | undefined,
+  deadlineMs: number = BATCH_DEADLINE_MS,
 ): Promise<ToolCallOutcome | Refusal> {
   const { requests } = args;
   // The proxy's cookie-jar session: a fresh one unless the caller continues a previous call's.
@@ -480,12 +508,16 @@ export async function executeApiCall(
   }
 
   const signal: AbortSignal | undefined = extra.signal;
-  const outcomes = await mapWithConcurrency(calls, CONCURRENCY, (prepared) => {
-    // An abort sends nothing more and fails the call.
+  const deadline = AbortSignal.timeout(deadlineMs);
+  const bounded = signal ? AbortSignal.any([signal, deadline]) : deadline;
+  const outcomes = await mapWithConcurrency(calls, CONCURRENCY, async (prepared) => {
+    // The caller's abort sends nothing more and fails the call; the deadline only stops sending.
     signal?.throwIfAborted();
+    if (deadline.aborted) return { deadline: { sent: false } } satisfies Outcome;
     // One request failing below the proxy's own error handling must not lose the others.
-    return dispatchCall(ctx, prepared, signal).catch((err: unknown): Outcome => {
+    return dispatchCall(ctx, prepared, bounded).catch((err: unknown): Outcome => {
       if (signal?.aborted) throw err;
+      if (deadline.aborted) return { deadline: { sent: true } };
       logger.error("mcp: call_integration_tool dispatch failed", {
         error: err instanceof Error ? err.name : typeof err,
       });
@@ -494,21 +526,32 @@ export async function executeApiCall(
       };
     });
   });
-  const { results, failed, budgetSpent } = projectOutcomes(outcomes);
+  const { results, failed, budgetSpent, deadlineReached } = projectOutcomes(outcomes);
+  const notes = [
+    ...(budgetSpent
+      ? [
+          `The result's ${MAX_RESULT_BYTES}-byte body budget ran out: later bodies are cut. ` +
+            "Every request answered was sent: repeat only the reads, in a smaller batch.",
+        ]
+      : []),
+    ...(deadlineReached
+      ? [
+          `The batch reached its ${deadlineMs / 1000} s deadline: the entries answered are ` +
+            "kept, `not_sent` ones were never sent, `no_answer_before_deadline` ones may have run.",
+        ]
+      : []),
+  ];
   const result = jsonResult(
     {
       session_id: sessionId,
       results,
-      ...(budgetSpent
-        ? {
-            note:
-              `The result's ${MAX_RESULT_BYTES}-byte body budget ran out: later bodies are ` +
-              "cut. Every request was sent: repeat only the reads, in a smaller batch.",
-          }
-        : {}),
+      ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
     },
     // An error only when no request got a successful answer.
     failed === results.length,
   );
-  return { result, shownCount: results.length };
+  // An upstream's answer is its own text. A result holding only the platform's refusals keeps
+  // their connect links readable as offers.
+  const relayed = results.some((entry) => "status" in entry);
+  return { result: relayed ? markThirdPartyResult(result) : result, shownCount: results.length };
 }

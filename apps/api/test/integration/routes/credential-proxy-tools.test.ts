@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
  * `GET /api/credential-proxy/tools` at the route boundary, for integrations without a remote
- * server: the `api_call` tools a call outside a run reaches, named per the run naming rule with
- * the connections each reaches, and the integrations active in the space without a usable
+ * server: the `api_call` tools a call outside a run reaches, each named by its integration's
+ * normalised package id (a hash of the id apart when two normalise alike), with the connections
+ * each reaches, and the integrations active in the space without a usable
  * connection, with the connect link of a refusal a connect flow clears. The typed tools of a remote
  * server are covered in `credential-proxy-remote-tools.test.ts`.
  */
@@ -81,6 +82,7 @@ interface Listing {
   tools: Tool[];
   not_ready: NotReady[];
   unlisted: unknown[];
+  truncated_catalogs: unknown[];
   code?: string;
 }
 
@@ -138,6 +140,7 @@ describe("GET /api/credential-proxy/tools", () => {
           },
         ],
         unlisted: [],
+        truncated_catalogs: [],
       });
       expect(body.not_ready[0]!.refusal).not.toHaveProperty("connect_url");
     });

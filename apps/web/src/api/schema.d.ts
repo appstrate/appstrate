@@ -11577,6 +11577,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            429: components["responses"]["RateLimited"];
         };
     };
     credentialProxyGet: {
@@ -12502,7 +12503,7 @@ export interface operations {
     listIntegrationTools: {
         parameters: {
             query?: {
-                /** @description Lists the tools of this integration alone (`@scope/name`). */
+                /** @description Lists the tools of this integration alone (`@scope/name`); `404` when it is not active in the space. */
                 integration_package_id?: string;
                 /** @description Resolves the tool of this name alone: an `api_call` tool lists no server, and only the remote integrations whose namespace starts the name are listed. `not_ready` is then empty. */
                 name?: string;
@@ -12603,6 +12604,11 @@ export interface operations {
                             integration_package_id: string;
                             refusal: components["schemas"]["ProblemDetail"];
                         }[];
+                        /** @description The remote integrations whose server lists more tools than are read: only its first `max_tools` are listed. Empty when `name` is given. */
+                        truncated_catalogs: {
+                            integration_package_id: string;
+                            max_tools: number;
+                        }[];
                     };
                 };
             };
@@ -12617,6 +12623,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
+            404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
         };
     };
@@ -12693,7 +12700,7 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description The MCP server failed the exchange or refused the connection's credential. */
+            /** @description `bad_gateway` — the MCP server failed the exchange or refused the connection's credential; `upstream_mcp_error` — it answered a JSON-RPC error (`mcp_error: { code, message }`, its message untrusted text); `upstream_response_too_large` — the tool ran, but its answer exceeds the exchange bound. */
             502: {
                 headers: {
                     [name: string]: unknown;

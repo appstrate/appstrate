@@ -34,12 +34,16 @@ export const REDACTED_CONNECT_LINK = "[connect link hidden — the chat renders 
  * emits — `auth_url` (Porte B, the headless OAuth2 start) and `connect_url`
  * (Porte A, the hosted Connect portal), both in `routes/integrations.ts`.
  *
- * Two, and no camelCase twin, because this walk only ever sees Appstrate's own
- * wire: the chat opens ONE MCP connection, to the platform's own org-scoped
- * endpoint (`platform-mcp.ts`), dispatched in-process through the REST
- * pipeline — there is no third-party MCP server in this path whose casing this
- * set would have to tolerate. And a spelling-based denylist could not be a
- * foreign-payload safety net anyway: a stranger is as free to call the field
+ * Two, and no camelCase twin, because an offer is only ever read from
+ * Appstrate's own wire: the chat opens ONE MCP connection, to the platform's
+ * own org-scoped endpoint (`platform-mcp.ts`), dispatched in-process through
+ * the REST pipeline. That endpoint also relays third-party text —
+ * `call_integration_tool` returns an integration's upstream answers, a remote
+ * MCP server's tool result included — and it marks every such result
+ * (`markThirdPartyResult`, `@appstrate/mcp-transport`): `mcpResultToPi` still
+ * redacts its links but turns none into an offer, since a card would present a
+ * stranger's link as the platform's own connect flow. A spelling-based set
+ * could not be that safety net anyway: a stranger is as free to call the field
  * `url` or `href`.
  *
  * What pins the spelling is the endpoints themselves, not a casing gate:

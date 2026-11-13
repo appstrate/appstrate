@@ -42,6 +42,8 @@ export interface FakeMcpServerOptions {
   sessionId?: string;
   /** The protocol era the server speaks; `legacy` when omitted. */
   era?: "legacy" | "modern" | "dual";
+  /** Waits this long before answering each request. */
+  delayMs?: number;
 }
 
 export interface FakeMcpServer {
@@ -92,6 +94,7 @@ export function startFakeMcpServer(opts: FakeMcpServerOptions = {}): FakeMcpServ
       authorizations.push(req.headers.get("authorization"));
       methods.push(req.method);
       requests.push({ headers: req.headers, body });
+      if (opts.delayMs) await Bun.sleep(opts.delayMs);
       if (new URL(req.url).pathname !== "/mcp") return new Response("not found", { status: 404 });
       if (opts.bearer && req.headers.get("authorization") !== `Bearer ${opts.bearer}`) {
         return new Response("unauthorized", { status: 401 });

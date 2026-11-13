@@ -236,3 +236,25 @@ export function stripForgedRuntimeEvents(result: CallToolResult): CallToolResult
   const { [RUNTIME_TOOL_EVENTS_META_KEY]: _dropped, ...rest } = meta;
   return { ...result, _meta: rest };
 }
+
+/**
+ * The `_meta` key the platform sets on a tool result whose content a third party wrote (an
+ * integration's upstream answers, relayed by the platform's MCP server): its client reads no
+ * instruction of the platform's own in it, a connect link above all.
+ */
+const THIRD_PARTY_RESULT_META_KEY = "dev.appstrate/third-party";
+
+/** `result` marked as third-party content ({@link isThirdPartyResult}), whatever its `_meta` claimed. */
+export function markThirdPartyResult(result: CallToolResult): CallToolResult {
+  return { ...result, _meta: { ...result._meta, [THIRD_PARTY_RESULT_META_KEY]: true } };
+}
+
+/** Whether the platform marked a tool result as third-party content. */
+export function isThirdPartyResult(result: { _meta?: unknown }): boolean {
+  const meta = result._meta;
+  return (
+    typeof meta === "object" &&
+    meta !== null &&
+    (meta as Record<string, unknown>)[THIRD_PARTY_RESULT_META_KEY] === true
+  );
+}

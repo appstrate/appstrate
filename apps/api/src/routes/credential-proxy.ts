@@ -99,17 +99,14 @@ import { recordConnectionCall } from "../services/credential-proxy/call-journal.
 import { trackAudit } from "../services/audit.ts";
 import { PROXY_CONTROL_HEADERS } from "../services/credential-proxy/control-headers.ts";
 import { isValidSessionId, bindOrCheckSession } from "../services/credential-proxy/session.ts";
-import {
-  assertCredentialProxyOpen,
-  authorizeProxyCall,
-  reachOutsideRun,
-} from "../services/credential-proxy/access.ts";
+import { authorizeProxyCall, reachOutsideRun } from "../services/credential-proxy/access.ts";
 import {
   listConnectionsOutsideRun,
   runBoundSelection,
 } from "../services/credential-proxy/integration-resolver.ts";
 import { listIntegrationTools } from "../services/credential-proxy/integration-tools.ts";
 import { callRemoteTool } from "../services/credential-proxy/remote-tools.ts";
+import type { ProxyReach } from "../services/integration-connections.ts";
 import type { AppEnv } from "../types/index.ts";
 
 import { getCookieJarStore } from "../infra/index.ts";
@@ -138,12 +135,16 @@ export function createCredentialProxyRouter() {
   router.use("/*", requireSpaceContext());
 
   // What the caller reaches outside a run: the rows and the rule `/proxy` selects from.
-  router.get("/connections", requirePermission("credential-proxy", "call-own"), async (c) => {
-    assertCredentialProxyOpen(c.get("space")!);
-    const reach = reachOutsideRun(callerPermissions(c));
-    const data = await listConnectionsOutsideRun(getSpaceScope(c), getActor(c), reach);
-    return c.json(listResponse(data));
-  });
+  router.get(
+    "/connections",
+    rateLimit(limits.rate_per_min),
+    requirePermission("credential-proxy", "call-own"),
+    async (c) => {
+      const reach = reachOutsideRun(callerPermissions(c), c.get("space")!);
+      const data = await listConnectionsOutsideRun(getSpaceScope(c), getActor(c), reach);
+      return c.json(listResponse(data));
+    },
+  );
 
   // Accept any HTTP method — the proxy preserves `req.method` on the
   // upstream fetch. A POST-only route would silently 404 GET/PUT/DELETE
@@ -174,6 +175,7 @@ export function createCredentialProxyRouter() {
       // X-Run-Id is optional — a runner executing a run (`appstrate run --report`) sends it. With
       // or without it decides which permission the call needs and which connections it reaches.
       const runId = c.req.header("X-Run-Id") || null;
+      let reach: ProxyReach | null = null;
       if (runId !== null) {
         await authorizeProxyCall({
           permissions: callerPermissions(c),
@@ -184,7 +186,7 @@ export function createCredentialProxyRouter() {
           onDenied: (required) => reportPermissionDenial(c, required),
         });
       } else {
-        assertCredentialProxyOpen(c.get("space")!);
+        reach = reachOutsideRun(callerPermissions(c), c.get("space")!);
       }
 
       // Canonical header is `X-Integration-Id` (suffix parity with `X-Connection-Id`).
@@ -350,7 +352,7 @@ export function createCredentialProxyRouter() {
           spaceId,
           actor,
           ...(explicitConnectionId ? { connectionId: explicitConnectionId } : {}),
-          ...(run ? { run } : { reach: reachOutsideRun(callerPermissions(c)) }),
+          ...(run ? { run } : { reach: reach! }),
           integrationId,
           method,
           target,
@@ -490,18 +492,17 @@ export function createCredentialProxyRouter() {
 
   // The tools callable outside a run (`credential-proxy/integration-tools.ts`) and the typed tools
   // of a remote MCP integration (`credential-proxy/remote-tools.ts`), under the access rule of
-  // `/proxy` outside a run. The limiter keys on the route pattern, so `/tools`, `/tools/call` and
-  // `/proxy` each count in their own bucket: discovery never spends the budget of calls, and each
-  // `tools/call` counts once.
+  // `/proxy` outside a run. The limiter keys on the route pattern, so `/connections`, `/tools`,
+  // `/tools/call` and `/proxy` each count in their own bucket: discovery never spends the budget
+  // of calls, and each `tools/call` counts once.
   const remoteToolsCaller = (c: Context<AppEnv>) => {
     assertBearerOnly(c.get("authMethod"), "Credential proxy", {
       firstPartyLoopback: c.get("firstPartyLoopback"),
     });
-    assertCredentialProxyOpen(c.get("space")!);
     return {
       scope: getSpaceScope(c),
       actor: getActor(c),
-      reach: reachOutsideRun(callerPermissions(c)),
+      reach: reachOutsideRun(callerPermissions(c), c.get("space")!),
       caller: {
         apiKeyId: c.get("apiKeyId") || null,
         authMethod: c.get("authMethod"),

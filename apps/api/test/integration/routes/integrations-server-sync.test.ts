@@ -13,6 +13,7 @@ import {
   integrationOrgDefaults,
   packages,
   spacePackages,
+  spaces,
 } from "@appstrate/db/schema";
 import { drainAudits } from "../../../src/services/audit.ts";
 import { getTestApp } from "../../helpers/app.ts";
@@ -181,6 +182,20 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     // pages, each carrying the injected credential; the standalone GET stream is never opened.
     expect(server.methods).toEqual(["POST", "POST", "POST", "POST", "POST", "POST"]);
     expect(server.authorizations.every((a) => a === `Bearer ${TOKEN}`)).toBe(true);
+  });
+
+  it("is refused in a space whose credential proxy is closed, before any exchange", async () => {
+    await seedProxyIntegration(ctx, remote());
+    const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+    await db
+      .update(spaces)
+      .set({ credentialProxyOpen: false })
+      .where(eq(spaces.id, ctx.defaultSpaceId));
+
+    const res = await sync(ctx, { connection_id: connectionId });
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe("credential_proxy_closed");
+    expect(server.methods).toEqual([]);
   });
 
   it("proposes no instructions when the draft already holds an INTEGRATION.md", async () => {

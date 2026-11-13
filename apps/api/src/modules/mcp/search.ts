@@ -23,3 +23,28 @@ export function searchScore(text: string, tokens: readonly string[]): number {
   for (const token of tokens) if (haystack.includes(token)) score += 1;
   return score;
 }
+
+/**
+ * `items` matching `tokens` (all of them when there are none), best first: an item whose name is
+ * the query itself, then by {@link searchScore}, ties kept in the order given.
+ */
+export function rankByKeywords<T>(
+  items: readonly T[],
+  tokens: readonly string[],
+  fields: (item: T) => { name: string; text: string },
+): T[] {
+  const query = tokens.join(" ");
+  return items
+    .map((item, order) => {
+      const { name, text } = fields(item);
+      return {
+        item,
+        order,
+        exact: tokens.length > 0 && name.toLowerCase() === query,
+        score: searchScore(`${name} ${text}`, tokens),
+      };
+    })
+    .filter(({ score }) => tokens.length === 0 || score > 0)
+    .sort((a, b) => Number(b.exact) - Number(a.exact) || b.score - a.score || a.order - b.order)
+    .map(({ item }) => item);
+}

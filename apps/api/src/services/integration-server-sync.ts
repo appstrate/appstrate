@@ -23,8 +23,13 @@ import { logger } from "../lib/logger.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { ProxyCallError } from "./credential-proxy/core.ts";
 import {
+  listToolPages,
   MAX_EXCHANGE_BYTES,
+  MAX_LISTED_PAGES,
+  MAX_LISTED_TOOLS,
+  McpExchangeTooLargeError,
   mcpServerFailure,
+  namingBodyConnectionId,
   proxiedMcpFetch,
   type ProxyCaller,
 } from "./credential-proxy/remote-tools.ts";
@@ -60,9 +65,6 @@ export interface DiscoveredTool {
 /** The sync reads, and the proxy authorizes against, the draft its route lets a home writer edit. */
 const DRAFT: ResolvedIntegrationVersion = { source: "draft", version: null };
 const SYNC_TIMEOUT_MS = 20_000;
-const MAX_TOOLS = 500;
-/** Bounds a server answering `nextCursor` forever with empty pages. */
-const MAX_PAGES = 20;
 /** `instructions` is the server's free text, proposed as a file: bounded like one. */
 const MAX_INSTRUCTIONS_BYTES = 32 * 1024;
 const MAX_TOOL_TITLE_CHARS = 200;
@@ -132,7 +134,7 @@ export async function syncIntegrationFromServer(input: {
     if (init?.method === "GET") return new Response(null, { status: 405 });
     const res = await egressFetch(target, init);
     const body = await readBodyUnder(res, MAX_EXCHANGE_BYTES);
-    if (body === null) throw new Error("an MCP answer exceeds the synchronization's bound");
+    if (body === null) throw new McpExchangeTooLargeError(MAX_EXCHANGE_BYTES);
     return new Response(body, { status: res.status, headers: res.headers });
   }) as typeof fetch;
 
@@ -160,7 +162,7 @@ export async function syncIntegrationFromServer(input: {
       signal: deadline,
       onWarning: (message, data) => logger.warn(message, { packageId, ...data }),
     });
-    const { tools, truncated } = await listAllTools(client, deadline);
+    const { tools, truncated } = await listToolPages(client, deadline);
     exchanged = {
       tools,
       truncated,
@@ -191,21 +193,6 @@ async function draftHasIntegrationDoc(orgId: string, packageId: string): Promise
   const path = PACKAGE_CONTENT_ENTRY.integration?.path;
   const files = await downloadPackageFiles("integrations", orgId, packageId, undefined, "org");
   return path !== undefined && files !== null && Object.hasOwn(files, path);
-}
-
-async function listAllTools(
-  client: AppstrateMcpClient,
-  signal: AbortSignal,
-): Promise<{ tools: Tool[]; truncated: boolean }> {
-  const tools: Tool[] = [];
-  let cursor: string | undefined;
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const res = await client.listToolsPage({ ...(cursor ? { cursor } : {}), signal });
-    tools.push(...res.tools);
-    cursor = res.nextCursor;
-    if (!cursor || tools.length >= MAX_TOOLS) break;
-  }
-  return { tools: tools.slice(0, MAX_TOOLS), truncated: tools.length > MAX_TOOLS || !!cursor };
 }
 
 /** The proposal a server's answers make. Exported for unit tests. */
@@ -241,7 +228,7 @@ export async function proposalFromServer(
   if (server.truncated) {
     warnings.push({
       code: "tools_truncated",
-      message: `The server lists more tools than are read (${MAX_TOOLS} tools over at most ${MAX_PAGES} pages): only the first ${names.length} are proposed.`,
+      message: `The server lists more tools than are read (${MAX_LISTED_TOOLS} tools over at most ${MAX_LISTED_PAGES} pages): only the first ${names.length} are proposed.`,
     });
   }
   const instructions = capInstructions(server.instructions?.trim() ?? "");
@@ -309,16 +296,8 @@ function syncFailure(
   url: string,
   unauthenticated: boolean,
 ): Error {
-  // The proxy names its own `X-Connection-Id` header; this route takes the body's `connection_id`.
-  if (err instanceof ApiError && err.code === "must_choose_connection") {
-    const detail = `No single connection of '${packageId}' applies: name one in the request body's \`connection_id\`.`;
-    return err.with({
-      detail,
-      ...(err.fieldErrors
-        ? { errors: err.fieldErrors.map((item) => ({ ...item, message: detail })) }
-        : {}),
-    });
-  }
+  const named = namingBodyConnectionId(err, packageId);
+  if (named !== err) return named as ApiError;
   if (err instanceof ProxyCallError && err.code === "credential_not_found") {
     return notConnected(err.message);
   }

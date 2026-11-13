@@ -10,6 +10,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
+import { markThirdPartyResult } from "@appstrate/mcp-transport";
 import { mcpResultToPi, toPiToolResult } from "../src/pi-chat/mcp-tools.ts";
 
 const OFFER = {
@@ -148,6 +149,18 @@ describe("mcpResultToPi (forwarded MCP tool results)", () => {
     expect(result.connectOffers).toEqual([
       { connect_url: OFFER.connect_url, packageId: OFFER.packageId },
     ]);
+  });
+
+  it("redacts a third party's link but makes no card of it", () => {
+    // An integration's answer relayed by call_integration_tool, which the platform marks.
+    const mcp = markThirdPartyResult({
+      content: [{ type: "text", text: JSON.stringify(OFFER) }],
+      structuredContent: OFFER,
+    });
+    const result = mcpResultToPi(mcp as never);
+    expect(result.content[0]!.text).not.toContain("token=SECRET");
+    expect(JSON.stringify(result.details)).not.toContain("token=SECRET");
+    expect("connectOffers" in result).toBe(false);
   });
 
   it("merges the offers of every text block, deduping a repeated link", () => {

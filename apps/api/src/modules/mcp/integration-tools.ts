@@ -29,6 +29,7 @@ import {
 import {
   DEFAULT_SEARCH_LIMIT,
   MAX_SEARCH_LIMIT,
+  rankByKeywords,
   searchLimit,
   searchScore,
   searchTokens,
@@ -100,41 +101,25 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
     name: "search_integration_tools",
     description:
       "Search the tools of the integrations you hold a connection of in this space, by keyword " +
-      "and/or integration; with neither, list every tool you can call: each integration's " +
-      "`api_call` tools and, for an integration backed by a remote MCP server, the typed tools " +
-      "that server offers. Each result has the `tool` name to pass to call_integration_tool, " +
-      "its `integration`, a `description`, and the `connections` it reaches; " +
-      "`catalog_unreadable: true` marks a typed tool whose server could not be listed, named " +
-      "without description or schema. With `credential-proxy:call`: your own connections and " +
-      "those other members shared into the space (`owned_by_actor: false`); with " +
-      "`credential-proxy:call-own` alone, your own only. Each connection has the " +
-      "`connection_id` to pass, the `authorized_uris` a target must match (unless " +
-      "`allow_all_uris`; an entry may hold a `{$credential.<field>}` the proxy alone resolves, " +
-      "see the `target` argument of `input_schema`), its `scopes_granted`, and what a call " +
-      "would still refuse: on a typed tool, `missing_scopes` (the scopes the tool's policy " +
-      "requires on the connection's auth that it lacks; a call with it answers " +
-      "`insufficient_scopes`), and on every tool `needs_reconnection` and " +
-      "`call_permission_required` (an enforced " +
-      "organization default governs the integration and you hold `credential-proxy:call-own` " +
-      "alone). Both flags describe a call passing that `connection_id`; with none passed and " +
-      "`credential-proxy:call` held, an organization default applies first. A connection you " +
-      "do not own is used when you pass its `connection_id` or an organization default " +
-      "designates it. With `credential-proxy:call-own` alone, a connection another member " +
-      "shared and a `call_permission_required` integration are reached through " +
+      "and/or integration; with neither, list them, `limit` at a time. They are each " +
+      "integration's `api_call` tools and, for an integration backed by a remote MCP server, " +
+      "the typed tools that server offers. Each result has the `tool` name to pass to " +
+      "call_integration_tool, its `integration`, a `description` and the `connections` it " +
+      "reaches, each with the `connection_id` to pass; `catalog_unreadable: true` marks a typed " +
+      "tool whose server could not be listed, named without description or schema. " +
+      "`total` counts every match; `note` says when more matched than are shown, or when a " +
+      "server lists more tools than are read. Present when not empty, filtered like the tools: " +
+      "`not_ready`, the integrations active here you have no usable connection of, each with " +
+      "its `proxy_connection` verdict (`status`, `imposed`) and, when a selection refusal " +
+      "explains it, that `refusal`, whose `connect_url` is a single-use link to hand to the " +
+      "user, which connects the integration as them; `unlisted`, the remote integrations whose " +
+      "server the platform refused to list, with that `refusal`: their typed tools are missing " +
+      "until it is cleared. With `credential-proxy:call-own` alone, a connection another " +
+      "member shared is reached through " +
       (ctx.runs ? "a run (run_and_wait). " : "an agent run only. ") +
-      "`not_ready` (present when not empty, filtered by `query` and `integration` like the " +
-      "tools) lists the integrations active in this space you have no usable connection of, " +
-      "apart from the tools: each `integration` with its `display_name`, its " +
-      "`proxy_connection` verdict for a call naming no connection (`status`: `none`, " +
-      "`needs_reconnection`, `not_permitted`, `default_unavailable` or `unusable`; " +
-      "`imposed`: an enforced organization default governs it, and the space's admins set " +
-      "its connection) and, when a selection refusal explains it, that `refusal` item " +
-      "(`code`, `auth_key`, `required_scopes`…). A `refusal` with a `connect_url` is a " +
-      "single-use link to hand to the user, which connects (or reconnects) the integration " +
-      "as them. " +
-      "With `query` or `integration`, `best_match` adds to the top result its `input_schema` " +
-      "and its `usage` (how to call it and read its result), so a clear hit needs no other " +
-      "call before call_integration_tool; search a tool's exact name to get them.",
+      "With `query` or `integration`, `best_match` adds to the top result (a tool's exact " +
+      "name ranks first) its `input_schema` and its `usage`: how to call it, how to read its " +
+      "result and what its connections' fields mean.",
     annotations: {
       title: "Search integration tools",
       readOnlyHint: true,
@@ -172,25 +157,24 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
     if ("refused" in read)
       return listingRefused(ctx, "search_integration_tools", start, read.refused);
 
+    const about = (id: string, text = "") =>
+      tokens.length === 0 || searchScore(`${id} ${text}`, tokens) > 0;
     const notReadyShown = read.notReady
-      .filter(
-        (entry) =>
-          tokens.length === 0 ||
-          searchScore(`${entry.integration_package_id} ${entry.display_name}`, tokens) > 0,
-      )
+      .filter((entry) => about(entry.integration_package_id, entry.display_name))
       .map(({ integration_package_id, ...entry }) => ({
         integration: integration_package_id,
         ...entry,
       }));
-    const matches = read.tools
-      .map((tool, order) => ({
-        tool,
-        order,
-        score: searchScore(`${tool.name} ${tool.integration} ${tool.description}`, tokens),
-      }))
-      .filter(({ score }) => tokens.length === 0 || score > 0)
-      .sort((a, b) => b.score - a.score || a.order - b.order)
-      .map(({ tool }) => tool);
+    const unlistedShown = read.unlisted
+      .filter((entry) => about(entry.integration_package_id))
+      .map(({ integration_package_id, refusal }) => ({
+        integration: integration_package_id,
+        refusal,
+      }));
+    const matches = rankByKeywords(read.tools, tokens, (tool) => ({
+      name: tool.name,
+      text: `${tool.integration} ${tool.description}`,
+    }));
     const shown = matches.slice(0, limit);
     ctx.observe({
       tool: "search_integration_tools",
@@ -198,12 +182,41 @@ function buildSearchIntegrationToolsTool(ctx: IntegrationToolContext): Appstrate
       shownCount: shown.length,
       outcome: "invoked",
     });
+    const notes: string[] = [];
+    if (matches.length > shown.length) {
+      notes.push(
+        `${matches.length - shown.length} more tool(s) match than the ${limit} shown: narrow ` +
+          "with `query`, or pass `integration` to search one integration" +
+          (limit < MAX_SEARCH_LIMIT ? `, or raise \`limit\` (at most ${MAX_SEARCH_LIMIT}).` : "."),
+      );
+    }
+    const truncated = read.truncatedCatalogs.filter((entry) => about(entry.integration_package_id));
+    for (const entry of truncated) {
+      notes.push(
+        `${entry.integration_package_id}'s server lists more tools than the ${entry.max_tools} read: ` +
+          "a tool it lists after those is not offered.",
+      );
+    }
+    if (
+      integration !== undefined &&
+      matches.length === 0 &&
+      notReadyShown.length === 0 &&
+      unlistedShown.length === 0
+    ) {
+      notes.push(
+        tokens.length > 0
+          ? `No tool of ${integration} matches \`query\`; search without it to list them all.`
+          : `${integration} offers you no tool to call in this space.`,
+      );
+    }
     const top = shown[0];
     const searched = tokens.length > 0 || integration !== undefined;
     return jsonResult({
       total: matches.length,
       tools: shown.map(listedTool),
       ...(notReadyShown.length > 0 ? { not_ready: notReadyShown } : {}),
+      ...(unlistedShown.length > 0 ? { unlisted: unlistedShown } : {}),
+      ...(notes.length > 0 ? { note: notes.join(" ") } : {}),
       ...(searched && top
         ? {
             best_match: {
@@ -231,9 +244,10 @@ function buildCallIntegrationToolTool(ctx: IntegrationToolContext): AppstrateToo
     description:
       "Call a tool search_integration_tools returned, by its `tool` name, with `arguments` " +
       "following its `input_schema`; its `usage` (in `best_match`, which a search by the " +
-      "tool's exact name returns) says how to read the result. Arguments the tool does not " +
-      "accept are refused before anything is sent. Call directly for deterministic or bulk " +
-      "reads and writes" +
+      "tool's exact name returns) says how to read the result. A missing required argument is " +
+      "refused before anything is sent; an `api_call` tool refuses any other argument it does " +
+      "not declare the same way, while a typed tool's server validates the rest itself. Call " +
+      "directly for deterministic or bulk reads and writes" +
       (ctx.runs
         ? "; delegate to run_and_wait instead when the task needs judgement, several dependent " +
           "steps, an agent's configured tools, or, holding `credential-proxy:call-own` alone, a " +

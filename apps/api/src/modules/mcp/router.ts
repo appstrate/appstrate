@@ -80,6 +80,7 @@ import type { AppEnv } from "../../types/index.ts";
 import { dispatchInProcess } from "../../lib/platform-app.ts";
 import { ceilingAllows } from "../../lib/permissions.ts";
 import { followRunLogs } from "../../services/realtime-access.ts";
+import { isCredentialProxyOpen } from "../../services/credential-proxy/access.ts";
 import type { RunLogEvent } from "@appstrate/shared-types";
 import {
   MCP_RESOURCE_PREFIX,
@@ -531,7 +532,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
         ceiling,
         actor,
         proxied,
-        space.credentialProxyOpen,
+        isCredentialProxyOpen(space),
       ),
     }));
     const requested = await requestedSpaceId(post?.payload, orgId);
@@ -553,7 +554,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
         ceiling,
         actor,
         proxied,
-        c.get("space")!.credentialProxyOpen,
+        isCredentialProxyOpen(c.get("space")!),
       ),
     };
     c.set("mcpOrgSpaces", {
@@ -699,7 +700,7 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
           ceiling,
           actor,
           proxyAcceptsCredential(c),
-          c.get("space")!.credentialProxyOpen,
+          isCredentialProxyOpen(c.get("space")!),
         );
     const tools = buildMcpTools(toolCtx, surface);
     // `resources/read` for `appfile://file_xxx` — resolves through the same

@@ -68,7 +68,10 @@ import {
 } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
 import { withoutConnectOffers } from "../../services/connect/preflight-connect-offer.ts";
-import { credentialProxyClosedDetail } from "../../services/credential-proxy/access.ts";
+import {
+  credentialProxyClosedDetail,
+  isCredentialProxyOpen,
+} from "../../services/credential-proxy/access.ts";
 import { logger } from "../../lib/logger.ts";
 import { ceilingHolds } from "../../lib/route-requirements.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
@@ -96,8 +99,8 @@ import { buildIntegrationTools } from "./integration-tools.ts";
 import {
   DEFAULT_SEARCH_LIMIT,
   MAX_SEARCH_LIMIT,
+  rankByKeywords,
   searchLimit,
-  searchScore,
   searchTokens,
 } from "./search.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
@@ -294,13 +297,6 @@ function fileResourceLink(doc: RunAndWaitFile): {
   };
 }
 
-function scoreOperation(op: CatalogOperation, tokens: string[]): number {
-  return searchScore(
-    `${op.operationId} ${op.summary} ${op.description} ${op.pathTemplate} ${op.tags.join(" ")}`,
-    tokens,
-  );
-}
-
 /**
  * The full, invoke-ready definition of one operation: parameters, request body,
  * responses, and every referenced component schema inlined. This is the payload
@@ -420,15 +416,19 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
     let matches = [...operations.values()];
     if (tag) matches = matches.filter((op) => op.tags.some((t) => t.toLowerCase() === tag));
 
-    const scored = matches
-      .map((op) => ({ op, score: scoreOperation(op, tokens) }))
-      .filter(({ score }) => tokens.length === 0 || score > 0)
-      .sort((a, b) => b.score - a.score || a.op.operationId.localeCompare(b.op.operationId));
+    const scored = rankByKeywords(
+      matches.sort((a, b) => a.operationId.localeCompare(b.operationId)),
+      tokens,
+      (op) => ({
+        name: op.operationId,
+        text: `${op.summary} ${op.description} ${op.pathTemplate} ${op.tags.join(" ")}`,
+      }),
+    );
 
     // A denied match is answered, not hidden — its id and requirement only.
     const granted: CatalogOperation[] = [];
     const denied: CatalogOperation[] = [];
-    for (const { op } of scored) {
+    for (const op of scored) {
       (operationGranted(op, ctx.permissions, ctx.ceiling) ? granted : denied).push(op);
     }
     const shown = granted.slice(0, limit);
@@ -1832,7 +1832,7 @@ export function deriveMcpSurface(
   actor: Actor,
   /** The credential proxy accepts the credential this request carries (it is bearer-only). */
   proxyAcceptsCredential: boolean,
-  /** The space leaves the credential proxy open outside a run (`assertCredentialProxyOpen`). */
+  /** The space leaves the credential proxy open outside a run (`isCredentialProxyOpen`). */
   proxyOpen: boolean,
 ): McpSurface {
   const granted = (operationId: string): boolean =>
@@ -1996,7 +1996,7 @@ function withSpaceArgument(
       const need = act === "runs" && args.kind === "inline" ? "composes" : act;
       const { current } = spaces;
       // The space's setting, not the caller's role, withholds the proxy there.
-      if (need === "proxies" && !current.credentialProxyOpen) {
+      if (need === "proxies" && !isCredentialProxyOpen(current)) {
         return refusalResult({
           code: "credential_proxy_closed",
           error: credentialProxyClosedDetail(current),

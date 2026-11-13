@@ -10,7 +10,7 @@
 
 import { z } from "zod";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
+import { markThirdPartyResult, type AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
 import type {
   IntegrationToolListing,
@@ -61,6 +61,7 @@ export interface IntegrationTools {
   tools: IntegrationTool[];
   notReady: IntegrationToolListing["not_ready"];
   unlisted: IntegrationToolListing["unlisted"];
+  truncatedCatalogs: IntegrationToolListing["truncated_catalogs"];
 }
 
 /** The listing route's refusal, as `invoke_operation` would relay it. */
@@ -69,11 +70,76 @@ export interface ListingRefusal {
   body: unknown;
 }
 
+/** What every tool's `usage` says of its `connections`. */
+const CONNECTIONS_USAGE =
+  "Its `connections`: with `credential-proxy:call`, yours and those other members shared into " +
+  "the space (`owned_by_actor: false`); with `credential-proxy:call-own` alone, yours only. " +
+  "Each has the `connection_id` to pass, the `authorized_uris` a target must match (unless " +
+  "`allow_all_uris`; an entry may hold a `{$credential.<field>}` the proxy alone resolves), " +
+  "its `scopes_granted`, and what a call passing that `connection_id` would still refuse: on a " +
+  "typed tool `missing_scopes` (the scopes its policy requires that the connection lacks: the " +
+  "call answers `insufficient_scopes`), and `needs_reconnection` and " +
+  "`call_permission_required` (an enforced organization default governs the integration and " +
+  "you hold `credential-proxy:call-own` alone). With no `connection_id` and " +
+  "`credential-proxy:call` held, an organization default applies first. A connection you do " +
+  "not own is used when you pass its `connection_id` or an organization default designates it.";
+
 const REMOTE_TOOL_USAGE =
-  "Pass the tool's own arguments in `arguments`, following its `input_schema`. The " +
+  "Pass the tool's own arguments in `arguments`, following its `input_schema`: the platform " +
+  "checks only that the required ones are present, the server validates the rest (a refusal " +
+  "of the server answers `upstream_mcp_error`, with its `mcp_error.code` and `message`). The " +
   "`connection_id` of call_integration_tool names the connection; without it the proxy " +
-  "chooses as for an `api_call`. The result is the MCP server's own tool result, relayed " +
-  `as is up to ${MAX_RESULT_BYTES} bytes; \`isError: true\` is the tool's own failure.`;
+  "chooses as for an `api_call`, and `must_choose_connection` lists the candidates in " +
+  "`errors[0].candidate_connections` (retry with one `id` as `connection_id`). The result is " +
+  `the server's own tool result, relayed as is up to ${MAX_RESULT_BYTES} bytes; past that the ` +
+  "tool has run, and only the content blocks that do not fit are replaced by a note " +
+  "(`truncated: true` in `_meta`). An error result carrying `content` is the tool's own " +
+  "failure (`isError: true`); one carrying `code`, `status` and `detail` is the platform's " +
+  "answer: a refusal before anything was sent, or the server failing the exchange " +
+  "(`bad_gateway`, `upstream_mcp_error`, `upstream_response_too_large` when the tool ran but " +
+  "its answer exceeds the exchange bound). " +
+  CONNECTIONS_USAGE;
+
+/**
+ * A tool result over {@link MAX_RESULT_BYTES}, bounded: its content blocks kept in order while
+ * they fit, each one that does not replaced by a note, `structuredContent` kept only if it still
+ * fits. The call has run: nothing of what fits is dropped.
+ */
+function boundedResult(result: CallToolResult): CallToolResult {
+  const size = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
+  let budget = MAX_RESULT_BYTES;
+  let omitted = 0;
+  const content = (Array.isArray(result.content) ? result.content : []).map((block, index) => {
+    const bytes = size(block);
+    if (bytes <= budget) {
+      budget -= bytes;
+      return block;
+    }
+    omitted += 1;
+    return {
+      type: "text" as const,
+      text: `[content block ${index} omitted: ${bytes} bytes, over the ${MAX_RESULT_BYTES}-byte result budget]`,
+    };
+  });
+  const structured =
+    result.structuredContent !== undefined && size(result.structuredContent) <= budget
+      ? { structuredContent: result.structuredContent }
+      : {};
+  const droppedStructured =
+    result.structuredContent !== undefined && !("structuredContent" in structured);
+  content.push({
+    type: "text",
+    text:
+      `The tool ran; its result exceeds ${MAX_RESULT_BYTES} bytes: ${omitted} content block(s)` +
+      `${droppedStructured ? " and its structuredContent" : ""} were dropped, the rest is as it answered.`,
+  });
+  return {
+    content,
+    ...structured,
+    ...(result.isError ? { isError: true } : {}),
+    _meta: { truncated: true },
+  };
+}
 
 /** Upstream arguments: the server validates them against its own schema. */
 const remoteArgumentsSchema = z.record(z.string(), z.unknown());
@@ -128,18 +194,9 @@ async function executeRemoteTool(
     return { result: jsonResult(body ?? { status: response.status }, true), shownCount: 0 };
   }
   if (new TextEncoder().encode(text).byteLength > MAX_RESULT_BYTES) {
-    return {
-      result: jsonResult(
-        {
-          error: `The tool's result exceeds ${MAX_RESULT_BYTES} bytes and is not relayed.`,
-          hint: "Ask the tool for less, with narrower arguments.",
-        },
-        true,
-      ),
-      shownCount: 0,
-    };
+    return { result: markThirdPartyResult(boundedResult(result as CallToolResult)), shownCount: 1 };
   }
-  return { result: result as CallToolResult, shownCount: 1 };
+  return { result: markThirdPartyResult(result as CallToolResult), shownCount: 1 };
 }
 
 /** A listed tool with how the MCP tool calls it. */
@@ -154,7 +211,7 @@ function callable(ctx: DispatchContext, tool: ListedIntegrationTool): Integratio
     return {
       ...base,
       description: `${tool.description} ${API_CALL_DESCRIPTION}`,
-      usage: API_CALL_USAGE,
+      usage: `${API_CALL_USAGE} ${CONNECTIONS_USAGE}`,
       schema: apiCallSchema,
       inputSchema: API_CALL_INPUT_SCHEMA,
       execute: (args, extra, named) =>
@@ -206,5 +263,6 @@ export async function readIntegrationTools(
     tools: listing.tools.map((tool) => callable(ctx, tool)),
     notReady: listing.not_ready,
     unlisted: listing.unlisted,
+    truncatedCatalogs: listing.truncated_catalogs,
   };
 }
