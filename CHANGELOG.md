@@ -108,6 +108,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (validated offline for a subscription, by one lightweight provider request
   for an API key), never the model itself. The response is unchanged.
 
+- **BREAKING (MCP): `search_integration_tools` and `call_integration_tool` replace
+  `list_connections` and `api_call`** (#2205). The platform MCP server lists the tools of
+  the integrations the caller holds a connection of, named as in a run
+  (`{ns}__api_call`, `{ns}__api_call__{auth}` when several auths expose one), each with
+  every field `list_connections` returned for its connections; a search by `query` or
+  `integration` carries the first result's input schema and usage in `best_match`.
+  `call_integration_tool` takes the tool name and its `arguments`: for `{ns}__api_call`,
+  the `requests` batch, `session_id` and `max_response_bytes` of `api_call`, without
+  `integration_package_id`, so a batch targets one integration. Only the `api_call` tools
+  an integration's catalog exposes are listed (every tool less `hidden_tools`, not
+  `default_tools`). The old names answer `-32602 Unknown tool`, with no alias: re-list
+  the tools in the client. The proxy route, its guard, rate limit and access rule are
+  unchanged.
+
 - **BREAKING (MCP): the `read_skill` tool is removed** (#2175). A skill and its files
   are read through the MCP Skills extension: `skills/list` and `skills/get` for the
   entries, `resources/read` on a file's `skill://` URI for its bytes. The access rule

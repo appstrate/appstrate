@@ -26,7 +26,7 @@ import {
 
 export const CREDENTIAL_STATUS_HEADER = "X-Appstrate-Credential-Status";
 
-/** What the platform concluded about a rejected credential, as the header and `api_call` name it. */
+/** What the platform concluded about a rejected credential, as the header and `call_integration_tool` name it. */
 export type CredentialStatus =
   | {
       status: "in_use";

@@ -13,7 +13,7 @@
  *     `selectAccessibleConnection`), and only in a space whose admin left the proxy open
  *     ({@link assertCredentialProxyOpen}).
  *
- * The REST route decides it here, and the MCP module's `api_call` tool re-enters that route.
+ * The REST route decides it here, and the MCP module's `call_integration_tool` re-enters that route.
  */
 
 import type { Actor } from "../../lib/actor.ts";

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `list_connections` and `api_call` through the real `/api/mcp/o/:org` endpoint, the real
+ * `search_integration_tools` and `call_integration_tool` through the real `/api/mcp/o/:org`
+ * endpoint, the real
  * credential-proxy routes behind them and a real minted MCP instance token (DCR client,
  * authorization-code flow, `aud` = the organization's MCP resource):
  *
@@ -9,11 +10,11 @@
  *     and a credential holding `credential-proxy:call` or `credential-proxy:call-own`, never a
  *     runner, a credential whose scopes omit both, or a cookie session or the chat's loopback
  *     bearer, which the bearer-only proxy refuses;
- *   - `api_call` makes one proxy call per request and relays what each came back with: the
+ *   - `call_integration_tool` with `{ns}__api_call` makes one proxy call per request and relays what each came back with: the
  *     upstream's answer, cut and filtered, or the proxy's own refusal. A connection another
  *     member shared is reached once named by a holder of `credential-proxy:call`, never with
  *     `credential-proxy:call-own` alone;
- *   - `list_connections` and the catalog's listing operation serve the same rows: the caller's
+ *   - `search_integration_tools` and the catalog's listing operation serve the same rows: the caller's
  *     own, and for a holder of `credential-proxy:call` those shared into the space.
  *
  * The upstream is a stub of the global `fetch` the proxy calls, as in
@@ -24,6 +25,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { getEnv } from "@appstrate/env";
+import type { IntegrationManifest } from "@appstrate/core/integration";
 import { eq, like } from "drizzle-orm";
 import { integrationConnections, oauthResource, spaces } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
@@ -212,8 +214,21 @@ type Entry = Record<string, unknown> & {
 };
 const entries = (data: Record<string, unknown>) => data.results as Entry[];
 
+/** The tool `@cporg/crm` exposes. */
+const TOOL = "cporg_crm__api_call";
+
+/** `call_integration_tool` on {@link TOOL}; `space_id` goes to the top level. */
+const callApi = (
+  caller: Caller,
+  { space_id, ...args }: Record<string, unknown>,
+): ReturnType<typeof callTool> =>
+  callTool(caller, "call_integration_tool", {
+    ...(space_id === undefined ? {} : { space_id }),
+    tool: TOOL,
+    arguments: args,
+  });
+
 const get = (path: string, overrides: Record<string, unknown> = {}) => ({
-  integration_package_id: INTEGRATION_ID,
   method: "GET",
   target: `${UPSTREAM}${path}`,
   ...overrides,
@@ -230,9 +245,8 @@ describe("mcp connection tools", () => {
     owner = await createTestContext({ orgSlug: "cporg" });
     // The row the authorization server needs to mint the organization's MCP resource.
     await mcpModule.events!.onOrgCreate!(owner.orgId, owner.user.email);
-    await seedProxyIntegration(
-      owner,
-      localIntegrationManifest({
+    await seedProxyIntegration(owner, {
+      ...localIntegrationManifest({
         name: INTEGRATION_ID,
         displayName: "CRM",
         description: "CRM integration",
@@ -248,7 +262,8 @@ describe("mcp connection tools", () => {
           },
         },
       }),
-    );
+      _meta: { "dev.appstrate/api": { auths: { api: {} } } },
+    } as IntegrationManifest);
     mockUpstream(() => json({ ok: true }));
   });
 
@@ -273,15 +288,15 @@ describe("mcp connection tools", () => {
       for (const preset of ["admin", "operator"] as const) {
         const caller = preset === "admin" ? owner : await memberContext(owner, "member", preset);
         const names = await toolNames(await instanceCaller(caller));
-        expect(names, preset).toContain("list_connections");
-        expect(names, preset).toContain("api_call");
+        expect(names, preset).toContain("search_integration_tools");
+        expect(names, preset).toContain("call_integration_tool");
       }
 
       const runner = await toolNames(
         await instanceCaller(await memberContext(owner, "member", "runner")),
       );
-      expect(runner).not.toContain("list_connections");
-      expect(runner).not.toContain("api_call");
+      expect(runner).not.toContain("search_integration_tools");
+      expect(runner).not.toContain("call_integration_tool");
       // The control: a runner runs agents, which is not what declares the tools.
       expect(runner).toContain("run_and_wait");
     });
@@ -290,8 +305,8 @@ describe("mcp connection tools", () => {
       const names = await toolNames(
         await instanceCaller(await memberHolding(owner, CALL_OWN_ROLE)),
       );
-      expect(names).toContain("list_connections");
-      expect(names).toContain("api_call");
+      expect(names).toContain("search_integration_tools");
+      expect(names).toContain("call_integration_tool");
     });
 
     it("declares both to the owner of a personal space, preset `admin` there", async () => {
@@ -305,8 +320,8 @@ describe("mcp connection tools", () => {
         path: spacePath(owner, personal.id),
         headers: { Authorization: `Bearer ${await mintInstanceToken(owner)}` },
       });
-      expect(names).toContain("list_connections");
-      expect(names).toContain("api_call");
+      expect(names).toContain("search_integration_tools");
+      expect(names).toContain("call_integration_tool");
       expect(names).toContain("run_and_wait");
     });
 
@@ -315,8 +330,8 @@ describe("mcp connection tools", () => {
       const without = await toolNames(
         await keyCaller(owner, ["mcp:read", "mcp:invoke", "agents:run", "runs:read"]),
       );
-      expect(without).not.toContain("list_connections");
-      expect(without).not.toContain("api_call");
+      expect(without).not.toContain("search_integration_tools");
+      expect(without).not.toContain("call_integration_tool");
       expect(without).toContain("run_and_wait");
 
       // A key scoped `credential-proxy:call` alone, which implies `call-own`.
@@ -324,8 +339,8 @@ describe("mcp connection tools", () => {
         const withIt = await toolNames(
           await keyCaller(owner, ["mcp:read", "mcp:invoke", permission]),
         );
-        expect(withIt, permission).toContain("list_connections");
-        expect(withIt, permission).toContain("api_call");
+        expect(withIt, permission).toContain("search_integration_tools");
+        expect(withIt, permission).toContain("call_integration_tool");
       }
     });
 
@@ -334,8 +349,8 @@ describe("mcp connection tools", () => {
         path: spacePath(owner),
         headers: { Cookie: owner.cookie, "X-Org-Id": owner.orgId },
       });
-      expect(names).not.toContain("list_connections");
-      expect(names).not.toContain("api_call");
+      expect(names).not.toContain("search_integration_tools");
+      expect(names).not.toContain("call_integration_tool");
       expect(names).toContain("invoke_operation");
     });
 
@@ -354,8 +369,8 @@ describe("mcp connection tools", () => {
         path: spacePath(owner),
         headers: { Authorization: `Bearer ${token}`, "X-Org-Id": owner.orgId },
       });
-      expect(names).not.toContain("list_connections");
-      expect(names).not.toContain("api_call");
+      expect(names).not.toContain("search_integration_tools");
+      expect(names).not.toContain("call_integration_tool");
       expect(names).toContain("invoke_operation");
       expect(names).toContain("run_and_wait");
     });
@@ -371,18 +386,20 @@ describe("mcp connection tools", () => {
         headers: { Authorization: `Bearer ${await mintInstanceToken(member)}` },
       };
 
-      const apiCall = (await listTools(caller)).find((tool) => tool.name === "api_call")!;
+      const apiCall = (await listTools(caller)).find(
+        (tool) => tool.name === "call_integration_tool",
+      )!;
       expect(apiCall.inputSchema.required).toContain("space_id");
       // Granted in one of the two spaces: the description names it, and only it.
       const availableIn = apiCall.description.slice(
         0,
-        apiCall.description.indexOf("Call third-party APIs"),
+        apiCall.description.indexOf("Call a tool search_integration_tools"),
       );
       expect(availableIn).toStartWith("Available in: ");
       expect(availableIn).toContain(owner.defaultSpaceId);
       expect(availableIn).not.toContain(other.id);
 
-      const refused = await callTool(caller, "api_call", {
+      const refused = await callApi(caller, {
         space_id: other.id,
         requests: [get("/contacts")],
       });
@@ -393,7 +410,7 @@ describe("mcp connection tools", () => {
       });
       expect(upstreamCalls).toHaveLength(0);
 
-      const served = await callTool(caller, "api_call", {
+      const served = await callApi(caller, {
         space_id: owner.defaultSpaceId,
         requests: [get("/contacts")],
       });
@@ -470,7 +487,7 @@ describe("mcp connection tools", () => {
       await connect(owner, "mine");
       mockUpstream(() => json({ contacts: [{ id: 1 }] }));
 
-      const { isError, data } = await callTool(caller, "api_call", {
+      const { isError, data } = await callApi(caller, {
         requests: [get("/contacts?limit=1", { headers: { Accept: "application/json" } })],
       });
 
@@ -495,7 +512,7 @@ describe("mcp connection tools", () => {
       await connect(owner, "mine");
       mockUpstream(() => json({ message: "Bad credentials" }, 401));
 
-      const { data } = await callTool(caller, "api_call", { requests: [get("/contacts")] });
+      const { data } = await callApi(caller, { requests: [get("/contacts")] });
 
       expect(entries(data)[0]).toMatchObject({
         status: 401,
@@ -522,7 +539,7 @@ describe("mcp connection tools", () => {
         .where(eq(integrationConnections.id, connectionId));
       mockUpstream(() => json({ message: "Bad credentials" }, 401));
 
-      const { data } = await callTool(caller, "api_call", { requests: [get("/contacts")] });
+      const { data } = await callApi(caller, { requests: [get("/contacts")] });
 
       expect(entries(data)[0]).toMatchObject({ status: 401, body: { message: "Bad credentials" } });
       expect(entries(data)[0]!.credential).toEqual({
@@ -541,7 +558,7 @@ describe("mcp connection tools", () => {
       await connect(owner, "mine");
       mockUpstream(() => json({ message: "Forbidden" }, 403));
 
-      const { data } = await callTool(caller, "api_call", { requests: [get("/contacts")] });
+      const { data } = await callApi(caller, { requests: [get("/contacts")] });
 
       expect(entries(data)[0]).toMatchObject({ status: 403 });
       expect(entries(data)[0]).not.toHaveProperty("credential");
@@ -555,15 +572,11 @@ describe("mcp connection tools", () => {
           : json({ path: call.path, method: call.method }),
       );
 
-      const { isError, data } = await callTool(caller, "api_call", {
+      const { isError, data } = await callApi(caller, {
         requests: [
           get("/a"),
           // Off the integration's `authorized_uris`: the proxy refuses, nothing is sent.
-          {
-            integration_package_id: INTEGRATION_ID,
-            method: "GET",
-            target: "https://8.8.8.8/elsewhere",
-          },
+          { method: "GET", target: "https://8.8.8.8/elsewhere" },
           get("/missing"),
           { ...get("/b"), method: "POST", body: { name: "x" } },
         ],
@@ -593,7 +606,7 @@ describe("mcp connection tools", () => {
           : new Response(new Uint8Array(300), { headers: { "content-type": "image/png" } }),
       );
 
-      const { data } = await callTool(caller, "api_call", {
+      const { data } = await callApi(caller, {
         requests: [get("/export"), get("/logo.png")],
         max_response_bytes: 100,
       });
@@ -603,45 +616,62 @@ describe("mcp connection tools", () => {
       expect(image).toMatchObject({ status: 200, bytes: 100, truncated: true });
     });
 
-    const notFound = { status: 404, code: "credential_not_found" };
-
     it("reaches a colleague's shared connection once named; credential-proxy:call-own alone never does", async () => {
       const shared = await shareColleagueConnection();
       const unnamed = get("/contacts");
       const named = get("/contacts", { connection_id: shared });
 
       // The admin holds `credential-proxy:call`: the fallback binds no share.
-      const fallback = await callTool(caller, "api_call", { requests: [unnamed] });
+      const fallback = await callApi(caller, { requests: [unnamed] });
       expect(entries(fallback.data)[0]!.error).toMatchObject({
         status: 409,
         code: "must_choose_connection",
       });
       expect(upstreamCalls).toHaveLength(0);
-      const served = await callTool(caller, "api_call", { requests: [named] });
+      const served = await callApi(caller, { requests: [named] });
       expect(entries(served.data)[0]).toMatchObject({ status: 200, body: { ok: true } });
       expect(upstreamAuth()).toEqual(["Bearer tok-theirs"]);
 
+      // `credential-proxy:call-own` alone, no connection of its own: the tool is not its to call.
       const ownOnly = await instanceCaller(await memberHolding(owner, CALL_OWN_ROLE));
       for (const request of [unnamed, named]) {
-        const { data } = await callTool(ownOnly, "api_call", { requests: [request] });
-        expect(entries(data)[0]!.error).toMatchObject(notFound);
+        const { isError, data } = await callApi(ownOnly, { requests: [request] });
+        expect(isError).toBe(true);
+        expect(data).toMatchObject({ code: "unknown_tool" });
       }
+      // Holding one of its own, the colleague's is still out of reach, by name or by the proxy.
+      const connectedMember = await memberHolding(owner, CALL_OWN_ROLE);
+      await connect(connectedMember, "own");
+      const ownConnected = await instanceCaller(connectedMember);
+      const byName = await callApi(ownConnected, { requests: [named] });
+      expect(byName.data).toMatchObject({
+        code: "invalid_argument",
+        arguments: ["arguments.requests[0].connection_id"],
+      });
       expect(upstreamCalls).toHaveLength(1);
     });
 
-    it("serves the listing operation the same rows as list_connections: shared ones for credential-proxy:call only", async () => {
+    it("serves the listing operation the same rows as search_integration_tools: shared ones for credential-proxy:call only", async () => {
       /** `[connection_id, owned_by_actor]` of each row, read at both doors. */
       const listedBy = async (asCaller: Caller) => {
-        const listed = await callTool(asCaller, "list_connections");
+        const listed = await callTool(asCaller, "search_integration_tools");
         const invoked = await callTool(asCaller, "invoke_operation", {
           operation_id: "listCredentialProxyConnections",
         });
         expect(invoked.isError).toBe(false);
-        const rows = listed.data.connections as Array<{
-          connection_id: string;
-          owned_by_actor: boolean;
+        const tools = listed.data.tools as Array<{
+          tool: string;
+          integration: string;
+          connections: Array<{ connection_id: string; owned_by_actor: boolean }>;
         }>;
-        expect((invoked.data.body as { data: unknown[] }).data).toEqual(rows);
+        expect(tools.map((tool) => [tool.tool, tool.integration])).toEqual([
+          [TOOL, INTEGRATION_ID],
+        ]);
+        const rows = tools[0]!.connections;
+        // Every field of the listing's rows, the integration carried by the tool.
+        expect((invoked.data.body as { data: unknown[] }).data).toEqual(
+          rows.map((row) => ({ integration_package_id: INTEGRATION_ID, ...row })),
+        );
         return rows
           .map((row): [string, boolean] => [row.connection_id, row.owned_by_actor])
           .sort(([a], [b]) => a.localeCompare(b));

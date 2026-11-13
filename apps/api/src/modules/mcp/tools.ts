@@ -93,6 +93,8 @@ import {
   type Refusal,
 } from "./tool-results.ts";
 import { buildConnectionTools } from "./connection-tools.ts";
+import type { IntegrationManifest } from "@appstrate/core/integration";
+import { readIntegrationManifestForProxy } from "../../services/integration-service.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
 import {
   describeSpace,
@@ -120,8 +122,8 @@ export type McpToolName =
   | "validate_package_file"
   | "import_package_file"
   | "get_runtime_capabilities"
-  | "list_connections"
-  | "api_call"
+  | "search_integration_tools"
+  | "call_integration_tool"
   | "get_me";
 
 /** Outcome of an `invoke_operation` call, for audit + telemetry. */
@@ -141,7 +143,7 @@ export interface McpToolEvent {
   tool: McpToolName;
   /** Wall-clock duration of the handler, milliseconds. */
   durationMs: number;
-  /** Rows returned to the caller (after `limit`), not rows matched; `api_call`: its entries. */
+  /** Rows returned to the caller (after `limit`), not rows matched; `call_integration_tool`: its entries. */
   shownCount?: number;
   /** `search_operations`: matches withheld for lack of permission. */
   deniedCount?: number;
@@ -202,6 +204,19 @@ export interface McpToolContext {
   contextInjected?: boolean;
   /** Org-wide connection only: its spaces; `permissions` and `scope` are the entered one's. */
   orgSpaces?: OrgWideSpaces;
+  /**
+   * The manifest an integration tool is listed and called under. Defaults to the one the
+   * credential proxy authorizes a call outside a run against (`readIntegrationManifestForProxy`).
+   */
+  readIntegrationManifest?: (packageId: string) => Promise<IntegrationManifest | null>;
+}
+
+/** The latest published manifest of an integration, as the proxy reads it outside a run. */
+function publishedIntegrationManifest(orgId: string) {
+  return async (packageId: string): Promise<IntegrationManifest | null> => {
+    const loaded = await readIntegrationManifestForProxy(packageId, orgId, null);
+    return loaded.ok ? loaded.manifest : null;
+  };
 }
 
 /** Never let an observer error affect the tool result. */
@@ -1760,7 +1775,9 @@ function buildGetMeTool(ctx: McpToolContext, proxies: boolean): AppstrateToolDef
       "and the integrations the caller already has connected and could attach to an agent: one " +
       "entry per integration active in that space with a connection the caller may bind there, " +
       "its own or shared into the space. " +
-      (proxies ? "The connections `api_call` can use are listed by `list_connections`. " : "") +
+      (proxies
+        ? "The integration tools you can call with them are listed by `search_integration_tools`. "
+        : "") +
       "Call this first to ground who you are acting for, what the " +
       "caller's role allows (operations beyond it fail at invoke time), and which integrations " +
       "to prefer when building or configuring an agent.",
@@ -1819,7 +1836,7 @@ export interface McpSurface {
   authors: boolean;
   listsFiles: boolean;
   importsPackages: boolean;
-  /** `list_connections` and `api_call`: the credential proxy outside a run. */
+  /** `search_integration_tools` and `call_integration_tool`: the credential proxy outside a run. */
   proxies: boolean;
 }
 
@@ -1917,6 +1934,8 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
           dispatch: ctx.dispatch,
           observe: (event) => emit(ctx, event),
           runs: surface.runs,
+          readManifest:
+            ctx.readIntegrationManifest ?? publishedIntegrationManifest(ctx.scope.orgId),
         })
       : []),
     // Redundant for a context-injecting caller; search_operations stays for `best_match`.
@@ -1943,8 +1962,8 @@ const SPACE_ACTS: Record<McpToolName, keyof McpSurface | null | false> = {
   read_file: null,
   validate_package_file: null,
   import_package_file: "importsPackages",
-  list_connections: "proxies",
-  api_call: "proxies",
+  search_integration_tools: "proxies",
+  call_integration_tool: "proxies",
   get_me: null,
   get_runtime_capabilities: false,
 };
