@@ -267,7 +267,7 @@ function buildIntegrationToolFactories(
             isError: result.isError === true,
             timestamp: Date.now(),
           });
-          // First-party runtime tools (output/log/note/pin) are executed
+          // First-party runtime tools (log/note/pin) are executed
           // ONCE by the sidecar, which journals their canonical events. Drain
           // the journal after every forwarded call and re-emit on the run's
           // sink — single source of

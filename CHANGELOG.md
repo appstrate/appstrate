@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
+- **Run `scripts/migration/0052` then `0053` in this release's window** (#2197).
+  `0052-report-output-runtime-tool.ts` is read-only and lists the agents whose
+  `runtime_tools` select `output` without an `output.schema`: they lose the
+  `output` tool. `0053-drop-output-runtime-tool.sql` then removes `"output"`
+  from every stored `runtime_tools` (`packages.draft_manifest`,
+  `package_versions.manifest`); it is idempotent and its header carries the
+  verification queries. Until it runs, a draft that still lists `output` keeps
+  running but cannot be saved.
+
 - **Fixed: the runner bootstrap keeps its env across sudo-rs** (#2153).
   `get.appstrate.dev/runner` elevated with `sudo -E`, which sudo-rs (the default
   sudo since Ubuntu 25.10) ignores with only a warning, so `runner install` lost
@@ -101,6 +110,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   persistence read.
 
 ### Changed
+
+- **BREAKING: `output` is injected from `output.schema`, not selected in
+  `runtime_tools`** (#2197). A run has the `output` tool exactly when its agent
+  declares a non-empty `output.schema`, and must then call it; without a schema
+  there is no `output` tool. `output` leaves the `runtime_tools` enum and the
+  editor's runtime-tools checklist, and the `output_tool_required` rule is
+  gone. A manifest sent by an author (create, update, ZIP import, inline run,
+  `appstrate run`) that lists `output` in `runtime_tools` is refused with
+  `invalid_manifest` on `manifest.runtime_tools`; a stored manifest drops the id
+  and reports it. The `PiRunner` builds the tool in the agent container and in
+  the CLI, and the sidecar no longer hosts it (`OUTPUT_SCHEMA` is not part of
+  the sidecar env). Inline runs default `runtime_tools` to `log`,
+  `publish_file` and keep their open object output schema, so they keep
+  `output`. The runner, the platform prompt's `## Output Format` section and
+  the output validation at finalize read the schema the same way: an empty
+  `output.schema` (`{}`) declares none.
 
 - **A model test says what it checked** (#2148). A successful model test reads
   « Credential valid — model not tested », and the `testModel` /
@@ -355,10 +380,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     server now names it and stores it in `connection_overrides` — on every
     `POST` or `PATCH` of an enabled schedule, a rename included — where it used
     to answer `409 must_choose_connection`.
-  - **Manifest validation**: an agent manifest declaring an output schema
-    without the `output` runtime tool now answers the `errors[]` item
-    `output_tool_required` on `manifest.runtime_tools` instead of
-    `invalid_manifest`, and items carry `line`/`column` on a YAML syntax error.
+  - **Manifest validation**: `errors[]` items carry `line`/`column` on a YAML
+    syntax error.
 - **An integration's `INTEGRATION.md` reaches the agent as a file, not inlined
   in the prompt** (#2005). The run bundle carries each integration the run uses
   at the version the run froze, written to `.pi/integrations/<id>/`; the

@@ -47,6 +47,7 @@ import {
 } from "@appstrate/runner-pi";
 import { getErrorMessage } from "@appstrate/core/errors";
 import { canonicalizeRuntimeToolIds } from "@appstrate/core/runtime-tools-catalog";
+import { readDeclaredOutputSchema } from "@appstrate/afps-shared/output-schema";
 import { SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
 import { readBundleFromFile } from "@appstrate/afps-runtime/bundle";
 import { HttpSink, attachStdoutBridge } from "@appstrate/afps-runtime/sinks";
@@ -453,8 +454,7 @@ phaseTimings.bundlePrepareMs = Math.round(performance.now() - bundlePrepareStart
 await progress("bundle loaded", { bundlePrepareMs: phaseTimings.bundlePrepareMs });
 
 // The agent's selected runtime tools (`manifest.runtime_tools`), read once from
-// the root package manifest. Reused by the `publish_file` gate and the
-// PiRunner's terminal-tool decision.
+// the root package manifest for the `publish_file` gate.
 //
 // Canonicalized here too. The platform already strips ids it cannot build
 // from the bundle (`buildAgentPackage`), so this is a second line of defence
@@ -466,10 +466,14 @@ await progress("bundle loaded", { bundlePrepareMs: phaseTimings.bundlePrepareMs 
 // digest-pinned ref, and a platform with no build identity. Filtering once, at
 // the single read, costs a function call and does not depend on which of those
 // is true.
+const rootManifest = bundle.packages.get(bundle.root)?.manifest;
 const declaredRuntimeTools: string[] = canonicalizeRuntimeToolIds(
-  (bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: unknown[] } | undefined)
-    ?.runtime_tools ?? [],
+  (rootManifest as { runtime_tools?: unknown[] } | undefined)?.runtime_tools ?? [],
 ).ids;
+
+// The agent's declared output schema: its presence gives the run the `output`
+// tool, built by the PiRunner (`outputSchema` option).
+const outputSchema = readDeclaredOutputSchema(rootManifest);
 
 // --- 2c. Phase C: wire sidecar-backed tools via MCP ---
 // Every sidecar-backed capability is surfaced as a typed Pi tool whose
@@ -620,7 +624,7 @@ try {
 }
 
 // --- 2d. publish_file runtime tool (opt-in via manifest.runtime_tools) ---
-// Unlike the four pure event-emitter runtime tools (served by the sidecar over
+// Unlike the pure event-emitter runtime tools (served by the sidecar over
 // MCP), `publish_file` performs an HTTP upload back to the platform — so it is
 // ALWAYS registered
 // in-process here (the sidecar has no path to the files route), gated on
@@ -708,12 +712,6 @@ await emitRuntimeReady(bridgedSink, AGENT_RUN_ID, {
 
 /** Construct the Pi runner (every run). */
 function buildPiRunner(): PiRunner {
-  // When the agent selected the `output` runtime tool, a successful call is
-  // the run's semantic end — stop the SDK loop there instead of paying one
-  // more LLM round-trip for a trailing text-only turn whose content the
-  // communication contract discards anyway. Gated on the manifest selection
-  // so a bundle-defined tool that happens to be named `output` (no
-  // `runtime_tools` opt-in) keeps the SDK's natural stop.
   return createRuntimePiRunner({
     model,
     // No rates reached this container (unpriced model, or a withheld alias
@@ -727,7 +725,9 @@ function buildPiRunner(): PiRunner {
     agentDir: "/tmp/pi-agent",
     extensionFactories,
     authStoragePath: "/tmp/pi-auth/auth.json",
-    ...(declaredRuntimeTools.includes("output") ? { terminalTools: ["output"] } : {}),
+    // The runner registers `output` and stops on its first successful call
+    // when the agent declares an output schema.
+    ...(outputSchema ? { outputSchema } : {}),
     modelRetry: env.modelRetry,
     modelCompaction: env.modelCompaction,
     ...(env.toolResultByteLimit !== undefined

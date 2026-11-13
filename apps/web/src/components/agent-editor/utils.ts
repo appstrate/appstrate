@@ -142,15 +142,6 @@ export function setRuntimeTools(m: Record<string, unknown>, tools: string[]): vo
   }
 }
 
-/** The server refuses an output schema without the `output` runtime tool; declaring a schema turns it on. */
-export function withOutputTool(m: Record<string, unknown>): Record<string, unknown> {
-  const tools = getRuntimeTools(m);
-  if (tools.includes("output")) return m;
-  const next = { ...m };
-  setRuntimeTools(next, [...tools, "output"]);
-  return next;
-}
-
 // ─── Manifest accessors ─────────────────────────────────────
 
 export function getManifestName(m: Record<string, unknown>): { scope: string; id: string } {

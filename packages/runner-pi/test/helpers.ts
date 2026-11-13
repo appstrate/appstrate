@@ -226,7 +226,7 @@ export function makeTestBundle(root: BundlePackage, deps: BundlePackage[] = []):
  * `installSessionBridge`, avoiding the Pi SDK entirely.
  *
  * The override mirrors the production tail of `executeSession`: the bridge is
- * installed with the runner's `terminalTools` + early-stop callback, and the
+ * installed with the terminal tools the runner's `outputSchema` implies + early-stop callback, and the
  * real `maybeRepromptForOutput` runs once the script's "agent loop" settles.
  * A script that never emits a successful `output` therefore exercises the
  * missing-`output` re-prompt end to end through `run()`.
@@ -268,7 +268,7 @@ export class ScriptedPiRunner extends PiRunner {
   ): Promise<void> {
     const session = createFakeSession();
     const { installSessionBridge, maybeRepromptForOutput } = await import("../src/pi-runner.ts");
-    const terminalTools = this.opts.terminalTools ?? [];
+    const terminalTools = this.opts.outputSchema ? ["output"] : [];
     const bridge = installSessionBridge(session, internalSink, context.runId, {
       terminalTools,
       onTerminalTool: () => {

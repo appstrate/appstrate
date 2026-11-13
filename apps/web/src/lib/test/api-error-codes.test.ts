@@ -26,7 +26,6 @@ import type { FieldErrorCode } from "@appstrate/core/api-errors";
 import type { ModelGenerationErrorCode } from "@appstrate/core/model-generation";
 import type { PackageFileWriteErrorCode } from "@appstrate/core/package-file-operations";
 import { RUNTIME_TOOL_CATALOG } from "@appstrate/core/runtime-tools-catalog";
-import { OUTPUT_TOOL_REQUIRED } from "@appstrate/core/validation";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { toApiError } from "../../api/client.ts";
 import { ApiError } from "../../api/errors.ts";
@@ -159,8 +158,6 @@ const EMITTED_OUT_OF_SIGHT = [
   "unrenderable_authorized_uri",
   // Thrown as `CREDENTIAL_CHANGE_REVOCATION_FAILED` (`@appstrate/db/auth`).
   "credential_change_revocation_failed",
-  // A manifest rule's own item code, carried by its Zod issue (`@appstrate/core/validation`).
-  OUTPUT_TOOL_REQUIRED,
 ];
 
 /** Codes that never reach a sentence in the dashboard, by reason. */
@@ -368,18 +365,6 @@ describe("errorMessage", () => {
       ],
     });
     expect(errorMessage(dependency)).toBe(agentsFr["error.dependencyOverridesRefused"]);
-  });
-
-  it("tells an output schema without the output tool what to turn on", async () => {
-    await i18n.changeLanguage("fr");
-    const message =
-      "The 'output' runtime tool must be enabled when an output schema is defined — an agent must return its result.";
-    const err = await problem({
-      code: "validation_failed",
-      detail: `manifest.runtime_tools: ${message}`,
-      errors: [{ field: "manifest.runtime_tools", code: "output_tool_required", message }],
-    });
-    expect(errorMessage(err)).toBe(agentsFr["error.outputToolRequired"]);
   });
 
   it("words a 'no connection' override on a required integration as the pin's refusal", async () => {

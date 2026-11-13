@@ -259,7 +259,7 @@ describe("parsePackageZip", () => {
         schema_version: "0.1",
         display_name: "Legacy Agent",
         author: "test",
-        runtime_tools: ["output", "report"],
+        runtime_tools: ["log", "report"],
       }),
       "prompt.md": "# Legacy prompt",
     });
@@ -284,7 +284,7 @@ describe("parsePackageZip", () => {
 
   it("drops a retired runtime_tools id and reports it when the caller opts in", () => {
     const result = parsePackageZip(legacyAgentZip(), { retiredRuntimeTools: "drop" });
-    expect((result.manifest as Record<string, unknown>).runtime_tools).toEqual(["output"]);
+    expect((result.manifest as Record<string, unknown>).runtime_tools).toEqual(["log"]);
     expect(result.droppedRuntimeTools).toEqual(["report"]);
   });
 

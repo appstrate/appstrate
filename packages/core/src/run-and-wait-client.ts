@@ -160,10 +160,11 @@ type MaterializedManifest =
  * empty array; no capability is silently re-injected. Nested deterministic
  * contracts such as `output.schema` therefore remain entirely caller-owned.
  *
- * `output` is part of the convenience runtime-tools default rather than an
- * independent default. Once a caller explicitly selects `runtime_tools`, an
- * absent `output` stays absent so side-effect-only agents — including
- * `runtime_tools: []` — remain expressible.
+ * The open output schema, which gives the run its `output` tool, is part of
+ * the convenience runtime-tools default rather than an independent default.
+ * Once a caller explicitly selects `runtime_tools`, an absent `output` stays
+ * absent so side-effect-only agents — including `runtime_tools: []` — remain
+ * expressible.
  */
 function materializeInlineManifest(manifest: Record<string, unknown>): MaterializedManifest {
   const hasOwn = (key: string): boolean => Object.prototype.hasOwnProperty.call(manifest, key);
@@ -190,7 +191,7 @@ function materializeInlineManifest(manifest: Record<string, unknown>): Materiali
   if (!hasOwn("version")) defaults.version = "1.0.0";
   if (!hasOwn("dependencies")) defaults.dependencies = {};
   if (!hasOwn("runtime_tools")) {
-    defaults.runtime_tools = ["log", "output", "publish_file"];
+    defaults.runtime_tools = ["log", "publish_file"];
     if (!hasOwn("output")) {
       defaults.output = {
         schema: { type: "object", properties: {}, additionalProperties: true },

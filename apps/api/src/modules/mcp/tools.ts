@@ -1114,7 +1114,7 @@ const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
         type: "array",
         description:
           "Exact runtime-tool selection. Omit for " +
-          "log/output/publish_file defaults; " +
+          "log/publish_file defaults; " +
           "an explicit [] disables them all.",
         items: { type: "string" },
       },
@@ -1174,13 +1174,14 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       (inline
         ? "For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set " +
           "only a concise task-specific `display_name` plus task dependencies/configuration. The " +
-          "platform derives `name` and fills omitted AFPS boilerplate, `runtime_tools` (log, output, " +
+          "platform derives `name` and fills omitted AFPS boilerplate, `runtime_tools` (log, " +
           "publish_file), and an open object output schema. Defaults apply only " +
           "to fields you omit; " +
           "every field you provide replaces its default exactly, with no array or nested-object merge. " +
           "That includes `runtime_tools: []`, which stays empty and disables every default runtime tool. " +
           "A complete deterministic manifest may override every field, including a strict " +
-          "`output.schema`; when it does, its explicit `runtime_tools` must include `output`. The chat " +
+          "`output.schema`. The run has the `output` tool exactly when its manifest declares an " +
+          "`output.schema`; `runtime_tools` does not select it. The chat " +
           "shows only lines emitted through `log`, so instruct the run to log meaningful steps whenever " +
           "that tool is selected. Never use an id or a generic display name such as `one-shot`. "
         : "") +

@@ -335,16 +335,10 @@ const agentManifestObjectSchema = afpsAgentManifestObjectSchema.extend({
   runtime_tools: z.array(z.enum(SELECTABLE_RUNTIME_TOOLS)).optional(),
 });
 
-/** The issue code of the agent rule "an output schema needs the `output` runtime tool". */
-export const OUTPUT_TOOL_REQUIRED = "output_tool_required";
-
 /**
- * `output` is opt-in like every runtime tool (none is auto-injected). But an
- * agent that declares an `output.schema` promises a typed result, so it MUST
- * enable the `output` tool — otherwise it has no way to emit that result and
- * the run would fail post-hoc output validation. Caught at save/import time
- * here so the editor surfaces it on the `runtimeTools` field. Agents with no
- * output schema may finish without ever calling output (side-effect-only run).
+ * The agent manifest schema: the AFPS base object plus the cross-field rules
+ * Zod cannot express structurally (orphan integration configuration, resource
+ * hints).
  */
 export const agentManifestSchema = agentManifestObjectSchema.superRefine((m, ctx) => {
   // AFPS §4.4 — re-apply the canonical orphan-key rule (the base AFPS schema
@@ -357,27 +351,6 @@ export const agentManifestSchema = agentManifestObjectSchema.superRefine((m, ctx
   ];
   if (resourceHints !== undefined) {
     refineAgentResourceHints(resourceHints, ctx);
-  }
-
-  const outputSchema = (m as { output?: { schema?: unknown } }).output?.schema;
-  const hasOutputSchema =
-    outputSchema != null &&
-    typeof outputSchema === "object" &&
-    Object.keys(outputSchema as object).length > 0;
-  if (!hasOutputSchema) return;
-
-  const runtimeTools = (m as { runtime_tools?: unknown }).runtime_tools;
-  const selectsOutput = Array.isArray(runtimeTools) && runtimeTools.includes("output");
-  if (!selectsOutput) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["runtime_tools"],
-      // Its own code: the one rule on `runtime_tools` a reader is told in their language.
-      params: { code: OUTPUT_TOOL_REQUIRED },
-      message:
-        "The 'output' runtime tool must be enabled when an output schema is defined — " +
-        "an agent that declares an output schema must be able to return its result.",
-    });
   }
 });
 
@@ -460,7 +433,7 @@ export type ValidateManifestResult =
       errors: string[];
       /**
        * The same failures, structured: `path` dotted, and `code` set on a rule that carries its
-       * own (e.g. {@link OUTPUT_TOOL_REQUIRED}). Absent on a dispatcher-level failure
+       * own. Absent on a dispatcher-level failure
        * (unknown type, retired keys), which only `errors` states.
        */
       issues?: ManifestIssue[];

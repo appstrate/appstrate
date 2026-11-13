@@ -39,7 +39,6 @@ import {
   getRuntimeTools,
   setRuntimeTools,
   withNormalizedManifest,
-  withOutputTool,
   fieldsToSchema,
 } from "../components/agent-editor/utils";
 import type { ResourceEntry, SchemaField } from "../components/agent-editor/types";
@@ -103,10 +102,7 @@ function AgentEditorInner({
   const onSchemaChange = (key: "input" | "output") => (fields: SchemaField[]) => {
     const wrapper = fieldsToSchema(fields, key, manifestSchemaWrapper(state.manifest, key)?.schema);
     if (wrapper) {
-      setState((s) => {
-        const manifest = { ...s.manifest, [key]: wrapper };
-        return { ...s, manifest: key === "output" ? withOutputTool(manifest) : manifest };
-      });
+      setState((s) => ({ ...s, manifest: { ...s.manifest, [key]: wrapper } }));
     } else {
       setState((s) => {
         const { [key]: _, ...rest } = s.manifest;

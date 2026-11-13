@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — the output schema is read by `readDeclaredOutputSchema` (#2197)
+
+- `buildPlatformPromptInputs` derives `outputSchema` with `readDeclaredOutputSchema`
+  (`@appstrate/afps-shared/output-schema`): an empty `output.schema` (`{}`) yields none, the
+  same reading the runner uses to inject the `output` tool. `renderPlatformPrompt` renders
+  `## Output Format` for every `outputSchema` it receives.
+
 ### Changed — `fetchApiCall` returns a redirect off the allowlist (#2154)
 
 - When gated (no `allowAllUris`), a 3xx whose `Location` matches no `authorizedUris` entry is

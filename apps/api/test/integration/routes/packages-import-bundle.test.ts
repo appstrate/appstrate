@@ -496,8 +496,8 @@ describe("POST /api/packages/import-bundle — import", () => {
         schema_version: "0.1",
         display_name: "Legacy Runtime Tools",
         author: "tester",
-        // `output` is still selectable; `report` was retired.
-        runtime_tools: ["output", "report"],
+        // `log` is selectable; `report` is retired.
+        runtime_tools: ["log", "report"],
       },
       content: "Legacy prompt.",
       type: "agent",
@@ -534,7 +534,7 @@ describe("POST /api/packages/import-bundle — import", () => {
       .where(eq(packages.id, agentId))
       .limit(1);
     expect(row).toBeDefined();
-    expect((row!.draftManifest as Record<string, unknown>).runtime_tools).toEqual(["output"]);
+    expect((row!.draftManifest as Record<string, unknown>).runtime_tools).toEqual(["log"]);
   });
 
   // ── retired AFPS 1.x dependency keys: import-bundle is the READ direction ──

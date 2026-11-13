@@ -217,11 +217,11 @@ const runtimeDeps = buildSidecarRuntimeDeps({
   ...(process.env.RUN_ID ? { runId: process.env.RUN_ID } : {}),
 });
 
-// Platform runtime tools (output/log/note/pin) the agent selected,
+// Platform runtime tools (log/note/pin) the agent selected,
 // hosted in-process as MCP tools on the agent-facing `/mcp` surface — the
 // same transport every other tool uses, so they are not Pi-SDK
-// extensions. Static for the run's lifetime (selection + output schema are
-// fixed at boot).
+// extensions. Static for the run's lifetime (the selection is fixed at
+// boot).
 //
 // Each def is wrapped so its handler runs ONCE and its canonical events are
 // journaled (the events sub-key is then stripped from the tool result). The
@@ -229,10 +229,7 @@ const runtimeDeps = buildSidecarRuntimeDeps({
 // execution, transport-agnostic, no `_meta` reliance.
 const runtimeEventJournal = new RuntimeEventJournal();
 const runtimeToolDefs = journalRuntimeToolDefs(
-  buildRuntimeToolDefs({
-    runtimeTools: env.runtimeToolNames,
-    outputSchema: env.outputSchema ?? null,
-  }),
+  buildRuntimeToolDefs({ runtimeTools: env.runtimeToolNames }),
   runtimeEventJournal,
 ) as unknown as AppstrateToolDefinition[];
 

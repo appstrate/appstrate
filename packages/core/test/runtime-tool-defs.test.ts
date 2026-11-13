@@ -3,6 +3,7 @@
 import { describe, it, expect } from "bun:test";
 import {
   buildPublishFileDef,
+  buildOutputToolDef,
   buildRuntimeToolDefs,
   CANONICAL_RUNTIME_TOOL_EVENT_TYPES,
   filePublishedEvent,
@@ -23,6 +24,11 @@ function eventsOf(meta: Record<string, unknown> | undefined): RuntimeToolEvent[]
 }
 
 describe("buildRuntimeToolDefs — selection", () => {
+  it("never builds `output`: the output schema decides it, not the selection", () => {
+    const defs = buildRuntimeToolDefs({ runtimeTools: ["output", "log"] });
+    expect(defs.map((d) => d.descriptor.name)).toEqual(["log"]);
+  });
+
   it("returns only the selected tools, de-duplicated, ignoring unknowns", () => {
     const defs = buildRuntimeToolDefs({ runtimeTools: ["log", "note", "log", "bogus"] });
     expect(defs.map((d) => d.descriptor.name)).toEqual(["log", "note"]);
@@ -80,7 +86,8 @@ describe("buildRuntimeToolDefs — event payloads", () => {
   // whole run over the sidecar/MCP re-emit path.
   it("stamps a numeric timestamp on every emitted event", async () => {
     for (const name of ["log", "note", "pin", "output"]) {
-      const def = defsByName([name]).get(name)!;
+      const def =
+        name === "output" ? buildOutputToolDef({ type: "object" }) : defsByName([name]).get(name)!;
       const args =
         name === "pin"
           ? { key: "k", content: 1 }
@@ -259,22 +266,19 @@ describe("output — schema dialect and compile failure", () => {
    * side and not the other.
    */
   it("compiles a 2020-12-only schema and enforces it", async () => {
-    const def = buildRuntimeToolDefs({
-      runtimeTools: ["output"],
-      outputSchema: {
-        type: "object",
-        properties: {
-          pair: {
-            type: "array",
-            // `prefixItems` is 2020-12. Draft-07 does not know it and treats
-            // it as an unknown annotation, so this constraint vanished.
-            prefixItems: [{ type: "string" }, { type: "number" }],
-            minItems: 2,
-          },
+    const def = buildOutputToolDef({
+      type: "object",
+      properties: {
+        pair: {
+          type: "array",
+          // `prefixItems` is 2020-12. Draft-07 does not know it and treats
+          // it as an unknown annotation, so this constraint vanished.
+          prefixItems: [{ type: "string" }, { type: "number" }],
+          minItems: 2,
         },
-        required: ["pair"],
       },
-    })[0]!;
+      required: ["pair"],
+    });
 
     const bad = await def.handler({ data: { pair: [1, "x"] } });
     expect(bad.isError).toBe(true);
@@ -291,10 +295,10 @@ describe("output — schema dialect and compile failure", () => {
    * pre-empt.
    */
   it("refuses every output when the declared schema cannot compile", async () => {
-    const def = buildRuntimeToolDefs({
-      runtimeTools: ["output"],
-      outputSchema: { type: "object", properties: { n: { type: "not-a-json-schema-type" } } },
-    })[0]!;
+    const def = buildOutputToolDef({
+      type: "object",
+      properties: { n: { type: "not-a-json-schema-type" } },
+    });
 
     const res = await def.handler({ data: { anything: true } });
     expect(res.isError).toBe(true);
@@ -316,14 +320,8 @@ describe("output — schema dialect and compile failure", () => {
       properties: { n: { type: "number" } },
       required: ["n"],
     };
-    const first = buildRuntimeToolDefs({
-      runtimeTools: ["output"],
-      outputSchema: { ...schema },
-    })[0]!;
-    const second = buildRuntimeToolDefs({
-      runtimeTools: ["output"],
-      outputSchema: { ...schema },
-    })[0]!;
+    const first = buildOutputToolDef({ ...schema });
+    const second = buildOutputToolDef({ ...schema });
 
     for (const def of [first, second]) {
       expect((await def.handler({ data: { n: "nope" } })).isError).toBe(true);

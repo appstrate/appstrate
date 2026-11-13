@@ -891,7 +891,6 @@
   "error.connectionSetTooLarge": "The imposed connections and the added ones together exceed the maximum allowed for an integration: remove some additions.",
   "error.requiredIntegrationUnbound": "The agent requires this integration, but the choice in force is \"No connection\": pick a connection, or remove that choice.",
   "error.connectionOverridesRefused": "A connection choice names an integration this version of the agent does not declare. Remove that choice, then try again.",
-  "error.outputToolRequired": "An output schema is defined: the \"output\" tool must stay enabled so the agent can return its result.",
   "error.dependencyOverridesRefused": "A version choice names a dependency this version of the agent does not declare. Remove that choice, then try again.",
   "launchWarnings.run_one": "Running without the {{names}} integration",
   "launchWarnings.run_other": "Running without the {{names}} integrations",

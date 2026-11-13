@@ -5,10 +5,12 @@
  * Runtime tool definitions — the platform's first-party "runtime tools"
  * expressed as transport-neutral, Pi-agnostic MCP tool definitions.
  *
- * Two groups, both defined here: the four pure event emitters
- * (`output` / `log` / `note` / `pin`), assembled together by
- * {@link buildRuntimeToolDefs}; and `publish_file`, built on its own by
- * {@link buildPublishFileDef} because it needs an injected HTTP uploader
+ * Three groups, all defined here: the pure event emitters selected through
+ * `manifest.runtime_tools` (`log` / `note` / `pin`), assembled together by
+ * {@link buildRuntimeToolDefs}; `output`, built by {@link buildOutputToolDef}
+ * when the agent declares an `output.schema` (the runner registers it as a Pi
+ * extension, see `@appstrate/runner-pi`); and `publish_file`, built on its own
+ * by {@link buildPublishFileDef} because it needs an injected HTTP uploader
  * only the runtime entrypoint can supply.
  *
  * They are plain tool definitions so the SAME logic can be hosted two ways:
@@ -118,13 +120,6 @@ export interface RuntimeToolDef {
 export interface BuildRuntimeToolDefsOptions {
   /** Agent-selected runtime tools (`manifest.runtime_tools`). */
   runtimeTools?: readonly string[];
-  /**
-   * Output JSON Schema. When set, it becomes `output`'s `data` argument
-   * schema (the model sees it in the tool definition) and calls are
-   * AJV-validated against it. `null`/omitted leaves `output` accepting any
-   * JSON object.
-   */
-  outputSchema?: Record<string, unknown> | null;
 }
 
 function withEvents(text: string, events: RuntimeToolEvent[]): RuntimeToolResult {
@@ -148,7 +143,13 @@ function toolError(text: string): RuntimeToolResult {
   return { content: [{ type: "text", text }], isError: true };
 }
 
-function buildOutputDef(outputSchema: Record<string, unknown> | null): RuntimeToolDef {
+/**
+ * Build the `output` tool for an agent that declares `outputSchema`: the
+ * schema becomes the `data` argument schema (the model sees it in the tool
+ * definition), every call is validated against it, and a valid call produces
+ * the `output.emitted` run event. The agent must call it exactly once.
+ */
+export function buildOutputToolDef(outputSchema: Record<string, unknown>): RuntimeToolDef {
   // Compile through the ONE shared Ajv2020 instance and its cache
   // (`@appstrate/core/schema-validation`), not a private second instance.
   //
@@ -172,32 +173,22 @@ function buildOutputDef(outputSchema: Record<string, unknown> | null): RuntimeTo
   // not the run's outcome.
   let validator: ValidateFunction | null = null;
   let schemaCompileError: string | null = null;
-  if (outputSchema) {
-    try {
-      validator = compileCached(asJSONSchemaObject(outputSchema));
-    } catch (err) {
-      schemaCompileError = err instanceof Error ? err.message : String(err);
-    }
+  try {
+    validator = compileCached(asJSONSchemaObject(outputSchema));
+  } catch (err) {
+    schemaCompileError = err instanceof Error ? err.message : String(err);
   }
-  const dataSchema: Record<string, unknown> = outputSchema
-    ? {
-        ...outputSchema,
-        description:
-          typeof outputSchema.description === "string"
-            ? outputSchema.description
-            : "JSON object to return as the run output",
-      }
-    : { type: "object", description: "JSON object to return as the run output" };
-  // `output` is opt-in (selected via `runtimeTools`). When a run declares an
-  // output schema the agent MUST call it (once, valid); otherwise it may
-  // finish without it (a side-effect-only run is a valid success).
-  const description = outputSchema
-    ? "Call exactly once, as your final action, with the complete output object that " +
-      "satisfies the declared schema (all required fields must be provided). A successful " +
-      "call ends the run immediately — do all other work first."
-    : "Optional — call at most once, as your final action, to return a JSON object as the " +
-      "run result. If your task produces no result to return, finish without calling it. " +
-      "A successful call ends the run immediately — do all other work first.";
+  const dataSchema: Record<string, unknown> = {
+    ...outputSchema,
+    description:
+      typeof outputSchema.description === "string"
+        ? outputSchema.description
+        : "JSON object to return as the run output",
+  };
+  const description =
+    "Call exactly once, as your final action, with the complete output object that " +
+    "satisfies the declared schema (all required fields must be provided). A successful " +
+    "call ends the run immediately — do all other work first.";
   return {
     descriptor: {
       name: "output",
@@ -347,11 +338,7 @@ function buildPinDef(): RuntimeToolDef {
   };
 }
 
-const RUNTIME_TOOL_BUILDERS: Record<
-  EventEmitterRuntimeTool,
-  (outputSchema: Record<string, unknown> | null) => RuntimeToolDef
-> = {
-  output: (s) => buildOutputDef(s),
+const RUNTIME_TOOL_BUILDERS: Record<EventEmitterRuntimeTool, () => RuntimeToolDef> = {
   log: () => buildLogDef(),
   note: () => buildNoteDef(),
   pin: () => buildPinDef(),
@@ -367,7 +354,6 @@ const RUNTIME_TOOL_BUILDERS: Record<
  * selection, de-duplicated.
  */
 export function buildRuntimeToolDefs(opts: BuildRuntimeToolDefsOptions): RuntimeToolDef[] {
-  const outputSchema = opts.outputSchema ?? null;
   const selected: EventEmitterRuntimeTool[] = [];
   const seen = new Set<string>();
   for (const entry of opts.runtimeTools ?? []) {
@@ -377,7 +363,7 @@ export function buildRuntimeToolDefs(opts: BuildRuntimeToolDefsOptions): Runtime
       selected.push(entry as EventEmitterRuntimeTool);
     }
   }
-  return selected.map((name) => RUNTIME_TOOL_BUILDERS[name](outputSchema));
+  return selected.map((name) => RUNTIME_TOOL_BUILDERS[name]());
 }
 
 // ---------------------------------------------------------------------------
