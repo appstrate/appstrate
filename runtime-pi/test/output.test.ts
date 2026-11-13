@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { describe, it, expect } from "bun:test";
 import {
   buildOutputToolDef,
   RUNTIME_TOOL_EVENTS_META_KEY,
