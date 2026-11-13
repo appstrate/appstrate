@@ -9,6 +9,7 @@ import { DropdownMenuLabel } from "@appstrate/ui/components/dropdown-menu";
 import { Button } from "@appstrate/ui/components/button";
 import { cn } from "@appstrate/ui/cn";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { SkeletonLine } from "../../components/skeleton-line";
 import { useMyConnections, useRenameMeConnection } from "../../hooks/use-me-connections";
 import { useConnectionShareAllSpaces, useConnectionShare } from "../../hooks/use-integrations";
 import { formatDateField } from "../../lib/format-date";
@@ -267,6 +268,27 @@ function SourceGroupCard({
   );
 }
 
+/** `SourceGroupCard`, folded, while the connections load. */
+function SourceGroupCardSkeleton() {
+  return (
+    <Card className="p-5">
+      <div className="flex items-center gap-3">
+        <Skeleton className="size-7 shrink-0 rounded-md" />
+        <div className="flex-1">
+          <div className="flex items-center gap-2">
+            <SkeletonLine className="w-32 text-[0.95rem] font-semibold" />
+            <span className="bg-muted w-20 animate-pulse rounded-full border border-transparent px-2 py-px text-[0.65rem] text-transparent uppercase">
+              {"\u00a0"}
+            </span>
+          </div>
+          {/* An inline span on the card's own line, as the count is. */}
+          <SkeletonLine className="w-28" inline="text-sm" />
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 // ─────────────────────────────────────────────
 // Page
 // ─────────────────────────────────────────────
@@ -303,7 +325,7 @@ export function PreferencesConnectionsPage() {
           {t("connections.myConnections")}
         </div>
         {isLoading ? (
-          <Skeleton className="h-3 w-20" />
+          <SkeletonLine className="w-20 text-xs" />
         ) : (
           <span className="text-muted-foreground text-xs">
             {t("connections.totalConnections", { count: totalConnections })}
@@ -332,6 +354,7 @@ export function PreferencesConnectionsPage() {
         items={groups ?? []}
         itemKey={(group) => `${group.kind}:${group.source_id}`}
         isLoading={isLoading}
+        placeholder={<SourceGroupCardSkeleton />}
         failure={error}
         empty={
           <EmptyState

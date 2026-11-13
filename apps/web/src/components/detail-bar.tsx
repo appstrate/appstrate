@@ -16,6 +16,7 @@ import type { ReactNode } from "react";
 import { CopyButton } from "@appstrate/ui/components/copy-button";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { usePageBreadcrumb } from "@/hooks/use-overlay-breadcrumb";
+import { SkeletonLine } from "@/components/skeleton-line";
 import type { BreadcrumbEntry } from "@/stores/breadcrumb-store";
 import {
   ShellHeaderActions,
@@ -99,10 +100,13 @@ export function DetailBarSkeleton({
   title,
   trail,
   tabCount = 4,
+  meta = true,
 }: {
   title?: string;
   trail?: readonly BreadcrumbEntry[];
   tabCount?: number;
+  /** The page draws a line under its title (a package's id); without it the line's box stays empty. */
+  meta?: boolean;
 }) {
   usePageBreadcrumb([...(trail ?? []), ...(title ? [{ label: title }] : [])]);
 
@@ -115,11 +119,14 @@ export function DetailBarSkeleton({
             {title ? (
               <h1 className="truncate text-base leading-6 font-semibold md:text-[17px]">{title}</h1>
             ) : (
-              <Skeleton className="my-1 h-4 w-44" />
+              <SkeletonLine className="w-44 text-base leading-6 font-semibold md:text-[17px]" />
             )}
-            <div className="text-muted-foreground flex items-center gap-1.5 text-xs leading-5 md:mt-0.5">
-              <Skeleton className="h-3 w-16" />
-            </div>
+            {/* The meta line's own box (`text-xs leading-5`), so it is 20px tall, not the bar's 12. */}
+            {meta ? (
+              <SkeletonLine className="w-32 text-xs leading-5 md:mt-0.5" />
+            ) : (
+              <div className="md:mt-0.5" />
+            )}
           </div>
         </div>
       </ShellHeaderLead>

@@ -403,3 +403,30 @@
     right: calc(anchor(right) + --spacing(2));
   }
 }
+
+/* A form drawn as its own skeleton (`FormSkeleton`): the real layout and its
+   static labels, every control greyed and pulsing, so the loaded form lands on
+   exactly the boxes it waited in. */
+.skeleton-form
+  :is(
+    input,
+    textarea,
+    button,
+    [role="combobox"],
+    [role="radio"],
+    [role="checkbox"],
+    [role="switch"],
+    [data-slot="badge"]
+  ) {
+  background-color: var(--muted) !important;
+  border-color: transparent !important;
+  color: transparent !important;
+  box-shadow: none !important;
+  animation: var(--animate-pulse);
+}
+.skeleton-form :is(input, textarea)::placeholder {
+  color: transparent;
+}
+.skeleton-form :is(button, [role="radio"], [role="checkbox"], [role="switch"]) * {
+  visibility: hidden;
+}

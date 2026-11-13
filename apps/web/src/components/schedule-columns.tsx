@@ -22,7 +22,7 @@ import type { DataColumn } from "./data-table";
 import { ScheduleStatusBadge } from "./schedule-status-badge";
 import { CountBadge } from "./count-badge";
 import { ActorLabel } from "./actor-label";
-import { CellDate, CellText } from "./table-cells";
+import { CellDate, CellPlaceholder, CellText } from "./table-cells";
 import { formatDateField } from "../lib/format-date";
 import { scheduleLabel, scheduleNextRunAt } from "../lib/schedule-options";
 import { describeSchedule } from "../lib/frequency-summary";
@@ -48,6 +48,7 @@ export function useScheduleColumns({
       header: t("schedules.column.name"),
       width: 160,
       elastic: true,
+      placeholder: <CellPlaceholder twoLines={showAgentName} />,
       cell: (schedule) => (
         <div className="flex min-w-0 flex-col">
           <span className="flex min-w-0 items-center gap-1.5">

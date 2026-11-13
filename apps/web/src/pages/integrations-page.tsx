@@ -13,7 +13,7 @@ import { packagePermission, spacePackagePermission } from "@appstrate/core/permi
 import { PageHeader } from "../components/page-header";
 import { CollectionTabs } from "../components/detail-tabs";
 import { CardGrid } from "../components/card-grid";
-import { PackageCard } from "../components/package-card";
+import { PackageCard, PackageCardSkeleton } from "../components/package-card";
 import { ListViewTabs } from "../components/list-view-tabs";
 import { packageCardItem } from "../lib/package-card-item";
 import { useListView } from "../stores/list-view-store";
@@ -158,6 +158,7 @@ export function IntegrationsPage() {
             // the second would undo the first (see `useListParams`). A protocol
             // filter left in the URL is simply not applied on the local tab.
             onChange={(next) => list.setValues("execution")(next === "local" ? ["local"] : [])}
+            countsPending={isLoading}
             options={INTEGRATION_EXECUTIONS.map((value) => ({
               value,
               label: t(`integrations.execution.${value}`),
@@ -228,6 +229,7 @@ export function IntegrationsPage() {
           isLoading={isLoading}
           failure={error}
           empty={empty}
+          placeholder={<PackageCardSkeleton />}
         />
       )}
       <ListFooter

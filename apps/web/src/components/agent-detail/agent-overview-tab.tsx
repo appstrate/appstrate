@@ -15,13 +15,13 @@ import { agentSettingsHref } from "../../lib/settings-section-href";
 import { searchOf } from "../../lib/url-search";
 import { OperationalStat } from "../operational-stat";
 import { DetailSectionCard } from "../detail-section-card";
-import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { SkeletonBadge, SkeletonLine } from "../skeleton-line";
 
 /** A figure read from a query: a placeholder while it loads, « unknown » when the read failed. */
 function QueryValue({
   loading,
   error,
-  skeleton = "h-6 w-10",
+  skeleton = "w-10",
   children,
 }: {
   loading: boolean;
@@ -30,7 +30,8 @@ function QueryValue({
   children: ReactNode;
 }) {
   const { t } = useTranslation("agents");
-  if (loading) return <Skeleton className={skeleton} />;
+  // In the value's own line box (`OperationalStat`'s `dd`), so the figure lands in place.
+  if (loading) return <SkeletonLine className={skeleton} />;
   return error ? t("detail.overview.unknown") : children;
 }
 
@@ -120,7 +121,7 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
               label={t("schedule.paramNextRun")}
               value={
                 schedulesLoading ? (
-                  <Skeleton className="h-5 w-32" />
+                  <SkeletonLine className="w-32" />
                 ) : nextSchedule?.next_run_at ? (
                   formatDateField(nextSchedule.next_run_at, "datetime", nextSchedule.timezone)
                 ) : (
@@ -210,7 +211,7 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
                 <QueryValue
                   loading={pinnedLoading || memoriesLoading}
                   error={pinnedError || memoriesError}
-                  skeleton="h-5 w-32"
+                  skeleton="w-32"
                 >
                   {latestMemory ? formatDateField(latestMemory, "datetime") : "—"}
                 </QueryValue>
@@ -218,6 +219,91 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
             />
           </dl>
         </DetailSectionCard>
+      </div>
+    </div>
+  );
+}
+
+/** An `OperationalStat` value on its way: a bar in the value's own line box. */
+function StatValueSkeleton({ size = "md" }: { size?: "md" | "sm" }) {
+  return <SkeletonLine className={size === "md" ? "w-10" : "w-32"} />;
+}
+
+/**
+ * The overview panel while the agent loads (`PackageDetailSkeleton`): the
+ * identity lines (`AgentIdentity`), then the three summary cards drawn by the
+ * very components the loaded panel uses, labels included — only the values wait.
+ */
+export function AgentOverviewSkeleton() {
+  const { t } = useTranslation("agents");
+  return (
+    <div className="flex flex-col gap-8">
+      <section className="flex flex-col gap-3">
+        <SkeletonLine className="w-2/3 text-sm" />
+        <SkeletonLine className="w-40 text-sm" />
+      </section>
+      <div className="flex flex-col gap-8">
+        <div className="grid gap-6 xl:grid-cols-3">
+          <DetailSectionCard
+            title={t("detail.overview.runs")}
+            icon={PlayCircle}
+            bodyClassName="p-0"
+          >
+            <dl className="grid h-full divide-y">
+              <OperationalStat
+                size="sm"
+                label={
+                  <span className="flex flex-wrap items-center gap-2">
+                    {t("detail.overview.lastRun")}
+                    <SkeletonBadge className="w-16 gap-1" />
+                  </span>
+                }
+                value={<StatValueSkeleton size="sm" />}
+              />
+              <OperationalStat
+                size="sm"
+                label={t("schedule.paramNextRun")}
+                value={<StatValueSkeleton size="sm" />}
+              />
+            </dl>
+          </DetailSectionCard>
+          <DetailSectionCard
+            title={t("detail.overview.activity")}
+            icon={ChartNoAxesCombined}
+            bodyClassName="p-0"
+          >
+            <dl className="grid h-full grid-cols-2 divide-x xl:grid-cols-1 xl:divide-x-0 xl:divide-y">
+              <OperationalStat
+                label={t("detail.overview.runningRuns")}
+                value={<StatValueSkeleton />}
+              />
+              <OperationalStat
+                label={t("detail.overview.activeSchedules")}
+                value={<StatValueSkeleton />}
+              />
+            </dl>
+          </DetailSectionCard>
+          <DetailSectionCard
+            title={t("detail.overview.memoryActivity")}
+            icon={Database}
+            bodyClassName="p-0"
+          >
+            <dl className="grid h-full grid-cols-1 divide-y sm:grid-cols-3 sm:divide-x sm:divide-y-0 lg:grid-cols-1 lg:divide-x-0 lg:divide-y">
+              <OperationalStat
+                label={t("detail.overview.pinnedItems")}
+                value={<StatValueSkeleton />}
+              />
+              <OperationalStat
+                label={t("detail.overview.archivedItems")}
+                value={<StatValueSkeleton />}
+              />
+              <OperationalStat
+                label={t("detail.overview.lastUpdated")}
+                value={<StatValueSkeleton size="sm" />}
+              />
+            </dl>
+          </DetailSectionCard>
+        </div>
       </div>
     </div>
   );

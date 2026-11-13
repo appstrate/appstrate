@@ -9,6 +9,7 @@ import { AlertTriangle, Building, HardDrive } from "lucide-react";
 import { Button } from "@appstrate/ui/components/button";
 import { AlertDescription } from "@appstrate/ui/components/alert";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { SkeletonLine } from "../../components/skeleton-line";
 import { canLeaveOrg } from "@appstrate/shared-types";
 import { $api } from "../../api/client";
 import { SettingsGroup, SettingRow } from "../../components/settings/setting-row";
@@ -168,7 +169,17 @@ export function OrgSettingsGeneralPage() {
           <div className="text-muted-foreground mt-8 mb-4 text-sm font-medium">
             {t("orgStorage.section")}
           </div>
-          <Skeleton className="mb-4 h-24 w-full rounded-lg" />
+          {/* The storage card's head (icon, title, usage) — its unlimited case. */}
+          <Card className="mb-4 p-5">
+            <div className="flex items-center gap-3">
+              <Skeleton className="size-[18px] shrink-0" />
+              <div className="flex-1">
+                <SkeletonLine className="w-28 text-sm font-semibold" />
+                {/* The usage is an inline span on the card's own 16px line, not a text-sm block. */}
+                <SkeletonLine className="w-48" inline="text-sm" />
+              </div>
+            </div>
+          </Card>
         </>
       )}
       {storage && (
@@ -237,7 +248,7 @@ export function OrgSettingsGeneralPage() {
             previewing ? (
               <span id={leaveHintId}>{leaveHint}</span>
             ) : orgDetailLoading ? (
-              <Skeleton className="h-3.5 w-64" />
+              <SkeletonLine className="w-64 max-w-full" />
             ) : orgDetailError ? (
               // The guard cannot be evaluated: leaving stays off, and the reason is said.
               <span id={leaveHintId} className="text-destructive">

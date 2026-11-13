@@ -16,7 +16,7 @@ import { FileText } from "lucide-react";
 import { useDeleteFile, useFileDownload, useKeepFile, type FileDto } from "../hooks/use-files";
 import { EmptyState } from "./page-states";
 import { CardGrid } from "./card-grid";
-import { FileTile } from "./file-tile";
+import { FileTile, FileTileSkeleton } from "./file-tile";
 import { ItemList } from "./item-list";
 import { DataTable } from "./data-table";
 import type { ColumnMenuSpec } from "./list-toolbar";
@@ -122,6 +122,7 @@ export function DocumentListPanel({
             items={documents}
             itemKey={(doc) => doc.id}
             min="12rem"
+            placeholder={<FileTileSkeleton />}
             isLoading={isLoading && documents.length === 0}
             failure={error}
             empty={emptyState}

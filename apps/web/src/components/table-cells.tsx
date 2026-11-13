@@ -9,7 +9,9 @@
 
 import type { ReactNode } from "react";
 import { cn } from "@appstrate/ui/cn";
+import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { formatDateField } from "../lib/format-date";
+import { SkeletonLine } from "./skeleton-line";
 
 /** One truncated line: muted `text-xs` by default, the row's name when `strong`. */
 export function CellText({
@@ -67,4 +69,35 @@ export function CellList({ items }: { items: readonly string[] }) {
   if (items.length === 0) return <CellEmpty />;
   const text = items.join(", ");
   return <CellText title={text}>{text}</CellText>;
+}
+
+/**
+ * A cell while its rows load (`DataColumn.placeholder`): an optional icon tile
+ * (`icon` carries the real tile's size and radius), then `CellText`'s lines — the
+ * row's name over a muted line with `twoLines`, else one muted line.
+ */
+export function CellPlaceholder({
+  icon,
+  twoLines = false,
+  width = "w-3/4",
+}: {
+  icon?: string;
+  twoLines?: boolean;
+  width?: string;
+}) {
+  const lines = twoLines ? (
+    <div className="flex min-w-0 flex-1 flex-col">
+      <SkeletonLine className="w-32 max-w-full text-sm font-medium" />
+      <SkeletonLine className="w-48 max-w-full text-xs" />
+    </div>
+  ) : (
+    <SkeletonLine className={cn("max-w-full text-xs", width)} />
+  );
+  if (!icon) return lines;
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-3">
+      <Skeleton className={cn("shrink-0", icon)} />
+      {lines}
+    </div>
+  );
 }

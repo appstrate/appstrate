@@ -29,7 +29,7 @@ import { formatDateField } from "../lib/format-date";
 import { dashboardSections } from "../lib/dashboard-sections";
 import { scheduleDetailPath } from "../lib/package-paths";
 import { toast } from "sonner";
-import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { SkeletonLine } from "../components/skeleton-line";
 
 const CODING_AGENT_SETUP_URL = "https://raw.githubusercontent.com/appstrate/skills/main/README.md";
 
@@ -108,7 +108,7 @@ export function DashboardHeader({
         }
       >
         {runningCount === undefined ? (
-          <Skeleton className="mt-1.5 h-3.5 w-56" />
+          <SkeletonLine className="mt-1 w-56 text-sm" />
         ) : (
           <p className="text-muted-foreground mt-1 text-sm first-letter:uppercase">
             {t("dashboard.subtitle", { date, count: runningCount })}

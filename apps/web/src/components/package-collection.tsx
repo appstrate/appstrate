@@ -18,8 +18,9 @@ import type { LucideIcon } from "lucide-react";
 import { ListViewTabs } from "./list-view-tabs";
 import type { PackageType } from "@appstrate/core/validation";
 import type { DataColumn } from "./data-table";
-import { CardGrid } from "./card-grid";
-import { PackageCard } from "./package-card";
+import { CardGrid, CardGridSkeleton } from "./card-grid";
+import { SkeletonLine } from "./skeleton-line";
+import { PackageCard, PackageCardSkeleton } from "./package-card";
 import { PackagesTable } from "./packages-table";
 import { ListFooter, ListToolbar, type ColumnMenuSpec, type FilterSpec } from "./list-toolbar";
 import { EmptyState, NoMatchState } from "./page-states";
@@ -95,6 +96,8 @@ export interface PackageCollectionProps {
    * An empty section is not drawn. Loading, failure and an empty list keep the
    * single grid, whose states say those things already.
    */
+  /** A card while the collection loads; the index pages' card when unset. */
+  cardPlaceholder?: ReactNode;
   cardSections?: (items: CardItem[]) => { key: string; title: string; items: CardItem[] }[];
 }
 
@@ -123,6 +126,7 @@ export function PackageCollection({
   tabs,
   rowAction,
   cardSections,
+  cardPlaceholder,
 }: PackageCollectionProps) {
   const { t } = useTranslation(["agents", "common"]);
   // Client-side on purpose, and honestly so: this catalogue arrives whole, so
@@ -192,6 +196,10 @@ export function PackageCollection({
     </EmptyState>
   );
 
+  const placeholder = cardPlaceholder ?? (
+    <PackageCardSkeleton runnable={cardRun && holds === "agent"} />
+  );
+
   return (
     <>
       {header}
@@ -219,6 +227,14 @@ export function PackageCollection({
           failure={error}
           empty={emptyBody}
         />
+      ) : cardSections && isLoading && !error ? (
+        // Sectioned cards wait in their first section: its heading, then its cards.
+        <div className="flex flex-col gap-8 pt-2">
+          <section>
+            <SettingsHeading level="group" title={<SkeletonLine className="w-48" />} />
+            <CardGridSkeleton placeholder={placeholder} />
+          </section>
+        </div>
       ) : cardSections && !isLoading && !error && shown.length > 0 ? (
         <div className="flex flex-col gap-8 pt-2">
           {cardSections(shown)
@@ -267,6 +283,7 @@ export function PackageCollection({
           isLoading={isLoading}
           failure={error}
           empty={emptyBody}
+          placeholder={placeholder}
         />
       )}
       {/* Under the body, like the runs page: what the collection amounts to,
