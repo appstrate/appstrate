@@ -155,6 +155,7 @@
   "apiError.dashboard_session_required": "This setting can only be changed from the dashboard, signed in with your account.",
   "apiError.invalid_domain": "This domain name is not valid (example: company.com).",
   "apiError.domain_exists": "This domain is already added to the organization.",
+  "apiError.tenant_already_linked": "Another Microsoft tenant is bound to the organization: confirm to replace it.",
   "apiError.domain_taken": "This domain is already verified by another organization on this instance.",
   "apiError.domain_not_verified": "The TXT record cannot be found yet. Check that it is published in your DNS zone, then try again in a few minutes.",
   "apiError.dns_lookup_failed": "The DNS lookup failed. Try again in a moment.",

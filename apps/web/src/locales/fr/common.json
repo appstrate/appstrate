@@ -155,6 +155,7 @@
   "apiError.dashboard_session_required": "Ce réglage ne se modifie que depuis le tableau de bord, connecté avec votre compte.",
   "apiError.invalid_domain": "Ce nom de domaine n'est pas valide (exemple : entreprise.com).",
   "apiError.domain_exists": "Ce domaine est déjà ajouté à l'organisation.",
+  "apiError.tenant_already_linked": "Un autre tenant Microsoft est relié à l'organisation : confirmez pour le remplacer.",
   "apiError.domain_taken": "Ce domaine est déjà vérifié par une autre organisation de cette instance.",
   "apiError.domain_not_verified": "L'enregistrement TXT est introuvable pour l'instant. Vérifiez sa publication dans votre zone DNS, puis réessayez dans quelques minutes.",
   "apiError.dns_lookup_failed": "La recherche DNS a échoué. Réessayez dans quelques instants.",

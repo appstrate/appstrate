@@ -3249,7 +3249,7 @@ export interface paths {
         put?: never;
         /**
          * Bind the tenant of the caller's own Microsoft sign-in
-         * @description The tenant id is never typed: it is the `tid` of the Microsoft sign-in that opened the caller's session, less than 15 minutes ago (409 `microsoft_session_required` otherwise). Requires `org-sso:write` (owners) AND a dashboard session: an API key, an OAuth client, an MCP or CLI token is refused with 403 `dashboard_session_required`, even for an owner.
+         * @description The tenant id is never typed: it is the `tid` of the Microsoft sign-in that opened the caller's session, less than 15 minutes ago (409 `microsoft_session_required` otherwise). Replacing another tenant already bound takes `replace: true` (409 `tenant_already_linked` otherwise). Requires `org-sso:write` (owners) AND a dashboard session: an API key, an OAuth client, an MCP or CLI token is refused with 403 `dashboard_session_required`, even for an owner.
          */
         post: operations["linkOrgSsoTenant"];
         /**
@@ -20377,7 +20377,14 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Replace a different tenant already bound. Absent means false. */
+                    replace?: boolean;
+                };
+            };
+        };
         responses: {
             /** @description The settings */
             200: {
@@ -20397,7 +20404,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description `microsoft_session_required`, or `sso_enforced` when another tenant is bound under enforcement */
+            /** @description `microsoft_session_required`, `tenant_already_linked`, or `sso_enforced` when another tenant is bound under enforcement */
             409: {
                 headers: {
                     [name: string]: unknown;

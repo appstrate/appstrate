@@ -147,13 +147,30 @@ export function openApiPaths(): Record<string, unknown> {
         operationId: "linkOrgSsoTenant",
         tags: [TAG],
         summary: "Bind the tenant of the caller's own Microsoft sign-in",
-        description: `The tenant id is never typed: it is the \`tid\` of the Microsoft sign-in that opened the caller's session, less than 15 minutes ago (409 \`microsoft_session_required\` otherwise). ${WRITE_RULE}`,
+        description: `The tenant id is never typed: it is the \`tid\` of the Microsoft sign-in that opened the caller's session, less than 15 minutes ago (409 \`microsoft_session_required\` otherwise). Replacing another tenant already bound takes \`replace: true\` (409 \`tenant_already_linked\` otherwise). ${WRITE_RULE}`,
         parameters: [orgHeader],
+        requestBody: {
+          required: false,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  replace: {
+                    type: "boolean",
+                    description: "Replace a different tenant already bound. Absent means false.",
+                  },
+                },
+              },
+            },
+          },
+        },
         responses: {
           "200": settings("The settings"),
           ...writeErrors,
           "409": problem(
-            "`microsoft_session_required`, or `sso_enforced` when another tenant is bound under enforcement",
+            "`microsoft_session_required`, `tenant_already_linked`, or `sso_enforced` when another tenant is bound under enforcement",
           ),
         },
       },
