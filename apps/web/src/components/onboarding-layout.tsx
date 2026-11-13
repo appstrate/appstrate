@@ -26,7 +26,7 @@ const ALL_STEPS: (StepDef & { showWhen?: "billing" })[] = [
   { key: "complete", route: "/onboarding/complete" },
 ];
 
-/** The onboarding steps, filtered by feature flags (`plan` only with billing, `@appstrate/module-ee`). */
+/** The onboarding steps, filtered by feature flags (`plan` only with billing, `@appstrate/module-billing`). */
 function useOnboardingSteps(): StepDef[] {
   const { features } = useAppConfig();
   return useMemo(

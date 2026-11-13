@@ -123,7 +123,7 @@ describe("zero-footprint invariant (no modules loaded)", () => {
       expect(cfg.features.webhooks).toBeUndefined();
     });
 
-    it("base config has no billing flag — only @appstrate/module-ee contributes it", () => {
+    it("base config has no billing flag — only @appstrate/module-billing contributes it", () => {
       const cfg = buildAppConfig();
       expect(cfg.features.billing).toBeUndefined();
     });
@@ -133,7 +133,7 @@ describe("zero-footprint invariant (no modules loaded)", () => {
    * The OTHER direction of the same invariant: what a module must NOT be
    * needed for.
    *
-   * `/api/roles` was licensed by `@appstrate/module-ee`'s `custom_roles`
+   * `/api/roles` was licensed by `@appstrate/module-billing`'s `custom_roles`
    * feature flag until custom space roles became open-source (RBAC spec §9).
    * Every assertion below answered `403 feature_unavailable` under that gate,
    * and this app mounts NO module at all — so green here is the whole claim

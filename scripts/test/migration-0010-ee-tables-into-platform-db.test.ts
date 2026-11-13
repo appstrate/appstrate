@@ -32,7 +32,7 @@ import { EE_TABLES } from "../migration/0010-ee-tables-into-platform-db.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "../..");
 const SCRIPT = "scripts/migration/0010-ee-tables-into-platform-db.ts";
-const MODULE_ROOT = resolve(REPO_ROOT, "packages/module-ee");
+const MODULE_ROOT = resolve(REPO_ROOT, "packages/module-billing");
 const MIGRATIONS_DIR = resolve(MODULE_ROOT, "drizzle/migrations");
 const SUFFIX = Math.random().toString(36).slice(2, 10);
 

@@ -287,7 +287,7 @@ describe("verify-compose-defaults as a process", () => {
  */
 describe("findPassThroughGaps", () => {
   const MODULE = [
-    { id: "ee", file: "packages/module-ee/src/env.ts", keys: ["ALPHA", "BETA", "GAMMA"] },
+    { id: "billing", file: "packages/module-billing/src/env.ts", keys: ["ALPHA", "BETA", "GAMMA"] },
   ];
   const compose = (names: string[]): string =>
     ["services:", "  api:", "    environment:", ...names.map((n) => `      - ${n}`)].join("\n");
@@ -296,8 +296,8 @@ describe("findPassThroughGaps", () => {
     const gaps = findPassThroughGaps(compose(["APP_URL", "ALPHA", "GAMMA"]), MODULE);
     expect(gaps).toEqual([
       {
-        module: "ee",
-        declaredIn: "packages/module-ee/src/env.ts",
+        module: "billing",
+        declaredIn: "packages/module-billing/src/env.ts",
         missing: ["BETA"],
         present: 2,
       },

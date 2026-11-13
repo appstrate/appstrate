@@ -28,4 +28,4 @@ French (`fr`, default) and English (`en`).
 
 ## Module overrides
 
-A module can replace default templates at boot via `registerEmailOverrides()` for branded emails — the ee module (`@appstrate/module-ee`) is the one that does.
+A module can replace default templates at boot via `registerEmailOverrides()` for branded emails — the ee module (`@appstrate/module-billing`) is the one that does.

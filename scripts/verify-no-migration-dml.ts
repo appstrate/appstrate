@@ -31,7 +31,7 @@
  *     gets no such exemption. See `functionBodies`.
  *
  * Two migration trees are scanned, listed in `SCANS`: the platform's, and the
- * one `packages/module-ee/` keeps for its `ee_*` tables. Each carries its own
+ * one `packages/module-billing/` keeps for its `ee_*` tables. Each carries its own
  * grandfather list.
  *
  * Only NEW files are gated. Every migration already in a directory has run
@@ -92,7 +92,7 @@ export const GRANDFATHERED: readonly string[] = [
 ];
 
 /**
- * `packages/module-ee/` keeps a migration tree of its own for its `ee_*`
+ * `packages/module-billing/` keeps a migration tree of its own for its `ee_*`
  * tables — the only second one in the repo, and subject to the same §2 rule. Its
  * two entries predate the gate for the same reason the platform's eight do:
  * `0001_cursor_billing` re-keys usage records and backfills `cost_usd`,
@@ -113,7 +113,7 @@ export interface MigrationSet {
 
 export const SCANS: readonly MigrationSet[] = [
   { dir: "packages/db/drizzle", grandfathered: GRANDFATHERED },
-  { dir: "packages/module-ee/drizzle/migrations", grandfathered: EE_GRANDFATHERED },
+  { dir: "packages/module-billing/drizzle/migrations", grandfathered: EE_GRANDFATHERED },
 ];
 
 /**

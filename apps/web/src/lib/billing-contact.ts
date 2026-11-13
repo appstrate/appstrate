@@ -9,7 +9,7 @@ import type { components } from "../api/client";
 
 export type BillingContact = components["schemas"]["EeBillingContact"];
 
-/** Mirrors `MAX_BILLING_CC` in `packages/module-ee/src/billing/contact.ts`; `openapi-typescript` drops `maxItems`, so it cannot be read off the generated types. */
+/** Mirrors `MAX_BILLING_CC` in `packages/module-billing/src/billing/contact.ts`; `openapi-typescript` drops `maxItems`, so it cannot be read off the generated types. */
 export const MAX_BILLING_CC = 5;
 
 const EMAIL = z.email();

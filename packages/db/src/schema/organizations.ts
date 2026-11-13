@@ -68,7 +68,7 @@ export const organizations = pgTable(
     // enforces (see `effectiveOrgStorageLimit` in files.ts):
     //   organizations.files_bytes_limit ?? env.ORG_STORAGE_QUOTA_BYTES ?? unlimited
     // Pilotable per-org by a billing module — the ee module
-    // (`@appstrate/module-ee`) — via the narrow
+    // (`@appstrate/module-billing`) — via the narrow
     // `PlatformServices.setFileStorageLimit` capability. The core stays
     // billing-neutral: this is a technical byte ceiling, never a plan or price.
     // bigint (mode: number) — mirrors `files_bytes_used` above.

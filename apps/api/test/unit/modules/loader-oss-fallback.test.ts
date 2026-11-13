@@ -6,11 +6,11 @@
  *   - the default registry (`MODULES` unset) is the OSS module set
  *     (oidc, webhooks, core-providers, @appstrate/module-codex,
  *     @appstrate/module-claude-code) and never attempts to dynamically
- *     import `@appstrate/module-ee`. An OSS install that never enables the
- *     commercial module MUST boot cleanly.
+ *     import `@appstrate/module-billing`. An install that never enables the
+ *     billing module MUST boot cleanly.
  *   - when a non-builtin specifier is listed but the package is not
  *     installed, the loader surfaces a wrapped error mentioning the
- *     specifier name (so operators see "Module \"@appstrate/module-ee\" could
+ *     specifier name (so operators see "Module \"@appstrate/module-billing\" could
  *     not be loaded" instead of a raw ESM resolution stack trace).
  *
  * The latter is the OSS/EE contract from AGENTS.md: the platform
