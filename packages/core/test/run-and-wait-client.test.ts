@@ -560,8 +560,8 @@ describe("launchRunAndWait launch body", () => {
     schema_version: AFPS_SCHEMA_VERSION,
     type: "agent",
     version: "1.0.0",
-    dependencies: {},
-    runtime_tools: ["log", "publish_file"],
+    dependencies: { integrations: { "@appstrate/platform": "^1.0.0" } },
+    integrations_configuration: { "@appstrate/platform": { tools: ["log"] } },
     output: { schema: { type: "object", properties: {}, additionalProperties: true } },
     ...overrides,
   });
@@ -626,7 +626,6 @@ describe("launchRunAndWait launch body", () => {
       timeout: 42,
       dependencies: { integrations: { "@appstrate/gmail": "^1.2.0" } },
       integrations_configuration: { "@appstrate/gmail": { tools: ["api_call"] } },
-      runtime_tools: ["log"],
       output: {
         schema: {
           type: "object",
@@ -655,13 +654,18 @@ describe("launchRunAndWait launch body", () => {
     );
   });
 
-  it("kind:inline preserves an explicit empty runtime_tools override", async () => {
+  it("kind:inline keeps caller-supplied dependencies without the platform integration", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
     const result = await launchRunAndWait(
       {
         kind: "inline",
-        manifest: { display_name: "Effet sans outil", runtime_tools: [] },
+        manifest: {
+          display_name: "Effet sans outil",
+          dependencies: { integrations: { "@appstrate/gmail": "^1.2.0" } },
+          integrations_configuration: { "@appstrate/gmail": { tools: ["api_call"] } },
+          output: {},
+        },
         prompt: "Perform the side effect.",
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
@@ -670,8 +674,11 @@ describe("launchRunAndWait launch body", () => {
     expect(result.ok).toBe(true);
     const manifest = (captured()?.body as { manifest?: Record<string, unknown> } | undefined)
       ?.manifest;
-    expect(manifest?.runtime_tools).toEqual([]);
-    expect(manifest).not.toHaveProperty("output");
+    expect(manifest?.dependencies).toEqual({ integrations: { "@appstrate/gmail": "^1.2.0" } });
+    expect(manifest?.integrations_configuration).toEqual({
+      "@appstrate/gmail": { tools: ["api_call"] },
+    });
+    expect(manifest?.output).toEqual({});
   });
 
   it("kind:inline rejects a minimal manifest with no usable identity before dispatch", async () => {

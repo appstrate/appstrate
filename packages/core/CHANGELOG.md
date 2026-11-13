@@ -35,6 +35,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`@appstrate/core/runtime-tool-defs`, #2199), with the `log`, `note` and `pin` tool
   definitions they built: the `@appstrate/platform` system integration serves these tools.
 
+- **BREAKING: `launchRunAndWait` inline defaults** (`@appstrate/core/run-and-wait-client`,
+  #2199). An absent `dependencies` defaults to the `@appstrate/platform` dependency, an absent
+  `integrations_configuration` to its `log` tool, and an absent `output` to the open object
+  schema; the `runtime_tools` default and the refusal of a non-array
+  `manifest.runtime_tools` are removed.
+
 - **BREAKING: `@appstrate/core/runtime-tools-catalog` and the `runtime_tools` field are
   removed** (#2199), with `SELECTABLE_RUNTIME_TOOLS`, `EVENT_EMITTER_RUNTIME_TOOLS`,
   `RUNTIME_TOOL_CATALOG`, `SelectableRuntimeTool`, `EventEmitterRuntimeTool`,
@@ -61,6 +67,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returns both. (#2175)
 
 ### Added
+
+- **`PLATFORM_INTEGRATION_ID`** (`@appstrate/core/integration`, #2199):
+  `"@appstrate/platform"`, the id of the system integration that ships the run tools. The
+  manifests the platform writes on an author's behalf name it; `isRuntimeBoundIntegration`
+  never reads it.
 
 - **Runtime-bound integrations** (`@appstrate/core/integration`, #2199).
   **`PLATFORM_META_KEY`** (`"dev.appstrate/platform"`) is the `_meta` key that binds an

@@ -117,6 +117,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   integration that carries it answers `400`, and a bundle is refused when any of its non-system
   packages carries it, dependencies included.
 
+- **BREAKING: `run_and_wait` inline defaults declare `@appstrate/platform`** (#2199). An
+  inline manifest without `dependencies` gets the `@appstrate/platform` dependency, one
+  without `integrations_configuration` gets its `log` tool selected, and one without
+  `output` gets the open object output schema. The `runtime_tools` default and the
+  `manifest.runtime_tools` argument are gone; defaults still fill absent top-level fields
+  only, so a caller that supplies `dependencies` declares `@appstrate/platform` itself.
+  The chat prompt and the `run_and_wait` descriptions say so. The default "Hello World"
+  agent declares `@appstrate/platform`.
+
 - **BREAKING: `publish_file` is a harness tool, not selected in `runtime_tools`** (#2199).
   The runner registers it whenever its host supplies an uploader (`PiRunner` option
   `fileUploader`): every platform run has it, whatever the manifest declares, and a CLI run

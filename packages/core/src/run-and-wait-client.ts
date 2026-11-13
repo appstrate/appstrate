@@ -4,6 +4,7 @@ import { isFileProducedByRun } from "./file-uri.ts";
 import { asRecordOrNull } from "./safe-json.ts";
 import { encodePackageIdPath, toSlug } from "./naming.ts";
 import { terminalRunStatusValues } from "./run-status.ts";
+import { PLATFORM_INTEGRATION_ID } from "./integration.ts";
 import { AFPS_SCHEMA_URLS, AFPS_SCHEMA_VERSION } from "./validation.ts";
 
 /**
@@ -156,15 +157,12 @@ type MaterializedManifest =
  *
  * This is a shallow defaulting boundary by design: defaults fill ABSENT
  * top-level fields only, while every caller-supplied field replaces its
- * default verbatim. In particular, an explicit `runtime_tools: []` remains an
- * empty array; no capability is silently re-injected. Nested deterministic
- * contracts such as `output.schema` therefore remain entirely caller-owned.
- *
- * The open output schema, which gives the run its `output` tool, is part of
- * the convenience runtime-tools default rather than an independent default.
- * Once a caller explicitly selects `runtime_tools`, an absent `output` stays
- * absent so side-effect-only agents — including `runtime_tools: []` — remain
- * expressible.
+ * default verbatim. A caller-supplied `dependencies` or
+ * `integrations_configuration` therefore carries no `@appstrate/platform`
+ * entry unless the caller writes one; no capability is silently re-injected.
+ * Nested deterministic contracts such as `output.schema` remain entirely
+ * caller-owned, and `output: {}` (no schema) gives a run without the `output`
+ * tool.
  */
 function materializeInlineManifest(manifest: Record<string, unknown>): MaterializedManifest {
   const hasOwn = (key: string): boolean => Object.prototype.hasOwnProperty.call(manifest, key);
@@ -189,14 +187,16 @@ function materializeInlineManifest(manifest: Record<string, unknown>): Materiali
   if (!hasOwn("name")) defaults.name = derivedName;
   if (!hasOwn("type")) defaults.type = "agent";
   if (!hasOwn("version")) defaults.version = "1.0.0";
-  if (!hasOwn("dependencies")) defaults.dependencies = {};
-  if (!hasOwn("runtime_tools")) {
-    defaults.runtime_tools = ["log", "publish_file"];
-    if (!hasOwn("output")) {
-      defaults.output = {
-        schema: { type: "object", properties: {}, additionalProperties: true },
-      };
-    }
+  if (!hasOwn("dependencies")) {
+    defaults.dependencies = { integrations: { [PLATFORM_INTEGRATION_ID]: "^1.0.0" } };
+  }
+  if (!hasOwn("integrations_configuration")) {
+    defaults.integrations_configuration = { [PLATFORM_INTEGRATION_ID]: { tools: ["log"] } };
+  }
+  if (!hasOwn("output")) {
+    defaults.output = {
+      schema: { type: "object", properties: {}, additionalProperties: true },
+    };
   }
 
   return { manifest: { ...defaults, ...manifest } };
@@ -681,14 +681,6 @@ export async function launchRunAndWait(
               "run_and_wait, alongside `manifest` — move it out of the manifest and retry."
           : "`prompt` is required for kind:'inline'. Pass it as a top-level argument " +
               "alongside `manifest` (not inside it).",
-      );
-    }
-    const selected = manifest.runtime_tools;
-    if (selected !== undefined && !Array.isArray(selected)) {
-      return refuseArguments(
-        "invalid_argument",
-        "`manifest.runtime_tools` must be an array for kind:'inline'.",
-        ["manifest.runtime_tools"],
       );
     }
     const materialized = materializeInlineManifest(manifest);

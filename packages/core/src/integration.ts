@@ -96,6 +96,15 @@ const APPSTRATE_META_NAMESPACE = API_META_KEY.slice(0, API_META_KEY.indexOf("/")
 export const PLATFORM_META_KEY = "dev.appstrate/platform";
 
 /**
+ * Id of the system integration that ships the run tools (`log`, `note`, `pin`, `recall_memory`,
+ * `run_history`) and carries {@link PLATFORM_META_KEY}. An agent declares it to receive those
+ * tools; the manifests the platform writes on an author's behalf (inline-run defaults, the
+ * default agent) name it. Whether an integration is bound to the runtime is never read from this
+ * id: {@link isRuntimeBoundIntegration} decides.
+ */
+export const PLATFORM_INTEGRATION_ID = "@appstrate/platform";
+
+/**
  * Is this integration bound to the runtime ({@link PLATFORM_META_KEY})? THE predicate: the spawn
  * resolver, the sidecar, activation and the write rule read it, never the package id.
  */
