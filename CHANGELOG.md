@@ -482,6 +482,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **The typed tools of a remote MCP integration are callable outside a run**
+  (#2206). `search_integration_tools` lists, for an integration backed by a
+  remote MCP server, the tools its catalog selects (the `tools_policy` keys, or
+  everything the server lists under `allow_undeclared_tools`, less
+  `hidden_tools` and the connect tool), named `{ns}__{tool}` and described by
+  the server's `tools/list` (sanitised, cached 5 minutes per connection and
+  integration version; a server that cannot be listed leaves the names, marked
+  `catalog_unreadable`). `call_integration_tool` sends one `tools/call` through
+  the credential proxy, which selects the connection, injects its credential
+  and journals one call. Two routes back them, `POST
+/api/credential-proxy/tools/list` and `POST /api/credential-proxy/tools/call`,
+  under the access rule of `/api/credential-proxy/proxy` outside a run and the
+  space's `credential_proxy_open`. The MCP exchange of the editor's server sync
+  and of these routes share one proxy adapter; `stripForgedRuntimeEvents` moves
+  from the sidecar to `@appstrate/mcp-transport`, which both consume.
+
 - **A space can close direct access to its connections** (#2204). A space
   admin turns off « Direct connection access » in the space settings
   (`credential_proxy_open: false` on `PATCH /api/spaces/{id}`, a new column

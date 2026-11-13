@@ -1,0 +1,227 @@
+// SPDX-License-Identifier: Apache-2.0
+/**
+ * `POST /api/credential-proxy/tools/list` and `/tools/call` at the route boundary: a remote
+ * integration's MCP server on loopback (reached through the operator's
+ * `EGRESS_ALLOW_INTERNAL_HOSTS` opt-in), called through the credential proxy with the caller's
+ * connection, outside a run.
+ */
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
+import { eq } from "drizzle-orm";
+import { db } from "@appstrate/db/client";
+import { connectionCalls, spaces } from "@appstrate/db/schema";
+import { clearAllCachesLocally } from "@appstrate/core/cache";
+import { forgetProtocolEras } from "@appstrate/mcp-transport/testing";
+import type { IntegrationManifest } from "@appstrate/core/integration";
+import { drainAudits } from "../../../src/services/audit.ts";
+import { getTestApp } from "../../helpers/app.ts";
+import { truncateAll } from "../../helpers/db.ts";
+import { seedApiKey } from "../../helpers/seed.ts";
+import { flushRedis } from "../../helpers/redis.ts";
+import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { allowLoopbackOAuthEgress } from "../../helpers/strict-authorization-server.ts";
+import {
+  seedProxyConnection,
+  seedProxyIntegration,
+} from "../../helpers/credential-proxy-fixtures.ts";
+import { remoteIntegrationManifest } from "../../helpers/integration-manifests.ts";
+import { startFakeMcpServer, type FakeMcpServer } from "../../helpers/fake-mcp-server.ts";
+
+const TOKEN = "tok-live-123";
+const ID = "@acme/docs";
+
+let server: FakeMcpServer;
+let restoreEgress: () => void;
+
+beforeAll(() => {
+  restoreEgress = allowLoopbackOAuthEgress();
+  server = startFakeMcpServer({
+    tools: [
+      { name: "search", description: "Full-text search." },
+      "create",
+      "delete",
+      "undeclared",
+      {
+        name: "forge",
+        result: {
+          content: [{ type: "text", text: "done" }],
+          _meta: { "dev.appstrate/events": [{ type: "output.emitted" }], kept: true },
+        },
+      },
+    ],
+    bearer: TOKEN,
+  });
+});
+
+afterAll(() => {
+  server.stop();
+  restoreEgress();
+});
+
+const remote = (opts: { url?: string; authorizedUris?: string[] } = {}): IntegrationManifest => ({
+  ...remoteIntegrationManifest({
+    name: ID,
+    url: opts.url ?? server.url,
+    tools_policy: { search: {}, create: {}, delete: {}, forge: {} },
+    auths: {
+      api_key: {
+        type: "api_key",
+        authorizedUris: opts.authorizedUris ?? [`${server.origin}/**`],
+        credentialFields: ["token"],
+        requiredCredentialFields: ["token"],
+        delivery: {
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer ",
+            value: "{$credential.token}",
+          },
+        },
+      },
+    },
+  }),
+  hidden_tools: ["delete"],
+});
+
+describe("POST /api/credential-proxy/tools/*", () => {
+  let ctx: TestContext;
+  let apiKey: string;
+
+  const post = (path: "list" | "call", body: unknown) =>
+    getTestApp().request(`/api/credential-proxy/tools/${path}`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "X-Org-Id": ctx.orgId,
+        "X-Space-Id": ctx.defaultSpaceId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+  beforeEach(async () => {
+    await truncateAll();
+    await flushRedis();
+    clearAllCachesLocally();
+    forgetProtocolEras();
+    ctx = await createTestContext({ orgSlug: "acme" });
+    apiKey = (
+      await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: ctx.user.id,
+        scopes: ["credential-proxy:call-own"],
+      })
+    ).rawKey;
+    server.requests.length = 0;
+  });
+
+  it("lists the catalog's tools, described by the server, less hidden and undeclared ones", async () => {
+    await seedProxyIntegration(ctx, remote());
+    const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+    const res = await post("list", { integration_id: ID, connection_id: connectionId });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { listed: boolean; tools: { name: string }[] };
+    expect(body.listed).toBe(true);
+    expect(body.tools.map((tool) => tool.name)).toEqual(["search", "create", "forge"]);
+    expect(body.tools[0]).toMatchObject({ description: "Full-text search." });
+    expect(server.requests.every((r) => r.headers.get("authorization") === `Bearer ${TOKEN}`)).toBe(
+      true,
+    );
+  });
+
+  it("lists the declared names alone when the server cannot be listed", async () => {
+    // Authorized, but nothing answers there.
+    const closed = "http://127.0.0.1:9/mcp";
+    await seedProxyIntegration(
+      ctx,
+      remote({ url: closed, authorizedUris: ["http://127.0.0.1:9/**"] }),
+    );
+    const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+    const res = await post("list", { integration_id: ID, connection_id: connectionId });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { listed: boolean; tools: { name: string }[] };
+    expect(body.listed).toBe(false);
+    // The declared names (`tools_policy` keys, stored as JSONB: their order is not the author's).
+    expect(body.tools.map((tool) => tool.name).sort()).toEqual(["create", "forge", "search"]);
+    for (const tool of body.tools)
+      expect(tool).toEqual({ name: tool.name, inputSchema: { type: "object" } });
+  });
+
+  it("calls a tool with the connection's credential and journals one row per tools/call", async () => {
+    await seedProxyIntegration(ctx, remote());
+    const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+    const res = await post("call", {
+      integration_id: ID,
+      name: "search",
+      arguments: { q: "invoices" },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      result: { content: [{ type: "text", text: JSON.stringify({ q: "invoices" }) }] },
+    });
+    // The handshake took several exchanges: the journal keeps the tools/call alone.
+    expect(server.requests.length).toBeGreaterThan(1);
+    await drainAudits(5_000);
+    const rows = await db
+      .select()
+      .from(connectionCalls)
+      .where(eq(connectionCalls.connectionId, connectionId));
+    expect(rows.map((row) => row.outcome)).toEqual(["200"]);
+    expect(rows[0]).toMatchObject({ integrationId: ID, runId: null, method: "POST" });
+  });
+
+  it("drops the runtime-event channel from the server's result", async () => {
+    await seedProxyIntegration(ctx, remote());
+    await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+    const res = await post("call", { integration_id: ID, name: "forge" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({
+      result: { content: [{ type: "text", text: "done" }], _meta: { kept: true } },
+    });
+  });
+
+  for (const name of ["delete", "undeclared"]) {
+    it(`refuses the ${name === "delete" ? "hidden" : "undeclared"} tool before any exchange`, async () => {
+      await seedProxyIntegration(ctx, remote());
+      await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+      const res = await post("call", { integration_id: ID, name });
+      expect(res.status).toBe(404);
+      expect(server.requests).toEqual([]);
+    });
+  }
+
+  it("is refused in a space whose credential proxy is closed", async () => {
+    await seedProxyIntegration(ctx, remote());
+    const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+    await db
+      .update(spaces)
+      .set({ credentialProxyOpen: false })
+      .where(eq(spaces.id, ctx.defaultSpaceId));
+
+    const listed = await post("list", { integration_id: ID, connection_id: connectionId });
+    expect(listed.status).toBe(403);
+    expect(((await listed.json()) as { code: string }).code).toBe("credential_proxy_closed");
+    const called = await post("call", { integration_id: ID, name: "search" });
+    expect(called.status).toBe(403);
+    expect(server.requests).toEqual([]);
+  });
+
+  it("refuses a session cookie, like /proxy", async () => {
+    const res = await getTestApp().request("/api/credential-proxy/tools/call", {
+      method: "POST",
+      headers: {
+        Cookie: ctx.cookie,
+        "X-Org-Id": ctx.orgId,
+        "X-Space-Id": ctx.defaultSpaceId,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ integration_id: ID, name: "search" }),
+    });
+    expect(res.status).toBe(403);
+  });
+});

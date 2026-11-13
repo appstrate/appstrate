@@ -9,12 +9,26 @@
  * Served by the fake handlers of `@appstrate/mcp-transport/testing`.
  */
 
-import type { Implementation, ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
+import type {
+  CallToolResult,
+  Implementation,
+  ToolAnnotations,
+} from "@modelcontextprotocol/sdk/types.js";
 import { legacyMcpHandler, modernMcpHandler } from "@appstrate/mcp-transport/testing";
 
-/** A name alone gets the description `Tool <name>` and no annotations. */
+/**
+ * A name alone gets the description `Tool <name>` and no annotations. A call answers `result`,
+ * else its arguments as JSON text.
+ */
 export type FakeMcpTool =
-  string | { name: string; title?: string; description?: string; annotations?: ToolAnnotations };
+  | string
+  | {
+      name: string;
+      title?: string;
+      description?: string;
+      annotations?: ToolAnnotations;
+      result?: CallToolResult;
+    };
 
 export interface FakeMcpServerOptions {
   tools?: FakeMcpTool[];
@@ -44,13 +58,15 @@ export interface FakeMcpServer {
 }
 
 export function startFakeMcpServer(opts: FakeMcpServerOptions = {}): FakeMcpServer {
-  const tools = (opts.tools ?? []).map((tool) => ({
-    descriptor: {
-      ...(typeof tool === "string" ? { name: tool, description: `Tool ${tool}` } : tool),
-      inputSchema: { type: "object" as const, properties: {} },
-    },
-    handler: async () => ({ content: [] }),
-  }));
+  const tools = (opts.tools ?? []).map((tool) => {
+    const { result, ...descriptor } =
+      typeof tool === "string" ? { name: tool, description: `Tool ${tool}` } : tool;
+    return {
+      descriptor: { ...descriptor, inputSchema: { type: "object" as const, properties: {} } },
+      handler: async (args: unknown): Promise<CallToolResult> =>
+        result ?? { content: [{ type: "text", text: JSON.stringify(args ?? {}) }] },
+    };
+  });
   const served = {
     tools,
     ...(opts.pageSize !== undefined ? { pageSize: opts.pageSize } : {}),

@@ -1297,6 +1297,46 @@ export interface paths {
         patch: operations["credentialProxyPatch"];
         trace?: never;
     };
+    "/api/credential-proxy/tools/call": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Call a typed tool of a remote MCP integration
+         * @description One `tools/call` on the integration's remote MCP server, outside a run, for a tool `/api/credential-proxy/tools/list` offers; a tool outside that selection answers `404` before any exchange. The exchange goes through the credential proxy with the access rule and the connection selection of `/api/credential-proxy/proxy` without `X-Run-Id`, against the integration's latest published version, and is journaled as one call of the connection. The server's result is relayed without its `_meta["dev.appstrate/events"]`; a tool error is a result with `isError: true`. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`.
+         */
+        post: operations["callRemoteIntegrationTool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/credential-proxy/tools/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List the typed tools of a remote MCP integration
+         * @description The tools the integration's remote MCP server (`source.kind: "remote"`, Streamable HTTP) offers through one connection, outside a run: the integration catalog's selection (its `tools_policy` keys, or every tool the server lists when `allow_undeclared_tools` is `true`), less `hidden_tools` and the connect tool, each described by the server's `tools/list` with its description and schemas sanitised as in a run. The listing is cached per connection and integration version for 5 minutes. The exchange goes through the credential proxy with the access rule of `/api/credential-proxy/proxy` without `X-Run-Id`, against the integration's latest published version. A server that cannot be listed answers the declared names alone with `listed: false`. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`.
+         */
+        post: operations["listRemoteIntegrationTools"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/docs": {
         parameters: {
             query?: never;
@@ -12457,6 +12497,144 @@ export interface operations {
                     "*/*": unknown;
                 };
             };
+        };
+    };
+    callRemoteIntegrationTool: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Integration package id (`@scope/name`). */
+                    integration_id: string;
+                    /**
+                     * Format: uuid
+                     * @description The connection to call with; omitted, the proxy's selection (`X-Connection-Id` semantics).
+                     */
+                    connection_id?: string;
+                    /** @description The tool's name, as the server lists it. */
+                    name: string;
+                    /** @description The tool's arguments, following its `inputSchema`. */
+                    arguments?: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description The server's result. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description An MCP `CallToolResult` (`content`, optional `structuredContent` and `isError`). */
+                        result: {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `integration_not_remote` — the integration is not backed by a Streamable HTTP MCP server; `remote_url_templated` — its server URL is chosen per connection. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+            /** @description The MCP server failed the exchange or refused the connection's credential. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    listRemoteIntegrationTools: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Integration package id (`@scope/name`). */
+                    integration_id: string;
+                    /**
+                     * Format: uuid
+                     * @description The connection the server is listed with, as `X-Connection-Id` names one on `/api/credential-proxy/proxy`.
+                     */
+                    connection_id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The offered tools, in catalog order. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        tools: ({
+                            name: string;
+                            description?: string;
+                            inputSchema: {
+                                [key: string]: unknown;
+                            };
+                        } & {
+                            [key: string]: unknown;
+                        })[];
+                        /** @description `false` when the server's `tools/list` could not be read: `tools` holds the declared names, each with an empty object schema. */
+                        listed: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `integration_not_remote` — the integration is not backed by a Streamable HTTP MCP server; `remote_url_templated` — its server URL is chosen per connection. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
         };
     };
     getSwaggerUI: {

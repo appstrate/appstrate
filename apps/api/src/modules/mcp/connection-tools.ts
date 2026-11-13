@@ -5,13 +5,14 @@
  * holds a connection of, outside a run, behind two discovery tools.
  *
  * An integration's tool is named as in a run (`{ns}__api_call`, `{ns}__api_call__{auth}` when
- * several of its auths expose one). Both tools read the caller's connections from the proxy's
- * listing route and dispatch every upstream request in-process to the proxy route
- * (`routes/credential-proxy.ts`), so the guard, the rate limit and the access rule
- * (`services/credential-proxy/access.ts`) are the REST door's and none is restated here. The
- * proxy route is kept out of the operation catalog (`isExcludedPath`): `call_integration_tool` is
- * the one MCP path to it, with typed arguments where the route takes control headers and a
- * bounded result where it relays the upstream body.
+ * several of its auths expose one, `{ns}__{tool}` for a typed tool of a remote MCP server). Both
+ * tools read the caller's connections from the proxy's listing route and dispatch every upstream
+ * request in-process to the proxy routes (`routes/credential-proxy.ts`: `/proxy` for an
+ * `api_call`, `/tools/list` and `/tools/call` for a remote server's tools), so the guard, the
+ * rate limit and the access rule (`services/credential-proxy/access.ts`) are the REST door's and
+ * none is restated here. Those routes are kept out of the operation catalog (`isExcludedPath`):
+ * the two tools are the one MCP path to them, with typed arguments where `/proxy` takes control
+ * headers and a bounded result where it relays the upstream body.
  */
 
 import { z } from "zod";
@@ -26,7 +27,11 @@ import {
   resolveIntegrationToolCatalog,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
-import { allocateMcpToolNamespace, normaliseMcpToolNamespace } from "@appstrate/core/naming";
+import {
+  allocateMcpToolName,
+  allocateMcpToolNamespace,
+  normaliseMcpToolNamespace,
+} from "@appstrate/core/naming";
 import { logger } from "../../lib/logger.ts";
 import { isRelayedResponse } from "../../lib/proxy-status.ts";
 import {
@@ -37,7 +42,11 @@ import {
 import { CREDENTIAL_FAILURE_SENTENCES } from "../../lib/credential-failure.ts";
 import { PROXY_CONTROL_HEADERS } from "../../services/credential-proxy/control-headers.ts";
 import { isValidSessionId } from "../../services/credential-proxy/session.ts";
-import { CREDENTIAL_PROXY_PATH } from "./catalog.ts";
+import {
+  CREDENTIAL_PROXY_PATH,
+  REMOTE_TOOLS_CALL_PATH,
+  REMOTE_TOOLS_LIST_PATH,
+} from "./catalog.ts";
 import {
   asRecord,
   dispatchHeaders,
@@ -453,6 +462,8 @@ interface IntegrationTool {
   integration: string;
   /** What the tool does, as a search lists it. */
   description: string;
+  /** A remote tool whose server could not be listed: named only, without description or schema. */
+  catalogUnreadable?: true;
   /** How to call it and read its result, carried with its `input_schema` by `best_match`. */
   usage: string;
   /** Its arguments: `call_integration_tool` validates `arguments` against it before `execute`. */
@@ -629,18 +640,19 @@ async function listIntegrations(
 
 /**
  * The tools of one integration: the `api_call` tools its catalog exposes (selection `"*"`, less
- * `hidden_tools` and connect tools) whose auth has a connection.
+ * `hidden_tools` and connect tools) whose auth has a connection, then, for a remote MCP source,
+ * the typed tools its server offers.
  */
-function integrationTools(
+async function integrationTools(
   ctx: ConnectionToolContext,
   integration: ListedIntegration,
   manifest: IntegrationManifest,
-): IntegrationTool[] {
+): Promise<IntegrationTool[]> {
   const catalog = new Set(
     resolveIntegrationToolCatalog({ integration: manifest }).map((entry) => entry.name),
   );
   const configs = getApiCallConfigs(manifest);
-  return configs
+  const apiCallTools = configs
     .filter((config) => catalog.has(config.toolName))
     .map((config) => ({
       config,
@@ -664,6 +676,116 @@ function integrationTools(
           executeApiCall(ctx, tool, sharesIntegration, args, extra),
       };
     });
+  if (manifest.source?.kind !== "remote") return apiCallTools;
+  const taken = new Set(apiCallTools.map((tool) => tool.name));
+  return [...apiCallTools, ...(await remoteTools(ctx, integration, manifest, taken))];
+}
+
+const REMOTE_TOOL_USAGE =
+  "Pass the tool's own arguments, following its `input_schema`; the proxy chooses the " +
+  "connection as for an `api_call`. The result is the MCP server's own tool result, relayed " +
+  `as is up to ${MAX_RESULT_BYTES} bytes; \`isError: true\` is the tool's own failure.`;
+
+/** Upstream arguments: the server validates them against its own schema. */
+const remoteArgumentsSchema = z.record(z.string(), z.unknown());
+
+/**
+ * The typed tools a remote integration's server offers, read through the proxy's tool listing
+ * with the integration's first connection, each named `{ns}__{tool}` as in a run. A listing the
+ * proxy refuses leaves the integration's `api_call` tools alone.
+ */
+async function remoteTools(
+  ctx: ConnectionToolContext,
+  integration: ListedIntegration,
+  manifest: IntegrationManifest,
+  taken: Set<string>,
+): Promise<IntegrationTool[]> {
+  const response = await ctx.dispatch(
+    new Request(new URL(REMOTE_TOOLS_LIST_PATH, ctx.origin).toString(), {
+      method: "POST",
+      headers: dispatchHeaders(
+        ctx.authHeaders,
+        new Headers({ "Content-Type": "application/json" }),
+      ),
+      body: JSON.stringify({
+        integration_id: integration.id,
+        connection_id: integration.connections[0]!.connection_id,
+      }),
+    }),
+  );
+  const body = asRecord(await response.json().catch(() => undefined));
+  if (!response.ok || !Array.isArray(body?.tools)) return [];
+  const listed = body.listed !== false;
+  const about = manifest.display_name ?? manifest.name;
+  return (body.tools as Tool[]).flatMap((upstream): IntegrationTool[] => {
+    let name: string;
+    try {
+      name = allocateMcpToolName(integration.namespace, upstream.name, (n) => taken.has(n));
+    } catch {
+      return [];
+    }
+    taken.add(name);
+    return [
+      {
+        name,
+        integration: integration.id,
+        description: upstream.description ? `${about}. ${upstream.description}` : `${about}.`,
+        ...(listed ? {} : { catalogUnreadable: true }),
+        usage: REMOTE_TOOL_USAGE,
+        schema: remoteArgumentsSchema,
+        inputSchema: upstream.inputSchema,
+        connections: integration.connections,
+        execute: (args: Record<string, unknown>, extra: AppstrateRequestExtra) =>
+          executeRemoteTool(ctx, integration.id, upstream.name, args, extra),
+      },
+    ];
+  });
+}
+
+/** One `tools/call` through the proxy's tool route; its refusal comes back as is. */
+async function executeRemoteTool(
+  ctx: ConnectionToolContext,
+  integrationId: string,
+  name: string,
+  args: Record<string, unknown>,
+  extra: AppstrateRequestExtra,
+): Promise<ToolCallOutcome> {
+  const response = await ctx.dispatch(
+    new Request(new URL(REMOTE_TOOLS_CALL_PATH, ctx.origin).toString(), {
+      method: "POST",
+      headers: dispatchHeaders(
+        ctx.authHeaders,
+        new Headers({ "Content-Type": "application/json" }),
+      ),
+      body: JSON.stringify({ integration_id: integrationId, name, arguments: args }),
+      ...(extra.signal ? { signal: extra.signal } : {}),
+    }),
+  );
+  const text = await response.text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    parsed = undefined;
+  }
+  const body = asRecord(parsed);
+  const result = asRecord(body?.result);
+  if (!response.ok || !result) {
+    return { result: jsonResult(body ?? { status: response.status }, true), shownCount: 0 };
+  }
+  if (new TextEncoder().encode(text).byteLength > MAX_RESULT_BYTES) {
+    return {
+      result: jsonResult(
+        {
+          error: `The tool's result exceeds ${MAX_RESULT_BYTES} bytes and is not relayed.`,
+          hint: "Ask the tool for less, with narrower arguments.",
+        },
+        true,
+      ),
+      shownCount: 0,
+    };
+  }
+  return { result: result as CallToolResult, shownCount: 1 };
 }
 
 function scoreTool(tool: IntegrationTool, tokens: readonly string[]): number {
@@ -679,6 +801,7 @@ function listedTool(tool: IntegrationTool): Record<string, unknown> {
     tool: tool.name,
     integration: tool.integration,
     description: tool.description,
+    ...(tool.catalogUnreadable ? { catalog_unreadable: true } : {}),
     connections: tool.connections,
   };
 }
@@ -688,9 +811,12 @@ function buildSearchIntegrationToolsTool(ctx: ConnectionToolContext): AppstrateT
     name: "search_integration_tools",
     description:
       "Search the tools of the integrations you hold a connection of in this space, by keyword " +
-      "and/or integration; with neither, list every tool you can call. Each result has the " +
-      "`tool` name to pass to call_integration_tool, its `integration`, a `description`, and " +
-      "the `connections` it reaches. With `credential-proxy:call`: your own connections and " +
+      "and/or integration; with neither, list every tool you can call: each integration's " +
+      "`api_call` tools and, for an integration backed by a remote MCP server, the typed tools " +
+      "that server offers. Each result has the `tool` name to pass to call_integration_tool, " +
+      "its `integration`, a `description`, and the `connections` it reaches; " +
+      "`catalog_unreadable: true` marks a typed tool whose server could not be listed, named " +
+      "without description or schema. With `credential-proxy:call`: your own connections and " +
       "those other members shared into the space (`owned_by_actor: false`); with " +
       "`credential-proxy:call-own` alone, your own only. Each connection has the " +
       "`connection_id` to pass, the `authorized_uris` a target must match (unless " +
@@ -762,10 +888,13 @@ function buildSearchIntegrationToolsTool(ctx: ConnectionToolContext): AppstrateT
     const manifests = await Promise.all(
       searchedIntegrations.map((entry) => ctx.readManifest(entry.id)),
     );
-    const tools = searchedIntegrations.flatMap((entry, i) => {
-      const manifest = manifests[i];
-      return manifest ? integrationTools(ctx, entry, manifest) : [];
-    });
+    // One integration's listing at a time per slot, each bounded by the proxy's tool route.
+    const perIntegration = await mapWithConcurrency(
+      searchedIntegrations.map((entry, i) => ({ entry, manifest: manifests[i] })),
+      CONCURRENCY,
+      async ({ entry, manifest }) => (manifest ? integrationTools(ctx, entry, manifest) : []),
+    );
+    const tools = perIntegration.flat();
     const matches = tools
       .map((tool, order) => ({ tool, order, score: scoreTool(tool, tokens) }))
       .filter(({ score }) => tokens.length === 0 || score > 0)
@@ -885,7 +1014,9 @@ function buildCallIntegrationToolTool(ctx: ConnectionToolContext): AppstrateTool
     const manifest = integration ? await ctx.readManifest(integration.id) : null;
     const tool =
       integration && manifest
-        ? integrationTools(ctx, integration, manifest).find((t) => t.name === call.data.tool)
+        ? (await integrationTools(ctx, integration, manifest)).find(
+            (t) => t.name === call.data.tool,
+          )
         : undefined;
     if (!tool) {
       return refuse({

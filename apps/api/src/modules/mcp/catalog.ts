@@ -77,6 +77,10 @@ function extractHeaderParams(node: OperationNode): string[] {
 /** The credential proxy's route: kept out of the catalog, dispatched to by `call_integration_tool` alone. */
 export const CREDENTIAL_PROXY_PATH = "/api/credential-proxy/proxy";
 
+/** The remote MCP tool routes: kept out of the catalog, dispatched to by the two integration tools alone. */
+export const REMOTE_TOOLS_LIST_PATH = "/api/credential-proxy/tools/list";
+export const REMOTE_TOOLS_CALL_PATH = "/api/credential-proxy/tools/call";
+
 /** The served-skill routes of the package API, which `appstrate code sync` reads. */
 const SERVED_SKILLS_PATHS: ReadonlySet<string> = new Set([
   "/api/packages/skills/served",
@@ -98,7 +102,9 @@ function isExcludedPath(pathTemplate: string): boolean {
     pathTemplate.startsWith("/.well-known/oauth-protected-resource") ||
     pathTemplate === "/api/openapi.json" ||
     pathTemplate === "/api/docs" ||
-    pathTemplate === CREDENTIAL_PROXY_PATH
+    pathTemplate === CREDENTIAL_PROXY_PATH ||
+    pathTemplate === REMOTE_TOOLS_LIST_PATH ||
+    pathTemplate === REMOTE_TOOLS_CALL_PATH
   );
 }
 

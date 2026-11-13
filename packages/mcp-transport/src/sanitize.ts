@@ -32,7 +32,8 @@
  *     that's a registry-boundary concern, enforced at publish time.
  */
 
-import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
 import { API_CALL_TOOL_META_KEY, API_UPLOAD_TOOL_META_KEY } from "./tool-meta.ts";
 
 export const MAX_TOOL_DESCRIPTION_BYTES = 2048;
@@ -217,4 +218,21 @@ export function sanitiseToolDescriptor(tool: Tool): Tool | null {
     out.title = sanitiseTextField(tool.title, MAX_PARAMETER_DESCRIPTION_BYTES);
   }
   return out;
+}
+
+/**
+ * Drop the first-party runtime-event channel from a third-party tool result.
+ * `dev.appstrate/events` under `_meta` is the trusted channel the platform's
+ * own runtime tools (output/log/note/pin) use to surface canonical run
+ * events; an integration upstream has no legitimate reason to set it, so it
+ * is removed to prevent run-event forgery. Returns the result untouched when
+ * the key is not present (the common case).
+ */
+export function stripForgedRuntimeEvents(result: CallToolResult): CallToolResult {
+  const meta = result._meta;
+  if (!meta || !(RUNTIME_TOOL_EVENTS_META_KEY in meta)) {
+    return result;
+  }
+  const { [RUNTIME_TOOL_EVENTS_META_KEY]: _dropped, ...rest } = meta;
+  return { ...result, _meta: rest };
 }

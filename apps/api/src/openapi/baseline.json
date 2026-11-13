@@ -27236,6 +27236,232 @@
         }
       }
     },
+    "/api/credential-proxy/tools/list": {
+      "post": {
+        "operationId": "listRemoteIntegrationTools",
+        "tags": ["Credential Proxy"],
+        "summary": "List the typed tools of a remote MCP integration",
+        "description": "The tools the integration's remote MCP server (`source.kind: \"remote\"`, Streamable HTTP) offers through one connection, outside a run: the integration catalog's selection (its `tools_policy` keys, or every tool the server lists when `allow_undeclared_tools` is `true`), less `hidden_tools` and the connect tool, each described by the server's `tools/list` with its description and schemas sanitised as in a run. The listing is cached per connection and integration version for 5 minutes. The exchange goes through the credential proxy with the access rule of `/api/credential-proxy/proxy` without `X-Run-Id`, against the integration's latest published version. A server that cannot be listed answers the declared names alone with `listed: false`. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["integration_id", "connection_id"],
+                "additionalProperties": false,
+                "properties": {
+                  "integration_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Integration package id (`@scope/name`)."
+                  },
+                  "connection_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "The connection the server is listed with, as `X-Connection-Id` names one on `/api/credential-proxy/proxy`."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The offered tools, in catalog order.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["tools", "listed"],
+                  "properties": {
+                    "tools": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["name", "inputSchema"],
+                        "description": "An MCP tool descriptor, as the server listed it after sanitisation.",
+                        "additionalProperties": true,
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "inputSchema": {
+                            "type": "object",
+                            "additionalProperties": true
+                          }
+                        }
+                      }
+                    },
+                    "listed": {
+                      "type": "boolean",
+                      "description": "`false` when the server's `tools/list` could not be read: `tools` holds the declared names, each with an empty object schema."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "description": "`integration_not_remote` — the integration is not backed by a Streamable HTTP MCP server; `remote_url_templated` — its server URL is chosen per connection.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/credential-proxy/tools/call": {
+      "post": {
+        "operationId": "callRemoteIntegrationTool",
+        "tags": ["Credential Proxy"],
+        "summary": "Call a typed tool of a remote MCP integration",
+        "description": "One `tools/call` on the integration's remote MCP server, outside a run, for a tool `/api/credential-proxy/tools/list` offers; a tool outside that selection answers `404` before any exchange. The exchange goes through the credential proxy with the access rule and the connection selection of `/api/credential-proxy/proxy` without `X-Run-Id`, against the integration's latest published version, and is journaled as one call of the connection. The server's result is relayed without its `_meta[\"dev.appstrate/events\"]`; a tool error is a result with `isError: true`. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["integration_id", "name"],
+                "additionalProperties": false,
+                "properties": {
+                  "integration_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Integration package id (`@scope/name`)."
+                  },
+                  "connection_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "The connection to call with; omitted, the proxy's selection (`X-Connection-Id` semantics)."
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The tool's name, as the server lists it."
+                  },
+                  "arguments": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "The tool's arguments, following its `inputSchema`."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The server's result.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["result"],
+                  "properties": {
+                    "result": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "An MCP `CallToolResult` (`content`, optional `structuredContent` and `isError`)."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "description": "`integration_not_remote` — the integration is not backed by a Streamable HTTP MCP server; `remote_url_templated` — its server URL is chosen per connection.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "description": "The MCP server failed the exchange or refused the connection's credential.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/credential-proxy/proxy": {
       "get": {
         "operationId": "credentialProxyGet",

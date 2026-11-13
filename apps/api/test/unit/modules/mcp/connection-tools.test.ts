@@ -900,3 +900,125 @@ describe("call_integration_tool — result", () => {
     ]);
   });
 });
+
+describe("typed tools of a remote MCP integration", () => {
+  const REMOTE = "@acme/docs";
+  const remoteManifest = {
+    name: REMOTE,
+    version: "1.0.0",
+    type: "integration",
+    display_name: "Acme Docs",
+    source: { kind: "remote", remote: { url: "https://mcp.acme.example/mcp" } },
+    auths: { api: { type: "api_key" } },
+    tools_policy: { search: {} },
+  } as unknown as IntegrationManifest;
+  const fixture: Fixture = {
+    listing: listingOf([connectionRow({ integration_package_id: REMOTE })]),
+    manifests: { [REMOTE]: remoteManifest },
+  };
+  const searchTool = {
+    name: "search",
+    description: "Full-text search.",
+    inputSchema: { type: "object", properties: { q: { type: "string" } }, required: ["q"] },
+  };
+  const remoteRoutes =
+    (call: Respond, list: Respond = () => Response.json({ tools: [searchTool], listed: true })) =>
+    (req: Request) =>
+      new URL(req.url).pathname === "/api/credential-proxy/tools/list" ? list(req) : call(req);
+
+  it("lists the server's tools under the integration's namespace, read with its connection", async () => {
+    const made = makeTools(
+      CALL_OWN,
+      remoteRoutes(() => Response.json({})),
+      true,
+      fixture,
+    );
+    const result = await made.byName
+      .get("search_integration_tools")!
+      .handler({ integration: REMOTE }, noExtra);
+    const payload = parseResult(result);
+    expect(payload.tools).toEqual([
+      expect.objectContaining({
+        tool: "acme_docs__search",
+        integration: REMOTE,
+        description: "Acme Docs. Full-text search.",
+      }),
+    ]);
+    expect((payload.best_match as { input_schema: unknown }).input_schema).toEqual(
+      searchTool.inputSchema,
+    );
+    const listed = made.calls[0]!;
+    expect(new URL(listed.url).pathname).toBe("/api/credential-proxy/tools/list");
+    expect(await listed.json()).toEqual({ integration_id: REMOTE, connection_id: CONNECTION_ID });
+  });
+
+  it("marks a tool whose server could not be listed", async () => {
+    const made = makeTools(
+      CALL_OWN,
+      remoteRoutes(
+        () => Response.json({}),
+        () =>
+          Response.json({
+            tools: [{ name: "search", inputSchema: { type: "object" } }],
+            listed: false,
+          }),
+      ),
+      true,
+      fixture,
+    );
+    const payload = parseResult(
+      await made.byName.get("search_integration_tools")!.handler({}, noExtra),
+    );
+    expect(payload.tools).toEqual([
+      expect.objectContaining({ tool: "acme_docs__search", catalog_unreadable: true }),
+    ]);
+  });
+
+  it("calls the tool through the proxy's tool route and relays the server's result", async () => {
+    const upstream = { content: [{ type: "text", text: "3 documents" }] };
+    const made = makeTools(
+      CALL_OWN,
+      remoteRoutes(() => Response.json({ result: upstream })),
+      true,
+      fixture,
+    );
+    const result = await made.byName
+      .get("call_integration_tool")!
+      .handler({ tool: "acme_docs__search", arguments: { q: "invoices" } }, noExtra);
+    expect(result).toEqual(upstream);
+    const call = made.calls.find((req) => new URL(req.url).pathname.endsWith("/tools/call"))!;
+    expect(await call.json()).toEqual({
+      integration_id: REMOTE,
+      name: "search",
+      arguments: { q: "invoices" },
+    });
+  });
+
+  it("refuses a missing required argument before calling", async () => {
+    const made = makeTools(
+      CALL_OWN,
+      remoteRoutes(() => Response.json({})),
+      true,
+      fixture,
+    );
+    const result = await made.byName
+      .get("call_integration_tool")!
+      .handler({ tool: "acme_docs__search", arguments: {} }, noExtra);
+    expect(parseResult(result)).toMatchObject({ code: "missing_argument" });
+    expect(made.calls.some((req) => new URL(req.url).pathname.endsWith("/tools/call"))).toBe(false);
+  });
+
+  it("relays the route's refusal as an error result", async () => {
+    const made = makeTools(
+      CALL_OWN,
+      remoteRoutes(() => problem(502, "bad_gateway", "The MCP server failed.")),
+      true,
+      fixture,
+    );
+    const result = await made.byName
+      .get("call_integration_tool")!
+      .handler({ tool: "acme_docs__search", arguments: { q: "x" } }, noExtra);
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatchObject({ code: "bad_gateway", status: 502 });
+  });
+});

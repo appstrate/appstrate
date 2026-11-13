@@ -104,6 +104,10 @@ describe("mcp catalog", () => {
     expect(operations.filter((op) => op.pathTemplate === "/api/credential-proxy/proxy")).toEqual(
       [],
     );
+    // The remote MCP tool routes too: the two integration tools are their one MCP path.
+    expect(
+      operations.filter((op) => op.pathTemplate.startsWith("/api/credential-proxy/tools/")),
+    ).toEqual([]);
     const { byName, calls } = makeTools(["mcp:read", "mcp:invoke", "agents:run"]);
     const refused = await byName
       .get("invoke_operation")!

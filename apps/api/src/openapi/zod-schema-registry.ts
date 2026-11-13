@@ -37,6 +37,7 @@ import {
 
 // --- API Key schemas (routes/api-keys.ts) ---
 import { createApiKeySchema } from "../routes/api-keys.ts";
+import { callRemoteToolSchema, listRemoteToolsSchema } from "../routes/credential-proxy.ts";
 
 // --- Organization schemas (routes/organizations.ts) ---
 import {
@@ -573,6 +574,20 @@ const coreSchemas: OpenApiSchemaEntry[] = [
   },
 
   // ─── Package draft file tree ────────────────────────────────────────────
+
+  // ─── Credential proxy ───────────────────────────────────────────────────
+  {
+    method: "POST",
+    path: "/api/credential-proxy/tools/list",
+    jsonSchema: toJsonSchema(listRemoteToolsSchema),
+    description: "List the typed tools of a remote MCP integration",
+  },
+  {
+    method: "POST",
+    path: "/api/credential-proxy/tools/call",
+    jsonSchema: toJsonSchema(callRemoteToolSchema),
+    description: "Call a typed tool of a remote MCP integration",
+  },
 
   // ─── Integrations ───────────────────────────────────────────────────────
   {
