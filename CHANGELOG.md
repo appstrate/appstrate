@@ -468,6 +468,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **`appstrate run --local` wires unauthenticated remote MCP integrations**
+  (#2198). For an integration with `source.kind: "remote"` and no `auths`, the
+  CLI connects to `source.remote.url` itself and exposes each tool the agent
+  selects (`integrations_configuration.<id>.tools`, else `default_tools`), minus
+  `hidden_tools`, as `{ns}__{tool}`, named as on the platform. Requests go
+  through the same SSRF guard as the CLI's `api_call` calls: the declared host
+  is reachable, a redirect to a blocked range is refused. A server the CLI
+  cannot reach, a connection and `tools/list` that take more than 10 s, a
+  failing `tools/list`, an SSE transport or a `{$variable.<name>}` URL template
+  leaves the integration unavailable: the agent is told and the run starts
+  without it.
+  Authenticated remote integrations and `local` sources stay unavailable to a
+  local run; `--integrations none` wires none.
+
 - **A model refused for the runtime version says so** (#2148). When a provider
   refuses a model for the client version the agent SDK announces (Anthropic's
   `claude_code_version_too_old` on a Claude Code subscription), the chat shows
