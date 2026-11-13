@@ -24,7 +24,6 @@ class RecordingSink implements EventSink {
 }
 
 const emptyResult: TerminalRunResult = {
-  memories: [],
   output: null,
   logs: [],
   status: "success",

@@ -7,7 +7,7 @@
  *
  *   - L4.1 — emits every scripted event in arrival order
  *   - L4.2 — calls sink.finalize() exactly once
- *   - L4.3 — reducer semantics (memories append, state LWW, etc.)
+ *   - L4.3 — reducer semantics (output last-write-wins, logs append, memory / pinned events left out)
  *   - L4.4 — empty script → no emission, still finalizes
  *
  * The adapter bypasses the Pi SDK by driving a {@link ScriptedPiRunner}

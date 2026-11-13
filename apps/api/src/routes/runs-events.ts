@@ -123,24 +123,6 @@ function clampArtifacts(input: unknown): unknown {
  */
 export const RunResultSchema = z
   .object({
-    memories: z
-      .array(
-        z.object({
-          content: z.string().catch(""),
-          scope: z.enum(["actor", "shared"]).optional().catch(undefined),
-        }),
-      )
-      .optional()
-      .default([]),
-    pinned: z
-      .record(
-        z.string(),
-        z.object({
-          content: z.unknown(),
-          scope: z.enum(["actor", "shared"]).optional().catch(undefined),
-        }),
-      )
-      .optional(),
     output: z.unknown().nullable().optional(),
     logs: z
       .array(
@@ -315,8 +297,6 @@ export function createRunsEventsRouter() {
       logger.warn("usage: malformed tier bands dropped", { runId: run.id, seam: "finalize" });
     }
     const result: TerminalRunResult = {
-      memories: d.memories,
-      ...(d.pinned !== undefined ? { pinned: d.pinned } : {}),
       output: d.output ?? null,
       logs: d.logs,
       ...(d.error ? { error: d.error } : {}),

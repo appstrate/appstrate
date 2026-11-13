@@ -434,7 +434,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // runner's sink stream so:
   //   - `--report` mode POSTs `output.emitted` to
   //     the platform → `run_logs` populated, finalize body carries
-  //     `result.output` / `result.pinned`.
+  //     `result.output`.
   //   - Offline mode (no `--report`) still aggregates the events so
   //     `--output <file>` writes the actual `result.output`.
   //

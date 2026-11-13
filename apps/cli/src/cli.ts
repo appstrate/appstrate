@@ -1114,7 +1114,7 @@ program
   )
   .option(
     "--output <path>",
-    "Write the final RunResult JSON to this path. Note: in remote mode the `memories` / `pinned` / `logs` fields are emitted as empty defaults — the dashboard remains the source of truth for those surfaces.",
+    "Write the final RunResult JSON to this path. Note: in remote mode the `logs` field is emitted as an empty default — the dashboard remains the source of truth for those surfaces.",
   )
   .option("--json", "Emit canonical RunEvents as JSONL on stdout")
   .option(

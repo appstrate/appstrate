@@ -140,22 +140,16 @@ describe("mergeTerminalResult", () => {
 
   it("prefers aggregate values when present, falls back to runner values", () => {
     const aggregate: RunResult = {
-      memories: [{ content: "hello" }],
-      pinned: { checkpoint: { content: { step: 2 } } },
       output: { foo: "bar" },
       logs: [{ level: "info", message: "x", timestamp: 100 }],
     };
     const runner: TerminalRunResult = {
-      memories: [{ content: "old" }],
-      pinned: { checkpoint: { content: { step: 1 } } },
       output: { foo: "baz" },
       logs: [{ level: "info", message: "y", timestamp: 50 }],
       status: "success",
       durationMs: 123,
     };
     const merged = mergeTerminalResult(aggregate, runner);
-    expect(merged.memories).toEqual([{ content: "hello" }]);
-    expect(merged.pinned!.checkpoint).toEqual({ content: { step: 2 } });
     expect(merged.output).toEqual({ foo: "bar" });
     expect(merged.logs).toEqual([{ level: "info", message: "x", timestamp: 100 }]);
     // Terminal metadata always comes from the runner.
@@ -166,16 +160,12 @@ describe("mergeTerminalResult", () => {
   it("falls back to runner values for every field the aggregate left empty", () => {
     const aggregate = emptyRunResult();
     const runner: TerminalRunResult = {
-      memories: [{ content: "r" }],
-      pinned: { checkpoint: { content: { ok: true } } },
       output: { answer: 42 },
       logs: [{ level: "warn", message: "w", timestamp: 1 }],
       status: "failed",
       error: { message: "boom" },
     };
     const merged = mergeTerminalResult(aggregate, runner);
-    expect(merged.memories).toEqual([{ content: "r" }]);
-    expect(merged.pinned!.checkpoint).toEqual({ content: { ok: true } });
     expect(merged.output).toEqual({ answer: 42 });
     expect(merged.logs).toHaveLength(1);
     expect(merged.status).toBe("failed");
@@ -472,18 +462,18 @@ describe("attachStdoutBridge — writeRaw", () => {
 // ---------------------------------------------------------------------------
 
 describe("attachStdoutBridge — aggregation via finalize", () => {
-  it("aggregates output.emitted + pinned.set across session + stdout", async () => {
+  it("aggregates output.emitted + log.written across session + stdout", async () => {
     const underlying = recordingSink();
     const stdout = makeFakeStdout();
     const bridge = attachStdoutBridge({ sink: underlying, runId: "r", stdout });
 
     // Session-style: emit via the bridge sink directly (what a runner does).
     await bridge.sink.handle({
-      type: "pinned.set",
+      type: "log.written",
       timestamp: 1,
       runId: "r",
-      key: "checkpoint",
-      content: { step: 1 },
+      level: "info",
+      message: "step 1",
     });
 
     // Stdout-style: a tool writes a JSON line.
@@ -505,7 +495,7 @@ describe("attachStdoutBridge — aggregation via finalize", () => {
     expect(underlying.finalized).not.toBeNull();
     const final = underlying.finalized!;
     expect(final.output).toEqual({ answer: 42 });
-    expect(final.pinned!.checkpoint).toEqual({ content: { step: 1 } });
+    expect(final.logs).toEqual([{ level: "info", message: "step 1", timestamp: 1 }]);
     expect(final.status).toBe("success");
     expect(final.durationMs).toBe(500);
     bridge.restore();
@@ -547,7 +537,7 @@ describe("attachStdoutBridge — aggregation via finalize", () => {
     bridge.restore();
   });
 
-  it("aggregates pinned.set with key='checkpoint' into result.pinned with scope captured", async () => {
+  it("leaves a pinned.set written on stdout out of the finalize result", async () => {
     const underlying = recordingSink();
     const stdout = makeFakeStdout();
     const bridge = attachStdoutBridge({ sink: underlying, runId: "r", stdout });
@@ -560,27 +550,8 @@ describe("attachStdoutBridge — aggregation via finalize", () => {
 
     await bridge.sink.finalize({ ...emptyRunResult(), status: "success" });
 
-    const final = underlying.finalized!;
-    expect(final.pinned!.checkpoint).toEqual({ content: { cursor: "abc" }, scope: "shared" });
-    bridge.restore();
-  });
-
-  it("aggregates pinned.set with arbitrary key into result.pinned", async () => {
-    const underlying = recordingSink();
-    const stdout = makeFakeStdout();
-    const bridge = attachStdoutBridge({ sink: underlying, runId: "r", stdout });
-
-    stdout.write.call(
-      null as never,
-      '{"type":"pinned.set","key":"persona","content":"agent persona","timestamp":1}\n',
-    );
-    await flushMicrotasks();
-
-    await bridge.sink.finalize({ ...emptyRunResult(), status: "success" });
-
-    const final = underlying.finalized!;
-    expect(final.pinned).toEqual({ persona: { content: "agent persona" } });
-    expect(final.pinned!.checkpoint).toBeUndefined();
+    expect(underlying.handled).toHaveLength(1);
+    expect(underlying.finalized).not.toHaveProperty("pinned");
     bridge.restore();
   });
 });

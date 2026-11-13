@@ -176,6 +176,17 @@ describe("run MCP server", () => {
       expect(rows).toHaveLength(3);
     });
 
+    it("`note` stores a memory whose trim splits a surrogate pair, the half replaced", async () => {
+      const run = await seedRunningRun();
+      await callTool(path, bearer(run.id), "note", { content: `${"a".repeat(1999)}😀` });
+
+      const rows = await db
+        .select()
+        .from(packagePersistence)
+        .where(eq(packagePersistence.runId, run.id));
+      expect(rows.map((r) => r.content)).toEqual([`${"a".repeat(1999)}\uFFFD`]);
+    });
+
     it("`recall_memory` returns the notes written through `note`, once each", async () => {
       const run = await seedRunningRun();
       await callTool(path, bearer(run.id), "note", { content: "Gmail paginates at 100" });

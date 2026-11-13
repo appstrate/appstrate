@@ -524,13 +524,8 @@ const L4_REDUCER_SEMANTICS: ConformanceCase = {
     const res = await withScript(adapter);
     if (res.skipped) return skipped("adapter does not implement runScripted");
     const r = res.output.result;
-    if (r.memories.length !== 2) return fail(`memories=${r.memories.length}, expected 2`);
-    if (r.memories[0]!.content !== "first" || r.memories[1]!.content !== "second") {
-      return fail("memory order / content mismatch");
-    }
-    const checkpoint = r.pinned?.checkpoint?.content as { counter?: number } | undefined;
-    if (!checkpoint || checkpoint.counter !== 2) {
-      return fail(`checkpoint should be last-write-wins, got ${JSON.stringify(checkpoint)}`);
+    if ("memories" in r || "pinned" in r) {
+      return fail(`memory.added / pinned.set must not be aggregated: ${JSON.stringify(r)}`);
     }
     const out = r.output as { answer?: number; partial?: boolean; extra?: string } | null;
     if (!out || out.answer !== 42 || out.partial !== false || out.extra !== "done") {
@@ -557,12 +552,7 @@ const L4_EMPTY_SCRIPT: ConformanceCase = {
       return fail(`finalize should still be called once, got ${res.output.finalizeCalls}`);
     }
     const r = res.output.result;
-    if (
-      r.memories.length !== 0 ||
-      r.logs.length !== 0 ||
-      r.pinned !== undefined ||
-      r.output !== null
-    ) {
+    if (r.logs.length !== 0 || r.output !== null) {
       return fail(`RunResult should be empty baseline, got ${JSON.stringify(r)}`);
     }
     return pass();

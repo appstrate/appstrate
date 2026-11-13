@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed — memories and pinned slots leave `RunResult` (#2199)
+
+- **BREAKING:** `RunResult.memories`, `RunResult.pinned` and the `Memory` / `PinnedSlot` types
+  are removed. `foldEvent` / `reduceEvents` leave `memory.added` and `pinned.set` out of the
+  aggregate: the server that serves the `note` and `pin` tools persists them when the tool is
+  called. `mergeTerminalResult` merges `output` and `logs` only. Conformance case L4.3 checks
+  that neither event is aggregated.
+
 ### Changed — the output schema is read by `readDeclaredOutputSchema` (#2197)
 
 - `buildPlatformPromptInputs` derives `outputSchema` with `readDeclaredOutputSchema`

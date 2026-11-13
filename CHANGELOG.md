@@ -518,6 +518,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `buildRuntimeToolDefs` and `@appstrate/runner-pi` drops
   `buildRuntimeToolExtensions`. The sidecar no longer strips `dev.appstrate/events`
   from third-party tool results: no relayed result is read for that key.
+- **The finalize body no longer carries memories or pinned slots** (#2199).
+  `POST /api/runs/{runId}/events/finalize` ignores `memories` and `pinned`, and
+  finalize writes neither `package_persistence` nor `runs.checkpoint`: `note` and
+  `pin` write them when the tool is called. `@appstrate/afps-runtime` drops
+  `RunResult.memories`, `RunResult.pinned`, `Memory` and `PinnedSlot`; its reducer
+  leaves `memory.added` and `pinned.set` out of the aggregate.
 
 ### Added
 

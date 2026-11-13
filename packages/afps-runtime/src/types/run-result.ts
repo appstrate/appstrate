@@ -17,24 +17,17 @@ export type LogLevel = "info" | "warn" | "error";
  * Built by the runtime by reducing the stream of {@link RunEvent} values
  * against the canonical AFPS semantics:
  *
- * - `memory.added` events append to `memories`
- * - `pinned.set` events upsert by `key` into `pinned` (last-write-wins per key)
  * - `output.emitted` events replace `output` wholesale (last-write-wins;
  *   the reducer assigns `result.output = event.data`, it does NOT merge)
  * - `log.written` events append to `logs`
  *
+ * `memory.added` and `pinned.set` are not aggregated: memories and pinned
+ * slots are persisted by the server that serves the `note` and `pin` tools,
+ * when the tool is called.
+ *
  * Passed to {@link EventSink.finalize} when the run ends.
  */
 export interface RunResult {
-  memories: Memory[];
-  /**
-   * Named pinned slots — last-write-wins per `key`. The reserved
-   * `"checkpoint"` key is the carry-over slot read by ingestion +
-   * prompt builder; other keys (`"persona"`, `"goals"`, …) are
-   * persisted as named pinned rows in `package_persistence` and
-   * rendered into the system prompt on the next run.
-   */
-  pinned?: Record<string, PinnedSlot>;
   output: unknown | null;
   logs: LogEntry[];
   error?: RunError;
@@ -103,26 +96,6 @@ export interface RunArtifactsSummary {
  * importers keep working.
  */
 export type { TokenUsage };
-
-export interface Memory {
-  content: string;
-  /**
-   * AFPS scope dimension for the unified persistence store.
-   * Emitters MAY omit the field — consumers default to `"actor"`.
-   */
-  scope?: "actor" | "shared";
-}
-
-/**
- * A single pinned slot — the value carried by one `pinned.set` event.
- * Aggregated by `RunResult.pinned[key]` so consumers can iterate every
- * named slot the run wrote without losing the per-slot scope.
- */
-export interface PinnedSlot {
-  content: unknown;
-  /** AFPS per-slot persistence scope; defaults to `"actor"`. */
-  scope?: "actor" | "shared";
-}
 
 export interface LogEntry {
   level: LogLevel;

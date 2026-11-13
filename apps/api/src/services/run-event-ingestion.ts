@@ -59,13 +59,6 @@ import {
   runAgentIdentity,
 } from "./state/runs.ts";
 import { createRunNotifications } from "./state/notifications.ts";
-import {
-  addMemories as addUnifiedMemories,
-  upsertPinned,
-  scopeFromActor,
-  CHECKPOINT_KEY,
-} from "./state/package-persistence.ts";
-import { actorFromIds } from "../lib/actor.ts";
 import { getRunEffectiveAgent, runPinnedVersionGoneDetail } from "./run-effective-agent.ts";
 import { validateOutput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
@@ -315,8 +308,7 @@ async function ingestInner(
  *   5. Build the terminal params shared by the CAS and the broadcast.
  *   6. CAS-update the run row (status, result, cost, sink_closed_at).
  *      Idempotent: zero rows affected = already finalized.
- *   7. Persist memories + checkpoint into the unified store + terminal log
- *      rows, then emit `onRunStatusChange` (modules react asynchronously).
+ *   7. Write the terminal log rows, then emit `onRunStatusChange` (modules react asynchronously).
  *
  * Idempotent by CAS on `sink_closed_at IS NULL`: concurrent finalize retries
  * from HttpSink end up applying once.
@@ -591,12 +583,6 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // 6. CAS close — single gate for all subsequent side effects. Concurrent
   //    finalize retries (platform synthesis vs container POST) hit the same
   //    row; the CAS lets exactly one proceed.
-  const checkpointSlot = result.pinned?.[CHECKPOINT_KEY];
-  const checkpointToPersist =
-    checkpointSlot !== undefined && isPlainRecord(checkpointSlot.content)
-      ? checkpointSlot.content
-      : null;
-
   // The CAS and the run-workspace teardown enqueue are ONE transaction: the
   // moment a run is durably terminal, the record that purges its provisioning
   // objects is durable too. (The enqueue is a bounded INSERT of two rows and
@@ -622,12 +608,6 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
         // run carries a status.
         ...(costPricingStatus !== null ? { costPricingStatus } : {}),
         sinkClosedAt: now,
-        // Per-run checkpoint snapshot — read by `getRecentRuns` to feed the
-        // sidecar `run_history` tool. The unified `package_persistence`
-        // store only keeps the latest checkpoint per actor (last-write-wins
-        // on the unique index); `runs.checkpoint` preserves the per-run
-        // history so agents can inspect what each prior run emitted.
-        ...(checkpointToPersist !== null ? { checkpoint: checkpointToPersist } : {}),
         // Terminal artifacts summary from the container's outputs sweep. Only
         // written when the runner reported it (older containers omit it) — an
         // absent value leaves the column null rather than clobbering it. Does NOT
@@ -704,83 +684,6 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
         err: getErrorMessage(err),
       });
     }
-  }
-
-  // Resolve the run's actor for the unified persistence scope.
-  const [actorRow] = await db
-    .select({
-      userId: runs.userId,
-      endUserId: runs.endUserId,
-    })
-    .from(runs)
-    .where(eq(runs.id, run.id))
-    .limit(1);
-  const persistenceScope = scopeFromActor(
-    actorFromIds(actorRow?.userId ?? null, actorRow?.endUserId ?? null),
-  );
-
-  // Post-CAS best-effort: the run is already terminal in `runs`. Memory and
-  // pinned-slot persistence is agent-authored side-data — a transient store
-  // fault here must NOT strand the status-change broadcast below (the only
-  // signal that updates the UI / fires webhooks) nor 500 the runner for a run
-  // that is already committed terminal. Log + swallow, like the run-log writes
-  // further down. (Persistence faults are surfaced via the error log for ops.)
-  try {
-    if (result.memories?.length) {
-      // Split memories by declared scope and write each non-empty bucket.
-      const sharedContent: string[] = [];
-      const actorContent: string[] = [];
-      for (const m of result.memories) {
-        if (m.scope === "shared") sharedContent.push(m.content);
-        else actorContent.push(m.content);
-      }
-
-      if (actorContent.length > 0) {
-        await addUnifiedMemories(
-          run.packageId,
-          run.spaceId,
-          run.orgId,
-          persistenceScope,
-          actorContent,
-          run.id,
-        );
-      }
-      if (sharedContent.length > 0) {
-        await addUnifiedMemories(
-          run.packageId,
-          run.spaceId,
-          run.orgId,
-          { type: "shared" },
-          sharedContent,
-          run.id,
-        );
-      }
-    }
-
-    // Unified-persistence pinned-slot write — the single store for every
-    // named pinned slot the agent wrote via `pin({ key, content })`,
-    // including the carry-over `"checkpoint"` slot. Honors the AFPS
-    // scope when the runtime stamped one onto each slot; falls back to
-    // the run's actor scope.
-    if (result.pinned) {
-      for (const [key, slot] of Object.entries(result.pinned)) {
-        const slotScope = slot.scope === "shared" ? { type: "shared" as const } : persistenceScope;
-        await upsertPinned(
-          run.packageId,
-          run.spaceId,
-          run.orgId,
-          slotScope,
-          key,
-          slot.content,
-          run.id,
-        );
-      }
-    }
-  } catch (err) {
-    logger.error("finalize: memory/pinned persistence failed (run already terminal)", {
-      runId: run.id,
-      err: getErrorMessage(err),
-    });
   }
 
   // Post-CAS best-effort: the run is already terminal in `runs`. A

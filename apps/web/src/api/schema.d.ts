@@ -25151,8 +25151,6 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    memories?: unknown[];
-                    pinned?: Record<string, never>;
                     output?: unknown;
                     logs?: unknown[];
                     error?: {

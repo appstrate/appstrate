@@ -803,7 +803,6 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
 
     const result = {
-      memories: [{ content: "m1" }],
       checkpoint: { step: 3 },
       output: { answer: 42 },
       logs: [],
@@ -833,7 +832,6 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
       failed: [{ name: "outputs/big.csv", code: "file_too_large" }],
     } satisfies RunArtifactsSummary;
     const res = await postFinalize(runId, {
-      memories: [],
       output: { ok: true },
       logs: [],
       status: "success",
@@ -856,7 +854,6 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
 
     const res = await postFinalize(runId, {
-      memories: [],
       output: { ok: true },
       logs: [],
       status: "success",
@@ -879,7 +876,6 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     // timeout, i.e. a successful run reported as failed. Anything invalid
     // degrades to `undefined` (column null) instead.
     const res = await postFinalize(runId, {
-      memories: [],
       output: { ok: true },
       logs: [],
       status: "success",
@@ -908,7 +904,6 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     // finalize, so unknown keys are stripped and everything the platform DOES
     // understand is persisted.
     const res = await postFinalize(runId, {
-      memories: [],
       output: { ok: true },
       logs: [],
       status: "success",
@@ -942,7 +937,6 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
       code: "y".repeat(100),
     }));
     const res = await postFinalize(runId, {
-      memories: [],
       output: { ok: true },
       logs: [],
       status: "success",
@@ -972,7 +966,6 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
   it("ignores a retired report field on the finalize body", async () => {
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
     const res = await postFinalize(runId, {
-      memories: [],
       output: null,
       logs: [],
       report: "# Legacy report",
@@ -2664,17 +2657,21 @@ describe("Postgres-poisoned values (#1501)", () => {
     expect(log).toMatchObject({ message: `console${FFFD}tail`, data: { text: `a${FFFD}b` } });
   });
 
-  it("stores a memory whose trim splits a surrogate pair, the half replaced", async () => {
+  it("writes no memory or pinned slot from the finalize body — `note` and `pin` write them", async () => {
     const runId = await seedRunWithSink(ctx, AGENT);
 
-    const res = await finalize(runId, { memories: [{ content: `${"a".repeat(1999)}😀` }] });
+    const res = await finalize(runId, {
+      memories: [{ content: "m1" }],
+      pinned: { checkpoint: { content: { step: 1 } } },
+    });
     expect(res.status).toBe(200);
 
-    const memories = await db
+    const rows = await db
       .select()
       .from(packagePersistence)
       .where(eq(packagePersistence.runId, runId));
-    expect(memories.map((m) => m.content)).toEqual([`${"a".repeat(1999)}${FFFD}`]);
+    expect(rows).toEqual([]);
+    expect((await readRun(runId)).checkpoint).toBeNull();
   });
 
   it("drains a buffered successor behind a dirty event that arrives late", async () => {

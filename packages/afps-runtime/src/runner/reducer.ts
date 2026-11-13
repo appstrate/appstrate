@@ -4,11 +4,11 @@
 /**
  * RunEvent → RunResult reducer.
  *
- * Consumes {@link RunEvent}s whose `type` is one of the reserved core
- * domains (`memory.added` / `pinned.set` / `output.emitted` /
- * `log.written`). Events with any other `type` are
- * passed through silently — the sink still sees them, but they do not
- * contribute to the aggregated result.
+ * Aggregates `output.emitted` and `log.written` into the {@link RunResult}.
+ * Every other event — `memory.added` and `pinned.set` included, whose
+ * persistence belongs to the server that serves the `note` and `pin`
+ * tools — is passed through silently: the sink still sees it, but it does
+ * not contribute to the aggregated result.
  *
  * `foldEvent` is the single switch that knows how each canonical event
  * contributes to the aggregate; the batch reducer `reduceEvents` folds the
@@ -26,7 +26,6 @@ export interface ReduceOptions {
 
 export function emptyRunResult(): RunResult {
   return {
-    memories: [],
     output: null,
     logs: [],
   };
@@ -59,21 +58,6 @@ export function foldEvent(result: RunResult, event: RunEvent): void {
   const canonical = event;
 
   switch (canonical.type) {
-    case "memory.added":
-      result.memories.push({
-        content: canonical.content,
-        ...(canonical.scope !== undefined ? { scope: canonical.scope } : {}),
-      });
-      return;
-    case "pinned.set": {
-      if (result.pinned === undefined) result.pinned = {};
-      const slot: { content: unknown; scope?: "actor" | "shared" } = {
-        content: canonical.content ?? null,
-      };
-      if (canonical.scope !== undefined) slot.scope = canonical.scope;
-      result.pinned[canonical.key] = slot;
-      return;
-    }
     case "output.emitted":
       result.output = canonical.data ?? null;
       return;
@@ -83,6 +67,11 @@ export function foldEvent(result: RunResult, event: RunEvent): void {
         message: canonical.message,
         timestamp: canonical.timestamp,
       });
+      return;
+    case "memory.added":
+    case "pinned.set":
+      // Persisted by the server that serves the `note` / `pin` tools, when
+      // the tool is called — not part of the aggregated result.
       return;
     case "appstrate.progress":
     case "appstrate.error":

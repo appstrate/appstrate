@@ -217,10 +217,9 @@ export interface RunRemoteOptions {
   /**
    * Optional path — final RunResult JSON written here. Shape parity
    * with the local path's `--output`: top-level keys match the AFPS
-   * `RunResult` (`memories`, `pinned`, `output`, `logs`, `error`,
-   * `status`, `durationMs`, `cost`). `memories`, `pinned`, and `logs`
-   * are emitted as empty defaults — the remote path does not
-   * have a server-side endpoint surfacing the runner's reduced AFPS
+   * `RunResult` (`output`, `logs`, `error`, `status`, `durationMs`,
+   * `cost`). `logs` is emitted as an empty default — the remote path
+   * does not have a server-side endpoint surfacing the runner's reduced AFPS
    * state, only `runs.result`. Two remote-only extras (`runId`,
    * `instance`) are added for debuggability.
    */
@@ -777,11 +776,9 @@ async function safeReadBody(res: Response): Promise<unknown> {
  *     hits the silent default), so we always map to `appstrate.progress`.
  *   - `appstrate.metric` events leave no row — they're synthesized
  *     separately at end-of-run from `runs.tokenUsage` + `runs.cost`.
- *   - `memory.added` / `pinned.set` events are not persisted to
- *     `run_logs` either (they update `package_persistence`); the local
- *     human sink only renders memories with a leading `+ memory:` line,
- *     so the remote-mode user simply doesn't see those breadcrumbs.
- *     Acceptable for v1 — the dashboard surfaces both.
+ *   - `note` / `pin` leave no `run_logs` row: the run MCP server writes
+ *     them to `package_persistence` when the tool is called, and the
+ *     dashboard surfaces both.
  */
 function runLogToRunEvent(log: RemoteRunLog): RunEvent | null {
   // RunEvent envelope requires `timestamp` (Unix ms) + `runId`. We pull
@@ -876,9 +873,8 @@ function buildMetricEvent(record: RemoteRunRecord): RunEvent | null {
 /**
  * Reconstruct a {@link RunResult} from the run record + terminal status,
  * matching the shape `EventSink.finalize` consumes locally. Fields the
- * record cannot reconstruct (`memories`, `pinned` named slots,
- * per-event `logs`) are emitted as empty defaults — the
- * dashboard remains the source of truth for those surfaces. `usage` is
+ * record cannot reconstruct (per-event `logs`) are emitted as empty
+ * defaults — the dashboard remains the source of truth for those surfaces. `usage` is
  * reconstructed from the run row when present and otherwise explicit zero.
  * `output` carries `runs.result` (the AFPS `output()` value),
  * matching `RunResult.output`. The status is mapped one-to-one.
@@ -889,8 +885,6 @@ function buildRunResultPayload(
 ): TerminalRunResult {
   const storedResult = isPlainObject(record.result) ? record.result : null;
   const result: TerminalRunResult = {
-    memories: [],
-    pinned: {},
     output: storedResult && "output" in storedResult ? storedResult.output : null,
     logs: [],
     status,

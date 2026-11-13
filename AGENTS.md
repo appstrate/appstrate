@@ -220,7 +220,7 @@ Agent manifest splits dependency from config: version on `dependencies.integrati
 - Three quadrants: archive (key=null, pinned=false), pinned memo (key=null, pinned=true), pinned named slot (key=string, pinned=true)
 - Write tools: `note(content, scope?)` and `pin(key, content, scope?)` are tools of the `@appstrate/platform` system integration, served by the run MCP server (`apps/api/src/services/run-tools-mcp.ts`), which writes at call time
 - Legacy `add-memory` / `set-checkpoint` system tools are retired; `runs.state` + `package_memories` are merged into `package_persistence`
-- Wire format: `RunResult.pinned: Record<string, PinnedSlot>` (top-level `RunResult.checkpoint` mirror was dropped)
+- The finalize body (`RunResult`) carries no memories or pinned slots: the reducer leaves `memory.added` / `pinned.set` out, and `pin("checkpoint", …)` also writes `runs.checkpoint` at call time
 
 ### AFPS bundle runtime — `@appstrate/afps-runtime`
 

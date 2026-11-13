@@ -68,8 +68,7 @@ const SAMPLE_EVENT: RunEvent = {
   content: "sent via http sink",
 };
 const SAMPLE_RESULT: TerminalRunResult = {
-  memories: [{ content: "sent via http sink" }],
-  output: null,
+  output: { text: "sent via http sink" },
   logs: [],
   status: "success",
   usage: { input_tokens: 3, output_tokens: 2 },

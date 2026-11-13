@@ -74,7 +74,6 @@ function progressEvent(message: string, data?: unknown): RunEvent {
 
 function emptyResult(): TerminalRunResult {
   return {
-    memories: [],
     output: null,
     logs: [],
     status: "success",

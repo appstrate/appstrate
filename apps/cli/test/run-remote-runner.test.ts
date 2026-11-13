@@ -495,8 +495,8 @@ describe("runRemote — happy path", () => {
     // parity here.
     expect(parsed.status).toBe("success");
     expect(parsed.output).toEqual({ final: 42 });
-    expect(parsed.memories).toEqual([]);
-    expect(parsed.pinned).toEqual({});
+    expect(parsed).not.toHaveProperty("memories");
+    expect(parsed).not.toHaveProperty("pinned");
     expect(parsed.logs).toEqual([]);
     expect(parsed.durationMs).toBe(42_000);
     expect(parsed.cost).toBe(0.0123);

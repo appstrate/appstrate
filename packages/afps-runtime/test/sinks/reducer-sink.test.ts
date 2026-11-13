@@ -18,18 +18,11 @@ describe("createReducerSink", () => {
     expect(snapshot()).toEqual(emptyRunResult());
   });
 
-  it("folds memory.added incrementally", async () => {
+  it("leaves memory.added and pinned.set out of the snapshot", async () => {
     const { sink, snapshot } = createReducerSink();
     await sink.handle(event("memory.added", { content: "a" }));
-    await sink.handle(event("memory.added", { content: "b" }));
-    expect(snapshot().memories).toEqual([{ content: "a" }, { content: "b" }]);
-  });
-
-  it("tracks the last pinned.set value with key='checkpoint'", async () => {
-    const { sink, snapshot } = createReducerSink();
     await sink.handle(event("pinned.set", { key: "checkpoint", content: { a: 1 } }));
-    await sink.handle(event("pinned.set", { key: "checkpoint", content: { b: 2 } }));
-    expect(snapshot().pinned!.checkpoint).toEqual({ content: { b: 2 } });
+    expect(snapshot()).toEqual(emptyRunResult());
   });
 
   it("replaces output on each output.emitted event", async () => {
