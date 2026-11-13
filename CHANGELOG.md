@@ -497,6 +497,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **System integration `@appstrate/platform`** (#2199). Runtime-bound
+  (`_meta["dev.appstrate/platform"]`), without auths, its catalog is `log`, `note`, `pin`,
+  `recall_memory` and `run_history`, all selected by default.
+
 - **`appstrate run --local` wires unauthenticated remote MCP integrations**
   (#2198). For an integration with `source.kind: "remote"` and no `auths`, the
   CLI connects to `source.remote.url` itself and exposes each tool the agent
