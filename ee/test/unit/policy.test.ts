@@ -84,6 +84,7 @@ describe("decideSession", () => {
     ).toEqual({
       allow: true,
       expiresAt: new Date(replacedCreatedAt.getTime() + ENFORCED_SESSION_MAX_AGE_MS),
+      createdAt: replacedCreatedAt,
     });
   });
 });

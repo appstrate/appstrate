@@ -24,7 +24,13 @@ export type SessionOrigin =
 
 export type SsoRefusal = "sso_required" | "sso_tenant_mismatch";
 
-export type SessionDecision = { allow: true; expiresAt: Date } | { allow: false; code: SsoRefusal };
+export type SessionDecision =
+  /**
+   * `createdAt`, when set, replaces the new session's creation time: a session
+   * replacing another carries the original's, so neither it nor its refreshes
+   * outlive the original's cap, however many times it is replaced.
+   */
+  { allow: true; expiresAt: Date; createdAt?: Date } | { allow: false; code: SsoRefusal };
 
 /**
  * May a session be opened for an address of a domain under `policy`, and until
@@ -53,13 +59,14 @@ export function decideSession(
         expiresAt: earliest(requestedExpiresAt, now.getTime() + ENFORCED_SESSION_MAX_AGE_MS),
       };
     case "rotation":
-      // The new session inherits the deadline of the one it replaces.
+      // The new session inherits the creation time, hence the deadline, of the one it replaces.
       return {
         allow: true,
         expiresAt: earliest(
           requestedExpiresAt,
           origin.replacedCreatedAt.getTime() + ENFORCED_SESSION_MAX_AGE_MS,
         ),
+        createdAt: origin.replacedCreatedAt,
       };
     case "other":
       return { allow: false, code: "sso_required" };
