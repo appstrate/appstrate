@@ -52,6 +52,7 @@ import { toLaunchOverrides } from "../services/integration-connection-resolver.t
 import { assertExplicitModelExists } from "../services/org-models.ts";
 import { resolveRunnerContext } from "../lib/runner-context.ts";
 import { getActor } from "../lib/actor.ts";
+import { markAllRunsRead, markRunRead } from "../services/state/notifications.ts";
 import { requestPayerUserId } from "../services/model-providers/credential-chain.ts";
 import { getSpaceScope } from "../lib/scope.ts";
 import { getInlineRunLimits } from "../services/run-limits.ts";
@@ -186,6 +187,8 @@ export function runTraceparent(c: Context<AppEnv>): string | undefined {
 
 /** The closed set `GET /api/runs?user=` accepts. One member, for now. */
 const USER_FILTERS = ["me"] as const;
+/** `?unread=` on `GET /api/runs`: a boolean, so `true` or `false`. */
+const UNREAD_FILTERS = ["true", "false"] as const;
 
 /**
  * Read a query parameter whose accepted values are a closed set.
@@ -517,6 +520,8 @@ export function createRunsRouter() {
     const visibility = userFilter === "me" ? ownRunsFilter(actor) : runVisibilityFilter(c);
 
     const kind = closedSetQuery(c, "kind", GLOBAL_RUN_KINDS);
+    // `?unread=true`: only the runs the caller has not read yet (per recipient).
+    const unread = closedSetQuery(c, "unread", UNREAD_FILTERS) === "true";
     const { status, search } = parseRunListFilters({
       status: c.req.query("status"),
       q: c.req.query("q"),
@@ -542,12 +547,28 @@ export function createRunsRouter() {
       endDate,
       chatSessionId,
       search,
+      unread,
       actor,
       visibility,
       canReadAgentInput: !agentReadIsSummary(c),
     });
     setOffsetLinkHeader({ c, limit, offset, total: result.total });
     return c.json(result);
+  });
+
+  // PUT /api/runs/read-all — the caller reads every run of the space. Bulk
+  // mutation: returns a documented operation result ({ updated_count }).
+  router.put("/runs/read-all", requireRunsRead, async (c) => {
+    const updated = await markAllRunsRead(getSpaceScope(c), getActor(c));
+    return c.json({ updated_count: updated });
+  });
+
+  // PUT /api/runs/:id/read — the caller reads one run (the run-detail page
+  // calls it on open). Idempotent 204: a missing run or one the caller holds no
+  // read state for is a no-op, not a 404.
+  router.put("/runs/:id/read", requireRunsRead, async (c) => {
+    await markRunRead(getSpaceScope(c), c.req.param("id")!, getActor(c));
+    return c.body(null, 204);
   });
 
   // GET /api/runs/:id — get a single run

@@ -137,7 +137,7 @@ describe("notification freshness", () => {
     const intervals = [...NOTIFICATIONS.matchAll(/refetchInterval:\s*([^,\n]+)/g)].map(
       (m) => m[1]!,
     );
-    expect(intervals).toHaveLength(3);
+    expect(intervals).toHaveLength(2);
     expect(intervals.every((v) => v === "NOTIFICATION_POLL_INTERVAL_MS")).toBe(true);
   });
 
@@ -150,12 +150,13 @@ describe("notification freshness", () => {
     stream.connected(1_000);
     expect(keys()).toContain('["get","/api/notifications"]');
     expect(keys()).toContain('["get","/api/notifications/unread-count"]');
-    expect(keys()).toContain('["get","/api/notifications/unread-counts-by-agent"]');
   });
 
-  it("still invalidates them on a terminal run seen live", () => {
+  // No finished run is in the feed: its unread state rides on the run caches,
+  // which a terminal frame already refreshes (`broadRunKeys`).
+  it("leaves the feed alone on a terminal run seen live", () => {
     expect(GLOBAL_SYNC).toContain("TERMINAL_RUN_STATUSES.has(status)");
-    expect([...GLOBAL_SYNC.matchAll(/invalidateNotificationQueries\(/g)].length).toBeGreaterThan(1);
+    expect([...GLOBAL_SYNC.matchAll(/invalidateNotificationQueries\(/g)]).toHaveLength(1);
   });
 });
 

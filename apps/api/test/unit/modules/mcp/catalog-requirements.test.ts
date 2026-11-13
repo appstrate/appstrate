@@ -397,9 +397,7 @@ describe("requirement anchors", () => {
       deleteMyIntegrationPin: req(["integrations:connect"]),
       listNotifications: req(["runs:read|runs:read-all"]),
       getUnreadNotificationCount: req(["runs:read|runs:read-all"]),
-      getUnreadCountsByAgent: req(["runs:read|runs:read-all"]),
       markNotificationReadById: req(["runs:read|runs:read-all"]),
-      markNotificationRead: req(["runs:read|runs:read-all"]),
       markAllNotificationsRead: req(["runs:read|runs:read-all"]),
       createUpload: req(["agents:run"]),
     };

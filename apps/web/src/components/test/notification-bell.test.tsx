@@ -1,11 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The bell lists what the runs page does not: a finished run is already there,
- * unread dot included, so the bell reads the share notifications only
- * (`?type=package_shared`) and renders a stray run row as nothing.
- *
- * A share names the sharer and the package and links to the package's sheet.
+ * The bell lists the notification feed, which holds no finished run (the runs
+ * page lists those, unread dot included). A share names the sharer and the
+ * package and links to the package's sheet.
  *
  * Same no-DOM harness as the other component suites — `renderToStaticMarkup`
  * through the SPA's own i18n singleton, so the assertions read the bundle
@@ -78,22 +76,6 @@ describe("NotificationContent", () => {
 
     // A shared SKILL opens on its own kind, on the package itself.
     expect(html).toContain('href="/catalogue/skill?package=%40acme%2Fhelper"');
-  });
-
-  it("renders no run row, and no way to the runs page", () => {
-    const html = renderList([
-      {
-        id: "n3",
-        type: "run_completed",
-        runId: "run_1",
-        payload: { packageId: PACKAGE_ID, status: "success" },
-        read_at: null,
-        createdAt: "2026-09-10T10:00:00.000Z",
-      },
-    ]);
-
-    expect(html).not.toContain("href=");
-    expect(html).toContain("Aucune notification");
   });
 
   // Notifications follow the session's ceiling: a caller can hold a share of a

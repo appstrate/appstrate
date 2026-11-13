@@ -832,6 +832,13 @@ const canonicalRunsPaths = {
           description: "Return only runs launched from this chat session.",
         },
         { $ref: "#/components/parameters/RunSearch" },
+        {
+          name: "unread",
+          in: "query",
+          schema: { type: "string", enum: ["true", "false"] },
+          description:
+            "`true` returns only the runs the caller has not read yet (`unread` on each row). Read state is per recipient: a run finished for a dashboard user is unread for that user only. Any value outside the enum is rejected with `400`.",
+        },
       ],
       responses: {
         "200": {
@@ -868,6 +875,73 @@ const canonicalRunsPaths = {
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
+      },
+    },
+  },
+  "/api/runs/read-all": {
+    put: {
+      operationId: "markAllRunsRead",
+      tags: ["Runs"],
+      summary: "Mark every run read",
+      description:
+        "Marks every unread run of the space read for the caller (read state is per recipient). Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/AppstrateUser" },
+      ],
+      responses: {
+        "200": {
+          description: "Update result",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  updated_count: { type: "integer", description: "Number of runs marked read" },
+                },
+                required: ["updated_count"],
+              },
+              example: { updated_count: 3 },
+            },
+          },
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
+      },
+    },
+  },
+  "/api/runs/{id}/read": {
+    put: {
+      operationId: "markRunRead",
+      tags: ["Runs"],
+      summary: "Mark a run read",
+      description:
+        "Marks one run read for the caller (read state is per recipient; the dashboard calls it when a finished run is opened). Idempotent: a missing run or one the caller holds no read state for is a no-op, always 204.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/AppstrateUser" },
+        {
+          name: "id",
+          in: "path",
+          required: true,
+          schema: { type: "string" },
+          description: "Run id",
+        },
+      ],
+      responses: {
+        "204": {
+          description: "Run marked read (idempotent — 204 even if it was already read)",
+          headers: STD_RESPONSE_HEADERS,
+        },
+        "400": { $ref: "#/components/responses/ValidationError" },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": { $ref: "#/components/responses/Forbidden" },
+        "404": { $ref: "#/components/responses/NotFound" },
       },
     },
   },

@@ -102,15 +102,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **The notification bell no longer lists finished runs.** It repeated the
-  unread runs the runs page already shows (unread dot, per-agent and
-  per-schedule counts, the Runs badge), so it now lists the other kinds only —
-  today, packages shared with you — and its badge counts those alone. The run
-  badges count `run_completed` notifications only, and the runs page's « mark
-  all read » no longer clears unread shares. API: `GET /api/notifications`,
-  `GET /api/notifications/unread-count` and `PUT /api/notifications/read-all`
-  take an optional `?type=` (`run_completed` | `package_shared`); without it
-  they behave as before.
+- **Breaking (API): a run's read state moves to the runs; the notification
+  bell no longer lists finished runs.** The bell repeated the unread runs the
+  runs page already shows, and "unread" was split across two APIs: a run carried
+  `unread`, a schedule `unread_count`, but the totals and the acks lived under
+  `/api/notifications`. Now:
+  - `GET /api/runs?unread=true` lists the caller's unread runs (its `total` is
+    the Runs badge), `PUT /api/runs/{id}/read` marks one read,
+    `PUT /api/runs/read-all` marks them all.
+  - `GET /api/agents` items carry `unread_count`, like a schedule.
+  - `/api/notifications` (list, `unread-count`, `{id}/read`, `read-all`) is the
+    bell's feed only — package shares today — and never serves a finished run.
+  - Removed: `GET /api/notifications/unread-counts-by-agent` (use `unread_count`
+    on `GET /api/agents`) and `PUT /api/notifications/read/{runId}` (use
+    `PUT /api/runs/{id}/read`).
 
 - **A model test says what it checked** (#2148). A successful model test reads
   « Credential valid — model not tested », and the `testModel` /

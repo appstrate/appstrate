@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { runStatusValues } from "@appstrate/core/run-status";
-import { notificationTypeValues, packageTypeValues } from "@appstrate/db/schema";
+import { packageTypeValues } from "@appstrate/db/schema";
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 
 /**
@@ -35,18 +34,12 @@ function notificationOf(kind: string, payload: Record<string, unknown>) {
   };
 }
 
+/**
+ * The feed's entries. A finished run is not one: its read state is served with
+ * the runs (`unread` on a run, `GET /api/runs?unread=true`).
+ */
 const notificationObject = {
   oneOf: [
-    notificationOf("run_completed", {
-      required: ["packageId", "status"],
-      properties: {
-        packageId: {
-          type: ["string", "null"],
-          description: "The run's agent; null once the agent is deleted.",
-        },
-        status: { type: "string", enum: [...runStatusValues] },
-      },
-    }),
     notificationOf("package_shared", {
       required: ["packageId", "package_type", "shared_by_name"],
       properties: {
@@ -58,16 +51,6 @@ const notificationObject = {
   ],
 };
 
-/** `?type=` — narrow to one notification kind. */
-const typeParam = {
-  name: "type",
-  in: "query",
-  required: false,
-  schema: { type: "string", enum: [...notificationTypeValues] },
-  description:
-    "Only notifications of this kind. The dashboard bell reads the non-run kinds; the run screens read `run_completed`.",
-};
-
 export const notificationsPaths = {
   "/api/notifications": {
     get: {
@@ -75,7 +58,7 @@ export const notificationsPaths = {
       tags: ["Notifications"],
       summary: "List notifications",
       description:
-        'Keyset-paginated list of the current recipient\'s notifications, newest first. Follow the `Link: rel="next"` header (`?startingAfter=<id>`) to page. `?unread=true` returns unread only, `?type=` one kind.',
+        'Keyset-paginated list of the current recipient\'s notifications, newest first. Follow the `Link: rel="next"` header (`?startingAfter=<id>`) to page. `?unread=true` returns unread only. A finished run is not in the feed: see `GET /api/runs?unread=true`.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -86,7 +69,6 @@ export const notificationsPaths = {
           schema: { type: "boolean" },
           description: "When true, only unread notifications are returned",
         },
-        typeParam,
         {
           name: "limit",
           in: "query",
@@ -128,9 +110,13 @@ export const notificationsPaths = {
                 data: [
                   {
                     id: "550e8400-e29b-41d4-a716-446655440000",
-                    type: "run_completed",
-                    runId: "run_cm4jkl012",
-                    payload: { packageId: "@acme/email-sorter", status: "success" },
+                    type: "package_shared",
+                    runId: null,
+                    payload: {
+                      packageId: "@acme/email-sorter",
+                      package_type: "agent",
+                      shared_by_name: "Ada Lovelace",
+                    },
                     read_at: null,
                     createdAt: "2026-01-15T10:31:12Z",
                   },
@@ -152,11 +138,10 @@ export const notificationsPaths = {
       tags: ["Notifications"],
       summary: "Get unread notification count",
       description:
-        "Returns the number of unread notifications for the current recipient, of one kind when `?type=` is given.",
+        "Returns the number of unread notifications in the current recipient's feed (finished runs excluded: `GET /api/runs?unread=true`).",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
-        typeParam,
       ],
       responses: {
         "200": {
@@ -172,46 +157,6 @@ export const notificationsPaths = {
                 required: ["count"],
               },
               example: { count: 5 },
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-  },
-  "/api/notifications/unread-counts-by-agent": {
-    get: {
-      operationId: "getUnreadCountsByAgent",
-      tags: ["Notifications"],
-      summary: "Get unread notification counts grouped by agent",
-      description: "Returns the number of unread run notifications per agent for the current user.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-      ],
-      responses: {
-        "200": {
-          description: "Unread counts keyed by package ID",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  counts: {
-                    type: "object",
-                    additionalProperties: { type: "integer" },
-                    description: "Map of packageId to unread notification count",
-                  },
-                },
-                required: ["counts"],
-              },
-              example: {
-                counts: { "@acme/email-sorter": 3, "@appstrate/code-reviewer": 2 },
-              },
             },
           },
         },
@@ -252,45 +197,16 @@ export const notificationsPaths = {
       },
     },
   },
-  "/api/notifications/read/{runId}": {
-    put: {
-      // Keeps the operationId the by-run endpoint shipped with (baseline.json)
-      // so operationId-keyed SDK consumers don't silently retarget when the
-      // new by-id endpoint was added — see PR review. The by-id path took a
-      // fresh `markNotificationReadById` instead.
-      operationId: "markNotificationRead",
-      tags: ["Notifications"],
-      summary: "Mark a run's notification as read",
-      description:
-        "Mark the caller's notification for a run read, keyed by run id — complements `PUT /api/notifications/{id}/read` for callers that hold a run id but not the notification id. Idempotent: a missing run or non-recipient is a no-op, always 204.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-        { name: "runId", in: "path", required: true, schema: { type: "string" } },
-      ],
-      responses: {
-        "204": {
-          description: "Notification marked as read (idempotent — 204 even if it was already read)",
-          headers: STD_RESPONSE_HEADERS,
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-      },
-    },
-  },
   "/api/notifications/read-all": {
     put: {
       operationId: "markAllNotificationsRead",
       tags: ["Notifications"],
       summary: "Mark all notifications as read",
       description:
-        "Marks all unread notifications as read for the current user — only those of one kind when `?type=` is given. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
+        "Marks every unread notification of the current recipient's feed read (finished runs excluded: `PUT /api/runs/read-all`). Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
-        typeParam,
       ],
       responses: {
         "200": {

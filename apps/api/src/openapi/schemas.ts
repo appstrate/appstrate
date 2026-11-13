@@ -984,6 +984,7 @@ export const schemas = {
       "source",
       "type",
       "running_runs",
+      "unread_count",
       "dependencies",
       "scope",
       "keywords",
@@ -1018,6 +1019,11 @@ export const schemas = {
         enum: [...packageTypeValues],
       },
       running_runs: { type: "integer" },
+      unread_count: {
+        type: "integer",
+        description:
+          "Runs of this agent the CALLER has not read yet. Scoped to the requesting actor, like `EnrichedRun.unread` and a schedule's `unread_count`.",
+      },
       dependencies: {
         type: "object",
         // `integrations` — which SaaS the agent talks to — is emitted to every
@@ -1709,7 +1715,7 @@ export const schemas = {
       unread: {
         type: "boolean",
         description:
-          "True when the requesting recipient has an unread notification for this run. Per-recipient: derived from the notifications table for the current actor, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows and the per-schedule unread count.",
+          "True when the caller has not read this run yet. Per recipient, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows; `PUT /api/runs/{id}/read` clears it.",
       },
       runNumber: {
         type: ["integer", "null"],
@@ -1909,7 +1915,7 @@ export const schemas = {
         type: "integer",
         minimum: 0,
         description:
-          "Runs of this schedule whose notification is unread by the CALLER. Scoped to the requesting actor, like `EnrichedRun.unread`.",
+          "Runs of this schedule the CALLER has not read yet. Scoped to the requesting actor, like `EnrichedRun.unread`.",
       },
       last_run_number: {
         type: "integer",

@@ -12,7 +12,6 @@ import { Separator } from "@appstrate/ui/components/separator";
 import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { EmptyState, ErrorState } from "./page-states";
 import {
-  BELL_NOTIFICATION_TYPE,
   useUnreadCount,
   useMarkRead,
   useMarkAllRead,
@@ -24,23 +23,16 @@ import { formatDateField } from "../lib/format-date";
 import { catalogueHref } from "../lib/catalogue-link";
 import type { paths } from "../api/client";
 
-/** One notification as returned by `GET /api/notifications`. */
+/** One notification as returned by `GET /api/notifications` — a finished run is never one. */
 type NotificationItem =
   paths["/api/notifications"]["get"]["responses"]["200"]["content"]["application/json"]["data"][number];
-
-/** The bell lists shares only: a finished run is on the runs page, unread dot included. */
-type ShareNotification = Extract<NotificationItem, { type: "package_shared" }>;
-
-function isShare(notification: NotificationItem): notification is ShareNotification {
-  return notification.type === "package_shared";
-}
 
 /**
  * Where a share leads, or `null` when that page is closed to the caller:
  * notifications follow the session's ceiling, not the space's reads.
  */
-function shareTarget(
-  notification: ShareNotification,
+function notificationTarget(
+  notification: NotificationItem,
   canReach: (target: string) => boolean,
 ): string | null {
   // One share, one decision: open THAT package's sheet, not a list to search.
@@ -75,7 +67,6 @@ export function NotificationContent({
   failed?: boolean;
 }) {
   const { t } = useTranslation("common");
-  const shares = notifications.filter(isShare);
 
   return (
     <>
@@ -114,12 +105,12 @@ export function NotificationContent({
         </div>
       ) : failed ? (
         <ErrorState compact />
-      ) : shares.length === 0 ? (
+      ) : notifications.length === 0 ? (
         <EmptyState compact icon={Bell} message={t("notifications.empty")} />
       ) : (
         <div className="max-h-[60vh] overflow-y-auto sm:max-h-96">
-          {shares.map((notification) => {
-            const target = shareTarget(notification, canReach);
+          {notifications.map((notification) => {
+            const target = notificationTarget(notification, canReach);
             const body = (
               <>
                 <Circle size={8} className="fill-destructive text-destructive mt-1.5 shrink-0" />
@@ -157,12 +148,12 @@ export function NotificationContent({
 
 export function NotificationBell() {
   const { t } = useTranslation("common");
-  const { data: count } = useUnreadCount(BELL_NOTIFICATION_TYPE);
+  const { data: count } = useUnreadCount();
   const {
     data: notifications,
     isPending: notificationsPending,
     isError: notificationsFailed,
-  } = useNotifications({ type: BELL_NOTIFICATION_TYPE, unread: true, limit: 50 });
+  } = useNotifications({ unread: true, limit: 50 });
   const markRead = useMarkRead();
   const markAllRead = useMarkAllRead();
   const [open, setOpen] = useState(false);
@@ -196,7 +187,7 @@ export function NotificationBell() {
     notifications: notifications ?? [],
     canReach,
     onItemClick: handleClick,
-    markAllRead: () => markAllRead.mutate({ params: { query: { type: BELL_NOTIFICATION_TYPE } } }),
+    markAllRead: () => markAllRead.mutate({}),
     loading: notificationsPending,
     failed: notificationsFailed && notifications === undefined,
   };

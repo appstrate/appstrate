@@ -2794,7 +2794,7 @@ export interface paths {
         };
         /**
          * List notifications
-         * @description Keyset-paginated list of the current recipient's notifications, newest first. Follow the `Link: rel="next"` header (`?startingAfter=<id>`) to page. `?unread=true` returns unread only, `?type=` one kind.
+         * @description Keyset-paginated list of the current recipient's notifications, newest first. Follow the `Link: rel="next"` header (`?startingAfter=<id>`) to page. `?unread=true` returns unread only. A finished run is not in the feed: see `GET /api/runs?unread=true`.
          */
         get: operations["listNotifications"];
         put?: never;
@@ -2815,29 +2815,9 @@ export interface paths {
         get?: never;
         /**
          * Mark all notifications as read
-         * @description Marks all unread notifications as read for the current user — only those of one kind when `?type=` is given. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.
+         * @description Marks every unread notification of the current recipient's feed read (finished runs excluded: `PUT /api/runs/read-all`). Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.
          */
         put: operations["markAllNotificationsRead"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/notifications/read/{runId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Mark a run's notification as read
-         * @description Mark the caller's notification for a run read, keyed by run id — complements `PUT /api/notifications/{id}/read` for callers that hold a run id but not the notification id. Idempotent: a missing run or non-recipient is a no-op, always 204.
-         */
-        put: operations["markNotificationRead"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2854,29 +2834,9 @@ export interface paths {
         };
         /**
          * Get unread notification count
-         * @description Returns the number of unread notifications for the current recipient, of one kind when `?type=` is given.
+         * @description Returns the number of unread notifications in the current recipient's feed (finished runs excluded: `GET /api/runs?unread=true`).
          */
         get: operations["getUnreadNotificationCount"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/notifications/unread-counts-by-agent": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get unread notification counts grouped by agent
-         * @description Returns the number of unread run notifications per agent for the current user.
-         */
-        get: operations["getUnreadCountsByAgent"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4513,6 +4473,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/read-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Mark every run read
+         * @description Marks every unread run of the space read for the caller (read state is per recipient). Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.
+         */
+        put: operations["markAllRunsRead"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/remote": {
         parameters: {
             query?: never;
@@ -4594,6 +4574,26 @@ export interface paths {
          */
         get: operations["getRunLogs"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Mark a run read
+         * @description Marks one run read for the caller (read state is per recipient; the dashboard calls it when a finished run is opened). Idempotent: a missing run or one the caller holds no read state for is a no-op, always 204.
+         */
+        put: operations["markRunRead"];
         post?: never;
         delete?: never;
         options?: never;
@@ -5788,6 +5788,8 @@ export interface components {
              */
             type: "agent" | "skill" | "integration" | "mcp-server";
             running_runs: number;
+            /** @description Runs of this agent the CALLER has not read yet. Scoped to the requesting actor, like `EnrichedRun.unread` and a schedule's `unread_count`. */
+            unread_count: number;
             dependencies: {
                 /** @description Withheld from a summary read (`agents:run` without `agents:read`). */
                 skills?: {
@@ -7124,7 +7126,7 @@ export interface components {
             } | null;
             /** @description Inline runs only. Snapshot of the prompt submitted at run time. Null once the shadow has been compacted. */
             inline_prompt?: string | null;
-            /** @description True when the requesting recipient has an unread notification for this run. Per-recipient: derived from the notifications table for the current actor, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows and the per-schedule unread count. */
+            /** @description True when the caller has not read this run yet. Per recipient, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows; `PUT /api/runs/{id}/read` clears it. */
             unread: boolean;
             /** @description Per-(app, package) monotonic counter assigned at run creation. Stable identifier for UI display. */
             runNumber: number | null;
@@ -7298,7 +7300,7 @@ export interface components {
             actor_type: "user" | "end_user" | null;
             /** @description Runs of this schedule currently pending or running. */
             running_runs: number;
-            /** @description Runs of this schedule whose notification is unread by the CALLER. Scoped to the requesting actor, like `EnrichedRun.unread`. */
+            /** @description Runs of this schedule the CALLER has not read yet. Scoped to the requesting actor, like `EnrichedRun.unread`. */
             unread_count: number;
             /** @description Highest run number this schedule ever produced; 0 when it never fired. */
             last_run_number: number;
@@ -8399,6 +8401,7 @@ export interface operations {
                      *           "published": true,
                      *           "type": "agent",
                      *           "running_runs": 1,
+                     *           "unread_count": 2,
                      *           "dependencies": {
                      *             "skills": {},
                      *             "mcp_servers": {},
@@ -8424,6 +8427,7 @@ export interface operations {
                      *           "published": true,
                      *           "type": "agent",
                      *           "running_runs": 0,
+                     *           "unread_count": 0,
                      *           "dependencies": {
                      *             "skills": {
                      *               "@appstrate/summarize": "^1.0.0"
@@ -18919,8 +18923,6 @@ export interface operations {
             query?: {
                 /** @description When true, only unread notifications are returned */
                 unread?: boolean;
-                /** @description Only notifications of this kind. The dashboard bell reads the non-run kinds; the run screens read `run_completed`. */
-                type?: "run_completed" | "package_shared";
                 limit?: number;
                 /** @description Keyset cursor — return notifications after this id (newest-first order). Supplied by the `Link: rel="next"` header. */
                 startingAfter?: string;
@@ -18951,11 +18953,12 @@ export interface operations {
                      *       "data": [
                      *         {
                      *           "id": "550e8400-e29b-41d4-a716-446655440000",
-                     *           "type": "run_completed",
-                     *           "runId": "run_cm4jkl012",
+                     *           "type": "package_shared",
+                     *           "runId": null,
                      *           "payload": {
                      *             "packageId": "@acme/email-sorter",
-                     *             "status": "success"
+                     *             "package_type": "agent",
+                     *             "shared_by_name": "Ada Lovelace"
                      *           },
                      *           "read_at": null,
                      *           "createdAt": "2026-01-15T10:31:12Z"
@@ -18967,31 +18970,7 @@ export interface operations {
                     "application/json": {
                         /** @enum {string} */
                         object: "list";
-                        data: ({
-                            /**
-                             * Format: uuid
-                             * @description Notification id
-                             */
-                            id: string;
-                            /** @constant */
-                            type: "run_completed";
-                            /** @description Originating run id, when the notification references one */
-                            runId: string | null;
-                            /** @description Render-without-join data. */
-                            payload: {
-                                /** @description The run's agent; null once the agent is deleted. */
-                                packageId: string | null;
-                                /** @enum {string} */
-                                status: "pending" | "running" | "success" | "failed" | "timeout" | "cancelled";
-                            } | null;
-                            /**
-                             * Format: date-time
-                             * @description When the recipient marked it read; null if unread
-                             */
-                            read_at: string | null;
-                            /** Format: date-time */
-                            createdAt: string;
-                        } | {
+                        data: {
                             /**
                              * Format: uuid
                              * @description Notification id
@@ -19015,7 +18994,7 @@ export interface operations {
                             read_at: string | null;
                             /** Format: date-time */
                             createdAt: string;
-                        })[];
+                        }[];
                         /** @description True when another page follows — page via the Link header cursor */
                         hasMore: boolean;
                     };
@@ -19028,10 +19007,7 @@ export interface operations {
     };
     markAllNotificationsRead: {
         parameters: {
-            query?: {
-                /** @description Only notifications of this kind. The dashboard bell reads the non-run kinds; the run screens read `run_completed`. */
-                type?: "run_completed" | "package_shared";
-            };
+            query?: never;
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
@@ -19063,43 +19039,9 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    markNotificationRead: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                runId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Notification marked as read (idempotent — 204 even if it was already read) */
-            204: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
     getUnreadNotificationCount: {
         parameters: {
-            query?: {
-                /** @description Only notifications of this kind. The dashboard bell reads the non-run kinds; the run screens read `run_completed`. */
-                type?: "run_completed" | "package_shared";
-            };
+            query?: never;
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
                 "X-Org-Id"?: components["parameters"]["XOrgId"];
@@ -19127,50 +19069,6 @@ export interface operations {
                     "application/json": {
                         /** @description Number of unread notifications */
                         count: number;
-                    };
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    getUnreadCountsByAgent: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Unread counts keyed by package ID */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "counts": {
-                     *         "@acme/email-sorter": 3,
-                     *         "@appstrate/code-reviewer": 2
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /** @description Map of packageId to unread notification count */
-                        counts: {
-                            [key: string]: number;
-                        };
                     };
                 };
             };
@@ -24319,6 +24217,8 @@ export interface operations {
                 chat_session_id?: string;
                 /** @description Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`. */
                 q?: components["parameters"]["RunSearch"];
+                /** @description `true` returns only the runs the caller has not read yet (`unread` on each row). Read state is per recipient: a run finished for a dashboard user is unread for that user only. Any value outside the enum is rejected with `400`. */
+                unread?: "true" | "false";
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -24637,6 +24537,47 @@ export interface operations {
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
+        };
+    };
+    markAllRunsRead: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description End-user ID (eu_ prefix) to execute the request on behalf of. API key auth only — rejected with 400 on cookie auth. */
+                "Appstrate-User"?: components["parameters"]["AppstrateUser"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Update result */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "updated_count": 3
+                     *     }
+                     */
+                    "application/json": {
+                        /** @description Number of runs marked read */
+                        updated_count: number;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     createRemoteRun: {
@@ -25060,6 +25001,40 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
+        };
+    };
+    markRunRead: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description End-user ID (eu_ prefix) to execute the request on behalf of. API key auth only — rejected with 400 on cookie auth. */
+                "Appstrate-User"?: components["parameters"]["AppstrateUser"];
+            };
+            path: {
+                /** @description Run id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Run marked read (idempotent — 204 even if it was already read) */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     ingestRunEvent: {
