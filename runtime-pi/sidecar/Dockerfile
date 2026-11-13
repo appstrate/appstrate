@@ -66,14 +66,6 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 #                                         `./api/*` subpaths an alias can be backed
 #                                         by, its registry (`./providers/all`) and
 #                                         the root's `normalizeContext`.
-#   - @appstrate/runner-pi/runtime-tools      canonical run_history / recall_memory
-#                                             descriptors (name + description +
-#                                             parameter JSON Schema), imported by
-#                                             mcp.ts to build the firstParty tool
-#                                             advertisements. The `./runtime-tools`
-#                                             subpath is pi-free (no pi-ai /
-#                                             pi-coding-agent imports) so the
-#                                             compiled binary stays minimal.
 #   - @appstrate/runner-pi/llm-proxy-routes   the platform LLM proxy's route table,
 #                                             for runs whose inference it serves.
 COPY packages/connect/src        packages/connect/src

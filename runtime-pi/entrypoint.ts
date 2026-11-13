@@ -479,8 +479,8 @@ const outputSchema = readDeclaredOutputSchema(rootManifest);
 // Every sidecar-backed capability is surfaced as a typed Pi tool whose
 // implementation forwards to the sidecar's MCP `tools/call` endpoint:
 //   - `{ns}__api_call({ method, target, … })` — credential-injecting proxy.
-//   - `run_history` — recent past-run metadata.
-//   - `recall_memory({ q?, limit? })` — archive memory store.
+//   - `{ns}__{tool}` — every tool of a spawned, remote or platform-bound
+//     integration (`appstrate_platform__recall_memory`, …).
 // The agent LLM never sees the sidecar URL; the contract ("agent never
 // talks to the sidecar directly") is enforced via the env-var deletion
 // in 2d below.
@@ -591,9 +591,8 @@ if ("error" in bootResult) {
 }
 
 try {
-  // `buildMcpDirectFactories` registers `run_history` and
-  // `recall_memory`, plus one forwarding factory per namespaced
-  // integration tool (including the generic `{ns}__api_call`). Runtime
+  // `buildMcpDirectFactories` registers one forwarding factory per
+  // namespaced integration tool (including the generic `{ns}__api_call`). Runtime
   // tools (log/note/pin/output) are executed once by the sidecar and
   // journaled; the drainer pulls them on the run sink after each forwarded
   // call — never trusted from `_meta`.

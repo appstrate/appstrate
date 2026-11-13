@@ -5535,26 +5535,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/internal/memories": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Recall archive memories
-         * @description Backs the agent-facing `recall_memory` MCP tool. Returns archive memories (pinned=false) visible to the run's actor, optionally filtered by an ILIKE substring match against content. Pinned memories are NOT returned — they are already injected into the system prompt. Container-to-host only. Auth via Bearer run token.
-         */
-        get: operations["recallMemories"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/internal/oauth-token/{credentialId}": {
         parameters: {
             query?: never;
@@ -5589,26 +5569,6 @@ export interface paths {
          * @description Sidecar-only. Auth via Bearer run token. Forces a refresh regardless of expiry; on a revoked or missing refresh token, flips needsReconnection=true on the connection and returns 410.
          */
         post: operations["refreshOAuthModelProviderToken"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/internal/run-history": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Fetch run history
-         * @description Container-to-host only. Auth via Bearer run token.
-         */
-        get: operations["getRunHistory"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -28956,59 +28916,6 @@ export interface operations {
             };
         };
     };
-    recallMemories: {
-        parameters: {
-            query?: {
-                /** @description Optional case-insensitive substring filter on memory content. Empty / absent returns the most recent archive memories. */
-                q?: string;
-                /** @description Max number of memories to return (1-50, default 10). */
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Recalled memories */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "memories": [
-                     *         {
-                     *           "id": 42,
-                     *           "content": "User prefers Python over JS for data tasks",
-                     *           "createdAt": "2026-04-20T10:00:00Z",
-                     *           "actor_type": "user",
-                     *           "actor_id": "usr_abc"
-                     *         }
-                     *       ]
-                     *     }
-                     */
-                    "application/json": {
-                        memories: {
-                            id: number;
-                            content: unknown;
-                            /** Format: date-time */
-                            createdAt: string;
-                            /** @enum {string} */
-                            actor_type: "user" | "end_user" | "shared";
-                            actor_id?: string | null;
-                        }[];
-                    };
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
-        };
-    };
     getOAuthModelProviderToken: {
         parameters: {
             query?: never;
@@ -29120,59 +29027,6 @@ export interface operations {
                 };
             };
             503: components["responses"]["EncryptionKeyUnavailable"];
-        };
-    };
-    getRunHistory: {
-        parameters: {
-            query?: {
-                /** @description Max number of runs to return (1-50, default 10) */
-                limit?: number;
-                /** @description Comma-separated fields to include: "checkpoint", "result" (default: "checkpoint") */
-                fields?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Run history */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "object": "list",
-                     *       "hasMore": false,
-                     *       "data": [
-                     *         {
-                     *           "id": "run_cm9abc123",
-                     *           "status": "success",
-                     *           "checkpoint": {
-                     *             "lastProcessedId": 42
-                     *           },
-                     *           "date": "2026-01-14T09:00:00Z",
-                     *           "duration": 1234
-                     *         }
-                     *       ]
-                     *     }
-                     */
-                    "application/json": {
-                        /** @enum {string} */
-                        object: "list";
-                        data: Record<string, never>[];
-                        hasMore: boolean;
-                    };
-                };
-            };
-            /** @description A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry. */
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
         };
     };
     acceptInvitation: {

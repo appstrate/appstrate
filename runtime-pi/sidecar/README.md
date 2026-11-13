@@ -24,18 +24,13 @@ Sidecars are spawned per-run with all runtime configuration (run token, platform
 
 ## MCP tools
 
-The `/mcp` endpoint advertises two first-party tools, both backed by the platform's per-run-token internal endpoints:
+The `/mcp` endpoint advertises the run's runtime tools and the tools of its integrations, each integration tool namespaced as `{namespace}__{tool}`. The `@appstrate/platform` system integration (`log`, `note`, `pin`, `recall_memory`, `run_history`) is bound to the platform's run MCP server (`{platformApiUrl}/internal/mcp`, run token) — see `integrations-boot.ts`.
 
-| Tool            | Purpose                                                                                                                                                                              |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `run_history`   | Past-run metadata via the platform's per-run-token internal endpoint.                                                                                                                |
-| `recall_memory` | Read the unified `package_persistence` archive — enumerates prior `note()` appends and (optionally) named pinned slots set via `pin()`. Replaces the legacy "Memory" prompt section. |
-
-Outbound credentialled HTTP access is exposed per integration as `{ns}__api_call` (credential-injecting outbound proxy, validated against `authorizedUris`), spawned alongside the first-party tools — see "AFPS Integrations (summary)" in the platform-level `AGENTS.md`.
+Outbound credentialled HTTP access is exposed per integration as `{ns}__api_call` (credential-injecting outbound proxy, validated against `authorizedUris`) — see "AFPS Integrations (summary)" in the platform-level `AGENTS.md`.
 
 The agent's primary completions are served by the HTTP `/llm/*` route the Pi SDK calls natively; the sidecar does not expose a completions tool. Sub-agent workflows are handled platform-side by spawning a separate run.
 
-Third-party MCP servers can be mounted alongside the first-party tools via `SubprocessTransport` and the multiplexing `McpHost` in `mcp-host.ts`. Each upstream is namespaced as `{namespace}__{tool}`. Descriptors are passed through `sanitiseToolDescriptor` (hidden-Unicode strip, length caps, Full-Schema-Poisoning recursion) before being advertised to the agent.
+Third-party MCP servers are mounted via `SubprocessTransport` and the multiplexing `McpHost` in `mcp-host.ts`. Each upstream is namespaced as `{namespace}__{tool}`. Descriptors are passed through `sanitiseToolDescriptor` (hidden-Unicode strip, length caps, Full-Schema-Poisoning recursion) before being advertised to the agent.
 
 ## Binary safety
 

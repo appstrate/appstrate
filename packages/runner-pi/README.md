@@ -59,10 +59,8 @@ From `.`:
 - **Container plumbing** (what Appstrate's own sandbox uses) —
   `buildRuntimePiEnv`, `pickOperatorSidecarEnv`, `emitRuntimeReady`,
   `emitBootProgress`, `startSinkHeartbeat`.
-- **Runtime tools** — `RUNTIME_INJECTED_TOOLS`, `buildRuntimeToolFactories`,
-  `callToolResultToPi`, `buildRuntimeToolExtensions`, `buildPublishFileExtension`,
-  `spillResourcesToWorkspace`. The individual tool descriptors live on
-  `./runtime-tools`, not here.
+- **Runtime tools** — `callToolResultToPi`, `buildRuntimeToolExtensions`,
+  `buildPublishFileExtension`, `spillResourcesToWorkspace`.
 
 ## What it handles
 

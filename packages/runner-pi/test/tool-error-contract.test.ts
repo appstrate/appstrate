@@ -4,8 +4,8 @@
  * The tool-error contract against the REAL Pi agent loop (issue #1490).
  *
  * Pi ignores an `isError` returned from `execute`, so an adapter's output
- * alone proves nothing. These tests register the tool through the production
- * factory, run one turn of a real `createAgentSession` on Pi's faux provider,
+ * alone proves nothing. These tests register a tool whose result goes through
+ * the production adapter (`callToolResultToPi`), run one turn of a real `createAgentSession` on Pi's faux provider,
  * and read the verdict where it is consumed: `tool_execution_end` (what
  * `pi-runner` logs as `Tool error` / `Tool result`) and the tool-result
  * message the provider receives on the next request.
@@ -16,17 +16,12 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
-import type { AppstrateMcpClient, CallToolResult } from "@appstrate/mcp-transport";
-import { loadPiCodingAgentSdk, type ExtensionFactory } from "../src/pi-sdk.ts";
-import { buildRuntimeToolFactories } from "../src/runtime-tools/mcp-forward.ts";
+import type { CallToolResult } from "@appstrate/mcp-transport";
+import { loadPiCodingAgentSdk, unsafeSchema, type ExtensionFactory } from "../src/pi-sdk.ts";
+import { callToolResultToPi } from "../src/runtime-tools/mcp-forward.ts";
 import { piToolResultOrThrow } from "../src/pi-tool-result.ts";
 
 const TOOL = "probe";
-
-/** An MCP client whose only capability is answering `tools/call` with `result`. */
-function mcpAnswering(result: CallToolResult): AppstrateMcpClient {
-  return { callTool: async () => result } as unknown as AppstrateMcpClient;
-}
 
 interface ToolVerdict {
   /** `tool_execution_end.isError`. */
@@ -54,12 +49,14 @@ async function runToolCallThroughPi(result: CallToolResult): Promise<ToolVerdict
         return fauxAssistantMessage(fauxText("done"));
       },
     ]);
-    const toolFactories = buildRuntimeToolFactories({
-      mcp: mcpAnswering(result),
-      runId: "run_test",
-      emit: () => {},
-      tools: [{ id: TOOL, name: TOOL, description: "probe tool", parameters: { type: "object" } }],
-    });
+    const toolFactory: ExtensionFactory = (pi) =>
+      pi.registerTool({
+        name: TOOL,
+        label: TOOL,
+        description: "probe tool",
+        parameters: unsafeSchema<Record<string, unknown>>({ type: "object" }),
+        execute: async () => callToolResultToPi(result),
+      });
     const providerFactory: ExtensionFactory = (pi) => pi.registerProvider(faux.provider);
 
     const {
@@ -73,7 +70,7 @@ async function runToolCallThroughPi(result: CallToolResult): Promise<ToolVerdict
       cwd: dir,
       agentDir: dir,
       settingsManager: SettingsManager.inMemory(),
-      extensionFactories: [providerFactory, ...toolFactories],
+      extensionFactories: [providerFactory, toolFactory],
       noPromptTemplates: true,
       noThemes: true,
       systemPrompt: "You are a test agent.",

@@ -58,7 +58,7 @@ function slowBootSidecar() {
     cookieJar: new Map(),
     integrationBootPromise: boot,
     integrationBootReportProvider: () => report,
-    additionalMcpToolsProvider: () => tools,
+    mcpToolsProvider: () => tools,
   });
   const fetchFn = ((input: URL | Request | string, init?: RequestInit) => {
     const headers = new Headers(init?.headers);

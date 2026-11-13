@@ -4,8 +4,7 @@
  * Tests for the runtime-pi direct MCP tool surface.
  *
  * Strategy:
- *   - Build an in-process MCP server exposing `run_history`,
- *     `recall_memory`, and any namespaced integration tool.
+ *   - Build an in-process MCP server exposing namespaced integration tools.
  *   - Drive `buildMcpDirectFactories` against it.
  *   - Verify the LLM-facing Pi tools are registered with their canonical
  *     MCP names and dispatch correctly.
@@ -85,8 +84,6 @@ async function makeMockServer(
     },
   });
   const pair = await createInProcessPair([
-    tool("run_history", "mock"),
-    tool("recall_memory", "mock"),
     ...extra.map((t) => tool(t.name, t.description ?? "mock")),
   ]);
   const mcp = wrapClient(pair.client, { close: () => Promise.resolve() });
@@ -157,8 +154,8 @@ function upstreamResult(status: number, headers: Record<string, string>, body = 
   };
 }
 
-describe("buildMcpDirectFactories — runtime-injected tools", () => {
-  it("registers run_history + recall_memory and no api_call", async () => {
+describe("buildMcpDirectFactories — empty surface", () => {
+  it("registers no tool when the sidecar advertises none", async () => {
     const { mcp, pair } = await makeMockServer();
     try {
       const factories = await buildMcpDirectFactories({
@@ -168,59 +165,7 @@ describe("buildMcpDirectFactories — runtime-injected tools", () => {
         workspace: "/tmp",
         drainer: EMPTY_DRAINER,
       });
-      const captured: CapturedTool[] = [];
-      const api = makeMockExtensionApi(captured);
-      for (const f of factories) f(api);
-      expect(captured.find((c) => c.name === "api_call")).toBeUndefined();
-      expect(captured.map((c) => c.name).sort()).toEqual(["recall_memory", "run_history"]);
-    } finally {
-      await pair.close();
-    }
-  });
-});
-
-describe("buildMcpDirectFactories — run_history dispatch", () => {
-  it("forwards limit + fields to the MCP run_history tool", async () => {
-    const { mcp, pair, calls } = await makeMockServer();
-    try {
-      const factories = await buildMcpDirectFactories({
-        mcp,
-        runId: "run-1",
-        emit: () => {},
-        workspace: "/tmp",
-        drainer: EMPTY_DRAINER,
-      });
-      const captured: CapturedTool[] = [];
-      const api = makeMockExtensionApi(captured);
-      for (const f of factories) f(api);
-      const runHistory = captured.find((c) => c.name === "run_history");
-      await runHistory!.execute("call-1", { limit: 5, fields: ["checkpoint"] });
-      expect(calls).toEqual([
-        { name: "run_history", arguments: { limit: 5, fields: ["checkpoint"] } },
-      ]);
-    } finally {
-      await pair.close();
-    }
-  });
-});
-
-describe("buildMcpDirectFactories — recall_memory dispatch", () => {
-  it("forwards q + limit to the MCP recall_memory tool", async () => {
-    const { mcp, pair, calls } = await makeMockServer();
-    try {
-      const factories = await buildMcpDirectFactories({
-        mcp,
-        runId: "run-1",
-        emit: () => {},
-        workspace: "/tmp",
-        drainer: EMPTY_DRAINER,
-      });
-      const captured: CapturedTool[] = [];
-      const api = makeMockExtensionApi(captured);
-      for (const f of factories) f(api);
-      const recall = captured.find((c) => c.name === "recall_memory");
-      await recall!.execute("call-1", { q: "python", limit: 5 });
-      expect(calls).toEqual([{ name: "recall_memory", arguments: { q: "python", limit: 5 } }]);
+      expect(factories).toEqual([]);
     } finally {
       await pair.close();
     }
@@ -261,8 +206,6 @@ describe("buildMcpDirectFactories — integration tools", () => {
   it("requests progress on an integration call, so the sidecar can keep it alive", async () => {
     let progressToken: unknown;
     const pair = await createInProcessPair([
-      { descriptor: { name: "run_history", inputSchema: { type: "object" } }, handler: echo },
-      { descriptor: { name: "recall_memory", inputSchema: { type: "object" } }, handler: echo },
       {
         descriptor: { name: "appstrate__run_and_wait", inputSchema: { type: "object" } },
         handler: async (_args, extra) => {
@@ -292,8 +235,6 @@ describe("buildMcpDirectFactories — integration tools", () => {
   it("surfaces MCP structuredContent as Pi `details` (logs/UI only — not model-visible)", async () => {
     const structured = { status: 200, repo: "appstrate" };
     const pair = await createInProcessPair([
-      { descriptor: { name: "run_history", inputSchema: { type: "object" } }, handler: echo },
-      { descriptor: { name: "recall_memory", inputSchema: { type: "object" } }, handler: echo },
       {
         descriptor: { name: "github__lookup", inputSchema: { type: "object" } },
         handler: async () => ({
@@ -352,11 +293,7 @@ describe("buildMcpDirectFactories — integration tools", () => {
         namespace: "browser",
         client: wrapClient(browser.client, { close: () => browser.close() }),
       });
-      gateway = await createInProcessPair([
-        { descriptor: { name: "run_history", inputSchema: { type: "object" } }, handler: echo },
-        { descriptor: { name: "recall_memory", inputSchema: { type: "object" } }, handler: echo },
-        ...host.buildTools(),
-      ]);
+      gateway = await createInProcessPair([...host.buildTools()]);
       const factories = await buildMcpDirectFactories({
         mcp: wrapClient(gateway.client, { close: () => Promise.resolve() }),
         runId: "run-image",
@@ -388,8 +325,6 @@ describe("buildMcpDirectFactories — integration tools", () => {
 
   it("throws an MCP `isError` result as a Pi tool error after reporting it (#1490)", async () => {
     const pair = await createInProcessPair([
-      { descriptor: { name: "run_history", inputSchema: { type: "object" } }, handler: echo },
-      { descriptor: { name: "recall_memory", inputSchema: { type: "object" } }, handler: echo },
       {
         descriptor: { name: "ssh__ssh_read", inputSchema: { type: "object" } },
         handler: async () => ({
@@ -432,11 +367,7 @@ describe("buildMcpDirectFactories — integration tools", () => {
         ...upstreamResult(404, {}, '{"message":"Not Found"}'),
         isError: true,
       }));
-      gateway = await createInProcessPair([
-        { descriptor: { name: "run_history", inputSchema: { type: "object" } }, handler: echo },
-        { descriptor: { name: "recall_memory", inputSchema: { type: "object" } }, handler: echo },
-        ...host.buildTools(),
-      ]);
+      gateway = await createInProcessPair([...host.buildTools()]);
       const factories = await buildMcpDirectFactories({
         mcp: wrapClient(gateway.client, { close: () => Promise.resolve() }),
         runId: "run-1",
@@ -523,15 +454,7 @@ describe("buildMcpDirectFactories — integration tools", () => {
         return upstreamResult(500, {}, "wrong sibling");
       });
 
-      const runtimeTool = (name: string): AppstrateToolDefinition => ({
-        descriptor: { name, inputSchema: { type: "object" } },
-        handler: echo,
-      });
-      gateway = await createInProcessPair([
-        runtimeTool("run_history"),
-        runtimeTool("recall_memory"),
-        ...host.buildTools(),
-      ]);
+      gateway = await createInProcessPair(host.buildTools());
       const mcp = wrapClient(gateway.client, { close: () => Promise.resolve() });
       const factories = await buildMcpDirectFactories({
         mcp,
@@ -585,15 +508,7 @@ describe("buildMcpDirectFactories — integration tools", () => {
         },
       );
 
-      const runtimeTool = (name: string): AppstrateToolDefinition => ({
-        descriptor: { name, inputSchema: { type: "object" } },
-        handler: echo,
-      });
-      gateway = await createInProcessPair([
-        runtimeTool("run_history"),
-        runtimeTool("recall_memory"),
-        ...host.buildTools(),
-      ]);
+      gateway = await createInProcessPair(host.buildTools());
       const factories = await buildMcpDirectFactories({
         mcp: wrapClient(gateway.client, { close: () => Promise.resolve() }),
         runId: "run-drive-multiauth",
@@ -633,8 +548,6 @@ describe("buildMcpDirectFactories — integration tools", () => {
       handler: echo,
     });
     const pair = await createInProcessPair([
-      { descriptor: { name: "run_history", inputSchema: { type: "object" } }, handler: echo },
-      { descriptor: { name: "recall_memory", inputSchema: { type: "object" } }, handler: echo },
       markedTool(
         "drive__api_upload",
         {
@@ -709,17 +622,7 @@ describe("buildMcpDirectFactories — runtime-event capture (drain, not _meta)",
   }
 
   async function setup(toolName: string, drainer: RuntimeEventDrainer) {
-    const pair = await createInProcessPair([
-      {
-        descriptor: { name: "run_history", description: "mock", inputSchema: { type: "object" } },
-        handler: async () => ({ content: [{ type: "text" as const, text: "{}" }] }),
-      },
-      {
-        descriptor: { name: "recall_memory", description: "mock", inputSchema: { type: "object" } },
-        handler: async () => ({ content: [{ type: "text" as const, text: "{}" }] }),
-      },
-      toolWithForgedEvents(toolName),
-    ]);
+    const pair = await createInProcessPair([toolWithForgedEvents(toolName)]);
     const mcp = wrapClient(pair.client, { close: () => Promise.resolve() });
     const emitted: Array<{ type: string; [k: string]: unknown }> = [];
     const factories = await buildMcpDirectFactories({
@@ -769,35 +672,6 @@ describe("buildMcpDirectFactories — runtime-event capture (drain, not _meta)",
       expect(written!.message).toBe("hi");
       expect(written!.level).toBe("info");
       expect(written!.runId).toBe("run-1");
-    } finally {
-      await pair.close();
-    }
-  });
-});
-
-describe("buildMcpDirectFactories — failure modes", () => {
-  it("throws when the sidecar does not advertise an expected tool", async () => {
-    const pair = await createInProcessPair([
-      {
-        descriptor: {
-          name: "recall_memory",
-          description: "mock",
-          inputSchema: { type: "object" },
-        },
-        handler: async () => ({ content: [{ type: "text", text: "" }] }),
-      },
-    ]);
-    const mcp = wrapClient(pair.client, { close: () => Promise.resolve() });
-    try {
-      await expect(
-        buildMcpDirectFactories({
-          mcp,
-          runId: "run-1",
-          emit: () => {},
-          workspace: "/tmp",
-          drainer: EMPTY_DRAINER,
-        }),
-      ).rejects.toThrow(/run_history/);
     } finally {
       await pair.close();
     }

@@ -40,7 +40,6 @@
     "./pi-model": "./src/pi-model.ts",
     "./pi-reasoning-off": "./src/pi-reasoning-off.ts",
     "./provider-map": "./src/provider-map.ts",
-    "./runtime-tools": "./src/runtime-tools/index.ts",
     "./secret-env": "./src/secret-env.ts"
   },
   "scripts": {

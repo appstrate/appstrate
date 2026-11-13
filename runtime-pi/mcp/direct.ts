@@ -3,25 +3,15 @@
 /**
  * Direct MCP tool surface (the only LLM-facing surface).
  *
- * Registers `run_history` and `recall_memory` as Pi-SDK tools, each
+ * Registers every namespaced `{ns}__{tool}` entry the sidecar advertises
+ * (spawned, remote and in-process AFPS integrations) as a Pi-SDK tool
  * forwarding to the sidecar's MCP `tools/call` endpoint via
- * {@link AppstrateMcpClient}, plus any namespaced `{ns}__{tool}` entry
- * advertised by a spawned AFPS integration. The LLM sees the canonical
+ * {@link AppstrateMcpClient}. The LLM sees the canonical
  * MCP names verbatim — Appstrate is indistinguishable (LLM-side) from
  * any other MCP host.
  *
- * What this module deliberately does NOT do:
- *   - Sniff `tools/list` and re-derive the input schema for first-party
- *     tools. The schemas there are pinned to the sidecar's
- *     `mountMcp(...)` advertisement so a divergence between Pi tools and
- *     MCP tools is a one-line fix here, not silent re-validation drift.
- *   - Build the system prompt. Tool-usage prose lives in each tool's MCP
- *     `description` (surfaced via `tools/list`), never here.
- *
- * The per-tool wiring (event emit → `mcp.callTool` → result-shape
- * adapter) for the runtime-injected tools lives in
- * `@appstrate/runner-pi/runtime-tools/mcp-forward`. This file is
- * orchestration-only.
+ * This module does not build the system prompt: tool-usage prose lives in
+ * each tool's MCP `description` (surfaced via `tools/list`), never here.
  */
 
 import {
@@ -33,9 +23,7 @@ import {
 } from "@appstrate/mcp-transport";
 import { unsafeSchema, type ExtensionFactory } from "../pi-sdk.ts";
 import {
-  buildRuntimeToolFactories,
   callToolResultToPi,
-  RUNTIME_INJECTED_TOOLS,
   spillResourcesToWorkspace,
   type RuntimeEventEmitter,
 } from "@appstrate/runner-pi";
@@ -68,54 +56,18 @@ interface BuildMcpDirectFactoriesOptions {
 }
 
 /**
- * Build the `run_history` + `recall_memory` Pi extension factories plus
- * one forwarding factory per namespaced integration tool. The set is
- * built once per agent.
- *
- * `run_history` and `recall_memory` are wired by `runner-pi`'s
- * `buildRuntimeToolFactories`, which iterates {@link
- * RUNTIME_INJECTED_TOOLS} and produces one Pi-tool registration per
- * descriptor.
+ * Build one forwarding Pi extension factory per tool the sidecar
+ * advertises. The set is built once per agent.
  */
 export async function buildMcpDirectFactories(
   opts: BuildMcpDirectFactoriesOptions,
 ): Promise<ExtensionFactory[]> {
-  // Discover the sidecar's tool surface so we can fail fast if the
-  // expected tools are missing. The expected set is derived from the
-  // shared `RUNTIME_INJECTED_TOOLS` descriptor list — adding a new
-  // runtime tool to that list automatically updates this guard.
   const { tools } = await opts.mcp.listTools();
-  const advertised = new Set(tools.map((t) => t.name));
-  const expected = RUNTIME_INJECTED_TOOLS.map((t) => t.name);
-  for (const name of expected) {
-    if (!advertised.has(name)) {
-      throw new Error(
-        `MCP server does not advertise '${name}'. ` +
-          `Tools available: ${[...advertised].join(", ") || "(none)"}`,
-      );
-    }
-  }
-
-  const factories: ExtensionFactory[] = [];
-  factories.push(
-    ...buildRuntimeToolFactories({
-      mcp: opts.mcp,
-      runId: opts.runId,
-      emit: opts.emit,
-    }),
-  );
-  // Integration tools. The sidecar's McpHost multiplexes
-  // each spawned `type: integration` MCP server's tools as namespaced
-  // entries (`{ns}__{tool}`). We mirror them as Pi tools that forward
-  // verbatim to the sidecar's MCP `tools/call`. Any name we already
-  // wired above (run_history / recall_memory) is skipped.
-  const claimedNames = new Set<string>(RUNTIME_INJECTED_TOOLS.map((t) => t.name));
-  factories.push(...buildIntegrationToolFactories(tools, claimedNames, opts));
-  return factories;
+  return buildIntegrationToolFactories(tools, opts);
 }
 
 /**
- * Wrap every non-first-party tool advertised by the sidecar's MCP host
+ * Wrap every tool advertised by the sidecar's MCP host
  * as a Pi extension that forwards to `mcp.callTool` verbatim. This is
  * how `{namespace}__{tool}` entries from spawned integration MCP servers
  * (including the generic `{ns}__api_call` tool) become callable from the
@@ -128,7 +80,6 @@ function buildIntegrationToolFactories(
     inputSchema?: unknown;
     _meta?: Record<string, unknown>;
   }>,
-  claimed: ReadonlySet<string>,
   opts: BuildMcpDirectFactoriesOptions,
 ): ExtensionFactory[] {
   const factories: ExtensionFactory[] = [];
@@ -157,7 +108,6 @@ function buildIntegrationToolFactories(
     }
   }
   for (const tool of advertised) {
-    if (claimed.has(tool.name)) continue;
     // `api_upload` tools are advertised by the sidecar (so the gating +
     // schema live in one place) but executed agent-side: the resolver reads
     // the workspace file, chunks it, and dispatches each chunk back through

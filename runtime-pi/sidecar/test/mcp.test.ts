@@ -3,10 +3,9 @@
 /**
  * MCP endpoint integration tests.
  *
- * The sidecar mounts `/mcp` and exposes `run_history` and
- * `recall_memory` as first-party MCP tools, plus a generic
- * `{ns}__api_call` tool per integration that opted into `apiCall`. These
- * tests verify wire-format compliance and the auth / authorisation /
+ * The sidecar mounts `/mcp` and serves the tools of its provider: every
+ * integration tool, including a generic `{ns}__api_call` tool per
+ * integration that opted into `apiCall`. These tests verify wire-format compliance and the auth / authorisation /
  * SSRF guarantees that the MCP path enforces end-to-end.
  */
 
@@ -17,7 +16,18 @@ import { createTestApp } from "./helpers/authed-app.ts";
 import { buildApiCallHost } from "./helpers/api-call-host.ts";
 import { MAX_MCP_ENVELOPE_SIZE } from "../helpers.ts";
 import { McpHost } from "../mcp-host.ts";
-import { createInProcessPair, createMcpHttpClient, wrapClient } from "@appstrate/mcp-transport";
+import {
+  createInProcessPair,
+  createMcpHttpClient,
+  wrapClient,
+  type AppstrateToolDefinition,
+} from "@appstrate/mcp-transport";
+
+/** A tool answering its own arguments as JSON text. */
+const echoTool: AppstrateToolDefinition = {
+  descriptor: { name: "echo", inputSchema: { type: "object" } },
+  handler: async (args) => ({ content: [{ type: "text", text: JSON.stringify(args) }] }),
+};
 
 function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
   return {
@@ -33,6 +43,7 @@ function makeDeps(overrides?: Partial<AppDeps>): AppDeps {
         }),
     ) as unknown as typeof fetch,
     isReady: () => true,
+    mcpToolsProvider: () => [echoTool],
     ...overrides,
   };
 }
@@ -156,77 +167,28 @@ describe("POST /mcp — initialize", () => {
 });
 
 describe("POST /mcp — tools/list", () => {
-  it("advertises run_history and recall_memory (no api_call)", async () => {
+  it("advertises the tools of its provider", async () => {
     const app = createTestApp(makeDeps());
     const res = await rpc(app, { method: "tools/list" });
     expect(res.status).toBe(200);
     const result = res.json.result as { tools: Array<{ name: string }> };
-    const names = result.tools.map((t) => t.name).sort();
-    expect(names).toEqual(["recall_memory", "run_history"]);
+    expect(result.tools.map((t) => t.name)).toEqual(["echo"]);
   });
 
-  it("declares input schemas matching the legacy contracts", async () => {
-    const app = createTestApp(makeDeps());
-    const res = await rpc(app, { method: "tools/list" });
-    const result = res.json.result as {
-      tools: Array<{ name: string; inputSchema: { properties: Record<string, unknown> } }>;
+  it("serves no tools, rather than failing, when a descriptor is malformed", async () => {
+    const malformed: AppstrateToolDefinition = {
+      ...echoTool,
+      descriptor: { name: "not a valid name!", inputSchema: { type: "object" } },
     };
-    const history = result.tools.find((t) => t.name === "run_history")!;
-    expect(Object.keys(history.inputSchema.properties).sort()).toEqual(["fields", "limit"]);
-    const recall = result.tools.find((t) => t.name === "recall_memory")!;
-    expect(Object.keys(recall.inputSchema.properties).sort()).toEqual(["limit", "q"]);
-  });
-
-  // Regression — the agent-facing `run_history.fields` enum is the LLM's
-  // single source of truth for the wire vocabulary. If the legacy `state`
-  // value re-appears here, agents start sending it again and the platform
-  // 400s every call. Lock it to the canonical AFPS values.
-  it("advertises run_history.fields as exactly [checkpoint, result]", async () => {
-    const app = createTestApp(makeDeps());
+    const app = createTestApp(makeDeps({ mcpToolsProvider: () => [echoTool, malformed] }));
     const res = await rpc(app, { method: "tools/list" });
-    const result = res.json.result as {
-      tools: Array<{
-        name: string;
-        inputSchema: { properties: { fields?: { items?: { enum?: string[] } } } };
-      }>;
-    };
-    const history = result.tools.find((t) => t.name === "run_history")!;
-    expect(history.inputSchema.properties.fields?.items?.enum).toEqual(["checkpoint", "result"]);
-  });
-});
-
-describe("POST /mcp — tools/call run_history", () => {
-  it("delegates to the platform's /internal/run-history and returns the upstream JSON", async () => {
-    const fetchFn = mock(
-      async () =>
-        new Response('{"object":"list","data":[{"id":"r1"}],"hasMore":false}', {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-    );
-    const app = createTestApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
-
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: { name: "run_history", arguments: { limit: 5, fields: ["checkpoint"] } },
-    });
     expect(res.status).toBe(200);
-    const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
-    expect(result.isError).toBeUndefined();
-    expect(result.content[0]!.text).toBe('{"object":"list","data":[{"id":"r1"}],"hasMore":false}');
-
-    // Verifies the `limit` and `fields` arguments propagated as query
-    // parameters into the underlying platform call.
-    expect(fetchFn).toHaveBeenCalledTimes(1);
-    const calledUrl = (fetchFn.mock.calls[0] as unknown as [string])[0];
-    expect(calledUrl).toContain("/internal/run-history");
-    expect(calledUrl).toContain("limit=5");
-    expect(calledUrl).toContain("fields=checkpoint");
+    expect((res.json.result as { tools: unknown[] }).tools).toEqual([]);
   });
 });
 
 describe("POST /mcp — answer format", () => {
-  async function callRunHistory(meta?: Record<string, unknown>): Promise<Response> {
+  async function callEcho(meta?: Record<string, unknown>): Promise<Response> {
     const app = createTestApp(makeDeps());
     return app.request("/mcp", {
       method: "POST",
@@ -239,19 +201,19 @@ describe("POST /mcp — answer format", () => {
         jsonrpc: "2.0",
         id: 1,
         method: "tools/call",
-        params: { name: "run_history", arguments: {}, ...(meta ? { _meta: meta } : {}) },
+        params: { name: "echo", arguments: {}, ...(meta ? { _meta: meta } : {}) },
       }),
     });
   }
 
   it("answers JSON when the call asks for no progress", async () => {
-    const res = await callRunHistory();
+    const res = await callEcho();
     expect(res.headers.get("content-type")).toStartWith("application/json");
     expect(((await res.json()) as { id: number }).id).toBe(1);
   });
 
   it("streams over SSE, opened at once, when the call carries a progressToken", async () => {
-    const res = await callRunHistory({ progressToken: "agent_tok" });
+    const res = await callEcho({ progressToken: "agent_tok" });
     expect(res.headers.get("content-type")).toStartWith("text/event-stream");
     const text = await res.text();
     // The open comment first, then the result frame: the server lived until the
@@ -316,7 +278,7 @@ describe("/mcp — progress relay over SSE, end to end", () => {
     });
     const app = createTestApp({
       ...makeDeps(),
-      additionalMcpToolsProvider: () => host.buildTools(),
+      mcpToolsProvider: () => host.buildTools(),
     });
     // The agent's real HTTP client, routed into the in-process app.
     const agent = await createMcpHttpClient("http://localhost/mcp", {
@@ -344,47 +306,6 @@ describe("/mcp — progress relay over SSE, end to end", () => {
       await agent.close();
       await upstream.close();
     }
-  });
-});
-
-describe("POST /mcp — tools/call recall_memory", () => {
-  it("delegates to the platform's /internal/memories and forwards q + limit", async () => {
-    const fetchFn = mock(
-      async () =>
-        new Response('{"memories":[{"id":1,"content":"x"}]}', {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-    );
-    const app = createTestApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
-
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: { name: "recall_memory", arguments: { q: "python", limit: 3 } },
-    });
-    expect(res.status).toBe(200);
-    const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
-    expect(result.isError).toBeUndefined();
-    expect(result.content[0]!.text).toBe('{"memories":[{"id":1,"content":"x"}]}');
-
-    expect(fetchFn).toHaveBeenCalledTimes(1);
-    const calledUrl = (fetchFn.mock.calls[0] as unknown as [string])[0];
-    expect(calledUrl).toContain("/internal/memories");
-    expect(calledUrl).toContain("q=python");
-    expect(calledUrl).toContain("limit=3");
-  });
-
-  it("omits empty q from the upstream URL", async () => {
-    const fetchFn = mock(async () => new Response('{"memories":[]}', { status: 200 }));
-    const app = createTestApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
-
-    await rpc(app, {
-      method: "tools/call",
-      params: { name: "recall_memory", arguments: { limit: 1 } },
-    });
-    const calledUrl = (fetchFn.mock.calls[0] as unknown as [string])[0];
-    expect(calledUrl).not.toContain("q=");
-    expect(calledUrl).toContain("limit=1");
   });
 });
 
@@ -426,56 +347,29 @@ describe("POST /mcp — per-request transport (stateless mode)", () => {
     const first = await rpc(app, { method: "tools/list" });
     expect(first.status).toBe(200);
     const firstResult = first.json.result as { tools: Array<{ name: string }> };
-    expect(firstResult.tools.map((t) => t.name).sort()).toEqual(["recall_memory", "run_history"]);
+    expect(firstResult.tools.map((t) => t.name)).toEqual(["echo"]);
 
     const second = await rpc(app, { method: "tools/list" });
     expect(second.status).toBe(200);
     expect(second.json.error).toBeUndefined();
     const secondResult = second.json.result as { tools: Array<{ name: string }> };
-    expect(secondResult.tools.map((t) => t.name).sort()).toEqual(["recall_memory", "run_history"]);
+    expect(secondResult.tools.map((t) => t.name)).toEqual(["echo"]);
   });
 
   it("handles two consecutive tools/call invocations on the same app", async () => {
-    const fetchFn = mock(
-      async () =>
-        new Response('{"id":"abc"}', {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-    );
-    const app = createTestApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
+    const app = createTestApp(makeDeps());
 
-    const args = { limit: 1 };
-
-    const first = await rpc(app, {
-      method: "tools/call",
-      params: { name: "run_history", arguments: args },
-    });
-    expect(first.status).toBe(200);
-    const firstResult = first.json.result as {
-      content: Array<{ text: string }>;
-      isError?: boolean;
-    };
-    expect(firstResult.isError).toBeUndefined();
-    expect(firstResult.content[0]!.text).toBe('{"id":"abc"}');
-
-    const second = await rpc(app, {
-      method: "tools/call",
-      params: { name: "run_history", arguments: args },
-    });
-    expect(second.status).toBe(200);
-    expect(second.json.error).toBeUndefined();
-    const secondResult = second.json.result as {
-      content: Array<{ text: string }>;
-      isError?: boolean;
-    };
-    expect(secondResult.isError).toBeUndefined();
-    expect(secondResult.content[0]!.text).toBe('{"id":"abc"}');
-
-    // Both invocations reached the upstream — proves the second MCP
-    // call did not fail at the transport layer before reaching the
-    // credential-proxy core.
-    expect(fetchFn).toHaveBeenCalledTimes(2);
+    for (let call = 0; call < 2; call++) {
+      const res = await rpc(app, {
+        method: "tools/call",
+        params: { name: "echo", arguments: { call } },
+      });
+      expect(res.status).toBe(200);
+      expect(res.json.error).toBeUndefined();
+      const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0]!.text).toBe(JSON.stringify({ call }));
+    }
   });
 });
 
@@ -534,7 +428,7 @@ describe("POST /mcp — request body size cap", () => {
       jsonrpc: "2.0",
       id: 1,
       method: "tools/call",
-      params: { name: "run_history", arguments: { padding: giant } },
+      params: { name: "echo", arguments: { padding: giant } },
     });
     const res = await app.request("/mcp", {
       method: "POST",
@@ -558,40 +452,6 @@ describe("POST /mcp — request body size cap", () => {
     const res = await rpc(app, { method: "tools/list" });
     expect(res.status).toBe(200);
     expect(res.json.error).toBeUndefined();
-  });
-});
-
-describe("POST /mcp — bounded response read", () => {
-  // `responseToToolResult` reads upstream bodies via a bounded
-  // streaming reader so an oversized upstream response (e.g. from
-  // `run_history`'s platform passthrough) cannot blow the agent's
-  // memory or context window even when no upstream-side cap fires
-  // first. Defence-in-depth.
-
-  it("spills oversized upstream responses to the blob store as a resource_link", async () => {
-    const oversized = "y".repeat(512 * 1024); // 512 KB → far above any inline budget
-    const fetchFn = mock(
-      async () =>
-        new Response(oversized, {
-          status: 200,
-          // Hit `run_history`, mocked to return the oversized body
-          // directly. With the token-budget guard wired into
-          // run_history, the response should spill to the blob store
-          // rather than poison the agent's context.
-          headers: { "Content-Type": "application/json" },
-        }),
-    );
-    const app = createTestApp(makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }));
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: { name: "run_history", arguments: { limit: 1 } },
-    });
-    const result = res.json.result as {
-      content: Array<{ type: string; uri?: string; text?: string }>;
-    };
-    // The token-budget gate must have triggered the blob spill.
-    expect(result.content[0]!.type).toBe("resource_link");
-    expect(result.content[0]!.uri).toMatch(/^appstrate:\/\/tool-output\//);
   });
 });
 
@@ -624,7 +484,7 @@ describe("POST /mcp — api_call", () => {
     return createTestApp({
       ...appDeps,
       runtimeDeps,
-      additionalMcpToolsProvider: () => host.buildTools(),
+      mcpToolsProvider: () => host.buildTools(),
     });
   }
 
@@ -689,109 +549,4 @@ describe("POST /mcp — api_call", () => {
     const result = res.json.result as { tools: Array<{ name: string }> };
     expect(result.tools.some((t) => t.name.endsWith("__api_call"))).toBe(false);
   });
-});
-
-/**
- * The deadline on the two first-party platform calls.
- *
- * `run_history` and `recall_memory` are the sidecar's only calls out to the
- * platform, and `/mcp` has no server-side deadline of its own: a platform that
- * accepts the connection and never answers would hang the agent's tool call —
- * and the agent with it — for the rest of the run. `API_CALL_TIMEOUT_MS` is
- * the same 30 s bound every other outbound call in the sidecar carries.
- *
- * Fake timers, not real sleeps: a suite that actually waits 30 s is not worth
- * having. Bun's fake timers drive `AbortSignal.timeout` too.
- */
-describe("POST /mcp — first-party platform calls are deadline-bounded", () => {
-  /** Let the in-flight request chain advance without any wall-clock wait. */
-  async function flushMicrotasks(): Promise<void> {
-    for (let i = 0; i < 50; i++) await Promise.resolve();
-  }
-
-  /** A platform that accepts the call and never answers, ending only on abort. */
-  function hangingFetch(signals: AbortSignal[]): typeof fetch {
-    return (async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-      const signal = init?.signal;
-      if (!signal) throw new Error("platform call carried no AbortSignal — it can hang forever");
-      signals.push(signal);
-      return await new Promise<Response>((_resolve, reject) => {
-        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
-      });
-    }) as unknown as typeof fetch;
-  }
-
-  for (const [tool, args] of [
-    ["run_history", { limit: 5 }],
-    ["recall_memory", { q: "python" }],
-  ] as const) {
-    it(`${tool} gives up when the platform never answers`, async () => {
-      jest.useFakeTimers();
-      try {
-        const signals: AbortSignal[] = [];
-        const app = createTestApp(makeDeps({ fetchFn: hangingFetch(signals) }));
-        const pending = rpc(app, { method: "tools/call", params: { name: tool, arguments: args } });
-
-        await flushMicrotasks();
-        expect(signals).toHaveLength(1);
-        // One second short of the bound, the call is still waiting — the
-        // deadline is the 30 s one, not an accidental shorter cancel.
-        jest.advanceTimersByTime(29_000);
-        await flushMicrotasks();
-        expect(signals[0]!.aborted).toBe(false);
-
-        jest.advanceTimersByTime(2_000);
-        await flushMicrotasks();
-
-        const res = await pending;
-        expect((signals[0]!.reason as Error).name).toBe("TimeoutError");
-        const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
-        // A tool-level error the agent can read and retry — not a hung call.
-        expect(result.isError).toBe(true);
-        expect(result.content[0]!.text).toBe(`${tool}: upstream fetch timed out after 30000ms`);
-      } finally {
-        jest.useRealTimers();
-      }
-    });
-
-    // Control: same tool, same clock, against a platform that answers. If the
-    // composed signal broke the call outright, or the deadline fired on a
-    // finished request, this fails — so the test above cannot pass by way of a
-    // wholly broken path.
-    it(`${tool} still returns the upstream body when the platform answers`, async () => {
-      jest.useFakeTimers();
-      try {
-        // Sampled at call time. Reading it afterwards would say nothing: the
-        // SDK aborts the MCP request's own signal once the response is
-        // written, and that signal is one leg of the composed one — which is
-        // precisely why the deadline is composed WITH it rather than replacing
-        // it.
-        let armedNotFired: boolean | undefined;
-        const fetchFn = (async (
-          _input: string | URL | Request,
-          init?: RequestInit,
-        ): Promise<Response> => {
-          armedNotFired = init?.signal != null && !init.signal.aborted;
-          return new Response('{"ok":true}', {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
-        }) as unknown as typeof fetch;
-        const app = createTestApp(makeDeps({ fetchFn }));
-
-        const res = await rpc(app, {
-          method: "tools/call",
-          params: { name: tool, arguments: args },
-        });
-
-        const result = res.json.result as { content: Array<{ text: string }>; isError?: boolean };
-        expect(result.isError).toBeUndefined();
-        expect(result.content[0]!.text).toBe('{"ok":true}');
-        // The bound was armed and simply never reached.
-        expect(armedNotFired).toBe(true);
-      } finally {
-        jest.useRealTimers();
-      }
-    });
-  }
 });

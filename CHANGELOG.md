@@ -495,6 +495,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   takes the imposed connections past 20; before, it always succeeded. Nothing is
   stored; `DELETE` is always allowed.
 
+### Removed
+
+- **`run_history` and `recall_memory` leave the sidecar's first-party tools** (#2199).
+  They are tools of the `@appstrate/platform` system integration, which an agent
+  gets as `appstrate_platform__run_history` and `appstrate_platform__recall_memory`
+  by declaring its dependency. `GET /internal/run-history` and
+  `GET /internal/memories` are removed; `@appstrate/runner-pi` drops
+  `RUNTIME_INJECTED_TOOLS`, `buildRuntimeToolFactories` and its `./runtime-tools`
+  export.
+
 ### Added
 
 - **System integration `@appstrate/platform`** (#2199). Runtime-bound

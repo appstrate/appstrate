@@ -20,7 +20,8 @@ import {
   type TestContext,
 } from "../../helpers/auth.ts";
 import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../helpers/mcp.ts";
-import { seedAgent, seedRun } from "../../helpers/seed.ts";
+import { seedAgent, seedEndUser, seedRun } from "../../helpers/seed.ts";
+import { addMemories } from "../../../src/services/state/package-persistence.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
 
 const app = getTestApp();
@@ -91,6 +92,23 @@ describe("run MCP server", () => {
     it("returns 401 without a run token", async () => {
       const { status } = await rpc(path, {}, "tools/list");
       expect(status).toBe(401);
+    });
+
+    it("returns 401 with a forged run token", async () => {
+      const run = await seedRunningRun();
+      const forged = `${run.id}.${"0".repeat(64)}`;
+      const { status } = await rpc(path, { Authorization: `Bearer ${forged}` }, "tools/list");
+      expect(status).toBe(401);
+    });
+
+    it("accepts a lowercase `bearer` scheme on the run token", async () => {
+      const run = await seedRunningRun();
+      const { status } = await rpc(
+        path,
+        { Authorization: `bearer ${signRunToken(run.id)}` },
+        "tools/list",
+      );
+      expect(status).toBe(200);
     });
 
     it("returns 403 when the run is not running", async () => {
@@ -185,6 +203,49 @@ describe("run MCP server", () => {
       };
       expect(body.data).toHaveLength(1);
       expect(body.data[0]).toMatchObject({ id: first.id, checkpoint: { cursor: 42 } });
+    });
+
+    it("`run_history` never returns another actor's run", async () => {
+      const eu = await seedEndUser({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        externalId: "ext_history",
+      });
+      await seedRun({
+        packageId: pkgId,
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        userId: null,
+        endUserId: eu.id,
+        status: "success",
+        checkpoint: { secret: true },
+      });
+      const run = await seedRunningRun();
+      const result = await callTool(path, bearer(run.id), "run_history", {
+        fields: ["checkpoint"],
+      });
+      const body = JSON.parse(result.content[0]!.text) as { data: unknown[] };
+      expect(body.data).toEqual([]);
+    });
+
+    it("`recall_memory` never returns another actor's archive", async () => {
+      const eu = await seedEndUser({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        externalId: "ext_recall",
+      });
+      const run = await seedRunningRun();
+      await addMemories(
+        pkgId,
+        ctx.defaultSpaceId,
+        ctx.orgId,
+        { type: "end_user", id: eu.id },
+        ["secret end-user memory"],
+        run.id,
+      );
+      const result = await callTool(path, bearer(run.id), "recall_memory", {});
+      const body = JSON.parse(result.content[0]!.text) as { memories: unknown[] };
+      expect(body.memories).toEqual([]);
     });
 
     it("`pin` refuses a malformed key as a tool error, writing nothing", async () => {

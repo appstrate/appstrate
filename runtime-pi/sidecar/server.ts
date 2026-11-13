@@ -299,7 +299,7 @@ const app = createApp({
   runtimeDeps,
   isReady: () => proxy.readySync,
   oauthTokenCache,
-  additionalMcpToolsProvider: () => [...runtimeToolDefs, ...integrationTools],
+  mcpToolsProvider: () => [...runtimeToolDefs, ...integrationTools],
   integrationBootPromise,
   integrationBootReportProvider: () => integrationBootReport,
   runtimeEventJournal,

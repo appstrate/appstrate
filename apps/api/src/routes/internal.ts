@@ -17,41 +17,19 @@ import { downloadVersionZipForExecution } from "../services/package-storage.ts";
 import { getSystemPackages } from "../services/system-packages.ts";
 import { logger } from "../lib/logger.ts";
 import { isInvalidTextRepresentation } from "../lib/db-helpers.ts";
-import { listResponse } from "../lib/list-response.ts";
-import { parseListPagination } from "../lib/list-query.ts";
 import { parseSignedToken } from "../lib/run-token.ts";
 import { verifyRunToken } from "../lib/verify-run-token.ts";
 import { requireRunBoundMember } from "../lib/run-bound-connection.ts";
 import { serveRunMcp } from "../services/run-tools-mcp.ts";
 import { rateLimitByBearer } from "../middleware/rate-limit.ts";
-import {
-  getRecentRuns,
-  recordRunDegradedIntegration,
-  RUN_HISTORY_FIELDS,
-  type RunHistoryField,
-} from "../services/state/runs.ts";
-import {
-  recallMemories,
-  RECALL_LIMIT_DEFAULT,
-  RECALL_LIMIT_MAX,
-  scopeFromActor,
-  MAX_MEMORY_CONTENT,
-} from "../services/state/package-persistence.ts";
-import { getErrorMessage } from "@appstrate/core/errors";
+import { recordRunDegradedIntegration } from "../services/state/runs.ts";
 import {
   getRunEffectiveAgent,
   runAgentGoneDetail,
   runPinnedVersionGoneDetail,
 } from "../services/run-effective-agent.ts";
 import type { RunAgentGone, RunPinnedVersionGone } from "../services/run-effective-agent.ts";
-import {
-  ApiError,
-  forbidden,
-  notFound,
-  conflict,
-  invalidRequest,
-  internalError,
-} from "../lib/errors.ts";
+import { ApiError, forbidden, notFound, conflict, invalidRequest } from "../lib/errors.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
 import {
   forceRefreshOAuthModelProviderToken,
@@ -248,105 +226,6 @@ export function createInternalRouter() {
       userId: run.userId,
       endUserId: run.endUserId,
     });
-  });
-
-  // GET /internal/run-history — called from inside containers
-  // Auth: Bearer <signedToken> (HMAC-verified, then checked against runs table)
-  router.get("/run-history", async (c) => {
-    const { runId, run } = await verifyRunToken(c);
-
-    // Parse query parameters
-    const fieldsParam = c.req.query("fields");
-
-    const { limit } = parseListPagination(c, { defaultLimit: 10, maxLimit: 50 });
-
-    // Unknown field names fail loudly with 400 so a stale runner schema can't
-    // silently strip fields the agent is asking for.
-    let fields: RunHistoryField[] = ["checkpoint"];
-    if (fieldsParam !== undefined) {
-      const requested = fieldsParam
-        .split(",")
-        .map((f) => f.trim())
-        .filter((f) => f.length > 0);
-      const invalid = requested.filter((f) => !RUN_HISTORY_FIELDS.includes(f as RunHistoryField));
-      if (invalid.length > 0) {
-        throw invalidRequest(
-          `Unknown fields: ${invalid.join(", ")}. Valid: ${RUN_HISTORY_FIELDS.join(", ")}.`,
-          "fields",
-        );
-      }
-      const dedup = [...new Set(requested as RunHistoryField[])];
-      if (dedup.length > 0) fields = dedup;
-    }
-
-    try {
-      // Actor isolation is mandatory: `getRecentRuns` filters runs by
-      // userId / endUserId so an end-user run never sees another actor's
-      // checkpoint, and a scheduled run (actor === null) sees only the
-      // shared / no-actor bucket.
-      const actor: Actor | null = actorFromIds(run.userId, run.endUserId);
-      const recentRuns = await getRecentRuns(
-        { orgId: run.orgId, spaceId: run.spaceId },
-        run.packageId,
-        actor,
-        {
-          limit,
-          fields,
-          excludeRunId: runId,
-        },
-      );
-
-      return c.json(listResponse(recentRuns));
-    } catch (err) {
-      logger.error("Failed to fetch run history", {
-        runId,
-        error: getErrorMessage(err),
-      });
-      throw internalError();
-    }
-  });
-
-  // GET /internal/memories — backs the agent-facing `recall_memory` MCP
-  // tool. Returns archive (pinned=false) memories visible to the run's
-  // actor, optionally filtered by an ILIKE substring match. Pinned
-  // memories are NOT returned here — they're already in the system prompt.
-  router.get("/memories", async (c) => {
-    const { runId, run } = await verifyRunToken(c);
-
-    const queryRaw = c.req.query("q");
-    const query = queryRaw && queryRaw.trim().length > 0 ? queryRaw.trim() : undefined;
-    if (query !== undefined && query.length > MAX_MEMORY_CONTENT) {
-      throw invalidRequest(`Query too long (max ${MAX_MEMORY_CONTENT} chars).`, "q");
-    }
-
-    const { limit } = parseListPagination(c, {
-      defaultLimit: RECALL_LIMIT_DEFAULT,
-      maxLimit: RECALL_LIMIT_MAX,
-    });
-
-    try {
-      const actor: Actor | null = actorFromIds(run.userId, run.endUserId);
-      const memories = await recallMemories(run.packageId, run.spaceId, scopeFromActor(actor), {
-        ...(query !== undefined ? { query } : {}),
-        limit,
-      });
-
-      return c.json({
-        memories: memories.map((m) => ({
-          id: m.id,
-          content: m.content,
-          createdAt: m.createdAt.toISOString(),
-          actor_type: m.actorType,
-          actor_id: m.actorId,
-        })),
-      });
-    } catch (err) {
-      logger.error("Failed to recall memories", {
-        runId,
-        error: getErrorMessage(err),
-      });
-      throw internalError();
-    }
   });
 
   // ─── OAuth Model Provider tokens ──────────────────────────────────────

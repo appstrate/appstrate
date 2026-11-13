@@ -123,12 +123,12 @@ export interface AppDeps {
    */
   runId?: string;
   /**
-   * Lazy provider for additional MCP tool definitions. Called on every
+   * Lazy provider for the MCP tool definitions `/mcp` serves. Called on every
    * `/mcp` request so integrations that finish booting after the
    * sidecar's HTTP listener comes up still appear on the next call.
    * The integration runtime wires `McpHost.buildTools` here.
    */
-  additionalMcpToolsProvider?: () => AppstrateToolDefinition[];
+  mcpToolsProvider?: () => AppstrateToolDefinition[];
   /**
    * Pre-built run-scoped runtime deps (blob store, token budget,
    * concurrency limiter, credential-proxy base deps). Production wires
@@ -563,9 +563,9 @@ function platformLlmUpstream(
  *                          back to the agent without buffering. The agent
  *                          never sees a credential.
  *   - `ALL  /mcp`        — JSON-RPC entrypoint mounted by `mountMcp`.
- *                          Exposes `{ns}__api_call`, `run_history`, and
- *                          `recall_memory` as MCP tools backed by the
- *                          credential-proxy core in `credential-proxy.ts`.
+ *                          Exposes `{ns}__api_call` (backed by the
+ *                          credential-proxy core in `credential-proxy.ts`)
+ *                          and every integration tool as MCP tools.
  */
 /**
  * Run-scoped runtime singletons shared between the HTTP `/mcp` surface
@@ -995,8 +995,7 @@ export function createApp(deps: AppDeps): Hono {
     );
   }
 
-  // MCP exposure — the agent-facing surface for the first-party tools
-  // (`run_history`, `recall_memory`) plus every integration tool the
+  // MCP exposure — the agent-facing surface for every integration tool the
   // McpHost aggregates (spawned/remote MCP servers AND the in-process
   // `api_call` server). Run-scoped deps are built once and shared with
   // `bootIntegrations` (when `server.ts` pre-builds them) so the
@@ -1018,16 +1017,10 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(journal.after(cursor));
   });
 
-  const { blobStore, tokenBudget, apiCallLimit, proxyDeps } =
-    deps.runtimeDeps ?? buildSidecarRuntimeDeps(deps);
+  const { blobStore } = deps.runtimeDeps ?? buildSidecarRuntimeDeps(deps);
   mountMcp(app, {
     blobStore,
-    tokenBudget,
-    apiCallLimit,
-    proxyDeps,
-    ...(deps.additionalMcpToolsProvider
-      ? { additionalToolsProvider: deps.additionalMcpToolsProvider }
-      : {}),
+    ...(deps.mcpToolsProvider ? { toolsProvider: deps.mcpToolsProvider } : {}),
   });
 
   return app;

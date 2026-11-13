@@ -5,9 +5,9 @@
  * MCP exposure of the sidecar's capabilities — the only agent-facing
  * surface.
  *
- * The sidecar's only first-party HTTP endpoint is `/health`; everything
- * the agent talks to (`{ns}__api_call`, `run_history`, `recall_memory`) is
- * dispatched here as MCP tools.
+ * The sidecar's only first-party HTTP endpoint is `/health`; every tool
+ * the agent talks to (`{ns}__api_call`, integration tools) is dispatched
+ * here as MCP tools.
  *
  * Key invariants:
  *
@@ -19,11 +19,7 @@
  *    core (`./credential-proxy.ts`) which is the SOLE place those
  *    invariants live.
  *
- * 2. `run_history` and `recall_memory` use `proxyDeps.fetchFn` to call
- *    the platform directly (no Hono round-trip). Tests inject a mock
- *    `fetchFn` via `AppDeps`.
- *
- * 3. Stateless transport, **per-request**. Each `/mcp` invocation builds
+ * 2. Stateless transport, **per-request**. Each `/mcp` invocation builds
  *    a fresh `Server` + `WebStandardStreamableHTTPServerTransport` pair,
  *    serves the request, then tears them down. This is not a design
  *    choice — the SDK throws "Stateless transport cannot be reused
@@ -34,7 +30,7 @@
  *    are pure-memory and synchronous in practice; the upside is that
  *    the agent can issue any number of MCP calls per run lifecycle.
  *
- * 4. Binary upstream responses spill to the run-scoped {@link BlobStore}
+ * 3. Binary upstream responses spill to the run-scoped {@link BlobStore}
  *    and are surfaced as MCP `resource_link` blocks (see
  *    `responseToToolResult`). The agent reads bytes via
  *    `client.readResource({ uri })` only when needed.
@@ -85,15 +81,10 @@ import {
   apiUploadToolNameFor,
 } from "@appstrate/afps-shared/api-tool-naming";
 import {
-  RUN_HISTORY_INJECTED_TOOL,
-  RECALL_MEMORY_INJECTED_TOOL,
-} from "@appstrate/runner-pi/runtime-tools";
-import {
   ABSOLUTE_MAX_RESPONSE_SIZE,
   MAX_MCP_ENVELOPE_SIZE,
   MAX_REQUEST_BODY_SIZE,
   MAX_RESPONSE_SIZE,
-  API_CALL_TIMEOUT_MS,
   concatAndRelease,
   readRequestBodyBounded,
 } from "./helpers.ts";
@@ -564,34 +555,10 @@ function validateMultipartParts(parts: unknown): MultipartValidationOk | Multipa
 }
 
 /**
- * One-line failure text for a first-party platform call that never produced a
- * response. Shared by `run_history` and `recall_memory`, whose upstream is the
- * same platform and whose failure modes are therefore identical.
- *
- * The three cases are distinguished because the agent acts on them
- * differently, and because the legacy numeric `code` an aborted fetch carries
- * (`23` for a timeout, `20` for an abort) tells it nothing: a deadline hit is
- * worth retrying, a caller-side cancellation is not, and a transport fault
- * keeps surfacing its `ECONNREFUSED`-style code as it always has.
- */
-function upstreamFetchErrorText(tool: string, err: unknown): string {
-  if (err instanceof Error && err.name === "TimeoutError") {
-    return `${tool}: upstream fetch timed out after ${API_CALL_TIMEOUT_MS}ms`;
-  }
-  if (err instanceof Error && err.name === "AbortError") {
-    return `${tool}: upstream fetch aborted`;
-  }
-  const code = err instanceof Error && "code" in err ? (err as { code: string }).code : undefined;
-  return `${tool}: upstream fetch failed${code ? `: ${code}` : ""}`;
-}
-
-/**
- * Build the `{ns}__api_call`, `run_history`, and `recall_memory` MCP
- * tool definitions. All three tools are implemented in-process —
- * `{ns}__api_call` calls {@link executeApiCall} directly via
- * {@link MountMcpOptions.proxyDeps}; `run_history` and `recall_memory`
- * call `proxyDeps.fetchFn` against the platform upstream. None of
- * these tools round-trip through a Hono HTTP envelope.
+ * Build the `{ns}__api_call` and `{ns}__api_upload` MCP tool factories.
+ * Both are implemented in-process: `{ns}__api_call` calls
+ * {@link executeApiCall} directly via {@link ApiCallToolDeps.proxyDeps},
+ * without a Hono HTTP envelope.
  *
  * When an `api_call` upstream response is binary, exceeds the
  * per-call token cap, or would push the run-level cumulative budget
@@ -599,14 +566,12 @@ function upstreamFetchErrorText(tool: string, err: unknown): string {
  * the supplied {@link BlobStore} and the tool returns a `resource_link`
  * block instead of an inline text body.
  */
-function buildSidecarTools(options: MountMcpOptions): {
-  firstParty: AppstrateToolDefinition[];
+function buildSidecarTools(options: ApiCallToolDeps): {
   makeApiCallTool: (integ: ApiCallIntegrationConfig) => AppstrateToolDefinition;
   makeApiUploadTool: (integ: ApiCallIntegrationConfig) => AppstrateToolDefinition | null;
 } {
   const { blobStore, proxyDeps, tokenBudget, apiCallLimit } = options;
   const { config } = proxyDeps;
-  const fetchFn = proxyDeps.fetchFn ?? fetch;
   // Input schema for the generic `{ns}__api_call` per-integration tool —
   // the integration is implied by the tool name, so the request carries no
   // integration identifier (just target + method + headers + body).
@@ -1062,119 +1027,11 @@ function buildSidecarTools(options: MountMcpOptions): {
         ...(blobStore ? { blobStore } : {}),
         tokenBudget,
         source: `${ctx.label}:${ctx.integrationId}`,
-        // Attach upstream `{ status, headers }` to the CallToolResult
-        // `_meta` payload so the agent-side resolver can surface real
-        // HTTP status / response headers (Location, ETag,
-        // Upload-Offset, …) to chunked-upload protocols. Always on for
-        // `api_call` — the runtime parser requires it.
-        attachUpstreamMeta: true,
       });
     }
   }
 
-  /**
-   * One first-party platform fetch, shaped into a tool result. Both
-   * `run_history` and `recall_memory` are the same call against the same
-   * upstream, so they share one body.
-   *
-   * Cancellation and deadline are composed: `callerSignal` is the MCP
-   * request's own abort (client gone, transport closed) and must keep working,
-   * `API_CALL_TIMEOUT_MS` is the same bound every other outbound call in the
-   * sidecar already carries. `/mcp` has no server-side deadline of its own, so
-   * without it a platform that accepts the connection and never answers hangs
-   * this tool call — and with it the agent — for the rest of the run.
-   *
-   * The deadline bounds the WHOLE request, headers and body alike, which is
-   * what we want (there is no long-lived stream here to keep open). That means
-   * it stays armed while {@link responseToToolResult} reads the body: headers
-   * at 29s plus a slow body aborts mid-read, one `await` past the header-time
-   * failure. So BOTH live inside this one `try` — a mid-body abort produced a
-   * raw handler rejection when only the `fetch` was guarded, while the exact
-   * same failure a second earlier produced a structured `isError` result. One
-   * deadline, one failure shape.
-   */
-  async function platformToolFetch(
-    tool: string,
-    url: string,
-    callerSignal: AbortSignal,
-  ): Promise<{
-    content: Array<
-      | { type: "text"; text: string }
-      | { type: "resource_link"; uri: string; name: string; mimeType?: string }
-    >;
-    isError?: boolean;
-    structuredContent?: Record<string, unknown>;
-    _meta?: Record<string, unknown>;
-  }> {
-    try {
-      const res = await fetchFn(url, {
-        headers: { Authorization: `Bearer ${config.runToken}` },
-        signal: AbortSignal.any([callerSignal, AbortSignal.timeout(API_CALL_TIMEOUT_MS)]),
-      });
-      return await responseToToolResult(res, {
-        source: tool,
-        ...(blobStore ? { blobStore } : {}),
-        tokenBudget,
-      });
-    } catch (err) {
-      return {
-        content: [{ type: "text", text: upstreamFetchErrorText(tool, err) }],
-        isError: true,
-      };
-    }
-  }
-
-  const runHistory: AppstrateToolDefinition = {
-    // Name + description + inputSchema are derived from the canonical
-    // `run_history` descriptor in `@appstrate/runner-pi/runtime-tools`
-    // (the single source consumed by the runtime Pi-tool registration).
-    // The handler stays local to the sidecar.
-    descriptor: {
-      name: RUN_HISTORY_INJECTED_TOOL.name,
-      description: RUN_HISTORY_INJECTED_TOOL.description,
-      inputSchema:
-        RUN_HISTORY_INJECTED_TOOL.parameters as AppstrateToolDefinition["descriptor"]["inputSchema"],
-    },
-    handler: async (rawArgs, extra) => {
-      const args = rawArgs as { limit?: number; fields?: string[] };
-      const params = new URLSearchParams();
-      if (args.limit !== undefined) params.set("limit", String(args.limit));
-      if (args.fields?.length) params.set("fields", args.fields.join(","));
-      const qs = params.size > 0 ? `?${params.toString()}` : "";
-
-      const url = `${config.platformApiUrl}/internal/run-history${qs}`;
-      return platformToolFetch("run_history", url, extra.signal);
-    },
-  };
-
-  // `recall_memory` MCP tool — backs the agent's archive memory store.
-  // Pinned memories are already in the system prompt; this tool fetches
-  // the archive (everything else) on demand so the working context stays
-  // small.
-  const recallMemory: AppstrateToolDefinition = {
-    // Name + description + inputSchema are derived from the canonical
-    // `recall_memory` descriptor in `@appstrate/runner-pi/runtime-tools`
-    // (the single source consumed by the runtime Pi-tool registration).
-    // The handler stays local to the sidecar.
-    descriptor: {
-      name: RECALL_MEMORY_INJECTED_TOOL.name,
-      description: RECALL_MEMORY_INJECTED_TOOL.description,
-      inputSchema:
-        RECALL_MEMORY_INJECTED_TOOL.parameters as AppstrateToolDefinition["descriptor"]["inputSchema"],
-    },
-    handler: async (rawArgs, extra) => {
-      const args = rawArgs as { q?: string; limit?: number };
-      const params = new URLSearchParams();
-      if (args.q !== undefined && args.q.length > 0) params.set("q", args.q);
-      if (args.limit !== undefined) params.set("limit", String(args.limit));
-      const qs = params.size > 0 ? `?${params.toString()}` : "";
-
-      const url = `${config.platformApiUrl}/internal/memories${qs}`;
-      return platformToolFetch("recall_memory", url, extra.signal);
-    },
-  };
-
-  return { firstParty: [runHistory, recallMemory], makeApiCallTool, makeApiUploadTool };
+  return { makeApiCallTool, makeApiUploadTool };
 }
 
 /**
@@ -1240,23 +1097,17 @@ interface ResponseToToolResultOptions {
   tokenBudget: TokenBudget;
   /** Source label propagated to the BlobStore record (for observability). */
   source?: string;
-  /**
-   * When true, attach upstream `{ status, headers }` to the
-   * `CallToolResult._meta` payload under {@link UPSTREAM_META_KEY}.
-   * Required for protocols where the agent must read response
-   * headers (`Location:` for resumable uploads, `ETag:` for S3
-   * multipart, `Upload-Offset:` for tus). Headers are filtered
-   * server-side via the allowlist in `./upstream-meta.ts`.
-   *
-   * Defaults to false for the first-party `run_history` / `recall_memory`
-   * tools. The `api_call` path always passes `true` (the runtime parser
-   * hard-requires `_meta`), as does the `api_upload` Pi tool.
-   */
-  attachUpstreamMeta?: boolean;
 }
 
 /**
  * Convert an upstream `Response` into an MCP CallToolResult.
+ *
+ * Every result carries the upstream `{ status, headers }` on
+ * `_meta[UPSTREAM_META_KEY]`: the agent-side `api_call` parser requires it,
+ * and chunked-upload protocols read response headers from it (`Location:`
+ * for resumable uploads, `ETag:` for S3 multipart, `Upload-Offset:` for
+ * tus). Headers are filtered server-side via the allowlist in
+ * `./upstream-meta.ts`.
  *
  * Non-OK responses become tool-level errors (`isError: true`) — the
  * model still receives them as data and can react. The SDK reserves
@@ -1278,7 +1129,7 @@ interface ResponseToToolResultOptions {
  *   rejected; text that should spill is cut to the inline cap (head + tail
  *   around a marker) and what is delivered is recorded against the token
  *   budget. Production always supplies a BlobStore + TokenBudget via
- *   `mountMcp`.
+ *   `buildSidecarRuntimeDeps`.
  *
  */
 async function responseToToolResult(
@@ -1302,9 +1153,7 @@ async function responseToToolResult(
   // body. The Response object's `headers` view stays valid after read,
   // but resolving the meta up-front keeps the code path linear and
   // documents the dependency: meta is independent of content.
-  const upstreamMeta: UpstreamMeta | undefined = options.attachUpstreamMeta
-    ? buildUpstreamMeta(res)
-    : undefined;
+  const upstreamMeta: UpstreamMeta = buildUpstreamMeta(res);
 
   type Result = {
     content: Array<
@@ -1322,10 +1171,7 @@ async function responseToToolResult(
   // spec-compliant clients drop the body. The status and headers
   // travel on `_meta[UPSTREAM_META_KEY]`, which the agent-side shaper
   // reads back into a model-visible `[api_call status=…]` line.
-  const withMeta = (r: Result): Result => {
-    if (!upstreamMeta) return r;
-    return { ...r, _meta: { [UPSTREAM_META_KEY]: upstreamMeta } };
-  };
+  const withMeta = (r: Result): Result => ({ ...r, _meta: { [UPSTREAM_META_KEY]: upstreamMeta } });
 
   const ct = res.headers.get("content-type") ?? "";
   // Media-type match, never a substring test, and never a list local to this
@@ -1636,53 +1482,21 @@ export function isSyntheticApiToolName(name: string): boolean {
 }
 
 interface MountMcpOptions {
-  /** Run-scoped blob store for `api_call` resource spillover. */
+  /** Run-scoped blob store backing the `resources/read` of spilled responses. */
   blobStore?: BlobStore;
   /**
-   * Credential-proxy core deps. `api_call` calls
-   * {@link executeApiCall} directly with structured args; `run_history`
-   * and `recall_memory` use `proxyDeps.fetchFn` + `proxyDeps.config` to
-   * reach the platform upstream. Required: there is no HTTP-route
-   * fallback. The per-connection credential pair is layered
-   * on top of these by `makeApiCallTool`.
-   */
-  proxyDeps: ApiCallBaseDeps;
-  /**
-   * Run-scoped token budget. Every tool output is run through the
-   * budget tracker before being delivered to the agent; dense JSON that
-   * fits under a byte cap but would exhaust the context window spills
-   * to the blob store. The decision is enforced sidecar-side and
-   * recorded in the sidecar's own logs.
-   */
-  tokenBudget: TokenBudget;
-  /**
-   * Run-scoped fan-out limiter for `api_call`. Caps the number of
-   * concurrent upstream HTTP hops a single run can issue at once.
-   * Without a cap, an agent that fetches N items in parallel (8 Gmail
-   * messages, 20 ClickUp tasks, …) can feed the next LLM turn an
-   * over-sized JSON dump and blow past the upstream model's TPM
-   * window.
-   *
-   * Optional only so tests / embedders can omit it; production wires a
-   * `pLimit` instance unconditionally via `createApp` (see `app.ts`).
-   */
-  apiCallLimit?: LimitFunction;
-  /**
-   * Lazy provider for additional MCP tool definitions to merge alongside
-   * the first-party sidecar tools (run_history, recall_memory).
+   * Lazy provider for the MCP tool definitions `/mcp` serves.
    * Called on EVERY `/mcp` request, and `/mcp` never waits for the
    * integration boot: the integration runtime wires `McpHost.buildTools`
    * here, so tools registered after the sidecar started serving become
    * visible on the next `tools/list` without restarting anything. The agent
    * lists its tools only after `GET /integrations/boot-report`, which does
-   * wait for the boot. First-party names take precedence.
+   * wait for the boot.
    */
-  additionalToolsProvider?: () => AppstrateToolDefinition[];
+  toolsProvider?: () => AppstrateToolDefinition[];
 }
 
 export function mountMcp(app: Hono, options: MountMcpOptions): void {
-  const { firstParty } = buildSidecarTools(options);
-  const firstPartyNames = new Set(firstParty.map((t) => t.descriptor.name));
   const resources = options.blobStore ? buildBlobResourceProvider(options.blobStore) : undefined;
   app.all("/mcp", async (c) => {
     // Host header validation (DNS-rebinding defence). Done here, not by
@@ -1748,20 +1562,16 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
 
     // Resolve tools per-request so integrations that finish booting AFTER
     // the sidecar's HTTP listener is up still surface on the next call.
-    // The generic `api_call` (+ optional
-    // `api_upload`) tools are registered on the McpHost as trusted
-    // in-process MCP servers at boot (see integrations-boot.ts), so they
-    // arrive here through `additionalToolsProvider` (= host.buildTools)
-    // exactly like any spawned/remote integration tool. One pipeline.
-    const dynamicExtras = (options.additionalToolsProvider?.() ?? []).filter(
-      (t) => !firstPartyNames.has(t.descriptor.name),
-    );
-    const tools = [...firstParty, ...dynamicExtras];
+    // The generic `api_call` (+ optional `api_upload`) tools are registered
+    // on the McpHost as trusted in-process MCP servers at boot (see
+    // integrations-boot.ts), so they arrive here through `toolsProvider`
+    // (= host.buildTools) exactly like any spawned/remote integration tool.
+    // One pipeline.
+    const tools = options.toolsProvider?.() ?? [];
     // `createMcpServer` validates every descriptor (tool-name pattern, schema
-    // shape). A single malformed dynamic tool would otherwise throw here —
-    // outside the try/finally below — and 500 the entire `/mcp` POST, taking
-    // down even the first-party tools. Degrade gracefully: log the offending
-    // descriptor, drop the dynamic extras, and serve first-party only so the
+    // shape). A single malformed tool would otherwise throw here — outside
+    // the try/finally below — and 500 the entire `/mcp` POST. Degrade
+    // gracefully: log the offending descriptors and serve no tools, so the
     // agent can still connect.
     let server: ReturnType<typeof createMcpServer>;
     try {
@@ -1771,12 +1581,12 @@ export function mountMcp(app: Hono, options: MountMcpOptions): void {
         resources ? { resources } : {},
       );
     } catch (err) {
-      logger.error("MCP server build failed; serving first-party tools only", {
+      logger.error("MCP server build failed; serving no tools", {
         error: err instanceof Error ? err.message : String(err),
-        dynamicToolNames: dynamicExtras.map((t) => t.descriptor.name),
+        toolNames: tools.map((t) => t.descriptor.name),
       });
       server = createMcpServer(
-        firstParty,
+        [],
         { name: "appstrate-sidecar", version: "1" },
         resources ? { resources } : {},
       );
