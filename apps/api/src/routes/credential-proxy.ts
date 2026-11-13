@@ -104,6 +104,7 @@ import {
 } from "../services/credential-proxy/access.ts";
 import {
   listConnectionsOutsideRun,
+  listIntegrationsOutsideRun,
   runBoundSelection,
 } from "../services/credential-proxy/integration-resolver.ts";
 import { callRemoteTool, listRemoteTools } from "../services/credential-proxy/remote-tools.ts";
@@ -138,6 +139,20 @@ export function createCredentialProxyRouter() {
     assertCredentialProxyOpen(c.get("space")!);
     const reach = reachOutsideRun(callerPermissions(c));
     const data = await listConnectionsOutsideRun(getSpaceScope(c), getActor(c), reach);
+    return c.json(listResponse(data));
+  });
+
+  // The integrations active here, each with what a call naming no connection gets: the
+  // connections an integration lacks, where `/connections` lists those it has.
+  router.get("/integrations", requirePermission("credential-proxy", "call-own"), async (c) => {
+    assertCredentialProxyOpen(c.get("space")!);
+    const reach = reachOutsideRun(callerPermissions(c));
+    const data = await listIntegrationsOutsideRun(
+      getSpaceScope(c),
+      getActor(c),
+      reach,
+      connectOfferPolicyFromRequest(c),
+    );
     return c.json(listResponse(data));
   });
 

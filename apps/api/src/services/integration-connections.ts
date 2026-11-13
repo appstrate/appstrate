@@ -49,7 +49,7 @@ import {
   listSystemIntegrationClientsFor,
   type SystemIntegrationClientDefinition,
 } from "./integration-client-registry.ts";
-import { isActiveHere } from "./package-activation.ts";
+import { activeHereSql, isActiveHere } from "./package-activation.ts";
 import { placementReadFilter, placementRowJoin } from "./package-placement.ts";
 import {
   setExactlyOneDefault,
@@ -65,7 +65,15 @@ import {
   encryptionKeyUnavailable,
   KEY_UNAVAILABLE,
 } from "../lib/stored-credential.ts";
-import { ApiError, notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
+import {
+  ApiError,
+  notFound,
+  conflict,
+  invalidRequest,
+  forbidden,
+  type ResolutionFieldError,
+} from "../lib/errors.ts";
+import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { proxyProblem } from "../lib/proxy-status.ts";
 import {
   evaluateJsonPath,
@@ -406,6 +414,19 @@ export async function selectAccessibleConnection(
   namedConnectionId: string | null,
   context: ConnectionSelectionContext,
 ): Promise<ResolvedConnectionRow | null> {
+  return (await selectConnection(packageId, manifest, namedConnectionId, context)).row;
+}
+
+/**
+ * {@link selectAccessibleConnection}'s selection, with the resolver's `not_connected` item when
+ * nothing answers for that reason: the auth and scopes a connect flow would target.
+ */
+async function selectConnection(
+  packageId: string,
+  manifest: IntegrationManifest,
+  namedConnectionId: string | null,
+  context: ConnectionSelectionContext,
+): Promise<{ row: ResolvedConnectionRow | null; notConnected?: ResolutionFieldError }> {
   let named = namedConnectionId?.toLowerCase() ?? null;
   const identity = actorIdentityOf(context.actor);
   const candidatesOf = (set: readonly SelectableRow[]) =>
@@ -427,7 +448,7 @@ export async function selectAccessibleConnection(
     } else if (bound.length === 1) {
       named = bound[0]!.connectionId;
     } else if (bound.length === 0) {
-      return null;
+      return { row: null };
     }
     rows = await listReachableConnections(context, "usable", [packageId]);
     if (!named) {
@@ -479,9 +500,10 @@ export async function selectAccessibleConnection(
     ...identity,
   });
   const error = errors[0];
-  if (error?.code === "not_connected" || error?.code === "override_connection_unavailable") {
-    return null;
+  if (error?.code === "not_connected") {
+    return { row: null, notConnected: translateResolutionError(error) };
   }
+  if (error?.code === "override_connection_unavailable") return { row: null };
   if (error?.code === "must_choose_connection") {
     const candidates = error.candidateConnections ?? [];
     const reason = candidates.some((c) => c.ownedByActor)
@@ -492,7 +514,7 @@ export async function selectAccessibleConnection(
   if (error) throw resolutionConflict(error);
 
   const set = resolved[packageId]!.map((m) => rows.find((r) => r.id === m.connectionId)!);
-  if (set.length === 1) return toResolvedRow(set[0]!);
+  if (set.length === 1) return { row: toResolvedRow(set[0]!) };
   throw mustChoose(packageId, candidatesOf(set), "The org default holds several connections");
 }
 
@@ -530,43 +552,102 @@ export async function proxyConnectionVerdict(
   manifest: IntegrationManifest,
   context: { spaceId: string; actor: Actor; reach: ProxyReach | null },
 ): Promise<{ status: ProxyConnectionStatus; imposed: boolean }> {
-  // Read once, for `imposed` and for the selection.
-  const orgDefaults = await listOrgDefaultsForResolver(context.spaceId);
+  const { status, imposed } = await proxyConnectionOutcome(packageId, manifest, {
+    ...context,
+    // Read once, for `imposed` and for the selection.
+    orgDefaults: await listOrgDefaultsForResolver(context.spaceId),
+  });
+  return { status, imposed };
+}
+
+/**
+ * {@link proxyConnectionVerdict}, and the selection's item behind a refusal (`refusal`): the
+ * `not_connected` item of `none`, else the first item of the refusal, as a run launch's 409
+ * carries it.
+ */
+async function proxyConnectionOutcome(
+  packageId: string,
+  manifest: IntegrationManifest,
+  context: {
+    spaceId: string;
+    actor: Actor;
+    reach: ProxyReach | null;
+    orgDefaults: Record<string, OrgDefaultPick>;
+  },
+): Promise<{ status: ProxyConnectionStatus; imposed: boolean; refusal?: ResolutionFieldError }> {
+  const { orgDefaults, reach } = context;
   const imposed = orgDefaults[packageId]?.enforce === true;
   if (isUnauthenticatedIntegration(manifest)) return { status: "not_required", imposed };
-  const { reach } = context;
   // The proxy route admits neither: nothing is selected for such a caller.
   if (reach === null) return { status: "not_permitted", imposed };
   const selection = { spaceId: context.spaceId, actor: context.actor, reach, orgDefaults };
-  const status = await selectAccessibleConnection(packageId, manifest, null, selection).then(
-    (row): ProxyConnectionStatus => (row ? "ready" : "none"),
-    (err: unknown): ProxyConnectionStatus => {
+  return selectConnection(packageId, manifest, null, selection).then(
+    ({ row, notConnected }) =>
+      row
+        ? { status: "ready" as const, imposed }
+        : { status: "none" as const, imposed, ...(notConnected ? { refusal: notConnected } : {}) },
+    (err: unknown) => {
       if (!(err instanceof ApiError)) throw err;
-      switch (err.code) {
-        case "must_choose_connection":
-          return "must_choose";
-        case "needs_reconnection":
-          return "needs_reconnection";
-        case "call_permission_required":
-          return "not_permitted";
-        case "pinned_connection_unavailable":
-        case "required_integration_unbound":
-        case "connection_set_too_large":
-          return "default_unavailable";
-        case "insufficient_scopes":
-        case "auth_serves_no_selected_tool":
-          return "unusable";
-        default:
-          logger.warn("proxy connection verdict: unmapped selection refusal", {
-            packageId,
-            code: err.code,
-          });
-          return "unusable";
-      }
+      const refusal = err.fieldErrors?.[0] as ResolutionFieldError | undefined;
+      return {
+        status: refusalStatus(packageId, err.code),
+        imposed,
+        ...(refusal ? { refusal } : {}),
+      };
     },
   );
-  return { status, imposed };
 }
+
+/** The {@link ProxyConnectionStatus} of a selection refusal's `code`. */
+function refusalStatus(packageId: string, code: string): ProxyConnectionStatus {
+  switch (code) {
+    case "must_choose_connection":
+      return "must_choose";
+    case "needs_reconnection":
+      return "needs_reconnection";
+    case "call_permission_required":
+      return "not_permitted";
+    case "pinned_connection_unavailable":
+    case "required_integration_unbound":
+    case "connection_set_too_large":
+      return "default_unavailable";
+    case "insufficient_scopes":
+    case "auth_serves_no_selected_tool":
+      return "unusable";
+    default:
+      logger.warn("proxy connection verdict: unmapped selection refusal", { packageId, code });
+      return "unusable";
+  }
+}
+
+/** An integration active in the space, with the verdict of an unnamed proxy call outside a run. */
+export interface IntegrationProxyVerdict {
+  integrationId: string;
+  manifest: IntegrationManifest;
+  status: ProxyConnectionStatus;
+  imposed: boolean;
+  refusal?: ResolutionFieldError;
+}
+
+/**
+ * {@link proxyConnectionVerdict} of each integration of `manifests` (the manifest the proxy
+ * authorizes against, by id), with its refusal item ({@link proxyConnectionOutcome}); the org
+ * defaults are read once.
+ */
+export async function proxyConnectionVerdicts(
+  manifests: ReadonlyMap<string, IntegrationManifest>,
+  context: { spaceId: string; actor: Actor; reach: ProxyReach | null },
+): Promise<IntegrationProxyVerdict[]> {
+  const orgDefaults = await listOrgDefaultsForResolver(context.spaceId);
+  return mapWithConcurrency([...manifests], VERDICT_CONCURRENCY, async ([id, manifest]) => ({
+    integrationId: id,
+    manifest,
+    ...(await proxyConnectionOutcome(id, manifest, { ...context, orgDefaults })),
+  }));
+}
+
+/** Integrations judged at once by {@link proxyConnectionVerdicts}: a few queries each. */
+const VERDICT_CONCURRENCY = 8;
 
 /**
  * The rows the actor reaches in `spaceId`, {@link OLDEST_FIRST}: under `usable` what it may bind
@@ -712,6 +793,27 @@ export async function listActiveIntegrationIds(
     if (activation.active) active.add(id);
   }
   return active;
+}
+
+/**
+ * The integrations of the organization (system ones included) active in the space, by the rule
+ * {@link activeHereSql} states, sorted by id.
+ */
+export async function listIntegrationIdsActiveInSpace(scope: SpaceScope): Promise<string[]> {
+  const rows = await db
+    .select({ id: packages.id })
+    .from(packages)
+    .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
+    .where(
+      and(
+        eq(packages.type, "integration"),
+        orgOrSystemFilter(scope.orgId),
+        notEphemeralFilter(),
+        activeHereSql(),
+      ),
+    )
+    .orderBy(packages.id);
+  return rows.map((row) => row.id);
 }
 
 /** Throw `notFound` unless the integration is active in the space. */

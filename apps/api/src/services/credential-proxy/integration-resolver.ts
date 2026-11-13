@@ -37,13 +37,20 @@ import { actorOwns, type Actor } from "../../lib/actor.ts";
 import { connectionVariablesOf } from "../../lib/connection-identity.ts";
 import { logger } from "../../lib/logger.ts";
 import { decryptStoredCredential } from "../../lib/stored-credential.ts";
+import type { ResolutionFieldError } from "../../lib/errors.ts";
+import type { ConnectOfferPolicy } from "../../lib/connect-offer-policy.ts";
+import type { SpaceScope } from "../../lib/scope.ts";
+import { attachConnectOffers } from "../connect/preflight-connect-offer.ts";
 import { requireCallerRun } from "./access.ts";
 import {
   assertIntegrationActive,
   listActiveIntegrationIds,
+  listIntegrationIdsActiveInSpace,
   listReachableConnections,
+  proxyConnectionVerdicts,
   selectAccessibleConnection,
   upstreamRejectionStreak,
+  type ProxyConnectionStatus,
   type ProxyReach,
   type ResolvedConnectionRow,
   type RunBoundSelection,
@@ -302,6 +309,55 @@ export async function listConnectionsOutsideRun(
   });
   // Grouped by integration; within one, oldest first.
   return listed.sort((a, b) => a.integration_package_id.localeCompare(b.integration_package_id));
+}
+
+/** An integration active in the space, as `GET /api/credential-proxy/integrations` lists it. */
+interface IntegrationOutsideRun {
+  integration_package_id: string;
+  display_name: string;
+  /** What a call naming no connection gets ({@link proxyConnectionVerdict}). */
+  proxy_connection: { status: ProxyConnectionStatus; imposed: boolean };
+  /** The selection's item behind a refusal, with its `connect_url` when the caller asks for one. */
+  refusal?: ResolutionFieldError;
+}
+
+/**
+ * The integrations active in the space that have a published version, each with the verdict of
+ * a call outside a run naming no connection, judged against that version under `reach`. With
+ * `connectOffers`, a refusal item a connect flow clears carries its `connect_url`, minted by the
+ * run launch's one minter under its policy (`attachConnectOffers`).
+ */
+export async function listIntegrationsOutsideRun(
+  scope: SpaceScope,
+  actor: Actor,
+  reach: ProxyReach,
+  connectOffers: ConnectOfferPolicy | null,
+): Promise<IntegrationOutsideRun[]> {
+  const ids = await listIntegrationIdsActiveInSpace(scope);
+  const loaded = await Promise.all(
+    ids.map((id) => readIntegrationManifestForProxy(id, scope.orgId, null)),
+  );
+  const manifests = new Map<string, IntegrationManifest>();
+  ids.forEach((id, i) => {
+    const result = loaded[i]!;
+    if (result.ok) manifests.set(id, result.manifest);
+  });
+  const verdicts = await proxyConnectionVerdicts(manifests, {
+    spaceId: scope.spaceId,
+    actor,
+    reach,
+  });
+  const refusals = verdicts.flatMap((verdict) => (verdict.refusal ? [verdict.refusal] : []));
+  const offered = connectOffers
+    ? await attachConnectOffers({ errors: refusals, scope, actor, policy: connectOffers })
+    : refusals;
+  const refusalOf = new Map(refusals.map((refusal, i) => [refusal, offered[i]!]));
+  return verdicts.map(({ integrationId, manifest, status, imposed, refusal }) => ({
+    integration_package_id: integrationId,
+    display_name: manifest.display_name ?? manifest.name,
+    proxy_connection: { status, imposed },
+    ...(refusal ? { refusal: refusalOf.get(refusal)! } : {}),
+  }));
 }
 
 // ─────────────────────────────────────────────

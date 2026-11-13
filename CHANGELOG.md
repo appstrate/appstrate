@@ -510,14 +510,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   space's `credential_proxy_open`, each with its own rate-limit bucket. The MCP exchange of the editor's server sync
   and of these routes share one proxy adapter; `stripForgedRuntimeEvents` moves
   from the sidecar to `@appstrate/mcp-transport`, which both consume.
+  `search_integration_tools` also lists, in `not_ready`, apart from the tools,
+  the integrations active in the space the caller has no usable connection of,
+  each with the `proxy_connection` verdict of a call naming none (`none`,
+  `needs_reconnection`, `not_permitted`, `default_unavailable`, `unusable`) and
+  the selection's `refusal` item, whose `connect_url` (same minter, same
+  policy) connects or reconnects it. A new route backs it,
+  `GET /api/credential-proxy/integrations`: each integration active in the
+  space with a published version, its verdict and refusal item, under the same
+  access rule. A `{ns}__api_call` selects no tool: its calls carry the scopes
+  of the connection, and the upstream refuses what they do not cover.
 
 - **A space can close direct access to its connections** (#2204). A space
   admin turns off « Direct connection access » in the space settings
   (`credential_proxy_open: false` on `PATCH /api/spaces/{id}`, a new column
   `spaces.credential_proxy_open`, default `true`, migration `0103`). The
   credential proxy then answers calls that name no run
-  (`GET /api/credential-proxy/connections`, `/api/credential-proxy/proxy`
-  without `X-Run-Id`) with `403 credential_proxy_closed` for every role,
+  (`GET /api/credential-proxy/connections` and `/integrations`,
+  `/api/credential-proxy/tools/*`, `/api/credential-proxy/proxy` without
+  `X-Run-Id`) with `403 credential_proxy_closed` for every role,
   organization owners and admins included, and the MCP tools
   `search_integration_tools` and `call_integration_tool` are not declared for
   that space;

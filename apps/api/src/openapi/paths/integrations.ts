@@ -628,6 +628,34 @@ const toolCatalogEntrySchema = {
   },
 } as const;
 
+/**
+ * The verdict of a credential-proxy call outside a run naming no connection
+ * (`proxyConnectionVerdict`): the integration detail's `proxy_connection`, and each entry of
+ * `GET /api/credential-proxy/integrations`.
+ */
+export const proxyConnectionVerdictProperties = {
+  status: {
+    type: "string",
+    enum: [
+      "ready",
+      "must_choose",
+      "needs_reconnection",
+      "none",
+      "not_permitted",
+      "default_unavailable",
+      "unusable",
+      "not_required",
+    ],
+    description:
+      "`not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, and the server sync reaches its server directly. `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal).",
+  },
+  imposed: {
+    type: "boolean",
+    description:
+      "An ENFORCED org default governs the integration in this space: its connection is the space admins' to set, never the caller's.",
+  },
+} as const;
+
 const integrationDetailSchema = {
   type: "object",
   required: [
@@ -683,28 +711,7 @@ const integrationDetailSchema = {
       additionalProperties: false,
       description:
         "The connection an unnamed credential-proxy call outside a run (`/api/credential-proxy/proxy` with no `X-Run-Id` and no `X-Connection-Id`) gets for THIS caller in the current space: the same selection, under the caller's reach (`credential-proxy:call` reaches the connections usable in the space, `credential-proxy:call-own` alone the caller's own), with the space's org default applied. It is judged against this response's `manifest` — the latest published version, else the draft while nothing is published — which is what the proxy authorizes a call against once a version exists, and what the server sync of a never-published draft (`POST /api/integrations/{packageId}/discover`) authorizes against. A published integration whose draft changed its auths is judged on the published auths, so a sync of that draft may still answer otherwise. Unlike `auths[].ready`, it is the governed answer. It names no connection. The proxy also requires the integration to be active here (`active`), which this verdict does not repeat.",
-      properties: {
-        status: {
-          type: "string",
-          enum: [
-            "ready",
-            "must_choose",
-            "needs_reconnection",
-            "none",
-            "not_permitted",
-            "default_unavailable",
-            "unusable",
-            "not_required",
-          ],
-          description:
-            "`not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, and the server sync reaches its server directly. `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal).",
-        },
-        imposed: {
-          type: "boolean",
-          description:
-            "An ENFORCED org default governs the integration in this space: its connection is the space admins' to set, never the caller's.",
-        },
-      },
+      properties: proxyConnectionVerdictProperties,
     },
   },
 } as const;

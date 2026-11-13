@@ -115,6 +115,8 @@ function apiManifest(
 interface Fixture {
   /** What the listing route answers. */
   listing?: () => Response;
+  /** What the integrations listing (`GET /api/credential-proxy/integrations`) answers. */
+  integrations?: () => Response;
   manifests?: Record<string, IntegrationManifest>;
 }
 
@@ -129,6 +131,7 @@ function makeTools(
 ) {
   const calls: Request[] = [];
   const listings: Request[] = [];
+  const integrationListings: Request[] = [];
   const manifestReads: string[] = [];
   const events: McpToolEvent[] = [];
   const listing = fixture.listing ?? listingOf([connectionRow()]);
@@ -137,6 +140,10 @@ function makeTools(
     if (new URL(req.url).pathname === "/api/credential-proxy/connections") {
       listings.push(req);
       return listing();
+    }
+    if (new URL(req.url).pathname === "/api/credential-proxy/integrations") {
+      integrationListings.push(req);
+      return (fixture.integrations ?? listingOf([]))();
     }
     calls.push(req);
     return respond(req);
@@ -165,7 +172,7 @@ function makeTools(
   };
   const tools = toolsFor(ctx, proxyAcceptsCredential);
   const byName = new Map(tools.map((tool) => [tool.descriptor.name, tool]));
-  return { byName, calls, listings, manifestReads, events };
+  return { byName, calls, listings, integrationListings, manifestReads, events };
 }
 
 /** The tool `@acme/items` exposes. */
@@ -379,6 +386,89 @@ describe("search_integration_tools", () => {
     expect(result.isError).toBe(true);
     expect(payload.status).toBe(403);
     expect((payload.body as { code: string }).code).toBe("forbidden");
+  });
+
+  /** An entry of the integrations listing (`GET /api/credential-proxy/integrations`). */
+  const integrationRow = (id: string, status: string, extra: Record<string, unknown> = {}) => ({
+    integration_package_id: id,
+    display_name: `${id} app`,
+    proxy_connection: { status, imposed: false },
+    ...extra,
+  });
+
+  it("lists the integrations without a usable connection in `not_ready`, apart from the tools", async () => {
+    const refusal = {
+      field: "integrations.@acme/mail",
+      code: "not_connected",
+      title: "Integration Not Connected",
+      message: "Integration '@acme/mail' has no connection accessible to this actor",
+      auth_key: "oauth",
+      connect_url: "https://test.local/connect/start?token=t",
+      expiresAt: "2026-11-13T16:00:00.000Z",
+      packageId: "@acme/mail",
+    };
+    const { payload, integrationListings } = await search(
+      {},
+      {
+        integrations: listingOf([
+          integrationRow(INTEGRATION, "ready"),
+          integrationRow("@acme/choose", "must_choose"),
+          integrationRow("@acme/free", "not_required"),
+          integrationRow("@acme/mail", "none", { refusal }),
+          integrationRow("@acme/crm", "needs_reconnection"),
+          integrationRow("@acme/gov", "not_permitted"),
+        ]),
+      },
+    );
+    expect(toolNames(payload)).toEqual([TOOL]);
+    expect(payload.not_ready).toEqual([
+      {
+        integration: "@acme/mail",
+        display_name: "@acme/mail app",
+        proxy_connection: { status: "none", imposed: false },
+        refusal,
+      },
+      {
+        integration: "@acme/crm",
+        display_name: "@acme/crm app",
+        proxy_connection: { status: "needs_reconnection", imposed: false },
+      },
+      {
+        integration: "@acme/gov",
+        display_name: "@acme/gov app",
+        proxy_connection: { status: "not_permitted", imposed: false },
+      },
+    ]);
+    // Asked for connect links, with the caller's auth.
+    const req = integrationListings[0]!;
+    expect(req.method).toBe("GET");
+    expect(req.headers.get("x-appstrate-connect-offers")).toBe("1");
+    expect(req.headers.get("authorization")).toBe("Bearer tok");
+  });
+
+  it("filters `not_ready` by `query` and `integration`", async () => {
+    const integrations = listingOf([
+      integrationRow("@acme/mail", "none"),
+      integrationRow("@acme/crm", "none"),
+    ]);
+    const shown = async (args: Record<string, unknown>) =>
+      (
+        (await search(args, { integrations })).payload.not_ready as
+          Array<{ integration: string }> | undefined
+      )?.map((entry) => entry.integration);
+    expect(await shown({ query: "mail" })).toEqual(["@acme/mail"]);
+    expect(await shown({ integration: "@acme/crm" })).toEqual(["@acme/crm"]);
+    expect(await shown({ query: "nothing-matches" })).toBeUndefined();
+  });
+
+  it("relays the integrations listing's refusal as `{ status, body }`", async () => {
+    const { result, payload } = await search(
+      {},
+      { integrations: () => problem(403, "credential_proxy_closed", "Closed") },
+    );
+    expect(result.isError).toBe(true);
+    expect(payload.status).toBe(403);
+    expect((payload.body as { code: string }).code).toBe("credential_proxy_closed");
   });
 });
 

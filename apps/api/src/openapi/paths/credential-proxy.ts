@@ -2,6 +2,7 @@
 
 import { STD_RESPONSE_HEADERS } from "../headers.ts";
 import { problemContent } from "../responses.ts";
+import { proxyConnectionVerdictProperties } from "./integrations.ts";
 
 /**
  * Credential proxy endpoint: a remote runner's calls for its run (`X-Run-Id`), and
@@ -535,6 +536,38 @@ const connectionOutsideRunSchema = {
   },
 } as const;
 
+/** One integration `GET /api/credential-proxy/integrations` lists. */
+const integrationOutsideRunSchema = {
+  type: "object",
+  required: ["integration_package_id", "display_name", "proxy_connection"],
+  additionalProperties: false,
+  properties: {
+    integration_package_id: {
+      type: "string",
+      description: "Integration package id: the `X-Integration-Id` of a call.",
+    },
+    display_name: { type: "string" },
+    proxy_connection: {
+      type: "object",
+      required: ["status", "imposed"],
+      additionalProperties: false,
+      description:
+        "What a call naming no connection gets for this caller, as the integration detail's " +
+        "`proxy_connection` states it, judged against the latest published version.",
+      properties: proxyConnectionVerdictProperties,
+    },
+    refusal: {
+      $ref: "#/components/schemas/ResolutionFieldError",
+      description:
+        "Present when the verdict is a refusal the selection describes: the `not_connected` " +
+        "item of `none` (with the `auth_key` and `required_scopes` a connect flow targets), " +
+        "else the first item of the refusal (`needs_reconnection`, `must_choose_connection`, " +
+        "`pinned_connection_unavailable`…). Absent on `ready`, `not_required` and " +
+        "`not_permitted`.",
+    },
+  },
+} as const;
+
 export const credentialProxyPaths = {
   "/api/credential-proxy/connections": {
     get: {
@@ -577,6 +610,59 @@ export const credentialProxyPaths = {
                 properties: {
                   object: { type: "string", enum: ["list"] },
                   data: { type: "array", items: connectionOutsideRunSchema },
+                  hasMore: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+        "401": { $ref: "#/components/responses/Unauthorized" },
+        "403": {
+          description:
+            "`forbidden` — the principal holds neither `credential-proxy:call-own` nor " +
+            "`credential-proxy:call`; `credential_proxy_closed` — the space's " +
+            "`credential_proxy_open` is `false`.",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
+      },
+    },
+  },
+  "/api/credential-proxy/integrations": {
+    get: {
+      operationId: "listCredentialProxyIntegrations",
+      tags: ["Credential Proxy"],
+      summary: "List the integrations active in the space, with what a call outside a run gets",
+      description:
+        "Each integration active in the space that has a published version, with the verdict " +
+        "of a call to `/api/credential-proxy/proxy` without `X-Run-Id` and without " +
+        "`X-Connection-Id` (`proxy_connection`), judged against that version for this caller, " +
+        "under the reach the proxy applies (`credential-proxy:call` or " +
+        "`credential-proxy:call-own` alone). Where `GET /api/credential-proxy/connections` lists " +
+        "the connections a call may use, this lists the integrations, those without a usable " +
+        "connection included. A refused verdict carries the selection's item (`refusal`), as a " +
+        "run launch's 409 does; with `X-Appstrate-Connect-Offers: 1`, an item a connect flow " +
+        "clears for the caller carries a `connect_url`. No credential is decrypted to build it. " +
+        "Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose " +
+        "`credential_proxy_open` is `false` answers `403 credential_proxy_closed`.",
+      parameters: [
+        { $ref: "#/components/parameters/XOrgId" },
+        { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/ConnectOffers" },
+      ],
+      responses: {
+        "200": {
+          description: "The integrations active in the space, sorted by id",
+          headers: STD_RESPONSE_HEADERS,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["object", "data", "hasMore"],
+                properties: {
+                  object: { type: "string", enum: ["list"] },
+                  data: { type: "array", items: integrationOutsideRunSchema },
                   hasMore: { type: "boolean" },
                 },
               },

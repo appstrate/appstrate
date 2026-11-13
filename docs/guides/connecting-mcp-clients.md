@@ -407,6 +407,19 @@ role. Runs keep their connections there:
   adds the first result's `input_schema` and `usage` (how to call the tool and
   read its result), so a search by a tool's exact name stands for a describe
   call, which does not exist.
+  `not_ready`, apart from the tools and present when not empty, lists the
+  integrations active in the space you have no usable connection of, filtered
+  by `query` and `integration` like the tools: each `integration` with its
+  `display_name`, the `proxy_connection` verdict of a call naming no
+  connection (`status`: `none`, `needs_reconnection`, `not_permitted`,
+  `default_unavailable` or `unusable`; `imposed` when an enforced organization
+  default governs it) and, when the connection selection explains it, its
+  `refusal` item (`code`, `auth_key`, `required_scopes`…). When you hold
+  `integrations:connect`, a `refusal` a connect flow clears for you (no
+  connection on an oauth2 auth, or your own connection to reconnect) carries a
+  `connect_url`, minted as for a run launch: hand it to the user, who connects
+  the integration by opening it. The listing comes from
+  `GET /api/credential-proxy/integrations`.
   `connections` lists what a call would accept: per connection, the
   `connection_id` to pass, `label`, `auth_key`, `scopes_granted`, `owned_by_actor`
   (`false` for another member's), the `authorized_uris` a target must match,
@@ -431,7 +444,8 @@ role. Runs keep their connections there:
   the proxy's control headers is refused in `headers`, and the whole call is
   refused before anything is sent when an argument is malformed. Requests run
   concurrently, three at a time and not in order, and each counts against the
-  proxy's rate limit.
+  proxy's rate limit. A `{ns}__api_call` selects no tool: its requests carry the
+  scopes the connection holds, and the upstream refuses what they do not cover.
 - **Typed tools of a remote MCP server.** An integration backed by a remote
   MCP server (`source.kind: "remote"`, Streamable HTTP) also lists the tools
   that server offers, named

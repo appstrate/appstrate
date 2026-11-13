@@ -73,6 +73,7 @@ interface ConnectionToolContext {
 }
 
 const CONNECTIONS_PATH = "/api/credential-proxy/connections";
+const INTEGRATIONS_PATH = "/api/credential-proxy/integrations";
 
 /**
  * Requests per call: what one tool call may hold before it answers. Every response is kept, up to
@@ -677,6 +678,73 @@ async function listIntegrations(
 }
 
 /**
+ * The `proxy_connection` statuses of an integration the caller has no usable connection of: a
+ * call naming none is refused, and no connection a call could name instead clears it.
+ */
+const NOT_READY_STATUSES: ReadonlySet<string> = new Set([
+  "none",
+  "needs_reconnection",
+  "not_permitted",
+  "default_unavailable",
+  "unusable",
+]);
+
+/** An integration active here that the caller has no usable connection of, as a search lists it. */
+interface NotReadyIntegration {
+  integration: string;
+  display_name: string;
+  proxy_connection: { status: string; imposed: boolean };
+  /** The selection's item, with its `connect_url` when a connect flow clears it for the caller. */
+  refusal?: Record<string, unknown>;
+}
+
+/**
+ * The integrations active here whose call naming no connection the proxy refuses for want of a
+ * usable connection ({@link NOT_READY_STATUSES}), from the proxy's integrations listing, asked
+ * for connect links as the tool routes are (see `RUN_CONNECT_OFFERS_HEADER`). The listing route's
+ * refusal comes back as is.
+ */
+async function listNotReadyIntegrations(
+  ctx: ConnectionToolContext,
+): Promise<
+  { integrations: NotReadyIntegration[] } | { refused: { status: number; body: unknown } }
+> {
+  const response = await ctx.dispatch(
+    new Request(new URL(INTEGRATIONS_PATH, ctx.origin).toString(), {
+      method: "GET",
+      headers: dispatchHeaders(ctx.authHeaders, new Headers({ [RUN_CONNECT_OFFERS_HEADER]: "1" })),
+    }),
+  );
+  const body = asRecord(await response.json().catch(() => undefined));
+  if (!response.ok || !Array.isArray(body?.data)) {
+    return { refused: { status: response.status, body: body ?? null } };
+  }
+  const integrations = (body.data as Array<Record<string, unknown>>).flatMap(
+    (row): NotReadyIntegration[] => {
+      const verdict = asRecord(row.proxy_connection);
+      if (
+        typeof row.integration_package_id !== "string" ||
+        typeof verdict?.status !== "string" ||
+        !NOT_READY_STATUSES.has(verdict.status)
+      ) {
+        return [];
+      }
+      const refusal = asRecord(row.refusal);
+      return [
+        {
+          integration: row.integration_package_id,
+          display_name:
+            typeof row.display_name === "string" ? row.display_name : row.integration_package_id,
+          proxy_connection: { status: verdict.status, imposed: verdict.imposed === true },
+          ...(refusal ? { refusal } : {}),
+        },
+      ];
+    },
+  );
+  return { integrations };
+}
+
+/**
  * The tools of one integration: the `api_call` tools its catalog exposes (selection `"*"`, less
  * `hidden_tools` and connect tools) whose auth has a connection, then, for a remote MCP source,
  * the typed tools its server offers, listed with `connectionId` when the caller names one.
@@ -923,6 +991,16 @@ function buildSearchIntegrationToolsTool(ctx: ConnectionToolContext): AppstrateT
       "designates it. With `credential-proxy:call-own` alone, a connection another member " +
       "shared and a `call_permission_required` integration are reached through " +
       (ctx.runs ? "a run (run_and_wait). " : "an agent run only. ") +
+      "`not_ready` (present when not empty, filtered by `query` and `integration` like the " +
+      "tools) lists the integrations active in this space you have no usable connection of, " +
+      "apart from the tools: each `integration` with its `display_name`, its " +
+      "`proxy_connection` verdict for a call naming no connection (`status`: `none`, " +
+      "`needs_reconnection`, `not_permitted`, `default_unavailable` or `unusable`; " +
+      "`imposed`: an enforced organization default governs it, and the space's admins set " +
+      "its connection) and, when a selection refusal explains it, that `refusal` item " +
+      "(`code`, `auth_key`, `required_scopes`…). A `refusal` with a `connect_url` is a " +
+      "single-use link to hand to the user, which connects (or reconnects) the integration " +
+      "as them. " +
       "With `query` or `integration`, `best_match` adds to the top result its `input_schema` " +
       "and its `usage` (how to call it and read its result), so a clear hit needs no other " +
       "call before call_integration_tool; search a tool's exact name to get them.",
@@ -956,19 +1034,24 @@ function buildSearchIntegrationToolsTool(ctx: ConnectionToolContext): AppstrateT
 
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const start = performance.now();
-    const listed = await listIntegrations(ctx);
-    if ("refused" in listed) {
+    const [listed, notReady] = await Promise.all([
+      listIntegrations(ctx),
+      listNotReadyIntegrations(ctx),
+    ]);
+    // A listing route's refusal, as `invoke_operation` would relay it.
+    const refusedBy = (path: string, refused: { status: number; body: unknown }) => {
       ctx.observe({
         tool: "search_integration_tools",
         durationMs: performance.now() - start,
         method: "GET",
-        path: CONNECTIONS_PATH,
-        status: listed.refused.status,
+        path,
+        status: refused.status,
         outcome: "invoked",
       });
-      // The route's refusal, as `invoke_operation` would relay it.
-      return jsonResult(listed.refused, true);
-    }
+      return jsonResult(refused, true);
+    };
+    if ("refused" in listed) return refusedBy(CONNECTIONS_PATH, listed.refused);
+    if ("refused" in notReady) return refusedBy(INTEGRATIONS_PATH, notReady.refused);
     const query = typeof args.query === "string" ? args.query.trim().toLowerCase() : "";
     const integration = typeof args.integration === "string" ? args.integration : undefined;
     const rawLimit = typeof args.limit === "number" ? args.limit : DEFAULT_SEARCH_LIMIT;
@@ -989,6 +1072,14 @@ function buildSearchIntegrationToolsTool(ctx: ConnectionToolContext): AppstrateT
         manifest ? (await integrationTools(ctx, entry, manifest)).tools : [],
     );
     const tools = perIntegration.flat();
+    const notReadyShown = notReady.integrations.filter(
+      (entry) =>
+        (integration === undefined || entry.integration === integration) &&
+        (tokens.length === 0 ||
+          tokens.some((token) =>
+            `${entry.integration} ${entry.display_name}`.toLowerCase().includes(token),
+          )),
+    );
     const matches = tools
       .map((tool, order) => ({ tool, order, score: scoreTool(tool, tokens) }))
       .filter(({ score }) => tokens.length === 0 || score > 0)
@@ -1006,6 +1097,7 @@ function buildSearchIntegrationToolsTool(ctx: ConnectionToolContext): AppstrateT
     return jsonResult({
       total: matches.length,
       tools: shown.map(listedTool),
+      ...(notReadyShown.length > 0 ? { not_ready: notReadyShown } : {}),
       ...(searched && top
         ? {
             best_match: {
