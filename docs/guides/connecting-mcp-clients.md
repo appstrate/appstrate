@@ -423,9 +423,10 @@ role. Runs keep their connections there:
   `connections` lists what a call would accept: per connection, the
   `connection_id` to pass, `label`, `auth_key`, `scopes_granted`, `owned_by_actor`
   (`false` for another member's), the `authorized_uris` a target must match,
-  `allow_all_uris`, `needs_reconnection`, `call_permission_required` and
-  `missing_scopes`: the scopes the tool's `tools_policy` entry requires on the
-  connection's auth that it lacks. It never carries a credential value: an entry that
+  `allow_all_uris`, `needs_reconnection`, `call_permission_required` and, on a
+  typed tool, `missing_scopes`: the scopes the tool's `tools_policy` entry requires
+  on the connection's auth that it lacks. A `{ns}__api_call` selects no tool, so
+  its connections carry no `missing_scopes`. It never carries a credential value: an entry that
   depends on one reads `{$credential.<field>}`, and you target it by writing
   `{{<field>}}` at that place in `target` (`{{webhook_url}}` for an entry that
   is `{$credential.webhook_url}` alone, `https://{{host}}/v1/items` for

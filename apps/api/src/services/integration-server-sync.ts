@@ -28,7 +28,11 @@ import { logger } from "../lib/logger.ts";
 import { proxyProblem } from "../lib/proxy-status.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { ProxyCallError } from "./credential-proxy/core.ts";
-import { proxiedMcpFetch, type ProxyCaller } from "./credential-proxy/remote-tools.ts";
+import {
+  MAX_EXCHANGE_BYTES,
+  proxiedMcpFetch,
+  type ProxyCaller,
+} from "./credential-proxy/remote-tools.ts";
 import type { ProxyReach } from "./integration-connections.ts";
 import {
   readIntegrationManifestForRun,
@@ -64,8 +68,6 @@ const SYNC_TIMEOUT_MS = 20_000;
 const MAX_TOOLS = 500;
 /** Bounds a server answering `nextCursor` forever with empty pages. */
 const MAX_PAGES = 20;
-/** Per MCP exchange: a `tools/list` page is kilobytes, not the proxy's general ceiling (an operator cap below it wins). */
-const MAX_EXCHANGE_BYTES = 2 * 1024 * 1024;
 /** `instructions` is the server's free text, proposed as a file: bounded like one. */
 const MAX_INSTRUCTIONS_BYTES = 32 * 1024;
 const MAX_TOOL_TITLE_CHARS = 200;
@@ -159,7 +161,6 @@ export async function syncIntegrationFromServer(input: {
               version: DRAFT,
               caller: input.caller,
               deadline,
-              maxExchangeBytes: MAX_EXCHANGE_BYTES,
               // Journaled as the proxy route does: once per exchange that may have sent the credential.
               journals: () => true,
             }),
@@ -318,10 +319,7 @@ function syncFailure(
   // The proxy names its own `X-Connection-Id` header; this route takes the body's `connection_id`.
   if (err instanceof ApiError && err.code === "must_choose_connection") {
     const detail = `No single connection of '${packageId}' applies: name one in the request body's \`connection_id\`.`;
-    return new ApiError({
-      status: err.status,
-      code: err.code,
-      title: err.title,
+    return err.with({
       detail,
       ...(err.fieldErrors
         ? { errors: err.fieldErrors.map((item) => ({ ...item, message: detail })) }

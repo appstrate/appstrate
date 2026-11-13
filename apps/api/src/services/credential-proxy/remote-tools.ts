@@ -20,6 +20,7 @@ import {
 } from "@appstrate/mcp-transport";
 import { createCache } from "@appstrate/core/cache";
 import {
+  allowsUndeclaredTools,
   getApiCallConfigs,
   resolveIntegrationToolCatalog,
   type IntegrationManifest,
@@ -58,11 +59,15 @@ interface ProxiedMcpFetchInput {
   caller: ProxyCaller;
   /** Bounds every exchange. */
   deadline: AbortSignal;
-  /** Per exchange, below the proxy's `max_response_bytes` (the lower of the two applies). */
-  maxExchangeBytes: number;
   /** Whether an exchange, by its JSON-RPC body, gets a call-journal row. */
   journals: (body: string | null) => boolean;
 }
+
+/**
+ * Per MCP exchange (a `tools/list` page or a tool result), bounded like an `api_call` body; the
+ * proxy's `max_response_bytes` wins when lower.
+ */
+export const MAX_EXCHANGE_BYTES = 2 * 1024 * 1024;
 
 /**
  * A `fetch` for `createMcpHttpClient` that sends each MCP exchange through `proxyCall`. The SDK
@@ -112,7 +117,7 @@ export function proxiedMcpFetch(input: ProxiedMcpFetchInput): typeof fetch {
         body,
         literalHeaders: true,
         maxResponseBytes: Math.min(
-          input.maxExchangeBytes,
+          MAX_EXCHANGE_BYTES,
           getCredentialProxyLimits().max_response_bytes,
         ),
         signal: init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline,
@@ -145,8 +150,6 @@ function isToolsCall(body: string | null): boolean {
 const LIST_TIMEOUT_MS = 10_000;
 /** Below an MCP client's 60 s request timeout, which the caller's own request also counts against. */
 const CALL_TIMEOUT_MS = 45_000;
-/** Per MCP exchange: a `tools/list` page or a tool result, bounded like an `api_call` body. */
-const MAX_EXCHANGE_BYTES = 2 * 1024 * 1024;
 const CATALOG_TTL_MS = 5 * 60 * 1000;
 
 /**
@@ -166,12 +169,13 @@ interface RemoteToolsInput {
   integrationId: string;
   caller: ProxyCaller;
   /** The caller's request: its going away ends the exchange. */
-  signal?: AbortSignal;
+  signal: AbortSignal;
   /**
-   * The caller asked for connect links (`RUN_CONNECT_OFFERS_HEADER`): a selection refusal's
-   * items then carry a `connect_url` where a run launch's would (`attachConnectOffers`).
+   * The policy of a caller that asked for connect links (`RUN_CONNECT_OFFERS_HEADER`), `null`
+   * otherwise: a selection refusal's items then carry a `connect_url` where a run launch's would
+   * (`attachConnectOffers`).
    */
-  connectOffers?: ConnectOfferPolicy | null;
+  connectOffers: ConnectOfferPolicy | null;
 }
 
 /** The latest published manifest, the one `proxyCall` authorizes outside a run against. */
@@ -253,16 +257,7 @@ async function withConnectOffers(err: unknown, input: RemoteToolsInput): Promise
     actor: input.actor,
     policy,
   });
-  return new ApiError({
-    status: err.status,
-    code: err.code,
-    title: err.title,
-    detail: err.message,
-    errors,
-    ...(err.param !== undefined ? { param: err.param } : {}),
-    ...(err.headers ? { headers: err.headers } : {}),
-    ...(err.extensions ? { extensions: err.extensions } : {}),
-  });
+  return err.with({ errors });
 }
 
 /**
@@ -274,10 +269,9 @@ function offeredRemoteToolNames(
   manifest: IntegrationManifest,
   listed: readonly Pick<Tool, "name" | "description">[] | undefined,
 ): Set<string> {
-  const undeclared = (manifest as { allow_undeclared_tools?: boolean }).allow_undeclared_tools;
   const catalog = resolveIntegrationToolCatalog({
     integration: manifest,
-    ...(undeclared === true && listed ? { mcpServerTools: listed } : {}),
+    ...(allowsUndeclaredTools(manifest) && listed ? { mcpServerTools: listed } : {}),
   });
   const synthetic = new Set(
     getApiCallConfigs(manifest).flatMap((config) =>
@@ -294,7 +288,7 @@ async function withClient<T>(
   use: (client: AppstrateMcpClient, deadline: AbortSignal) => Promise<T>,
 ): Promise<T> {
   const timeout = AbortSignal.timeout(input.timeoutMs);
-  const deadline = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout;
+  const deadline = AbortSignal.any([input.signal, timeout]);
   let client: AppstrateMcpClient | undefined;
   try {
     client = await createMcpHttpClient(url, {
@@ -306,7 +300,6 @@ async function withClient<T>(
         reach: input.reach,
         caller: input.caller,
         deadline,
-        maxExchangeBytes: MAX_EXCHANGE_BYTES,
         journals,
       }),
       signal: deadline,
@@ -405,11 +398,10 @@ export async function callRemoteTool(
   },
 ): Promise<CallToolResult> {
   const manifest = await remoteManifest(input.integrationId, input.scope.orgId);
-  const undeclared = (manifest as { allow_undeclared_tools?: boolean }).allow_undeclared_tools;
   // With `allow_undeclared_tools`, any listed name is in the selection; the hidden ones never are.
   const offered = offeredRemoteToolNames(
     manifest,
-    undeclared === true ? [{ name: input.name }] : undefined,
+    allowsUndeclaredTools(manifest) ? [{ name: input.name }] : undefined,
   );
   if (!offered.has(input.name)) {
     throw notFound(`Integration '${input.integrationId}' offers no tool named '${input.name}'`);

@@ -102,3 +102,44 @@ describe("zodIssuesToFieldErrors without reportInput", () => {
     ).toEqual([{ field: "name", code: "invalid_type" }]);
   });
 });
+
+describe("ApiError.with", () => {
+  it("applies the changes and carries every other member over", () => {
+    const cause = new Error("upstream");
+    const original = new ApiError({
+      status: 429,
+      code: "rate_limited",
+      title: "Too Many Requests",
+      detail: "Slow down.",
+      param: "body",
+      retryAfter: 30,
+      errors: [{ field: "a", code: "x", message: "m" }],
+      headers: { "Proxy-Status": "appstrate" },
+      extensions: { kept: true },
+      cause,
+    });
+    const changed = original.with({ detail: "Slow down, again.", extensions: { other: 1 } });
+    expect(changed).not.toBe(original);
+    expect(changed.message).toBe("Slow down, again.");
+    expect(changed.extensions).toEqual({ other: 1 });
+    expect([
+      changed.status,
+      changed.code,
+      changed.title,
+      changed.param,
+      changed.retryAfter,
+      changed.fieldErrors,
+      changed.headers,
+      changed.cause,
+    ]).toEqual([
+      429,
+      "rate_limited",
+      "Too Many Requests",
+      "body",
+      30,
+      [{ field: "a", code: "x", message: "m" }],
+      { "Proxy-Status": "appstrate" },
+      cause,
+    ]);
+  });
+});

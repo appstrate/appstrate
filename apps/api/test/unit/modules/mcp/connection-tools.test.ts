@@ -262,8 +262,8 @@ describe("search_integration_tools", () => {
           tool: TOOL,
           integration: INTEGRATION,
           description: expect.stringContaining("Acme Items."),
-          // Every field of the row, and the scopes the tool requires that it lacks.
-          connections: [{ ...connection, missing_scopes: [] }],
+          // Every field of the row; an HTTP call selects no tool, so no `missing_scopes`.
+          connections: [connection],
         },
       ],
     });

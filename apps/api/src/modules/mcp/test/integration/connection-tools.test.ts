@@ -670,11 +670,11 @@ describe("mcp connection tools", () => {
           [TOOL, INTEGRATION_ID],
         ]);
         const rows = tools[0]!.connections;
-        // Every field of the listing's rows, the integration carried by the tool, and the
-        // scopes the tool requires that the row lacks.
+        // Every field of the listing's rows and the integration carried by the tool; an HTTP
+        // call selects no tool, so no `missing_scopes`.
         const listingRows: Record<string, unknown>[] = (
           invoked.data.body as { data: Record<string, unknown>[] }
-        ).data.map((row) => ({ ...row, missing_scopes: [] }));
+        ).data;
         const searchRows: Record<string, unknown>[] = rows.map((row) => ({
           integration_package_id: INTEGRATION_ID,
           ...row,

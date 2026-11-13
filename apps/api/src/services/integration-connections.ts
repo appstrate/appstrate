@@ -110,6 +110,7 @@ import { CONNECTION_LABEL_MAX, toMintedLabel } from "../lib/connection-label.ts"
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import type { Actor, AuthorizationServerBinding, ResolvedOAuthClient } from "@appstrate/connect";
 import {
+  allowsUndeclaredTools,
   isUnauthenticatedIntegration,
   resolveIntegrationToolCatalog,
   readDefaultTools,
@@ -3269,8 +3270,7 @@ export async function getIntegrationAuthStatuses(
     auths,
     tool_catalog: toolCatalog,
     default_tools: readDefaultTools(manifest),
-    allow_undeclared_tools:
-      (manifest as { allow_undeclared_tools?: boolean }).allow_undeclared_tools === true,
+    allow_undeclared_tools: allowsUndeclaredTools(manifest),
     active: activation.active,
     block_user_connections: activation.blockUserConnections,
     platform_redirect_uri: integrationCallbackUrl(),

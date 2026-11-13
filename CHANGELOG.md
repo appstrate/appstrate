@@ -497,7 +497,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `409 insufficient_scopes` with `missing_scopes`, `required_scopes` and
   `remedy`, and one on an auth that does not serve the tool
   `auth_serves_no_selected_tool`, before anything is sent; the search lists,
-  per connection of each tool, its `missing_scopes`. With
+  per connection of each typed tool, its `missing_scopes` (a `{ns}__api_call`
+  selects no tool and carries none). With
   `X-Appstrate-Connect-Offers: 1`, which the MCP tools send, a selection
   refusal's item a connect flow clears (a reconnection of the caller's own
   connection) carries a `connect_url`, minted by the run launch's minter under

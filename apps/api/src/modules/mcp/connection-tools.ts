@@ -763,11 +763,7 @@ async function integrationTools(
     .filter((config) => catalog.has(config.toolName))
     .map((config) => ({
       config,
-      connections: withMissingScopes(
-        manifest,
-        config.toolName,
-        integration.connections.filter((c) => c.auth_key === config.authKey),
-      ),
+      connections: integration.connections.filter((c) => c.auth_key === config.authKey),
     }))
     .filter((entry) => entry.connections.length > 0)
     .map(({ config, connections }): IntegrationTool => {
@@ -980,9 +976,9 @@ function buildSearchIntegrationToolsTool(ctx: ConnectionToolContext): AppstrateT
       "`connection_id` to pass, the `authorized_uris` a target must match (unless " +
       "`allow_all_uris`; an entry may hold a `{$credential.<field>}` the proxy alone resolves, " +
       "see the `target` argument of `input_schema`), its `scopes_granted`, and what a call " +
-      "would still refuse: `missing_scopes` (the scopes the tool's policy requires on the " +
-      "connection's auth that it lacks; a typed tool's call with it answers " +
-      "`insufficient_scopes`), `needs_reconnection`, and " +
+      "would still refuse: on a typed tool, `missing_scopes` (the scopes the tool's policy " +
+      "requires on the connection's auth that it lacks; a call with it answers " +
+      "`insufficient_scopes`), and on every tool `needs_reconnection` and " +
       "`call_permission_required` (an enforced " +
       "organization default governs the integration and you hold `credential-proxy:call-own` " +
       "alone). Both flags describe a call passing that `connection_id`; with none passed and " +
