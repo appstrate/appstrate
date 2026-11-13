@@ -32,7 +32,6 @@ import { errorField, errorMessage, refusalMessage, REFUSAL_ERROR_KEYS } from "..
 import fr from "../../locales/fr/common.json";
 import en from "../../locales/en/common.json";
 import agentsFr from "../../locales/fr/agents.json";
-import agentsEn from "../../locales/en/agents.json";
 
 await i18nReady;
 

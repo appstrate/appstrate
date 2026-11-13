@@ -118,7 +118,7 @@ async function forkWithConfig(
   // Build manifest from the published version snapshot, update name
   const versionManifest = asRecord(versionRow.manifest);
 
-  const updatedManifest = { ...versionManifest, name: targetId };
+  const updatedManifest: Record<string, unknown> = { ...versionManifest, name: targetId };
 
   // Look, warn, NEVER reject. A source manifest invalid for any reason (missing `type` /
   // `schema_version`, a null/array jsonb column) would otherwise mint a fresh

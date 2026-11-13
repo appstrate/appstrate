@@ -558,6 +558,7 @@ export function createRunsRemoteRouter() {
   // 404 so nothing leaks about the run's existence.
   router.post("/runs/:runId/mcp", rateLimit(200), requirePermission("agents", "run"), async (c) => {
     const runId = c.req.param("runId");
+    if (!runId) throw invalidRequest("runId path parameter is required", "runId");
     const [run] = await db
       .select({
         packageId: runs.packageId,
