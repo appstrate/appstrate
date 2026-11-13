@@ -357,6 +357,28 @@ describe("an enforced domain, mail on", () => {
     expect(await sessionCount(alice.id)).toBe(0);
   });
 
+  it("keeps a refusal's redirect on the platform's origin", async () => {
+    const pending = await createTestUser({ email: `pending2@${DOMAIN}` });
+    await db.delete(session).where(eq(session.userId, pending.id));
+    const secret = (await getAuth().$context).secret;
+    for (const callback of [
+      "https://evil.example/landing",
+      "//evil.example/landing",
+      encodeURIComponent("https://evil.example/landing"),
+    ]) {
+      const token = await createEmailVerificationToken(secret, pending.email);
+      const res = await app.request(
+        `/api/auth/verify-email?token=${token}&callbackURL=${encodeURIComponent(callback)}`,
+      );
+      const location = new URL(res.headers.get("location") ?? "", "http://localhost:3000");
+      expect(res.status).toBe(302);
+      expect(location.origin).toBe("http://localhost:3000");
+      expect(location.searchParams.get("error")).toBe("sso_required");
+      await db.update(user).set({ emailVerified: false }).where(eq(user.id, pending.id));
+    }
+    expect(await sessionCount(pending.id)).toBe(0);
+  });
+
   it("refuses the email-verification auto sign-in", async () => {
     const pending = await createTestUser({ email: `pending@${DOMAIN}` });
     await db.delete(session).where(eq(session.userId, pending.id));
