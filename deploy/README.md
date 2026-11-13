@@ -2,7 +2,7 @@
 
 The compose that runs `app.appstrate.com`. **No product code lives here**: `docker-compose.yml` pulls published images, and that is the whole directory.
 
-The billing module is `packages/module-ee`, and it ships inside `ghcr.io/appstrate/appstrate` itself, inert until `MODULES` names it. One image, one tag, nothing to build — which is why the deployment is one file in the monorepo rather than a repository of its own.
+The billing module is `packages/module-billing`, and it ships inside `ghcr.io/appstrate/appstrate` itself, inert until `MODULES` names it. One image, one tag, nothing to build — which is why the deployment is one file in the monorepo rather than a repository of its own.
 
 Staging deploys this same file, from `main`, on every merge: `docs/deployment/STAGING.md`.
 
@@ -30,7 +30,7 @@ Coolify's `docker_compose_domains` maps **these** service names to `app.appstrat
 1. Set `APPSTRATE_VERSION` to the release tag **without the `v`** (`1.0.0-beta.68`, not `v1.0.0-beta.68`).
 2. Redeploy.
 
-`appstrate-migrate` runs the platform's schema migrations before the application starts (`depends_on: service_completed_successfully`), and `@appstrate/module-ee` migrates its own `ee_*` tables at `init()`. A release that needs more than that says so in `CHANGELOG.md`, and the procedure lives in **`scripts/migration/README.md`** — read it before changing the version, not after.
+`appstrate-migrate` runs the platform's schema migrations before the application starts (`depends_on: service_completed_successfully`), and `@appstrate/module-billing` migrates its own `ee_*` tables at `init()`. A release that needs more than that says so in `CHANGELOG.md`, and the procedure lives in **`scripts/migration/README.md`** — read it before changing the version, not after.
 
 **A release is not always an image swap.** Migrations that cannot be replayed, one-off data scripts, and environment variables that must land at a particular moment are all real. The runbook is the authority; this file is not a substitute for it.
 
@@ -58,9 +58,9 @@ Facts worth writing down, because each one is easy to break:
 
 - **A bare name in an `environment:` block is materialised as the empty string.** Coolify rewrites `- FOO` into `FOO: ''` in the compose it generates, so "unset, let the schema default apply" is a state that file cannot express. `verify:compose-defaults` (class 5) refuses one, and `env_file` is what delivers the operator's variables instead.
 
-- **`MODULES` is required, not defaulted.** `docker-compose.yml` reads it as `${MODULES:?}`: a raw `docker compose` refuses to start without it, and Coolify documents that form as flagging the variable and blocking the deploy until a value is entered. There is no fallback list, and the code default names no billing module. Set it on the resource with `@appstrate/module-ee` included; its Stripe keys are then required (`.env.example` lists them).
+- **`MODULES` is required, not defaulted.** `docker-compose.yml` reads it as `${MODULES:?}`: a raw `docker compose` refuses to start without it, and Coolify documents that form as flagging the variable and blocking the deploy until a value is entered. There is no fallback list, and the code default names no billing module. Set it on the resource with `@appstrate/module-billing` included; its Stripe keys are then required (`.env.example` lists them).
 
-- **Check what Coolify actually ran, not this file.** Coolify rewrites the compose before running it, so after a deploy read `/data/coolify/applications/<uuid>/docker-compose.yaml` on the server: `MODULES` must appear there with the resource's value, `@appstrate/module-ee` included.
+- **Check what Coolify actually ran, not this file.** Coolify rewrites the compose before running it, so after a deploy read `/data/coolify/applications/<uuid>/docker-compose.yaml` on the server: `MODULES` must appear there with the resource's value, `@appstrate/module-billing` included.
 
 - **Coolify regenerates `.env` from the resource's own environment configuration on every deploy.** A value written into the file on the server is gone at the next one. Edit the variables in Coolify, never the file.
 

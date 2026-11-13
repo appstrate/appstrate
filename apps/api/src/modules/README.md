@@ -97,13 +97,15 @@ tree, no `__drizzle_migrations_<id>` table.
    module, use a hook (`beforeUsage`) or an event — never a direct import. A
    module reads another module's data via the platform API/events, never a
    cross-module SQL join.
-4. **Need tables the Apache-2.0 core schema must not carry?** A module in that
-   position (the `@appstrate/module-ee` module, in-tree under `packages/module-ee`
-   and source-available) keeps a Drizzle tree of its own and self-migrates it
-   into the platform database at `init()`, under a migration journal of its own
-   (`drizzle.ee_migrations`, never the platform's `drizzle.__drizzle_migrations`).
-   It still reads platform data through `ctx.services`
-   (e.g. `services.usage.list`), never a SQL join across the licence boundary.
+4. **The one exception: `@appstrate/module-billing`.** It keeps a Drizzle tree
+   of its own (`packages/module-billing/drizzle`) and self-migrates its `ee_*`
+   tables into the platform database at `init()`, under a migration journal of
+   its own (`drizzle.ee_migrations`, never the platform's
+   `drizzle.__drizzle_migrations`). It dates from when the module was under a
+   separate licence the core schema could not carry; the tables and the journal
+   keep their names because deployed databases carry them. It still reads
+   platform data through `ctx.services` (e.g. `services.usage.list`), never a
+   SQL join across the module boundary.
    `bun run verify:module-sql-boundary` (in `bun run check`) enforces that last
    sentence: because those tables sit in the platform database, a `SELECT …
 FROM organizations` written in the module compiles, runs and returns rows, so
@@ -392,7 +394,7 @@ is logged, not retried. The platform revokes only its own grants on that exit
 (space roles, API keys, the refresh and opaque access tokens bound to the
 org — RBAC spec §3.6);
 anything a module keyed on the `(orgId, userId)` pair must be dropped here, or
-it comes back when the same user is invited again — `@appstrate/module-ee`
+it comes back when the same user is invited again — `@appstrate/module-billing`
 deletes the billing-manager row. It must be **idempotent**: a no-op when there
 is nothing left to drop.
 
@@ -526,15 +528,15 @@ The platform mounts `idempotencyGuard` (`apps/api/src/middleware/idempotency-gua
 
 **Built-in dir modules opt in by relative import**, and two already do — `webhooks/routes.ts` (`POST /api/webhooks`) and `oidc/routes.ts` (`POST /api/oauth/clients`) both mount `idempotency()` from `../../middleware/idempotency.ts` and declare `$ref: "#/components/parameters/IdempotencyKey"` on that operation in their own `openapi/paths.ts`. Copy that pair — mount **and** declare — if a built-in route needs de-duplication.
 
-**Package modules cannot** — the line is the package boundary, not the repo boundary. `idempotency()` lives in `apps/api/src/middleware/` and is exported from no package — not `@appstrate/core`, not anywhere an importer outside `apps/api` can reach (unlike `services.http.rateLimit()`, which the same routes get through `PlatformServices`). So `@appstrate/module-chat`, `@appstrate/module-claude-code`, `@appstrate/module-codex`, `@appstrate/module-ee` — in-tree workspace packages, all four — and any operator-installed module are permanently in "refuse" mode on every mutating route they expose. Nothing breaks today: none of them advertises the header, and `@appstrate/module-ee` de-duplicates Stripe deliveries in its own `ee_stripe_events` table rather than through the platform's. But the asymmetry is real: they are held to a policy they have no way to satisfy.
+**Package modules cannot** — the line is the package boundary, not the repo boundary. `idempotency()` lives in `apps/api/src/middleware/` and is exported from no package — not `@appstrate/core`, not anywhere an importer outside `apps/api` can reach (unlike `services.http.rateLimit()`, which the same routes get through `PlatformServices`). So `@appstrate/module-chat`, `@appstrate/module-claude-code`, `@appstrate/module-codex`, `@appstrate/module-billing` — in-tree workspace packages, all four — and any operator-installed module are permanently in "refuse" mode on every mutating route they expose. Nothing breaks today: none of them advertises the header, and `@appstrate/module-billing` de-duplicates Stripe deliveries in its own `ee_stripe_events` table rather than through the platform's. But the asymmetry is real: they are held to a policy they have no way to satisfy.
 
 Until that changes, for a package module:
 
 - **Do not declare an `Idempotency-Key` parameter in your `openApiPaths()`.** It would be a promise the runtime refuses; the drift test (`apps/api/test/integration/middleware/idempotency-contract.test.ts`) matches the parameter by name — inline or `$ref` — and fails on a declaration with no mount. (`openapi/paths/llm-proxy.ts` carried exactly that false promise for three operations.)
 - **Do not tell clients to stamp the header on your routes.** They will get a `400`.
-- If you genuinely need request de-duplication, implement it in your own handler under your own header/body field (`@appstrate/module-ee` does exactly that for Stripe), or open an issue: exposing `idempotency()` on `PlatformServices.http` next to `rateLimit()` is the obvious shape, and it is a deliberate core API-surface decision (a `@appstrate/core` minor, plus lockstep for the out-of-tree modules), not something to work around locally.
+- If you genuinely need request de-duplication, implement it in your own handler under your own header/body field (`@appstrate/module-billing` does exactly that for Stripe), or open an issue: exposing `idempotency()` on `PlatformServices.http` next to `rateLimit()` is the obvious shape, and it is a deliberate core API-surface decision (a `@appstrate/core` minor, plus lockstep for the out-of-tree modules), not something to work around locally.
 
-Note also that the drift test discovers modules through the test preload (built-ins under `apps/api/src/modules/*` plus workspace `packages/module-*`, which now includes `module-ee`). An operator-installed out-of-tree module is not in that process and is not checked by it — sound only for as long as such a module has no way to mount `idempotency()`. Exposing the middleware to modules means giving that check a second, module-side home.
+Note also that the drift test discovers modules through the test preload (built-ins under `apps/api/src/modules/*` plus workspace `packages/module-*`, which now includes `module-billing`). An operator-installed out-of-tree module is not in that process and is not checked by it — sound only for as long as such a module has no way to mount `idempotency()`. Exposing the middleware to modules means giving that check a second, module-side home.
 
 ## Disabling a module
 

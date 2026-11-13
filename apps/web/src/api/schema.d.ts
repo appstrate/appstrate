@@ -5,9 +5,6 @@
 // Source: apps/api/src/openapi/ merged with the OpenAPI contribution of EVERY
 // module in the tree — apps/api/src/modules/*/ and packages/module-*/ — found
 // on the FILESYSTEM, not through MODULES, so this file does not vary by config.
-// That includes packages/module-ee/, which is source-available under its own
-// LICENSE: its Ee* schemas and /api/billing/* paths appear below. Removing that
-// directory and regenerating drops them (packages/module-ee/README.md).
 
 export interface paths {
     "/.well-known/oauth-authorization-server": {
@@ -9116,7 +9113,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-ee`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
+            /** @description Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-billing`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
             402: {
                 headers: {
                     [name: string]: unknown;
@@ -24442,7 +24439,7 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            /** @description Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-ee`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
+            /** @description Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-billing`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
             402: {
                 headers: {
                     [name: string]: unknown;
@@ -24703,7 +24700,7 @@ export interface operations {
             };
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
-            /** @description Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-ee`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
+            /** @description Usage refused by a billing module; only emitted when one is enabled (e.g. `@appstrate/module-billing`). `code` is `quota_exceeded` when the org is out of credits, or `subscription_blocked` when its subscription is suspended or cancelled. */
             402: {
                 headers: {
                     [name: string]: unknown;

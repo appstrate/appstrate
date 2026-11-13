@@ -19,7 +19,7 @@ API. Today that is exactly one repo:
 - `appstrate/connect-helper`
 
 `appstrate/cloud` was the second entry until the billing module came in-tree as
-`packages/module-ee`. A `workspace:*` package resolves core from the monorepo
+`packages/module-billing`. A `workspace:*` package resolves core from the monorepo
 and is never published, so gating a core publish on it would gate it on a
 version that does not exist on npm yet — the same deadlock `packages/module-*`
 has always been kept out of. Its `CONSUMERS` entry is gone.

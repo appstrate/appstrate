@@ -36,7 +36,7 @@ describe("verify-module-isolation as a process", () => {
 
   it("reads a module's production code that lives outside `src/`", () => {
     expect(verbose.code).toBe(0);
-    expect(verbose.out).toContain("scanned: packages/module-ee/drizzle/schema.ts");
+    expect(verbose.out).toContain("scanned: packages/module-billing/drizzle/schema.ts");
   });
 
   it("reads `scripts/test`, the one platform root scanned with its tests", () => {
@@ -61,7 +61,7 @@ describe("verify-module-isolation as a process", () => {
   it("reads the trees the other two directions skip — a test tree and the SPA", () => {
     // The blind spot #1373 named: `apps/api/test/**` sits under no platform
     // scan root at all, and `apps/web` is waived from the core→module rule, so
-    // a static `@appstrate/module-ee` import in either passed every gate.
+    // a static `@appstrate/module-billing` import in either passed every gate.
     expect(verbose.out).toContain(
       "scanned: apps/api/test/unit/module-isolation-acceptances.test.ts",
     );

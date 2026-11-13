@@ -796,7 +796,7 @@ export const EXEMPT_REQUEST_BODIES: Record<string, string> = {
   "POST /api/chat":
     "@appstrate/module-chat streaming turn endpoint; the body is the AI-SDK UI message envelope, not a hand-written Zod object",
   "POST /api/billing/webhooks":
-    "@appstrate/module-ee Stripe webhook receiver; the raw text is what the signature covers, so the handler never parses JSON and there is no Zod object to compare",
+    "@appstrate/module-billing Stripe webhook receiver; the raw text is what the signature covers, so the handler never parses JSON and there is no Zod object to compare",
 };
 
 /**

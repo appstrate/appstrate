@@ -31,7 +31,7 @@
 -- The ledger is repointed too, and deliberately: `llm_usage.model` is what
 -- per-model spend reporting groups by, so leaving the losers behind would keep
 -- the split this whole change exists to end. It is not a billing rewrite —
--- the commercial module settles rows by serial id (`ee_billed_llm_usage`,
+-- the billing module settles rows by serial id (`ee_billed_llm_usage`,
 -- `ee_billing_cursor`) and never reads this column, so no row's billed state,
 -- amount or cursor position moves. `real_model` (the upstream id the proxy
 -- actually forwarded) is identical across the copies by construction and is

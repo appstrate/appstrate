@@ -4,7 +4,7 @@
  * Unit tests for the pure decisions in `scripts/verify-module-isolation.ts` —
  * the two-directional acceptance check (module → module), the platform
  * import review (core → module) and the commercial-dependency review
- * (Apache-2.0 → `packages/module-ee/`).
+ * (Apache-2.0 → `ee/`).
  *
  * `ACCEPTED_CROSS_MODULE_IMPORTS` is checked both ways: an accepted import must
  * not be reported as a violation, AND an acceptance with no matching import
@@ -155,8 +155,8 @@ describe("reviewPlatformModuleImports", () => {
 
 describe("importSpecifiers", () => {
   it("reads a literal `import()` written with backticks", () => {
-    expect(importSpecifiers("void import(`@appstrate/module-ee`);")).toEqual([
-      "@appstrate/module-ee",
+    expect(importSpecifiers("void import(`@appstrate/module-billing`);")).toEqual([
+      "@appstrate/module-billing",
     ]);
   });
 
@@ -166,7 +166,7 @@ describe("importSpecifiers", () => {
 
   it("ignores an import inside a comment", () => {
     const source = [
-      '// import "@appstrate/module-ee";',
+      '// import "@appstrate/module-billing";',
       '/* import "@appstrate/module-chat"; */',
       'import { boot } from "./boot.ts";',
     ].join("\n");
@@ -188,7 +188,7 @@ describe("importSpecifiers", () => {
       "export function Panel() {",
       "  return <div>x</div>;",
       "}",
-      '// import "@appstrate/module-ee";',
+      '// import "@appstrate/module-billing";',
     ].join("\n");
     expect(importSpecifiers(source)).toEqual([]);
   });
@@ -200,16 +200,16 @@ describe("importSpecifiers", () => {
       "export function Panel() {",
       "  return <div>x</div>;",
       "}",
-      'import "@appstrate/module-ee";',
+      'import "@appstrate/module-billing";',
     ].join("\n");
-    expect(importSpecifiers(source)).toEqual(["@appstrate/module-ee"]);
+    expect(importSpecifiers(source)).toEqual(["@appstrate/module-billing"]);
   });
 
   it("reads past a regex literal holding quote characters", () => {
     // Treated as a string, the `["']` swallows the rest of the file and the
     // import behind it disappears from the scan.
-    const source = ["const RE = /[\"']/g;", 'import "@appstrate/module-ee";'].join("\n");
-    expect(importSpecifiers(source)).toEqual(["@appstrate/module-ee"]);
+    const source = ["const RE = /[\"']/g;", 'import "@appstrate/module-billing";'].join("\n");
+    expect(importSpecifiers(source)).toEqual(["@appstrate/module-billing"]);
   });
 
   it("does not read an import QUOTED inside a string literal", () => {
@@ -217,7 +217,7 @@ describe("importSpecifiers", () => {
     // one token. Without that, every file that talks ABOUT an import reads as
     // performing one.
     const source = [
-      "const fixture = 'import \"@appstrate/module-ee\";';",
+      "const fixture = 'import \"@appstrate/module-billing\";';",
       'const other = "void import(`@appstrate/module-chat`)";',
       'import { boot } from "./boot.ts";',
     ].join("\n");
@@ -228,29 +228,30 @@ describe("importSpecifiers", () => {
 /**
  * The Apache-2.0 → commercial direction. Unlike the other two it has no
  * acceptance list and no root narrowing, so the only thing to pin is which
- * specifiers count as reaching into `packages/module-ee/`.
+ * specifiers count as reaching into `ee/`.
  */
 describe("reviewCommercialDependencies", () => {
   const commercial: PlatformImport[] = [
-    { file: "apps/api/test/unit/x.test.ts", spec: "@appstrate/module-ee" },
-    { file: "apps/web/src/hooks/use-billing.ts", spec: "@appstrate/module-ee/schema" },
+    { file: "apps/api/test/unit/x.test.ts", spec: "@appstrate/ee" },
+    { file: "apps/web/src/hooks/use-sso.ts", spec: "@appstrate/ee/sso" },
     {
       file: "packages/db/src/schema/x.ts",
-      spec: "../../../module-ee/drizzle/schema.ts",
-      resolved: "packages/module-ee/drizzle/schema.ts",
+      spec: "../../../../ee/src/sso.ts",
+      resolved: "ee/src/sso.ts",
     },
   ];
 
   it("reports a test tree, the SPA and a relative path alike", () => {
     const problems = reviewCommercialDependencies(commercial);
     expect(problems).toHaveLength(3);
-    for (const p of problems) expect(p).toContain("packages/module-ee/");
+    for (const p of problems) expect(p).toContain("`ee/`");
   });
 
   it("leaves every other module alone — this direction is about the LICENCE", () => {
     expect(
       reviewCommercialDependencies([
         { file: "apps/api/test/unit/x.test.ts", spec: "@appstrate/module-claude-code" },
+        { file: "apps/web/src/x.ts", spec: "@appstrate/module-billing" },
         { file: "apps/web/src/x.ts", spec: "@appstrate/module-chat" },
         {
           file: "apps/api/src/x.ts",
@@ -264,11 +265,16 @@ describe("reviewCommercialDependencies", () => {
   it("does not mistake a package whose name merely starts with the commercial one", () => {
     expect(
       reviewCommercialDependencies([
-        { file: "apps/api/src/x.ts", spec: "@appstrate/module-eels" },
+        { file: "apps/api/src/x.ts", spec: "@appstrate/eels" },
         {
           file: "apps/api/src/x.ts",
-          spec: "../../module-eels/src/index.ts",
-          resolved: "packages/module-eels/src/index.ts",
+          spec: "../../../eels/src/index.ts",
+          resolved: "eels/src/index.ts",
+        },
+        {
+          file: "apps/api/src/x.ts",
+          spec: "../../../packages/ee/src/index.ts",
+          resolved: "packages/ee/src/index.ts",
         },
       ]),
     ).toEqual([]);
@@ -296,7 +302,11 @@ describe("isScannedSource", () => {
   it("never reads an installed dependency, tests included", () => {
     // A workspace's `node_modules` holds every module's source — reading it would
     // report the platform as importing all of them.
-    expect(isScannedSource("node_modules/@appstrate/module-ee/src/index.ts", false)).toBe(false);
-    expect(isScannedSource("node_modules/@appstrate/module-ee/src/index.ts", true)).toBe(false);
+    expect(isScannedSource("node_modules/@appstrate/module-billing/src/index.ts", false)).toBe(
+      false,
+    );
+    expect(isScannedSource("node_modules/@appstrate/module-billing/src/index.ts", true)).toBe(
+      false,
+    );
   });
 });

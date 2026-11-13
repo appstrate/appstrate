@@ -13,7 +13,7 @@
 # initialization must bring /health and Docker health back to healthy with no
 # restart.
 #
-# HEALTH_E2E_EE=1 boots the SAME image and topology with the commercial module
+# HEALTH_E2E_EE=1 boots the SAME image and topology with the billing module
 # enabled and adds the "EE module" phase below (loaded, sweeping). The "EE
 # tables" and "Billing route" phases run in both modes and assert the opposite
 # outcome in each. That mode is the `ee-container-e2e` job in
@@ -48,7 +48,7 @@ if [ "$E2E_EE" = "1" ]; then
     import { envSchema } from "./packages/env/src/index.ts";
     console.log(envSchema.shape.MODULES.parse(undefined));
   ')
-  export MODULES="${default_modules},@appstrate/module-ee"
+  export MODULES="${default_modules},@appstrate/module-billing"
   # `Module loaded` and `billing sweeper started` are info-level.
   export HEALTH_E2E_LOG_LEVEL=info
   # No database variable of its own: the module reads DATABASE_URL, which
@@ -158,8 +158,8 @@ if [ "$E2E_EE" = "1" ]; then
   # Two greps over a variable rather than one pipeline, for the SIGPIPE reason
   # spelled out at the negative-phase grep below.
   module_lines=$(grep -F 'Module loaded' <<<"$positive_logs" || true)
-  if ! grep -q '"id":"ee"' <<<"$module_lines"; then
-    echo 'No `Module loaded` line with "id":"ee" — the EE module never loaded' >&2
+  if ! grep -q '"id":"billing"' <<<"$module_lines"; then
+    echo 'No `Module loaded` line with "id":"billing" — the billing module never loaded' >&2
     exit 1
   fi
   if ! grep -q 'billing sweeper started' <<<"$positive_logs"; then

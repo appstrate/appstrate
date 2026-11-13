@@ -34,7 +34,7 @@ updates:
           - "patch"
         # Each of these gets a PR of its own instead of failing the group:
         # - stripe: any release can move the pinned API version
-        #   (`STRIPE_API_VERSION`, packages/module-ee/src/stripe/client.ts),
+        #   (`STRIPE_API_VERSION`, packages/module-billing/src/stripe/client.ts),
         #   which needs the production webhook endpoint recreated.
         # - better-auth: has its own group above, yet #2187 still carried it,
         #   bumping core/oauth-provider while leaving @better-auth/cimd behind

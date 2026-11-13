@@ -17,12 +17,12 @@
 --   SELECT count(*) AS members, count(DISTINCT org_id) AS orgs
 --   FROM org_members;
 --
--- and know the number before running anything. The commercial module counts
+-- and know the number before running anything. The billing module counts
 -- spaces for NOTHING today — there is no space quota to breach and no billing
 -- consequence (RBAC spec §3.6) — so the count matters to exactly one reader: a
 -- self-hosted operator who has imposed a per-space ceiling of their own,
 -- whether in their own tooling or in whatever the row count feeds. If a space
--- limit is ever added to the commercial module, §3.6 says it counts
+-- limit is ever added to the billing module, §3.6 says it counts
 -- `WHERE owner_user_id IS NULL`, which excludes every row this script writes.
 -- If in doubt, do not run this script at all: the lazy repair covers
 -- correctness on its own.

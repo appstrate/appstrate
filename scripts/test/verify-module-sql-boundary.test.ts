@@ -2,10 +2,10 @@
 
 /**
  * The gate that gives `apps/api/src/modules/README.md` rule 4 — "never a SQL
- * join across the licence boundary" — something other than prose behind it.
+ * join across the module boundary" — something other than prose behind it.
  *
  * The defect it exists for is invisible to every other check: because
- * `@appstrate/module-ee` migrates its tables into the PLATFORM database, a
+ * `@appstrate/module-billing` migrates its tables into the PLATFORM database, a
  * `SELECT … FROM organizations` written in the module compiles, runs, returns
  * rows and passes typecheck, lint, knip, the isolation gate and the test suite.
  * So the positive control below is that exact statement, and it must FAIL.
@@ -24,7 +24,7 @@ import {
 /** The seven `ee_*` tables the module's snapshot declares, in miniature. */
 const OWN = new Set(["ee_billing_accounts", "ee_usage_records"]);
 
-const file = (source: string, name = "packages/module-ee/src/billing/x.ts"): ScannedFile[] => [
+const file = (source: string, name = "packages/module-billing/src/billing/x.ts"): ScannedFile[] => [
   { file: name, source },
 ];
 
@@ -33,19 +33,19 @@ describe("reviewModuleSql — raw SQL naming a platform table", () => {
     // The whole reason this gate exists. Nothing else in `bun run check` says a
     // word about this statement.
     const { problems } = reviewModuleSql(
-      "ee",
+      "billing",
       file("const q = sql`SELECT id FROM organizations WHERE id = 1`;"),
       OWN,
     );
     expect(problems).toHaveLength(1);
-    expect(problems[0]).toContain("packages/module-ee/src/billing/x.ts:1");
+    expect(problems[0]).toContain("packages/module-billing/src/billing/x.ts:1");
     expect(problems[0]).toContain("`organizations`");
     expect(problems[0]).toContain("does not own");
   });
 
   it("NEGATIVE CONTROL: passes on the same statement against one of its own tables", () => {
     const { problems, references } = reviewModuleSql(
-      "ee",
+      "billing",
       file("const q = sql`SELECT id FROM ee_usage_records`;"),
       OWN,
     );
@@ -55,7 +55,7 @@ describe("reviewModuleSql — raw SQL naming a platform table", () => {
 
   it("catches a JOIN, an INSERT INTO, an UPDATE and a DELETE FROM alike", () => {
     const { problems } = reviewModuleSql(
-      "ee",
+      "billing",
       file(
         [
           "const a = sql`SELECT 1 FROM ee_usage_records JOIN llm_usage USING (id)`;",
@@ -78,7 +78,7 @@ describe("reviewModuleSql — raw SQL naming a platform table", () => {
 
   it("allows the catalog relations any module may read", () => {
     const { problems } = reviewModuleSql(
-      "ee",
+      "billing",
       file(
         "const a = sql`SELECT 1 FROM pg_indexes`;\n" +
           "const b = sql`SELECT 1 FROM information_schema.columns`;\n" +
@@ -91,7 +91,7 @@ describe("reviewModuleSql — raw SQL naming a platform table", () => {
 
   it("reads a `public.`-qualified own table as its own", () => {
     const { problems } = reviewModuleSql(
-      "ee",
+      "billing",
       file('const q = sql`SELECT 1 FROM public."ee_billing_accounts"`;'),
       OWN,
     );
@@ -104,18 +104,18 @@ describe("reviewModuleSql — the platform schema import", () => {
     // The other half of the same defect, and the half raw-SQL scanning cannot
     // see: `.from(organizations)` names no table in any string.
     const { problems } = reviewModuleSql(
-      "ee",
+      "billing",
       file('import { organizations } from "@appstrate/db/schema";'),
       OWN,
     );
     expect(problems).toHaveLength(1);
     expect(problems[0]).toContain("@appstrate/db/schema");
-    expect(problems[0]).toContain("licence boundary");
+    expect(problems[0]).toContain("module boundary");
   });
 
   it("fails on a relative import reaching into packages/db", () => {
     const { problems } = reviewModuleSql(
-      "ee",
+      "billing",
       file('import { runs } from "../../../packages/db/src/schema/runs.ts";'),
       OWN,
     );
@@ -125,7 +125,7 @@ describe("reviewModuleSql — the platform schema import", () => {
 
   it("NEGATIVE CONTROL: leaves the module's own imports and core alone", () => {
     const { problems } = reviewModuleSql(
-      "ee",
+      "billing",
       file(
         'import { getEeDb } from "../db.ts";\n' +
           'import { logger } from "@appstrate/core/logger";\n' +
@@ -137,7 +137,7 @@ describe("reviewModuleSql — the platform schema import", () => {
   });
 
   it("does not mistake `@appstrate/dbx` for the platform schema", () => {
-    const { problems } = reviewModuleSql("ee", file('import x from "@appstrate/dbx";'), OWN);
+    const { problems } = reviewModuleSql("billing", file('import x from "@appstrate/dbx";'), OWN);
     expect(problems).toEqual([]);
   });
 });
@@ -145,7 +145,7 @@ describe("reviewModuleSql — the platform schema import", () => {
 describe("sqlText — what survives the blanking", () => {
   it("blanks comments, so prose about a platform table is not a query", () => {
     const { problems } = reviewModuleSql(
-      "ee",
+      "billing",
       file("// never write SELECT * FROM organizations here\n/* nor FROM llm_usage */\n"),
       OWN,
     );
@@ -154,7 +154,7 @@ describe("sqlText — what survives the blanking", () => {
 
   it("blanks a string that is not SQL, so a log message is not a query", () => {
     const { problems, literals } = reviewModuleSql(
-      "ee",
+      "billing",
       file('logger.info("copied FROM organizations into the ledger");'),
       OWN,
     );
@@ -212,8 +212,8 @@ describe("reviewModuleSnapshot", () => {
     // the SNAPSHOT that is broken, and a gate checking a module against an empty
     // set of its own tables is checking nothing.
     const problem = reviewModuleSnapshot({
-      id: "ee",
-      snapshot: "packages/module-ee/drizzle/migrations/meta/0003_snapshot.json",
+      id: "billing",
+      snapshot: "packages/module-billing/drizzle/migrations/meta/0003_snapshot.json",
       tables: new Set(),
     });
     expect(problem).toContain("0003_snapshot.json");
@@ -223,7 +223,7 @@ describe("reviewModuleSnapshot", () => {
 
   it("NEGATIVE CONTROL: says nothing about a snapshot that declares one", () => {
     expect(
-      reviewModuleSnapshot({ id: "ee", snapshot: "x/0003_snapshot.json", tables: OWN }),
+      reviewModuleSnapshot({ id: "billing", snapshot: "x/0003_snapshot.json", tables: OWN }),
     ).toBeNull();
   });
 });

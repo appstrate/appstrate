@@ -18,6 +18,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   releases at once, and roll back by restoring the backup. Detail in
   `scripts/migration/README.md`.
 
+- **Breaking: `@appstrate/module-ee` is now `@appstrate/module-billing`,
+  under Apache-2.0** (#1645). The billing module (Stripe billing, credit
+  quotas, usage metering, billing managers) leaves the commercial licence and
+  `packages/module-ee/` moves to `packages/module-billing/`, so the whole
+  repository and the published image are Apache-2.0. **A deployment that sets
+  `MODULES` with `@appstrate/module-ee` must replace it with
+  `@appstrate/module-billing` before upgrading**: the old specifier no longer
+  resolves, and the platform refuses to boot with
+  `Module "@appstrate/module-ee" could not be loaded`. Nothing maps the old
+  name to the new one. The module's id in logs changes from `ee` to `billing`
+  (`Module loaded {"id":"billing"}`). Nothing else changes for a deployment: the
+  `ee_*` tables, the `drizzle.ee_migrations` journal, the `STRIPE_*` and
+  `EE_RECONCILIATION_*` variables and the `/api/billing/*` routes keep their
+  names, and no migration runs. `verify:license-boundary` now reserves the
+  root `ee/` directory for code under a commercial licence.
+
 - **Fixed: the runner bootstrap keeps its env across sudo-rs** (#2153).
   `get.appstrate.dev/runner` elevated with `sudo -E`, which sudo-rs (the default
   sudo since Ubuntu 25.10) ignores with only a warning, so `runner install` lost

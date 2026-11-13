@@ -128,12 +128,12 @@ const MODULE_TENANT: Record<string, Tenant> = {
   "module-claude-code": "oss",
   "module-chat": "oss",
   "module-observability": "oss",
-  "module-ee": "ee",
+  "module-billing": "oss",
 };
 
 /**
  * Module source roots to scan. A module's contract members are frequently
- * split across files (module-ee declares `openApiPaths` in `openapi.ts`, oidc
+ * split across files (module-billing declares `openApiPaths` in `openapi.ts`, oidc
  * declares `events`/`hooks` in sub-modules re-exported into the literal), so
  * we scan the whole tree, not just `index.ts`. Paths are relative to the
  * repository root — every module now lives in it — and an absent root is
@@ -149,7 +149,7 @@ const DECLARER_ROOTS: Record<string, string> = {
   "module-claude-code": "packages/module-claude-code/src",
   "module-chat": "packages/module-chat/src",
   "module-observability": "packages/module-observability/src",
-  "module-ee": "packages/module-ee/src",
+  "module-billing": "packages/module-billing/src",
 };
 
 // The two module tables are one roster written twice, and the compiler cannot
@@ -177,22 +177,23 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
   // ── extension — generic, must have >= 2 owners ──────────────────────────
   createRouter: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "mcp", "module-ee", "module-chat"],
+    owners: ["oidc", "webhooks", "mcp", "module-billing", "module-chat"],
   },
-  publicPaths: { kind: "extension", owners: ["oidc", "mcp", "module-ee"] },
+  publicPaths: { kind: "extension", owners: ["oidc", "mcp", "module-billing"] },
   permissionsContribution: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "mcp", "module-ee", "module-chat"],
-    justification: "RBAC — the open-core boundary; module-ee cannot migrate it into core (#488).",
+    owners: ["oidc", "webhooks", "mcp", "module-billing", "module-chat"],
+    justification:
+      "RBAC — the core/module boundary; module-billing cannot migrate it into core (#488).",
   },
   hooks: {
     kind: "extension",
-    owners: ["oidc", "module-ee", "module-codex", "module-claude-code"],
+    owners: ["oidc", "module-billing", "module-codex", "module-claude-code"],
   },
-  events: { kind: "extension", owners: ["webhooks", "mcp", "module-ee", "module-chat"] },
+  events: { kind: "extension", owners: ["webhooks", "mcp", "module-billing", "module-chat"] },
   features: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "mcp", "module-ee", "module-chat"],
+    owners: ["oidc", "webhooks", "mcp", "module-billing", "module-chat"],
   },
   modelProviders: {
     kind: "extension",
@@ -202,19 +203,19 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
   },
   openApiPaths: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "mcp", "module-ee", "module-chat"],
+    owners: ["oidc", "webhooks", "mcp", "module-billing", "module-chat"],
   },
   openApiComponentSchemas: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "module-ee", "module-chat"],
+    owners: ["oidc", "webhooks", "module-billing", "module-chat"],
   },
   openApiTags: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "mcp", "module-ee", "module-chat"],
+    owners: ["oidc", "webhooks", "mcp", "module-billing", "module-chat"],
   },
   openApiSchemas: {
     kind: "extension",
-    owners: ["oidc", "webhooks", "module-chat", "module-ee"],
+    owners: ["oidc", "webhooks", "module-chat", "module-billing"],
     justification:
       "Zod/OpenAPI parity is tied to each module's routes; centralizing these schemas would make the platform import module-private request shapes.",
   },
@@ -249,7 +250,7 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
   },
   principalPermissions: {
     kind: "seam",
-    owners: ["module-ee"],
+    owners: ["module-billing"],
     justification:
       "Org-level grants attached to a PRINCIPAL rather than a role (RBAC spec §4.2/§10). " +
       "The EE billing managers cannot be an `org_role` value — core is Apache-2.0 and carries " +
@@ -259,7 +260,7 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
   },
   emailOverrides: {
     kind: "seam",
-    owners: ["module-ee"],
+    owners: ["module-billing"],
     justification:
       "Email-template override into @appstrate/emails registry — EE branding, single-owner by design.",
   },
@@ -272,7 +273,7 @@ const LEDGER: Record<ContractMember, LedgerEntry> = {
  * platform maintained its whole call path.
  */
 const HOOK_LEDGER: Record<HookMember, NamedLedgerEntry> = {
-  beforeUsage: { owners: ["module-ee"] },
+  beforeUsage: { owners: ["module-billing"] },
   beforeSignup: { owners: ["oidc"] },
   afterSignup: { owners: ["oidc"] },
 };
@@ -285,9 +286,9 @@ const HOOK_LEDGER: Record<HookMember, NamedLedgerEntry> = {
 const EVENT_LEDGER: Record<EventMember, NamedLedgerEntry> = {
   onRunStatusChange: { owners: ["webhooks", "module-chat"] },
   onRunConnectionMissing: { owners: ["webhooks"] },
-  onOrgCreate: { owners: ["mcp", "module-ee"] },
-  onOrgDelete: { owners: ["mcp", "module-ee"] },
-  onOrgMemberRemove: { owners: ["module-ee"] },
+  onOrgCreate: { owners: ["mcp", "module-billing"] },
+  onOrgDelete: { owners: ["mcp", "module-billing"] },
+  onOrgMemberRemove: { owners: ["module-billing"] },
 };
 
 /**
@@ -300,7 +301,7 @@ const EVENT_LEDGER: Record<EventMember, NamedLedgerEntry> = {
 const SERVICE_LEDGER: Record<ServiceMember, NamedLedgerEntry> = {
   logger: { owners: ["module-observability"] },
   http: { owners: ["module-chat", "module-observability"] },
-  usage: { owners: ["module-ee"] },
+  usage: { owners: ["module-billing"] },
   inProcess: { owners: ["module-chat"] },
   resolveChatModel: { owners: ["module-chat"] },
   recordChatUsage: { owners: ["module-chat"] },
@@ -309,14 +310,14 @@ const SERVICE_LEDGER: Record<ServiceMember, NamedLedgerEntry> = {
   listEnforcedChatSkills: { owners: ["module-chat"] },
   cleanupSessionFiles: { owners: ["module-chat"] },
   checkUsageAllowed: { owners: ["module-chat"] },
-  setFileStorageLimit: { owners: ["module-ee"] },
-  audit: { owners: ["module-ee"] },
+  setFileStorageLimit: { owners: ["module-billing"] },
+  audit: { owners: ["module-billing"] },
 };
 
 /**
  * Detect a top-level object-literal member declaration on its own indented
  * line: `member:` (value), `member(` (method), or `member,` (ES shorthand —
- * how module-ee declares `openApiPaths,`/`openApiTags,`). The scan is best-effort
+ * how module-billing declares `openApiPaths,`/`openApiTags,`). The scan is best-effort
  * (warnings only), so a stray false positive is a nudge, not a gate.
  */
 function declaresMember(source: string, member: string): boolean {

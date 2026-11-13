@@ -18,7 +18,7 @@
 --             < scripts/schema-catalog.sql | diff packages/db/schema-catalog.txt -
 --
 -- Deliberately left out:
---   * `ee_*` tables — `@appstrate/module-ee` migrates them under its own
+--   * `ee_*` tables — `@appstrate/module-billing` migrates them under its own
 --     journal (`drizzle.ee_migrations`) at init, not through `migrate.ts`;
 --   * the NOTIFY triggers — the platform installs them at boot
 --     (`packages/db/src/notify.ts`), so a migrate-only database has none. They

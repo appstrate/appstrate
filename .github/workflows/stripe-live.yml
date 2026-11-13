@@ -3,14 +3,14 @@
 # The EE billing tests run against a hand-written mock. The mock proves what
 # the module SENDS; it cannot prove what Stripe RETURNS, because we wrote those
 # responses ourselves. This job closes that half: it runs
-# `packages/module-ee/test/live` against real Stripe in TEST MODE and fails
+# `packages/module-billing/test/live` against real Stripe in TEST MODE and fails
 # when a fixture claims a field the live API does not have, or when Stripe stops
 # behaving the way the module bets it does.
 #
 # Without `STRIPE_LIVE_SECRET_KEY` the suite skips itself. A skip is tolerated
 # only on pull_request, where fork and Dependabot PRs structurally cannot see
 # repository secrets; on push, schedule and workflow_dispatch a missing key FAILS
-# the job. Full rationale: `packages/module-ee/README.md`.
+# the job. Full rationale: `packages/module-billing/README.md`.
 name: Stripe live contract
 
 on:
@@ -20,18 +20,18 @@ on:
     - cron: "0 7 * * 1"
   workflow_dispatch:
   # The guaranteed run. A Dependabot bump of `stripe` edits
-  # packages/module-ee/package.json, so its MERGE lands here — with repository
+  # packages/module-billing/package.json, so its MERGE lands here — with repository
   # secrets — even though its PR run could not see them.
   push:
     branches:
       - main
     paths:
-      - "packages/module-ee/**"
+      - "packages/module-billing/**"
       - ".github/workflows/stripe-live.yml"
   # Best-effort pre-merge signal for human PRs touching the billing module.
   pull_request:
     paths:
-      - "packages/module-ee/**"
+      - "packages/module-billing/**"
       - ".github/workflows/stripe-live.yml"
 
 concurrency:
@@ -62,7 +62,7 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      # `packages/module-ee` declares `postgres: true`, so under TEST_TIER=0 the
+      # `packages/module-billing` declares `postgres: true`, so under TEST_TIER=0 the
       # harness skips the module and collects none of its tests — including this
       # suite. The infra is up purely so the suite is allowed to run; it touches
       # no table.
@@ -88,6 +88,6 @@ jobs:
           STRIPE_LIVE_SECRET_KEY: ${{ secrets.STRIPE_LIVE_SECRET_KEY }}
 
       - name: Run Stripe live contract suite
-        run: bun test packages/module-ee/test/live
+        run: bun test packages/module-billing/test/live
         env:
           STRIPE_LIVE_SECRET_KEY: ${{ secrets.STRIPE_LIVE_SECRET_KEY }}

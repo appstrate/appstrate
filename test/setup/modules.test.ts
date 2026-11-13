@@ -5,7 +5,7 @@
  * must agree — the preload (import/register/init a module?) and the tier-0
  * runner (collect its test files?).
  *
- * `packages/module-ee` is the only declaration on disk, so it exercises one
+ * `packages/module-billing` is the only declaration on disk, so it exercises one
  * shape. These assertions are the negative control it cannot provide: a
  * rejection that stopped rejecting, or a skip that stopped skipping, would be
  * invisible until a module relied on it — and would then present as the failure

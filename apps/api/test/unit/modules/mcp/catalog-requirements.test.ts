@@ -219,7 +219,7 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
   { path: "/api/runs/{runId}/workspace", why: "runner input — HMAC `verifyRunSignature`" },
   { path: "/api/oauth/logout", why: "ends the session its own cookie names" },
   { path: "/api/uploads/_content", why: "HMAC upload sink — skips the auth pipeline outright" },
-  // Only with `@appstrate/module-ee` loaded (Postgres tiers): see PRESENT_ONLY_WITH_EE.
+  // Only with `@appstrate/module-billing` loaded (Postgres tiers): see PRESENT_ONLY_WITH_EE.
   { path: "/api/billing/webhooks", why: "Stripe receiver, verified by `stripe-signature`" },
 
   // ── Self-scoped: the caller's own rows, with no RBAC resource to name.
@@ -307,7 +307,7 @@ const NO_MOUNTED_GUARD: ReadonlyArray<AllowlistEntry> = [
   },
 ];
 
-/** Entries a deployment without `@appstrate/module-ee` cannot match. */
+/** Entries a deployment without `@appstrate/module-billing` cannot match. */
 const PRESENT_ONLY_WITH_EE: ReadonlySet<string> = new Set(["/api/billing/webhooks"]);
 
 function covers(
