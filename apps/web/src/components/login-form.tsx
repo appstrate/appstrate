@@ -100,7 +100,8 @@ export function LoginForm({
   const resolvedHeader = header === undefined ? defaultHeader : header;
   const resolvedFooter = footer === undefined ? defaultFooter : footer;
 
-  const hasSocialAuth = features.googleAuth || features.githubAuth || features.smtp;
+  const hasSocialAuth =
+    features.googleAuth || features.githubAuth || features.microsoftAuth || features.smtp;
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
@@ -152,6 +153,9 @@ export function LoginForm({
               )}
               {features.githubAuth && (
                 <SocialSignInButton provider="github" callbackURL={callbackURL} />
+              )}
+              {features.microsoftAuth && (
+                <SocialSignInButton provider="microsoft" callbackURL={callbackURL} />
               )}
               {features.smtp && (
                 <Button

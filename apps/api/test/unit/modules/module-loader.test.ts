@@ -96,6 +96,7 @@ const baseConfig: AppConfig = {
     webhooks: false,
     googleAuth: false,
     githubAuth: false,
+    microsoftAuth: false,
     smtp: false,
     signupDisabled: false,
     bootstrapTokenPending: false,

@@ -199,7 +199,7 @@ export function useAuth() {
   }, []);
 
   const signInWithSocial = useCallback(
-    async (provider: "google" | "github", callbackURL?: string) => {
+    async (provider: "google" | "github" | "microsoft", callbackURL?: string) => {
       rememberSignedIn(localStorage, true);
       await authClient.signIn.social({
         provider,
@@ -209,7 +209,7 @@ export function useAuth() {
     [],
   );
 
-  const linkSocial = useCallback(async (provider: "google" | "github") => {
+  const linkSocial = useCallback(async (provider: "google" | "github" | "microsoft") => {
     await authClient.linkSocial({
       provider,
       callbackURL: "/preferences",
@@ -219,6 +219,8 @@ export function useAuth() {
   const linkGoogle = useCallback(() => linkSocial("google"), [linkSocial]);
 
   const linkGithub = useCallback(() => linkSocial("github"), [linkSocial]);
+
+  const linkMicrosoft = useCallback(() => linkSocial("microsoft"), [linkSocial]);
 
   /**
    * Unlink ONE account by the `id` of its `listAccounts()` row (Better Auth's primary key). The
@@ -300,6 +302,7 @@ export function useAuth() {
     linkSocial,
     linkGoogle,
     linkGithub,
+    linkMicrosoft,
     unlinkAccount,
     resendVerificationEmail,
     requestPasswordReset,

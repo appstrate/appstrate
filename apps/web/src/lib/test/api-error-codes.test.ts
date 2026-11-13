@@ -208,6 +208,8 @@ const NOT_SURFACED = new Set([
   "login_link_expired",
   "oidc_realm_unresolved",
   "signup_configuration_invalid",
+  // Refused on a space client's hosted login only; the SPA is the instance client.
+  "social_provider_not_configured",
   // A launch warning, never a refusal: `lib/launch-warnings.ts` words the toast.
   "integration_unbound",
   // Warnings of integration discovery and server sync (`POST /api/integrations/discover`,
