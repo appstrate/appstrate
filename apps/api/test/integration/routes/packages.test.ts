@@ -1076,6 +1076,30 @@ describe("Packages API", () => {
       expect(JSON.stringify(await res.json())).toContain("cannot declare variables");
     });
 
+    it("refuses the runtime binding key: only a system package may carry it", async () => {
+      const res = await app.request("/api/packages/integrations", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: {
+            name: "@pkgorg/runtime-bound",
+            version: "1.0.0",
+            type: "integration",
+            schema_version: "0.3",
+            display_name: "Runtime bound",
+            source: {
+              kind: "remote",
+              remote: { url: "https://example.com/mcp", transport: "streamable-http" },
+            },
+            _meta: { "dev.appstrate/platform": {} },
+          },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(await res.json())).toContain("reserved for system packages");
+    });
+
     it("updates an integration manifest under If-Match", async () => {
       const createRes = await app.request("/api/packages/integrations", {
         method: "POST",

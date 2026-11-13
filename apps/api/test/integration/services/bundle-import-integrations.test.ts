@@ -12,6 +12,8 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { zipSync } from "fflate";
+import { writeBundleToBuffer } from "@appstrate/afps-runtime/bundle";
+import { PLATFORM_META_KEY } from "@appstrate/core/integration";
 import { db, truncateAll } from "../../helpers/db.ts";
 import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import {
@@ -109,6 +111,23 @@ function connectManifest(name: string, criterion: Record<string, unknown>) {
   }) as unknown as Record<string, unknown>;
 }
 
+/** An integration bound to the runtime (`_meta["dev.appstrate/platform"]`), legal for a system package only. */
+function runtimeBoundManifest(name: string): Record<string, unknown> {
+  return {
+    name,
+    version: "1.0.0",
+    type: "integration",
+    schema_version: "0.3",
+    display_name: "Runtime bound",
+    source: {
+      kind: "remote",
+      remote: { url: "https://platform.invalid/mcp", transport: "streamable-http" },
+    },
+    tools_policy: { log: {} },
+    _meta: { [PLATFORM_META_KEY]: {} },
+  };
+}
+
 describe("handleImportBundle — integration packages", () => {
   let ctx: TestContext;
   let scope: { orgId: string; spaceId: string };
@@ -160,6 +179,42 @@ describe("handleImportBundle — integration packages", () => {
     const list = await listIntegrations(scope);
     expect(list.length).toBe(1);
     expect(list[0]!.id).toBe("@official/gmail");
+  });
+
+  it("refuses a runtime-bound root: the key is reserved for system packages", async () => {
+    const afps = buildIntegrationAfps({ manifest: runtimeBoundManifest("@evil/platform") });
+    const err = await handleImportBundle(afps, scope, ctx.user.id, noAuthorize, noShare).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(400);
+    expect(JSON.stringify((err as ApiError).fieldErrors)).toContain("reserved for system packages");
+    const rows = await db.select().from(packages).where(eq(packages.id, "@evil/platform"));
+    expect(rows).toEqual([]);
+  });
+
+  it("refuses a runtime-bound dependency before writing any package", async () => {
+    const root = await readOrBuildBundle(
+      buildIntegrationAfps({ manifest: validManifest() }),
+      scope,
+    );
+    const dep = await readOrBuildBundle(
+      buildIntegrationAfps({ manifest: runtimeBoundManifest("@evil/platform") }),
+      scope,
+    );
+    const bundle = { ...root, packages: new Map([...root.packages, ...dep.packages]) };
+    const err = await handleImportBundle(
+      writeBundleToBuffer(bundle),
+      scope,
+      ctx.user.id,
+      noAuthorize,
+      noShare,
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(400);
+    expect((err as ApiError).message).toContain("@evil/platform@1.0.0");
+    const rows = await db.select({ id: packages.id }).from(packages);
+    expect(rows).toEqual([]);
   });
 
   it("re-import is idempotent and returns `reused`", async () => {

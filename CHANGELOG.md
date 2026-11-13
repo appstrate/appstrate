@@ -111,6 +111,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **An org integration cannot carry `_meta["dev.appstrate/platform"]`** (#2199). The key binds an
+  integration to the runtime that executes the run, which authenticates to it with the run token,
+  so only a system package may declare it: creating, updating, forking or importing an
+  integration that carries it answers `400`, and a bundle is refused when any of its non-system
+  packages carries it, dependencies included.
+
 - **BREAKING: `output` is injected from `output.schema`, not selected in
   `runtime_tools`** (#2197). A run has the `output` tool exactly when its agent
   declares a non-empty `output.schema`, and must then call it; without a schema

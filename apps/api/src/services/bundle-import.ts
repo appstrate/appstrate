@@ -38,7 +38,7 @@ import {
   readBundleFromBuffer,
 } from "@appstrate/afps-runtime/bundle";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { findUnevaluableExpressions } from "@appstrate/core/integration";
+import { findRuntimeBinding, findUnevaluableExpressions } from "@appstrate/core/integration";
 import { parsePackageZip } from "@appstrate/core/zip";
 import { db } from "@appstrate/db/client";
 import { packages, packageVersions } from "@appstrate/db/schema";
@@ -766,6 +766,20 @@ function assertBundleScopesNotReserved(bundle: Bundle): void {
   }
 }
 
+/**
+ * Refuse a runtime-bound integration anywhere in the bundle, dependencies included: the runtime
+ * hands its run token to that integration's endpoint, so only a system package may carry the key
+ * (`findRuntimeBinding`). Unlike the root-only gates, a dependency is judged too — no stored
+ * package can carry the key, so the refusal never blocks a bundle of already-published copies.
+ */
+function assertBundleRuntimeBindingsSystemOnly(bundle: Bundle): void {
+  for (const [identity, pkg] of bundle.packages) {
+    const packageId = parsePackageIdentity(identity)?.packageId;
+    if (packageId && isSystemPackage(packageId)) continue;
+    assertNoManifestViolations(findRuntimeBinding(pkg.manifest), `${identity}: `);
+  }
+}
+
 export async function preflightBundleImport(
   bytes: Uint8Array,
   scope: BundleAssemblyScope,
@@ -774,6 +788,7 @@ export async function preflightBundleImport(
   const bundle = await readOrBuildBundle(bytes, scope);
   assertBundleRootConforms(bundle);
   assertBundleScopesNotReserved(bundle);
+  assertBundleRuntimeBindingsSystemOnly(bundle);
   await authorize(bundle);
   const carried = carriedVersionsById(bundle);
   await assertBundleAgentsExposeCallableTools(bundle, scope.orgId, carried);

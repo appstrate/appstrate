@@ -33,6 +33,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Runtime-bound integrations** (`@appstrate/core/integration`, #2199).
+  **`PLATFORM_META_KEY`** (`"dev.appstrate/platform"`) is the `_meta` key that binds an
+  integration's MCP endpoint to the runtime executing the run; `integrationManifestSchema`
+  accepts it only on an integration without `auths` and with `source.kind: "remote"`.
+  **`isRuntimeBoundIntegration(manifest)`** is the one predicate that reads it, and
+  **`findRuntimeBinding(manifest)`** is its write-path refusal for packages the platform did not
+  ship.
+
 - **`@appstrate/core/model-error`: a structured reason beside the category.**
   **`MODEL_ERROR_REASONS`** and **`ModelErrorReason`** (`runtime_version_too_old`), and an
   optional `reason` on `ModelErrorClassification` that `classifyModelError` and

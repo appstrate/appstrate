@@ -78,6 +78,49 @@ export const API_META_KEY = "dev.appstrate/api";
 
 const APPSTRATE_META_NAMESPACE = API_META_KEY.slice(0, API_META_KEY.indexOf("/") + 1);
 
+// ─────────────────────────────────────────────
+// Appstrate vendor extension: runtime binding (`_meta["dev.appstrate/platform"]`)
+// ─────────────────────────────────────────────
+
+/**
+ * `_meta` key binding an integration to the runtime that executes the run: its MCP endpoint is the
+ * runtime's own, and the runtime authenticates to it. The declared `source.remote.url` is never
+ * contacted by a runtime that honours the key; a runtime that does not know the key leaves the
+ * integration unbound.
+ *
+ * Shape: `{}` (AFPS `_meta` values are objects; the key's presence is the declaration). Legal
+ * only on an unauthenticated (`auths` absent) `source.kind: "remote"` integration
+ * (`integrationManifestSchema`). Only a system package may carry it: every org write
+ * path refuses it (`findRuntimeBinding`), because the runtime hands its run token to that endpoint.
+ */
+export const PLATFORM_META_KEY = "dev.appstrate/platform";
+
+/**
+ * Is this integration bound to the runtime ({@link PLATFORM_META_KEY})? THE predicate: the spawn
+ * resolver, the sidecar, activation and the write rule read it, never the package id.
+ */
+export function isRuntimeBoundIntegration(manifest: unknown): boolean {
+  if (!manifest || typeof manifest !== "object") return false;
+  const meta = (manifest as { _meta?: unknown })._meta;
+  if (!meta || typeof meta !== "object") return false;
+  return (meta as Record<string, unknown>)[PLATFORM_META_KEY] !== undefined;
+}
+
+/**
+ * WRITE-path refusal of {@link PLATFORM_META_KEY} on a package the platform did not ship. The
+ * caller applies it to every non-system manifest it stores.
+ */
+export function findRuntimeBinding(manifest: unknown): { path: IssuePath; message: string }[] {
+  return isRuntimeBoundIntegration(manifest)
+    ? [
+        {
+          path: ["_meta", PLATFORM_META_KEY],
+          message: `_meta["${PLATFORM_META_KEY}"] is reserved for system packages`,
+        },
+      ]
+    : [];
+}
+
 /**
  * Resumable-upload protocols an api_call auth MAY advertise under
  * `_meta["dev.appstrate/api"].auths.{key}.upload_protocols`. This is an open
@@ -682,6 +725,26 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
           });
         }
       }
+    }
+  }
+
+  // (5b) `_meta["dev.appstrate/platform"]` (runtime binding): only on an unauthenticated
+  // `remote` integration — the runtime authenticates to its own endpoint, so an auth would never
+  // be used, and only a remote source has an MCP endpoint to bind.
+  if (isRuntimeBoundIntegration(manifest)) {
+    if (manifest.auths !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        message: `_meta["${PLATFORM_META_KEY}"] requires an integration without auths`,
+        path: ["auths"],
+      });
+    }
+    if (manifest.source?.kind !== "remote") {
+      ctx.addIssue({
+        code: "custom",
+        message: `_meta["${PLATFORM_META_KEY}"] requires source.kind "remote"`,
+        path: ["source", "kind"],
+      });
     }
   }
 
