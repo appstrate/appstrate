@@ -624,8 +624,13 @@ describe("launchRunAndWait launch body", () => {
       version: "7.3.1",
       description: "Exact caller-owned contract",
       timeout: 42,
-      dependencies: { integrations: { "@appstrate/gmail": "^1.2.0" } },
-      integrations_configuration: { "@appstrate/gmail": { tools: ["api_call"] } },
+      dependencies: {
+        integrations: { "@appstrate/gmail": "^1.2.0", "@appstrate/platform": "^1.3.0" },
+      },
+      integrations_configuration: {
+        "@appstrate/gmail": { tools: ["api_call"] },
+        "@appstrate/platform": { tools: ["log", "note"] },
+      },
       output: {
         schema: {
           type: "object",
@@ -654,19 +659,22 @@ describe("launchRunAndWait launch body", () => {
     );
   });
 
-  it("kind:inline keeps caller-supplied dependencies without the platform integration", async () => {
+  it("kind:inline adds the platform entry beside a caller-declared integration", async () => {
     const { fetchImpl, captured } = captureLaunch();
 
     const result = await launchRunAndWait(
       {
         kind: "inline",
         manifest: {
-          display_name: "Effet sans outil",
-          dependencies: { integrations: { "@appstrate/gmail": "^1.2.0" } },
+          display_name: "Tri des e-mails",
+          dependencies: {
+            integrations: { "@appstrate/gmail": "^1.2.0" },
+            skills: { "@acme/triage": "^1.0.0" },
+          },
           integrations_configuration: { "@appstrate/gmail": { tools: ["api_call"] } },
           output: {},
         },
-        prompt: "Perform the side effect.",
+        prompt: "Sort the inbox.",
       },
       { origin: "https://test.local", headers: {}, fetch: fetchImpl },
     );
@@ -674,11 +682,78 @@ describe("launchRunAndWait launch body", () => {
     expect(result.ok).toBe(true);
     const manifest = (captured()?.body as { manifest?: Record<string, unknown> } | undefined)
       ?.manifest;
-    expect(manifest?.dependencies).toEqual({ integrations: { "@appstrate/gmail": "^1.2.0" } });
+    expect(manifest?.dependencies).toEqual({
+      integrations: { "@appstrate/gmail": "^1.2.0", "@appstrate/platform": "^1.0.0" },
+      skills: { "@acme/triage": "^1.0.0" },
+    });
     expect(manifest?.integrations_configuration).toEqual({
       "@appstrate/gmail": { tools: ["api_call"] },
+      "@appstrate/platform": { tools: ["log"] },
     });
     expect(manifest?.output).toEqual({});
+  });
+
+  it("kind:inline adds the platform entry to dependencies that declare no integrations", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { display_name: "Avec skill", dependencies: { skills: { "@acme/x": "*" } } },
+        prompt: "do it",
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    const manifest = (captured()?.body as { manifest?: Record<string, unknown> } | undefined)
+      ?.manifest;
+    expect(manifest?.dependencies).toEqual({
+      skills: { "@acme/x": "*" },
+      integrations: { "@appstrate/platform": "^1.0.0" },
+    });
+  });
+
+  it("kind:inline keeps a caller-written platform entry exactly", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: {
+          display_name: "Sans journal",
+          dependencies: { integrations: { "@appstrate/platform": "^1.4.0" } },
+          integrations_configuration: { "@appstrate/platform": { tools: [] } },
+        },
+        prompt: "do it",
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    const manifest = (captured()?.body as { manifest?: Record<string, unknown> } | undefined)
+      ?.manifest;
+    expect(manifest?.dependencies).toEqual({
+      integrations: { "@appstrate/platform": "^1.4.0" },
+    });
+    expect(manifest?.integrations_configuration).toEqual({
+      "@appstrate/platform": { tools: [] },
+    });
+  });
+
+  it("kind:inline leaves a non-object dependencies value for validation to refuse", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: { display_name: "Malformé", dependencies: { integrations: [] } },
+        prompt: "do it",
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    const manifest = (captured()?.body as { manifest?: Record<string, unknown> } | undefined)
+      ?.manifest;
+    expect(manifest?.dependencies).toEqual({ integrations: [] });
   });
 
   it("kind:inline rejects a minimal manifest with no usable identity before dispatch", async () => {

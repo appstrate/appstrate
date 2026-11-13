@@ -155,14 +155,18 @@ type MaterializedManifest =
  * Turn the concise manifest accepted by `run_and_wait` into the one canonical
  * AFPS manifest sent to the inline-run route.
  *
- * This is a shallow defaulting boundary by design: defaults fill ABSENT
- * top-level fields only, while every caller-supplied field replaces its
- * default verbatim. A caller-supplied `dependencies` or
- * `integrations_configuration` therefore carries no `@appstrate/platform`
- * entry unless the caller writes one; no capability is silently re-injected.
- * Nested deterministic contracts such as `output.schema` remain entirely
- * caller-owned, and `output: {}` (no schema) gives a run without the `output`
- * tool.
+ * Defaults fill ABSENT top-level fields, and every caller-supplied field
+ * replaces its default verbatim, with one exception: the tables keyed by
+ * package id (`dependencies.integrations`, `integrations_configuration`)
+ * receive their defaults entry by entry. The `@appstrate/platform` entry is
+ * added to each table that does not already name that id, and the caller's
+ * own entries are never touched. A caller opts out of the platform tools by
+ * writing the entry itself, e.g.
+ * `integrations_configuration["@appstrate/platform"] = { tools: [] }`. A
+ * `dependencies` or `dependencies.integrations` value that is not an object is
+ * left as written, for manifest validation to refuse. Nested deterministic
+ * contracts such as `output.schema` remain entirely caller-owned, and
+ * `output: {}` (no schema) gives a run without the `output` tool.
  */
 function materializeInlineManifest(manifest: Record<string, unknown>): MaterializedManifest {
   const hasOwn = (key: string): boolean => Object.prototype.hasOwnProperty.call(manifest, key);
@@ -187,19 +191,46 @@ function materializeInlineManifest(manifest: Record<string, unknown>): Materiali
   if (!hasOwn("name")) defaults.name = derivedName;
   if (!hasOwn("type")) defaults.type = "agent";
   if (!hasOwn("version")) defaults.version = "1.0.0";
-  if (!hasOwn("dependencies")) {
-    defaults.dependencies = { integrations: { [PLATFORM_INTEGRATION_ID]: "^1.0.0" } };
-  }
-  if (!hasOwn("integrations_configuration")) {
-    defaults.integrations_configuration = { [PLATFORM_INTEGRATION_ID]: { tools: ["log"] } };
-  }
   if (!hasOwn("output")) {
     defaults.output = {
       schema: { type: "object", properties: {}, additionalProperties: true },
     };
   }
 
-  return { manifest: { ...defaults, ...manifest } };
+  const materialized: Record<string, unknown> = { ...defaults, ...manifest };
+  const dependencies = hasOwn("dependencies") ? asRecordOrNull(manifest.dependencies) : {};
+  if (dependencies) {
+    const integrations = Object.prototype.hasOwnProperty.call(dependencies, "integrations")
+      ? asRecordOrNull(dependencies.integrations)
+      : {};
+    if (integrations) {
+      materialized.dependencies = {
+        ...dependencies,
+        integrations: withDefaultEntry(integrations, PLATFORM_INTEGRATION_ID, "^1.0.0"),
+      };
+    }
+  }
+  const configuration = hasOwn("integrations_configuration")
+    ? asRecordOrNull(manifest.integrations_configuration)
+    : {};
+  if (configuration) {
+    materialized.integrations_configuration = withDefaultEntry(
+      configuration,
+      PLATFORM_INTEGRATION_ID,
+      { tools: ["log"] },
+    );
+  }
+
+  return { manifest: materialized };
+}
+
+/** `table` with `value` under `id` when the table does not already name `id`. */
+function withDefaultEntry(
+  table: Record<string, unknown>,
+  id: string,
+  value: unknown,
+): Record<string, unknown> {
+  return Object.prototype.hasOwnProperty.call(table, id) ? table : { ...table, [id]: value };
 }
 
 /**

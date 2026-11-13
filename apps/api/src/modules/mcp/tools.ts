@@ -1082,9 +1082,11 @@ const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
     description:
       "Partial canonical AFPS agent manifest (kind:inline). Usually only `display_name` " +
       "plus task-specific dependencies/configuration are needed; `name` is derived and " +
-      "AFPS boilerplate, the `@appstrate/platform` dependency with its `log` tool, and an open " +
-      "output schema are defaulted. Every provided field is an exact top-level replacement: " +
-      "arrays and nested objects are not merged. You may instead provide a complete, " +
+      "AFPS boilerplate and an open output schema are defaulted. Every provided field is an " +
+      "exact top-level replacement: arrays and nested objects are not merged. The platform adds " +
+      "`@appstrate/platform` with its `log` tool unless the manifest already names that " +
+      "integration in `dependencies.integrations` or `integrations_configuration`. You may " +
+      "instead provide a complete, " +
       "strict deterministic manifest and override every field. Do NOT put the prompt inside " +
       "the manifest — it goes in the separate top-level `prompt` argument.",
     properties: {
@@ -1166,12 +1168,13 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       (inline
         ? "For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set " +
           "only a concise task-specific `display_name` plus task dependencies/configuration. The " +
-          "platform derives `name` and fills omitted AFPS boilerplate: `dependencies` declares " +
-          "the `@appstrate/platform` integration, `integrations_configuration` selects its `log` " +
-          "tool, and `output` is an open object schema. Defaults apply only to top-level fields " +
-          "you omit; every field you provide replaces its default exactly, with no array or " +
-          "nested-object merge. When you provide `dependencies` or `integrations_configuration`, " +
-          "declare `@appstrate/platform` there and select its `log` tool yourself. " +
+          "platform derives `name` and fills omitted AFPS boilerplate, with an open object " +
+          "`output` schema. Defaults apply only to top-level fields you omit; every field you " +
+          "provide replaces its default exactly, with no array or nested-object merge. The " +
+          "platform also adds `@appstrate/platform` with its `log` tool selected unless the " +
+          "manifest already names that integration in `dependencies.integrations` or " +
+          "`integrations_configuration`; it never changes your entries, and " +
+          '`integrations_configuration["@appstrate/platform"] = { tools: [] }` removes the tools. ' +
           "A complete deterministic manifest may override every field, including a strict " +
           "`output.schema`. The run has the `output` tool exactly when its manifest declares an " +
           "`output.schema`. The chat " +

@@ -196,7 +196,9 @@ describe("run_and_wait", () => {
     expect(tool.descriptor.description).toContain("build a `.zip` or `.afps` archive");
     expect(tool.descriptor.description).not.toContain("publish_archive");
     expect(tool.descriptor.description).toMatch(/fields you omit/i);
-    expect(tool.descriptor.description).toContain("declare `@appstrate/platform` there");
+    expect(tool.descriptor.description).toContain(
+      "adds `@appstrate/platform` with its `log` tool selected unless the manifest already names that integration",
+    );
     expect(tool.descriptor.description).not.toMatch(/one main user-facing file/i);
     expect(tool.descriptor.description).not.toMatch(/several peer files/i);
     expect(tool.descriptor.inputSchema.properties).not.toHaveProperty("primary_deliverable");

@@ -36,9 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   definitions they built: the `@appstrate/platform` system integration serves these tools.
 
 - **BREAKING: `launchRunAndWait` inline defaults** (`@appstrate/core/run-and-wait-client`,
-  #2199). An absent `dependencies` defaults to the `@appstrate/platform` dependency, an absent
-  `integrations_configuration` to its `log` tool, and an absent `output` to the open object
-  schema; the `runtime_tools` default and the refusal of a non-array
+  #2199). `dependencies.integrations` and `integrations_configuration` receive the
+  `@appstrate/platform` entry (version `^1.0.0`, tools `["log"]`) when they do not already name
+  that id, entry by entry, beside the caller's own entries; an absent `output` defaults to the
+  open object schema. The `runtime_tools` default and the refusal of a non-array
   `manifest.runtime_tools` are removed.
 
 - **BREAKING: `@appstrate/core/runtime-tools-catalog` and the `runtime_tools` field are

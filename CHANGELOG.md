@@ -122,12 +122,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   packages carries it, dependencies included.
 
 - **BREAKING: `run_and_wait` inline defaults declare `@appstrate/platform`** (#2199). An
-  inline manifest without `dependencies` gets the `@appstrate/platform` dependency, one
-  without `integrations_configuration` gets its `log` tool selected, and one without
-  `output` gets the open object output schema. The `runtime_tools` default and the
-  `manifest.runtime_tools` argument are gone; defaults still fill absent top-level fields
-  only, so a caller that supplies `dependencies` declares `@appstrate/platform` itself.
-  The chat prompt and the `run_and_wait` descriptions say so. The default "Hello World"
+  inline manifest gets the `@appstrate/platform` dependency with its `log` tool selected
+  unless it already names that integration in `dependencies.integrations` or
+  `integrations_configuration`: these two tables are completed entry by entry, beside the
+  caller's own integrations. `integrations_configuration["@appstrate/platform"] = { tools: [] }`
+  removes the tools. One without `output` gets the open object output schema. The
+  `runtime_tools` default and the `manifest.runtime_tools` argument are gone. The chat
+  prompt and the `run_and_wait` descriptions say so. The default "Hello World"
   agent declares `@appstrate/platform`.
 
 - **BREAKING: `publish_file` is a harness tool, not selected in `runtime_tools`** (#2199).

@@ -466,12 +466,14 @@ its in-chat progress surface or `resource_link` deliverables.
 For `kind:"inline"`, `manifest` is a partial canonical AFPS manifest. A normal
 call can provide only a task-specific `display_name` plus its dependencies and
 integration configuration; `run_and_wait` derives `name` and defaults the
-omitted AFPS boilerplate, the `@appstrate/platform` dependency with its `log`
-tool selected, and an open object output schema. Defaults fill absent top-level
-fields only. Every supplied field is preserved as an exact
-replacement—arrays and nested objects are not merged, so a supplied
-`dependencies` or `integrations_configuration` declares `@appstrate/platform`
-and selects `log` itself when the run should log. Clients can therefore provide a complete
+omitted AFPS boilerplate and an open object output schema. Defaults fill absent
+top-level fields only. Every supplied field is preserved as an exact
+replacement—arrays and nested objects are not merged. The platform also adds
+`@appstrate/platform` with its `log` tool selected unless the manifest already
+names that integration in `dependencies.integrations` or
+`integrations_configuration`; it never changes the caller's entries, and
+`integrations_configuration["@appstrate/platform"] = { tools: [] }` removes the
+tools. Clients can therefore provide a complete
 deterministic manifest and override every field, including a strict
 `output.schema`. The run has the `output` tool exactly when its manifest
 declares an `output.schema`.
