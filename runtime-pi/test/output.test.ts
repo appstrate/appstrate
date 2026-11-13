@@ -1,27 +1,25 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect } from "bun:test";
-import {
-  buildOutputToolDef,
-  RUNTIME_TOOL_EVENTS_META_KEY,
-  type RuntimeToolEvent,
-} from "@appstrate/core/runtime-tool-defs";
+import { beforeEach, describe, it, expect } from "bun:test";
+import { buildOutputToolDef, type RuntimeToolEvent } from "@appstrate/core/runtime-tool-defs";
 
 /**
  * Tests for the `output` tool: a transport-neutral tool definition
  * (`@appstrate/core/runtime-tool-defs`) built from the agent's declared
  * output schema. The schema is advertised as the `data` argument's input
- * schema AND is AJV-validated at call time. The call returns its canonical
- * `output.emitted` event under the result `_meta` key for the host to
- * re-emit into the run sink.
+ * schema AND is AJV-validated at call time. A valid call emits its canonical
+ * `output.emitted` event through the `emit` the host passes in.
  */
 
 const outputDef = buildOutputToolDef;
 
-function eventsOf(meta: Record<string, unknown> | undefined): RuntimeToolEvent[] {
-  const raw = meta?.[RUNTIME_TOOL_EVENTS_META_KEY];
-  return Array.isArray(raw) ? (raw as RuntimeToolEvent[]) : [];
-}
+const emitted: RuntimeToolEvent[] = [];
+const emit = (event: RuntimeToolEvent): void => {
+  emitted.push(event);
+};
+beforeEach(() => {
+  emitted.length = 0;
+});
 
 describe("output runtime tool — schema exposure", () => {
   it("injects output schema properties when provided", () => {
@@ -70,11 +68,11 @@ describe("output runtime tool — execute validation", () => {
       properties: { name: { type: "string" } },
       required: ["name"],
     });
-    const result = await def.handler({ data: {} });
+    const result = await def.handler({ data: {} }, emit);
     expect(result.isError).toBe(true);
     expect(result.content[0]!.text).toContain("validation failed");
     expect(result.content[0]!.text).toContain("name");
-    expect(eventsOf(result._meta)).toHaveLength(0);
+    expect(emitted).toHaveLength(0);
   });
 
   it("rejects type mismatches", async () => {
@@ -83,7 +81,7 @@ describe("output runtime tool — execute validation", () => {
       properties: { count: { type: "number" } },
       required: ["count"],
     });
-    const result = await def.handler({ data: { count: "not a number" } });
+    const result = await def.handler({ data: { count: "not a number" } }, emit);
     expect(result.isError).toBe(true);
     expect(result.content[0]!.text).toContain("validation failed");
   });
@@ -94,10 +92,10 @@ describe("output runtime tool — execute validation", () => {
       properties: { name: { type: "string" }, age: { type: "number" } },
       required: ["name", "age"],
     });
-    const result = await def.handler({ data: { name: "Ada", age: 36 } });
+    const result = await def.handler({ data: { name: "Ada", age: 36 } }, emit);
     expect(result.isError).toBeUndefined();
     expect(result.content[0]!.text).toBe("Output recorded");
-    const events = eventsOf(result._meta);
+    const events = emitted;
     expect(events).toHaveLength(1);
     expect(events[0]!.type).toBe("output.emitted");
     expect(events[0]!.data).toEqual({ name: "Ada", age: 36 });

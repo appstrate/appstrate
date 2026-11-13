@@ -12,8 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING:** `RunResult.memories`, `RunResult.pinned` and the `Memory` / `PinnedSlot` types
   are removed. `foldEvent` / `reduceEvents` leave `memory.added` and `pinned.set` out of the
   aggregate: the server that serves the `note` and `pin` tools persists them when the tool is
-  called. `mergeTerminalResult` merges `output` and `logs` only. Conformance case L4.3 checks
-  that neither event is aggregated.
+  called. `mergeTerminalResult` merges `output` and `logs` only.
+- **BREAKING:** `memory.added` and `pinned.set` are no longer canonical run events: nothing
+  emits them. `MemoryAddedEvent` and `PinnedSetEvent` leave `CanonicalRunEvent`, the two types
+  leave `CANONICAL_EVENT_TYPES` and `CANONICAL_CONSTRAINTS`, so `isCanonicalRunEvent` and the
+  stdout bridge reject them. Conformance case L4.1 scripts `log.written` and `output.emitted`
+  only.
 
 ### Changed — the output schema is read by `readDeclaredOutputSchema` (#2197)
 

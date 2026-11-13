@@ -14,14 +14,14 @@ function event(type: string, extra: Record<string, unknown> = {}): RunEvent {
 describe("buildCloudEventEnvelope", () => {
   it("builds a valid CloudEvents 1.0 envelope for a canonical event", () => {
     const env = buildCloudEventEnvelope({
-      event: event("memory.added", { content: "hi" }),
+      event: event("@my-org/audit.logged", { content: "hi" }),
       sequence: 3,
       id: "01HXYZ000000000000000000",
       nowMs: 1714000000000,
     });
     expect(env).toEqual({
       specversion: "1.0",
-      type: "memory.added",
+      type: "@my-org/audit.logged",
       source: "/afps/runs/run_abc",
       id: "01HXYZ000000000000000000",
       time: "2024-04-24T23:06:40.000Z",
@@ -32,13 +32,7 @@ describe("buildCloudEventEnvelope", () => {
   });
 
   it("mirrors the RunEvent type verbatim (no rewriting)", () => {
-    const mappings: readonly string[] = [
-      "memory.added",
-      "pinned.set",
-      "output.emitted",
-      "log.written",
-      "@my-org/audit.logged",
-    ];
+    const mappings: readonly string[] = ["output.emitted", "log.written", "@my-org/audit.logged"];
     for (const type of mappings) {
       const env = buildCloudEventEnvelope({
         event: event(type),

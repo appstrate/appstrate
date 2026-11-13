@@ -101,14 +101,9 @@ describe("persistRunEvent", () => {
   // `file.published` / `fileId` is the ONE published-file spelling. The
   // pre-#1177 `document.published` / `document_id` twin is gone from the sink.
   //
-  // The "producer and acceptor are the same build, so there is no version
-  // boundary" argument does NOT cover this drop, and it is worth writing down
-  // because it reads as if it does. That argument belongs to the CONTAINER-side
-  // acceptor `reEmitRuntimeToolEvents`, which core bundles into the runtime
-  // image alongside the producer `filePublishedEvent`. `persistRunEvent` is the
-  // PLATFORM-side sink — a separate artifact, reached over HTTP by whatever
-  // image the operator happens to have launched — so a version boundary very
-  // much exists across it.
+  // `persistRunEvent` is the PLATFORM-side sink — a separate artifact from the
+  // runtime image, reached over HTTP by whatever image the operator happens to
+  // have launched — so a version boundary exists across it.
   //
   // What makes the drop safe across that boundary is the image-tag rule plus
   // the event's own precondition. `findRuntimeImageTagMismatch`, enforced by

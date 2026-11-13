@@ -21,10 +21,6 @@ export type LogLevel = "info" | "warn" | "error";
  *   the reducer assigns `result.output = event.data`, it does NOT merge)
  * - `log.written` events append to `logs`
  *
- * `memory.added` and `pinned.set` are not aggregated: memories and pinned
- * slots are persisted by the server that serves the `note` and `pin` tools,
- * when the tool is called.
- *
  * Passed to {@link EventSink.finalize} when the run ends.
  */
 export interface RunResult {

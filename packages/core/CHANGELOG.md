@@ -34,8 +34,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **BREAKING: `buildRuntimeToolDefs` and `BuildRuntimeToolDefsOptions` are removed**
   (`@appstrate/core/runtime-tool-defs`, #2199), with the `log`, `note` and `pin` tool
   definitions they built: the `@appstrate/platform` system integration serves these tools.
-  `CANONICAL_RUNTIME_TOOL_EVENT_TYPES` keeps only `output.emitted` and `file.published`, so
-  `reEmitRuntimeToolEvents` drops `log.written`, `memory.added` and `pinned.set`.
+
+- **BREAKING: runtime tools emit their events directly** (`@appstrate/core/runtime-tool-defs`,
+  #2199). `RuntimeToolDef.handler` takes the run's `emit` as its second argument and calls it
+  with the `output.emitted` / `file.published` event of a successful call.
+  `RUNTIME_TOOL_EVENTS_META_KEY`, `CANONICAL_RUNTIME_TOOL_EVENT_TYPES`,
+  `reEmitRuntimeToolEvents` and `RuntimeToolResult._meta` are removed with the
+  `_meta["dev.appstrate/events"]` channel.
 
 - **BREAKING: `EnforcedChatSkill` gains the required `uri`** (`@appstrate/core/chat-contract`):
   the `skill://` URI of an enforced skill's `SKILL.md` (`null` with `content` when no version

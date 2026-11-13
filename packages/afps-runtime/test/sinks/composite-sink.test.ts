@@ -39,7 +39,7 @@ describe("CompositeSink", () => {
     const b = new RecordingSink();
     const composite = new CompositeSink([a, b]);
 
-    const ev = event("memory.added", { content: "x" });
+    const ev = event("@my-org/audit.logged", { content: "x" });
     await composite.handle(ev);
 
     expect(a.events).toEqual([ev]);

@@ -81,11 +81,11 @@ describe("CANONICAL_EVENT_TYPES", () => {
   it("matches the union exhaustively (compile + runtime)", () => {
     // Compile-time: each entry must be a CanonicalRunEvent['type']
     const arr: ReadonlyArray<CanonicalRunEvent["type"]> = CANONICAL_EVENT_TYPES;
-    // The one place the count is pinned to a literal: 4 reserved AFPS
-    // namespaces (memory/pinned/output/log) + 3 appstrate.* platform-internal
-    // events (progress/error/metric). Every other file derives from
+    // The one place the count is pinned to a literal: 2 reserved AFPS
+    // namespaces (output/log) + 3 appstrate.* platform-internal events
+    // (progress/error/metric). Every other file derives from
     // `CANONICAL_EVENT_TYPES.length` so the literal has a single home.
-    expect(arr.length).toBe(7);
+    expect(arr.length).toBe(5);
     expect(new Set(arr).size).toBe(arr.length);
   });
 

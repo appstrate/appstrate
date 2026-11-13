@@ -278,16 +278,12 @@ function createHumanSink(
           writeStdout(dim(`∑ tokens in=${input} out=${output}  $${cost.toFixed(4)}\n`));
           return;
         }
-        case "memory.added": {
-          writeStdout(yellow(`+ memory: ${String(event.content ?? "")}\n`));
-          return;
-        }
         case "output.emitted": {
           writeStdout(green(`✓ output: ${JSON.stringify(event.data ?? {})}\n`));
           return;
         }
         default: {
-          // Be quiet about low-signal events (log.written, pinned.set)
+          // Be quiet about low-signal events (log.written)
           // by default — JSONL mode exposes them fully.
           return;
         }

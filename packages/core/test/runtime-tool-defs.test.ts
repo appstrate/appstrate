@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect } from "bun:test";
+import { beforeEach, describe, it, expect } from "bun:test";
 import {
   buildPublishFileDef,
   buildOutputToolDef,
-  CANONICAL_RUNTIME_TOOL_EVENT_TYPES,
   filePublishedEvent,
-  reEmitRuntimeToolEvents,
-  RUNTIME_TOOL_EVENTS_META_KEY,
   type PublishedFile,
   type RuntimeToolEvent,
 } from "../src/runtime-tool-defs.ts";
 
-function eventsOf(meta: Record<string, unknown> | undefined): RuntimeToolEvent[] {
-  const raw = meta?.[RUNTIME_TOOL_EVENTS_META_KEY];
-  return Array.isArray(raw) ? (raw as RuntimeToolEvent[]) : [];
-}
+const emitted: RuntimeToolEvent[] = [];
+const emit = (event: RuntimeToolEvent): void => {
+  emitted.push(event);
+};
+beforeEach(() => {
+  emitted.length = 0;
+});
 
 describe("runtime tool events", () => {
   // Every emitted canonical event MUST carry a numeric `timestamp`: the
@@ -35,38 +35,11 @@ describe("runtime tool events", () => {
       [output, { data: { ok: true } }],
       [publish, { path: "a.txt" }],
     ] as const) {
-      const events = eventsOf((await def.handler(args))._meta);
-      expect(events.length).toBeGreaterThan(0);
-      for (const e of events) expect(typeof e.timestamp).toBe("number");
+      emitted.length = 0;
+      await def.handler(args, emit);
+      expect(emitted.length).toBeGreaterThan(0);
+      for (const e of emitted) expect(typeof e.timestamp).toBe("number");
     }
-  });
-
-  it("accepts only the events of the runner's own tools", () => {
-    expect([...CANONICAL_RUNTIME_TOOL_EVENT_TYPES]).toEqual(["output.emitted", "file.published"]);
-  });
-});
-
-describe("reEmitRuntimeToolEvents", () => {
-  it("re-emits each well-formed event from the meta key", () => {
-    const emitted: RuntimeToolEvent[] = [];
-    reEmitRuntimeToolEvents(
-      {
-        [RUNTIME_TOOL_EVENTS_META_KEY]: [
-          { type: "output.emitted", data: { a: 1 } },
-          { bad: 1 },
-          { type: "log.written", message: "a" },
-        ],
-      },
-      (e) => emitted.push(e),
-    );
-    expect(emitted).toEqual([{ type: "output.emitted", data: { a: 1 } }]);
-  });
-
-  it("is a no-op when the meta key is absent or malformed", () => {
-    const emitted: RuntimeToolEvent[] = [];
-    reEmitRuntimeToolEvents(undefined, (e) => emitted.push(e));
-    reEmitRuntimeToolEvents({ [RUNTIME_TOOL_EVENTS_META_KEY]: "nope" }, (e) => emitted.push(e));
-    expect(emitted).toHaveLength(0);
   });
 });
 
@@ -104,13 +77,14 @@ describe("buildPublishFileDef", () => {
       return publishedFile;
     });
 
-    const result = await def.handler({
-      path: "outputs/final.html",
-      name: "Final report.html",
-    });
+    const result = await def.handler(
+      { path: "outputs/final.html", name: "Final report.html" },
+      emit,
+    );
 
+    expect(result.isError).toBeUndefined();
     expect(requests).toEqual([["outputs/final.html", "Final report.html"]]);
-    expect(eventsOf(result._meta)).toEqual([
+    expect(emitted).toEqual([
       {
         ...filePublishedEvent(publishedFile),
         timestamp: expect.any(Number),
@@ -140,14 +114,17 @@ describe("buildPublishFileDef", () => {
       return publishedFile;
     });
 
-    const result = await def.handler({
-      path: "outputs/final.html",
-      presentation: "primary",
-    });
+    const result = await def.handler(
+      {
+        path: "outputs/final.html",
+        presentation: "primary",
+      },
+      emit,
+    );
 
     expect(result.isError).toBeUndefined();
     expect(requests).toEqual([["outputs/final.html", undefined]]);
-    expect(eventsOf(result._meta)).toHaveLength(1);
+    expect(emitted).toHaveLength(1);
   });
 
   it("normalizes an empty `name` to undefined on the way to the uploader", async () => {
@@ -161,7 +138,7 @@ describe("buildPublishFileDef", () => {
       return publishedFile;
     });
 
-    const result = await def.handler({ path: "outputs/notes.md", name: "" });
+    const result = await def.handler({ path: "outputs/notes.md", name: "" }, emit);
 
     expect(result.isError).toBeUndefined();
     expect(requests).toEqual([["outputs/notes.md", undefined]]);
@@ -169,7 +146,7 @@ describe("buildPublishFileDef", () => {
 
   it("still rejects a missing path", async () => {
     const def = buildPublishFileDef(async () => publishedFile);
-    const result = await def.handler({ presentation: "primary" });
+    const result = await def.handler({ presentation: "primary" }, emit);
     expect(result.isError).toBe(true);
     expect(result.content[0]!.text).toContain("non-empty `path`");
   });
@@ -179,30 +156,6 @@ describe("buildPublishFileDef", () => {
     expect(def.descriptor.name).toBe("publish_file");
     expect(def.descriptor.description).not.toContain("publish_document");
     expect(def.descriptor.description).not.toContain("document://");
-  });
-});
-
-describe("run-event type compatibility (#1177)", () => {
-  it("file.published is canonical and document.published is no longer accepted", () => {
-    expect([...CANONICAL_RUNTIME_TOOL_EVENT_TYPES]).toContain("file.published");
-    expect([...CANONICAL_RUNTIME_TOOL_EVENT_TYPES]).not.toContain("document.published" as never);
-
-    // The only producer of the retired name is this module's own
-    // `filePublishedEvent`, bundled into the SAME artifact as the acceptor
-    // below — there is no version boundary between them, so the name can now
-    // only arrive forged, and the acceptor drops it like any other.
-    const emitted: unknown[] = [];
-    reEmitRuntimeToolEvents(
-      {
-        [RUNTIME_TOOL_EVENTS_META_KEY]: [
-          { type: "document.published", document_id: "file_legacy" },
-          { type: "file.published", fileId: "file_new" },
-          { type: "forged.event", x: 1 },
-        ],
-      },
-      (e) => emitted.push(e),
-    );
-    expect(emitted).toEqual([{ type: "file.published", fileId: "file_new" }]);
   });
 });
 
@@ -229,11 +182,11 @@ describe("output — schema dialect and compile failure", () => {
       required: ["pair"],
     });
 
-    const bad = await def.handler({ data: { pair: [1, "x"] } });
+    const bad = await def.handler({ data: { pair: [1, "x"] } }, emit);
     expect(bad.isError).toBe(true);
     expect(bad.content[0]).toMatchObject({ text: expect.stringContaining("validation failed") });
 
-    const good = await def.handler({ data: { pair: ["x", 1] } });
+    const good = await def.handler({ data: { pair: ["x", 1] } }, emit);
     expect(good.isError).toBeUndefined();
   });
 
@@ -249,7 +202,7 @@ describe("output — schema dialect and compile failure", () => {
       properties: { n: { type: "not-a-json-schema-type" } },
     });
 
-    const res = await def.handler({ data: { anything: true } });
+    const res = await def.handler({ data: { anything: true } }, emit);
     expect(res.isError).toBe(true);
     expect(res.content[0]).toMatchObject({
       text: expect.stringContaining("cannot be compiled"),
@@ -273,8 +226,8 @@ describe("output — schema dialect and compile failure", () => {
     const second = buildOutputToolDef({ ...schema });
 
     for (const def of [first, second]) {
-      expect((await def.handler({ data: { n: "nope" } })).isError).toBe(true);
-      expect((await def.handler({ data: { n: 1 } })).isError).toBeUndefined();
+      expect((await def.handler({ data: { n: "nope" } }, emit)).isError).toBe(true);
+      expect((await def.handler({ data: { n: 1 } }, emit)).isError).toBeUndefined();
     }
   });
 });

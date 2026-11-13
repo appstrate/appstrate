@@ -137,7 +137,6 @@ const prompt = await renderPrompt({
 const { sink, snapshot } = createReducerSink();
 const events: RunEvent[] = [
   { type: "log.written", timestamp: Date.now(), runId: "run_1", level: "info", message: "hello" },
-  { type: "memory.added", timestamp: Date.now(), runId: "run_1", content: "learned something" },
   { type: "output.emitted", timestamp: Date.now(), runId: "run_1", data: { done: true } },
 ];
 for (const ev of events) await sink.handle(ev);

@@ -18,13 +18,6 @@ describe("createReducerSink", () => {
     expect(snapshot()).toEqual(emptyRunResult());
   });
 
-  it("leaves memory.added and pinned.set out of the snapshot", async () => {
-    const { sink, snapshot } = createReducerSink();
-    await sink.handle(event("memory.added", { content: "a" }));
-    await sink.handle(event("pinned.set", { key: "checkpoint", content: { a: 1 } }));
-    expect(snapshot()).toEqual(emptyRunResult());
-  });
-
   it("replaces output on each output.emitted event", async () => {
     const { sink, snapshot } = createReducerSink();
     await sink.handle(event("output.emitted", { data: { x: 1 } }));
@@ -53,10 +46,10 @@ describe("createReducerSink", () => {
 
   it("finalize() replaces the snapshot with the runner-provided result", async () => {
     const { sink, snapshot } = createReducerSink();
-    await sink.handle(event("memory.added", { content: "a" }));
+    await sink.handle(event("log.written", { level: "info", message: "a" }));
     const runnerResult = {
       ...reduceEvents([
-        event("memory.added", { content: "final" }),
+        event("log.written", { level: "info", message: "final" }),
         event("output.emitted", { data: { done: true } }),
       ]),
       status: "success" as const,
@@ -67,8 +60,6 @@ describe("createReducerSink", () => {
 
   it("produces the same result as reduceEvents over the event stream", async () => {
     const events = [
-      event("memory.added", { content: "m1" }),
-      event("pinned.set", { key: "checkpoint", content: { c: 1 } }),
       event("output.emitted", { data: { a: 1 } }),
       event("output.emitted", { data: { b: 2 } }),
       event("log.written", { level: "info", message: "done" }),

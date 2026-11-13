@@ -449,10 +449,6 @@ function scriptEvent(type: string, extra: Record<string, unknown>): RunEvent {
 
 const SAMPLE_SCRIPT: RunEvent[] = [
   scriptEvent("log.written", { level: "info", message: "starting" }),
-  scriptEvent("memory.added", { content: "first" }),
-  scriptEvent("memory.added", { content: "second" }),
-  scriptEvent("pinned.set", { key: "checkpoint", content: { counter: 1 } }),
-  scriptEvent("pinned.set", { key: "checkpoint", content: { counter: 2 } }),
   scriptEvent("output.emitted", { data: { answer: 0, partial: true } }),
   scriptEvent("output.emitted", { data: { answer: 42, partial: false, extra: "done" } }),
 ];
@@ -481,15 +477,7 @@ const L4_ORDERED_EMISSION: ConformanceCase = {
     if (emitted.length !== SAMPLE_SCRIPT.length) {
       return fail(`emitted ${emitted.length} events, expected ${SAMPLE_SCRIPT.length}`);
     }
-    const EXPECTED_TYPES = [
-      "log.written",
-      "memory.added",
-      "memory.added",
-      "pinned.set",
-      "pinned.set",
-      "output.emitted",
-      "output.emitted",
-    ];
+    const EXPECTED_TYPES = ["log.written", "output.emitted", "output.emitted"];
     for (let i = 0; i < emitted.length; i++) {
       if (emitted[i]!.type !== EXPECTED_TYPES[i]) {
         return fail(`event ${i} has type ${emitted[i]!.type}, expected ${EXPECTED_TYPES[i]}`);
@@ -524,9 +512,6 @@ const L4_REDUCER_SEMANTICS: ConformanceCase = {
     const res = await withScript(adapter);
     if (res.skipped) return skipped("adapter does not implement runScripted");
     const r = res.output.result;
-    if ("memories" in r || "pinned" in r) {
-      return fail(`memory.added / pinned.set must not be aggregated: ${JSON.stringify(r)}`);
-    }
     const out = r.output as { answer?: number; partial?: boolean; extra?: string } | null;
     if (!out || out.answer !== 42 || out.partial !== false || out.extra !== "done") {
       return fail(`output replace-on-emit failed: ${JSON.stringify(out)}`);

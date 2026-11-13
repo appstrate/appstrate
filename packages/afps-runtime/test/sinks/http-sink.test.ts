@@ -62,7 +62,7 @@ function startTestServer(): ServerContext {
 
 const RUN_SECRET = "test-secret-k9rdqs";
 const SAMPLE_EVENT: RunEvent = {
-  type: "memory.added",
+  type: "@my-org/audit.logged",
   timestamp: 1714000000000,
   runId: "run_http_test",
   content: "sent via http sink",
@@ -114,7 +114,7 @@ describe("HttpSink", () => {
 
     const cloudEvent = JSON.parse(req.body);
     expect(cloudEvent.specversion).toBe("1.0");
-    expect(cloudEvent.type).toBe("memory.added");
+    expect(cloudEvent.type).toBe("@my-org/audit.logged");
     expect(cloudEvent.source).toBe("/afps/runs/run_http_test");
     expect(cloudEvent.id).toBe("id_0001");
     // First emitted event is sequence=1. The platform's ingestion endpoint

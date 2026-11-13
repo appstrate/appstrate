@@ -9,11 +9,9 @@
  * around an injected HTTP uploader. `@appstrate/runner-pi` registers both as
  * Pi extensions (see `outputSchema` and `fileUploader` on its `PiRunner`).
  *
- * Event delivery: a tool call NEVER emits directly. It returns the
- * canonical run events under the result `_meta` key
- * {@link RUNTIME_TOOL_EVENTS_META_KEY}; the runner re-emits them into the
- * run's single event sink through {@link reEmitRuntimeToolEvents}, which keeps
- * a single sequence source for the run-event pipeline.
+ * Event delivery: the runner passes each handler the `emit` function of the
+ * run's single event sink; a successful call emits its canonical run event
+ * through it, stamped with a production-time `timestamp`, before returning.
  *
  * Lives in `@appstrate/core` (dependency-light, already ships `ajv`) so the
  * tool logic carries no Pi SDK dependency.
@@ -25,45 +23,11 @@ import { compileCached } from "./schema-validation.ts";
 import type { RunAndWaitFile } from "./run-and-wait-client.ts";
 
 /**
- * `_meta` key under which a runtime tool call surfaces the canonical run
- * events it produced (`output.emitted`, `file.published`). The runner reads
- * this key and re-emits each event into the run's event sink.
- *
- * AFPS (Phase F1): reverse-DNS namespace — `_meta` keys must be
- * either a single bare token or a reverse-DNS prefix (RFC §2.2 / Appendix
- * B). The canonical form is `"dev.appstrate/events"`.
+ * A canonical run event produced by a runtime tool call: `output.emitted`
+ * (`output`) or `file.published` (`publish_file`).
  */
-export const RUNTIME_TOOL_EVENTS_META_KEY = "dev.appstrate/events";
-
-/**
- * The closed set of canonical run-event types a runtime tool may emit. Used
- * as a trust-boundary allowlist by {@link reEmitRuntimeToolEvents}: only the
- * platform's own first-party runtime tools legitimately produce these, so any
- * event under {@link RUNTIME_TOOL_EVENTS_META_KEY} whose `type` is not in this
- * set is dropped rather than forwarded into the run's event sink.
- */
-export const CANONICAL_RUNTIME_TOOL_EVENT_TYPES = [
-  "output.emitted",
-  // Emitted by the `publish_file` tool (and the entrypoint outputs sweep) once
-  // a run file has been stored on the platform. Carries the durable file
-  // metadata so ingestion persists a run_log the UI/chat can render.
-  "file.published",
-] as const;
-
-/**
- * Membership form of {@link CANONICAL_RUNTIME_TOOL_EVENT_TYPES}, for the trust
- * boundary in `reEmitRuntimeToolEvents`.
- *
- * Named CANONICAL, not ACCEPTED: on a set whose whole job is to be closed, a name promising
- * a wider membership than it has is an invitation to add one back.
- */
-const CANONICAL_RUNTIME_TOOL_EVENT_TYPE_SET: ReadonlySet<string> = new Set<string>(
-  CANONICAL_RUNTIME_TOOL_EVENT_TYPES,
-);
-
-/** A canonical run event carried back from a runtime tool call. */
 export interface RuntimeToolEvent {
-  type: (typeof CANONICAL_RUNTIME_TOOL_EVENT_TYPES)[number];
+  type: "output.emitted" | "file.published";
   [k: string]: unknown;
 }
 
@@ -71,7 +35,6 @@ export interface RuntimeToolEvent {
 export interface RuntimeToolResult {
   content: Array<{ type: "text"; text: string }>;
   isError?: boolean;
-  _meta?: Record<string, unknown>;
 }
 
 /**
@@ -85,20 +48,22 @@ export interface RuntimeToolDef {
     description: string;
     inputSchema: Record<string, unknown>;
   };
-  handler: (rawArgs: unknown) => Promise<RuntimeToolResult>;
+  /** `emit` writes into the run's event sink. */
+  handler: (
+    rawArgs: unknown,
+    emit: (event: RuntimeToolEvent) => void,
+  ) => Promise<RuntimeToolResult>;
 }
 
-function withEvents(text: string, events: RuntimeToolEvent[]): RuntimeToolResult {
-  // Stamp a production-time `timestamp` on every canonical event at the single
-  // point they are wrapped: canonical run events carry a required `timestamp`,
-  // and the re-emit path (`reEmitRuntimeToolEvents` → run sink) does not stamp
-  // one. An event that already carries its own timestamp keeps it.
-  const now = Date.now();
-  const stamped = events.map((e) => ({ timestamp: now, ...e }));
-  return {
-    content: [{ type: "text", text }],
-    _meta: { [RUNTIME_TOOL_EVENTS_META_KEY]: stamped },
-  };
+function emitAndReply(
+  emit: (event: RuntimeToolEvent) => void,
+  event: RuntimeToolEvent,
+  text: string,
+): RuntimeToolResult {
+  // Canonical run events carry a required `timestamp` and the run sink does
+  // not stamp one: stamp it here, at the single emit point of both tools.
+  emit({ timestamp: Date.now(), ...event });
+  return { content: [{ type: "text", text }] };
 }
 
 function toolError(text: string): RuntimeToolResult {
@@ -162,7 +127,7 @@ export function buildOutputToolDef(outputSchema: Record<string, unknown>): Runti
         properties: { data: dataSchema },
       },
     },
-    handler: async (rawArgs) => {
+    handler: async (rawArgs, emit) => {
       const { data } = (rawArgs ?? {}) as { data?: Record<string, unknown> };
       if (schemaCompileError) {
         return toolError(
@@ -180,9 +145,11 @@ export function buildOutputToolDef(outputSchema: Record<string, unknown>): Runti
             `Please call output() again with all required fields correctly typed.`,
         );
       }
-      return withEvents("Output recorded", [
+      return emitAndReply(
+        emit,
         { type: "output.emitted", data: data as Record<string, unknown> },
-      ]);
+        "Output recorded",
+      );
     },
   };
 }
@@ -240,8 +207,8 @@ export type FileUploader = (path: string, name?: string) => Promise<PublishedFil
 /**
  * Build the `publish_file` runtime tool def around an injected
  * {@link FileUploader}. Unlike `output` this tool performs the upload
- * itself (via `uploader`), then surfaces the canonical
- * `file.published` event under `_meta` so ingestion persists a run_log.
+ * itself (via `uploader`), then emits the canonical
+ * `file.published` event so ingestion persists a run_log.
  * An upload failure (cap / quota / HTTP) is returned as a tool error, never a
  * throw — the agent sees a clear message and can continue.
  */
@@ -275,7 +242,7 @@ export function buildPublishFileDef(uploader: FileUploader): RuntimeToolDef {
         },
       },
     },
-    handler: async (rawArgs) => {
+    handler: async (rawArgs, emit) => {
       // Only the declared arguments are read. `additionalProperties: false`
       // already keeps a schema-validating caller from sending anything else;
       // for a caller that skips validation, an extra key (notably the retired
@@ -296,31 +263,7 @@ export function buildPublishFileDef(uploader: FileUploader): RuntimeToolDef {
         const message = err instanceof Error ? err.message : String(err);
         return toolError(`Failed to publish '${path}': ${message}`);
       }
-      return withEvents(`Published ${file.name} → ${file.uri}`, [filePublishedEvent(file)]);
+      return emitAndReply(emit, filePublishedEvent(file), `Published ${file.name} → ${file.uri}`);
     },
   };
-}
-
-/**
- * Re-emit the canonical run events a runtime tool call returned under
- * {@link RUNTIME_TOOL_EVENTS_META_KEY}. Called by the runner's Pi wrapper so
- * the events land in the run's single event sink. No-op when the meta key is absent or malformed.
- */
-export function reEmitRuntimeToolEvents(
-  meta: Record<string, unknown> | undefined,
-  emit: (event: RuntimeToolEvent) => void,
-): void {
-  const raw = meta?.[RUNTIME_TOOL_EVENTS_META_KEY];
-  if (!Array.isArray(raw)) return;
-  for (const ev of raw) {
-    if (
-      ev &&
-      typeof ev === "object" &&
-      typeof (ev as { type?: unknown }).type === "string" &&
-      // Forward only the CLOSED canonical set: a type outside it is dropped.
-      CANONICAL_RUNTIME_TOOL_EVENT_TYPE_SET.has((ev as { type: string }).type)
-    ) {
-      emit(ev as RuntimeToolEvent);
-    }
-  }
 }

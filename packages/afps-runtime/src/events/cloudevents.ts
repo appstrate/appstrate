@@ -7,8 +7,8 @@
  * Every {@link RunEvent} posted to an `HttpSink` is wrapped in a
  * CloudEvents 1.0 envelope so it is interoperable with Knative, Argo,
  * observability tooling, and the wider eventing ecosystem. The CloudEvent
- * `type` mirrors the RunEvent `type` verbatim — e.g. `memory.added`,
- * `pinned.set`, or any third-party `@scope/tool.verb`.
+ * `type` mirrors the RunEvent `type` verbatim — e.g. `output.emitted`,
+ * `log.written`, or any third-party `@scope/tool.verb`.
  *
  * ## No `dataschema`
  *
@@ -41,7 +41,7 @@ import type { RunEvent } from "@afps-spec/types";
 
 export interface CloudEventEnvelope {
   specversion: "1.0";
-  /** Verbatim RunEvent.type — e.g. `memory.added`, `@my-org/audit.logged`. */
+  /** Verbatim RunEvent.type — e.g. `output.emitted`, `@my-org/audit.logged`. */
   type: string;
   source: string;
   id: string;

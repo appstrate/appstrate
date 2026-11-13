@@ -17,7 +17,7 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { sign, verify } from "@appstrate/afps-runtime/events";
-import { buildPublishFileDef } from "@appstrate/core/runtime-tool-defs";
+import { buildPublishFileDef, type RuntimeToolEvent } from "@appstrate/core/runtime-tool-defs";
 import { decodeFilenameHeader, sanitizeFilename } from "@appstrate/core/naming";
 import {
   createRunFileUploader,
@@ -841,15 +841,23 @@ describe("summarizeArtifacts bounds (server ingest contract)", () => {
 });
 
 describe("buildPublishFileDef (publish_file tool)", () => {
+  const emitted: RuntimeToolEvent[] = [];
+  const emit = (event: RuntimeToolEvent): void => {
+    emitted.push(event);
+  };
+  beforeEach(() => {
+    emitted.length = 0;
+  });
+
   it("uploads and emits a file.published event on success", async () => {
     await writeFile(path.join(workspace, "out.html"), new TextEncoder().encode("<h1>ok</h1>"));
     const def = buildPublishFileDef(makeUploader(new Set()));
 
-    const result = await def.handler({ path: "out.html" });
+    const result = await def.handler({ path: "out.html" }, emit);
 
     expect(result.isError).toBeUndefined();
     expect(result.content[0]!.text).toContain("Published");
-    const events = (result._meta?.["dev.appstrate/events"] ?? []) as Array<Record<string, unknown>>;
+    const events = emitted;
     expect(events).toHaveLength(1);
     expect(events[0]!.type).toBe("file.published");
     expect(events[0]!.fileId).toMatch(/^file_/);
@@ -858,14 +866,14 @@ describe("buildPublishFileDef (publish_file tool)", () => {
 
   it("returns a tool error (not a throw) when the upload fails", async () => {
     const def = buildPublishFileDef(makeUploader(new Set()));
-    const result = await def.handler({ path: "missing.txt" });
+    const result = await def.handler({ path: "missing.txt" }, emit);
     expect(result.isError).toBe(true);
     expect(result.content[0]!.text).toContain("Failed to publish");
   });
 
   it("returns a tool error when path is missing", async () => {
     const def = buildPublishFileDef(makeUploader(new Set()));
-    const result = await def.handler({});
+    const result = await def.handler({}, emit);
     expect(result.isError).toBe(true);
   });
 
@@ -874,7 +882,7 @@ describe("buildPublishFileDef (publish_file tool)", () => {
     // dropped, never turned into a tool error that would lose the deliverable.
     await writeFile(path.join(workspace, "out.html"), new TextEncoder().encode("<h1>ok</h1>"));
     const def = buildPublishFileDef(makeUploader(new Set()));
-    const result = await def.handler({ path: "out.html", presentation: "thumbnail" });
+    const result = await def.handler({ path: "out.html", presentation: "thumbnail" }, emit);
     expect(result.isError).toBeUndefined();
     expect(config.received).toHaveLength(1);
     expect(config.received[0]!.headerNames).not.toContain("x-document-presentation");
@@ -903,7 +911,7 @@ describe("buildPublishFileDef (publish_file tool)", () => {
     await writeFile(path.join(workspace, ".config"), new TextEncoder().encode("k=v"));
     const def = buildPublishFileDef(makeUploader(new Set()));
 
-    const result = await def.handler({ path: ".config" });
+    const result = await def.handler({ path: ".config" }, emit);
 
     expect(result.isError).toBeUndefined();
     expect(config.received).toHaveLength(1);

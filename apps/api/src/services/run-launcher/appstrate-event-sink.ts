@@ -172,7 +172,7 @@ export async function persistRunEvent(
     }
 
     default:
-      // memory.added / pinned.set / third-party — no run_logs row.
+      // Third-party — no run_logs row.
       return null;
   }
 }

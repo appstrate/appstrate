@@ -8,8 +8,7 @@
  * The tools' logic (input schema + validation + the canonical run events
  * each call produces) lives transport-neutrally in
  * `@appstrate/core/runtime-tool-defs`. This wrapper registers each definition
- * as a Pi tool and re-emits the canonical events the handler returns under
- * the `_meta` key into the run's event sink via {@link reEmitRuntimeToolEvents}.
+ * as a Pi tool and hands its handler the run's `emit`.
  * A handler error (e.g. `output` failing its schema) throws as a Pi tool
  * error, so the terminal-tool early stop never fires on it.
  */
@@ -18,7 +17,6 @@ import { unsafeSchema, type ExtensionAPI, type ExtensionFactory } from "../pi-sd
 import {
   buildOutputToolDef,
   buildPublishFileDef,
-  reEmitRuntimeToolEvents,
   type FileUploader,
   type RuntimeToolDef,
   type RuntimeToolEvent,
@@ -37,8 +35,7 @@ function runtimeToolExtension(
       description: def.descriptor.description,
       parameters: unsafeSchema<Record<string, unknown>>(def.descriptor.inputSchema),
       async execute(_toolCallId, params) {
-        const result = await def.handler(params ?? {});
-        reEmitRuntimeToolEvents(result._meta, emit);
+        const result = await def.handler(params ?? {}, emit);
         return piToolResultOrThrow({
           content: result.content.map((c) => ({ type: "text" as const, text: c.text })),
           isError: result.isError === true,

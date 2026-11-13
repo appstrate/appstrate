@@ -83,7 +83,6 @@ async function flushMicrotasks(): Promise<void> {
 describe("isStdoutEventLine", () => {
   it("accepts a structurally valid canonical event", () => {
     expect(isStdoutEventLine({ type: "output.emitted", data: { ok: true } })).toBe(true);
-    expect(isStdoutEventLine({ type: "memory.added", content: "m" })).toBe(true);
     expect(isStdoutEventLine({ type: "log.written", level: "info", message: "x" })).toBe(true);
   });
 
@@ -102,22 +101,19 @@ describe("isStdoutEventLine", () => {
     expect(isStdoutEventLine({ type: "build.done", success: true })).toBe(false);
     expect(isStdoutEventLine({ type: "npm.audit", vulnerabilities: 0 })).toBe(false);
     expect(isStdoutEventLine({ type: "" })).toBe(false);
-    // Retired canonical type — a stale emitter's line falls through to the
+    // Retired canonical types — a stale emitter's line falls through to the
     // stdout passthrough instead of poisoning the aggregate.
     expect(isStdoutEventLine({ type: "report.appended", content: "# Report" })).toBe(false);
+    expect(isStdoutEventLine({ type: "memory.added", content: "m" })).toBe(false);
+    expect(isStdoutEventLine({ type: "pinned.set", key: "k", content: 1 })).toBe(false);
   });
 
   it("rejects canonical types with malformed payloads", () => {
     // `output.emitted` requires `data` to be present.
     expect(isStdoutEventLine({ type: "output.emitted" })).toBe(false);
-    // `memory.added` requires string `content`.
-    expect(isStdoutEventLine({ type: "memory.added", content: 42 })).toBe(false);
     // `log.written` requires a valid level and string message.
     expect(isStdoutEventLine({ type: "log.written", level: "bogus", message: "x" })).toBe(false);
     expect(isStdoutEventLine({ type: "log.written", level: "info" })).toBe(false);
-    // `pinned.set` requires non-empty string key + content presence.
-    expect(isStdoutEventLine({ type: "pinned.set", key: "", content: "x" })).toBe(false);
-    expect(isStdoutEventLine({ type: "pinned.set", key: "k" })).toBe(false);
     // `appstrate.metric` bands and counters follow the token-usage rule.
     expect(
       isStdoutEventLine({
@@ -521,37 +517,21 @@ describe("attachStdoutBridge — aggregation via finalize", () => {
     const bridge = attachStdoutBridge({ sink: underlying, runId: "r", stdout });
 
     await bridge.sink.handle({
-      type: "memory.added",
+      type: "log.written",
       timestamp: 1,
       runId: "r",
-      content: "m1",
+      level: "info",
+      message: "m1",
     });
     await bridge.sink.handle({
-      type: "memory.added",
+      type: "log.written",
       timestamp: 2,
       runId: "r",
-      content: "m2",
+      level: "info",
+      message: "m2",
     });
 
     expect(underlying.handled).toHaveLength(2);
-    bridge.restore();
-  });
-
-  it("leaves a pinned.set written on stdout out of the finalize result", async () => {
-    const underlying = recordingSink();
-    const stdout = makeFakeStdout();
-    const bridge = attachStdoutBridge({ sink: underlying, runId: "r", stdout });
-
-    stdout.write.call(
-      null as never,
-      '{"type":"pinned.set","key":"checkpoint","content":{"cursor":"abc"},"scope":"shared","timestamp":1}\n',
-    );
-    await flushMicrotasks();
-
-    await bridge.sink.finalize({ ...emptyRunResult(), status: "success" });
-
-    expect(underlying.handled).toHaveLength(1);
-    expect(underlying.finalized).not.toHaveProperty("pinned");
     bridge.restore();
   });
 });

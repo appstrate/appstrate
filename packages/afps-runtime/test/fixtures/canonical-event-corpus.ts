@@ -14,8 +14,8 @@
  * ## Labels
  *
  * Each fixture's `label` names the constraint it exercises — e.g.
- * "memory.added — numeric content" is the wrong-typed-value case for
- * `content`, and "— missing content" is the omission case. Labels are for
+ * "log.written — numeric message" is the wrong-typed-value case for
+ * `message`, and "— missing message" is the omission case. Labels are for
  * humans reading an assertion diff; they are not what proves coverage.
  *
  * ## Coverage is checked, not trusted
@@ -53,92 +53,6 @@ interface CanonicalEventFixture {
  * {@link NON_CANONICAL_EVENTS} — the guard cannot know their shape.
  */
 export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
-  // --- memory.added ---------------------------------------------------
-  {
-    label: "memory.added — minimal",
-    event: { ...base, type: "memory.added", content: "hello" },
-    valid: true,
-  },
-  {
-    label: "memory.added — explicit shared scope",
-    event: { ...base, type: "memory.added", content: "scoped", scope: "shared" },
-    valid: true,
-  },
-  {
-    label: "memory.added — explicit actor scope",
-    event: { ...base, type: "memory.added", content: "scoped", scope: "actor" },
-    valid: true,
-  },
-  {
-    label: "memory.added — missing content",
-    event: { ...base, type: "memory.added" },
-    valid: false,
-  },
-  {
-    label: "memory.added — numeric content",
-    event: { ...base, type: "memory.added", content: 42 },
-    valid: false,
-  },
-  {
-    label: "memory.added — unknown scope",
-    event: { ...base, type: "memory.added", content: "x", scope: "global" },
-    valid: false,
-  },
-
-  // --- pinned.set -----------------------------------------------------
-  {
-    label: "pinned.set — checkpoint slot",
-    event: { ...base, type: "pinned.set", key: "checkpoint", content: { counter: 1 } },
-    valid: true,
-  },
-  {
-    label: "pinned.set — named slot, scalar content",
-    event: { ...base, type: "pinned.set", key: "persona", content: "agent A" },
-    valid: true,
-  },
-  {
-    label: "pinned.set — explicit actor scope",
-    event: { ...base, type: "pinned.set", key: "checkpoint", content: { c: 2 }, scope: "actor" },
-    valid: true,
-  },
-  {
-    label: "pinned.set — null content is still a value",
-    event: { ...base, type: "pinned.set", key: "k", content: null },
-    valid: true,
-  },
-  {
-    label: "pinned.set — missing key",
-    event: { ...base, type: "pinned.set", content: 1 },
-    valid: false,
-  },
-  {
-    label: "pinned.set — missing content",
-    event: { ...base, type: "pinned.set", key: "checkpoint" },
-    valid: false,
-  },
-  {
-    // `JSON.stringify` drops an explicitly-undefined value, so the wire
-    // payload is `{"key":"k"}` — which fails `required: ["content"]`.
-    label: "pinned.set — explicitly undefined content",
-    event: { ...base, type: "pinned.set", key: "k", content: undefined },
-    valid: false,
-  },
-  {
-    label: "pinned.set — numeric key",
-    event: { ...base, type: "pinned.set", key: 42, content: 1 },
-    valid: false,
-  },
-  {
-    label: "pinned.set — empty key",
-    event: { ...base, type: "pinned.set", key: "", content: 1 },
-    valid: false,
-  },
-  {
-    label: "pinned.set — unknown scope",
-    event: { ...base, type: "pinned.set", key: "k", content: 1, scope: "everyone" },
-    valid: false,
-  },
-
   // --- output.emitted -------------------------------------------------
   {
     label: "output.emitted — object payload",

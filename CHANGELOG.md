@@ -517,13 +517,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   (#2199). They are tools of `@appstrate/platform`; `@appstrate/core` drops
   `buildRuntimeToolDefs` and `@appstrate/runner-pi` drops
   `buildRuntimeToolExtensions`. The sidecar no longer strips `dev.appstrate/events`
-  from third-party tool results: no relayed result is read for that key.
+  from third-party tool results: the key is removed (see below).
 - **The finalize body no longer carries memories or pinned slots** (#2199).
   `POST /api/runs/{runId}/events/finalize` ignores `memories` and `pinned`, and
   finalize writes neither `package_persistence` nor `runs.checkpoint`: `note` and
   `pin` write them when the tool is called. `@appstrate/afps-runtime` drops
-  `RunResult.memories`, `RunResult.pinned`, `Memory` and `PinnedSlot`; its reducer
-  leaves `memory.added` and `pinned.set` out of the aggregate.
+  `RunResult.memories`, `RunResult.pinned`, `Memory` and `PinnedSlot`.
+- **`memory.added` and `pinned.set` are no longer canonical run events** (#2199).
+  Nothing emits them: `note` and `pin` write server-side. `@appstrate/afps-runtime`
+  drops them from `CanonicalRunEvent`, `CANONICAL_EVENT_TYPES` and the reducer, and
+  the L4 conformance script no longer contains them; the stdout bridge passes such a line
+  through as plain output, and `appstrate run` no longer prints `+ memory:` lines.
+- **The `_meta["dev.appstrate/events"]` channel is removed** (#2199). The runner's
+  `output` and `publish_file` tools emit their event through the `emit` their
+  handler receives; `@appstrate/core` drops `RUNTIME_TOOL_EVENTS_META_KEY`,
+  `CANONICAL_RUNTIME_TOOL_EVENT_TYPES` and `reEmitRuntimeToolEvents`.
 
 ### Added
 
