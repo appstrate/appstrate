@@ -18,11 +18,17 @@ const PROVIDERS: Record<SocialProvider, { icon: React.ComponentType; labelKey: s
 export function SocialSignInButton({
   provider,
   callbackURL: callbackURLProp,
+  errorCallbackURL,
   disabled,
+  emphasized = false,
 }: {
   provider: SocialProvider;
   callbackURL?: string;
+  /** Where a refused callback lands with `?error=<code>`; Better Auth's own error page otherwise. */
+  errorCallbackURL?: string;
   disabled?: boolean;
+  /** The way in a refusal points to (an organization that requires Microsoft). */
+  emphasized?: boolean;
 }) {
   const { t } = useTranslation("settings");
   const { signInWithSocial } = useAuth();
@@ -33,8 +39,8 @@ export function SocialSignInButton({
 
   return (
     <Button
-      variant="outline"
-      className="text-foreground w-full"
+      variant={emphasized ? "default" : "outline"}
+      className={emphasized ? "w-full" : "text-foreground w-full"}
       type="button"
       disabled={loading || disabled}
       onClick={async () => {
@@ -43,7 +49,7 @@ export function SocialSignInButton({
           const redirect = searchParams.get("redirect");
           const callbackURL =
             callbackURLProp ?? (redirect ? `/login?redirect=${encodeURIComponent(redirect)}` : "/");
-          await signInWithSocial(provider, callbackURL);
+          await signInWithSocial(provider, callbackURL, errorCallbackURL);
         } finally {
           setLoading(false);
         }

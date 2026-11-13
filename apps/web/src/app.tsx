@@ -163,6 +163,10 @@ const OrgSettingsBillingPage = lazyPage(
   () => import("./pages/org-settings/billing"),
   "OrgSettingsBillingPage",
 );
+const OrgSettingsEnterpriseSsoPage = lazyPage(
+  () => import("./pages/org-settings/enterprise-sso"),
+  "OrgSettingsEnterpriseSsoPage",
+);
 const OrgSettingsCliSessionsPage = lazyPage(
   () => import("./pages/org-settings/cli-sessions"),
   "OrgSettingsCliSessionsPage",
@@ -305,6 +309,7 @@ const PAGES: Record<RoutePath, ReactNode> = {
   "/org-settings/oauth": <OrgSettingsOAuthPage />,
   "/org-settings/cli-sessions": <OrgSettingsCliSessionsPage />,
   "/org-settings/billing": <OrgSettingsBillingPage />,
+  "/org-settings/enterprise-sso": <OrgSettingsEnterpriseSsoPage />,
   // Workspace settings are scoped by `X-Space-Id`, except webhooks, which also manages the org's own (`org-webhooks:read`).
   "/workspace-settings": <Outlet />,
   "/workspace-settings/general": <WorkspaceSettingsGeneralPage />,

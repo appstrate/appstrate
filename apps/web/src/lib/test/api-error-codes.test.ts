@@ -52,6 +52,8 @@ const SOURCES = [
   "packages/db/src/**/*.ts",
   "packages/connect/src/**/*.ts",
   "packages/module-*/src/**/*.ts",
+  // The commercial package (`@appstrate/ee`): enterprise sign-in's refusals.
+  "ee/src/**/*.ts",
 ];
 // The MCP module's `code` literals are tool-result refusals read by the model, never a problem body.
 const NOT_A_SOURCE =

@@ -3,11 +3,12 @@
 // Regenerate with: bun run generate:api
 //
 // Source: apps/api/src/openapi/ merged with the OpenAPI contribution of EVERY
-// module in the tree — apps/api/src/modules/*/ and packages/module-*/ — found
-// on the FILESYSTEM, not through MODULES, so this file does not vary by config.
-// That includes packages/module-ee/, which is source-available under its own
-// LICENSE: its Ee* schemas and /api/billing/* paths appear below. Removing that
-// directory and regenerating drops them (packages/module-ee/README.md).
+// module in the tree — apps/api/src/modules/*/, packages/module-*/ and ee/ —
+// found on the FILESYSTEM, not through MODULES, so this file does not vary by
+// config. That includes packages/module-ee/ and ee/, which are source-available
+// under their own LICENSE: their Ee*/Sso* schemas and /api/billing/* and
+// /api/org-sso/* paths appear below. Removing a directory and regenerating
+// drops them.
 
 export interface paths {
     "/.well-known/oauth-authorization-server": {
@@ -3124,6 +3125,138 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/org-sso": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the organization's enterprise sign-in settings
+         * @description Requires `org-sso:read` (owners and admins).
+         */
+        get: operations["getOrgSso"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Set the role given to people who join by signing in with Microsoft
+         * @description `member` or `guest`, never a privileged role. Requires `org-sso:write` (owners) AND a dashboard session: an API key, an OAuth client, an MCP or CLI token is refused with 403 `dashboard_session_required`, even for an owner.
+         */
+        patch: operations["updateOrgSso"];
+        trace?: never;
+    };
+    "/api/org-sso/domains": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Claim an email domain
+         * @description Returns the TXT record to publish before verifying. Requires `org-sso:write` (owners) AND a dashboard session: an API key, an OAuth client, an MCP or CLI token is refused with 403 `dashboard_session_required`, even for an owner.
+         */
+        post: operations["addOrgSsoDomain"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/org-sso/domains/{domainId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a domain
+         * @description 409 `sso_enforced` for a verified domain while enforcement is on. Requires `org-sso:write` (owners) AND a dashboard session: an API key, an OAuth client, an MCP or CLI token is refused with 403 `dashboard_session_required`, even for an owner.
+         */
+        delete: operations["removeOrgSsoDomain"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/org-sso/domains/{domainId}/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify a domain by its DNS TXT record
+         * @description Looks up `_appstrate.<domain>`. A verified domain belongs to one organization of the instance. Requires `org-sso:write` (owners) AND a dashboard session: an API key, an OAuth client, an MCP or CLI token is refused with 403 `dashboard_session_required`, even for an owner.
+         */
+        post: operations["verifyOrgSsoDomain"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/org-sso/enforcement": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Require Microsoft sign-in for the verified domains
+         * @description Only from a session a Microsoft sign-in of the bound tenant opened (409 `microsoft_session_required`), so the owner cannot lock themselves out. Ends every other session of the domains' accounts. Requires `org-sso:write` (owners) AND a dashboard session: an API key, an OAuth client, an MCP or CLI token is refused with 403 `dashboard_session_required`, even for an owner.
+         */
+        post: operations["enforceOrgSso"];
+        /**
+         * Lift the enforcement
+         * @description Passwords and other sign-in methods work again. Requires `org-sso:write` (owners) AND a dashboard session: an API key, an OAuth client, an MCP or CLI token is refused with 403 `dashboard_session_required`, even for an owner.
+         */
+        delete: operations["liftOrgSsoEnforcement"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/org-sso/tenant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bind the tenant of the caller's own Microsoft sign-in
+         * @description The tenant id is never typed: it is the `tid` of the Microsoft sign-in that opened the caller's session, less than 15 minutes ago (409 `microsoft_session_required` otherwise). Requires `org-sso:write` (owners) AND a dashboard session: an API key, an OAuth client, an MCP or CLI token is refused with 403 `dashboard_session_required`, even for an owner.
+         */
+        post: operations["linkOrgSsoTenant"];
+        /**
+         * Unbind the tenant
+         * @description 409 `sso_enforced` while enforcement is on. Requires `org-sso:write` (owners) AND a dashboard session: an API key, an OAuth client, an MCP or CLI token is refused with 403 `dashboard_session_required`, even for an owner.
+         */
+        delete: operations["unlinkOrgSsoTenant"];
         options?: never;
         head?: never;
         patch?: never;
@@ -7458,6 +7591,39 @@ export interface components {
             rehomed_packages: number;
             /** @description Packages this space homed that no other space had placed: deleted */
             deleted_packages: number;
+        };
+        SsoDomain: {
+            /** Format: uuid */
+            id: string;
+            /** @description Lowercase, no subdomain implied. */
+            domain: string;
+            verified: boolean;
+            /** Format: date-time */
+            verified_at: string | null;
+            /** @description The DNS name to publish the TXT record at: `_appstrate.<domain>`. */
+            txt_record_name: string;
+            /** @description The TXT value: `appstrate-domain-verification=<token>`. */
+            txt_record_value: string;
+            /** Format: date-time */
+            createdAt: string;
+        };
+        SsoSettings: {
+            /** @description The bound Entra tenant id (`tid`), read off an owner's Microsoft sign-in. */
+            tenant_id: string | null;
+            /** Format: date-time */
+            tenant_linked_at: string | null;
+            /**
+             * @description The org role given to a newcomer who joins by signing in with Microsoft.
+             * @enum {string}
+             */
+            join_role: "member" | "guest";
+            /** @description Whether only a Microsoft sign-in from the bound tenant opens a session for an address of a verified domain. */
+            enforced: boolean;
+            /** Format: date-time */
+            enforced_at: string | null;
+            /** @description The tenant of the caller's own session when a Microsoft sign-in opened it, else `null`. Enforcing needs it equal to `tenant_id`. */
+            caller_tenant_id: string | null;
+            domains: components["schemas"]["SsoDomain"][];
         };
         TestResult: {
             ok: boolean;
@@ -19877,6 +20043,410 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+        };
+    };
+    getOrgSso: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoSettings"];
+                };
+            };
+            /** @description Caller lacks `org-sso:read` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    updateOrgSso: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    join_role: "member" | "guest";
+                };
+            };
+        };
+        responses: {
+            /** @description The settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoSettings"];
+                };
+            };
+            /** @description Not an owner, or not a dashboard session (`dashboard_session_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    addOrgSsoDomain: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    domain: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The settings, the new domain included */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoSettings"];
+                };
+            };
+            /** @description `invalid_domain` */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Not an owner, or not a dashboard session (`dashboard_session_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `domain_exists`, or `domain_taken` by another organization */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    removeOrgSsoDomain: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                domainId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoSettings"];
+                };
+            };
+            /** @description Not an owner, or not a dashboard session (`dashboard_session_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description No such domain in this organization */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `sso_enforced` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    verifyOrgSsoDomain: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path: {
+                domainId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoSettings"];
+                };
+            };
+            /** @description Not an owner, or not a dashboard session (`dashboard_session_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description No such domain in this organization */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `domain_taken`: another organization verified it first */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `domain_not_verified`: the record is absent or carries another value */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `dns_lookup_failed` */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    enforceOrgSso: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoSettings"];
+                };
+            };
+            /** @description Not an owner, or not a dashboard session (`dashboard_session_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `sso_not_ready` or `microsoft_session_required` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    liftOrgSsoEnforcement: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoSettings"];
+                };
+            };
+            /** @description Not an owner, or not a dashboard session (`dashboard_session_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    linkOrgSsoTenant: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoSettings"];
+                };
+            };
+            /** @description Not an owner, or not a dashboard session (`dashboard_session_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `microsoft_session_required`, or `sso_enforced` when another tenant is bound under enforcement */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    unlinkOrgSsoTenant: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SsoSettings"];
+                };
+            };
+            /** @description Not an owner, or not a dashboard session (`dashboard_session_required`) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `sso_enforced` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     listOrganizations: {

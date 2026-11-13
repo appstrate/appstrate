@@ -11,14 +11,23 @@ import { FormItem } from "@/components/app-ui/form-item";
 import { AuthLayout } from "../components/auth-layout";
 import { AuthLink, AuthMessage } from "../components/auth-message";
 import { useAuth } from "../hooks/use-auth";
+import { refusalMessage } from "../lib/mutation-error";
+import { isSsoRefusal } from "../lib/org-sso";
 
 export function MagicLinkPage() {
   const { t } = useTranslation(["settings", "common"]);
   const { startMagicLink } = useAuth();
   const location = useLocation();
   const prefillEmail = (location.state as { email?: string })?.email ?? "";
-  // A spent or expired link redirects here with `?error=` (see `startMagicLink`).
-  const linkFailed = useSearchParams()[0].has("error");
+  // A spent or expired link redirects here with `?error=` (see `startMagicLink`), and so does a
+  // link refused by the organization's sign-in policy, which says so.
+  const linkError = useSearchParams()[0].get("error");
+  const linkFailedMessage =
+    linkError === null
+      ? null
+      : isSsoRefusal(linkError)
+        ? refusalMessage({ code: linkError })
+        : t("magicLink.linkInvalid");
 
   const [email, setEmail] = useState(prefillEmail);
   const [state, setState] = useState<"form" | "submitting" | "sent">("form");
@@ -70,7 +79,7 @@ export function MagicLinkPage() {
               required
             />
           </FormItem>
-          {linkFailed && !error && <FieldError>{t("magicLink.linkInvalid")}</FieldError>}
+          {linkFailedMessage && !error && <FieldError>{linkFailedMessage}</FieldError>}
           <FieldError>{error}</FieldError>
           <Button type="submit" className="w-full" disabled={state === "submitting"}>
             {state === "submitting" ? t("loading") : t("magicLink.submit")}
