@@ -367,6 +367,14 @@ export const internalPaths = {
           description:
             "The `credential_revision` of the credential that was rejected. Omitted only by a caller that holds no credentials payload (a local MCP server reporting a rejected credential it received at spawn); its rejection is then counted against the connection's current credential.",
         },
+        {
+          name: "rejected_request",
+          in: "query",
+          required: false,
+          schema: { type: "string", enum: ["handshake"] },
+          description:
+            "`handshake`: the rejected request is the MCP handshake (`initialize`) the sidecar sends to a remote MCP server at boot, which no agent input shapes. An auth nothing can refresh is then flagged on this first rejection (`410`) instead of counted toward `INTEGRATION_REFRESH_MAX_FAILURES`. Omitted for a request made on the agent's behalf (tool call, `api_call`, MITM request). An OAuth2 credential that can be refreshed is refreshed either way.",
+        },
       ],
       responses: {
         "200": {
@@ -379,7 +387,7 @@ export const internalPaths = {
         },
         "400": {
           ...connectionSelector400,
-          description: `${connectionSelector400.description} A malformed \`credential_revision\` (empty included) is an \`invalid_request\` too.`,
+          description: `${connectionSelector400.description} A malformed \`credential_revision\` (empty included) or a \`rejected_request\` other than \`handshake\` is an \`invalid_request\` too.`,
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
@@ -389,7 +397,7 @@ export const internalPaths = {
           description: `${integrationCredentialsConflict409.description} A fourth cause is unique to this operation: \`connect_run_no_refresh\` — the caller is an ephemeral connect run, which has no stored credential to force-refresh (its session is minted in-process by the integration's login tool). The sidecar treats any non-2xx here as "do not retry now" and leaves the upstream response untouched.`,
         },
         "410": credentialFailure(
-          "`integration_connection_needs_reconnection`: the credential is dead and the connection is flagged `needsReconnection`; the run records the integration as degraded and the sidecar stops retrying. Counted failures flag it at `INTEGRATION_REFRESH_MAX_FAILURES` (an OAuth2 token only once expired past `INTEGRATION_REFRESH_GRACE_SECONDS`).",
+          "`integration_connection_needs_reconnection`: the credential is dead and the connection is flagged `needsReconnection`; the run records the integration as degraded and the sidecar stops retrying. Counted failures flag it at `INTEGRATION_REFRESH_MAX_FAILURES` (an OAuth2 token only once expired past `INTEGRATION_REFRESH_GRACE_SECONDS`); a rejected handshake (`rejected_request=handshake`) of an auth nothing can refresh flags it at once.",
         ),
         "502": credentialFailure(
           "Not refreshed now; the connection stays usable. A successful upstream call through a non-OAuth2 connection (`upstream-success`) or a reconnect resets the count of its rejections.",

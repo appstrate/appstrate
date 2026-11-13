@@ -134,6 +134,101 @@ async function withGlobalFetch<T>(impl: typeof fetch, fn: () => Promise<T>): Pro
   }
 }
 
+describe("connectRemoteHttpIntegration — rejected handshake", () => {
+  /**
+   * A source whose refresh answers like the platform: `flagged` makes it a 410 (the connection is
+   * flagged), and every call's `rejectedRequest` is recorded. The client sends one request while
+   * it connects (the handshake) and, once connected, hands its fetch to the test (a tool call).
+   */
+  function handshakeHarness(flagged: boolean, connectLoginAuthKey?: string) {
+    const initial = wire([{ authKey: "apikey", authType: "api_key" }], {
+      apikey: { headerName: "Authorization", headerPrefix: "Bearer ", value: "EXPIRED" },
+    });
+    const rejectedRequests: Array<string | undefined> = [];
+    let reconnect = false;
+    const source = {
+      snapshot: () => initial,
+      refreshOnUnauthorized: async (
+        _authKey: string,
+        _revision: string | undefined,
+        rejectedRequest?: string,
+      ) => {
+        rejectedRequests.push(rejectedRequest);
+        reconnect = flagged;
+        return false;
+      },
+      needsReconnection: () => reconnect,
+      reportUpstreamSuccess: () => {},
+    } as unknown as IntegrationCredentialsSource;
+    let captured: typeof fetch | undefined;
+    const deps: ConnectRemoteHttpDeps = {
+      createClient: (async (_url: string | URL, opts: { fetch: typeof fetch }) => {
+        captured = opts.fetch;
+        const res = await opts.fetch(SERVER_URL, { method: "POST" });
+        if (res.status === 401) throw new Error(`Streamable HTTP error: ${await res.text()}`);
+        return {} as AppstrateMcpClient;
+      }) as unknown as ConnectRemoteHttpDeps["createClient"],
+      resolveHost: async () => [PUBLIC_IP],
+    };
+    const base = spec();
+    const integrationSpec = connectLoginAuthKey
+      ? ({ ...base, connectLogin: { authKey: connectLoginAuthKey } } as IntegrationSpawnSpec)
+      : base;
+    return { source, deps, integrationSpec, rejectedRequests, getFetch: () => captured! };
+  }
+
+  const unauthenticated = (async () =>
+    new Response('{"message":"Unauthenticated."}', { status: 401 })) as unknown as typeof fetch;
+
+  it("reports a 401 on the handshake as such and fails with the reconnect step once flagged", async () => {
+    const { source, deps, integrationSpec, rejectedRequests } = handshakeHarness(true);
+    const err = await withGlobalFetch(unauthenticated, () =>
+      connectRemoteHttpIntegration(integrationSpec, source, deps).then(
+        () => undefined,
+        (e: unknown) => e,
+      ),
+    );
+    expect(rejectedRequests).toEqual(["handshake"]);
+    expect(err).toBeInstanceOf(Error);
+    const message = (err as Error).message;
+    expect(message).toContain("rejected the connection's credential during the MCP handshake");
+    expect(message).toContain("Reconnect it and relaunch the run.");
+    expect(message).not.toContain("Unauthenticated.");
+  });
+
+  it("keeps the remote failure when the platform did not flag the connection", async () => {
+    const { source, deps, integrationSpec, rejectedRequests } = handshakeHarness(false);
+    const err = await withGlobalFetch(unauthenticated, () =>
+      connectRemoteHttpIntegration(integrationSpec, source, deps).then(
+        () => undefined,
+        (e: unknown) => e,
+      ),
+    );
+    expect(rejectedRequests).toEqual(["handshake"]);
+    expect((err as Error).message).not.toContain("Reconnect");
+  });
+
+  it("reports a 401 after the handshake as a call", async () => {
+    const { source, deps, integrationSpec, rejectedRequests, getFetch } = handshakeHarness(true);
+    await withGlobalFetch(
+      (async () => new Response("{}", { status: 200 })) as unknown as typeof fetch,
+      () => connectRemoteHttpIntegration(integrationSpec, source, deps),
+    );
+    await withGlobalFetch(unauthenticated, async () => {
+      expect((await getFetch()(SERVER_URL, { method: "POST" })).status).toBe(401);
+    });
+    expect(rejectedRequests).toEqual([undefined]);
+  });
+
+  it("reports a connect.tool auth's handshake 401 as a call", async () => {
+    const { source, deps, integrationSpec, rejectedRequests } = handshakeHarness(false, "apikey");
+    await withGlobalFetch(unauthenticated, () =>
+      connectRemoteHttpIntegration(integrationSpec, source, deps).catch(() => undefined),
+    );
+    expect(rejectedRequests).toEqual([undefined]);
+  });
+});
+
 describe("connectRemoteHttpIntegration — credential injection", () => {
   it("prefers the oauth2 auth and injects its Bearer header per request", async () => {
     const initial = wire(

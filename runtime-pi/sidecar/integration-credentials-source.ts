@@ -138,13 +138,25 @@ function normalizeIntegrationCredentialsWire(raw: unknown): IntegrationCredentia
   };
 }
 
-function credentialsQuery(connectionId: string | undefined, credentialRevision?: string): string {
+function credentialsQuery(
+  connectionId: string | undefined,
+  credentialRevision?: string,
+  rejectedRequest?: RejectedRequest,
+): string {
   const query = new URLSearchParams();
   if (connectionId !== undefined) query.set("connection_id", connectionId);
   if (credentialRevision !== undefined) query.set("credential_revision", credentialRevision);
+  if (rejectedRequest !== undefined) query.set("rejected_request", rejectedRequest);
   const qs = query.toString();
   return qs ? `?${qs}` : "";
 }
+
+/**
+ * The request the upstream rejected, when the sidecar wrote it itself: `handshake` is the MCP
+ * `initialize` exchange with a remote server, which no agent input shapes. Absent: a call made
+ * for the agent (tool call, `api_call`, MITM request).
+ */
+type RejectedRequest = "handshake";
 
 interface CreateIntegrationCredentialsSourceOptions {
   /** Package id (e.g. `@vendor/integration`). */
@@ -260,9 +272,16 @@ export interface IntegrationCredentialsSource extends MitmCredentialSource {
    * {@link MitmCredentialSource.refreshOnUnauthorized} as REQUIRED — this
    * factory always wires it (routes to the registered re-login handler, else
    * the platform refresh POST). Callers holding the concrete source type can
-   * invoke it without a presence check.
+   * invoke it without a presence check. `rejectedRequest` names a rejected request the sidecar
+   * wrote itself; the platform flags an unrefreshable credential on the first such rejection.
    */
-  refreshOnUnauthorized(authKey: string, credentialRevision: string | undefined): Promise<boolean>;
+  refreshOnUnauthorized(
+    authKey: string,
+    credentialRevision: string | undefined,
+    rejectedRequest?: RejectedRequest,
+  ): Promise<boolean>;
+  /** True once the platform answered a refresh with 410: the connection is flagged for reconnection. */
+  needsReconnection(): boolean;
   /** Required here: this factory always reports ({@link MitmCredentialSource.reportUpstreamSuccess}). */
   reportUpstreamSuccess(credentialRevision: string | undefined): void;
 }
@@ -350,6 +369,7 @@ export function createIntegrationCredentialsSource(
   // The platform holds a rejection streak on this connection that no success has ended yet: the
   // boot payload announced one, or a rejection was counted during this run (the 502 below).
   let rejectionPending = (payload.rejectionStreak ?? 0) > 0;
+  let flagged = false;
 
   const reportUpstreamSuccess = (revision: string | undefined): void => {
     if (!rejectionPending || options.connectionId === undefined || revision === undefined) return;
@@ -398,6 +418,7 @@ export function createIntegrationCredentialsSource(
   const refreshOnUnauthorized = async (
     authKey: string,
     credentialRevision: string | undefined,
+    rejectedRequest?: RejectedRequest,
   ): Promise<boolean> => {
     // Cheap dedup against retry storms. We don't track per-authKey
     // separately on the network side — the platform refreshes the named
@@ -426,7 +447,7 @@ export function createIntegrationCredentialsSource(
     const relogin = reloginHandlers.get(authKey);
     const promise = relogin
       ? runRelogin(authKey, relogin.handler)
-      : doRefresh(authKey, credentialRevision);
+      : doRefresh(authKey, credentialRevision, rejectedRequest);
     inflight.set(authKey, promise);
     try {
       return await promise;
@@ -462,6 +483,7 @@ export function createIntegrationCredentialsSource(
   async function doRefresh(
     authKey: string,
     rejectedRevision: string | undefined,
+    rejectedRequest: RejectedRequest | undefined,
   ): Promise<boolean> {
     let res: Response;
     try {
@@ -470,6 +492,7 @@ export function createIntegrationCredentialsSource(
         options.connectionId,
         rejectedRevision,
         { ...options, fetchFn },
+        rejectedRequest,
       );
     } catch (err) {
       logger.warn("integration credential refresh fetch failed", {
@@ -492,6 +515,7 @@ export function createIntegrationCredentialsSource(
       });
       // Mark cooldown so we don't retry for at least the full interval.
       lastRefreshAt.set(authKey, Date.now());
+      flagged = true;
       // 410 = the platform flagged the connection needsReconnection (revoked
       // token, unrefreshable oauth2, or a non-oauth2 auth that 401'd). The
       // credential is dead — do not retry.
@@ -568,6 +592,7 @@ export function createIntegrationCredentialsSource(
     deliveryPlans,
     refreshOnUnauthorized,
     reportUpstreamSuccess,
+    needsReconnection: () => flagged,
     snapshot: () => payload,
     setSessionOutputs,
     setActiveInputs: (
@@ -628,16 +653,18 @@ export function createIntegrationCredentialsSource(
  * `credentialRevision` names the rejected credential; a superseded one gets the
  * current credential back (200) and counts nothing. Without it (a local server
  * with no credentials source) the rejection is counted against the current one.
+ * `rejectedRequest` is sent as `?rejected_request=` (see {@link RejectedRequest}).
  */
 export function postIntegrationCredentialsRefresh(
   integrationId: string,
   connectionId: string | undefined,
   credentialRevision: string | undefined,
   opts: { platformApiUrl: string; runToken: string; fetchFn?: typeof fetch },
+  rejectedRequest?: RejectedRequest,
 ): Promise<Response> {
   const fetchFn = opts.fetchFn ?? fetch;
   return fetchFn(
-    `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}/refresh${credentialsQuery(connectionId, credentialRevision)}`,
+    `${opts.platformApiUrl}/internal/integration-credentials/${integrationId}/refresh${credentialsQuery(connectionId, credentialRevision, rejectedRequest)}`,
     {
       method: "POST",
       headers: { Authorization: `Bearer ${opts.runToken}` },

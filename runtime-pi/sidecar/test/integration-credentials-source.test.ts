@@ -155,6 +155,43 @@ describe("createIntegrationCredentialsSource", () => {
     expect(calls).toBe(1);
   });
 
+  it("names a rejected handshake as `rejected_request=handshake` and records the 410 flag", async () => {
+    const urls: string[] = [];
+    const fetchFn = (async (url: string) => {
+      urls.push(url);
+      return new Response("", { status: 410 });
+    }) as unknown as typeof fetch;
+    const source = createIntegrationCredentialsSource({
+      connectionId: "conn-a",
+      integrationId: "@test/integ",
+      platformApiUrl: "http://api",
+      runToken: "run-tok",
+      initialPayload: makePayload("tok-1"),
+      fetchFn,
+    });
+
+    expect(source.needsReconnection()).toBe(false);
+    expect(await source.refreshOnUnauthorized("primary", "rev-a", "handshake")).toBe(false);
+    expect(urls).toEqual([
+      "http://api/internal/integration-credentials/@test/integ/refresh?connection_id=conn-a&credential_revision=rev-a&rejected_request=handshake",
+    ]);
+    expect(source.needsReconnection()).toBe(true);
+  });
+
+  it("leaves needsReconnection() false on a counted rejection (502)", async () => {
+    const fetchFn = (async () => new Response("", { status: 502 })) as unknown as typeof fetch;
+    const source = createIntegrationCredentialsSource({
+      connectionId: "conn-a",
+      integrationId: "@test/integ",
+      platformApiUrl: "http://api",
+      runToken: "run-tok",
+      initialPayload: makePayload("tok-1"),
+      fetchFn,
+    });
+    expect(await source.refreshOnUnauthorized("primary", "rev-a")).toBe(false);
+    expect(source.needsReconnection()).toBe(false);
+  });
+
   it("returns false on fetch network failure without crashing", async () => {
     const initial = makePayload("tok-1");
     const fetchFn = (async () => {
