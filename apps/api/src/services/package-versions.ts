@@ -29,7 +29,7 @@ import { planCreateVersionOutcome, planTagReassignment } from "@appstrate/core/v
 
 import { parseScopedName } from "@appstrate/core/naming";
 import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
-import { dropRetiredRuntimeTools, type PackageType } from "@appstrate/core/validation";
+import type { PackageType } from "@appstrate/core/validation";
 import { parsePackageZip, zipArtifact } from "@appstrate/core/zip";
 import { asRecord, asRecordOrNull } from "@appstrate/core/safe-json";
 import { decodeSkillMarkdown } from "@appstrate/afps-shared/companion-files";
@@ -809,28 +809,9 @@ export async function createVersionFromDraft(params: {
   // (`buildBundleFromCatalog`), and the derived per-version dependency index
   // is rebuilt downstream from this manifest via `extractDependencies`.
   const parsed = typeof baseManifest.name === "string" ? parseScopedName(baseManifest.name) : null;
-  const rawManifest: Record<string, unknown> = parsed
+  const finalManifest: Record<string, unknown> = parsed
     ? { ...manifest, name: `@${parsed.scope}/${parsed.name}`, version }
     : manifest;
-
-  // Normalise BEFORE the snapshot. A version freezes its manifest twice — the
-  // `package_versions.manifest` row and the integrity-checked ZIP — and both
-  // are immutable afterwards. Freezing the draft verbatim would mint a brand
-  // new artifact carrying a `runtime_tools` id the platform retired *before*
-  // this publish, i.e. create the very legacy the read paths then have to
-  // tolerate forever. The drop is structural (no Zod re-parse): key order and
-  // unknown fields survive byte-for-byte, so a draft with nothing to drop
-  // yields the exact same bytes as before and publish dedup is
-  // unaffected.
-  const { manifest: finalManifest, dropped: droppedRuntimeTools } =
-    dropRetiredRuntimeTools(rawManifest);
-  if (droppedRuntimeTools.length > 0) {
-    logger.info("dropped retired runtime tools from published manifest", {
-      packageId,
-      version,
-      dropped: droppedRuntimeTools,
-    });
-  }
 
   await params.validateManifest?.(finalManifest, pkg.type);
 
@@ -891,7 +872,7 @@ export async function createVersionFromDraft(params: {
   // (`docs/NO_TRANSITIONAL_CODE.md` §1).
   if (pkg.type === "mcp-server") {
     try {
-      parsePackageZip(new Uint8Array(zipBuffer), { retiredRuntimeTools: "drop" });
+      parsePackageZip(new Uint8Array(zipBuffer), { retiredVocabulary: "drop" });
     } catch (err) {
       return { ok: false, error: "invalid_bundle", detail: getErrorMessage(err) };
     }

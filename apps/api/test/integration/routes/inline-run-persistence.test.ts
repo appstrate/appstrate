@@ -34,7 +34,6 @@ const shadowManifest = {
   type: "agent",
   description: "Inline",
   schema_version: "0.1",
-  runtime_tools: ["note", "pin"],
 } as unknown as AgentManifest;
 
 interface PersistenceBody {

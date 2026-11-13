@@ -161,7 +161,6 @@ const BANNED_CAMEL_KEYS = [
   "maxSize",
   "iconUrl",
   "providersConfiguration",
-  "runtimeTools",
 ] as const;
 
 interface Violation {

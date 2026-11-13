@@ -539,6 +539,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `@appstrate/afps-runtime` drops `LogWrittenEvent`, `RunResult.logs`, `LogEntry`
   and `LogLevel`; the stdout bridge passes such a line through as plain output.
 
+- **BREAKING: the `runtime_tools` manifest field is removed** (#2199). An agent gets
+  `log`, `note`, `pin`, `recall_memory` and `run_history` by declaring the
+  `@appstrate/platform` integration (`integrations_configuration` restricts the
+  selection); `output` and `publish_file` are harness tools. The field leaves the
+  `AgentManifest` OpenAPI schema and the AFPS agent JSON Schema; a manifest that still
+  carries it is not validated against any enum, and nothing reads it. Read paths no
+  longer drop retired ids (no `droppedRuntimeTools` warning on bundle import, fork or
+  publish), and the agent editor loses its Tools tab.
+
 ### Added
 
 - **System integration `@appstrate/platform`** (#2199). Runtime-bound

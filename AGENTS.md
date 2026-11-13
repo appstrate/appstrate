@@ -134,7 +134,7 @@ appstrate/
 
 Import from workspace packages using their published subpaths. **Core has no barrel** — import each module by subpath.
 
-- `@appstrate/core/*` — validation, zip, naming, dependencies, integrity, semver, version-policy, system-packages, form, schemas, logger, env, storage, ssrf, dist-tags, module, permissions, runtime-tools-catalog, integration, mcp-server, sidecar-types
+- `@appstrate/core/*` — validation, zip, naming, dependencies, integrity, semver, version-policy, system-packages, form, schemas, logger, env, storage, ssrf, dist-tags, module, permissions, integration, mcp-server, sidecar-types
 - `@appstrate/db/schema` -- Drizzle schema. **Every** table lives here, including the ones a module reads/writes (`schema/oidc.ts`, `schema/webhooks.ts`, …). Modules own no schema, no migrations, no `schema.ts` of their own
 - `@appstrate/db/client` -- `db` + `listenClient`
 - `@appstrate/env` -- `getEnv()` (Zod-validated, cached, fail-fast)

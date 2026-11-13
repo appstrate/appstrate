@@ -253,13 +253,12 @@ The platform MCP server (`apps/api/src/modules/mcp/`) surfaces files to external
 
 ## Compatibility surface
 
-**No alias is read.** The four spellings below are written down to record what is refused or ignored:
+**No alias is read.** The three spellings below are written down to record what is refused or ignored:
 
 | Retired spelling                                                                     | Canonical                 | How it goes, and what it costs                                                                                                                                                                                         |
 | ------------------------------------------------------------------------------------ | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `run_logs` `event: "document"`                                                       | `event: "file"`           | Not the tag readers accept — `PUBLISHED_FILE_LOG_EVENT` (`@appstrate/core/file-uri`) is `"file"`. A row carrying it renders without its file attachment — an absence, not an error.                                    |
 | `documents` key in a persisted `run_and_wait` result, and `document_id` on its items | `files`, `id` / `file_id` | `rawFileList` reads only `files` (`packages/module-chat/src/ui/run-events.ts`). A conversation carrying it comes back with no chips.                                                                                   |
-| `publish_document` in `manifest.runtime_tools`                                       | `publish_file`            | No alias table. Refused on author input; on a stored manifest the id is DROPPED and the drop REPORTED to the caller — never silently reinterpreted as another tool.                                                    |
 | `context_documents` as a `run_and_wait` **tool argument**                            | `context_files`           | Refused **by name**, which is the point: the launch body is built from an allowlist, so merely not reading it would make it invisible — the run would start with nothing mounted and every layer would report success. |
 
 Exactly two entries on this page stay written down after their alias is gone, under `docs/NO_TRANSITIONAL_CODE.md` §4's carve-out for what is load-bearing for CURRENT data: the `run_logs` `event: "document"` row above, and the `document://` / `doc_` bullet under "Retired, and refused on purpose" below. Production still holds historical `run_logs` rows, so how today's reader treats that tag and that id prefix is a fact about live data, not a transition note. Every other spelling named here has no data behind it and is written down only to say it is refused.

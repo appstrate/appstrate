@@ -35,6 +35,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`@appstrate/core/runtime-tool-defs`, #2199), with the `log`, `note` and `pin` tool
   definitions they built: the `@appstrate/platform` system integration serves these tools.
 
+- **BREAKING: `@appstrate/core/runtime-tools-catalog` and the `runtime_tools` field are
+  removed** (#2199), with `SELECTABLE_RUNTIME_TOOLS`, `EVENT_EMITTER_RUNTIME_TOOLS`,
+  `RUNTIME_TOOL_CATALOG`, `SelectableRuntimeTool`, `EventEmitterRuntimeTool`,
+  `RuntimeToolCatalogEntry`, `isSelectableRuntimeTool`, `canonicalizeRuntimeToolIds` and
+  `CanonicalizedRuntimeToolIds`. `agentManifestSchema` (`@appstrate/core/validation`) no
+  longer declares `runtime_tools`, `dropRetiredRuntimeTools` is removed, and
+  `ValidateManifestResult.droppedRuntimeTools` / `ParsedPackageZip.droppedRuntimeTools`
+  are removed. The direction option that governs retired `dependencies` keys is renamed:
+  `RetiredRuntimeToolsPolicy` → **`RetiredVocabularyPolicy`**, and
+  `ValidateManifestOptions.retiredRuntimeTools` / `ParsePackageZipOptions.retiredRuntimeTools`
+  → **`retiredVocabulary`** (same `"reject"` / `"drop"` values).
+
 - **BREAKING: runtime tools emit their events directly** (`@appstrate/core/runtime-tool-defs`,
   #2199). `RuntimeToolDef.handler` takes the run's `emit` as its second argument and calls it
   with the `output.emitted` / `file.published` event of a successful call.

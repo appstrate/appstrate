@@ -25,7 +25,6 @@ import type { CompanionViolationReason } from "@appstrate/afps-shared/companion-
 import type { FieldErrorCode } from "@appstrate/core/api-errors";
 import type { ModelGenerationErrorCode } from "@appstrate/core/model-generation";
 import type { PackageFileWriteErrorCode } from "@appstrate/core/package-file-operations";
-import { RUNTIME_TOOL_CATALOG } from "@appstrate/core/runtime-tools-catalog";
 import i18n, { i18nReady } from "../../i18n.ts";
 import { toApiError } from "../../api/client.ts";
 import { ApiError } from "../../api/errors.ts";
@@ -304,17 +303,6 @@ describe("API refusal codes ↔ locale files", () => {
         .filter((k) => k.startsWith("apiError."))
         .sort();
     expect(keys(en)).toEqual(keys(fr));
-  });
-});
-
-describe("runtime tool descriptions", () => {
-  it("exist in both locales for every tool of the catalog", () => {
-    const missing = RUNTIME_TOOL_CATALOG.flatMap((tool) =>
-      [agentsFr, agentsEn]
-        .filter((bundle) => !(`editor.runtimeTool.${tool.id}` in bundle))
-        .map(() => tool.id),
-    );
-    expect(missing).toEqual([]);
   });
 });
 

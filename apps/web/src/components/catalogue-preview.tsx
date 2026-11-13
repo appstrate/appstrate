@@ -18,7 +18,6 @@ import { useTranslation } from "react-i18next";
 import {
   Boxes,
   Clock,
-  Hammer,
   Hash,
   History,
   House,
@@ -353,9 +352,6 @@ export function CataloguePreview({
   const usedBy = (other?.agents ?? []).filter((entry) => agents.some((row) => row.id === entry.id));
   const agentSkills = agent?.dependencies.skills ?? [];
   const agentInputs = agent ? inputNames(agent) : [];
-  const runtimeTools = Array.isArray(agent?.manifest?.runtime_tools)
-    ? (agent.manifest.runtime_tools as unknown[]).length
-    : 0;
 
   return (
     <div>
@@ -438,11 +434,6 @@ export function CataloguePreview({
           {agentInputs.length > 0 && (
             <PropertyRow icon={TextCursorInput} label={t("catalogue.sheet.inputs")}>
               {agentInputs.join(", ")}
-            </PropertyRow>
-          )}
-          {runtimeTools > 0 && (
-            <PropertyRow icon={Hammer} label={t("catalogue.sheet.tools")}>
-              {t("catalogue.sheet.toolCount", { count: runtimeTools })}
             </PropertyRow>
           )}
           {/* Held at their height so the groups below do not move when the detail lands. */}

@@ -32,8 +32,7 @@ export interface RuntimeReadyPayload {
   bundleLoaded: boolean;
   /**
    * Count of extension factories handed to the runner: the AFPS bundle's own
-   * tools, the integration / sidecar-backed MCP tools, and the runtime tools
-   * the agent selected in `manifest.runtime_tools`. Diagnostics only — a
+   * tools and the integration / sidecar-backed MCP tools. Diagnostics only — a
    * caller counts whatever it actually registered.
    */
   extensions: number;

@@ -440,18 +440,6 @@
     "timeout": {
       "type": "number",
       "exclusiveMinimum": 0
-    },
-    "runtime_tools": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "enum": [
-          "log",
-          "note",
-          "pin",
-          "publish_file"
-        ]
-      }
     }
   },
   "required": [

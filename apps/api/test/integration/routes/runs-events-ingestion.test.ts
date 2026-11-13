@@ -2429,7 +2429,6 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
         name: "@test/schema-agent",
         version: "1.0.0",
         type: "agent",
-        runtime_tools: ["log"],
       },
     });
     const runId = await seedRunWithSink(ctx, "@test/schema-agent", { versionRef: "1.0.0" });
@@ -2457,7 +2456,6 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
         name: "@test/schema-agent",
         version: "2.0.0",
         type: "agent",
-        runtime_tools: ["log"],
         output: {
           schema: {
             type: "object",
@@ -2475,7 +2473,6 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
           name: "@test/schema-agent",
           version: "2.0.1",
           type: "agent",
-          runtime_tools: ["log"],
         },
       })
       .where(eq(packages.id, "@test/schema-agent"));

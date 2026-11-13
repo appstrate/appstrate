@@ -5802,8 +5802,8 @@ export interface components {
                 };
             };
         };
-        /** @description AFPS Agent manifest extended with Appstrate platform fields. Standard fields are defined by the AFPS Agent schema. Most extension fields use the x- prefix per AFPS §10, with the exception of the Appstrate-specific top-level `runtime_tools` field documented below. */
-        AgentManifest: ({
+        /** @description AFPS Agent manifest extended with Appstrate platform fields. Standard fields are defined by the AFPS Agent schema. Extension fields use the x- prefix per AFPS §10. */
+        AgentManifest: {
             name: string;
             version: string;
             /** @constant */
@@ -5944,9 +5944,6 @@ export interface components {
             timeout?: number;
         } & {
             [key: string]: unknown;
-        }) & {
-            /** @description Appstrate top-level extension: runtime tools the agent may use. Optional. An id outside this enum is rejected on author input and dropped (with the drop reported) when read back from a stored manifest. The `output` tool is not selected here: a run has it exactly when the manifest declares `output.schema`. */
-            runtime_tools?: ("log" | "note" | "pin" | "publish_file")[];
         };
         AgentSkillRef: {
             id: string;

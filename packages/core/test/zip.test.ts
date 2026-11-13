@@ -243,12 +243,11 @@ describe("parsePackageZip", () => {
     expect(agentManifest.customField).toBe("must-survive");
   });
 
-  // ── retired `runtime_tools` policy ──
+  // ── retired `dependencies` keys policy ──
   //
-  // `report` was a selectable runtime tool until it was removed from the enum.
-  // ZIPs published before the removal are immutable, so the parse boundary has
-  // to be directional: the default REJECTS (author input), and read paths opt
-  // into "drop" explicitly.
+  // ZIPs published before AFPS 2.0 are immutable, so the parse boundary is
+  // directional: the default REJECTS (author input), and read paths opt into
+  // "drop" (tolerate) explicitly.
 
   function legacyAgentZip(): Uint8Array {
     return makeZip({
@@ -259,42 +258,26 @@ describe("parsePackageZip", () => {
         schema_version: "0.1",
         display_name: "Legacy Agent",
         author: "test",
-        runtime_tools: ["log", "report"],
+        dependencies: { tools: { "@test/fetch": "^1.0.0" } },
       }),
       "prompt.md": "# Legacy prompt",
     });
   }
 
-  it("rejects a retired runtime_tools id by default (author input)", () => {
-    expect(() => parsePackageZip(legacyAgentZip())).toThrow(PackageZipError);
+  it("rejects a retired dependency key by default (author input)", () => {
     try {
       parsePackageZip(legacyAgentZip());
       expect.unreachable();
     } catch (e) {
       expect((e as PackageZipError).code).toBe("INVALID_MANIFEST");
-      expect((e as PackageZipError).message).toContain("runtime_tools");
+      expect((e as PackageZipError).message).toContain("dependencies.tools");
     }
   });
 
-  it("rejects a retired runtime_tools id under an explicit reject policy", () => {
-    expect(() => parsePackageZip(legacyAgentZip(), { retiredRuntimeTools: "reject" })).toThrow(
-      PackageZipError,
-    );
-  });
-
-  it("drops a retired runtime_tools id and reports it when the caller opts in", () => {
-    const result = parsePackageZip(legacyAgentZip(), { retiredRuntimeTools: "drop" });
-    expect((result.manifest as Record<string, unknown>).runtime_tools).toEqual(["log"]);
-    expect(result.droppedRuntimeTools).toEqual(["report"]);
-  });
-
-  it("reports no dropped runtime tools for a manifest with none retired", () => {
-    const zip = makeZip({
-      "manifest.json": validAgentManifest(),
-      "prompt.md": "# Test prompt",
-    });
-    expect(parsePackageZip(zip, { retiredRuntimeTools: "drop" }).droppedRuntimeTools).toEqual([]);
-    expect(parsePackageZip(zip).droppedRuntimeTools).toEqual([]);
+  it("tolerates a retired dependency key, untouched, when the caller opts in", () => {
+    const result = parsePackageZip(legacyAgentZip(), { retiredVocabulary: "drop" });
+    const deps = (result.manifest as Record<string, unknown>).dependencies;
+    expect(deps).toEqual({ tools: { "@test/fetch": "^1.0.0" } });
   });
 
   // Both limits are derived from the fixture's own compressed size, so NEITHER

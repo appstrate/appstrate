@@ -15,7 +15,6 @@ import {
   type BundlePackage,
 } from "@appstrate/afps-runtime/bundle";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { dropRetiredRuntimeTools } from "@appstrate/core/validation";
 import { RunPackageCatalog } from "./run-launcher/run-package-catalog.ts";
 import { loadAndVerifyBundle } from "./run-launcher/bundle-signature-policy.ts";
 import { AGENT_PACKAGES_BUCKET, versionZipKey } from "./package-storage-keys.ts";
@@ -226,28 +225,7 @@ export async function buildAgentPackage(
     dependencyOverrides?: Record<string, string> | null;
   },
 ): Promise<AgentPackageResult> {
-  // Canonicalize the persisted `runtime_tools` ids BEFORE they are serialized
-  // into the bundle the container loads: an id the platform cannot build is
-  // stripped and reported here rather than shipped to the runtime. The run
-  // routes (`package-catalog`) and the version resolver (`package-versions`)
-  // hand the stored manifest through verbatim, so the choke point is here,
-  // where the manifest BECOMES the run bundle.
-  //
-  // `dropRetiredRuntimeTools` returns the SAME reference when nothing needs
-  // rewriting, so an already-canonical manifest keeps its exact bytes (the
-  // bundle integrity hash is derived from them).
-  const { manifest, dropped: unbuildableRuntimeTools } = dropRetiredRuntimeTools(
-    agent.manifest as Record<string, unknown>,
-  );
-  if (unbuildableRuntimeTools.length > 0) {
-    // Not an alias — an id that resolves to nothing (retired outright, or an
-    // author typo). Dropping it keeps the run alive, but it is a silent
-    // capability loss, so it must not be silent in the log.
-    logger.warn("buildAgentPackage: manifest names runtime tools the platform cannot build", {
-      agentId: agent.id,
-      dropped: unbuildableRuntimeTools,
-    });
-  }
+  const manifest = agent.manifest as Record<string, unknown>;
   const name = typeof manifest.name === "string" ? manifest.name : null;
   const version = typeof manifest.version === "string" ? manifest.version : null;
   if (!name || !version || !name.startsWith("@") || !name.includes("/")) {

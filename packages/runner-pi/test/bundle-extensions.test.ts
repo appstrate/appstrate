@@ -63,17 +63,6 @@ describe("prepareBundleForPi — skills/ install", () => {
       ),
     ).toBe("nested");
   });
-
-  it("registers no runtime tools — they are registered elsewhere", async () => {
-    // Runtime tools are not Pi extensions built here: `PiRunner` registers
-    // `output` / `publish_file`, the `@appstrate/platform` integration serves
-    // the rest. `prepareBundleForPi` only writes members and returns nothing — even a
-    // `runtimeTools` selection produces no side effect here.
-    const root = makeBundlePackage("@acme/agent", "1.0.0", "agent", {}, { runtimeTools: ["log"] });
-    const bundle = makeTestBundle(root);
-    const result = await prepareBundleForPi(bundle, { workspaceDir: workspace });
-    expect(result).toBeUndefined();
-  });
 });
 
 const exists = (p: string) =>

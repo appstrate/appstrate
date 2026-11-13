@@ -21,7 +21,6 @@ import {
   MODEL_REASONING_OFF_BEHAVIOURS,
   modelCapabilitySupportSchema,
 } from "@appstrate/core/model-generation";
-import { SELECTABLE_RUNTIME_TOOLS } from "@appstrate/core/runtime-tools-catalog";
 import { MAX_TOKEN_USAGE_TIERS, TOKEN_USAGE_COUNTERS } from "@appstrate/afps-shared/token-usage";
 import { SPACE_ID_RE } from "@appstrate/db/ids";
 import {
@@ -61,14 +60,6 @@ const ORG_ROLES = [...orgRoleEnum.enumValues];
  * turn a server-side id-shape change into a client-side break.
  */
 export const SPACE_ROLE_ID_PATTERN = "^srl_";
-
-/**
- * Runtime-tool ids a manifest may DECLARE — the canonical catalog
- * ({@link SELECTABLE_RUNTIME_TOOLS}) spread into the mutable `string[]` a JSON
- * Schema `enum` member takes. There is no second list to pick from and no
- * reason to import anything but the catalog itself.
- */
-const RUNTIME_TOOL_IDS = [...SELECTABLE_RUNTIME_TOOLS];
 
 const TOKEN_USAGE_COUNTER_PROPERTIES = Object.fromEntries(
   TOKEN_USAGE_COUNTERS.map((counter) => [counter, { type: "integer", minimum: 0 }]),
@@ -2949,30 +2940,11 @@ export const schemas = {
     },
   },
   AgentManifest: {
+    type: "object",
     description:
       "AFPS Agent manifest extended with Appstrate platform fields. " +
-      "Standard fields are defined by the AFPS Agent schema. Most extension fields use the x- prefix per AFPS §10, " +
-      "with the exception of the Appstrate-specific top-level `runtime_tools` field documented below.",
-    allOf: [
-      { $ref: "https://schemas.afps.dev/v0/agent.schema.json" },
-      {
-        type: "object",
-        properties: {
-          runtime_tools: {
-            type: "array",
-            items: {
-              type: "string",
-              enum: RUNTIME_TOOL_IDS,
-            },
-            description:
-              "Appstrate top-level extension: runtime tools the agent may use. Optional. " +
-              "An id outside this enum is rejected on author input and dropped (with the " +
-              "drop reported) when read back from a stored manifest. The `output` tool is not " +
-              "selected here: a run has it exactly when the manifest declares `output.schema`.",
-          },
-        },
-      },
-    ],
+      "Standard fields are defined by the AFPS Agent schema. Extension fields use the x- prefix per AFPS §10.",
+    allOf: [{ $ref: "https://schemas.afps.dev/v0/agent.schema.json" }],
   },
   FileConstraintsMap: {
     type: "object",

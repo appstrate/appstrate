@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { parseScopedName, isOwnedByOrg } from "@appstrate/core/naming";
-import {
-  dropRetiredRuntimeTools,
-  validateManifest,
-  type PackageType,
-} from "@appstrate/core/validation";
+import { validateManifest, type PackageType } from "@appstrate/core/validation";
 import { logger } from "../lib/logger.ts";
 
 import { zipArtifact } from "@appstrate/core/zip";
@@ -122,38 +118,9 @@ async function forkWithConfig(
   // Build manifest from the published version snapshot, update name
   const versionManifest = asRecord(versionRow.manifest);
 
-  // Normalise ONCE, here, because a fork is a read that MINTS. It reads a
-  // manifest that is already published — immutable by construction, so a
-  // `runtime_tools` id the platform retired after that publish can never be
-  // repaired at the source — and turns it into a brand new immutable artifact.
-  // Rejecting would make every legacy agent permanently un-forkable (the same
-  // reason `createVersionFromDraft` drops rather than fails); carrying the id
-  // forward verbatim would regrave the retired legacy into a version row + ZIP
-  // minted today. `dropRetiredRuntimeTools` is structural (no Zod re-parse):
-  // key order, unknown fields and absent defaults survive it untouched, so it
-  // never introduces a difference of its own. (The fork's bytes still differ
-  // from the source's — the manifest is re-serialised from a jsonb read, which
-  // reorders keys, and `zipArtifact` rebuilds the archive.)
-  //
-  // BEFORE `createOrgItem`, not later: this one object feeds all three sinks —
-  // the draft row, the draft storage files, and the published version (row +
-  // ZIP). Normalising only the version would leave the retired id in the fork's
-  // draft, and the fork's first re-publish would mint it right back.
-  const { manifest: updatedManifest, dropped: droppedRuntimeTools } = dropRetiredRuntimeTools({
-    ...versionManifest,
-    name: targetId,
-  });
-  if (droppedRuntimeTools.length > 0) {
-    logger.info("dropped retired runtime tools from forked manifest", {
-      sourcePackageId,
-      packageId: targetId,
-      version: versionRow.version,
-      dropped: droppedRuntimeTools,
-    });
-  }
+  const updatedManifest = { ...versionManifest, name: targetId };
 
-  // Look, warn, NEVER reject. The drop above closes the retired-tool hole, but
-  // a source manifest invalid for any other reason (missing `type` /
+  // Look, warn, NEVER reject. A source manifest invalid for any reason (missing `type` /
   // `schema_version`, a null/array jsonb column) would otherwise mint a fresh
   // draft row, version row and ZIP unnoticed. Rejecting is not an option:
   // manifests today's validator refuses DO sit in the catalog, and a gate here
@@ -163,7 +130,7 @@ async function forkWithConfig(
   // this fork is the one path that propagates a stored one (a
   // `type: "provider"` manifest, for instance), the price of staying forkable.
   // So the operator gets a log line, and the fork proceeds.
-  const validation = validateManifest(updatedManifest, { retiredRuntimeTools: "drop" });
+  const validation = validateManifest(updatedManifest, { retiredVocabulary: "drop" });
   if (!validation.valid) {
     logger.warn("forking an invalid published manifest", {
       sourcePackageId,

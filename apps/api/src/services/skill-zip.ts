@@ -78,9 +78,6 @@ export async function tryParseSkillOnlyZip(
       files,
       type: "skill",
       packageId,
-      // The manifest is synthesised here from SKILL.md frontmatter, and only
-      // agents carry `runtime_tools` — nothing can have been dropped.
-      droppedRuntimeTools: [],
     },
   };
 }
