@@ -1461,9 +1461,15 @@ copy, removal and the second pass behaved as stated.
 `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/migration/0052-run-reads.sql`; under PGlite,
 with the app stopped.
 
-Rollback: the release before this one reads read state from `notifications` only, so rolling back
-after `0052` shows every successful run as read and loses the read state of runs finished since the
-deploy. Back up first.
+Between the deploy and `0052` the stored run notifications already carry the type `run_failed`
+whatever their run's status, so the feed still returns those of successful runs: run `0052` in the
+same window as the deploy.
+
+Rollback: not supported without restoring the backup. `0103` re-states `notifications_type_valid`
+without `run_completed`, the type the release before this one writes, so that release can record no
+finished run (the insert is refused, logged, and the run shows neither unread nor in the bell); for
+the same reason, do not serve the previous release beside this one. It also reads read state from
+`notifications` only, so after `0052` every successful run reads as read.
 
 ## Log
 

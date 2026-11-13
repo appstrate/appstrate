@@ -155,10 +155,16 @@ export async function markAllRunsRead(scope: SpaceScope, actor: Actor): Promise<
   return updated.length;
 }
 
-/** Unread runs per agent for the caller — the agent index's `unread_count`. */
+/**
+ * Unread runs per agent for the caller — the agent index's `unread_count`.
+ * `visibility` is the caller's run-read predicate (`runVisibilityFilter`), so
+ * the count spans the runs `GET /api/runs?unread=true` lists, never one the
+ * caller can no longer open.
+ */
 export async function getUnreadRunCountsByAgent(
   scope: SpaceScope,
   actor: Actor,
+  visibility?: SQL,
 ): Promise<Record<string, number>> {
   const rows = await db
     .select({ packageId: runs.packageId, count: count() })
@@ -168,7 +174,11 @@ export async function getUnreadRunCountsByAgent(
       scopedWhere(runReads, {
         orgId: scope.orgId,
         spaceId: scope.spaceId,
-        extra: [recipientFilter(actor), isNull(runReads.readAt)],
+        extra: [
+          recipientFilter(actor),
+          isNull(runReads.readAt),
+          ...(visibility ? [visibility] : []),
+        ],
       }),
     )
     .groupBy(runs.packageId);

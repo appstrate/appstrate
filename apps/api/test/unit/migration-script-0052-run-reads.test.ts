@@ -70,6 +70,9 @@ beforeAll(async () => {
         '{"packageId":"@acme0052/skill","package_type":"skill","shared_by_name":"Bob"}'::jsonb);
   `);
   await pg.exec(await Bun.file(`${DRIZZLE}/${tagOf("0103")}.sql`).text());
+  // A row the release wrote before the script ran: its read state wins.
+  await pg.exec(`INSERT INTO run_reads (run_id, org_id, space_id, recipient_type, recipient_id, read_at)
+    VALUES ('${run(1)}', '${ORG}', '${SPACE}', 'user', '${ALICE}', now())`);
 });
 
 afterAll(async () => {
@@ -91,11 +94,11 @@ describe("scripts/migration/0052-run-reads.sql", () => {
     ).rejects.toThrow(/notifications_type_valid/);
   });
 
-  it("copies every run notification into run_reads, keeping read state", async () => {
+  it("copies every run notification into run_reads, keeping read state and the rows already there", async () => {
     await pg.exec(await Bun.file(SCRIPT).text());
     expect(await reads()).toEqual([
       { run_id: run(0), read: true },
-      { run_id: run(1), read: false },
+      { run_id: run(1), read: true },
       { run_id: run(2), read: false },
       { run_id: run(3), read: false },
     ]);

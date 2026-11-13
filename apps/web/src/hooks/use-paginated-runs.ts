@@ -115,7 +115,7 @@ export function usePaginatedRuns({
             kind: kind && kind !== "all" ? kind : undefined,
             status: statusQuery,
             q: search || undefined,
-            unread: unread ? "true" : undefined,
+            unread: unread || undefined,
           },
         },
       });

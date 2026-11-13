@@ -13,7 +13,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `run_failed`). It copies each run's read state out of the
   `run_completed` notifications and removes the notifications of runs that did
   not fail or time out. Until it runs, runs finished before the deploy read as
-  read and the bell still lists them. The app may keep running; detail in
+  read and the bell still lists them. The app may keep running. `0103` makes
+  the previous release unable to record a finished run: do not serve both
+  releases at once, and roll back by restoring the backup. Detail in
   `scripts/migration/README.md`.
 
 - **Fixed: the runner bootstrap keeps its env across sudo-rs** (#2153).

@@ -24241,8 +24241,8 @@ export interface operations {
                 chat_session_id?: string;
                 /** @description Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`. */
                 q?: components["parameters"]["RunSearch"];
-                /** @description `true` returns only the runs the caller has not read yet (`unread` on each row). Read state is per recipient: a run finished for a dashboard user is unread for that user only. Any value outside the enum is rejected with `400`. */
-                unread?: "true" | "false";
+                /** @description When true, only the runs the caller has not read yet are returned (`unread` on each row). Read state is per recipient: a run finished for a dashboard user is unread for that user only. A value that is neither `true` nor `false` is rejected with `400`. */
+                unread?: boolean;
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */

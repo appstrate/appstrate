@@ -24,7 +24,7 @@ import { removeMember } from "../../../src/services/organizations.ts";
 import { synthesiseFinalize } from "../../../src/services/run-event-ingestion.ts";
 import { encrypt } from "@appstrate/connect";
 import { db } from "@appstrate/db/client";
-import { notifications, runReads, runs } from "@appstrate/db/schema";
+import { notifications, organizationMembers, runReads, runs } from "@appstrate/db/schema";
 import { and, eq, sql } from "drizzle-orm";
 
 const app = getTestApp();
@@ -60,7 +60,7 @@ describe("Run read state (per-recipient)", () => {
    * `actor` controls the recipient model: own user, an end-user, or none
    * (schedule / actor-less → fan out to org admins/owners).
    */
-  async function seedNotifiedRun(opts: {
+  async function seedFinishedRun(opts: {
     agentName?: string;
     actor: { userId: string } | { endUserId: string } | "schedule";
     status?: "success" | "failed" | "timeout";
@@ -140,17 +140,17 @@ describe("Run read state (per-recipient)", () => {
 
   describe("fan-out on finalize", () => {
     it("creates exactly one read-state row for a dashboard-user run", async () => {
-      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      await seedFinishedRun({ actor: { userId: ctx.user.id } });
       expect(await unreadCount(authHeaders(ctx))).toBe(1);
     });
 
-    it("end-user run notifies the end-user, not org members", async () => {
+    it("an end-user run is unread for the end-user, not for org members", async () => {
       const eu = await seedEndUser({
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
         name: "External",
       });
-      await seedNotifiedRun({ agentName: "eu-agent", actor: { endUserId: eu.id } });
+      await seedFinishedRun({ agentName: "eu-agent", actor: { endUserId: eu.id } });
 
       // The triggering org member is NOT a recipient.
       expect(await unreadCount(authHeaders(ctx))).toBe(0);
@@ -162,7 +162,7 @@ describe("Run read state (per-recipient)", () => {
       const member = await createTestUser();
       await addOrgMember(ctx.orgId, member.id, "member");
 
-      await seedNotifiedRun({ agentName: "sched-agent", actor: "schedule" });
+      await seedFinishedRun({ agentName: "sched-agent", actor: "schedule" });
 
       // ctx.user is the org owner → recipient; the admin → recipient.
       expect(await unreadCount(authHeaders(ctx))).toBe(1);
@@ -172,7 +172,7 @@ describe("Run read state (per-recipient)", () => {
     });
 
     it("is idempotent — a second fan-out for the same run creates no duplicate", async () => {
-      const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      const run = await seedFinishedRun({ actor: { userId: ctx.user.id } });
       await recordRunFinished(scope(), run.id);
 
       expect(await rowsOf(run.id)).toHaveLength(1); // primary key → onConflictDoNothing
@@ -180,7 +180,7 @@ describe("Run read state (per-recipient)", () => {
     });
 
     it("a successful run creates a read-state row and NO notification", async () => {
-      const run = await seedNotifiedRun({ actor: { userId: ctx.user.id }, status: "success" });
+      const run = await seedFinishedRun({ actor: { userId: ctx.user.id }, status: "success" });
 
       expect(await rowsOf(run.id)).toHaveLength(1);
       expect(await notificationsOf(run.id)).toHaveLength(0);
@@ -190,7 +190,7 @@ describe("Run read state (per-recipient)", () => {
 
     for (const status of ["failed", "timeout"] as const) {
       it(`a ${status} run creates a read-state row AND a notification carrying its status`, async () => {
-        const run = await seedNotifiedRun({ actor: { userId: ctx.user.id }, status });
+        const run = await seedFinishedRun({ actor: { userId: ctx.user.id }, status });
 
         expect(await rowsOf(run.id)).toHaveLength(1);
         const notified = await notificationsOf(run.id);
@@ -204,7 +204,7 @@ describe("Run read state (per-recipient)", () => {
     it("an actor-less failed run notifies each admin/owner once", async () => {
       const admin = await createTestUser();
       await addOrgMember(ctx.orgId, admin.id, "admin");
-      const run = await seedNotifiedRun({
+      const run = await seedFinishedRun({
         agentName: "fail-sched",
         actor: "schedule",
         status: "failed",
@@ -303,14 +303,14 @@ describe("Run read state (per-recipient)", () => {
 
   describe("PUT /api/runs/{id}/read", () => {
     it("marks the caller's run read (count drops)", async () => {
-      const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      const run = await seedFinishedRun({ actor: { userId: ctx.user.id } });
 
       expect(await markRead(authHeaders(ctx), run.id)).toBe(204);
       expect(await unreadCount(authHeaders(ctx))).toBe(0);
     });
 
     it("is idempotent — a second ack still answers 204", async () => {
-      const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      const run = await seedFinishedRun({ actor: { userId: ctx.user.id } });
       const h = authHeaders(ctx);
 
       expect(await markRead(h, run.id)).toBe(204);
@@ -319,7 +319,7 @@ describe("Run read state (per-recipient)", () => {
     });
 
     it("also marks the run's failure notification read (the bell count drops)", async () => {
-      const run = await seedNotifiedRun({ actor: { userId: ctx.user.id }, status: "failed" });
+      const run = await seedFinishedRun({ actor: { userId: ctx.user.id }, status: "failed" });
       expect(await bellCount(authHeaders(ctx))).toBe(1);
 
       expect(await markRead(authHeaders(ctx), run.id)).toBe(204);
@@ -329,12 +329,12 @@ describe("Run read state (per-recipient)", () => {
     });
 
     it("leaves another run's notification unread", async () => {
-      const a = await seedNotifiedRun({
+      const a = await seedFinishedRun({
         agentName: "fa",
         actor: { userId: ctx.user.id },
         status: "failed",
       });
-      await seedNotifiedRun({ agentName: "fb", actor: { userId: ctx.user.id }, status: "failed" });
+      await seedFinishedRun({ agentName: "fb", actor: { userId: ctx.user.id }, status: "failed" });
 
       await markRead(authHeaders(ctx), a.id);
       expect(await bellCount(authHeaders(ctx))).toBe(1);
@@ -347,18 +347,18 @@ describe("Run read state (per-recipient)", () => {
     it("is a no-op for a non-recipient (204, owner stays unread)", async () => {
       const userB = await createTestUser();
       await addOrgMember(ctx.orgId, userB.id, "member");
-      const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      const run = await seedFinishedRun({ actor: { userId: ctx.user.id } });
 
       expect(await markRead(headersFor(userB), run.id)).toBe(204);
       expect(await unreadCount(authHeaders(ctx))).toBe(1);
     });
 
-    it("a member marking another member's run does not touch it (the bug)", async () => {
+    it("a member marking another member's run does not touch it", async () => {
       const userB = await createTestUser();
       await addOrgMember(ctx.orgId, userB.id);
 
       // A run owned by user A → only A holds read state.
-      const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      const run = await seedFinishedRun({ actor: { userId: ctx.user.id } });
 
       // User B (same org) cannot mark A's run — a silent no-op, A stays unread.
       expect(await markRead(headersFor(userB), run.id)).toBe(204);
@@ -367,7 +367,7 @@ describe("Run read state (per-recipient)", () => {
     });
   });
 
-  // ─── Per-user read isolation (core of issue #667) ───────────
+  // ─── Per-user read isolation ───────────
 
   describe("per-user read isolation", () => {
     it("A marking a fanned-out run read leaves B's unread", async () => {
@@ -376,14 +376,14 @@ describe("Run read state (per-recipient)", () => {
       await addOrgMember(ctx.orgId, userB.id, "admin");
 
       // Actor-less run → one row each for A (owner) and B (admin).
-      const run = await seedNotifiedRun({ agentName: "iso-agent", actor: "schedule" });
+      const run = await seedFinishedRun({ agentName: "iso-agent", actor: "schedule" });
       expect(await unreadCount(authHeaders(ctx))).toBe(1);
       expect(await unreadCount(headersFor(userB))).toBe(1);
 
       // A marks their own copy read.
       expect(await markRead(authHeaders(ctx), run.id)).toBe(204);
 
-      // A is now read, B is still unread — the bug is fixed.
+      // A is now read, B is still unread.
       expect(await unreadCount(authHeaders(ctx))).toBe(0);
       expect(await unreadCount(headersFor(userB))).toBe(1);
     });
@@ -396,7 +396,7 @@ describe("Run read state (per-recipient)", () => {
       const userB = await createTestUser();
       // Admin so the actor-less run fans out to B too.
       await addOrgMember(ctx.orgId, userB.id, "admin");
-      await seedNotifiedRun({ agentName: "all-agent", actor: "schedule" });
+      await seedFinishedRun({ agentName: "all-agent", actor: "schedule" });
 
       const res = await readAll(authHeaders(ctx));
       expect(res.status).toBe(200);
@@ -408,8 +408,8 @@ describe("Run read state (per-recipient)", () => {
     });
 
     it("also marks every failure notification of the caller read", async () => {
-      await seedNotifiedRun({ agentName: "ra1", actor: { userId: ctx.user.id }, status: "failed" });
-      await seedNotifiedRun({
+      await seedFinishedRun({ agentName: "ra1", actor: { userId: ctx.user.id }, status: "failed" });
+      await seedFinishedRun({
         agentName: "ra2",
         actor: { userId: ctx.user.id },
         status: "timeout",
@@ -428,8 +428,8 @@ describe("Run read state (per-recipient)", () => {
     });
 
     it("counts only the still-unread runs", async () => {
-      const first = await seedNotifiedRun({ agentName: "mix1", actor: { userId: ctx.user.id } });
-      await seedNotifiedRun({ agentName: "mix2", actor: { userId: ctx.user.id } });
+      const first = await seedFinishedRun({ agentName: "mix1", actor: { userId: ctx.user.id } });
+      await seedFinishedRun({ agentName: "mix2", actor: { userId: ctx.user.id } });
       // Mark one of the two read up front.
       await markRead(authHeaders(ctx), first.id);
 
@@ -451,10 +451,10 @@ describe("Run read state (per-recipient)", () => {
       return Object.fromEntries(body.data.map((a) => [a.id, a.unread_count]));
     }
 
-    it("groups unread runs by agent id from the payload", async () => {
-      await seedNotifiedRun({ agentName: "agent-a", actor: { userId: ctx.user.id } });
-      await seedNotifiedRun({ agentName: "agent-a", actor: { userId: ctx.user.id } });
-      await seedNotifiedRun({ agentName: "agent-b", actor: { userId: ctx.user.id } });
+    it("groups unread runs by agent", async () => {
+      await seedFinishedRun({ agentName: "agent-a", actor: { userId: ctx.user.id } });
+      await seedFinishedRun({ agentName: "agent-a", actor: { userId: ctx.user.id } });
+      await seedFinishedRun({ agentName: "agent-b", actor: { userId: ctx.user.id } });
 
       const counts = await countsByAgent(authHeaders(ctx));
       expect(counts["@notiforg/agent-a"]).toBe(2);
@@ -462,8 +462,8 @@ describe("Run read state (per-recipient)", () => {
     });
 
     it("excludes runs already marked read", async () => {
-      const first = await seedNotifiedRun({ agentName: "cba", actor: { userId: ctx.user.id } });
-      await seedNotifiedRun({ agentName: "cba", actor: { userId: ctx.user.id } });
+      const first = await seedFinishedRun({ agentName: "cba", actor: { userId: ctx.user.id } });
+      await seedFinishedRun({ agentName: "cba", actor: { userId: ctx.user.id } });
       // Mark one of the two read → the unread group must drop to 1.
       await markRead(authHeaders(ctx), first.id);
 
@@ -471,8 +471,26 @@ describe("Run read state (per-recipient)", () => {
       expect(counts["@notiforg/cba"]).toBe(1);
     });
 
+    it("counts only the runs the caller may still open, like the Runs badge", async () => {
+      const admin = await createTestUser();
+      await addOrgMember(ctx.orgId, admin.id, "admin");
+      await seedFinishedRun({ agentName: "demoted", actor: "schedule" });
+      expect((await countsByAgent(headersFor(admin)))["@notiforg/demoted"]).toBe(1);
+
+      // Demoted: the actor-less run is no longer readable, its row remains.
+      await db
+        .update(organizationMembers)
+        .set({ role: "member" })
+        .where(
+          and(eq(organizationMembers.orgId, ctx.orgId), eq(organizationMembers.userId, admin.id)),
+        );
+
+      expect((await countsByAgent(headersFor(admin)))["@notiforg/demoted"] ?? 0).toBe(0);
+      expect(await unreadCount(headersFor(admin))).toBe(0);
+    });
+
     it("is scoped to the caller — another member's unread runs do not count", async () => {
-      await seedNotifiedRun({ agentName: "mine", actor: { userId: ctx.user.id } });
+      await seedFinishedRun({ agentName: "mine", actor: { userId: ctx.user.id } });
       const userB = await createTestUser();
       await addOrgMember(ctx.orgId, userB.id, "admin");
 
@@ -480,7 +498,7 @@ describe("Run read state (per-recipient)", () => {
     });
 
     it("skips read-state rows whose run carries no packageId", async () => {
-      await seedNotifiedRun({ agentName: "has-agent", actor: { userId: ctx.user.id } });
+      await seedFinishedRun({ agentName: "has-agent", actor: { userId: ctx.user.id } });
       // A run whose agent is gone (`packageId: null`), unread by the caller.
       const orphan = await seedRun({
         packageId: "@notiforg/has-agent",
@@ -501,7 +519,7 @@ describe("Run read state (per-recipient)", () => {
     });
 
     it("counts run read state only — a share notification's `packageId` is not a run", async () => {
-      await seedNotifiedRun({ agentName: "shared", actor: { userId: ctx.user.id } });
+      await seedFinishedRun({ agentName: "shared", actor: { userId: ctx.user.id } });
       await db.insert(notifications).values({
         orgId: ctx.orgId,
         spaceId: ctx.defaultSpaceId,
@@ -520,14 +538,14 @@ describe("Run read state (per-recipient)", () => {
 
   describe("org isolation", () => {
     it("a run's read state in another org is invisible", async () => {
-      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      await seedFinishedRun({ actor: { userId: ctx.user.id } });
 
       const otherCtx = await createTestContext({ orgSlug: "othernotiforg" });
       expect(await unreadCount(authHeaders(otherCtx))).toBe(0);
     });
 
     it("a mark from another org leaves the run unread for its recipient", async () => {
-      const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      const run = await seedFinishedRun({ actor: { userId: ctx.user.id } });
 
       const otherCtx = await createTestContext({ orgSlug: "wrongorg" });
       // An idempotent ack: 204, but it reaches no row of another org.
@@ -539,7 +557,7 @@ describe("Run read state (per-recipient)", () => {
 
   describe("cross-space isolation", () => {
     it("a run's read state in space A is invisible from space B in the same org", async () => {
-      await seedNotifiedRun({ actor: { userId: ctx.user.id } }); // space = ctx.defaultSpaceId
+      await seedFinishedRun({ actor: { userId: ctx.user.id } }); // space = ctx.defaultSpaceId
       const spaceB = await seedSpace({ orgId: ctx.orgId, name: "Space B" });
       const headersB = {
         Cookie: ctx.cookie,
@@ -553,7 +571,7 @@ describe("Run read state (per-recipient)", () => {
     });
 
     it("read-all in space B does not clear space A", async () => {
-      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      await seedFinishedRun({ actor: { userId: ctx.user.id } });
       const spaceB = await seedSpace({ orgId: ctx.orgId, name: "Space B" });
 
       const res = await readAll({
@@ -581,7 +599,7 @@ describe("Run read state (per-recipient)", () => {
         spaceId: ctx.defaultSpaceId,
         name: "EU positive",
       });
-      const run = await seedNotifiedRun({ agentName: "eu-pos", actor: { endUserId: eu.id } });
+      const run = await seedFinishedRun({ agentName: "eu-pos", actor: { endUserId: eu.id } });
 
       const rows = await rowsOf(run.id);
       expect(rows).toHaveLength(1);
@@ -624,7 +642,7 @@ describe("Run read state (per-recipient)", () => {
         spaceId: ctx.defaultSpaceId,
         name: "EU mark",
       });
-      const run = await seedNotifiedRun({ agentName: "eu-mark", actor: { endUserId: eu.id } });
+      const run = await seedFinishedRun({ agentName: "eu-mark", actor: { endUserId: eu.id } });
       expect(await readAtOf(run.id)).toBeNull();
 
       await markRunRead(scope(), run.id, { type: "end_user", id: eu.id });
@@ -637,7 +655,7 @@ describe("Run read state (per-recipient)", () => {
         spaceId: ctx.defaultSpaceId,
         name: "EU isolated",
       });
-      const run = await seedNotifiedRun({ agentName: "eu-iso", actor: { endUserId: eu.id } });
+      const run = await seedFinishedRun({ agentName: "eu-iso", actor: { endUserId: eu.id } });
 
       // Same id value passed under the wrong actor type must not clear the row.
       await markRunRead(scope(), run.id, { type: "user", id: eu.id });
@@ -687,7 +705,7 @@ describe("Run read state (per-recipient)", () => {
     });
 
     it("run_reads rejects a row with no recipient_id, and an unknown recipient_type", async () => {
-      const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      const run = await seedFinishedRun({ actor: { userId: ctx.user.id } });
       await expectNotNullViolation(
         db.execute(
           sql`INSERT INTO run_reads (run_id, org_id, space_id, recipient_type)
@@ -757,7 +775,7 @@ describe("Run read state (per-recipient)", () => {
       // Rows on a run the end-user did NOT launch: only the explicit cleanup
       // (not the end-user's runs cascading) can remove them — proves the
       // delete is real.
-      const run = await seedNotifiedRun({
+      const run = await seedFinishedRun({
         agentName: "eu-cleanup",
         actor: { userId: ctx.user.id },
       });
@@ -789,7 +807,7 @@ describe("Run read state (per-recipient)", () => {
       await addOrgMember(ctx.orgId, userB.id, "admin");
       // Actor-less failed run → a read-state row and a notification each for
       // the owner (A) and admin (B).
-      await seedNotifiedRun({ agentName: "cleanup-agent", actor: "schedule", status: "failed" });
+      await seedFinishedRun({ agentName: "cleanup-agent", actor: "schedule", status: "failed" });
       expect(await countForRecipient("user", userB.id)).toBe(2);
       expect(await countForRecipient("user", ctx.user.id)).toBe(2);
 
@@ -806,11 +824,11 @@ describe("Run read state (per-recipient)", () => {
         spaceId: ctx.defaultSpaceId,
         name: "EU survives",
       });
-      await seedNotifiedRun({ agentName: "eu-survive", actor: { endUserId: eu.id } });
+      await seedFinishedRun({ agentName: "eu-survive", actor: { endUserId: eu.id } });
 
       const userB = await createTestUser();
       await addOrgMember(ctx.orgId, userB.id, "admin");
-      await seedNotifiedRun({ agentName: "member-run", actor: "schedule" });
+      await seedFinishedRun({ agentName: "member-run", actor: "schedule" });
       expect(await countForRecipient("user", userB.id)).toBe(1);
 
       await removeMember(ctx.orgId, userB.id, { userId: ctx.user.id, firstPartySession: true });
@@ -825,7 +843,7 @@ describe("Run read state (per-recipient)", () => {
   // ─── Per-recipient `unread` flag on enriched runs (badge source) ──
   //
   // The run-list / schedule-card unread badges read `EnrichedRun.unread`,
-  // derived from the `run_reads` table for the requesting actor (issue #667).
+  // derived from the `run_reads` table for the requesting actor.
   // No `runs.notifiedAt` / `runs.readAt` columns exist any more — `run_reads`
   // is the single source of read-state.
 
@@ -841,7 +859,7 @@ describe("Run read state (per-recipient)", () => {
     };
 
     it("is true while the recipient's run is unread, false after mark", async () => {
-      const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      const run = await seedFinishedRun({ actor: { userId: ctx.user.id } });
       expect(await unreadOf(authHeaders(ctx), run.id)).toBe(true);
 
       await markRead(authHeaders(ctx), run.id);
@@ -852,7 +870,7 @@ describe("Run read state (per-recipient)", () => {
       const userB = await createTestUser();
       await addOrgMember(ctx.orgId, userB.id, "admin");
       // Actor-less run → one row each for A (owner) and B (admin).
-      const run = await seedNotifiedRun({ agentName: "unread-iso", actor: "schedule" });
+      const run = await seedFinishedRun({ agentName: "unread-iso", actor: "schedule" });
 
       expect(await unreadOf(authHeaders(ctx), run.id)).toBe(true);
       expect(await unreadOf(headersFor(userB), run.id)).toBe(true);
@@ -868,8 +886,8 @@ describe("Run read state (per-recipient)", () => {
 
   describe("GET /api/runs?unread=", () => {
     it("lists only the runs the caller has not read, `total` is the unread count", async () => {
-      const first = await seedNotifiedRun({ agentName: "u1", actor: { userId: ctx.user.id } });
-      const second = await seedNotifiedRun({ agentName: "u2", actor: { userId: ctx.user.id } });
+      const first = await seedFinishedRun({ agentName: "u1", actor: { userId: ctx.user.id } });
+      const second = await seedFinishedRun({ agentName: "u2", actor: { userId: ctx.user.id } });
       await markRead(authHeaders(ctx), first.id);
 
       expect(await unreadRunIds(authHeaders(ctx))).toEqual([second.id]);
@@ -877,8 +895,8 @@ describe("Run read state (per-recipient)", () => {
     });
 
     it("unread=false accepts the value and narrows nothing", async () => {
-      const read = await seedNotifiedRun({ agentName: "r1", actor: { userId: ctx.user.id } });
-      await seedNotifiedRun({ agentName: "r2", actor: { userId: ctx.user.id } });
+      const read = await seedFinishedRun({ agentName: "r1", actor: { userId: ctx.user.id } });
+      await seedFinishedRun({ agentName: "r2", actor: { userId: ctx.user.id } });
       await markRead(authHeaders(ctx), read.id);
 
       const res = await app.request("/api/runs?unread=false", { headers: authHeaders(ctx) });
@@ -895,7 +913,7 @@ describe("Run read state (per-recipient)", () => {
 
     it("paginates the unread list (limit + offset) with `total` of every unread run", async () => {
       for (let i = 0; i < 3; i++) {
-        await seedNotifiedRun({ agentName: `pg-${i}`, actor: { userId: ctx.user.id } });
+        await seedFinishedRun({ agentName: `pg-${i}`, actor: { userId: ctx.user.id } });
       }
       const res = await app.request("/api/runs?unread=true&limit=2&offset=2", {
         headers: authHeaders(ctx),
@@ -906,7 +924,7 @@ describe("Run read state (per-recipient)", () => {
     });
   });
 
-  // ─── GET /api/runs (org runs, ?user=me filter) — unchanged by #667 ──
+  // ─── GET /api/runs (org runs, ?user=me filter) ──
 
   describe("GET /api/runs", () => {
     it("returns empty list when no runs exist", async () => {
@@ -1043,19 +1061,19 @@ describe("Run read state (per-recipient)", () => {
     }
 
     it("read: a key without a run-read scope is refused", async () => {
-      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      await seedFinishedRun({ actor: { userId: ctx.user.id } });
       const headers = await keyHeaders(["agents:run"]);
       const res = await app.request("/api/runs?unread=true", { headers });
       expect(res.status).toBe(403);
     });
 
     it("read: a key with runs:read lists the caller's unread run", async () => {
-      const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      const run = await seedFinishedRun({ actor: { userId: ctx.user.id } });
       expect(await unreadRunIds(await keyHeaders(["runs:read"]))).toEqual([run.id]);
     });
 
     it("write: a key without a run-read scope is refused and nothing is marked", async () => {
-      const run = await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      const run = await seedFinishedRun({ actor: { userId: ctx.user.id } });
       const headers = await keyHeaders(["agents:run"]);
       expect((await readAll(headers)).status).toBe(403);
       expect(await markRead(headers, run.id)).toBe(403);
@@ -1063,13 +1081,13 @@ describe("Run read state (per-recipient)", () => {
     });
 
     it("write: a key with runs:read-all marks the caller's run read", async () => {
-      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      await seedFinishedRun({ actor: { userId: ctx.user.id } });
       expect((await readAll(await keyHeaders(["runs:read-all"]))).status).toBe(200);
       expect(await unreadCount(authHeaders(ctx))).toBe(0);
     });
 
     it("write: a cookie session, which carries no ceiling, marks it read", async () => {
-      await seedNotifiedRun({ actor: { userId: ctx.user.id } });
+      await seedFinishedRun({ actor: { userId: ctx.user.id } });
       expect((await readAll(authHeaders(ctx))).status).toBe(200);
       expect(await unreadCount(authHeaders(ctx))).toBe(0);
     });

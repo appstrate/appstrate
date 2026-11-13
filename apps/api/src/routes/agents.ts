@@ -211,10 +211,11 @@ export function createAgentsRouter() {
     // an agent placed here but switched off (or never switched on) lives on the
     // space library instead (`GET /api/spaces/{spaceId}/library`), which
     // carries its origin, its state and the switch.
+    const visibility = runVisibilityFilter(c);
     const [rows, runningCounts, unreadCounts] = await Promise.all([
       listActivePackages(scope, "agent"),
-      getRunningRunCounts(scope, runVisibilityFilter(c)),
-      getUnreadRunCountsByAgent(scope, getActor(c)),
+      getRunningRunCounts(scope, visibility),
+      getUnreadRunCountsByAgent(scope, getActor(c), visibility),
     ]);
 
     const agentList = rows.map((row) => {

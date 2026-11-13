@@ -835,9 +835,9 @@ const canonicalRunsPaths = {
         {
           name: "unread",
           in: "query",
-          schema: { type: "string", enum: ["true", "false"] },
+          schema: { type: "boolean" },
           description:
-            "`true` returns only the runs the caller has not read yet (`unread` on each row). Read state is per recipient: a run finished for a dashboard user is unread for that user only. Any value outside the enum is rejected with `400`.",
+            "When true, only the runs the caller has not read yet are returned (`unread` on each row). Read state is per recipient: a run finished for a dashboard user is unread for that user only. A value that is neither `true` nor `false` is rejected with `400`.",
         },
       ],
       responses: {
