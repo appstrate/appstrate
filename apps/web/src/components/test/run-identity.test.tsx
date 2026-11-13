@@ -64,6 +64,17 @@ describe("RunIdentity inside one agent", () => {
 });
 
 describe("RunIdentity, whatever the context", () => {
+  it("shows no number for a run the platform has not numbered", () => {
+    const withAgent = render(<RunIdentity run={makeRun({ runNumber: null })} agent={AGENT} />);
+    expect(withAgent).not.toContain("#");
+    expect(withAgent).toContain(START);
+    const alone = render(<RunIdentity run={makeRun({ runNumber: null })} />);
+    expect(alone).not.toContain("#");
+    expect(alone).toContain(START);
+    // Nothing on the second line but the duration: no separator leading it.
+    expect(alone).not.toContain("before:content-");
+  });
+
   it("says the start is pending before the run has one", () => {
     const html = render(<RunIdentity run={makeRun({ started_at: null })} agent={AGENT} />);
     expect(html).toContain(`#42 · ${agentsFr["dashboard.runPending"]}`);

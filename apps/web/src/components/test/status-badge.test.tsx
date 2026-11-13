@@ -19,7 +19,8 @@ describe("RunStatusBadge compact", () => {
   it("switches on its container's width, not the viewport's", () => {
     expect(html).toContain("@lg:hidden");
     expect(html).toContain("@lg:inline-flex");
-    expect(html).not.toContain("sm:");
+    expect(html).not.toContain("sm:hidden");
+    expect(html).not.toContain("sm:inline-flex");
   });
 
   it("names the status for a screen reader when only the icon shows", () => {

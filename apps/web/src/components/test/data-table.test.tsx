@@ -74,7 +74,13 @@ describe("width", () => {
   it("draws every column at every width, and scrolls under their sum", () => {
     // The width never hides a column: which ones show is the reader's call.
     const html = table();
-    expect(html).not.toContain("hidden @");
+    for (const column of COLUMNS) {
+      const head = (html.match(/<th[^>]*>/g) ?? []).find((h) =>
+        h.includes(`data-column="${column.id}"`),
+      );
+      expect(head).toBeDefined();
+      expect(head).not.toMatch(/class="[^"]*\bhidden\b/);
+    }
     expect(html).toContain("--dt-floor:272px");
     expect(html).toContain("min-w-(--dt-floor)");
   });

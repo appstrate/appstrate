@@ -30,8 +30,11 @@ export function RunIdentity({
   };
 }) {
   const { t } = useTranslation("agents");
-  const number = `#${run.runNumber ?? "?"}`;
+  // A run the platform has not numbered (yet) shows no number, never `#?`.
+  const number = run.runNumber != null ? `#${run.runNumber}` : null;
   const start = run.started_at ? formatDateField(run.started_at) : t("dashboard.runPending");
+  const title = agent ? agent.name : (number ?? start);
+  const subtitle = (agent ? [number, start] : [number && start]).filter(Boolean).join(" · ");
 
   return (
     <>
@@ -47,18 +50,18 @@ export function RunIdentity({
       )}
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-sm font-medium">{agent ? agent.name : number}</span>
+          <span className="truncate text-sm font-medium">{title}</span>
           <RunProvenanceBadges run={run} />
         </div>
         <p className="text-muted-foreground mt-0.5 truncate text-xs">
-          {agent ? `${number} · ${start}` : start}
+          {subtitle}
           {/* Live while the run goes, absent until it has a figure: the
               separator belongs to the duration, so it never dangles. */}
           <RunDuration
             status={run.status}
             startedAt={run.started_at}
             duration={run.duration}
-            className="before:content-['_·_']"
+            className={subtitle ? "before:content-['_·_']" : undefined}
           />
         </p>
       </div>

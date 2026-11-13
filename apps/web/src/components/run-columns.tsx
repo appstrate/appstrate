@@ -59,8 +59,8 @@ export function useRunColumns({
       // The badge says it is a status: a head would only take room.
       hideHeader: true,
       // The pill alone plus the cell's padding (12px each side): the unread dot
-      // is absolute and overflows into that padding. 99px fits the longest
-      // label, « en attente »; the compact icon is 16px.
+      // is absolute and overflows into that padding. The longest pill,
+      // « en attente », measures 98.3px (100 with room); the compact icon is 16px.
       width: 124,
       // In a table under 32rem the compact badge is its icon alone: the column follows.
       narrowWidth: 40,
