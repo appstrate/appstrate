@@ -55,6 +55,18 @@ const notificationObject = {
         shared_by_name: { type: "string" },
       },
     }),
+    notificationOf("agent_message", {
+      required: ["packageId", "title", "message"],
+      properties: {
+        packageId: {
+          type: ["string", "null"],
+          description:
+            "The agent of the run that sent it; null when the run no longer references its agent.",
+        },
+        title: { type: "string", description: "Headline the agent wrote (`notify` tool)." },
+        message: { type: "string", description: "Body the agent wrote (`notify` tool)." },
+      },
+    }),
   ],
 };
 

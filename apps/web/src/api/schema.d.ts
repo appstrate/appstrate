@@ -4718,7 +4718,7 @@ export interface paths {
         put?: never;
         /**
          * Run MCP server of a remote run
-         * @description Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the `@appstrate/platform` system integration — `log`, `note`, `pin`, `recall_memory`, `run_history` — for one `running` run. Each tool writes at call time: `log` appends a run log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's checkpoint snapshot that `run_history` returns. Mounted here for the host executing a remote run. Requires `agents:run`, and serves only a `running` remote run that the caller launched, in the caller's org and space; any other run returns 404 rather than confirming it exists.
+         * @description Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the `@appstrate/platform` system integration — `log`, `note`, `pin`, `recall_memory`, `run_history`, `notify` — for one `running` run. Each tool writes at call time: `log` appends a run log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's checkpoint snapshot that `run_history` returns, `notify` an `agent_message` notification to each recipient of the run's completion notification, once per run. Mounted here for the host executing a remote run. Requires `agents:run`, and serves only a `running` remote run that the caller launched, in the caller's org and space; any other run returns 404 rather than confirming it exists.
          */
         post: operations["runToolsMcpPost"];
         delete?: never;
@@ -5506,7 +5506,7 @@ export interface paths {
         put?: never;
         /**
          * Run MCP server of a platform run
-         * @description Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the `@appstrate/platform` system integration — `log`, `note`, `pin`, `recall_memory`, `run_history` — for one `running` run. Each tool writes at call time: `log` appends a run log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's checkpoint snapshot that `run_history` returns. Mounted here for the sidecar. Container-to-host only. Auth via Bearer run token, which names the run; a run that is not `running` is refused with 403.
+         * @description Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the `@appstrate/platform` system integration — `log`, `note`, `pin`, `recall_memory`, `run_history`, `notify` — for one `running` run. Each tool writes at call time: `log` appends a run log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's checkpoint snapshot that `run_history` returns, `notify` an `agent_message` notification to each recipient of the run's completion notification, once per run. Mounted here for the sidecar. Container-to-host only. Auth via Bearer run token, which names the run; a run that is not `running` is refused with 403.
          */
         post: operations["internalRunToolsMcpPost"];
         delete?: never;
@@ -19002,6 +19002,32 @@ export interface operations {
                                 /** @enum {string} */
                                 package_type: "agent" | "skill" | "integration" | "mcp-server";
                                 shared_by_name: string;
+                            } | null;
+                            /**
+                             * Format: date-time
+                             * @description When the recipient marked it read; null if unread
+                             */
+                            read_at: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                        } | {
+                            /**
+                             * Format: uuid
+                             * @description Notification id
+                             */
+                            id: string;
+                            /** @constant */
+                            type: "agent_message";
+                            /** @description Originating run id, when the notification references one */
+                            runId: string | null;
+                            /** @description Render-without-join data. */
+                            payload: {
+                                /** @description The agent of the run that sent it; null when the run no longer references its agent. */
+                                packageId: string | null;
+                                /** @description Headline the agent wrote (`notify` tool). */
+                                title: string;
+                                /** @description Body the agent wrote (`notify` tool). */
+                                message: string;
                             } | null;
                             /**
                              * Format: date-time

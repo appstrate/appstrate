@@ -2,7 +2,8 @@
 
 /**
  * The run MCP server — the tools of the `@appstrate/platform` system
- * integration (`log`, `note`, `pin`, `recall_memory`, `run_history`), served
+ * integration (`log`, `note`, `pin`, `recall_memory`, `run_history`,
+ * `notify`), served
  * over stateless Streamable HTTP for ONE running run.
  *
  * One server, two mounts, one auth each (the routes own the auth, this module
@@ -13,8 +14,8 @@
  *     pipeline on a remote run the caller launched.
  *
  * Every tool writes through the state services directly, at call time: a
- * `note` or `pin` is durable the moment the call returns, whether or not the
- * run reaches finalize.
+ * `note`, `pin` or `notify` is durable the moment the call returns, whether or
+ * not the run reaches finalize.
  */
 
 import type { Context } from "hono";
@@ -41,6 +42,7 @@ import {
   upsertPinned,
   type PersistenceScope,
 } from "./state/package-persistence.ts";
+import { createAgentMessageNotifications } from "./state/notifications.ts";
 import { isPlainRecord } from "./run-event-ingestion.ts";
 
 /** Server identity returned by `initialize`. */
@@ -88,6 +90,15 @@ const runHistoryArgs = z.object({
   fields: z.array(z.enum(RUN_HISTORY_FIELDS)).optional(),
 });
 
+/** Bounds of a `notify` message: one bell row, a title line and a short body. */
+const NOTIFY_TITLE_MAX = 100;
+const NOTIFY_MESSAGE_MAX = 500;
+
+const notifyArgs = z.object({
+  title: z.string().min(1).max(NOTIFY_TITLE_MAX),
+  message: z.string().min(1).max(NOTIFY_MESSAGE_MAX),
+});
+
 function textResult(text: string): CallToolResult {
   return { content: [{ type: "text", text }] };
 }
@@ -111,7 +122,7 @@ function parseArgs<T>(
 }
 
 /**
- * Build the five tool definitions bound to `run`. The run's actor decides the
+ * Build the six tool definitions bound to `run`. The run's actor decides the
  * default persistence scope; `scope: "shared"` writes the space-wide bucket.
  */
 function buildRunTools(run: RunToolsRun): AppstrateToolDefinition[] {
@@ -356,7 +367,58 @@ function buildRunTools(run: RunToolsRun): AppstrateToolDefinition[] {
     },
   };
 
-  return [log, note, pin, recallMemory, runHistory];
+  const notify: AppstrateToolDefinition = {
+    descriptor: {
+      name: "notify",
+      description:
+        "Send an in-app notification about this run — it appears in the notification bell and links to the run. " +
+        "It reaches the people the run's completion notifies: the member or end-user who triggered the run, or the " +
+        "organization's owners and admins for an unattended run. Each of them receives ONE notification per run: a " +
+        "second call is refused, so send it once, for what deserves attention (a result to review, a decision to make). " +
+        `Title up to ${NOTIFY_TITLE_MAX} characters, message up to ${NOTIFY_MESSAGE_MAX}.`,
+      inputSchema: {
+        type: "object",
+        additionalProperties: false,
+        required: ["title", "message"],
+        properties: {
+          title: {
+            type: "string",
+            minLength: 1,
+            maxLength: NOTIFY_TITLE_MAX,
+            description: `Short headline shown in bold (max ${NOTIFY_TITLE_MAX} characters)`,
+          },
+          message: {
+            type: "string",
+            minLength: 1,
+            maxLength: NOTIFY_MESSAGE_MAX,
+            description: `Body text under the title (max ${NOTIFY_MESSAGE_MAX} characters)`,
+          },
+        },
+      },
+    },
+    handler: async (raw) => {
+      const parsed = parseArgs("notify", notifyArgs, raw);
+      if (!parsed.ok) return parsed.result;
+      const { recipients, inserted } = await createAgentMessageNotifications(
+        { orgId: run.orgId, spaceId: run.spaceId },
+        run.runId,
+        parsed.args,
+      );
+      if (recipients === 0) {
+        return errorResult(
+          "notify: nobody can be notified for this run (a foreground run, or no recipient); nothing was sent.",
+        );
+      }
+      if (inserted === 0) {
+        return errorResult(
+          "notify: this run already sent its notification; a run notifies each recipient once.",
+        );
+      }
+      return textResult(`Notification sent to ${inserted} recipient(s)`);
+    },
+  };
+
+  return [log, note, pin, recallMemory, runHistory, notify];
 }
 
 /** Answer one MCP POST for `run`. The mount has already authenticated and authorised it. */

@@ -8,9 +8,10 @@
 export const RUN_TOOLS_MCP_DESCRIPTION =
   "Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the " +
   "`@appstrate/platform` system integration — `log`, `note`, `pin`, `recall_memory`, " +
-  "`run_history` — for one `running` run. Each tool writes at call time: `log` appends a run " +
+  "`run_history`, `notify` — for one `running` run. Each tool writes at call time: `log` appends a run " +
   "log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's " +
-  "checkpoint snapshot that `run_history` returns.";
+  "checkpoint snapshot that `run_history` returns, `notify` an `agent_message` notification to " +
+  "each recipient of the run's completion notification, once per run.";
 
 export const runToolsMcpRequestBody = {
   required: true,

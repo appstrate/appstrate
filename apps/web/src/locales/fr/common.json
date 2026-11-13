@@ -436,6 +436,7 @@
   "timeField.minute": "Minute",
   "timeField.period": "AM ou PM",
   "notifications.packageShared": "{{name}} vous a partagé {{package}}",
+  "notifications.agentMessageFrom": "Message de {{agent}} · {{date}}",
   "library.indexEmptyHint": "Ce qui est placé ici mais désactivé, et ce qui a été partagé avec vous, se trouve dans le <1>catalogue</1>.",
   "library.cannotActivate": "Vous n'avez pas la permission d'activer ce package dans cet espace",
   "library.cannotDeactivate": "Vous n'avez pas la permission de désactiver ce package dans cet espace",

@@ -574,16 +574,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **System integration `@appstrate/platform`** (#2199). Runtime-bound
   (`_meta["dev.appstrate/platform"]`), without auths, its catalog is `log`, `note`, `pin`,
-  `recall_memory` and `run_history`, all selected by default.
+  `recall_memory`, `run_history` and `notify`, all selected by default.
 
 - **Run MCP server: `POST /internal/mcp` and `POST /api/runs/{runId}/mcp`** (#2199).
   One stateless Streamable HTTP MCP server serves the `@appstrate/platform` tools
   for one `running` run, and each tool writes at call time: `log` a run log,
   `note` an archive memory, `pin` a pinned slot (and, for `checkpoint`, the run's
-  checkpoint snapshot `run_history` returns). The sidecar authenticates
+  checkpoint snapshot `run_history` returns), `notify` a notification. The sidecar authenticates
   `/internal/mcp` with the run token; the host executing a remote run reaches
   `/api/runs/{runId}/mcp` with `agents:run`, on a remote run it launched (any
   other run answers 404, `runs:read-all` included).
+
+- **`notify`: an agent sends an in-app notification from inside its run** (#2200).
+  A tool of `@appstrate/platform`, `notify({ title, message })` (title 1–100
+  characters, message 1–500) writes an `agent_message` notification, linked to the
+  run, to the recipients its `run_completed` would reach: the member or end-user
+  who triggered it, else the organization's owners and admins. Each recipient gets
+  one per run; a second call, a run with no recipient (an inline run) and
+  arguments outside the schema are tool errors that write nothing. The bell
+  renders it with its title, message and a link to the run. `GET /api/notifications`
+  adds the `agent_message` kind (payload `packageId`, `title`, `message`);
+  migration `0103` restates the `notifications_type_valid` CHECK. Agents whose
+  manifest `scripts/migration/0053` rewrote keep their explicit selection, without
+  `notify`.
 
 - **`appstrate run --local` wires unauthenticated remote MCP integrations**
   (#2198). For an integration with `source.kind: "remote"` and no `auths`, the

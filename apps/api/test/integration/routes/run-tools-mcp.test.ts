@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { packagePersistence, runLogs, runs } from "@appstrate/db/schema";
+import { notifications, packagePersistence, runLogs, runs } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
@@ -117,12 +117,12 @@ describe("run MCP server", () => {
       expect(status).toBe(403);
     });
 
-    it("lists the five platform tools", async () => {
+    it("lists the six platform tools", async () => {
       const run = await seedRunningRun();
       const { status, envelope } = await rpc(path, bearer(run.id), "tools/list");
       expect(status).toBe(200);
       const names = (envelope.result!.tools as Array<{ name: string }>).map((t) => t.name);
-      expect(names).toEqual(["log", "note", "pin", "recall_memory", "run_history"]);
+      expect(names).toEqual(["log", "note", "pin", "recall_memory", "run_history", "notify"]);
     });
 
     it("`log` appends a progress run log at call time", async () => {
@@ -268,6 +268,86 @@ describe("run MCP server", () => {
         .from(packagePersistence)
         .where(eq(packagePersistence.packageId, pkgId));
       expect(rows).toHaveLength(0);
+    });
+  });
+
+  describe("`notify`", () => {
+    const path = "/internal/mcp";
+    const bearer = (runId: string) => ({ Authorization: `Bearer ${signRunToken(runId)}` });
+    const notificationsOf = (runId: string) =>
+      db.select().from(notifications).where(eq(notifications.runId, runId));
+
+    it("notifies the run's trigger with an `agent_message` linked to the run", async () => {
+      const run = await seedRunningRun();
+      const result = await callTool(path, bearer(run.id), "notify", {
+        title: "Invoices ready",
+        message: "12 invoices await your review.",
+      });
+      expect(result.isError).toBeUndefined();
+      const rows = await notificationsOf(run.id);
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        recipientType: "user",
+        recipientId: ctx.user.id,
+        type: "agent_message",
+        runId: run.id,
+        payload: {
+          packageId: pkgId,
+          title: "Invoices ready",
+          message: "12 invoices await your review.",
+        },
+        readAt: null,
+      });
+    });
+
+    it("fans an unattended run's message out to the org owners and admins", async () => {
+      const admin = await memberContext(ctx, "admin");
+      await memberContext(ctx, "member");
+      const run = await seedRunningRun({ userId: null });
+      const result = await callTool(path, bearer(run.id), "notify", { title: "t", message: "m" });
+      expect(result.isError).toBeUndefined();
+      const recipients = (await notificationsOf(run.id)).map((r) => r.recipientId).sort();
+      expect(recipients).toEqual([ctx.user.id, admin.user.id].sort());
+    });
+
+    it("refuses arguments outside the input schema as a tool error, writing nothing", async () => {
+      const run = await seedRunningRun();
+      for (const args of [
+        { title: "only a title" },
+        { title: "", message: "m" },
+        { title: "t".repeat(101), message: "m" },
+        { title: "t", message: "m".repeat(501) },
+      ]) {
+        const result = await callTool(path, bearer(run.id), "notify", args);
+        expect(result.isError).toBe(true);
+        expect(result.content[0]!.text).toContain("notify: invalid arguments");
+      }
+      expect(await notificationsOf(run.id)).toHaveLength(0);
+    });
+
+    it("refuses a run nobody can be notified for, writing nothing", async () => {
+      const inlineId = `@inline/r-${crypto.randomUUID()}`;
+      await seedAgent({ id: inlineId, orgId: ctx.orgId, createdBy: ctx.user.id, ephemeral: true });
+      const run = await seedRunningRun({ packageId: inlineId });
+      const result = await callTool(path, bearer(run.id), "notify", { title: "t", message: "m" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain("nobody can be notified");
+      expect(await notificationsOf(run.id)).toHaveLength(0);
+    });
+
+    it("notifies each recipient once per run: a second call is a tool error", async () => {
+      const run = await seedRunningRun();
+      await callTool(path, bearer(run.id), "notify", { title: "first", message: "m" });
+      const second = await callTool(path, bearer(run.id), "notify", {
+        title: "second",
+        message: "m",
+      });
+      expect(second.isError).toBe(true);
+      expect(second.content[0]!.text).toContain("already sent its notification");
+      const rows = await notificationsOf(run.id);
+      expect(rows.map((r) => (r.payload as { title: string }).title)).toEqual(["first"]);
     });
   });
 

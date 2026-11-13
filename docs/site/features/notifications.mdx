@@ -1,6 +1,6 @@
 ---
 title: Notifications
-description: The in-app feed that tells people when a run finished or a package was shared with them.
+description: The in-app feed that tells people when a run finished, an agent sent them a message, or a package was shared with them.
 ---
 
 Notifications are the **in-app** inbox of a person or an [end-user](/features/end-users): the bell in the web app, the unread dots on runs, and the unread counts on agents and schedules. They are not emails or push messages. To notify an external system, use [webhooks](/features/webhooks).
@@ -13,8 +13,9 @@ Each notification belongs to one **recipient** and one space, and has its own re
 | ---------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
 | `run_completed`  | A run reaches a terminal status (`success`, `failed`, `timeout` or `cancelled`).                  | The member or end-user who launched it. A run with no actor is notified to the organization's owners and admins. |
 | `package_shared` | A package is shared **with a person**. The payload names the package, its type and who shared it. | The person, in their personal space.                                                                             |
+| `agent_message`  | A running agent calls the `notify` [platform tool](/features/tools#platform-tools).               | The recipients of the run's `run_completed`, at most once per run.                                               |
 
-A `run_completed` payload carries the `packageId` and the final `status`, which is enough to render the bell without another request. Runs of an inline agent do not notify, since their result is already in front of the caller.
+A `run_completed` payload carries the `packageId` and the final `status`, which is enough to render the bell without another request. An `agent_message` payload carries the `packageId`, the `title` and the `message` the agent wrote, and its `runId` is the run that sent it. Runs of an inline agent do not notify, since their result is already in front of the caller: their `notify` call is refused.
 
 ## Reading the feed
 

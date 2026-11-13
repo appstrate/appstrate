@@ -4,7 +4,7 @@
   "type": "integration",
   "schema_version": "0.3",
   "display_name": "Appstrate Platform",
-  "description": "Run tools served by the runtime that executes the run: progress logs, persistent memory (archive notes and pinned slots, the `checkpoint` slot included), memory recall and the agent's past runs. The runtime serves the MCP endpoint and authenticates to it itself (`_meta[\"dev.appstrate/platform\"]`); the declared URL is a reserved `.invalid` host that a runtime unaware of the binding cannot reach, so it leaves the integration unbound.",
+  "description": "Run tools served by the runtime that executes the run: progress logs, persistent memory (archive notes and pinned slots, the `checkpoint` slot included), memory recall, the agent's past runs and in-app notifications. The runtime serves the MCP endpoint and authenticates to it itself (`_meta[\"dev.appstrate/platform\"]`); the declared URL is a reserved `.invalid` host that a runtime unaware of the binding cannot reach, so it leaves the integration unbound.",
   "keywords": ["platform", "memory"],
   "license": "Apache-2.0",
   "icon": "lucide:server",
@@ -20,9 +20,10 @@
     "note": {},
     "pin": {},
     "recall_memory": {},
-    "run_history": {}
+    "run_history": {},
+    "notify": {}
   },
-  "default_tools": ["log", "note", "pin", "recall_memory", "run_history"],
+  "default_tools": ["log", "note", "pin", "recall_memory", "run_history", "notify"],
   "_meta": {
     "dev.appstrate/package": {
       "author": "Appstrate"
