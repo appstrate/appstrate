@@ -365,7 +365,7 @@ describe("PiRunner.run — missing-output re-prompt end to end", () => {
           content: [{ type: "text", text: "Sélection de 7 informations marquantes effectuée" }],
         });
       },
-      { terminalTools: ["output"] },
+      { outputSchema: { type: "object" } },
     );
 
     await runner.run({ bundle: STUB_BUNDLE, context: makeContext(), eventSink: sink });
@@ -390,7 +390,7 @@ describe("PiRunner.run — missing-output re-prompt end to end", () => {
         };
         endTurn(session, { role: "assistant", stopReason: "stop", content: [] });
       },
-      { terminalTools: ["output"] },
+      { outputSchema: { type: "object" } },
     );
 
     await runner.run({ bundle: STUB_BUNDLE, context: makeContext(), eventSink: sink });
@@ -419,7 +419,7 @@ describe("PiRunner.run — missing-output re-prompt end to end", () => {
           content: [],
         });
       },
-      { terminalTools: ["output"] },
+      { outputSchema: { type: "object" } },
     );
 
     await runner.run({ bundle: STUB_BUNDLE, context: makeContext(), eventSink: sink });

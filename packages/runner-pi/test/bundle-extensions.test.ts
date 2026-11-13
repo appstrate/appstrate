@@ -65,19 +65,13 @@ describe("prepareBundleForPi — skills/ install", () => {
   });
 
   it("registers no runtime tools — they are MCP defs hosted elsewhere", async () => {
-    // Runtime tools (output/log/note/pin) are no longer Pi extensions
+    // Runtime tools (log/note/pin) are not Pi extensions
     // built here: they are transport-neutral MCP defs
     // (`@appstrate/core/runtime-tool-defs`) served by the sidecar or
     // registered by the CLI via `buildRuntimeToolExtensions`.
     // `prepareBundleForPi` only writes members and returns nothing — even a
     // `runtimeTools` selection produces no side effect here.
-    const root = makeBundlePackage(
-      "@acme/agent",
-      "1.0.0",
-      "agent",
-      {},
-      { runtimeTools: ["output", "log"] },
-    );
+    const root = makeBundlePackage("@acme/agent", "1.0.0", "agent", {}, { runtimeTools: ["log"] });
     const bundle = makeTestBundle(root);
     const result = await prepareBundleForPi(bundle, { workspaceDir: workspace });
     expect(result).toBeUndefined();

@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: `output` is not a selectable runtime tool** (#2197). It leaves
+  `SELECTABLE_RUNTIME_TOOLS`, `EVENT_EMITTER_RUNTIME_TOOLS` and `RUNTIME_TOOL_CATALOG`
+  (`@appstrate/core/runtime-tools-catalog`), so `validateManifest` rejects it in
+  `runtime_tools` on the author path and drops it on the read path.
+  `buildRuntimeToolDefs` (`@appstrate/core/runtime-tool-defs`) loses its `outputSchema`
+  option, and `SidecarLaunchSpec.outputSchema` (`@appstrate/core/sidecar-types`) is
+  removed. **`buildOutputToolDef(outputSchema)`** builds the `output` tool from a
+  declared schema, always mandatory, and **`readDeclaredOutputSchema(manifest)`** returns
+  a manifest's non-empty `output.schema`, the condition for the tool.
+
 - **BREAKING: `EnforcedChatSkill` gains the required `uri`** (`@appstrate/core/chat-contract`):
   the `skill://` URI of an enforced skill's `SKILL.md` (`null` with `content` when no version
   resolves), and `content` is that `SKILL.md` as the MCP Skills extension serves it, so the
@@ -65,9 +75,7 @@ providerMessage? }` — the `<status> <JSON body>` envelope of a provider refusa
   server-side — and the category vocabulary as a runtime tuple.
 - **`ValidateManifestResult.issues`** (`@appstrate/core/validation`): on an invalid
   manifest, the failures structured as **`ManifestIssue`** `{ path, message, code? }` beside the `errors`
-  strings; `code` is set on a rule that carries its own — today
-  **`OUTPUT_TOOL_REQUIRED`** (`"output_tool_required"`, an output schema without the
-  `output` runtime tool). **`ValidationFieldError.line` / `.column`**
+  strings; `code` is set on a rule that carries its own. **`ValidationFieldError.line` / `.column`**
   (`@appstrate/core/api-errors`): the 1-based position of a file-level failure.
 - **`AGENT_UI_META_KEY`** (`@appstrate/core/validation`): `"dev.appstrate/ui"`,
   the `_meta` key holding an agent's presentation (`color`), next to

@@ -48,8 +48,8 @@ export interface ReportSnapshot {
 
 /**
  * `SELECTS_OUTPUT(m)` is true when `m.runtime_tools` is an array containing `"output"`;
- * `HAS_SCHEMA(m)` when `m.output.schema` is a non-empty object — the condition the validator's
- * `output_tool_required` rule tests. A CASE evaluates the type test before the containment, so a
+ * `HAS_SCHEMA(m)` when `m.output.schema` is a non-empty object — the condition under which the
+ * runner injects `output` (`readDeclaredOutputSchema`). A CASE evaluates the type test before the containment, so a
  * malformed manifest is skipped instead of aborting the report.
  */
 const SELECTS_OUTPUT = (m: string) =>

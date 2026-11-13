@@ -28,7 +28,6 @@ import {
   getRuntimeTools,
   withNormalizedManifest,
   setRuntimeTools,
-  withOutputTool,
 } from "../utils";
 import type { SchemaField } from "../types";
 import type { JSONSchema7, JSONSchemaObject } from "@appstrate/core/form";
@@ -850,8 +849,8 @@ describe("manifestToMetadata", () => {
 
 describe("getRuntimeTools", () => {
   it("reads canonical runtime_tools (snake_case)", () => {
-    const m = { runtime_tools: ["output", "note"] };
-    expect(getRuntimeTools(m)).toEqual(["output", "note"]);
+    const m = { runtime_tools: ["log", "note"] };
+    expect(getRuntimeTools(m)).toEqual(["log", "note"]);
   });
 
   it("tolerates missing field", () => {
@@ -862,13 +861,13 @@ describe("getRuntimeTools", () => {
     expect(getRuntimeTools({ runtime_tools: "not-an-array" })).toEqual([]);
   });
 
-  // Non-regression: `report` was a real runtime tool until it was replaced by
-  // durable `outputs/` files. Agents saved back then still carry the id;
-  // the editor must ignore it, never render a phantom checkbox for it, and
-  // never surface a validation error to the user because of it.
-  it("drops a retired tool id (`report`) it can no longer render", () => {
-    expect(getRuntimeTools({ runtime_tools: ["output", "report", "log"] })).toEqual([
-      "output",
+  // Stored agents can carry ids outside the catalog: `report` (superseded by
+  // durable `outputs/` files) and `output` (injected from `output.schema`).
+  // The editor ignores them, never renders a phantom checkbox for them, and
+  // never surfaces a validation error because of them.
+  it("drops retired tool ids (`report`, `output`) it cannot render", () => {
+    expect(getRuntimeTools({ runtime_tools: ["note", "output", "report", "log"] })).toEqual([
+      "note",
       "log",
     ]);
   });
@@ -880,18 +879,6 @@ describe("getRuntimeTools", () => {
 // (`@appstrate/core`). The former is gated on `type: "agent"` — the fixtures
 // carry it because the only call site (`package-editor.tsx`) runs in the agent
 // branch on a stored AFPS manifest, where `type` is required by the schema.
-describe("withOutputTool", () => {
-  it("turns the output tool on next to the tools already chosen", () => {
-    expect(withOutputTool({ runtime_tools: ["log"] }).runtime_tools).toEqual(["log", "output"]);
-    expect(withOutputTool({}).runtime_tools).toEqual(["output"]);
-  });
-
-  it("returns the same manifest when the tool is already there", () => {
-    const manifest = { runtime_tools: ["output", "log"] };
-    expect(withOutputTool(manifest)).toBe(manifest);
-  });
-});
-
 describe("withNormalizedManifest", () => {
   it("strips a retired id from the manifest loaded into the editor", () => {
     const m = { type: "agent", name: "@o/a", runtime_tools: ["report", "log"] };
@@ -909,7 +896,7 @@ describe("withNormalizedManifest", () => {
   });
 
   it("returns the same reference when there is nothing to drop", () => {
-    const m = { type: "agent", name: "@o/a", runtime_tools: ["output"] };
+    const m = { type: "agent", name: "@o/a", runtime_tools: ["log"] };
     expect(withNormalizedManifest(m)).toBe(m);
     const noField = { type: "agent", name: "@o/a" };
     expect(withNormalizedManifest(noField)).toBe(noField);

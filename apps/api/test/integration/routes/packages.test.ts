@@ -3027,7 +3027,7 @@ describe("Packages API", () => {
     }
 
     it("returns 400 for a RETIRED runtime_tools id (author input rejects)", async () => {
-      const res = await importAgentWithRuntimeTools(["output", "report"]);
+      const res = await importAgentWithRuntimeTools(["log", "report"]);
       expect(res.status).toBe(400);
       const body = (await res.json()) as any;
       expect(JSON.stringify(body)).toContain("runtime_tools");
@@ -3039,6 +3039,12 @@ describe("Packages API", () => {
         .where(eq(packages.id, "@pkgorg/rt-policy-agent"))
         .limit(1);
       expect(row).toBeUndefined();
+    });
+
+    it("returns 400 for `output` in runtime_tools: the output schema decides it", async () => {
+      const res = await importAgentWithRuntimeTools(["output", "log"]);
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(await res.json())).toContain("runtime_tools");
     });
 
     it("returns 400 for a MISSPELLED runtime_tools id (author input rejects)", async () => {
@@ -3091,7 +3097,7 @@ describe("Packages API", () => {
     it("imports an agent whose runtime_tools are all still selectable", async () => {
       // Control: the reject above must be caused by the id, not by the mere
       // presence of `runtime_tools`.
-      const res = await importAgentWithRuntimeTools(["output", "log"]);
+      const res = await importAgentWithRuntimeTools(["note", "log"]);
       expect(res.status).toBe(201);
       const [row] = await db
         .select({ draftManifest: packages.draftManifest })
@@ -3099,7 +3105,7 @@ describe("Packages API", () => {
         .where(eq(packages.id, "@pkgorg/rt-policy-agent"))
         .limit(1);
       expect((row!.draftManifest as Record<string, unknown>).runtime_tools).toEqual([
-        "output",
+        "note",
         "log",
       ]);
     });
@@ -3921,7 +3927,7 @@ describe("Packages API", () => {
         schema_version: "0.1",
         display_name: "Legacy Tool Agent",
         description: "Published before `report` was retired",
-        runtime_tools: ["output", "report"],
+        runtime_tools: ["log", "report"],
       });
 
       const res = await app.request(`/api/packages/${sourceId}/fork`, {
@@ -3933,16 +3939,16 @@ describe("Packages API", () => {
 
       const targetId = "@pkgorg/legacy-agent";
       // 1. the new catalog row
-      expect((await versionManifest(targetId)).runtime_tools).toEqual(["output"]);
+      expect((await versionManifest(targetId)).runtime_tools).toEqual(["log"]);
       // 2. the fork's draft — leave the retired id here and the fork's first
       //    re-publish regraves it into yet another immutable artifact.
-      expect((await draftManifest(targetId)).runtime_tools).toEqual(["output"]);
+      expect((await draftManifest(targetId)).runtime_tools).toEqual(["log"]);
       // 3. the immutable artifact — a normalised row over a stale ZIP still
       //    ships the retired id to every runner that downloads the bundle.
       const zipped = JSON.parse(await artifactManifestText(targetId, "0.1.0")) as {
         runtime_tools?: string[];
       };
-      expect(zipped.runtime_tools).toEqual(["output"]);
+      expect(zipped.runtime_tools).toEqual(["log"]);
     });
 
     it("removes the runtime_tools key entirely when every tool was retired", async () => {
@@ -3990,7 +3996,7 @@ describe("Packages API", () => {
         schema_version: "0.1",
         display_name: "Clean Agent",
         description: "Nothing to drop",
-        runtime_tools: ["output", "log"],
+        runtime_tools: ["log", "note"],
       });
 
       const res = await app.request(`/api/packages/${sourceId}/fork`, {

@@ -2967,7 +2967,8 @@ export const schemas = {
             description:
               "Appstrate top-level extension: runtime tools the agent may use. Optional. " +
               "An id outside this enum is rejected on author input and dropped (with the " +
-              "drop reported) when read back from a stored manifest.",
+              "drop reported) when read back from a stored manifest. The `output` tool is not " +
+              "selected here: a run has it exactly when the manifest declares `output.schema`.",
           },
         },
       },

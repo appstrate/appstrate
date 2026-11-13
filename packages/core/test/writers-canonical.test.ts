@@ -136,7 +136,7 @@ describe("banned-key walker (test infrastructure)", () => {
         mcp_servers: { "@x/m": "^1.0.0" },
         integrations: { "@x/i": "^1.0.0" },
       },
-      runtime_tools: ["output"],
+      runtime_tools: ["log"],
     });
     expect(v).toEqual([]);
   });

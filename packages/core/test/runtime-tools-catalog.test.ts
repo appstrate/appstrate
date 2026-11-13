@@ -18,19 +18,18 @@ describe("runtime-tools-catalog", () => {
     // `runtime_tools` enum and the generated AFPS JSON Schema, which are built
     // from it — an id missing here stops a persisted manifest validating. If
     // you change one, change all.
-    expect([...SELECTABLE_RUNTIME_TOOLS]).toEqual(["output", "log", "note", "pin", "publish_file"]);
+    expect([...SELECTABLE_RUNTIME_TOOLS]).toEqual(["log", "note", "pin", "publish_file"]);
   });
 
-  it("EVENT_EMITTER set is the four standalone-buildable emitters", () => {
+  it("EVENT_EMITTER set is the three standalone-buildable emitters", () => {
     // These are the tools `buildRuntimeToolDefs` builds standalone;
     // The publishing tool is deliberately excluded (it needs injected dependencies).
-    expect([...EVENT_EMITTER_RUNTIME_TOOLS]).toEqual(["output", "log", "note", "pin"]);
+    expect([...EVENT_EMITTER_RUNTIME_TOOLS]).toEqual(["log", "note", "pin"]);
   });
 
-  it("output is present in the catalog and selectable like every other tool", () => {
-    const output = RUNTIME_TOOL_CATALOG.find((e) => e.id === "output");
-    expect(output).toBeDefined();
-    expect(isSelectableRuntimeTool("output")).toBe(true);
+  it("output is not selectable: the output schema decides it", () => {
+    expect(RUNTIME_TOOL_CATALOG.find((e) => e.id === ("output" as never))).toBeUndefined();
+    expect(isSelectableRuntimeTool("output")).toBe(false);
   });
 
   it("catalog covers every selectable id — nothing hidden", () => {
@@ -73,25 +72,25 @@ describe("runtime-tool id reading", () => {
   });
 
   it("leaves an already-canonical list untouched", () => {
-    expect(canonicalizeRuntimeToolIds(["output", "publish_file"])).toEqual({
-      ids: ["output", "publish_file"],
+    expect(canonicalizeRuntimeToolIds(["log", "publish_file"])).toEqual({
+      ids: ["log", "publish_file"],
       dropped: [],
       changed: false,
     });
   });
 
   it("collapses a duplicate, preserving the author's order", () => {
-    expect(canonicalizeRuntimeToolIds(["publish_file", "output", "publish_file"])).toEqual({
-      ids: ["publish_file", "output"],
+    expect(canonicalizeRuntimeToolIds(["publish_file", "log", "publish_file"])).toEqual({
+      ids: ["publish_file", "log"],
       dropped: [],
       changed: true,
     });
   });
 
   it("drops an id that resolves to nothing, including non-strings", () => {
-    expect(canonicalizeRuntimeToolIds(["output", "report", 42, undefined])).toEqual({
-      ids: ["output"],
-      dropped: ["report", "42", "undefined"],
+    expect(canonicalizeRuntimeToolIds(["log", "report", "output", 42, undefined])).toEqual({
+      ids: ["log"],
+      dropped: ["report", "output", "42", "undefined"],
       changed: true,
     });
   });

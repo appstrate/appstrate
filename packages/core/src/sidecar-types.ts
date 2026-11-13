@@ -134,15 +134,6 @@ export interface SidecarLaunchSpec {
    */
   runtimeTools?: readonly string[];
   /**
-   * Output JSON Schema (`manifest.output.schema`). Forwarded so the
-   * sidecar's `output` runtime tool exposes it as the `data` argument
-   * schema (visible to the model in the tool definition) and AJV-validates
-   * calls against it.
-   * Serialised as the `OUTPUT_SCHEMA` env var. Omitted when the agent
-   * declares no output schema.
-   */
-  outputSchema?: Record<string, unknown>;
-  /**
    * P4 — connect-run mode (`runAt: "link"`). When set, the sidecar runs in
    * "connect mode": it boots the SINGLE integration carried in `integrations`,
    * runs its `login` MCP tool exactly once (`runConnectOnce`), emits the

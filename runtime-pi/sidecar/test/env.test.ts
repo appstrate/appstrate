@@ -32,25 +32,17 @@ describe("parseSidecarEnv", () => {
     });
   });
 
-  it("parses the run's runtime tools and output schema", () => {
-    const env = parseSidecarEnv({
-      ...VALID,
-      RUNTIME_TOOLS_JSON: '["output","note"]',
-      OUTPUT_SCHEMA: '{"type":"object"}',
-    });
-    expect(env.runtimeToolNames).toEqual(["output", "note"]);
-    expect(env.outputSchema).toEqual({ type: "object" });
+  it("parses the run's runtime tools", () => {
+    const env = parseSidecarEnv({ ...VALID, RUNTIME_TOOLS_JSON: '["log","note"]' });
+    expect(env.runtimeToolNames).toEqual(["log", "note"]);
   });
 
-  it("fails on a malformed runtime-tool list or output schema instead of dropping it", () => {
+  it("fails on a malformed runtime-tool list instead of dropping it", () => {
     expect(issuesOf({ ...VALID, RUNTIME_TOOLS_JSON: "[output" })).toEqual([
       "RUNTIME_TOOLS_JSON: must be valid JSON",
     ]);
-    expect(issuesOf({ ...VALID, RUNTIME_TOOLS_JSON: '["output",1]' })).toEqual([
+    expect(issuesOf({ ...VALID, RUNTIME_TOOLS_JSON: '["log",1]' })).toEqual([
       "RUNTIME_TOOLS_JSON: unexpected shape",
-    ]);
-    expect(issuesOf({ ...VALID, OUTPUT_SCHEMA: "[]" })).toEqual([
-      "OUTPUT_SCHEMA: unexpected shape",
     ]);
   });
 

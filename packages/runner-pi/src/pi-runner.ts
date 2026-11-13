@@ -38,6 +38,7 @@ import {
   type Transport,
 } from "./pi-sdk.ts";
 import { scheduleDeadlineNudges } from "./deadline-nudges.ts";
+import { buildOutputExtension } from "./runtime-tools/runtime-tool-extensions.ts";
 import { piSkillsDir } from "./bundle-extensions.ts";
 import { createIsolatedResourceLoader } from "./isolated-resource-loader.ts";
 import { addRequestUsage, DEFAULT_CONTEXT_WINDOW } from "./pi-model.ts";
@@ -266,16 +267,18 @@ export interface PiRunnerOptions {
    */
   transport?: Transport;
   /**
-   * Tool names whose first successful execution ends the run. When one of
-   * these tools completes without error the runner aborts the Pi session
-   * instead of paying one more LLM round-trip for a trailing text-only turn
-   * whose content is never delivered (the platform's communication contract
-   * routes everything through tools). Appstrate passes `["output"]` when the
-   * agent declares the `output` runtime tool. The abort raced here is
-   * recognised by the bridge and does NOT count as a terminal failure.
-   * Default: none (external consumers keep the SDK's natural stop).
+   * The agent's declared output schema (`output.schema`). When set, the runner
+   * registers the `output` tool (validating `data` against this schema and
+   * emitting `output.emitted` into the run's sink), and that tool's first
+   * successful call ends the run: the runner aborts the Pi session instead of
+   * paying one more LLM round-trip for a trailing text-only turn whose content
+   * is never delivered (the platform's communication contract routes
+   * everything through tools). The abort is recognised by the bridge and does
+   * NOT count as a terminal failure. A run that ends without calling it gets
+   * one corrective re-prompt. Omitted: no `output` tool, and the SDK's natural
+   * stop.
    */
-  terminalTools?: string[];
+  outputSchema?: Record<string, unknown>;
   /** Pi SDK retry on transient 429/5xx. Default `true`; off when an outer layer retries. */
   modelRetry?: boolean;
   /** Pi SDK context compaction. Default `true`; see {@link derivePiCompactionSettings}. */
@@ -668,6 +671,16 @@ export class PiRunner {
       enabled: this.opts.modelCompaction ?? true,
     });
 
+    // `output` events go straight into the run's sink, like every event the
+    // bridge emits; `run()` reads them back at finalize.
+    const outputSchema = this.opts.outputSchema;
+    const outputExtension: ExtensionFactory[] = outputSchema
+      ? [
+          buildOutputExtension(outputSchema, (event) => {
+            void internalSink.emit({ ...event, runId: context.runId } as RunEvent);
+          }),
+        ]
+      : [];
     const temperatureExtension: ExtensionFactory[] =
       this.opts.temperature === undefined
         ? []
@@ -685,7 +698,11 @@ export class PiRunner {
       cwd,
       agentDir,
       systemPrompt,
-      extensionFactories: [...(this.opts.extensionFactories ?? []), ...temperatureExtension],
+      extensionFactories: [
+        ...(this.opts.extensionFactories ?? []),
+        ...outputExtension,
+        ...temperatureExtension,
+      ],
       skillPaths: [piSkillsDir(cwd)],
     });
 
@@ -716,7 +733,7 @@ export class PiRunner {
     // for why this placement is the cheap one.
     enableSearchTools(session);
 
-    const terminalTools = this.opts.terminalTools ?? [];
+    const terminalTools = this.opts.outputSchema ? [OUTPUT_TERMINAL_TOOL] : [];
     const bridge = installSessionBridge(session, internalSink, context.runId, {
       terminalTools,
       contextWindow: budget.contextWindow,

@@ -3,7 +3,7 @@
 
 /**
  * Pi-extension wrapper for the platform runtime tools
- * (`output` / `log` / `note` / `pin`).
+ * (`output` / `log` / `note` / `pin` / `publish_file`).
  *
  * The tools' logic (input schema + validation + the canonical run events
  * each call produces) lives transport-neutrally in
@@ -25,6 +25,7 @@
 import { unsafeSchema, type ExtensionAPI, type ExtensionFactory } from "../pi-sdk.ts";
 import {
   buildRuntimeToolDefs,
+  buildOutputToolDef,
   buildPublishFileDef,
   reEmitRuntimeToolEvents,
   type FileUploader,
@@ -36,8 +37,6 @@ import { piToolResultOrThrow } from "../pi-tool-result.ts";
 export interface BuildRuntimeToolExtensionsOptions {
   /** Agent-selected runtime tools (`manifest.runtime_tools`). */
   runtimeTools?: readonly string[];
-  /** Output JSON Schema (constrains + validates `output`'s `data` arg). */
-  outputSchema?: Record<string, unknown> | null;
   /**
    * Sink for the canonical events each tool call produces. Defaults to the
    * stdout-JSONL emitter (`{...event, timestamp, runId}\n`) harvested by
@@ -67,7 +66,6 @@ export function buildRuntimeToolExtensions(
   const emit = opts.emit ?? defaultStdoutEmit;
   const defs = buildRuntimeToolDefs({
     ...(opts.runtimeTools !== undefined ? { runtimeTools: opts.runtimeTools } : {}),
-    ...(opts.outputSchema !== undefined ? { outputSchema: opts.outputSchema } : {}),
   });
   return defs.map((def) => runtimeToolExtension(def, emit));
 }
@@ -114,4 +112,16 @@ export function buildPublishFileExtension(
 ): ExtensionFactory {
   const emit = opts.emit ?? defaultStdoutEmit;
   return runtimeToolExtension(buildPublishFileDef(opts.uploader), emit);
+}
+
+/**
+ * Build the `output` Pi extension for an agent that declares `outputSchema`.
+ * {@link PiRunner} registers it itself from its `outputSchema` option, with
+ * `emit` writing into the run's event sink.
+ */
+export function buildOutputExtension(
+  outputSchema: Record<string, unknown>,
+  emit: (event: RuntimeToolEvent) => void,
+): ExtensionFactory {
+  return runtimeToolExtension(buildOutputToolDef(outputSchema), emit);
 }

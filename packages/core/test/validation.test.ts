@@ -182,8 +182,8 @@ describe("validateManifest", () => {
       { retiredRuntimeTools: "drop" },
     );
     expect(result.valid).toBe(true);
-    expect((result.manifest as Record<string, unknown>).runtime_tools).toEqual(["log", "output"]);
-    expect(result.valid && result.droppedRuntimeTools).toEqual(["report"]);
+    expect((result.manifest as Record<string, unknown>).runtime_tools).toEqual(["log"]);
+    expect(result.valid && result.droppedRuntimeTools).toEqual(["report", "output"]);
   });
 
   // The field is REMOVED, not emptied — the editor's `setRuntimeTools` drops it
@@ -412,32 +412,25 @@ describe("validateManifest", () => {
     expect(result.errors.some((e) => e.startsWith("runtime_tools"))).toBe(true);
   });
 
-  it("agent with no output schema is valid without the `output` runtime tool", () => {
-    // Side-effect-only run: do a task and finish, no result to return.
-    const result = validateManifest(validAgentManifest({ runtime_tools: ["log"] }));
-    expect(result.valid).toBe(true);
-  });
-
-  it("rejects an output schema when the `output` runtime tool is not selected", () => {
+  it("accepts an output schema without any runtime tool selected", () => {
     const result = validateManifest(
       validAgentManifest({
         output: { schema: { type: "object", properties: { x: { type: "string" } } } },
         runtime_tools: ["log"],
       }),
     );
-    expect(result.valid).toBe(false);
-    // Error is surfaced on the runtime_tools field so the editor can render it.
-    expect(result.errors.some((e) => e.startsWith("runtime_tools:"))).toBe(true);
+    expect(result.valid).toBe(true);
   });
 
-  it("accepts an output schema when the `output` runtime tool is selected", () => {
+  it("rejects `output` in runtime_tools on the author path: the output schema decides it", () => {
     const result = validateManifest(
       validAgentManifest({
         output: { schema: { type: "object", properties: { x: { type: "string" } } } },
         runtime_tools: ["output", "log"],
       }),
     );
-    expect(result.valid).toBe(true);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => e.startsWith("runtime_tools"))).toBe(true);
   });
 
   it("agent with integrations declared as bare version string (canonical §4.1 form)", () => {

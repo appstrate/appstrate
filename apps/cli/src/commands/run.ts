@@ -29,6 +29,7 @@ import {
 } from "@appstrate/runner-pi";
 import { parsePiLoopEnv, type PiLoopOptions } from "@appstrate/runner-pi/loop-env";
 import { getErrorMessage } from "@appstrate/core/errors";
+import { readDeclaredOutputSchema } from "@appstrate/core/runtime-tool-defs";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
 import {
   readBundleFromBuffer,
@@ -307,9 +308,9 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
 
   // ─── 6. ExecutionContext + prompt inputs ──────────────────────────
   // Derive the full platform prompt (skills / integrations / schemas /
-  // output) from the bundle. The runtime `output` tool receives the output schema as
-  // a parameter (`buildRuntimeToolExtensions({ outputSchema })` below), not
-  // via the environment.
+  // output) from the bundle. The `output` tool is built by the PiRunner from
+  // the declared output schema (`outputSchema` option below), not from the
+  // environment.
   //
   // `--snapshot` seeds `memories` / `history` / `state` onto the
   // context so dev-loop replays
@@ -369,19 +370,20 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   const promptInputs = cliPromptInputs(bundle, context, unavailable, wiredIntegrationIds);
   const systemPrompt = renderPlatformPrompt(promptInputs);
 
-  // ─── 7b. Platform runtime tools (output/log/note/pin) ──────────
+  // ─── 7b. Platform runtime tools (log/note/pin) ─────────────────
   // Selected via `manifest.runtime_tools`. With no sidecar (the CLI always
   // runs in-process), register the shared MCP tool definitions
   // (`@appstrate/core/runtime-tool-defs`) as Pi extensions. The default
   // emitter writes the canonical events as stdout-JSONL, harvested by the
   // `attachStdoutBridge` wired below into the run sink.
-  const rootRuntimeTools = (
-    bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: string[] } | undefined
-  )?.runtime_tools;
+  const rootManifest = bundle.packages.get(bundle.root)?.manifest;
+  const rootRuntimeTools = (rootManifest as { runtime_tools?: string[] } | undefined)
+    ?.runtime_tools;
   const runtimeToolFactories = buildRuntimeToolExtensions({
     ...(rootRuntimeTools ? { runtimeTools: rootRuntimeTools } : {}),
-    outputSchema: (promptInputs.outputSchema ?? null) as Record<string, unknown> | null,
   });
+  // Its presence gives the run the `output` tool, registered by the PiRunner.
+  const outputSchema = readDeclaredOutputSchema(rootManifest);
   if (!opts.json && runtimeToolFactories.length > 0) {
     process.stderr.write(`→ wired ${runtimeToolFactories.length} runtime tool(s)\n`);
   }
@@ -415,7 +417,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     envValue: process.env.APPSTRATE_VERBOSE,
   });
   // Stdout-JSONL bridge wiring (see `attachStdoutBridge` for the full
-  // rationale). The built-in runtime tools (`output`, `log`, `note`, `pin`)
+  // rationale). The built-in runtime tools (`log`, `note`, `pin`)
   // emit canonical events via
   // `process.stdout.write(JSON+\n)`. Without the bridge these events
   // never reach the configured sink — they're printed as raw JSON noise
@@ -547,6 +549,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       agentDir: path.join(workspaceDir, ".pi-agent"),
       extensionFactories: [...apiCallFactories, ...runtimeToolFactories],
       authStoragePath: path.join(workspaceDir, ".pi-auth.json"),
+      ...(outputSchema ? { outputSchema } : {}),
       ...piLoopOptions,
     });
 

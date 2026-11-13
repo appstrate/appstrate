@@ -2337,7 +2337,6 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
         version: "0.1.0",
         type: "agent",
         description: "Agent with a declared output schema",
-        runtime_tools: ["output"],
         output: {
           schema: {
             type: "object",
@@ -2472,7 +2471,7 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
         name: "@test/schema-agent",
         version: "2.0.0",
         type: "agent",
-        runtime_tools: ["output", "log"],
+        runtime_tools: ["log"],
         output: {
           schema: {
             type: "object",

@@ -175,7 +175,7 @@ import { isManifestTextFallback } from "../lib/manifest-utils.ts";
 
 /**
  * The 400 items of an invalid manifest: one per structured issue, carrying the rule's own code
- * when it has one (`output_tool_required`), else `invalid_manifest`. A dispatcher-level failure
+ * when it has one, else `invalid_manifest`. A dispatcher-level failure
  * comes as strings only.
  */
 function manifestErrorsToFieldErrors(result: {

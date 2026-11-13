@@ -21,20 +21,20 @@ These tools act inside the sandbox only. Anything that reaches the outside world
 
 ## Runtime tools
 
-Runtime tools are first-party and **opt-in**. You choose them per agent with `runtime_tools`. None is injected by default, not even `output`.
+Runtime tools are first-party and **opt-in**. You choose them per agent with `runtime_tools`. None is injected by default. The exception is `output`, which is not selectable: the run has it exactly when the agent declares an `output.schema`.
 
-| Tool           | Purpose                                                                                                                                                                                                                |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `output`       | Returns the run's structured result as its `data` argument, whose schema is the agent's `output.schema`, and the call is validated. A successful call ends the run. Required when the agent declares an output schema. |
-| `log`          | Sends a progress message (`info`, `warn`, `error`) that the user sees live.                                                                                                                                            |
-| `note`         | Appends a long-term memory (up to 2000 characters), private to the actor by default or `shared` for the space.                                                                                                         |
-| `pin`          | Upserts a named slot that is pinned into the prompt of every run (`checkpoint`, `persona`, ...).                                                                                                                       |
-| `publish_file` | Publishes a workspace file as a durable run file immediately and returns its `appfile://` URI.                                                                                                                         |
+| Tool           | Purpose                                                                                                                                                                                                                       |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `output`       | Returns the run's structured result as its `data` argument, whose schema is the agent's `output.schema`, and the call is validated. A successful call ends the run. Present exactly when the agent declares an output schema. |
+| `log`          | Sends a progress message (`info`, `warn`, `error`) that the user sees live.                                                                                                                                                   |
+| `note`         | Appends a long-term memory (up to 2000 characters), private to the actor by default or `shared` for the space.                                                                                                                |
+| `pin`          | Upserts a named slot that is pinned into the prompt of every run (`checkpoint`, `persona`, ...).                                                                                                                              |
+| `publish_file` | Publishes a workspace file as a durable run file immediately and returns its `appfile://` URI.                                                                                                                                |
 
 Excerpt of the agent manifest:
 
 ```json
-{ "runtime_tools": ["output", "log", "note"] }
+{ "runtime_tools": ["log", "note"] }
 ```
 
 Alongside them the sidecar exposes two read-only first-party tools, `run_history` (metadata of recent runs) and `recall_memory` (search the memory archive). `note`, `pin` and `recall_memory` are explained in [Memory](/features/memory). Files are covered in [Files](/features/files).

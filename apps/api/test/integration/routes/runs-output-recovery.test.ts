@@ -128,7 +128,6 @@ describe("platform-synthesised terminals — emitted `output` recovery", () => {
         version: "0.1.0",
         type: "agent",
         description: "Agent with a declared output schema",
-        runtime_tools: ["output"],
         output: {
           schema: {
             type: "object",

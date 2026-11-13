@@ -561,7 +561,7 @@ describe("launchRunAndWait launch body", () => {
     type: "agent",
     version: "1.0.0",
     dependencies: {},
-    runtime_tools: ["log", "output", "publish_file"],
+    runtime_tools: ["log", "publish_file"],
     output: { schema: { type: "object", properties: {}, additionalProperties: true } },
     ...overrides,
   });
@@ -626,7 +626,7 @@ describe("launchRunAndWait launch body", () => {
       timeout: 42,
       dependencies: { integrations: { "@appstrate/gmail": "^1.2.0" } },
       integrations_configuration: { "@appstrate/gmail": { tools: ["api_call"] } },
-      runtime_tools: ["output"],
+      runtime_tools: ["log"],
       output: {
         schema: {
           type: "object",
