@@ -15,8 +15,9 @@
  * the manifest names in `source.remote.url` is the caller's own (a dev server on localhost is
  * reachable), any other host a redirect leads to is checked against the SSRF blocklist.
  *
- * An integration whose server cannot be reached, whose `tools/list` fails or which exposes no
- * admitted tool is returned in `unavailable` with the platform's wording
+ * An integration whose server cannot be reached, does not answer the connection and `tools/list`
+ * within {@link REMOTE_MCP_STARTUP_TIMEOUT_MS}, fails its `tools/list` or exposes no admitted tool
+ * is returned in `unavailable` with the platform's wording
  * ({@link UNAVAILABLE_INTEGRATION_REASONS}): the run starts without it.
  */
 
@@ -26,6 +27,7 @@ import {
   type IntegrationRef,
 } from "@appstrate/afps-runtime/resolvers";
 import { UNAVAILABLE_INTEGRATION_REASONS, type Bundle } from "@appstrate/afps-runtime/bundle";
+import { renderUrlTemplate } from "@appstrate/afps-shared/connection-variables";
 import { guardedFetchChain, SsrfBlockedError } from "@appstrate/afps-shared/guarded-fetch";
 import type { HostResolver } from "@appstrate/afps-shared/ssrf-dns";
 import {
@@ -66,9 +68,18 @@ interface BuildRemoteMcpExtensionsOptions {
   signal?: AbortSignal;
   /** DNS resolver of the egress guard. Production omits it. */
   resolveHost?: HostResolver;
+  /** Bound on one integration's connection and `tools/list`. Production omits it. */
+  startupTimeoutMs?: number;
 }
 
 const CLIENT_INFO = { name: "appstrate-cli-remote-integration", version: "0.1.0" };
+
+/**
+ * Bound on the connection and `tools/list` of one integration: integrations connect one after the
+ * other before the run starts, so a server that accepts the connection and never answers delays
+ * the run by this much at most. Tool calls keep the client's default timeout.
+ */
+const REMOTE_MCP_STARTUP_TIMEOUT_MS = 10_000;
 
 /** Connect every unauthenticated remote integration the agent selects tools of. */
 export async function buildRemoteMcpExtensions(
@@ -162,12 +173,13 @@ function remoteTarget(
   const wildcard = isToolsWildcard(selection);
   if (!wildcard && !selection?.length) return undefined;
 
-  const url = source.remote?.url;
-  if (typeof url !== "string") {
+  if (typeof source.remote?.url !== "string") {
     return { reason: UNAVAILABLE_INTEGRATION_REASONS.remote_source_invalid };
   }
-  // An unauthenticated integration binds no connection, so a variable has no value to render.
-  if (url.includes("{{")) {
+  // An unauthenticated integration binds no connection, so a `{$variable.<name>}` template
+  // (AFPS §7.12) has no value to render.
+  const url = renderUrlTemplate(source.remote.url, {});
+  if (url === null) {
     return { reason: UNAVAILABLE_INTEGRATION_REASONS.remote_url_unrenderable };
   }
   if (!URL.canParse(url) || !/^https?:$/.test(new URL(url).protocol)) {
@@ -201,12 +213,14 @@ async function connectAndList(
     },
     { preconnect: fetch.preconnect },
   );
+  const deadline = AbortSignal.timeout(opts.startupTimeoutMs ?? REMOTE_MCP_STARTUP_TIMEOUT_MS);
+  const signal = opts.signal ? AbortSignal.any([opts.signal, deadline]) : deadline;
   let client: AppstrateMcpClient;
   try {
     client = await createMcpHttpClient(url, {
       fetch: guardedFetch,
       clientInfo: CLIENT_INFO,
-      ...(opts.signal ? { signal: opts.signal } : {}),
+      signal,
     });
   } catch (err) {
     return {
@@ -217,7 +231,7 @@ async function connectAndList(
     };
   }
   try {
-    const { tools } = await client.listTools(opts.signal ? { signal: opts.signal } : {});
+    const { tools } = await client.listTools({ signal });
     return { client, tools };
   } catch {
     await client.close().catch(() => {});

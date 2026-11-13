@@ -475,8 +475,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `hidden_tools`, as `{ns}__{tool}`, named as on the platform. Requests go
   through the same SSRF guard as the CLI's `api_call` calls: the declared host
   is reachable, a redirect to a blocked range is refused. A server the CLI
-  cannot reach, a failing `tools/list` or an SSE transport leaves the
-  integration unavailable: the agent is told and the run starts without it.
+  cannot reach, a connection and `tools/list` that take more than 10 s, a
+  failing `tools/list`, an SSE transport or a `{$variable.<name>}` URL template
+  leaves the integration unavailable: the agent is told and the run starts
+  without it.
   Authenticated remote integrations and `local` sources stay unavailable to a
   local run; `--integrations none` wires none.
 

@@ -226,10 +226,33 @@ describe("run --local — unauthenticated remote MCP integrations", () => {
     expect(extensions.unavailable).toEqual([]);
   });
 
-  it("marks a templated server address unrenderable without connecting", async () => {
-    const { extensions } = await wire(makeBundle({ url: "https://{{tenant}}.example.com/mcp" }));
-    expect(extensions.unavailable).toEqual([
-      { id: DOCS, reason: UNAVAILABLE_INTEGRATION_REASONS.remote_url_unrenderable },
-    ]);
+  for (const url of ["https://{$variable.tenant}.example.com/mcp", "{$variable.base_url}/mcp"]) {
+    it(`marks the templated server address ${url} unrenderable without connecting`, async () => {
+      const { extensions } = await wire(makeBundle({ url }));
+      expect(extensions.factories).toEqual([]);
+      expect(extensions.unavailable).toEqual([
+        { id: DOCS, reason: UNAVAILABLE_INTEGRATION_REASONS.remote_url_unrenderable },
+      ]);
+    });
+  }
+
+  it("marks a server that never answers unavailable once the startup timeout fires", async () => {
+    const silent = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () => new Promise<Response>(() => {}),
+    });
+    try {
+      const bundle = makeBundle({ url: `http://127.0.0.1:${silent.port}/mcp` });
+      const started = Date.now();
+      const extensions = await buildRemoteMcpExtensions({ bundle, startupTimeoutMs: 200 });
+      expect(Date.now() - started).toBeLessThan(5_000);
+      expect(extensions.factories).toEqual([]);
+      expect(extensions.unavailable).toEqual([
+        { id: DOCS, reason: UNAVAILABLE_INTEGRATION_REASONS.resolve_error },
+      ]);
+    } finally {
+      silent.stop(true);
+    }
   });
 });
