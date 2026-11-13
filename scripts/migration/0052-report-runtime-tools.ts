@@ -2,20 +2,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * 0052 — READ-ONLY report (#2197), before deploying the release where `output` is a harness tool
- * injected exactly when the agent declares `output.schema`, and stops being a `runtime_tools` entry:
+ * 0052 — READ-ONLY report (#2197, #2199), before running `0053-migrate-runtime-tools.sql`, which
+ * moves every stored agent manifest from `runtime_tools` to the `@appstrate/platform`
+ * integration:
  *
- *   DATABASE_URL=<platform> bun scripts/migration/0052-report-output-runtime-tool.ts
+ *   DATABASE_URL=<platform> bun scripts/migration/0052-report-runtime-tools.ts
  *
- * Reads every stored agent manifest that lists `"output"` in `runtime_tools` —
- * `packages.draft_manifest` and `package_versions.manifest` — and splits them on whether the same
- * manifest declares a non-empty `output.schema`:
+ * Reads `packages.draft_manifest` and `package_versions.manifest` and prints:
  *
- *   - WITH a schema: `output` stays available (injected from the schema); only the
- *     `runtime_tools` entry goes. Counted, not listed.
- *   - WITHOUT a schema: the agent has no `output` tool after the deploy. Listed per agent, with
- *     its runs of the last 90 days and how many of them stored a `result.output`, which is the
- *     measure of whether the free-form result is actually used.
+ *   - the agent manifests `0053` rewrites (they carry `runtime_tools` or do not declare
+ *     `@appstrate/platform`), and the malformed ones it leaves untouched (`dependencies`,
+ *     `dependencies.integrations` or `integrations_configuration` present but not an object);
+ *   - the agents that list `"output"` in `runtime_tools` without a non-empty `output.schema`:
+ *     they have no `output` tool after the deploy. Listed per agent, with its runs of the last
+ *     90 days and how many of them stored a `result.output`, which is the measure of whether the
+ *     free-form result is actually used. Manifests WITH a schema keep `output` (injected from
+ *     the schema) and are counted, not listed.
  *
  * Ephemeral packages (inline runs) are flagged: inline runs receive an open object schema by
  * default and keep `output`. Nothing is rewritten. One READ ONLY transaction.
@@ -35,6 +37,10 @@ interface AffectedAgentRow {
 }
 
 interface CountsRow {
+  drafts_to_rewrite: number;
+  versions_to_rewrite: number;
+  drafts_malformed: number;
+  versions_malformed: number;
   drafts_with_output: number;
   versions_with_output: number;
   drafts_without_schema: number;
@@ -58,6 +64,20 @@ const SELECTS_OUTPUT = (m: string) =>
 const HAS_SCHEMA = (m: string) =>
   `(CASE WHEN jsonb_typeof(${m}->'output'->'schema') = 'object'
          THEN ${m}->'output'->'schema' <> '{}'::jsonb ELSE false END)`;
+
+/**
+ * `IS_AGENT_TO_MIGRATE(m)` is `0053`'s condition minus the shape checks: an agent manifest that
+ * carries `runtime_tools` or does not declare `@appstrate/platform`. `WELL_FORMED(m)` is the shape
+ * check `0053` applies before rewriting.
+ */
+const IS_AGENT_TO_MIGRATE = (m: string) =>
+  `(${m}->>'type' = 'agent'
+    AND (${m}->'runtime_tools' IS NOT NULL
+         OR ${m}->'dependencies'->'integrations'->'@appstrate/platform' IS NULL))`;
+const WELL_FORMED = (m: string) =>
+  `(jsonb_typeof(COALESCE(${m}->'dependencies', '{}'::jsonb)) = 'object'
+    AND jsonb_typeof(COALESCE(${m}->'dependencies'->'integrations', '{}'::jsonb)) = 'object'
+    AND jsonb_typeof(COALESCE(${m}->'integrations_configuration', '{}'::jsonb)) = 'object')`;
 
 const AFFECTED_QUERY = `
   WITH drafts AS (
@@ -91,6 +111,18 @@ const AFFECTED_QUERY = `
 const COUNTS_QUERY = `
   SELECT
     (SELECT count(*)::int FROM packages p
+      WHERE ${IS_AGENT_TO_MIGRATE("p.draft_manifest")}
+        AND ${WELL_FORMED("p.draft_manifest")}) AS drafts_to_rewrite,
+    (SELECT count(*)::int FROM package_versions v
+      WHERE ${IS_AGENT_TO_MIGRATE("v.manifest")}
+        AND ${WELL_FORMED("v.manifest")}) AS versions_to_rewrite,
+    (SELECT count(*)::int FROM packages p
+      WHERE ${IS_AGENT_TO_MIGRATE("p.draft_manifest")}
+        AND NOT ${WELL_FORMED("p.draft_manifest")}) AS drafts_malformed,
+    (SELECT count(*)::int FROM package_versions v
+      WHERE ${IS_AGENT_TO_MIGRATE("v.manifest")}
+        AND NOT ${WELL_FORMED("v.manifest")}) AS versions_malformed,
+    (SELECT count(*)::int FROM packages p
       WHERE p.type = 'agent' AND ${SELECTS_OUTPUT("p.draft_manifest")}) AS drafts_with_output,
     (SELECT count(*)::int FROM package_versions v
       WHERE ${SELECTS_OUTPUT("v.manifest")}) AS versions_with_output,
@@ -111,6 +143,10 @@ export async function readSnapshot(
 
 export function report({ affected, counts }: ReportSnapshot): string[] {
   const lines = [
+    `to_rewrite (0053): ${counts.drafts_to_rewrite} draft manifest(s), ` +
+      `${counts.versions_to_rewrite} published version manifest(s).`,
+    `malformed, left untouched: ${counts.drafts_malformed} draft(s), ` +
+      `${counts.versions_malformed} version(s).`,
     `runtime_tools lists "output": ${counts.drafts_with_output} draft manifest(s), ` +
       `${counts.versions_with_output} published version manifest(s).`,
     `…of which without output.schema: ${counts.drafts_without_schema} draft(s), ` +

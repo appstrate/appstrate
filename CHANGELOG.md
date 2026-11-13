@@ -8,14 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
-- **Run `scripts/migration/0052` then `0053` in this release's window** (#2197).
-  `0052-report-output-runtime-tool.ts` is read-only and lists the agents whose
-  `runtime_tools` select `output` without an `output.schema`: they lose the
-  `output` tool. `0053-drop-output-runtime-tool.sql` then removes `"output"`
-  from every stored `runtime_tools` (`packages.draft_manifest`,
-  `package_versions.manifest`); it is idempotent and its header carries the
-  verification queries. Until it runs, a draft that still lists `output` keeps
-  running but cannot be saved.
+- **Run `scripts/migration/0052` then `0053` in this release's window** (#2197, #2199).
+  `0052-report-runtime-tools.ts` is read-only: it counts the agent manifests
+  `0053` rewrites and the malformed ones it skips, and lists the agents whose
+  `runtime_tools` select `output` without an `output.schema` (they lose the
+  `output` tool). `0053-migrate-runtime-tools.sql` then rewrites every stored
+  agent manifest (`packages.draft_manifest`, `package_versions.manifest`) in
+  one pass: it declares `@appstrate/platform`, selects
+  (`runtime_tools` ∩ {`log`, `note`, `pin`}) ∪ {`recall_memory`, `run_history`}
+  under `integrations_configuration`, and removes `runtime_tools`. Published
+  archives are not rewritten: a run reads the version's jsonb manifest. It is
+  idempotent and its header carries the verification queries. An agent whose
+  manifest it has not rewritten runs without the platform tools.
 
 - **Fixed: the runner bootstrap keeps its env across sudo-rs** (#2153).
   `get.appstrate.dev/runner` elevated with `sudo -E`, which sudo-rs (the default
