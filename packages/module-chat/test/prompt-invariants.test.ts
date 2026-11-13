@@ -86,9 +86,8 @@ describe("full persona invariants", () => {
     expect(FULL).toContain("PARTIAL canonical AFPS agent");
     expect(FULL).toMatch(/Defaults apply ONLY to absent top-level fields/);
     expect(FULL).toContain(
-      "adds `@appstrate/platform` with its `log` tool selected unless the manifest already names that integration",
+      "selects its `log` tool in `integrations_configuration` unless either `dependencies.integrations` or `integrations_configuration` names it (the dependency alone keeps its `default_tools`)",
     );
-    expect(FULL).not.toContain("runtime_tools");
     expect(FULL).toMatch(/override EVERY field/);
     expect(FULL).toContain("complete strict `output.schema`");
   });

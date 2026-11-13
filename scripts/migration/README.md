@@ -1450,16 +1450,19 @@ every stored agent manifest (`package_versions.manifest`, `packages.draft_manife
 `runtime_tools` or does not declare `@appstrate/platform`: it adds the dependency (`^1.0.0`),
 selects (`runtime_tools` ∩ {`log`, `note`, `pin`}) ∪ {`recall_memory`, `run_history`} under
 `integrations_configuration."@appstrate/platform".tools`, and removes `runtime_tools`. Published
-archives are not rewritten: a run of a published version reads the jsonb manifest of the version
-row (`resolveAgentRunVersion`, registry resolver); the archive supplies only the prompt. An agent
-that selected `output` without a schema loses the tool.
+archives are not rewritten: a run of a published version and its bundle export both take the jsonb
+manifest of the version row (`resolveAgentRunVersion`, registry resolver,
+`buildBundleForAgentExport`); the archive supplies the prompt and the other files. An agent that
+selected `output` without a schema loses the tool.
 
 Run `0052` first: `DATABASE_URL=<platform> bun scripts/migration/0052-report-runtime-tools.ts` is
 read-only; it counts the manifests `0053` rewrites and the malformed ones it skips, and lists the
 agents that lose `output` (org, versions, runs over 90 days, runs that stored a `result.output`).
 Then `psql "$DATABASE_URL" -f scripts/migration/0053-migrate-runtime-tools.sql` in the window of
-the release that ships #2199. Its header carries the before/after queries; a second run reports
-`UPDATE 0` twice.
+the release that ships #2199; the API refuses to boot until it has run
+(`assertRuntimeToolsMigrated`, `apps/api/src/lib/boot.ts`). Its header carries the before/after
+queries; an immediate second run reports `UPDATE 0` twice, a later one re-adds the dependency to
+agents whose author removed it, so it is run once.
 
 Rollback: none; the removed key is read by nothing, and the added dependency only grants the tools
 the agent had.

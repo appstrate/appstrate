@@ -8,11 +8,13 @@
 -- `@appstrate/platform` system integration: an agent receives them by
 -- declaring it, and `integrations_configuration.<id>.tools` restricts them.
 -- `output` is injected from `output.schema`, `publish_file` is a harness tool,
--- and nothing reads `runtime_tools`. A run of a published version reads the
--- jsonb `package_versions.manifest` (`resolveAgentRunVersion` and the registry
--- resolver take the catalog row's manifest; the archive supplies only the
--- prompt), so rewriting the rows is enough: no archive is rewritten and no
--- corrective version is published.
+-- and nothing reads `runtime_tools`. Every reader of a published version takes
+-- its manifest from the jsonb `package_versions.manifest`: a run
+-- (`resolveAgentRunVersion`, the registry resolver) and the bundle export
+-- (`buildBundleForAgentExport`, which writes that manifest over the archive's
+-- `manifest.json`); the archive supplies the prompt and the other files. So no
+-- archive is rewritten and no corrective version is published. The archives
+-- keep `runtime_tools`; a stored-manifest read tolerates it.
 --
 -- For each agent manifest that carries `runtime_tools` or does not declare
 -- `@appstrate/platform`:
@@ -35,12 +37,15 @@
 -- (read-only; one transaction `READ ONLY`). It prints the rows this file
 -- rewrites and the agents that lose `output`.
 --
--- A manifest whose `dependencies`, `dependencies.integrations` or
--- `integrations_configuration` is present but not an object is left
--- untouched; the report counts it.
+-- A manifest whose `dependencies`, `dependencies.integrations`,
+-- `integrations_configuration` or `integrations_configuration."@appstrate/platform"`
+-- is present but not an object is left untouched; the report counts it.
 --
--- Idempotent: a rewritten manifest has no `runtime_tools` and declares
--- `@appstrate/platform`, so a second run reports `UPDATE 0` twice.
+-- Run ONCE, in the deployment window of the release that ships #2199; the API
+-- refuses to boot until it has run (`assertRuntimeToolsMigrated`). An immediate
+-- re-run is a no-op (`UPDATE 0` twice): a rewritten manifest has no
+-- `runtime_tools` and declares `@appstrate/platform`. A LATER re-run is not:
+-- it re-adds the dependency to every agent whose author has since removed it.
 --
 -- ═══ VERIFY ═══
 --
@@ -66,6 +71,7 @@ CREATE OR REPLACE FUNCTION pg_temp.needs_platform(m jsonb) RETURNS boolean LANGU
     AND jsonb_typeof(COALESCE(m -> 'dependencies', '{}'::jsonb)) = 'object'
     AND jsonb_typeof(COALESCE(m -> 'dependencies' -> 'integrations', '{}'::jsonb)) = 'object'
     AND jsonb_typeof(COALESCE(m -> 'integrations_configuration', '{}'::jsonb)) = 'object'
+    AND jsonb_typeof(COALESCE(m -> 'integrations_configuration' -> '@appstrate/platform', '{}'::jsonb)) = 'object'
     AND (m -> 'runtime_tools' IS NOT NULL
          OR m -> 'dependencies' -> 'integrations' -> '@appstrate/platform' IS NULL),
     false)

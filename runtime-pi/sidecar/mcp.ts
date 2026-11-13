@@ -919,7 +919,7 @@ function buildSidecarTools(options: ApiCallToolDeps): {
             text:
               `${integ.namespace}__api_upload is orchestrated agent-side and cannot run against ` +
               "the sidecar directly (the workspace file is not visible here). It is exposed to " +
-              "the LLM as a runtime tool that chunks the file and dispatches each part through " +
+              "the LLM as an agent-side tool that chunks the file and dispatches each part through " +
               `${integ.namespace}__api_call.`,
           },
         ],

@@ -48,8 +48,9 @@ import { getErrorMessage } from "@appstrate/core/errors";
 import { readDeclaredOutputSchema } from "@appstrate/afps-shared/output-schema";
 import { SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
 import { readBundleFromFile } from "@appstrate/afps-runtime/bundle";
-import { HttpSink, attachStdoutBridge } from "@appstrate/afps-runtime/sinks";
+import { HttpSink } from "@appstrate/afps-runtime/sinks";
 import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
+import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
 import {
@@ -183,17 +184,6 @@ const sink = new HttpSink({
   maxBackoffMs: 2000,
 });
 
-// --- 0a. Result-aggregating sink wrapper ---
-// See `@appstrate/afps-runtime/sinks/stdout-bridge` for the full design
-// rationale. What matters here: the wrapper folds every event PiRunner
-// hands the sink into an in-memory `RunResult` aggregate, then merges that
-// aggregate into the finalize POST — this is how `result.output`
-// reaches the platform at all. (The
-// module also intercepts `process.stdout.write` for out-of-process runners;
-// inside this container nothing writes canonical events that way.)
-const bridge = attachStdoutBridge({ sink, runId: AGENT_RUN_ID });
-const bridgedSink = bridge.sink;
-
 // --- Liveness keep-alive ---
 //
 // Start the runner-side heartbeat against POST {SINK_URL}/heartbeat.
@@ -289,7 +279,7 @@ async function die(message: string, data?: Record<string, unknown>): Promise<nev
  * not stdout — the `data` marker keeps each on its own log entry.
  */
 async function progress(message: string, data?: Record<string, unknown>): Promise<void> {
-  await emitBootProgress(bridgedSink, AGENT_RUN_ID!, message, {
+  await emitBootProgress(sink, AGENT_RUN_ID!, message, {
     data: { boot: true, ...data },
   }).catch(() => {});
 }
@@ -469,7 +459,7 @@ let mcpClient: AppstrateMcpClient;
 await progress("connecting to sidecar");
 const mcpConnectStart = performance.now();
 try {
-  // Retry the initial MCP handshake — the platform now starts the agent
+  // Retry the initial MCP handshake — the platform starts the agent
   // in parallel with sidecar boot, so the sidecar's /mcp
   // may briefly answer ECONNREFUSED / ENOTFOUND while the container is
   // still wiring its listener and the Docker DNS alias is propagating.
@@ -533,7 +523,7 @@ if ("error" in bootResult) {
 } else {
   const bootReport = bootResult.report;
   for (const crumb of bootReport.breadcrumbs) {
-    await emitBootProgress(bridgedSink, AGENT_RUN_ID!, crumb.message, {
+    await emitBootProgress(sink, AGENT_RUN_ID!, crumb.message, {
       level: crumb.level,
       ...(crumb.data ? { data: crumb.data } : {}),
     }).catch(() => {});
@@ -562,7 +552,7 @@ try {
     runId: AGENT_RUN_ID,
     workspace: WORKSPACE,
     emit: (event) => {
-      void bridgedSink.handle(event as RunEvent);
+      void sink.handle(event as RunEvent);
     },
   });
   extensionFactories.push(...factories);
@@ -626,7 +616,7 @@ if ((await piSdkWarmup) === null) {
   }
 }
 
-await emitRuntimeReady(bridgedSink, AGENT_RUN_ID, {
+await emitRuntimeReady(sink, AGENT_RUN_ID, {
   bundleLoaded: true,
   extensions: extensionFactories.length,
   bootDurationMs: performance.now(),
@@ -709,7 +699,7 @@ async function runOutputsSweep(): Promise<SweepResult | null> {
     publishedSourceHashes: publishedFileSourceHashes,
     maxFileBytes: OUTPUTS_SWEEP_MAX_FILE_BYTES,
     emit: (event) => {
-      void bridgedSink.handle(event as RunEvent);
+      void sink.handle(event as RunEvent);
     },
     logWarn: (message, data) => logLine("warn", message, data),
   }).catch((err) => {
@@ -724,9 +714,9 @@ async function runOutputsSweep(): Promise<SweepResult | null> {
 // POST: it auto-publishes `workspace/outputs/` deliverables so their
 // `file.published` events ride the run stream before it closes.
 // PiRunner owns its finalize, so wrapping the sink is the only injection point
-// that runs BEFORE the stdout-bridge merges its aggregate into the finalize POST.
-const piEventSink: typeof bridgedSink = {
-  handle: (event) => bridgedSink.handle(event),
+// that runs before the finalize POST.
+const piEventSink: EventSink = {
+  handle: (event) => sink.handle(event),
   finalize: async (result) => {
     const sweep = await runOutputsSweep();
     // Stamp the terminal artifacts summary onto the finalize payload so the
@@ -736,7 +726,7 @@ const piEventSink: typeof bridgedSink = {
     // terminal success/failure (the runner owns that); a successful run can
     // still have lost a deliverable.
     if (sweep) result.artifacts = summarizeArtifacts(sweep);
-    await bridgedSink.finalize(result);
+    await sink.finalize(result);
   },
 };
 

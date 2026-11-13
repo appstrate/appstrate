@@ -197,7 +197,7 @@ describe("run_and_wait", () => {
     expect(tool.descriptor.description).not.toContain("publish_archive");
     expect(tool.descriptor.description).toMatch(/fields you omit/i);
     expect(tool.descriptor.description).toContain(
-      "adds `@appstrate/platform` with its `log` tool selected unless the manifest already names that integration",
+      "selects its `log` tool in `integrations_configuration` unless either `dependencies.integrations` or `integrations_configuration` names it (the dependency alone keeps its `default_tools`)",
     );
     expect(tool.descriptor.description).not.toMatch(/one main user-facing file/i);
     expect(tool.descriptor.description).not.toMatch(/several peer files/i);

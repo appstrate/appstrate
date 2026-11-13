@@ -17,8 +17,8 @@
  *     runner, which fetches it from the platform, never from the workspace;
  *   - `RECORD`, a packaging artefact.
  *
- * Runtime tools are not registered here: `output` and `publish_file` are
- * registered by `PiRunner`, the platform tools (`log`, `note`, …) are served
+ * Tools are not registered here: the harness tools `output` and
+ * `publish_file` are registered by `PiRunner`, the platform tools (`log`, `note`, …) are served
  * by the `@appstrate/platform` integration.
  *
  * Used by:

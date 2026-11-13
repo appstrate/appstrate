@@ -1,13 +1,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Reads the results of `recall_memory` and `run_history` (an MCP text part holding
- * `{ memories }` / a `{ data }` envelope; an already-parsed or bare-string result
- * reads the same). `null` = unknown shape, the caller keeps the raw JSON.
+ * Reads the results of the `@appstrate/platform` tools `recall_memory` and
+ * `run_history` (an MCP text part holding `{ memories }` / a `{ data }` envelope;
+ * an already-parsed or bare-string result reads the same). `null` = unknown
+ * shape, the caller keeps the raw JSON.
  */
 
+import { PLATFORM_INTEGRATION_ID } from "@appstrate/core/integration";
 import { asRecordOrNull } from "@appstrate/core/safe-json";
 import { unwrapMcpResult } from "@appstrate/core/mcp-result";
+import { normaliseMcpToolNamespace } from "@appstrate/afps-shared/mcp-naming";
+
+const platformToolName = (tool: string) =>
+  `${normaliseMcpToolNamespace(PLATFORM_INTEGRATION_ID)}__${tool}`;
+
+/** The names the agent (and so a tool row) sees: `appstrate_platform__<tool>`. */
+export const RECALL_MEMORY_TOOL = platformToolName("recall_memory");
+export const RUN_HISTORY_TOOL = platformToolName("run_history");
 
 export interface RecalledMemory {
   id: string;

@@ -158,10 +158,13 @@ type MaterializedManifest =
  * Defaults fill ABSENT top-level fields, and every caller-supplied field
  * replaces its default verbatim, with one exception: the tables keyed by
  * package id (`dependencies.integrations`, `integrations_configuration`)
- * receive their defaults entry by entry. The `@appstrate/platform` entry is
- * added to each table that does not already name that id, and the caller's
- * own entries are never touched. A caller opts out of the platform tools by
- * writing the entry itself, e.g.
+ * receive their defaults entry by entry, and the caller's own entries are
+ * never touched. `dependencies.integrations["@appstrate/platform"] = "^1.0.0"`
+ * is added when `dependencies.integrations` does not name that id;
+ * `integrations_configuration["@appstrate/platform"] = { tools: ["log"] }` is
+ * added only when NEITHER table names it, so a caller who declares the
+ * dependency alone gets the integration's `default_tools`. A caller opts out
+ * of the platform tools by writing the configuration entry, e.g.
  * `integrations_configuration["@appstrate/platform"] = { tools: [] }`. A
  * `dependencies` or `dependencies.integrations` value that is not an object is
  * left as written, for manifest validation to refuse. Nested deterministic
@@ -198,39 +201,32 @@ function materializeInlineManifest(manifest: Record<string, unknown>): Materiali
   }
 
   const materialized: Record<string, unknown> = { ...defaults, ...manifest };
+  const names = (table: Record<string, unknown> | null): boolean =>
+    table !== null && Object.prototype.hasOwnProperty.call(table, PLATFORM_INTEGRATION_ID);
+
   const dependencies = hasOwn("dependencies") ? asRecordOrNull(manifest.dependencies) : {};
-  if (dependencies) {
-    const integrations = Object.prototype.hasOwnProperty.call(dependencies, "integrations")
+  const integrations =
+    dependencies && Object.prototype.hasOwnProperty.call(dependencies, "integrations")
       ? asRecordOrNull(dependencies.integrations)
       : {};
-    if (integrations) {
-      materialized.dependencies = {
-        ...dependencies,
-        integrations: withDefaultEntry(integrations, PLATFORM_INTEGRATION_ID, "^1.0.0"),
-      };
-    }
-  }
   const configuration = hasOwn("integrations_configuration")
     ? asRecordOrNull(manifest.integrations_configuration)
     : {};
-  if (configuration) {
-    materialized.integrations_configuration = withDefaultEntry(
-      configuration,
-      PLATFORM_INTEGRATION_ID,
-      { tools: ["log"] },
-    );
+
+  if (dependencies && integrations && !names(integrations)) {
+    materialized.dependencies = {
+      ...dependencies,
+      integrations: { ...integrations, [PLATFORM_INTEGRATION_ID]: "^1.0.0" },
+    };
+  }
+  if (configuration && !names(integrations) && !names(configuration)) {
+    materialized.integrations_configuration = {
+      ...configuration,
+      [PLATFORM_INTEGRATION_ID]: { tools: ["log"] },
+    };
   }
 
   return { manifest: materialized };
-}
-
-/** `table` with `value` under `id` when the table does not already name `id`. */
-function withDefaultEntry(
-  table: Record<string, unknown>,
-  id: string,
-  value: unknown,
-): Record<string, unknown> {
-  return Object.prototype.hasOwnProperty.call(table, id) ? table : { ...table, [id]: value };
 }
 
 /**

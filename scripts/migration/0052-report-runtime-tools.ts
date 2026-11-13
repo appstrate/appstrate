@@ -12,7 +12,8 @@
  *
  *   - the agent manifests `0053` rewrites (they carry `runtime_tools` or do not declare
  *     `@appstrate/platform`), and the malformed ones it leaves untouched (`dependencies`,
- *     `dependencies.integrations` or `integrations_configuration` present but not an object);
+ *     `dependencies.integrations`, `integrations_configuration` or
+ *     `integrations_configuration."@appstrate/platform"` present but not an object);
  *   - the agents that list `"output"` in `runtime_tools` without a non-empty `output.schema`:
  *     they have no `output` tool after the deploy. Listed per agent, with its runs of the last
  *     90 days and how many of them stored a `result.output`, which is the measure of whether the
@@ -77,7 +78,8 @@ const IS_AGENT_TO_MIGRATE = (m: string) =>
 const WELL_FORMED = (m: string) =>
   `(jsonb_typeof(COALESCE(${m}->'dependencies', '{}'::jsonb)) = 'object'
     AND jsonb_typeof(COALESCE(${m}->'dependencies'->'integrations', '{}'::jsonb)) = 'object'
-    AND jsonb_typeof(COALESCE(${m}->'integrations_configuration', '{}'::jsonb)) = 'object')`;
+    AND jsonb_typeof(COALESCE(${m}->'integrations_configuration', '{}'::jsonb)) = 'object'
+    AND jsonb_typeof(COALESCE(${m}->'integrations_configuration'->'@appstrate/platform', '{}'::jsonb)) = 'object')`;
 
 const AFFECTED_QUERY = `
   WITH drafts AS (

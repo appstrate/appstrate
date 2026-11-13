@@ -46,32 +46,15 @@ interface BuildMcpDirectFactoriesOptions {
 }
 
 /**
- * Build one forwarding Pi extension factory per tool the sidecar
- * advertises. The set is built once per agent.
+ * Build one Pi extension factory per tool the sidecar's MCP host advertises,
+ * forwarding to `mcp.callTool` verbatim. This is how `{namespace}__{tool}`
+ * entries of the run's integrations (including the generic `{ns}__api_call`
+ * tool) become callable from the LLM side. The set is built once per agent.
  */
 export async function buildMcpDirectFactories(
   opts: BuildMcpDirectFactoriesOptions,
 ): Promise<ExtensionFactory[]> {
-  const { tools } = await opts.mcp.listTools();
-  return buildIntegrationToolFactories(tools, opts);
-}
-
-/**
- * Wrap every tool advertised by the sidecar's MCP host
- * as a Pi extension that forwards to `mcp.callTool` verbatim. This is
- * how `{namespace}__{tool}` entries from spawned integration MCP servers
- * (including the generic `{ns}__api_call` tool) become callable from the
- * LLM side.
- */
-function buildIntegrationToolFactories(
-  advertised: ReadonlyArray<{
-    name: string;
-    description?: string;
-    inputSchema?: unknown;
-    _meta?: Record<string, unknown>;
-  }>,
-  opts: BuildMcpDirectFactoriesOptions,
-): ExtensionFactory[] {
+  const { tools: advertised } = await opts.mcp.listTools();
   const factories: ExtensionFactory[] = [];
   // Index every advertised api_call tool by BOTH its McpHost namespace and
   // the auth-scoped key stamped into its `_meta` marker. The key alone is not

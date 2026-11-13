@@ -4,8 +4,7 @@
  * Regression tests for the HMAC-signed event-ingestion path:
  * `POST /api/runs/:runId/events` + `POST /api/runs/:runId/events/finalize`.
  *
- * Protects two fixes introduced after the stdout-JSONL → HttpSink
- * transport swap:
+ * Protects two properties of the HttpSink transport:
  *
  *   1. Ingestion + finalize MUST not crash when the platform is booted
  *      without Redis (Tier 0 dev mode). Before the `EventBuffer` +
@@ -2399,8 +2398,8 @@ describe("POST /api/runs/:runId/events/finalize — output-schema validation per
 
   it("a platform-SYNTHESISED success still gets the `output` tool wording when the schema was unmet", async () => {
     // Lost finalize POST + container exit 0: execute-background synthesises
-    // success. Every run delivers structured output through the single `output`
-    // runtime tool, so an unmet schema fails with that tool's wording.
+    // success. A run delivers structured output only through the `output`
+    // tool, so an unmet schema fails with that tool's wording.
     const runId = await seedRunWithSink(ctx, "@test/schema-agent");
 
     await synthesiseFinalize(runId, {

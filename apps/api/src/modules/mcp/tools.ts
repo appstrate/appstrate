@@ -1084,8 +1084,9 @@ const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
       "plus task-specific dependencies/configuration are needed; `name` is derived and " +
       "AFPS boilerplate and an open output schema are defaulted. Every provided field is an " +
       "exact top-level replacement: arrays and nested objects are not merged. The platform adds " +
-      "`@appstrate/platform` with its `log` tool unless the manifest already names that " +
-      "integration in `dependencies.integrations` or `integrations_configuration`. You may " +
+      "the `@appstrate/platform` dependency unless `dependencies.integrations` names it, and " +
+      "selects its `log` tool unless `dependencies.integrations` or " +
+      "`integrations_configuration` names it. You may " +
       "instead provide a complete, " +
       "strict deterministic manifest and override every field. Do NOT put the prompt inside " +
       "the manifest — it goes in the separate top-level `prompt` argument.",
@@ -1171,9 +1172,10 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
           "platform derives `name` and fills omitted AFPS boilerplate, with an open object " +
           "`output` schema. Defaults apply only to top-level fields you omit; every field you " +
           "provide replaces its default exactly, with no array or nested-object merge. The " +
-          "platform also adds `@appstrate/platform` with its `log` tool selected unless the " +
-          "manifest already names that integration in `dependencies.integrations` or " +
-          "`integrations_configuration`; it never changes your entries, and " +
+          "platform also adds the `@appstrate/platform` dependency unless `dependencies.integrations` " +
+          "already names it, and selects its `log` tool in `integrations_configuration` unless " +
+          "either `dependencies.integrations` or `integrations_configuration` names it (the " +
+          "dependency alone keeps its `default_tools`); it never changes your entries, and " +
           '`integrations_configuration["@appstrate/platform"] = { tools: [] }` removes the tools. ' +
           "A complete deterministic manifest may override every field, including a strict " +
           "`output.schema`. The run has the `output` tool exactly when its manifest declares an " +

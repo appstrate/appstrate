@@ -8,7 +8,7 @@
  */
 
 import type { CallToolResult } from "@appstrate/mcp-transport";
-import { piToolResultOrThrow, type PiToolContent, type PiToolResult } from "../pi-tool-result.ts";
+import { piToolResultOrThrow, type PiToolContent, type PiToolResult } from "./pi-tool-result.ts";
 
 /**
  * Adapt an MCP `CallToolResult` into Pi's `AgentToolResult` shape. Pi

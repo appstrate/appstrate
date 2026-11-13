@@ -38,11 +38,11 @@ import {
 } from "@appstrate/core/naming";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import {
-  MAX_PARAMETER_DESCRIPTION_BYTES,
-  MAX_TOOL_DESCRIPTION_BYTES,
+  exposedToolDescriptor,
   notifyDetached,
   sanitiseTextField,
   sanitiseToolDescriptor,
+  toolExclusion,
   type AppstrateMcpClient,
   type AppstrateRequestExtra,
   type AppstrateToolDefinition,
@@ -402,7 +402,7 @@ export class McpHost {
     // A slot served by several connections puts the selector on every tool it
     // holds, so none of them may declare `connection` itself.
     const admitted = tools.filter(
-      (tool) => (!allowlist || allowlist.has(tool.name)) && !hiddenSet?.has(tool.name),
+      (tool) => toolExclusion(tool.name, allowlist, hiddenSet) === null,
     );
     const slotLabels = this.labelsBySlot().get(normalisedNs) ?? new Set<string>();
     if (admitted.length > 0 && [...slotLabels].some((other) => other !== label)) {
@@ -424,9 +424,7 @@ export class McpHost {
     const trustedReplacements = new Set<string>();
     if (upstream.trusted) {
       const incomingNames = new Set<string>();
-      for (const tool of tools) {
-        if (allowlist && !allowlist.has(tool.name)) continue;
-        if (hiddenSet && hiddenSet.has(tool.name)) continue;
+      for (const tool of admitted) {
         const candidate = `${normalisedNs}__${tool.name}`;
         if (!isValidToolName(candidate)) {
           throw new Error(
@@ -464,25 +462,12 @@ export class McpHost {
       }
     }
     for (const tool of tools) {
-      if (allowlist && !allowlist.has(tool.name)) {
+      const exclusion = toolExclusion(tool.name, allowlist, hiddenSet);
+      if (exclusion !== null) {
         this.options.onLog?.({
           source: `host:${normalisedNs}`,
           level: "info",
-          data: {
-            event: "tool_excluded_by_allowlist",
-            originalName: tool.name,
-          },
-        });
-        continue;
-      }
-      if (hiddenSet && hiddenSet.has(tool.name)) {
-        this.options.onLog?.({
-          source: `host:${normalisedNs}`,
-          level: "info",
-          data: {
-            event: "tool_excluded_by_hidden_tools",
-            originalName: tool.name,
-          },
+          data: { event: `tool_excluded_by_${exclusion}`, originalName: tool.name },
         });
         continue;
       }
@@ -562,26 +547,14 @@ export class McpHost {
           continue;
         }
       }
-      let descriptor: Tool = { ...sanitised, name: finalName };
       if (finalName !== `${normalisedNs}__${tool.name}`) {
-        // The model only sees the exposed name; give it the upstream one so it
-        // can match the tool against the server's own documentation.
         this.options.onLog?.({
           source: `host:${normalisedNs}`,
           level: "info",
           data: { event: "tool_name_rewritten", originalName: tool.name, name: finalName },
         });
-        const upstreamName = JSON.stringify(
-          sanitiseTextField(tool.name, MAX_PARAMETER_DESCRIPTION_BYTES),
-        );
-        descriptor = {
-          ...descriptor,
-          description: sanitiseTextField(
-            `Upstream tool name: ${upstreamName}.${sanitised.description ? `\n\n${sanitised.description}` : ""}`,
-            MAX_TOOL_DESCRIPTION_BYTES,
-          ),
-        };
       }
+      const descriptor = exposedToolDescriptor(sanitised, normalisedNs, finalName);
       this.toolToNamespace.set(finalName, normalisedNs);
       this.toolRoutes.set(
         finalName,

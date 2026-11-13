@@ -130,7 +130,7 @@ async function forkWithConfig(
   // this fork is the one path that propagates a stored one (a
   // `type: "provider"` manifest, for instance), the price of staying forkable.
   // So the operator gets a log line, and the fork proceeds.
-  const validation = validateManifest(updatedManifest, { retiredVocabulary: "drop" });
+  const validation = validateManifest(updatedManifest, { retiredVocabulary: "tolerate" });
   if (!validation.valid) {
     logger.warn("forking an invalid published manifest", {
       sourcePackageId,

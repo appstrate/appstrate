@@ -4,8 +4,9 @@
  * Agent-container file publishing — the run→platform outbound channel.
  *
  * Two consumers share this module:
- *   - the `publish_file` runtime tool, which calls {@link createRunFileUploader}
- *     to upload a single workspace file the agent chose to publish; and
+ *   - the `publish_file` harness tool, which `PiRunner` (`@appstrate/runner-pi`) registers around
+ *     the {@link createRunFileUploader} uploader to upload a single workspace
+ *     file the agent chose to publish; and
  *   - the end-of-run {@link sweepOutputs} pass, which auto-publishes every file
  *     the agent wrote under `workspace/outputs/`.
  *
@@ -25,9 +26,12 @@ import { randomUUID } from "node:crypto";
 import { sign } from "@appstrate/afps-runtime/events";
 import { resolveWorkspaceFile } from "@appstrate/afps-runtime/resolvers";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { filePublishedEvent } from "@appstrate/core/runtime-tool-defs";
 import { encodeFilenameHeader, sanitizeFilename } from "@appstrate/core/naming";
-import type { FileUploader, PublishedFile } from "@appstrate/core/runtime-tool-defs";
+import {
+  filePublishedEvent,
+  type FileUploader,
+  type PublishedFile,
+} from "@appstrate/runner-pi/harness-tools";
 import type { RunArtifactsSummary } from "@appstrate/afps-runtime/runner";
 
 /**

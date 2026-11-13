@@ -18,7 +18,7 @@ import { join } from "node:path";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import type { CallToolResult } from "@appstrate/mcp-transport";
 import { loadPiCodingAgentSdk, unsafeSchema, type ExtensionFactory } from "../src/pi-sdk.ts";
-import { callToolResultToPi } from "../src/runtime-tools/mcp-forward.ts";
+import { callToolResultToPi } from "../src/mcp-forward.ts";
 import { piToolResultOrThrow } from "../src/pi-tool-result.ts";
 
 const TOOL = "probe";

@@ -554,8 +554,9 @@ export function createRunsRemoteRouter() {
   // tools) for the host executing a remote run. Same auth as creation
   // (`agents:run`), and only on a running remote run the caller launched:
   // the tools write memories and slots in the run's actor scope, which no
-  // other principal may write, `runs:read-all` included. Anything else is a
-  // 404 so nothing leaks about the run's existence.
+  // other principal may write, `runs:read-all` included. Any other run is a
+  // 404 so nothing leaks about its existence; the caller's own run once it has
+  // left `running` is a 403.
   router.post("/runs/:runId/mcp", rateLimit(200), requirePermission("agents", "run"), async (c) => {
     const runId = c.req.param("runId");
     if (!runId) throw invalidRequest("runId path parameter is required", "runId");

@@ -453,26 +453,38 @@ function parseWithSchema(
 }
 
 /**
- * How {@link validateManifest} treats the `dependencies` keys AFPS 2.0 retired —
- * `tools` (replaced by `mcp_servers`) and `providers` (replaced by
- * `integrations`). The one behaviour that MUST differ by direction:
+ * How {@link validateManifest} treats the manifest vocabulary the platform
+ * retired: the `dependencies` keys AFPS 2.0 retired — `tools` (replaced by
+ * `mcp_servers`) and `providers` (replaced by `integrations`) — and the agent
+ * field `runtime_tools` (replaced by the `@appstrate/platform` integration). The
+ * one behaviour that MUST differ by direction:
  *
  *   - `"reject"` (default) — the manifest is AUTHOR INPUT (create, update,
  *     import, an inline manifest from an API client, a repo-authored system
- *     package). A retired dependency key declares a dependency no reader will
- *     ever honour, so the author must see it.
- *   - `"drop"` — the manifest was ALREADY PERSISTED (a stored draft, a
- *     published version snapshot). A retired key is TOLERATED, left exactly
- *     where it is: it is inert (no reader reads it), and rewriting a stored
- *     manifest's bytes here would change its integrity hash. Surfacing it
+ *     package). A retired key declares something no reader will ever honour,
+ *     so the author must see it, with its replacement named.
+ *   - `"tolerate"` — the manifest was ALREADY PERSISTED (a stored draft, a
+ *     published version snapshot or archive). A retired key is TOLERATED, left
+ *     exactly where it is: it is inert (no reader reads it), and rewriting a
+ *     stored manifest's bytes here would change its integrity hash. Surfacing it
  *     belongs to the install-warning channel, not to this validator.
  */
-export type RetiredVocabularyPolicy = "reject" | "drop";
+export type RetiredVocabularyPolicy = "reject" | "tolerate";
+
+/**
+ * The retired agent field and the message naming its replacement, returned on
+ * the author direction of {@link validateManifest}.
+ */
+const RETIRED_RUNTIME_TOOLS_ERROR =
+  'runtime_tools: `runtime_tools` is retired — declare `dependencies.integrations["@appstrate/platform"]` ' +
+  "and select its tools (`log`, `note`, `pin`, `recall_memory`, `run_history`, `notify`) under " +
+  '`integrations_configuration["@appstrate/platform"].tools`. `output` is injected when ' +
+  "`output.schema` is declared and `publish_file` is always available, so neither is selected.";
 
 /** Options for {@link validateManifest}. */
 export interface ValidateManifestOptions {
   /**
-   * Direction-dependent handling of the retired AFPS 1.x `dependencies` keys.
+   * Direction-dependent handling of the retired manifest vocabulary.
    * Default `"reject"` (author input). See {@link RetiredVocabularyPolicy}.
    */
   retiredVocabulary?: RetiredVocabularyPolicy;
@@ -483,7 +495,7 @@ export interface ValidateManifestOptions {
  * Determines the schema from the `type` field (agent, skill, integration) and validates accordingly.
  * @param raw - The raw manifest object to validate (typically parsed from JSON)
  * @param options - Direction of the call; see {@link ValidateManifestOptions}. The
- *   default is the safe one: author input declaring a retired dependency key fails.
+ *   default is the safe one: author input declaring a retired key fails.
  * @returns Validation result with parsed manifest on success, or error messages on failure
  */
 export function validateManifest(
@@ -507,21 +519,19 @@ export function validateManifest(
   const obj = raw as Record<string, unknown>;
   const type = obj.type;
 
-  // AFPS 1.x retired dependency vocabulary: on the author direction, reject
-  // and name the replacement key. See {@link RetiredVocabularyPolicy}
-  // for why the keys still parse. Checked before the type dispatch because
-  // every package type may declare `dependencies`.
-  if (options?.retiredVocabulary !== "drop") {
-    const retiredDeps = findRetiredDependencyKeys(obj);
-    if (retiredDeps.length > 0) {
-      return {
-        valid: false,
-        errors: retiredDeps.map(
-          ({ key, replacement }) =>
-            `dependencies.${key}: \`dependencies.${key}\` is a retired AFPS 1.x key — rename it to \`dependencies.${replacement}\`. No consumer reads it, so the dependencies declared under it are silently ignored.`,
-        ),
-      };
+  // Retired vocabulary: on the author direction, reject and name the
+  // replacement. See {@link RetiredVocabularyPolicy} for why the keys still
+  // parse. Checked before the type dispatch because every package type may
+  // declare `dependencies`.
+  if (options?.retiredVocabulary !== "tolerate") {
+    const errors = findRetiredDependencyKeys(obj).map(
+      ({ key, replacement }) =>
+        `dependencies.${key}: \`dependencies.${key}\` is a retired AFPS 1.x key — rename it to \`dependencies.${replacement}\`. No consumer reads it, so the dependencies declared under it are silently ignored.`,
+    );
+    if (type === "agent" && Object.prototype.hasOwnProperty.call(obj, "runtime_tools")) {
+      errors.push(RETIRED_RUNTIME_TOOLS_ERROR);
     }
+    if (errors.length > 0) return { valid: false, errors };
   }
 
   // AFPS (§3.4): mcp-server identity lives at the manifest root —

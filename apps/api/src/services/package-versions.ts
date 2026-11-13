@@ -872,7 +872,7 @@ export async function createVersionFromDraft(params: {
   // (`docs/NO_TRANSITIONAL_CODE.md` §1).
   if (pkg.type === "mcp-server") {
     try {
-      parsePackageZip(new Uint8Array(zipBuffer), { retiredVocabulary: "drop" });
+      parsePackageZip(new Uint8Array(zipBuffer), { retiredVocabulary: "tolerate" });
     } catch (err) {
       return { ok: false, error: "invalid_bundle", detail: getErrorMessage(err) };
     }

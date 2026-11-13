@@ -23,7 +23,7 @@ Sidecars are spawned per-run with all runtime configuration (run token, platform
 
 ## MCP tools
 
-The `/mcp` endpoint advertises the run's runtime tools and the tools of its integrations, each integration tool namespaced as `{namespace}__{tool}`. The `@appstrate/platform` system integration (`log`, `note`, `pin`, `recall_memory`, `run_history`) is bound to the platform's run MCP server (`{platformApiUrl}/internal/mcp`, run token) — see `integrations-boot.ts`.
+The `/mcp` endpoint advertises the tools of the run's integrations, each namespaced as `{namespace}__{tool}`. The `@appstrate/platform` system integration (`log`, `note`, `pin`, `recall_memory`, `run_history`, `notify`) is bound to the platform's run MCP server (`{platformApiUrl}/internal/mcp`, run token) — see `integrations-boot.ts`.
 
 Outbound credentialled HTTP access is exposed per integration as `{ns}__api_call` (credential-injecting outbound proxy, validated against `authorizedUris`) — see "AFPS Integrations (summary)" in the platform-level `AGENTS.md`.
 

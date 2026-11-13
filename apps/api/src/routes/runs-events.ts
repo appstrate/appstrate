@@ -375,7 +375,7 @@ export function createRunsEventsRouter() {
   // POST /api/runs/:runId/files — agent-published run output.
   //
   // The agent container streams a file it produced (an HTML report, a CSV, …)
-  // here, either via the `publish_file` runtime tool or the entrypoint's
+  // here, either via the runner's `publish_file` tool or the entrypoint's
   // end-of-run `outputs/` sweep. Authenticated by the SAME run HMAC as the GET
   // provisioning routes (verified over an empty body so the up-to-100 MiB
   // payload streams straight to storage without being buffered for the hash).

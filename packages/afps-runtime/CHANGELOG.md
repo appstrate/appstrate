@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed — the stdout bridge (#2199)
+
+- **BREAKING:** `attachStdoutBridge`, `mergeTerminalResult` and the `sinks/stdout-bridge`
+  module are removed. Nothing writes a canonical event to stdout: the runner emits every
+  event, `output.emitted` and `file.published` included, into the run's sink, and reduces
+  them itself.
+
 ### Removed — memories, pinned slots and logs leave `RunResult` (#2199)
 
 - **BREAKING:** `RunResult.memories`, `RunResult.pinned` and the `Memory` / `PinnedSlot` types
@@ -15,13 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   called.
 - **BREAKING:** `memory.added` and `pinned.set` are no longer canonical run events: nothing
   emits them. `MemoryAddedEvent` and `PinnedSetEvent` leave `CanonicalRunEvent`, the two types
-  leave `CANONICAL_EVENT_TYPES` and `CANONICAL_CONSTRAINTS`, so `isCanonicalRunEvent` and the
-  stdout bridge reject them.
+  leave `CANONICAL_EVENT_TYPES` and `CANONICAL_CONSTRAINTS`, so `isCanonicalRunEvent` rejects
+  them.
 - **BREAKING:** `log.written` is no longer a canonical run event: nothing emits it, the server
   that serves the `log` tool writes the log line when the tool is called. `LogWrittenEvent`
   leaves `CanonicalRunEvent`, `CANONICAL_EVENT_TYPES` and `CANONICAL_CONSTRAINTS`;
-  `RunResult.logs`, `LogEntry` and `LogLevel` are removed, and `mergeTerminalResult` merges
-  `output` only. Conformance case L4.1 scripts a third-party event and two `output.emitted`;
+  `RunResult.logs`, `LogEntry` and `LogLevel` are removed. Conformance case L4.1 scripts a third-party event and two `output.emitted`;
   L4.3 checks `output` only.
 
 ### Changed — the output schema is read by `readDeclaredOutputSchema` (#2197)

@@ -7,7 +7,7 @@
  * `isCanonicalRunEvent` (`src/types/canonical-events.ts`) is the runtime
  * structural guard that narrows an open `RunEvent` into the discriminated
  * union. A rejection is not cosmetic: the reducer drops the event from the
- * `RunResult`, and the stdout bridge refuses to believe it. This corpus is the
+ * `RunResult`. This corpus is the
  * only list of accept/reject cases for it; `test/types/canonical-events.test.ts`
  * runs every fixture through the guard and asserts the `valid` label.
  *

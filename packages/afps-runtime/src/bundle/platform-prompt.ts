@@ -441,10 +441,10 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
 
   // --- Memory ---
   // Data-only section: dumps the agent's pinned memory list (working
-  // set, tier 1). The archive tier is reachable via
-  // tool calls — those instructions live in each tool's MCP descriptor
-  // `description` (`note` for writes, runtime-injected `recall_memory`
-  // for searches, surfaced via `tools/list`). Section omitted when no
+  // set, tier 1). The archive tier is reachable via tool calls — those
+  // instructions live in each tool's MCP descriptor `description` (the
+  // `@appstrate/platform` tools `note` for writes, `recall_memory` for
+  // searches, surfaced via `tools/list`). Section omitted when no
   // memories are pinned.
   if (context.memories && context.memories.length > 0) {
     sections.push("## Memory\n");

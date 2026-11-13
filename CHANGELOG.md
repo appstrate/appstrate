@@ -8,18 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
-- **Run `scripts/migration/0052` then `0053` in this release's window** (#2197, #2199).
-  `0052-report-runtime-tools.ts` is read-only: it counts the agent manifests
-  `0053` rewrites and the malformed ones it skips, and lists the agents whose
-  `runtime_tools` select `output` without an `output.schema` (they lose the
-  `output` tool). `0053-migrate-runtime-tools.sql` then rewrites every stored
-  agent manifest (`packages.draft_manifest`, `package_versions.manifest`) in
-  one pass: it declares `@appstrate/platform`, selects
-  (`runtime_tools` ∩ {`log`, `note`, `pin`}) ∪ {`recall_memory`, `run_history`}
-  under `integrations_configuration`, and removes `runtime_tools`. Published
-  archives are not rewritten: a run reads the version's jsonb manifest. It is
-  idempotent and its header carries the verification queries. An agent whose
-  manifest it has not rewritten runs without the platform tools.
+- **BREAKING: run `scripts/migration/0052` then `0053` between the migration and the app's
+  start** (#2197, #2199). The `runtime_tools` agent field is removed, and the platform refuses
+  to boot while a stored agent manifest (`packages.draft_manifest`,
+  `package_versions.manifest`) still carries it (`assertRuntimeToolsMigrated`), naming the
+  commands for its database. `0052-report-runtime-tools.ts` is read-only: it counts the
+  manifests `0053` rewrites and the malformed ones it skips, and lists the agents whose
+  `runtime_tools` select `output` without an `output.schema` (they lose the `output` tool).
+  `0053-migrate-runtime-tools.sql` then rewrites every stored agent manifest in one pass: it
+  declares `@appstrate/platform`, selects (`runtime_tools` ∩ {`log`, `note`, `pin`}) ∪
+  {`recall_memory`, `run_history`} under `integrations_configuration`, and removes
+  `runtime_tools`. A manifest it skips is fixed by hand. Published archives are not rewritten:
+  a run and the bundle export of a version take the version's jsonb manifest. Run it once: an
+  immediate re-run changes nothing, a later one re-adds the dependency to agents whose author
+  removed it. Running it before the deploy strips a field the previous release still reads. The
+  boot guard is deleted in the release after this one.
 
 - **Fixed: the runner bootstrap keeps its env across sudo-rs** (#2153).
   `get.appstrate.dev/runner` elevated with `sudo -E`, which sudo-rs (the default
@@ -130,35 +133,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   remote MCP integrations.
 
 - **BREAKING: `run_and_wait` inline defaults declare `@appstrate/platform`** (#2199). An
-  inline manifest gets the `@appstrate/platform` dependency with its `log` tool selected
-  unless it already names that integration in `dependencies.integrations` or
-  `integrations_configuration`: these two tables are completed entry by entry, beside the
-  caller's own integrations. `integrations_configuration["@appstrate/platform"] = { tools: [] }`
-  removes the tools. One without `output` gets the open object output schema. The
+  inline manifest gets the `@appstrate/platform` dependency unless `dependencies.integrations`
+  already names it, and its `log` tool selected in `integrations_configuration` unless either
+  `dependencies.integrations` or `integrations_configuration` names it (the dependency alone
+  keeps its `default_tools`); the caller's own entries are kept.
+  `integrations_configuration["@appstrate/platform"] = { tools: [] }` removes the tools. One without `output` gets the open object output schema. The
   `runtime_tools` default and the `manifest.runtime_tools` argument are gone. The chat
   prompt and the `run_and_wait` descriptions say so. The default "Hello World"
   agent declares `@appstrate/platform`.
 
-- **BREAKING: `publish_file` is a harness tool, not selected in `runtime_tools`** (#2199).
-  The runner registers it whenever its host supplies an uploader (`PiRunner` option
-  `fileUploader`): every platform run has it, whatever the manifest declares, and a CLI run
-  has none. `@appstrate/runner-pi` no longer exports `buildPublishFileExtension`.
+- **BREAKING: `publish_file` is a harness tool** (#2199). The runner registers it whenever its
+  host supplies an uploader (`PiRunner` option `fileUploader`): every platform run has it,
+  whatever the manifest declares, and a CLI run has none.
 
-- **BREAKING: `output` is injected from `output.schema`, not selected in
-  `runtime_tools`** (#2197). A run has the `output` tool exactly when its agent
-  declares a non-empty `output.schema`, and must then call it; without a schema
-  there is no `output` tool. `output` leaves the `runtime_tools` enum and the
-  editor's runtime-tools checklist, and the `output_tool_required` rule is
-  gone. A manifest sent by an author (create, update, ZIP import, inline run,
-  `appstrate run`) that lists `output` in `runtime_tools` is refused with
-  `invalid_manifest` on `manifest.runtime_tools`; a stored manifest drops the id
-  and reports it. The `PiRunner` builds the tool in the agent container and in
-  the CLI, and the sidecar no longer hosts it (`OUTPUT_SCHEMA` is not part of
-  the sidecar env). Inline runs default `runtime_tools` to `log`,
-  `publish_file` and keep their open object output schema, so they keep
-  `output`. The runner, the platform prompt's `## Output Format` section and
-  the output validation at finalize read the schema the same way: an empty
-  `output.schema` (`{}`) declares none.
+- **BREAKING: `output` is injected from `output.schema`** (#2197). A run has the `output` tool
+  exactly when its agent declares a non-empty `output.schema`, and must then call it; without a
+  schema there is no `output` tool, and the `output_tool_required` rule is gone. The `PiRunner`
+  builds the tool in the agent container and in the CLI; the sidecar does not host it
+  (`OUTPUT_SCHEMA` is not part of the sidecar env). Inline runs keep their open object output
+  schema, so they keep `output`. The runner, the platform prompt's `## Output Format` section
+  and the output validation at finalize read the schema the same way: an empty `output.schema`
+  (`{}`) declares none.
 
 - **A model test says what it checked** (#2148). A successful model test reads
   « Credential valid — model not tested », and the `testModel` /
@@ -533,42 +528,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   export.
 - **The sidecar no longer hosts `log`, `note` and `pin`** (#2199). On a platform
   run these are tools of `@appstrate/platform`, served by the run MCP server. The
-  sidecar's runtime-event journal, `GET /runtime-events`, the `RUNTIME_TOOLS_JSON`
-  env var and `@appstrate/core/runtime-event-drain` are removed.
+  sidecar's runtime-event journal, `GET /runtime-events` and the `RUNTIME_TOOLS_JSON`
+  env var are removed.
 - **`appstrate run` no longer registers `log`, `note` and `pin` as local tools**
-  (#2199). They are tools of `@appstrate/platform`; `@appstrate/core` drops
-  `buildRuntimeToolDefs` and `@appstrate/runner-pi` drops
+  (#2199). They are tools of `@appstrate/platform`; `@appstrate/runner-pi` drops
   `buildRuntimeToolExtensions`. The sidecar no longer strips `dev.appstrate/events`
   from third-party tool results: the key is removed (see below).
-- **The finalize body no longer carries memories or pinned slots** (#2199).
-  `POST /api/runs/{runId}/events/finalize` ignores `memories` and `pinned`, and
-  finalize writes neither `package_persistence` nor `runs.checkpoint`: `note` and
-  `pin` write them when the tool is called. `@appstrate/afps-runtime` drops
-  `RunResult.memories`, `RunResult.pinned`, `Memory` and `PinnedSlot`.
-- **`memory.added` and `pinned.set` are no longer canonical run events** (#2199).
-  Nothing emits them: `note` and `pin` write server-side. `@appstrate/afps-runtime`
-  drops them from `CanonicalRunEvent`, `CANONICAL_EVENT_TYPES` and the reducer, and
-  the L4 conformance script no longer contains them; the stdout bridge passes such a line
-  through as plain output, and `appstrate run` no longer prints `+ memory:` lines.
+- **BREAKING: the finalize contract carries no memories, pinned slots or logs** (#2199).
+  `POST /api/runs/{runId}/events/finalize` ignores `memories`, `pinned` and `logs`, and
+  finalize writes neither `package_persistence`, `runs.checkpoint` nor a run log from them:
+  `note`, `pin` and `log` write when the tool is called. `@appstrate/afps-runtime` drops
+  `RunResult.memories`, `RunResult.pinned`, `RunResult.logs`, `Memory`, `PinnedSlot`,
+  `LogEntry` and `LogLevel`.
+- **`memory.added`, `pinned.set` and `log.written` are no longer canonical run events**
+  (#2199). Nothing emits them: `note`, `pin` and `log` write server-side. Ingestion writes no
+  row for such an envelope; `@appstrate/afps-runtime` drops them (and `LogWrittenEvent`) from
+  `CanonicalRunEvent`, `CANONICAL_EVENT_TYPES` and the reducer, and the L4 conformance script
+  no longer contains them, and `appstrate run` no longer prints `+ memory:` lines.
 - **The `_meta["dev.appstrate/events"]` channel is removed** (#2199). The runner's
   `output` and `publish_file` tools emit their event through the `emit` their
-  handler receives; `@appstrate/core` drops `RUNTIME_TOOL_EVENTS_META_KEY`,
-  `CANONICAL_RUNTIME_TOOL_EVENT_TYPES` and `reEmitRuntimeToolEvents`.
-- **`log.written` is no longer a canonical run event, and the finalize body no
-  longer carries logs** (#2199). Nothing emits it: `log` writes its `run_logs` row
-  when the tool is called. Ingestion writes no row for a `log.written` envelope,
-  `POST /api/runs/{runId}/events/finalize` ignores `logs`, and
-  `@appstrate/afps-runtime` drops `LogWrittenEvent`, `RunResult.logs`, `LogEntry`
-  and `LogLevel`; the stdout bridge passes such a line through as plain output.
-
+  handler receives.
 - **BREAKING: the `runtime_tools` manifest field is removed** (#2199). An agent gets
   `log`, `note`, `pin`, `recall_memory` and `run_history` by declaring the
   `@appstrate/platform` integration (`integrations_configuration` restricts the
   selection); `output` and `publish_file` are harness tools. The field leaves the
-  `AgentManifest` OpenAPI schema and the AFPS agent JSON Schema; a manifest that still
-  carries it is not validated against any enum, and nothing reads it. Read paths no
-  longer drop retired ids (no `droppedRuntimeTools` warning on bundle import, fork or
-  publish), and the agent editor loses its Tools tab.
+  `AgentManifest` OpenAPI schema and the AFPS agent JSON Schema, and the agent editor loses
+  its Tools tab. An author manifest carrying it (create, update, ZIP import, inline run) is
+  refused with `invalid_manifest` on `manifest.runtime_tools`, naming
+  `dependencies.integrations["@appstrate/platform"]` and `integrations_configuration`, and so is
+  a bundle import that would store it; a stored manifest is read as it is, and nothing reads
+  the field. Stored manifests move with `scripts/migration/0053` (see Operators).
+
+- **BREAKING: `@appstrate/core` removes its runtime-tool exports** (#2197, #2199):
+  `@appstrate/core/runtime-tool-defs`, `@appstrate/core/runtime-tools-catalog` and
+  `@appstrate/core/runtime-event-drain`, and the `runtime_tools` helpers of
+  `@appstrate/core/validation`. The full list is in `packages/core/CHANGELOG.md`.
 
 ### Added
 
@@ -583,7 +577,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   checkpoint snapshot `run_history` returns), `notify` a notification. The sidecar authenticates
   `/internal/mcp` with the run token; the host executing a remote run reaches
   `/api/runs/{runId}/mcp` with `agents:run`, on a remote run it launched (any
-  other run answers 404, `runs:read-all` included).
+  other run answers 404, `runs:read-all` included); a run that is not `running` answers 403.
 
 - **`notify`: an agent sends an in-app notification from inside its run** (#2200).
   A tool of `@appstrate/platform`, `notify({ title, message })` (title 1–100

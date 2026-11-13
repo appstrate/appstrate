@@ -134,6 +134,10 @@ export async function bootCritical(): Promise<void> {
   // Detection only; the fold is an operator task, see the function's doc comment.
   await assertPackageSharesFolded(embeddedDataDir);
 
+  // Refuse to boot while a stored agent manifest still carries `runtime_tools`, which nothing
+  // reads. Detection only; the rewrite is an operator task, see the function's doc comment.
+  await assertRuntimeToolsMigrated(embeddedDataDir);
+
   await assertKeyringCoversCiphertexts();
 
   // Bootstrap-token reconciliation. If the env still carries an
@@ -753,6 +757,56 @@ export async function unfoldedPackageShareCount(
   const { sql: rawSql } = await import("drizzle-orm");
   const [row] = toRows<{ pending: number }>(
     await database.execute(rawSql`SELECT count(*)::int AS pending FROM package_shares`),
+  );
+  return row?.pending ?? 0;
+}
+
+/**
+ * Refuse to boot while a stored agent manifest (`package_versions.manifest`,
+ * `packages.draft_manifest`) still carries `runtime_tools`, i.e. until
+ * `scripts/migration/0053-migrate-runtime-tools.sql` has run: nothing reads the field, so every
+ * such agent runs without the `@appstrate/platform` tools it had. Refuses rather than warns, like
+ * {@link assertOAuthResourceColumnsPresent}. Delete with the release after the one that ships
+ * #2199 (§4). `pendingRewrites` is injected for tests.
+ */
+export async function assertRuntimeToolsMigrated(
+  embeddedDataDir: string | null,
+  pendingRewrites: () => Promise<number> = unmigratedRuntimeToolsCount,
+): Promise<void> {
+  const pending = await pendingRewrites();
+  if (pending === 0) return;
+
+  const report = "bun scripts/migration/0052-report-runtime-tools.ts";
+  const script = "scripts/migration/0053-migrate-runtime-tools.sql";
+  const command =
+    embeddedDataDir === null
+      ? `\`DATABASE_URL=… ${report}\` (read-only), then ` +
+        `\`psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f ${script}\`, with this DATABASE_URL`
+      : `${script} on the embedded database at ${embeddedDataDir}, from the platform's directory ` +
+        "while it is stopped (an embedded database opens in one process at a time)";
+  throw new Error(
+    `Agent manifests not migrated: ${pending} stored agent manifest(s) still carry runtime_tools, ` +
+      `so ${script} has not run. Until it runs, those agents run without the ` +
+      "@appstrate/platform tools (log, note, pin, recall_memory, run_history) they had. " +
+      `Refusing to boot: run ${command}, then restart. A manifest the script leaves untouched ` +
+      "(the report counts them as malformed) is fixed by hand.",
+  );
+}
+
+/** `database` is injected for tests that probe a second embedded database. */
+export async function unmigratedRuntimeToolsCount(
+  database: { execute(query: SQL): PromiseLike<unknown> } = db,
+): Promise<number> {
+  const { sql: rawSql } = await import("drizzle-orm");
+  const [row] = toRows<{ pending: number }>(
+    await database.execute(rawSql`
+      SELECT
+        (SELECT count(*)::int FROM package_versions
+          WHERE manifest ->> 'type' = 'agent' AND manifest -> 'runtime_tools' IS NOT NULL)
+        + (SELECT count(*)::int FROM packages
+          WHERE draft_manifest ->> 'type' = 'agent' AND draft_manifest -> 'runtime_tools' IS NOT NULL)
+        AS pending
+    `),
   );
   return row?.pending ?? 0;
 }

@@ -235,16 +235,9 @@ export function firstViolatedConstraint(event: RunEvent): string | undefined {
  *
  * ## What rides on this
  *
- * Three callers, and two of them lose data when the guard says no:
- *
- *  - `../runner/reducer.ts` narrows with it before folding an event into the
- *    `RunResult`. A rejected event is **silently dropped** — no output, no
- *    metric.
- *  - `../sinks/stdout-bridge.ts` validates what the agent prints on stdout.
- *    That is a trust boundary: untrusted container output, structurally
- *    checked before it is believed.
- *  - `../events/cloudevents.ts` does not consult it. The `dataschema` stamp
- *    it used to gate is gone (see that module for why).
+ * `../runner/reducer.ts` narrows with it before folding an event into the
+ * `RunResult`. A rejected event is **silently dropped** — no output, no
+ * metric.
  *
  * So this is not a cosmetic classifier. Every constraint in
  * {@link CANONICAL_CONSTRAINTS} is a rejection path that discards data, and

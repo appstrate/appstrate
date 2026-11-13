@@ -75,12 +75,7 @@ import {
   type ReportSource,
 } from "./run/report.ts";
 import { announceLaunch } from "./run/launch-warnings.ts";
-import {
-  attachStdoutBridge,
-  CompositeSink,
-  type HttpSink,
-  type StdoutBridgeHandle,
-} from "@appstrate/afps-runtime/sinks";
+import { CompositeSink, type HttpSink } from "@appstrate/afps-runtime/sinks";
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { loadSnapshotFile, mergeSnapshotIntoContext } from "./run/snapshot.ts";
@@ -326,18 +321,6 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // The integrations the platform bound this run to none of: told to the agent, tools withheld.
   const unavailable = unavailableIntegrations(reportSession?.warnings ?? []);
 
-  // System tools (`@appstrate/output`, `@appstrate/log`, …) read
-  // `AGENT_RUN_ID` from the env when stamping their stdout-JSONL events.
-  // The stdout bridge installed below re-stamps events with the canonical
-  // `runId` regardless, but exporting the var keeps any tool-side log
-  // output (debug prints, error messages) consistent with the run record.
-  const priorAgentRunId = process.env.AGENT_RUN_ID;
-  process.env.AGENT_RUN_ID = runId;
-  const restoreAgentRunId = (): void => {
-    if (priorAgentRunId === undefined) delete process.env.AGENT_RUN_ID;
-    else process.env.AGENT_RUN_ID = priorAgentRunId;
-  };
-
   // ─── 7. Temp workspace + extension prep ────────────────────────────
   const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "appstrate-run-"));
   await prepareBundleForPi(bundle, { workspaceDir });
@@ -349,20 +332,23 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // `{ns}__api_call` MCP tool, so prompts are identical regardless of
   // execution mode. MCP-server integrations have no api_call surface: the
   // unauthenticated remote ones are wired below (7a'), the others are not.
-  const { factories: apiCallFactories, integrationIds: wiredIntegrationIds } =
-    await buildApiCallExtensionFactory({
-      bundle: withoutIntegrations(
-        bundle,
-        unavailable.map((entry) => entry.id),
-      ),
-      integrationResolver,
-      runId,
-      workspace: workspaceDir,
-      emitEvent: () => {
-        // Events are swallowed in the CLI — the run-result aggregate is
-        // assembled from stdout CloudEvents, not from these telemetry hooks.
-      },
-    });
+  const {
+    factories: apiCallFactories,
+    integrationIds: wiredIntegrationIds,
+    toolNames: apiCallToolNames,
+  } = await buildApiCallExtensionFactory({
+    bundle: withoutIntegrations(
+      bundle,
+      unavailable.map((entry) => entry.id),
+    ),
+    integrationResolver,
+    runId,
+    workspace: workspaceDir,
+    emitEvent: () => {
+      // Events are swallowed in the CLI — the run-result aggregate is
+      // assembled from stdout CloudEvents, not from these telemetry hooks.
+    },
+  });
   if (!opts.json && apiCallFactories.length > 0) {
     process.stderr.write(`→ wired ${apiCallFactories.length} integration api_call tool(s)\n`);
   }
@@ -404,33 +390,10 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     quiet: opts.quiet,
     envValue: process.env.APPSTRATE_VERBOSE,
   });
-  // Stdout-JSONL bridge wiring (see `attachStdoutBridge` for the full
-  // rationale). A canonical event written as
-  // `process.stdout.write(JSON+\n)` would otherwise never reach the
-  // configured sink — printed as raw JSON noise and lost. The bridge
-  // intercepts stdout, parses canonical events, and folds them into the
-  // runner's sink stream so:
-  //   - `--report` mode POSTs `output.emitted` to
-  //     the platform → `run_logs` populated, finalize body carries
-  //     `result.output`.
-  //   - Offline mode (no `--report`) still aggregates the events so
-  //     `--output <file>` writes the actual `result.output`.
-  //
-  // `writeStdout` trampoline: the console sink needs a writer that
-  // bypasses the bridge (otherwise `--json` would re-emit canonical
-  // events on stdout and the bridge would re-aspirate them, dispatching
-  // every event a second time). The bridge needs the composite sink to
-  // attach its forwarder. Both circular dependencies are resolved with
-  // late binding — defaultWriteStdout up-front, swapped to
-  // `bridge.writeRaw` after the bridge attaches.
-  let writeStdout: (chunk: string) => void = (chunk) => {
-    process.stdout.write(chunk);
-  };
   const consoleSink = createConsoleSink({
     json: opts.json,
     outputPath: opts.output,
     verbosity,
-    writeStdout: (chunk) => writeStdout(chunk),
   });
   // Track whether finalize was already sent to the HttpSink so the
   // CLI's safety-net finalize in the cleanup doesn't double-post.
@@ -440,23 +403,16 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
   // PiRunner entirely. Without this safety net the run sits open
   // until the watchdog times out.
   const runnerFinalize = reportSession ? attachFinalizeTracker(reportSession.httpSink) : null;
-  const composite: EventSink = reportSession
+  const sink: EventSink = reportSession
     ? new CompositeSink([consoleSink, reportSession.httpSink])
     : consoleSink;
-  const bridge: StdoutBridgeHandle = attachStdoutBridge({ sink: composite, runId });
-  // Bridge is attached: route the console sink's writes through its
-  // escape hatch so `--json` mode's JSONL output isn't re-parsed.
-  writeStdout = (chunk) => {
-    bridge.writeRaw(chunk);
-  };
-  const sink: EventSink = bridge.sink;
   announceLaunch({
     type: "appstrate.report.started",
     json: opts.json,
     bundleLabel,
     instance: resolverInputsInstance(resolverInputs),
     run: reportSession,
-    writeStdout,
+    writeStdout: (chunk) => process.stdout.write(chunk),
     writeStderr: (chunk) => process.stderr.write(chunk),
   });
 
@@ -509,11 +465,6 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       // The run is over: no report request may outlive it, or a stalled
       // platform would keep the process from exiting.
       reportSession?.httpSink.abort(new Error("run ended"));
-      // Tear down env-var + stdout-bridge mutations in the reverse order
-      // they were installed. `bridge.restore()` swaps `process.stdout.write`
-      // back to the original.
-      bridge.restore();
-      restoreAgentRunId();
       await remoteMcp.close();
       await fs.rm(workspaceDir, { recursive: true, force: true }).catch(() => {});
     })();
@@ -586,6 +537,7 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
           unavailable.map((entry) => entry.id),
         ),
         ...(reportSession ? { runToolsMcp: reportSession.runToolsMcp } : {}),
+        takenToolNames: apiCallToolNames,
         signal: shutdownSignal,
       });
     }

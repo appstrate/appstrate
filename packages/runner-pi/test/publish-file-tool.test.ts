@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import type { FileUploader } from "@appstrate/core/runtime-tool-defs";
+import type { FileUploader } from "../src/harness-tools.ts";
 import { runAgainstStub, stubGatewayModel } from "./helpers.ts";
 
 /** Names of the tools the first model request offered. */

@@ -4,7 +4,7 @@
  * Platform-synthesised terminals must recover the structured deliverable the
  * agent already emitted (issue #1020).
  *
- * The `output` runtime tool is persisted at emit time as a `run_logs` row
+ * The `output` tool's payload is persisted at emit time as a `run_logs` row
  * (`type='result'`, `event='output'`), but `runs.result` is written only at
  * finalize from the RunResult the runner posts. On every path where the
  * runner never posts its own finalize — user cancel, timeout, container

@@ -318,10 +318,10 @@ export interface VisibleLogEntry {
 /**
  * The ordered sequence of the agent's own log-tool output — the queue the run
  * card tickers through one entry at a time. ONLY `event === "log"` rows qualify:
- * those come from the agent's explicit `log` runtime tool (sink tags them so),
- * never the auto-emitted runtime lifecycle / tool-call breadcrumbs (which share
- * `type='progress'` but keep `event='progress'`), nor `output`/`file`/system
- * rows. Keeps ascending `id` order (same as `mergeLogs`), so the last element is
+ * the platform writes them for the agent's explicit `log` tool
+ * (`@appstrate/platform`), never for the auto-emitted runtime lifecycle /
+ * tool-call breadcrumbs (which share `type='progress'` but keep
+ * `event='progress'`), nor `output`/`file`/system rows. Keeps ascending `id` order (same as `mergeLogs`), so the last element is
  * the most recent line; `id` doubles as the React key the line animates on.
  */
 export function visibleLogEntries(logs: readonly RunLogLine[]): VisibleLogEntry[] {
@@ -432,12 +432,11 @@ export function extractRunFiles(result: unknown): ChatRunFile[] {
  * (`event='document'`) is read.
  *
  * These frames are publications, i.e. files the agent PRODUCED: the only
- * emitters are the `publish_file` runtime tool and the end-of-run
+ * emitters are the `publish_file` harness tool and the end-of-run
  * `outputs/` sweep. Input files a run merely consumed never appear here, so
  * this list is exactly the population the auto-present rule counts.
  *
- * Historical frames carry extra fields (notably the retired `presentation`);
- * only the known keys are read, so a legacy line parses like any other.
+ * Only the known keys are read; any other field of a frame is ignored.
  */
 export function publishedFilesFromLogs(logs: readonly RunLogLine[]): ChatRunFile[] {
   const out: ChatRunFile[] = [];

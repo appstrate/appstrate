@@ -268,7 +268,7 @@ async function validateManifestForRoute(
 ): Promise<Record<string, unknown> & { name: string }> {
   const result = validateManifest(
     manifest,
-    direction === "stored" ? { retiredVocabulary: "drop" } : undefined,
+    direction === "stored" ? { retiredVocabulary: "tolerate" } : undefined,
   );
   if (!result.valid) {
     throw validationFailed(manifestErrorsToFieldErrors(result));

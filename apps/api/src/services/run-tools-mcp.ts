@@ -43,7 +43,7 @@ import {
   type PersistenceScope,
 } from "./state/package-persistence.ts";
 import { createAgentMessageNotifications } from "./state/notifications.ts";
-import { isPlainRecord } from "./run-event-ingestion.ts";
+import { isPlainObject } from "@appstrate/core/safe-json";
 
 /** Server identity returned by `initialize`. */
 const RUN_TOOLS_SERVER_INFO = { name: "appstrate-platform", version: "1.0.0" } as const;
@@ -59,35 +59,81 @@ export interface RunToolsRun {
   endUserId: string | null;
 }
 
-const PERSISTENCE_SCOPE_PARAM = {
-  type: "string",
-  enum: ["actor", "shared"],
-} as const;
+/**
+ * A tool's `inputSchema`, derived from the Zod schema its handler parses with
+ * (`additionalProperties: false`, bounds and descriptions included), without
+ * the `$schema` dialect key.
+ */
+function inputSchemaOf(schema: z.ZodObject): AppstrateToolDefinition["descriptor"]["inputSchema"] {
+  const json: Record<string, unknown> = { ...z.toJSONSchema(schema) };
+  delete json.$schema;
+  return json as AppstrateToolDefinition["descriptor"]["inputSchema"];
+}
+
+const persistenceScope = (description: string) =>
+  z.enum(["actor", "shared"]).optional().describe(description);
 
 const logArgs = z.object({
-  level: z.enum(["info", "warn", "error"]),
-  message: z.string(),
+  level: z
+    .enum(["info", "warn", "error"])
+    .describe("info: progress and milestones, warn: non-blocking issues, error: failures"),
+  message: z.string().describe("Message for the user"),
 });
 
 const noteArgs = z.object({
-  content: z.string().min(1),
-  scope: z.enum(["actor", "shared"]).optional(),
+  content: z.string().min(1).describe(`Memory text to save (max ${MAX_MEMORY_CONTENT} characters)`),
+  scope: persistenceScope(
+    'Persistence scope. "actor" (default) keeps the note private to the calling actor — well-suited for personal preferences. "shared" makes the note visible to every actor of the space; use for facts universal regardless of who triggered the run.',
+  ),
 });
 
 const pinArgs = z.object({
-  key: z.string(),
-  content: z.unknown(),
-  scope: z.enum(["actor", "shared"]).optional(),
+  key: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[a-z0-9_]+$/)
+    .describe(
+      'Pinned slot identifier. Lowercase, digits and underscores only. "checkpoint" is the carry-over slot.',
+    ),
+  content: z.unknown().describe("Arbitrary JSON value stored under the pinned slot."),
+  scope: persistenceScope(
+    'Persistence scope. "actor" (default) gives every actor their own private copy of the slot — scheduled runs, manual triggers, and different members do not share state. "shared" makes the slot space-wide; use when the slot tracks a resource shared across actors.',
+  ),
 });
 
 const recallArgs = z.object({
-  q: z.string().min(1).max(MAX_MEMORY_CONTENT).optional(),
-  limit: z.number().int().min(1).max(RECALL_LIMIT_MAX).optional(),
+  q: z
+    .string()
+    .min(1)
+    .max(MAX_MEMORY_CONTENT)
+    .optional()
+    .describe(
+      "Case-insensitive substring to match against memory content (text or JSON). " +
+        "Omit for an unfiltered most-recent-first slice.",
+    ),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(RECALL_LIMIT_MAX)
+    .optional()
+    .describe(`Max memories to return (1..${RECALL_LIMIT_MAX}, default ${RECALL_LIMIT_DEFAULT}).`),
 });
 
 const runHistoryArgs = z.object({
-  limit: z.number().int().min(1).max(50).optional(),
-  fields: z.array(z.enum(RUN_HISTORY_FIELDS)).optional(),
+  limit: z
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .optional()
+    .describe("Number of past runs to return (1..50, default 10)."),
+  fields: z
+    .array(z.enum(RUN_HISTORY_FIELDS))
+    .meta({ uniqueItems: true })
+    .optional()
+    .describe("Optional subset of `{checkpoint, result}` to include per run."),
 });
 
 /** Bounds of a `notify` message: one bell row, a title line and a short body. */
@@ -95,8 +141,16 @@ const NOTIFY_TITLE_MAX = 100;
 const NOTIFY_MESSAGE_MAX = 500;
 
 const notifyArgs = z.object({
-  title: z.string().min(1).max(NOTIFY_TITLE_MAX),
-  message: z.string().min(1).max(NOTIFY_MESSAGE_MAX),
+  title: z
+    .string()
+    .min(1)
+    .max(NOTIFY_TITLE_MAX)
+    .describe(`Short headline shown in bold (max ${NOTIFY_TITLE_MAX} characters)`),
+  message: z
+    .string()
+    .min(1)
+    .max(NOTIFY_MESSAGE_MAX)
+    .describe(`Body text under the title (max ${NOTIFY_MESSAGE_MAX} characters)`),
 });
 
 function textResult(text: string): CallToolResult {
@@ -135,20 +189,7 @@ function buildRunTools(run: RunToolsRun): AppstrateToolDefinition[] {
       name: "log",
       description:
         "Send a progress message to the user. Write naturally — the user reads these in real time.",
-      inputSchema: {
-        type: "object",
-        additionalProperties: false,
-        required: ["level", "message"],
-        properties: {
-          level: {
-            type: "string",
-            enum: ["info", "warn", "error"],
-            description:
-              "info: progress and milestones, warn: non-blocking issues, error: failures",
-          },
-          message: { type: "string", description: "Message for the user" },
-        },
-      },
+      inputSchema: inputSchemaOf(logArgs),
     },
     handler: async (raw) => {
       const parsed = parseArgs("log", logArgs, raw);
@@ -166,28 +207,13 @@ function buildRunTools(run: RunToolsRun): AppstrateToolDefinition[] {
       name: "note",
       description:
         "Append a long-term archive memory — a discovery, fact, or user preference worth keeping across future runs. " +
-        "Archive memories are NOT injected into the system prompt; retrieve them on demand with `recall_memory`. " +
+        "Archive memories are NOT injected into the system prompt; retrieve them on demand with this integration's `recall_memory` tool. " +
         'Scope defaults to "actor" — personal observations stay private to the calling actor (scheduled runs, ' +
         "manual triggers, and different members each see only their own notes). " +
         'Pass scope="shared" for facts universal to the space — API quirks, org conventions, shared-resource structure — ' +
         "so every actor can recall them. " +
         "Use for insights worth remembering (e.g. 'Gmail API paginates at 100 results', 'User prefers CSV format').",
-      inputSchema: {
-        type: "object",
-        additionalProperties: false,
-        required: ["content"],
-        properties: {
-          content: {
-            type: "string",
-            description: `Memory text to save (max ${MAX_MEMORY_CONTENT} characters)`,
-          },
-          scope: {
-            ...PERSISTENCE_SCOPE_PARAM,
-            description:
-              'Persistence scope. "actor" (default) keeps the note private to the calling actor — well-suited for personal preferences. "shared" makes the note visible to every actor of the space; use for facts universal regardless of who triggered the run.',
-          },
-        },
-      },
+      inputSchema: inputSchemaOf(noteArgs),
     },
     handler: async (raw) => {
       const parsed = parseArgs("note", noteArgs, raw);
@@ -219,27 +245,7 @@ function buildRunTools(run: RunToolsRun): AppstrateToolDefinition[] {
         'Scope defaults to "actor" — scheduled runs, manual triggers, and different members each get their own copy. ' +
         'Pass scope="shared" when the slot tracks a resource shared across actors (synced repo, shared inbox, shared DB), ' +
         "otherwise the agent will desynchronise across triggers.",
-      inputSchema: {
-        type: "object",
-        additionalProperties: false,
-        required: ["key", "content"],
-        properties: {
-          key: {
-            type: "string",
-            minLength: 1,
-            maxLength: 64,
-            pattern: "^[a-z0-9_]+$",
-            description:
-              'Pinned slot identifier. Lowercase, digits and underscores only. "checkpoint" is the carry-over slot.',
-          },
-          content: { description: "Arbitrary JSON value stored under the pinned slot." },
-          scope: {
-            ...PERSISTENCE_SCOPE_PARAM,
-            description:
-              'Persistence scope. "actor" (default) gives every actor their own private copy of the slot — scheduled runs, manual triggers, and different members do not share state. "shared" makes the slot space-wide; use when the slot tracks a resource shared across actors.',
-          },
-        },
-      },
+      inputSchema: inputSchemaOf(pinArgs),
     },
     handler: async (raw) => {
       const parsed = parseArgs("pin", pinArgs, raw);
@@ -261,7 +267,7 @@ function buildRunTools(run: RunToolsRun): AppstrateToolDefinition[] {
       }
       // `runs.checkpoint` is the per-run snapshot `run_history` reads; the
       // persistence row above keeps only the latest checkpoint per scope.
-      if (key === CHECKPOINT_KEY && isPlainRecord(content)) {
+      if (key === CHECKPOINT_KEY && isPlainObject(content)) {
         await setRunCheckpoint({ orgId: run.orgId, spaceId: run.spaceId }, run.runId, content);
       }
       return textResult(`Pinned slot "${key}" updated`);
@@ -275,29 +281,9 @@ function buildRunTools(run: RunToolsRun): AppstrateToolDefinition[] {
         "Search the agent's archive memories — durable facts and learnings from past runs that " +
         "are NOT visible in the system prompt by default. Pass an optional `q` to filter by " +
         "case-insensitive substring; omit it to retrieve the most recent archive memories. " +
-        "Use this when the prompt's `## Memory` section says you have archived memories worth " +
-        "checking, when looking for a fact you remember saving, or before answering a question " +
+        "Use this when looking for a fact you remember saving, or before answering a question " +
         "that depends on prior-session context. Returns JSON `{ memories: [...] }`.",
-      inputSchema: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          q: {
-            type: "string",
-            minLength: 1,
-            maxLength: MAX_MEMORY_CONTENT,
-            description:
-              "Case-insensitive substring to match against memory content (text or JSON). " +
-              "Omit for an unfiltered most-recent-first slice.",
-          },
-          limit: {
-            type: "integer",
-            minimum: 1,
-            maximum: RECALL_LIMIT_MAX,
-            description: `Max memories to return (1..${RECALL_LIMIT_MAX}, default ${RECALL_LIMIT_DEFAULT}).`,
-          },
-        },
-      },
+      inputSchema: inputSchemaOf(recallArgs),
     },
     handler: async (raw) => {
       const parsed = parseArgs("recall_memory", recallArgs, raw);
@@ -328,24 +314,7 @@ function buildRunTools(run: RunToolsRun): AppstrateToolDefinition[] {
         "Fetch metadata and optionally the carry-over checkpoint or final output of the agent's " +
         'most recent past runs (current run excluded). Returns JSON `{ object: "list", data: [...], hasMore }`. ' +
         "Use for trend analysis, auditing prior executions, or recovering from a failed run.",
-      inputSchema: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          limit: {
-            type: "integer",
-            minimum: 1,
-            maximum: 50,
-            description: "Number of past runs to return (1..50, default 10).",
-          },
-          fields: {
-            type: "array",
-            items: { type: "string", enum: [...RUN_HISTORY_FIELDS] },
-            uniqueItems: true,
-            description: "Optional subset of `{checkpoint, result}` to include per run.",
-          },
-        },
-      },
+      inputSchema: inputSchemaOf(runHistoryArgs),
     },
     handler: async (raw) => {
       const parsed = parseArgs("run_history", runHistoryArgs, raw);
@@ -376,25 +345,7 @@ function buildRunTools(run: RunToolsRun): AppstrateToolDefinition[] {
         "organization's owners and admins for an unattended run. Each of them receives ONE notification per run: a " +
         "second call is refused, so send it once, for what deserves attention (a result to review, a decision to make). " +
         `Title up to ${NOTIFY_TITLE_MAX} characters, message up to ${NOTIFY_MESSAGE_MAX}.`,
-      inputSchema: {
-        type: "object",
-        additionalProperties: false,
-        required: ["title", "message"],
-        properties: {
-          title: {
-            type: "string",
-            minLength: 1,
-            maxLength: NOTIFY_TITLE_MAX,
-            description: `Short headline shown in bold (max ${NOTIFY_TITLE_MAX} characters)`,
-          },
-          message: {
-            type: "string",
-            minLength: 1,
-            maxLength: NOTIFY_MESSAGE_MAX,
-            description: `Body text under the title (max ${NOTIFY_MESSAGE_MAX} characters)`,
-          },
-        },
-      },
+      inputSchema: inputSchemaOf(notifyArgs),
     },
     handler: async (raw) => {
       const parsed = parseArgs("notify", notifyArgs, raw);

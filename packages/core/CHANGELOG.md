@@ -15,51 +15,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **BREAKING: `output` is not a selectable runtime tool** (#2197). It leaves
-  `SELECTABLE_RUNTIME_TOOLS`, `EVENT_EMITTER_RUNTIME_TOOLS` and `RUNTIME_TOOL_CATALOG`
-  (`@appstrate/core/runtime-tools-catalog`), so `validateManifest` rejects it in
-  `runtime_tools` on the author path and drops it on the read path.
-  `buildRuntimeToolDefs` (`@appstrate/core/runtime-tool-defs`) loses its `outputSchema`
-  option, and `SidecarLaunchSpec.outputSchema` (`@appstrate/core/sidecar-types`) is
-  removed. **`buildOutputToolDef(outputSchema)`** builds the `output` tool from a
-  declared schema, always mandatory; the condition for the tool is
-  `readDeclaredOutputSchema` (`@appstrate/afps-shared/output-schema`).
+- **BREAKING: `@appstrate/core/runtime-tool-defs` is removed** (#2197, #2199), with
+  `buildRuntimeToolDefs`, `BuildRuntimeToolDefsOptions`, `buildOutputToolDef`,
+  `buildPublishFileDef`,
+  `filePublishedEvent`, `FilePublishedEvent`, `FileUploader`, `PublishedFile`, `RuntimeToolDef`,
+  `RuntimeToolEvent`, `RuntimeToolResult`, `RUNTIME_TOOL_EVENTS_META_KEY`,
+  `CANONICAL_RUNTIME_TOOL_EVENT_TYPES` and `reEmitRuntimeToolEvents`. `output` and
+  `publish_file` are harness tools of `@appstrate/runner-pi`; `log`, `note` and `pin` are tools
+  of the `@appstrate/platform` system integration; the `_meta["dev.appstrate/events"]` channel
+  is gone. `output` exists exactly when `readDeclaredOutputSchema`
+  (`@appstrate/afps-shared/output-schema`) finds a schema.
 
-- **BREAKING: `@appstrate/core/runtime-event-drain` is removed** (#2199), with
-  `createRuntimeEventDrainer`, `drainAndEmitInto`, `RuntimeEventDrainer`,
-  `RuntimeEventDrainerOptions`, `DrainOptions`, `DrainAndEmitOptions` and `DrainLogger`:
-  the sidecar no longer hosts runtime tools, so it has no event journal to drain.
-  `SidecarLaunchSpec.runtimeTools` (`@appstrate/core/sidecar-types`) is removed.
+- **BREAKING: `@appstrate/core/runtime-tools-catalog` and `@appstrate/core/runtime-event-drain`
+  are removed** (#2199), with `SELECTABLE_RUNTIME_TOOLS`, `EVENT_EMITTER_RUNTIME_TOOLS`,
+  `RUNTIME_TOOL_CATALOG`, `SelectableRuntimeTool`, `EventEmitterRuntimeTool`,
+  `RuntimeToolCatalogEntry`, `isSelectableRuntimeTool`, `canonicalizeRuntimeToolIds`,
+  `CanonicalizedRuntimeToolIds`, `createRuntimeEventDrainer`, `drainAndEmitInto`,
+  `RuntimeEventDrainer`, `RuntimeEventDrainerOptions`, `DrainOptions`, `DrainAndEmitOptions` and
+  `DrainLogger`. `SidecarLaunchSpec.outputSchema` and `SidecarLaunchSpec.runtimeTools`
+  (`@appstrate/core/sidecar-types`) are removed.
 
-- **BREAKING: `buildRuntimeToolDefs` and `BuildRuntimeToolDefsOptions` are removed**
-  (`@appstrate/core/runtime-tool-defs`, #2199), with the `log`, `note` and `pin` tool
-  definitions they built: the `@appstrate/platform` system integration serves these tools.
+- **BREAKING: the `runtime_tools` agent field is retired** (`@appstrate/core/validation`, #2199).
+  `agentManifestSchema` does not declare it, and `dropRetiredRuntimeTools`,
+  `OUTPUT_TOOL_REQUIRED`, `ValidateManifestResult.droppedRuntimeTools` and
+  `ParsedPackageZip.droppedRuntimeTools` are removed. `validateManifest` refuses an agent
+  manifest carrying `runtime_tools` on the author path, naming
+  `dependencies.integrations["@appstrate/platform"]` and `integrations_configuration`, and
+  tolerates it untouched on the stored path, like the retired `dependencies` keys. The option
+  governing both is renamed: `RetiredRuntimeToolsPolicy` → **`RetiredVocabularyPolicy`**,
+  `ValidateManifestOptions.retiredRuntimeTools` / `ParsePackageZipOptions.retiredRuntimeTools` →
+  **`retiredVocabulary`**, with the values `"reject"` and **`"tolerate"`** (was `"drop"`).
 
 - **BREAKING: `launchRunAndWait` inline defaults** (`@appstrate/core/run-and-wait-client`,
-  #2199). `dependencies.integrations` and `integrations_configuration` receive the
-  `@appstrate/platform` entry (version `^1.0.0`, tools `["log"]`) when they do not already name
-  that id, entry by entry, beside the caller's own entries; an absent `output` defaults to the
-  open object schema. The `runtime_tools` default and the refusal of a non-array
+  #2199). `dependencies.integrations["@appstrate/platform"] = "^1.0.0"` is added when
+  `dependencies.integrations` does not name that id, and
+  `integrations_configuration["@appstrate/platform"] = { tools: ["log"] }` only when neither
+  table names it; the caller's own entries are kept. An absent `output` defaults to the open
+  object schema. The `runtime_tools` default and the refusal of a non-array
   `manifest.runtime_tools` are removed.
-
-- **BREAKING: `@appstrate/core/runtime-tools-catalog` and the `runtime_tools` field are
-  removed** (#2199), with `SELECTABLE_RUNTIME_TOOLS`, `EVENT_EMITTER_RUNTIME_TOOLS`,
-  `RUNTIME_TOOL_CATALOG`, `SelectableRuntimeTool`, `EventEmitterRuntimeTool`,
-  `RuntimeToolCatalogEntry`, `isSelectableRuntimeTool`, `canonicalizeRuntimeToolIds` and
-  `CanonicalizedRuntimeToolIds`. `agentManifestSchema` (`@appstrate/core/validation`) no
-  longer declares `runtime_tools`, `dropRetiredRuntimeTools` is removed, and
-  `ValidateManifestResult.droppedRuntimeTools` / `ParsedPackageZip.droppedRuntimeTools`
-  are removed. The direction option that governs retired `dependencies` keys is renamed:
-  `RetiredRuntimeToolsPolicy` → **`RetiredVocabularyPolicy`**, and
-  `ValidateManifestOptions.retiredRuntimeTools` / `ParsePackageZipOptions.retiredRuntimeTools`
-  → **`retiredVocabulary`** (same `"reject"` / `"drop"` values).
-
-- **BREAKING: runtime tools emit their events directly** (`@appstrate/core/runtime-tool-defs`,
-  #2199). `RuntimeToolDef.handler` takes the run's `emit` as its second argument and calls it
-  with the `output.emitted` / `file.published` event of a successful call.
-  `RUNTIME_TOOL_EVENTS_META_KEY`, `CANONICAL_RUNTIME_TOOL_EVENT_TYPES`,
-  `reEmitRuntimeToolEvents` and `RuntimeToolResult._meta` are removed with the
-  `_meta["dev.appstrate/events"]` channel.
 
 - **BREAKING: `EnforcedChatSkill` gains the required `uri`** (`@appstrate/core/chat-contract`):
   the `skill://` URI of an enforced skill's `SKILL.md` (`null` with `content` when no version

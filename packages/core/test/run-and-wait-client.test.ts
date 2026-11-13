@@ -739,6 +739,55 @@ describe("launchRunAndWait launch body", () => {
     });
   });
 
+  it("kind:inline injects no platform configuration when the caller declares the dependency alone", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: {
+          display_name: "Tous les outils",
+          dependencies: { integrations: { "@appstrate/platform": "^1.0.0" } },
+        },
+        prompt: "do it",
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    const manifest = (captured()?.body as { manifest?: Record<string, unknown> } | undefined)
+      ?.manifest;
+    expect(manifest?.dependencies).toEqual({
+      integrations: { "@appstrate/platform": "^1.0.0" },
+    });
+    // The integration's `default_tools` apply: nothing narrows them to `log`.
+    expect(manifest).not.toHaveProperty("integrations_configuration");
+  });
+
+  it("kind:inline adds the dependency beside a caller-written platform configuration", async () => {
+    const { fetchImpl, captured } = captureLaunch();
+
+    await launchRunAndWait(
+      {
+        kind: "inline",
+        manifest: {
+          display_name: "Notes",
+          integrations_configuration: { "@appstrate/platform": { tools: ["note"] } },
+        },
+        prompt: "do it",
+      },
+      { origin: "https://test.local", headers: {}, fetch: fetchImpl },
+    );
+
+    const manifest = (captured()?.body as { manifest?: Record<string, unknown> } | undefined)
+      ?.manifest;
+    expect(manifest?.dependencies).toEqual({
+      integrations: { "@appstrate/platform": "^1.0.0" },
+    });
+    expect(manifest?.integrations_configuration).toEqual({
+      "@appstrate/platform": { tools: ["note"] },
+    });
+  });
+
   it("kind:inline leaves a non-object dependencies value for validation to refuse", async () => {
     const { fetchImpl, captured } = captureLaunch();
 

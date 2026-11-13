@@ -467,6 +467,10 @@ export {
   MAX_SCHEMA_SERIALISED_BYTES,
 } from "./sanitize.ts";
 
+// Tool exposure — which upstream tools an integration exposes to the agent, and the descriptor
+// the model sees under the exposed name. Shared by the sidecar's McpHost and the CLI.
+export { exposedToolDescriptor, toolExclusion } from "./tool-exposure.ts";
+
 // Upstream-response metadata wire format — `_meta` key, header
 // allowlist, and `UpstreamMeta` type shared by the sidecar serializer
 // and the runtime-pi parser. Hosted here so both sides agree without

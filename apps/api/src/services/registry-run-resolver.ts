@@ -121,7 +121,7 @@ export async function resolveRegistryAgent(
     // crashing deeper in the run pipeline with a less actionable error.
     // READ direction: the draft is already persisted, so a retired
     // `dependencies` key must not make it unrunnable.
-    const draftValidation = validateManifest(pkg.manifest, { retiredVocabulary: "drop" });
+    const draftValidation = validateManifest(pkg.manifest, { retiredVocabulary: "tolerate" });
     if (!draftValidation.valid) {
       throw new ApiError({
         status: 400,
@@ -176,7 +176,7 @@ export async function resolveRegistryAgent(
   // READ direction, and the strictest case for it: a published version is
   // immutable by construction (integrity-checked ZIP), so a retired
   // `dependencies` key can never be repaired in place; it is tolerated.
-  const manifestValidation = validateManifest(detail.manifest, { retiredVocabulary: "drop" });
+  const manifestValidation = validateManifest(detail.manifest, { retiredVocabulary: "tolerate" });
   if (!manifestValidation.valid) {
     logger.error("stored published manifest failed AFPS validation", {
       packageId,

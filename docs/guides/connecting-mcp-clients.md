@@ -469,9 +469,11 @@ integration configuration; `run_and_wait` derives `name` and defaults the
 omitted AFPS boilerplate and an open object output schema. Defaults fill absent
 top-level fields only. Every supplied field is preserved as an exact
 replacement—arrays and nested objects are not merged. The platform also adds
-`@appstrate/platform` with its `log` tool selected unless the manifest already
-names that integration in `dependencies.integrations` or
-`integrations_configuration`; it never changes the caller's entries, and
+the `@appstrate/platform` dependency unless `dependencies.integrations` already
+names it, and selects its `log` tool in `integrations_configuration` unless
+either `dependencies.integrations` or `integrations_configuration` names it (the
+dependency alone keeps its `default_tools`); it never changes the caller's
+entries, and
 `integrations_configuration["@appstrate/platform"] = { tools: [] }` removes the
 tools. Clients can therefore provide a complete
 deterministic manifest and override every field, including a strict

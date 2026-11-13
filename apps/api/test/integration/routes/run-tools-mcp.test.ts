@@ -21,7 +21,7 @@ import {
 } from "../../helpers/auth.ts";
 import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../helpers/mcp.ts";
 import { seedAgent, seedEndUser, seedRun } from "../../helpers/seed.ts";
-import { addMemories } from "../../../src/services/state/package-persistence.ts";
+import { addMemories, listPinnedSlots } from "../../../src/services/state/package-persistence.ts";
 import { signRunToken } from "../../../src/lib/run-token.ts";
 
 const app = getTestApp();
@@ -123,6 +123,22 @@ describe("run MCP server", () => {
       expect(status).toBe(200);
       const names = (envelope.result!.tools as Array<{ name: string }>).map((t) => t.name);
       expect(names).toEqual(["log", "note", "pin", "recall_memory", "run_history", "notify"]);
+    });
+
+    // The shipped manifest is the catalog an author selects from; the server is what a run
+    // gets. Neither may name a tool the other does not.
+    it("lists exactly the tools the shipped `@appstrate/platform` manifest declares", async () => {
+      const manifest = (await Bun.file(
+        new URL(
+          "../../../../../scripts/system-packages/integration-platform-1.0.0/manifest.json",
+          import.meta.url,
+        ).pathname,
+      ).json()) as { tools_policy: Record<string, unknown>; default_tools: string[] };
+      const run = await seedRunningRun();
+      const { envelope } = await rpc(path, bearer(run.id), "tools/list");
+      const names = (envelope.result!.tools as Array<{ name: string }>).map((t) => t.name);
+      expect(Object.keys(manifest.tools_policy).sort()).toEqual([...names].sort());
+      expect([...manifest.default_tools].sort()).toEqual([...names].sort());
     });
 
     it("`log` appends a progress run log at call time", async () => {
@@ -257,6 +273,113 @@ describe("run MCP server", () => {
       const result = await callTool(path, bearer(run.id), "recall_memory", {});
       const body = JSON.parse(result.content[0]!.text) as { memories: unknown[] };
       expect(body.memories).toEqual([]);
+    });
+
+    it("`run_history` excludes the current run and honours `limit` and `fields`", async () => {
+      for (const [i, startedAt] of ["2026-01-01", "2026-01-02", "2026-01-03"].entries()) {
+        await seedRunningRun({
+          status: "success",
+          startedAt: new Date(startedAt),
+          checkpoint: { n: i },
+          result: { output: { n: i } },
+        });
+      }
+      const run = await seedRunningRun({ startedAt: new Date("2026-01-04") });
+      const result = await callTool(path, bearer(run.id), "run_history", {
+        limit: 2,
+        fields: ["result"],
+      });
+      const body = JSON.parse(result.content[0]!.text) as {
+        data: Array<Record<string, unknown>>;
+      };
+      expect(body.data).toHaveLength(2);
+      expect(body.data.map((r) => r.id)).not.toContain(run.id);
+      expect(body.data.map((r) => r.result)).toEqual([{ output: { n: 2 } }, { output: { n: 1 } }]);
+      for (const entry of body.data) expect(entry).not.toHaveProperty("checkpoint");
+    });
+
+    it("`recall_memory` honours `q` and `limit`", async () => {
+      const run = await seedRunningRun();
+      for (const content of ["Gmail quota", "gmail pagination", "Slack rate limit"]) {
+        await callTool(path, bearer(run.id), "note", { content });
+      }
+      const filtered = await callTool(path, bearer(run.id), "recall_memory", { q: "GMAIL" });
+      const byQuery = JSON.parse(filtered.content[0]!.text) as {
+        memories: Array<{ content: string }>;
+      };
+      expect(byQuery.memories.map((m) => m.content).sort()).toEqual([
+        "Gmail quota",
+        "gmail pagination",
+      ]);
+      const limited = await callTool(path, bearer(run.id), "recall_memory", { limit: 1 });
+      const byLimit = JSON.parse(limited.content[0]!.text) as { memories: unknown[] };
+      expect(byLimit.memories).toHaveLength(1);
+    });
+
+    it('`note` and `pin` with `scope: "shared"` reach another actor of the space; the default does not', async () => {
+      const run = await seedRunningRun();
+      await callTool(path, bearer(run.id), "note", { content: "team fact", scope: "shared" });
+      await callTool(path, bearer(run.id), "note", { content: "private fact" });
+      await callTool(path, bearer(run.id), "pin", {
+        key: "repo",
+        content: { head: "abc" },
+        scope: "shared",
+      });
+      await callTool(path, bearer(run.id), "pin", { key: "persona", content: "dry" });
+
+      const eu = await seedEndUser({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        externalId: "ext_shared",
+      });
+      const other = await seedRunningRun({ userId: null, endUserId: eu.id });
+      const recalled = await callTool(path, bearer(other.id), "recall_memory", {});
+      const body = JSON.parse(recalled.content[0]!.text) as {
+        memories: Array<{ content: string }>;
+      };
+      expect(body.memories.map((m) => m.content)).toEqual(["team fact"]);
+      const slots = await listPinnedSlots(pkgId, ctx.defaultSpaceId, {
+        type: "end_user",
+        id: eu.id,
+      });
+      expect(slots.map((r) => r.key)).toEqual(["repo"]);
+    });
+
+    it("`note` at the archive limit is a tool error and writes nothing", async () => {
+      const run = await seedRunningRun();
+      const saved = await addMemories(
+        pkgId,
+        ctx.defaultSpaceId,
+        ctx.orgId,
+        { type: "user", id: ctx.user.id },
+        Array.from({ length: 100 }, (_, i) => `memory ${i}`),
+        run.id,
+      );
+      expect(saved).toBe(100);
+      const result = await callTool(path, bearer(run.id), "note", { content: "one too many" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0]!.text).toContain("archive memory limit");
+      const rows = await db
+        .select()
+        .from(packagePersistence)
+        .where(eq(packagePersistence.packageId, pkgId));
+      expect(rows).toHaveLength(100);
+    });
+
+    it('`pin("checkpoint", <non-object>)` keeps the slot but does not write `runs.checkpoint`', async () => {
+      const run = await seedRunningRun();
+      const result = await callTool(path, bearer(run.id), "pin", {
+        key: "checkpoint",
+        content: "page 3",
+      });
+      expect(result.isError).toBeUndefined();
+      const [snapshot] = await db
+        .select({ checkpoint: runs.checkpoint })
+        .from(runs)
+        .where(eq(runs.id, run.id));
+      expect(snapshot!.checkpoint).toBeNull();
+      const slots = await listPinnedSlots(pkgId, ctx.defaultSpaceId);
+      expect(slots.map((r) => [r.key, r.content])).toEqual([["checkpoint", "page 3"]]);
     });
 
     it("`pin` refuses a malformed key as a tool error, writing nothing", async () => {

@@ -48,14 +48,13 @@ import type { AppstrateModule } from "@appstrate/core/module";
 
 **Runtime & agents**
 
-| Subpath                                    | What it does                                                       |
-| ------------------------------------------ | ------------------------------------------------------------------ |
-| `./mcp-server` · `./mcp-server-bundle`     | MCP server definition and bundling.                                |
-| `./runtime-tool-defs`                      | Harness tools (`output`, `publish_file`) registered by the runner. |
-| `./sidecar-types`                          | Sidecar protocol types.                                            |
-| `./chat-contract` · `./chat-turn-metadata` | Chat surface contract.                                             |
-| `./token-usage` · `./token-budget`         | Token accounting and budgeting.                                    |
-| `./run-and-wait-client`                    | Client for the run-and-wait flow.                                  |
+| Subpath                                    | What it does                        |
+| ------------------------------------------ | ----------------------------------- |
+| `./mcp-server` · `./mcp-server-bundle`     | MCP server definition and bundling. |
+| `./sidecar-types`                          | Sidecar protocol types.             |
+| `./chat-contract` · `./chat-turn-metadata` | Chat surface contract.              |
+| `./token-usage` · `./token-budget`         | Token accounting and budgeting.     |
+| `./run-and-wait-client`                    | Client for the run-and-wait flow.   |
 
 **Infrastructure**
 

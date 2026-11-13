@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * An inline run may select the `note` / `pin` runtime tools, and finalisation
- * writes what they produce under the run's package id: the inline shadow
+ * An inline run may select the `note` / `pin` tools of `@appstrate/platform`,
+ * which write at call time under the run's package id: the inline shadow
  * (`@inline/r-<uuid>`). The run detail page reads them back through
  * `GET /api/agents/:scope/:name/persistence?runId=`, so that read must serve a
  * shadow whose run the caller may read in this space, and only there: a shadow

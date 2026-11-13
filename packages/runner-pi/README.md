@@ -35,12 +35,13 @@ The barrel is not a superset of the rest: a symbol sits in `.` only when
 something OUTSIDE this package imports it FROM the barrel, so a subpath is the
 sole route to anything read only through that subpath.
 
-| Subpath          | Contents                                                                               |
-| ---------------- | -------------------------------------------------------------------------------------- |
-| `.`              | The clusters listed below.                                                             |
-| `./provider-map` | Provider mapping on its own, for callers that want it without the barrel.              |
-| `./model-compat` | The pi-ai `model.compat` flag bag and its pricing invariants.                          |
-| `./loop-env`     | `parsePiLoopEnv`: the strict env reader of the Pi loop knobs (retry, compaction, cap). |
+| Subpath           | Contents                                                                                                    |
+| ----------------- | ----------------------------------------------------------------------------------------------------------- |
+| `.`               | The clusters listed below.                                                                                  |
+| `./provider-map`  | Provider mapping on its own, for callers that want it without the barrel.                                   |
+| `./model-compat`  | The pi-ai `model.compat` flag bag and its pricing invariants.                                               |
+| `./loop-env`      | `parsePiLoopEnv`: the strict env reader of the Pi loop knobs (retry, compaction, cap).                      |
+| `./harness-tools` | The harness tools `PiRunner` registers (`output`, `publish_file`), `FileUploader` and `filePublishedEvent`. |
 
 From `.`:
 
@@ -56,7 +57,7 @@ From `.`:
 - **Container plumbing** (what Appstrate's own sandbox uses) —
   `buildRuntimePiEnv`, `pickOperatorSidecarEnv`, `emitRuntimeReady`,
   `emitBootProgress`, `startSinkHeartbeat`.
-- **Runtime tools** — `callToolResultToPi`, `spillResourcesToWorkspace`.
+- **MCP forwarding** — `callToolResultToPi`, `spillResourcesToWorkspace`.
 
 ## What it handles
 

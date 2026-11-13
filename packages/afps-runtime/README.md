@@ -152,7 +152,7 @@ console.log(snapshot().output); // { done: true }
 | `@appstrate/afps-runtime/bundle`      | Loader, validator, hash, signing, prompt rendering                                                                |
 | `@appstrate/afps-runtime/runner`      | `RunOptions`, `reduceEvents`, `RunResult`                                                                         |
 | `@appstrate/afps-runtime/interfaces`  | `EventSink` contract                                                                                              |
-| `@appstrate/afps-runtime/sinks`       | `HttpSink`, `CompositeSink`, `createReducerSink`, `attachStdoutBridge`                                            |
+| `@appstrate/afps-runtime/sinks`       | `HttpSink`, `CompositeSink`, `createReducerSink`                                                                  |
 | `@appstrate/afps-runtime/resolvers`   | `LocalIntegrationResolver`, `RemoteAppstrateIntegrationResolver`, `IntegrationApiCallResolver`, `makeApiCallTool` |
 | `@appstrate/afps-runtime/events`      | CloudEvents envelope + Standard Webhooks signing                                                                  |
 | `@appstrate/afps-runtime/template`    | Logic-less Mustache with JSON sanitisation                                                                        |

@@ -4,7 +4,7 @@
  * Appstrate platform system prompt — thin shim over the runtime's
  * `buildPlatformPromptInputs` + `renderPlatformPrompt`. Derivation of
  * every section (System / Environment / Tools / Skills / Input /
- * Files / Config / Checkpoint / Memory / Output Format) happens in
+ * Files / Config / Checkpoint / Pinned Slots / Output Format) happens in
  * the runtime from the parsed Bundle; this function only adds the
  * overrides that are platform-specific:
  *
@@ -24,10 +24,9 @@
  * via integration MCP tools (`{ns}__api_call`); the prompt only lists
  * each integration and where its INTEGRATION.md sits in the workspace.
  *
- * Run history is NOT rendered in the prompt: the runtime wires a
- * typed `run_history` tool (see runtime-pi/entrypoint.ts Phase D) whose
- * description self-documents the capability — the agent never sees the
- * sidecar URL.
+ * Run history and archive memories are NOT rendered in the prompt: an agent
+ * that declares `@appstrate/platform` reads them through its `run_history`
+ * and `recall_memory` tools, whose descriptions self-document the capability.
  */
 
 import type { AppstrateRunPlan } from "./types.ts";
@@ -111,9 +110,9 @@ export function buildPlatformSystemPrompt(
     ...(unavailableIntegrations.length > 0 ? { unavailableIntegrations } : {}),
   });
 
-  // The agent's tools — runtime-wired (`run_history`, `recall_memory`),
-  // integration tools, and the platform runtime tools (output/log/note/
-  // pin) — are all advertised to the model via MCP `tools/list`
+  // The agent's tools — the runner's (`output`, `publish_file`) and its
+  // integrations' tools, `@appstrate/platform`'s included — are all
+  // advertised to the model via MCP `tools/list`
   // (name + description + input schema), so the prompt does not list
   // them. The Communication contract (rendered above) is the only
   // tool-related instruction the model can't infer from `tools/list`, and

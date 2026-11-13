@@ -1,11 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "bun:test";
-import { historyRuns, recalledMemories } from "../runtime-tool-results";
+import {
+  RECALL_MEMORY_TOOL,
+  RUN_HISTORY_TOOL,
+  historyRuns,
+  recalledMemories,
+} from "../platform-tool-results";
 
 const mcp = (body: unknown) => ({ content: [{ type: "text", text: JSON.stringify(body) }] });
 
-describe("runtime tool results", () => {
+describe("platform tool results", () => {
+  it("names the tools as the agent sees them", () => {
+    expect(RECALL_MEMORY_TOOL).toBe("appstrate_platform__recall_memory");
+    expect(RUN_HISTORY_TOOL).toBe("appstrate_platform__run_history");
+  });
+
   it("reads recall_memory from an MCP text part, a string or an object", () => {
     const body = { memories: [{ id: 7, content: "Relevé BNC en CSV", createdAt: "2026-09-01" }] };
     const expected = [{ id: "7", content: "Relevé BNC en CSV", createdAt: "2026-09-01" }];

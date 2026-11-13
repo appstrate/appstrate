@@ -397,8 +397,8 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     const validation = validateOutput(outputRecord, asJSONSchemaObject(outputSchema));
     if (!validation.valid) {
       status = "failed";
-      // Every run delivers structured output through the `output` runtime
-      // tool (the single Pi-engine channel).
+      // A run delivers structured output only through the `output` tool the
+      // runner injects from the declared `output.schema`.
       const missing = validation.errors.join("; ");
       errorMessage = outputEmitted
         ? `Output validation failed: ${missing}`
@@ -824,7 +824,7 @@ export async function synthesiseFinalize(
  * posted its own finalize ({@link synthesiseFinalize}'s callers, plus the
  * stall watchdog, which builds its own `emptyRunResult()`).
  *
- * WHY: the `output` runtime tool is persisted at emit time as a `run_logs`
+ * WHY: the `output` tool's payload is persisted at emit time as a `run_logs`
  * row, but `runs.result` is written only at finalize, from the RunResult the
  * runner posts. A synthesised terminal carries an `emptyRunResult()`, so a
  * run whose agent had ALREADY delivered its output ended with
@@ -854,7 +854,7 @@ export async function synthesiseFinalize(
  * stays `cancelled`, a timeout stays `timeout`; recovering an output never
  * touches `result.status`. It does legitimately change the outcome of the
  * output-schema validation `finalizeRunImpl` runs on a synthesised
- * `success` — a run that really did emit a valid payload now stays
+ * `success` — a run that really did emit a valid payload stays
  * `success` instead of being failed for "finished without calling the
  * required `output` tool".
  */
@@ -864,7 +864,7 @@ export async function applyRecoveredOutput(run: RunSinkContext, result: RunResul
   if (isPlainRecord(emitted)) result.output = emitted;
 }
 
-export function isPlainRecord(value: unknown): value is Record<string, unknown> {
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 

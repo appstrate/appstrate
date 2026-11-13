@@ -250,7 +250,7 @@ interface ImportBundleResult {
   root_type: PackageType;
   /**
    * Non-blocking import-time warnings, each prefixed with its package identity
-   * (e.g. dropped runtime tools, `_meta` soft-fails, retired dependency keys, an expression a
+   * (e.g. `_meta` soft-fails, retired dependency keys, an expression a
    * dependency integration holds that its connect will refuse).
    * Empty when nothing is degraded.
    */
@@ -376,7 +376,7 @@ export async function importBundle(
         // rejecting here would abort the ENTIRE bundle (every co-packaged skill
         // and integration with it), with no recourse for the operator. The key
         // is tolerated and surfaced as an import warning below.
-        return parsePackageZip(getReconstructedPackage(), { retiredVocabulary: "drop" });
+        return parsePackageZip(getReconstructedPackage(), { retiredVocabulary: "tolerate" });
       } catch (err) {
         throw invalidRequest(`Invalid package '${identity}' in bundle: ${getErrorMessage(err)}`);
       }
@@ -447,6 +447,19 @@ export async function importBundle(
     // reuse the parse above; other types are parsed only after the reuse check.
     parsedZip ??= parseIncomingPackage();
 
+    // `runtime_tools` is not inert like a retired `dependencies` key: the agent had
+    // tools under it, and stored as it is the version would run without them. A bundle
+    // exported by an instance that has run `scripts/migration/0053` carries the
+    // `@appstrate/platform` declaration instead.
+    if (parsedZip.type === "agent" && Object.hasOwn(parsedZip.manifest, "runtime_tools")) {
+      throw invalidRequest(
+        `Invalid package '${identity}' in bundle: \`runtime_tools\` is retired — declare ` +
+          '`dependencies.integrations["@appstrate/platform"]` and select its tools under ' +
+          '`integrations_configuration["@appstrate/platform"].tools`, or export the bundle again ' +
+          "from an instance that has run scripts/migration/0053-migrate-runtime-tools.sql.",
+      );
+    }
+
     // Surface `_meta` policy warnings for all package types — the validator
     // soft-fails malformed namespace keys to console.warn only (per AFPS §10.1
     // "consumers MUST NOT reject unknown `_meta` keys"). Lift them to the
@@ -456,7 +469,7 @@ export async function importBundle(
     }
 
     // READ direction (see the parse above): this manifest was validated with
-    // `retiredVocabulary: "drop"`, so a retired
+    // `retiredVocabulary: "tolerate"`, so a retired
     // AFPS 1.x `dependencies` key (`tools` / `providers`) is tolerated instead
     // of rejected. It is inert — nothing reads it — so the import succeeds; the
     // warning is how the operator learns the dependencies declared under it

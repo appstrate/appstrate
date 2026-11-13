@@ -456,7 +456,7 @@ describe("SessionBridgeHandle.getLastUpstreamError — benign aborts", () => {
     // upstream failure would blame a provider that never failed.
     const session = createFakeSession();
     const handle = installSessionBridge(session, createInternalCapture(), RUN_ID, {
-      terminalTools: ["output"],
+      outputRequired: true,
     });
     completeTerminalTool(session);
     endTurn(session, {
@@ -474,7 +474,7 @@ describe("SessionBridgeHandle.getLastUpstreamError — benign aborts", () => {
     // the cause a watchdog firing later must still be able to report.
     const session = createFakeSession();
     const handle = installSessionBridge(session, createInternalCapture(), RUN_ID, {
-      terminalTools: ["output"],
+      outputRequired: true,
     });
     endTurn(session, {
       role: "assistant",
@@ -492,7 +492,7 @@ describe("SessionBridgeHandle.getLastUpstreamError — benign aborts", () => {
     // terminal tool behind it is a genuine upstream failure, not our own stop.
     const session = createFakeSession();
     const handle = installSessionBridge(session, createInternalCapture(), RUN_ID, {
-      terminalTools: ["output"],
+      outputRequired: true,
     });
     endTurn(session, {
       role: "assistant",

@@ -202,7 +202,7 @@ describe("validateManifest", () => {
         skills: { "@test/skill": "^1.0.0" },
       },
     });
-    const result = validateManifest(stored, { retiredVocabulary: "drop" });
+    const result = validateManifest(stored, { retiredVocabulary: "tolerate" });
     expect(result.valid).toBe(true);
     const deps = (result.manifest as Record<string, unknown>).dependencies as Record<
       string,
@@ -211,6 +211,23 @@ describe("validateManifest", () => {
     // Tolerated means LEFT ALONE — this validator never rewrites stored bytes.
     expect(deps.tools).toEqual({ "@appstrate/report": "^1.0.0" });
     expect(deps.skills).toEqual({ "@test/skill": "^1.0.0" });
+  });
+
+  it("rejects `runtime_tools` on author input, naming the platform integration", () => {
+    const result = validateManifest(validAgentManifest({ runtime_tools: ["log"] }));
+    expect(result.valid).toBe(false);
+    expect(result.errors).toHaveLength(1);
+    expect(result.errors[0]).toStartWith("runtime_tools:");
+    expect(result.errors[0]).toContain('dependencies.integrations["@appstrate/platform"]');
+    expect(result.errors[0]).toContain('integrations_configuration["@appstrate/platform"]');
+  });
+
+  it("tolerates `runtime_tools` on a stored manifest, untouched", () => {
+    const result = validateManifest(validAgentManifest({ runtime_tools: ["log", "output"] }), {
+      retiredVocabulary: "tolerate",
+    });
+    expect(result.valid).toBe(true);
+    expect((result.manifest as Record<string, unknown>).runtime_tools).toEqual(["log", "output"]);
   });
 
   // The fix must not close `dependencies`: AFPS §10 mandates extensibility for

@@ -139,6 +139,18 @@ describe("run --local — unauthenticated remote MCP integrations", () => {
     }
   });
 
+  it("allocates its namespace past the ones the run's api_call tools hold", async () => {
+    // An api_call integration whose id normalises alike already holds `acme_docs`.
+    const { extensions, tools } = await wire(makeBundle(), {
+      takenToolNames: new Set(["acme_docs__api_call"]),
+    });
+    try {
+      expect(tools.map((t) => t.name)).toEqual(["acme_docs_2__a", "acme_docs_2__b"]);
+    } finally {
+      await extensions.close();
+    }
+  });
+
   it("withholds hidden_tools, under the wildcard too", async () => {
     const { extensions, tools } = await wire(
       makeBundle({ tools: "*", integration: { allow_undeclared_tools: true } }),

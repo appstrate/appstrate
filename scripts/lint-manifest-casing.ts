@@ -312,11 +312,10 @@ function isTestFile(filePath: string): boolean {
 
 // Per-line exemptions: legitimate read fallbacks and M8 cleanup writes.
 //
-// The four patterns below are BUILT from `BANNED_KEYS` rather than repeating
-// its nine names inline four times, which is what they used to do. A key added
-// to the list above but forgotten in one of these alternations would have been
-// reported with none of its exemptions honoured — a false positive nobody could
-// silence except by editing this file, which is the wrong way round.
+// The patterns below that name a key are BUILT from `BANNED_KEYS` rather than
+// repeating its names inline: a key added to the list above but forgotten in one
+// of these alternations would be reported with none of its exemptions honoured —
+// a false positive nobody could silence except by editing this file.
 const KEY_ALT = BANNED_KEYS.join("|");
 const LINE_EXEMPTIONS: RegExp[] = [
   // Documented per-line opt-outs.
@@ -332,8 +331,6 @@ const LINE_EXEMPTIONS: RegExp[] = [
   // M8 cleanup: `displayName: undefined` — a documented writer-side strip of a
   // legacy sibling key.
   new RegExp(`\\b(${KEY_ALT})\\s*:\\s*undefined\\b`),
-  // M8 cleanup: `delete m.displayName`.
-  new RegExp(`\\bdelete\\s+[\\w\\[\\]'"\`.()]+\\.(${KEY_ALT})\\b`),
   // `as { displayName?: … }` type-narrowing READS. The writer-shape regex below
   // filters most reads implicitly; this covers the cast form it cannot.
   new RegExp(`\\bas\\s*\\{[^}]*\\b(${KEY_ALT})\\b`),

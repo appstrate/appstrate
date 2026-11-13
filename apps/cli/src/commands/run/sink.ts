@@ -24,20 +24,12 @@
  * defaulting to the matching `process.*.write`. The sink itself never
  * names a global stream.
  *
- * `writeStdout` exists for a production reason: the `appstrate run`
- * command installs a stdout-JSONL bridge around the runner's sink to
- * capture canonical events emitted by system tools via
- * `process.stdout.write(JSON+\n)` — without `writeStdout`, this sink's
- * JSONL mode would re-emit canonical events directly to stdout and the
- * bridge would re-aspirate them, dispatching every event a second time.
- * Routing through the bridge's `writeRaw` escape hatch bypasses the
- * interceptor and breaks the loop. `writeStderr` has no such bridge to
- * dodge — stderr is not intercepted — but it closes the seam so tests
- * can observe the error channel without swapping the *global*
- * `process.stderr.write`. Global-stream capture is unsafe: `bun test` runs every package in one process, so a buffer
- * installed on a global stream collects writes from concurrent suites
- * and `expect(captured).toBe("")` becomes a coin flip that blames an
- * innocent test.
+ * The writers close the seam so tests can observe both channels without
+ * swapping the *global* `process.stdout.write` / `process.stderr.write`.
+ * Global-stream capture is unsafe: `bun test` runs every package in one
+ * process, so a buffer installed on a global stream collects writes from
+ * concurrent suites and `expect(captured).toBe("")` becomes a coin flip
+ * that blames an innocent test.
  */
 
 import type { EventSink } from "@appstrate/afps-runtime/interfaces";
@@ -63,20 +55,14 @@ interface SinkOptions {
    * still print so the run is never silent).
    */
   verbosity?: Verbosity;
-  /**
-   * Writer used for all stdout output. Defaults to
-   * `process.stdout.write`. The CLI passes the stdout-bridge's
-   * `writeRaw` so JSONL emissions bypass the bridge's interceptor and
-   * don't recurse through the tool-event parser. See module docstring
-   * for the full rationale.
-   */
+  /** Writer used for all stdout output. Defaults to `process.stdout.write`. */
   writeStdout?: (chunk: string) => void;
   /**
    * Writer used for all stderr output. Defaults to
-   * `process.stderr.write`. Production leaves it unset — stderr is not
-   * bridged — so this is the seam tests use to read back the advisory
-   * `appstrate.error` lines without patching the global stream. See
-   * module docstring for why the global is off limits.
+   * `process.stderr.write`. Production leaves it unset, so this is the
+   * seam tests use to read back the advisory `appstrate.error` lines
+   * without patching the global stream. See module docstring for why the
+   * global is off limits.
    */
   writeStderr?: (chunk: string) => void;
 }
@@ -120,9 +106,7 @@ export function createConsoleSink(opts: SinkOptions = {}): EventSink {
  * args, end events carry result. Splitting the rendering keeps each
  * line self-explanatory and scrollback-friendly.
  *
- * Routes every write through the injected `writeStdout` so the
- * stdout-bridge interceptor doesn't re-aspirate our own output (see
- * module docstring).
+ * Routes every write through the injected `writeStdout`.
  */
 function renderToolEvent(
   data: {
@@ -260,8 +244,7 @@ function createHumanSink(
           // keeps the red treatment.
           //
           // This is the one line that leaves on stderr. It deliberately
-          // does NOT go through `writeStdout`: stderr bypasses the
-          // stdout bridge entirely, and mixing it into the `--json`
+          // does NOT go through `writeStdout`: mixing it into the `--json`
           // stream would corrupt the JSONL contract. It still goes
           // through an injected writer — `writeStderr` — so the channel
           // stays observable without touching the global stream.

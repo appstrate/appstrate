@@ -2,7 +2,7 @@
 
 /**
  * Unit tests for the agent-container file publishing path
- * (`runtime-pi/publish.ts`) + the `publish_file` runtime tool def.
+ * (`runtime-pi/publish.ts`) + the `publish_file` harness tool around its uploader.
  *
  * Drives the real `createRunFileUploader` / `sweepOutputs` against a local
  * HTTP server that VERIFIES the Standard-Webhooks HMAC over an EMPTY body (the
@@ -17,7 +17,11 @@ import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { sign, verify } from "@appstrate/afps-runtime/events";
-import { buildPublishFileDef, type RuntimeToolEvent } from "@appstrate/core/runtime-tool-defs";
+import {
+  buildPublishFileExtension,
+  type FileUploader,
+  type HarnessToolEvent,
+} from "@appstrate/runner-pi/harness-tools";
 import { decodeFilenameHeader, sanitizeFilename } from "@appstrate/core/naming";
 import {
   createRunFileUploader,
@@ -840,80 +844,73 @@ describe("summarizeArtifacts bounds (server ingest contract)", () => {
   });
 });
 
-describe("buildPublishFileDef (publish_file tool)", () => {
-  const emitted: RuntimeToolEvent[] = [];
-  const emit = (event: RuntimeToolEvent): void => {
+describe("publish_file tool", () => {
+  const emitted: HarnessToolEvent[] = [];
+  const emit = (event: HarnessToolEvent): void => {
     emitted.push(event);
   };
   beforeEach(() => {
     emitted.length = 0;
   });
 
+  interface PublishTool {
+    description: string;
+    execute: (id: string, params: unknown) => Promise<{ content: Array<{ text: string }> }>;
+  }
+  /** The tool `PiRunner` registers around `uploader`, taken off a stub Pi. */
+  function publishTool(uploader: FileUploader): PublishTool {
+    const tools: PublishTool[] = [];
+    buildPublishFileExtension(
+      uploader,
+      emit,
+    )({
+      registerTool: (tool: PublishTool) => tools.push(tool),
+    } as never);
+    return tools[0]!;
+  }
+
   it("uploads and emits a file.published event on success", async () => {
     await writeFile(path.join(workspace, "out.html"), new TextEncoder().encode("<h1>ok</h1>"));
-    const def = buildPublishFileDef(makeUploader(new Set()));
+    const tool = publishTool(makeUploader(new Set()));
 
-    const result = await def.handler({ path: "out.html" }, emit);
+    const result = await tool.execute("call-1", { path: "out.html" });
 
-    expect(result.isError).toBeUndefined();
     expect(result.content[0]!.text).toContain("Published");
-    const events = emitted;
-    expect(events).toHaveLength(1);
-    expect(events[0]!.type).toBe("file.published");
-    expect(events[0]!.fileId).toMatch(/^file_/);
-    expect(events[0]!).not.toHaveProperty("presentation");
+    expect(emitted).toHaveLength(1);
+    expect(emitted[0]!.type).toBe("file.published");
+    expect(emitted[0]!.fileId).toMatch(/^file_/);
   });
 
-  it("returns a tool error (not a throw) when the upload fails", async () => {
-    const def = buildPublishFileDef(makeUploader(new Set()));
-    const result = await def.handler({ path: "missing.txt" }, emit);
-    expect(result.isError).toBe(true);
-    expect(result.content[0]!.text).toContain("Failed to publish");
+  it("refuses the call (Pi's tool error) when the upload fails", async () => {
+    const tool = publishTool(makeUploader(new Set()));
+    await expect(tool.execute("call-1", { path: "missing.txt" })).rejects.toThrow(
+      "Failed to publish",
+    );
   });
 
-  it("returns a tool error when path is missing", async () => {
-    const def = buildPublishFileDef(makeUploader(new Set()));
-    const result = await def.handler({}, emit);
-    expect(result.isError).toBe(true);
-  });
-
-  it("ignores a retired `presentation` argument and publishes anyway", async () => {
-    // Version skew: an older agent may still pass the retired argument. It is
-    // dropped, never turned into a tool error that would lose the deliverable.
-    await writeFile(path.join(workspace, "out.html"), new TextEncoder().encode("<h1>ok</h1>"));
-    const def = buildPublishFileDef(makeUploader(new Set()));
-    const result = await def.handler({ path: "out.html", presentation: "thumbnail" }, emit);
-    expect(result.isError).toBeUndefined();
-    expect(config.received).toHaveLength(1);
-    expect(config.received[0]!.headerNames).not.toContain("x-document-presentation");
+  it("refuses the call when path is missing", async () => {
+    const tool = publishTool(makeUploader(new Set()));
+    await expect(tool.execute("call-1", {})).rejects.toThrow("non-empty `path`");
   });
 
   it("leads its description with the publish-now + `appfile://` URI value", () => {
     // The `outputs/` sweep is unconditional and shares the same uploader, so
     // what the tool alone can do is publish DURING the run and hand back the
-    // durable URI. A description that reads "use this tool only to publish a
-    // deliverable that lives elsewhere" names the one replaceable case and
-    // hides that one, so an agent never calls it at the right moment.
-    const description = buildPublishFileDef(makeUploader(new Set())).descriptor.description!;
+    // durable URI.
+    const { description } = publishTool(makeUploader(new Set()));
 
     expect(description).toContain("appfile://");
     expect(description.indexOf("appfile://")).toBeLessThan(description.indexOf("./outputs/"));
-    expect(description).not.toContain("use this tool only");
-    // The retired primary/presentation concept must be gone from the surface
-    // the model reads.
-    expect(description).not.toMatch(/primary/i);
-    expect(description).not.toContain("presentation");
   });
 
   it("still publishes an explicitly-chosen dotfile (hidden filter is sweep-only)", async () => {
     // The hidden-file exclusion applies ONLY to the implicit outputs sweep; an
     // agent deliberately publishing a dotfile via the tool is honoured.
     await writeFile(path.join(workspace, ".config"), new TextEncoder().encode("k=v"));
-    const def = buildPublishFileDef(makeUploader(new Set()));
+    const tool = publishTool(makeUploader(new Set()));
 
-    const result = await def.handler({ path: ".config" }, emit);
+    await tool.execute("call-1", { path: ".config" });
 
-    expect(result.isError).toBeUndefined();
     expect(config.received).toHaveLength(1);
     expect(config.received[0]!.name).toBe(".config");
   });

@@ -53,7 +53,7 @@ When the run starts, uploads are copied into durable files and the stored input 
 An agent produces output files in two ways:
 
 - It writes them under **`./outputs/`**. At the end of the run, everything there is published automatically. Files and folders whose name starts with a dot are skipped.
-- It calls the **`publish_file`** [runtime tool](/features/tools), when selected, to publish a file immediately and get its `appfile://` URI back, for example to cite it in its output.
+- It calls the **`publish_file`** [harness tool](/features/tools#harness-tools), present on every platform run, to publish a file immediately and get its `appfile://` URI back, for example to cite it in its output.
 
 The platform prompt asks agents to use a concise, descriptive file name, which is the name you see. The run reports what was stored: `file_counts` and an `artifacts` summary that lists any file that could not be saved.
 

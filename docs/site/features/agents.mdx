@@ -9,10 +9,10 @@ An agent is an **LLM in a loop with tools**, running inside an isolated sandbox.
 
 An agent is an [AFPS package](/features/packages) of type `agent`. It is made of:
 
-- `manifest.json`: identity, input and output schemas, timeout, dependencies, runtime tools.
+- `manifest.json`: identity, input and output schemas, timeout, dependencies and their configuration.
 - `prompt.md`: the instructions the model receives.
 
-At run time Appstrate assembles the agent, its [skills](/features/skills), its [integrations](/integrations/how-integrations-work) and the [runtime tools](/features/tools) it selected, starts a sandbox (see [Sandbox and Sidecar](/features/sandbox-and-sidecar)) and lets the model loop until it calls the `output` tool, finishes, fails, or hits the timeout.
+At run time Appstrate assembles the agent, its [skills](/features/skills), its [integrations](/integrations/how-integrations-work) and the [tools](/features/tools) they bring, starts a sandbox (see [Sandbox and Sidecar](/features/sandbox-and-sidecar)) and lets the model loop until it calls the `output` tool, finishes, fails, or hits the timeout.
 
 Plain text the model writes outside a tool call is never delivered to anyone. Results leave the run through tools: `output` for structured data, `log` for progress, and files written under `./outputs/` (see [Files](/features/files)).
 
@@ -31,7 +31,7 @@ A launch with no selector runs the **latest published version**. The draft runs 
 
 ### In the web app
 
-Open **Agents** in the sidebar and choose **New agent**. A name, what it does and its prompt are enough to create it. The rest is set afterwards on the agent: the input and output schemas, skills and integrations, and the runtime tools. Saving edits the draft. **Create version**, in the agent's actions menu, cuts a version.
+Open **Agents** in the sidebar and choose **New agent**. A name, what it does and its prompt are enough to create it. The rest is set afterwards on the agent: the input and output schemas, skills and integrations. Saving edits the draft. **Create version**, in the agent's actions menu, cuts a version.
 
 ### Through the API
 

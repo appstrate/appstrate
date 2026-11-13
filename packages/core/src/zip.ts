@@ -307,11 +307,11 @@ export interface ParsePackageZipOptions {
   /** Maximum compressed size in bytes. Defaults to 10 MB. */
   maxSize?: number;
   /**
-   * How the embedded manifest's retired `dependencies` keys are treated —
+   * How the embedded manifest's retired vocabulary is treated —
    * forwarded verbatim to `validateManifest`. Defaults to `"reject"`, because
    * a ZIP is author input unless the caller knows otherwise.
    *
-   * Pass `"drop"` ONLY when the archive is content the platform already holds
+   * Pass `"tolerate"` ONLY when the archive is content the platform already holds
    * and cannot repair in place (a re-import of a published, integrity-checked
    * artifact). See the doctrine on
    * {@link import("./validation.ts").RetiredVocabularyPolicy}.
@@ -326,7 +326,7 @@ export interface ParsePackageZipOptions {
  * Includes zip bomb protection and wrapper folder stripping.
  * @param zipBuffer - The raw ZIP file as a Uint8Array
  * @param options - {@link ParsePackageZipOptions}
- * @returns Parsed package with manifest, content, files, type, and any dropped runtime-tool ids
+ * @returns Parsed package with manifest, content, files and type
  * @throws PackageZipError for size limits, invalid ZIP, missing/invalid manifest, or missing content
  * @example
  * const zip = await readFile("my-agent.afps");

@@ -546,17 +546,17 @@ describe("renderPlatformPrompt", () => {
     });
 
     it("omits the section entirely when there are no memories", () => {
-      // Post-#368: the platform prompt is data-driven. With no memories
-      // and no fallback prose, the `## Memory` header is suppressed —
-      // the LLM still discovers the archive via the runtime-injected
-      // `recall_memory` tool docs (surfaced in `### Tools` + toolDocs).
+      // The platform prompt is data-driven. With no memories and no
+      // fallback prose, the `## Memory` header is suppressed — the LLM
+      // discovers the archive through the `recall_memory` tool of
+      // `@appstrate/platform`, whose description `tools/list` surfaces.
       const out = renderPlatformPrompt({ template: "T", context: ctx() });
       expect(out).not.toContain("## Memory");
       expect(out).not.toContain("No memories are currently pinned");
     });
 
     it("does NOT mention specific tool names — archive APIs live on the MCP descriptor", () => {
-      // Post-#368 contract: data block only. Instructions for `note`,
+      // Data block only. Instructions for `note`,
       // `recall_memory`, `pin` come from each tool's MCP descriptor
       // `description` (surfaced via `tools/list`) when the tool is wired.
       const out = renderPlatformPrompt({
@@ -605,12 +605,9 @@ describe("renderPlatformPrompt", () => {
   });
 
   it("never emits sidecar-knowledge sections — run history is surfaced via a typed tool", () => {
-    // Before the run_history tool migration, a `## Run History` section
-    // with a `curl $SIDECAR_URL/run-history` snippet was emitted when
-    // `runHistoryApi: true` was passed in. That surface is gone: the
-    // prompt must never mention $SIDECAR_URL, regardless of the options
-    // bag. Run history is wired via the `run_history` tool whose
-    // description is surfaced through `availableTools` instead.
+    // The prompt never mentions $SIDECAR_URL, regardless of the options
+    // bag. Run history is the `run_history` tool of `@appstrate/platform`,
+    // whose description `tools/list` surfaces.
     const out = renderPlatformPrompt({ template: "T", context: ctx() });
     expect(out).not.toContain("## Run History");
     expect(out).not.toContain("$SIDECAR_URL");

@@ -1461,6 +1461,36 @@ describe("Packages API", () => {
       expect(body).toContain("dependencies.integrations");
     });
 
+    it("rejects an update whose manifest carries `runtime_tools`, naming @appstrate/platform", async () => {
+      const id = "@pkgorg/retired-runtime-tools";
+      const agent = await seedAgent({ id, orgId: ctx.orgId, createdBy: ctx.user.id });
+
+      const res = await app.request(`/api/packages/agents/${id}`, {
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(agent.lockVersion),
+        }),
+        body: JSON.stringify({
+          manifest: {
+            name: id,
+            version: "0.2.0",
+            type: "agent",
+            schema_version: "0.1",
+            display_name: "Runtime Tools Agent",
+            runtime_tools: ["log"],
+          },
+          content: "Updated prompt.",
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { errors: Array<{ field: string; message: string }> };
+      expect(body.errors).toHaveLength(1);
+      expect(body.errors[0]!.field).toBe("manifest.runtime_tools");
+      expect(body.errors[0]!.message).toContain("@appstrate/platform");
+    });
+
     it("accepts the canonical dependency maps and an unrelated extension key", async () => {
       // Control: the rejects above are caused by the retired KEYS, not by the
       // mere presence of `dependencies`. `dependencies` stays a loose object

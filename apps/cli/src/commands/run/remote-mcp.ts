@@ -8,8 +8,9 @@
  * connection per integration, `tools/list`, the agent's effective selection
  * (`integrations_configuration.<id>.tools`, else `default_tools`) and `hidden_tools` applied to
  * the upstream names, then one Pi tool per admitted tool, named `{ns}__{tool}` exactly as the
- * platform sidecar's McpHost names it. Descriptors pass the same sanitiser as on the platform
- * before they reach the model.
+ * platform sidecar's McpHost names it, in one allocation with the run's `api_call` tools.
+ * Admission and descriptors follow the platform's rules (`toolExclusion`,
+ * `sanitiseToolDescriptor`, `exposedToolDescriptor`) before they reach the model.
  *
  * An integration bound to the runtime (`isRuntimeBoundIntegration`, e.g. `@appstrate/platform`)
  * takes the same path with another target: the run's MCP server on the instance the run reports
@@ -49,10 +50,9 @@ import {
 } from "@appstrate/core/integration";
 import {
   createMcpHttpClient,
-  sanitiseTextField,
+  exposedToolDescriptor,
   sanitiseToolDescriptor,
-  MAX_PARAMETER_DESCRIPTION_BYTES,
-  MAX_TOOL_DESCRIPTION_BYTES,
+  toolExclusion,
   type AppstrateMcpClient,
   type Tool,
 } from "@appstrate/mcp-transport";
@@ -75,6 +75,11 @@ interface BuildRemoteMcpExtensionsOptions {
    * absent when the run reports to no instance.
    */
   runToolsMcp?: { url: string; headers: Record<string, string> };
+  /**
+   * Exposed names the run's other tools already hold (its `{ns}__api_call…` tools): neither
+   * they nor their namespaces are given to a remote integration's tool.
+   */
+  takenToolNames?: ReadonlySet<string>;
   /** Aborts the connections in flight (the CLI's shutdown signal). */
   signal?: AbortSignal;
   /** DNS resolver of the egress guard. Production omits it. */
@@ -104,8 +109,9 @@ export async function buildRemoteMcpExtensions(
   const integrationIds = new Set<string>();
   const unavailable: Array<{ id: string; reason: string }> = [];
   const clients: AppstrateMcpClient[] = [];
-  const namespaces = new Set<string>();
-  const toolNames = new Set<string>();
+  const toolNames = new Set(opts.takenToolNames);
+  // `{namespace}__{body}`: a normalised namespace never holds `__`.
+  const namespaces = new Set([...toolNames].map((name) => name.slice(0, name.indexOf("__"))));
 
   for (const ref of readIntegrationRefs(opts.bundle)) {
     const target = remoteTarget(opts.bundle, ref, agentTools.get(ref.name), opts.runToolsMcp);
@@ -122,9 +128,7 @@ export async function buildRemoteMcpExtensions(
     const { client, tools } = connected;
     const namespace = allocateMcpToolNamespace(normaliseMcpToolNamespace(ref.name), namespaces);
     const admitted = tools.filter(
-      (tool) =>
-        (target.allowlist === null || target.allowlist.has(tool.name)) &&
-        !target.hidden.has(tool.name),
+      (tool) => toolExclusion(tool.name, target.allowlist, target.hidden) === null,
     );
     const before = factories.length;
     for (const tool of admitted) {
@@ -138,8 +142,9 @@ export async function buildRemoteMcpExtensions(
         continue;
       }
       toolNames.add(name);
-      const descriptor = exposedDescriptor(sanitised, name, name !== `${namespace}__${tool.name}`);
-      factories.push(remoteToolExtension(client, tool.name, descriptor));
+      factories.push(
+        remoteToolExtension(client, tool.name, exposedToolDescriptor(sanitised, namespace, name)),
+      );
     }
     if (factories.length === before) {
       await client.close().catch(() => {});
@@ -261,26 +266,6 @@ async function connectAndList(
     await client.close().catch(() => {});
     return { reason: UNAVAILABLE_INTEGRATION_REASONS.resolve_error };
   }
-}
-
-/**
- * The descriptor the model sees under `name`. A `renamed` tool (not `{ns}__{upstream}`) gives
- * the upstream name in the description, as McpHost does, so the model can match the tool against
- * the server's own documentation.
- */
-function exposedDescriptor(sanitised: Tool, name: string, renamed: boolean): Tool {
-  if (!renamed) return { ...sanitised, name };
-  const upstreamName = JSON.stringify(
-    sanitiseTextField(sanitised.name, MAX_PARAMETER_DESCRIPTION_BYTES),
-  );
-  return {
-    ...sanitised,
-    name,
-    description: sanitiseTextField(
-      `Upstream tool name: ${upstreamName}.${sanitised.description ? `\n\n${sanitised.description}` : ""}`,
-      MAX_TOOL_DESCRIPTION_BYTES,
-    ),
-  };
 }
 
 /** A Pi tool forwarding every call verbatim to `upstreamName` on the integration's server. */
