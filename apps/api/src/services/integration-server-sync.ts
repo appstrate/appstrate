@@ -10,26 +10,21 @@
  */
 
 import type { Implementation, Tool } from "@modelcontextprotocol/sdk/types.js";
-import {
-  createMcpHttpClient,
-  httpStatusOf,
-  type AppstrateMcpClient,
-} from "@appstrate/mcp-transport";
+import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
 import { isIconImage } from "@appstrate/core/appearance";
 import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
-import { getErrorMessage } from "@appstrate/core/errors";
 import type { Actor } from "../lib/actor.ts";
 import { ApiError, badGateway } from "../lib/errors.ts";
 import { checkEgressUrl, egressFetchImpl, fetchWithin } from "../lib/egress-host-guard.ts";
 import { readBodyUnder } from "../lib/capped-body.ts";
 import { logger } from "../lib/logger.ts";
-import { proxyProblem } from "../lib/proxy-status.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import { ProxyCallError } from "./credential-proxy/core.ts";
 import {
   MAX_EXCHANGE_BYTES,
+  mcpServerFailure,
   proxiedMcpFetch,
   type ProxyCaller,
 } from "./credential-proxy/remote-tools.ts";
@@ -161,8 +156,6 @@ export async function syncIntegrationFromServer(input: {
               version: DRAFT,
               caller: input.caller,
               deadline,
-              // Journaled as the proxy route does: once per exchange that may have sent the credential.
-              journals: () => true,
             }),
       signal: deadline,
       onWarning: (message, data) => logger.warn(message, { packageId, ...data }),
@@ -326,29 +319,15 @@ function syncFailure(
         : {}),
     });
   }
-  if (err instanceof ApiError) return err;
-  if (err instanceof ProxyCallError) {
-    return err.code === "credential_not_found"
-      ? notConnected(err.message)
-      : proxyProblem(err.code, err.message);
+  if (err instanceof ProxyCallError && err.code === "credential_not_found") {
+    return notConnected(err.message);
   }
-  const origin = URL.parse(url)?.origin;
-  logger.warn("integration server sync: MCP exchange failed", {
-    packageId,
-    origin,
-    error: getErrorMessage(err),
+  // AFPS §7.2: for an unauthenticated integration a challenge makes it unavailable, never an ad
+  // hoc authorization.
+  return mcpServerFailure(err, {
+    integrationId: packageId,
+    url,
+    unauthenticated,
+    failed: "could not be synchronized",
   });
-  const status = httpStatusOf(err);
-  if ((status === 401 || status === 403) && unauthenticated) {
-    // AFPS §7.2: a challenge makes the integration unavailable, never an ad hoc authorization.
-    return badGateway(
-      `The MCP server at ${origin} asks for a credential (HTTP ${status}), but the integration declares no authentication.`,
-    );
-  }
-  if (status === 401 || status === 403) {
-    return badGateway(
-      `The MCP server at ${origin} refused the connection's credential (HTTP ${status}); reconnect the integration.`,
-    );
-  }
-  return badGateway(`The MCP server at ${origin} could not be synchronized.`);
 }

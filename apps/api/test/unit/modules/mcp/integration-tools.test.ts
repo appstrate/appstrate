@@ -3,13 +3,14 @@
 /**
  * Unit tests for `search_integration_tools` and `call_integration_tool`: when they are declared,
  * what each one reads and dispatches to the credential proxy, and what the model is handed back.
- * Dispatch and the manifest reader are injected, so the proxy's own answers (its guard, its access
- * rule, its refusals) are stubbed here and exercised for real in
- * `src/modules/mcp/test/integration/connection-tools.test.ts`.
+ * Dispatch is injected, so the proxy's own answers (its listing of the tools, its guard, its
+ * access rule, its refusals) are stubbed here; the listing is exercised for real in
+ * `test/integration/routes/credential-proxy-tools.test.ts` and
+ * `credential-proxy-remote-tools.test.ts`, the tools end to end in
+ * `src/modules/mcp/test/integration/integration-tools.test.ts`.
  */
 
 import { describe, it, expect } from "bun:test";
-import type { IntegrationManifest } from "@appstrate/core/integration";
 import type { AppstrateRequestExtra } from "@appstrate/mcp-transport";
 import { withImpliedPermissions } from "@appstrate/core/permissions";
 import {
@@ -77,11 +78,12 @@ function problem(
 }
 
 const CONNECTION_ID = "8a6f2f0e-1c1b-4c58-9a36-0d7b7a1f3c11";
+/** The tool `@acme/items` exposes. */
+const TOOL = "acme_items__api_call";
 
-/** A row of the listing route (`GET /api/credential-proxy/connections`). */
-function connectionRow(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+/** A connection of a listed tool, as `GET /api/credential-proxy/tools` gives it. */
+function connection(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    integration_package_id: INTEGRATION,
     connection_id: CONNECTION_ID,
     label: "acct-1",
     owned_by_actor: true,
@@ -95,33 +97,32 @@ function connectionRow(overrides: Record<string, unknown> = {}): Record<string, 
   };
 }
 
-/** An integration manifest whose `authKeys` each expose `api_call`. */
-function apiManifest(
-  name: string,
-  authKeys: string[] = ["api"],
-  extra: Record<string, unknown> = {},
-): IntegrationManifest {
+/** A listed `api_call` tool. */
+function apiCallTool(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    name,
-    version: "1.0.0",
-    type: "integration",
-    display_name: "Acme Items",
-    auths: Object.fromEntries(authKeys.map((key) => [key, { type: "api_key" }])),
-    _meta: { "dev.appstrate/api": { auths: Object.fromEntries(authKeys.map((k) => [k, {}])) } },
-    ...extra,
-  } as unknown as IntegrationManifest;
+    kind: "api_call",
+    name: TOOL,
+    integration_package_id: INTEGRATION,
+    description: "Acme Items.",
+    auth_key: "api",
+    connection_required: false,
+    connections: [connection()],
+    ...overrides,
+  };
 }
 
 interface Fixture {
-  /** What the listing route answers. */
-  listing?: () => Response;
-  /** What the integrations listing (`GET /api/credential-proxy/integrations`) answers. */
-  integrations?: () => Response;
-  manifests?: Record<string, IntegrationManifest>;
+  /** What the listing route (`GET /api/credential-proxy/tools`) answers. */
+  listing?: (req: Request) => Response | Promise<Response>;
 }
 
-const listingOf = (rows: Record<string, unknown>[]) => () =>
-  Response.json({ object: "list", data: rows, hasMore: false });
+const listingOf =
+  (
+    tools: Record<string, unknown>[],
+    rest: { not_ready?: Record<string, unknown>[]; unlisted?: Record<string, unknown>[] } = {},
+  ) =>
+  () =>
+    Response.json({ tools, not_ready: rest.not_ready ?? [], unlisted: rest.unlisted ?? [] });
 
 function makeTools(
   permissions: string[],
@@ -131,19 +132,12 @@ function makeTools(
 ) {
   const calls: Request[] = [];
   const listings: Request[] = [];
-  const integrationListings: Request[] = [];
-  const manifestReads: string[] = [];
   const events: McpToolEvent[] = [];
-  const listing = fixture.listing ?? listingOf([connectionRow()]);
-  const manifests = fixture.manifests ?? { [INTEGRATION]: apiManifest(INTEGRATION) };
+  const listing = fixture.listing ?? listingOf([apiCallTool()]);
   const dispatch: Dispatch = async (req) => {
-    if (new URL(req.url).pathname === "/api/credential-proxy/connections") {
+    if (new URL(req.url).pathname === "/api/credential-proxy/tools") {
       listings.push(req);
-      return listing();
-    }
-    if (new URL(req.url).pathname === "/api/credential-proxy/integrations") {
-      integrationListings.push(req);
-      return (fixture.integrations ?? listingOf([]))();
+      return listing(req);
     }
     calls.push(req);
     return respond(req);
@@ -165,18 +159,11 @@ function makeTools(
     placeRootAs: async () => null,
     requestId: "req_test",
     followRunLogs: () => () => {},
-    readIntegrationManifest: async (packageId) => {
-      manifestReads.push(packageId);
-      return manifests[packageId] ?? null;
-    },
   };
   const tools = toolsFor(ctx, proxyAcceptsCredential);
   const byName = new Map(tools.map((tool) => [tool.descriptor.name, tool]));
-  return { byName, calls, listings, integrationListings, manifestReads, events };
+  return { byName, calls, listings, events };
 }
-
-/** The tool `@acme/items` exposes. */
-const TOOL = "acme_items__api_call";
 
 const get = (overrides: Record<string, unknown> = {}) => ({
   method: "GET",
@@ -201,7 +188,7 @@ const entries = (payload: Record<string, unknown>) => payload.results as Entry[]
 
 const BOTH = ["search_integration_tools", "call_integration_tool"];
 
-describe("connection tools — declaration", () => {
+describe("integration tools — declaration", () => {
   const names = (permissions: string[], proxyAcceptsCredential = true): string[] => [
     ...makeTools(permissions, undefined, proxyAcceptsCredential).byName.keys(),
   ];
@@ -251,27 +238,28 @@ describe("search_integration_tools", () => {
   const toolNames = (payload: Record<string, unknown>) =>
     (payload.tools as Array<{ tool: string }>).map((tool) => tool.tool);
 
-  it("with no argument, lists every tool with every field of the listing's rows", async () => {
+  it("with no argument, lists every tool with every field of the listing's connections", async () => {
     const { result, payload, listings, calls, events } = await search({});
     expect(result.isError).toBe(false);
-    const { integration_package_id: _integration, ...connection } = connectionRow();
     expect(payload).toEqual({
       total: 1,
       tools: [
         {
           tool: TOOL,
           integration: INTEGRATION,
-          description: expect.stringContaining("Acme Items."),
-          // Every field of the row; an HTTP call selects no tool, so no `missing_scopes`.
-          connections: [connection],
+          description: expect.stringMatching(/^Acme Items\. Calls the integration's API/),
+          connections: [connection()],
         },
       ],
     });
     expect(calls).toHaveLength(0);
     const req = listings[0]!;
     expect(req.method).toBe("GET");
+    expect(new URL(req.url).search).toBe("");
     expect(req.headers.get("authorization")).toBe("Bearer tok");
     expect(req.headers.get("x-space-id")).toBe("spc_1");
+    // Asked for connect links, which `not_ready` hands to the human driving the client.
+    expect(req.headers.get("x-appstrate-connect-offers")).toBe("1");
     const [marker, value] = internalDispatchHeader();
     expect(req.headers.get(marker)).toBe(value);
     expect(events).toEqual([
@@ -301,95 +289,48 @@ describe("search_integration_tools", () => {
     expect((await search({ query: "nothing-matches" })).payload).toEqual({ total: 0, tools: [] });
   });
 
-  it("names one tool per auth when several expose api_call, each with its own connections", async () => {
-    const { payload } = await search(
-      {},
-      {
-        listing: listingOf([
-          connectionRow({ connection_id: "c-oauth", auth_key: "oauth" }),
-          connectionRow({ connection_id: "c-key", auth_key: "key" }),
-        ]),
-        manifests: { [INTEGRATION]: apiManifest(INTEGRATION, ["oauth", "key"]) },
-      },
+  it("asks the listing for the integration it searches, and ranks by keyword in listing order", async () => {
+    const tools = [
+      apiCallTool({ name: "acme_items__api_call__oauth", description: "Acme Items. Uses oauth." }),
+      apiCallTool({
+        name: "acme_crm__api_call",
+        integration_package_id: "@acme/crm",
+        description: "CRM.",
+      }),
+      apiCallTool({ name: "acme_items__api_call__key", description: "Acme Items. Uses key." }),
+    ];
+    const { listings, payload } = await search(
+      { integration: INTEGRATION, query: "items key" },
+      { listing: listingOf(tools) },
     );
-    const tools = payload.tools as Array<{
-      tool: string;
-      connections: { connection_id: string }[];
-    }>;
-    expect(tools.map((t) => [t.tool, t.connections.map((c) => c.connection_id)])).toEqual([
-      ["acme_items__api_call__oauth", ["c-oauth"]],
-      ["acme_items__api_call__key", ["c-key"]],
-    ]);
-  });
-
-  it("suffixes the namespace of a second package with the same slug", async () => {
-    const { payload } = await search(
-      {},
-      {
-        listing: listingOf([
-          connectionRow({ integration_package_id: "@acme/items" }),
-          connectionRow({ integration_package_id: "@acme-items/x", connection_id: "c-2" }),
-          connectionRow({ integration_package_id: "@acme_items/x", connection_id: "c-3" }),
-        ]),
-        manifests: {
-          "@acme/items": apiManifest("@acme/items"),
-          "@acme-items/x": apiManifest("@acme-items/x"),
-          "@acme_items/x": apiManifest("@acme_items/x"),
-        },
-      },
-    );
-    // `@acme-items/x` and `@acme_items/x` both normalise to `acme_items_x`; package ids sort first.
+    expect(new URL(listings[0]!.url).searchParams.get("integration_package_id")).toBe(INTEGRATION);
     expect(toolNames(payload)).toEqual([
-      "acme_items_x__api_call",
-      "acme_items__api_call",
-      "acme_items_x_2__api_call",
+      "acme_items__api_call__key",
+      "acme_items__api_call__oauth",
     ]);
-  });
-
-  it("allocates namespaces over every listed integration, its manifest read or not", async () => {
-    const { payload } = await search(
-      {},
-      {
-        listing: listingOf([
-          connectionRow({ integration_package_id: "@acme-items/x" }),
-          connectionRow({ integration_package_id: "@acme_items/x", connection_id: "c-2" }),
-        ]),
-        manifests: { "@acme_items/x": apiManifest("@acme_items/x") },
-      },
-    );
-    expect(toolNames(payload)).toEqual(["acme_items_x_2__api_call"]);
-  });
-
-  it("lists no hidden api_call, no auth without a connection, no unreadable manifest", async () => {
-    const { payload } = await search(
-      {},
-      {
-        listing: listingOf([
-          connectionRow({ integration_package_id: "@acme/hidden" }),
-          connectionRow({ integration_package_id: "@acme/gone" }),
-          connectionRow({ integration_package_id: "@acme/plain", auth_key: "other" }),
-        ]),
-        manifests: {
-          "@acme/hidden": apiManifest("@acme/hidden", ["api"], { hidden_tools: ["api_call"] }),
-          "@acme/plain": apiManifest("@acme/plain"),
-        },
-      },
-    );
-    expect(payload).toEqual({ total: 0, tools: [] });
   });
 
   it("relays the listing route's refusal as `{ status, body }`", async () => {
-    const { result, payload } = await search(
-      {},
-      { listing: () => problem(403, "forbidden", "Insufficient") },
-    );
-    expect(result.isError).toBe(true);
-    expect(payload.status).toBe(403);
-    expect((payload.body as { code: string }).code).toBe("forbidden");
+    for (const code of ["forbidden", "credential_proxy_closed"]) {
+      const { result, payload, events } = await search(
+        {},
+        { listing: () => problem(403, code, "Refused") },
+      );
+      expect(result.isError).toBe(true);
+      expect(payload.status).toBe(403);
+      expect((payload.body as { code: string }).code).toBe(code);
+      expect(events).toEqual([
+        expect.objectContaining({
+          method: "GET",
+          path: "/api/credential-proxy/tools",
+          status: 403,
+        }),
+      ]);
+    }
   });
 
-  /** An entry of the integrations listing (`GET /api/credential-proxy/integrations`). */
-  const integrationRow = (id: string, status: string, extra: Record<string, unknown> = {}) => ({
+  /** A `not_ready` entry of the listing. */
+  const notReadyRow = (id: string, status: string, extra: Record<string, unknown> = {}) => ({
     integration_package_id: id,
     display_name: `${id} app`,
     proxy_connection: { status, imposed: false },
@@ -407,17 +348,15 @@ describe("search_integration_tools", () => {
       expiresAt: "2026-11-13T16:00:00.000Z",
       packageId: "@acme/mail",
     };
-    const { payload, integrationListings } = await search(
+    const { payload } = await search(
       {},
       {
-        integrations: listingOf([
-          integrationRow(INTEGRATION, "ready"),
-          integrationRow("@acme/choose", "must_choose"),
-          integrationRow("@acme/free", "not_required"),
-          integrationRow("@acme/mail", "none", { refusal }),
-          integrationRow("@acme/crm", "needs_reconnection"),
-          integrationRow("@acme/gov", "not_permitted"),
-        ]),
+        listing: listingOf([apiCallTool()], {
+          not_ready: [
+            notReadyRow("@acme/mail", "none", { refusal }),
+            notReadyRow("@acme/crm", "needs_reconnection"),
+          ],
+        }),
       },
     );
     expect(toolNames(payload)).toEqual([TOOL]);
@@ -433,42 +372,20 @@ describe("search_integration_tools", () => {
         display_name: "@acme/crm app",
         proxy_connection: { status: "needs_reconnection", imposed: false },
       },
-      {
-        integration: "@acme/gov",
-        display_name: "@acme/gov app",
-        proxy_connection: { status: "not_permitted", imposed: false },
-      },
     ]);
-    // Asked for connect links, with the caller's auth.
-    const req = integrationListings[0]!;
-    expect(req.method).toBe("GET");
-    expect(req.headers.get("x-appstrate-connect-offers")).toBe("1");
-    expect(req.headers.get("authorization")).toBe("Bearer tok");
   });
 
-  it("filters `not_ready` by `query` and `integration`", async () => {
-    const integrations = listingOf([
-      integrationRow("@acme/mail", "none"),
-      integrationRow("@acme/crm", "none"),
-    ]);
+  it("filters `not_ready` by `query`", async () => {
+    const listing = listingOf([], {
+      not_ready: [notReadyRow("@acme/mail", "none"), notReadyRow("@acme/crm", "none")],
+    });
     const shown = async (args: Record<string, unknown>) =>
       (
-        (await search(args, { integrations })).payload.not_ready as
+        (await search(args, { listing })).payload.not_ready as
           Array<{ integration: string }> | undefined
       )?.map((entry) => entry.integration);
     expect(await shown({ query: "mail" })).toEqual(["@acme/mail"]);
-    expect(await shown({ integration: "@acme/crm" })).toEqual(["@acme/crm"]);
     expect(await shown({ query: "nothing-matches" })).toBeUndefined();
-  });
-
-  it("relays the integrations listing's refusal as `{ status, body }`", async () => {
-    const { result, payload } = await search(
-      {},
-      { integrations: () => problem(403, "credential_proxy_closed", "Closed") },
-    );
-    expect(result.isError).toBe(true);
-    expect(payload.status).toBe(403);
-    expect((payload.body as { code: string }).code).toBe("credential_proxy_closed");
   });
 });
 
@@ -502,21 +419,17 @@ describe("call_integration_tool — tool", () => {
     }
   });
 
-  it("reads the manifest of the integration it calls, and no other", async () => {
-    const { calls, manifestReads } = await callWith(
-      { tool: "acme_other__api_call", arguments: { requests: [get()] } },
-      {
-        listing: listingOf([
-          connectionRow(),
-          connectionRow({ integration_package_id: "@acme/other", connection_id: "c-2" }),
-        ]),
-        manifests: {
-          [INTEGRATION]: apiManifest(INTEGRATION),
-          "@acme/other": apiManifest("@acme/other"),
-        },
-      },
+  it("resolves the tool by its full name through the listing, and calls its integration", async () => {
+    const other = apiCallTool({
+      name: "acme_other___api_call",
+      integration_package_id: "@acme/other",
+    });
+    const { calls, listings } = await callWith(
+      { tool: "acme_other___api_call", arguments: { requests: [get()] } },
+      { listing: listingOf([apiCallTool(), other]) },
     );
-    expect(manifestReads).toEqual(["@acme/other"]);
+    const query = new URL(listings[0]!.url).searchParams;
+    expect([...query]).toEqual([["name", "acme_other___api_call"]]);
     expect(calls[0]!.headers.get("X-Integration-Id")).toBe("@acme/other");
   });
 
@@ -528,36 +441,49 @@ describe("call_integration_tool — tool", () => {
   });
 
   it("refuses a connection_id outside the tool's connections", async () => {
-    const { payload, calls } = await callWith({
-      tool: TOOL,
-      arguments: { requests: [get({ connection_id: "not-mine" })] },
-    });
-    expect(payload).toMatchObject({
-      code: "invalid_argument",
-      arguments: ["arguments.requests[0].connection_id"],
-    });
-    expect(calls).toHaveLength(0);
+    for (const connectionId of ["not-mine", "2b0d7c4e-5f6a-4b8c-9d1e-3f2a1b0c9d8e"]) {
+      const { payload, calls } = await callWith({
+        tool: TOOL,
+        arguments: { requests: [get({ connection_id: connectionId })] },
+      });
+      expect(payload).toMatchObject({
+        code: "invalid_argument",
+        arguments: ["arguments.requests[0].connection_id"],
+      });
+      expect(calls).toHaveLength(0);
+    }
   });
 
-  it("pins an auth's tool to its own connections when the integration has others", async () => {
-    const twoAuths: Fixture = {
-      listing: listingOf([
-        connectionRow({ connection_id: "c-oauth", auth_key: "oauth" }),
-        connectionRow({ connection_id: "c-key-1", auth_key: "key" }),
-        connectionRow({ connection_id: "c-key-2", auth_key: "key" }),
-      ]),
-      manifests: { [INTEGRATION]: apiManifest(INTEGRATION, ["oauth", "key"]) },
-    };
+  it("takes a connection_id in any case, and sends it as listed", async () => {
+    const { calls } = await callWith({
+      tool: TOOL,
+      arguments: { requests: [get({ connection_id: CONNECTION_ID.toUpperCase() })] },
+    });
+    expect(calls[0]!.headers.get("X-Connection-Id")).toBe(CONNECTION_ID);
+  });
+
+  it("names a connection when the listing says the integration has others", async () => {
+    const KEY_1 = "1f0e9d8c-7b6a-4c5d-8e4f-3a2b1c0d9e8f";
+    const KEY_2 = "4a5b6c7d-8e9f-4a0b-9c1d-2e3f4a5b6c7d";
+    const tools = [
+      apiCallTool({ name: "acme_items__api_call__oauth", connection_required: true }),
+      apiCallTool({
+        name: "acme_items__api_call__key",
+        auth_key: "key",
+        connection_required: true,
+        connections: [connection({ connection_id: KEY_1 }), connection({ connection_id: KEY_2 })],
+      }),
+    ];
     const single = await callWith(
       { tool: "acme_items__api_call__oauth", arguments: { requests: [get()] } },
-      twoAuths,
+      { listing: listingOf(tools) },
     );
-    expect(single.calls[0]!.headers.get("X-Connection-Id")).toBe("c-oauth");
+    expect(single.calls[0]!.headers.get("X-Connection-Id")).toBe(CONNECTION_ID);
     expect(single.calls[0]!.headers.get("X-Integration-Id")).toBe(INTEGRATION);
 
     const several = await callWith(
       { tool: "acme_items__api_call__key", arguments: { requests: [get()] } },
-      twoAuths,
+      { listing: listingOf(tools) },
     );
     expect(several.payload).toMatchObject({
       code: "missing_argument",
@@ -994,123 +920,62 @@ describe("call_integration_tool — result", () => {
 
 describe("typed tools of a remote MCP integration", () => {
   const REMOTE = "@acme/docs";
-  const remoteManifest = {
-    name: REMOTE,
-    version: "1.0.0",
-    type: "integration",
-    display_name: "Acme Docs",
-    source: { kind: "remote", remote: { url: "https://mcp.acme.example/mcp" } },
-    auths: { api: { type: "api_key" } },
-    tools_policy: { search: {} },
-  } as unknown as IntegrationManifest;
-  const fixture: Fixture = {
-    listing: listingOf([connectionRow({ integration_package_id: REMOTE })]),
-    manifests: { [REMOTE]: remoteManifest },
+  const inputSchema = {
+    type: "object",
+    properties: { q: { type: "string" } },
+    required: ["q"],
   };
-  const searchTool = {
-    name: "search",
-    description: "Full-text search.",
-    input_schema: { type: "object", properties: { q: { type: "string" } }, required: ["q"] },
-  };
-  const remoteRoutes =
-    (call: Respond, list: Respond = () => Response.json({ tools: [searchTool], listed: true })) =>
-    (req: Request) =>
-      new URL(req.url).pathname === "/api/credential-proxy/tools/list" ? list(req) : call(req);
-
-  it("lists the server's tools under the integration's namespace, read with the proxy's selection", async () => {
-    const made = makeTools(
-      CALL_OWN,
-      remoteRoutes(() => Response.json({})),
-      true,
-      fixture,
-    );
-    const result = await made.byName
-      .get("search_integration_tools")!
-      .handler({ integration: REMOTE }, noExtra);
-    const payload = parseResult(result);
-    expect(payload.tools).toEqual([
-      expect.objectContaining({
-        tool: "acme_docs__search",
-        integration: REMOTE,
-        description: "Acme Docs. Full-text search.",
-      }),
-    ]);
-    expect((payload.best_match as { input_schema: unknown }).input_schema).toEqual(
-      searchTool.input_schema,
-    );
-    const listed = made.calls[0]!;
-    expect(new URL(listed.url).pathname).toBe("/api/credential-proxy/tools/list");
-    expect(await listed.json()).toEqual({ integration_id: REMOTE });
-    // A refusal's connect link reaches the human driving the client.
-    expect(listed.headers.get("x-appstrate-connect-offers")).toBe("1");
+  const remoteTool = (overrides: Record<string, unknown> = {}) => ({
+    kind: "remote",
+    name: "acme_docs__search",
+    integration_package_id: REMOTE,
+    description: "Acme Docs. Full-text search.",
+    remote_name: "search",
+    input_schema: inputSchema,
+    connections: [connection({ missing_scopes: [] })],
+    ...overrides,
   });
+  const fixture: Fixture = { listing: listingOf([remoteTool()]) };
+  const callTool = (paths: Request[]) =>
+    paths.find((req) => new URL(req.url).pathname.endsWith("/tools/call"));
 
-  it("lists a tool with, per connection, the scopes its policy requires that it lacks", async () => {
-    const SCOPED_ID = "2b0d7c4e-5f6a-4b8c-9d1e-3f2a1b0c9d8e";
-    const made = makeTools(
-      CALL_OWN,
-      remoteRoutes(() => Response.json({})),
-      true,
-      {
-        listing: listingOf([
-          connectionRow({ integration_package_id: REMOTE, auth_key: "oauth" }),
-          connectionRow({
-            integration_package_id: REMOTE,
-            connection_id: SCOPED_ID,
-            auth_key: "oauth",
-            scopes_granted: ["read"],
-          }),
-        ]),
-        manifests: {
-          [REMOTE]: {
-            ...remoteManifest,
-            auths: { oauth: { type: "oauth2" } },
-            tools_policy: { search: { required_scopes: { oauth: ["read"] } } },
-          } as unknown as IntegrationManifest,
-        },
-      },
-    );
+  it("lists a typed tool as the listing describes it, its schema in `best_match`", async () => {
+    const made = makeTools(CALL_OWN, undefined, true, fixture);
     const payload = parseResult(
       await made.byName.get("search_integration_tools")!.handler({ integration: REMOTE }, noExtra),
     );
-    const [tool] = payload.tools as { connections: Record<string, unknown>[] }[];
-    expect(tool!.connections.map((c) => [c.connection_id, c.missing_scopes])).toEqual([
-      [CONNECTION_ID, ["read"]],
-      [SCOPED_ID, []],
+    expect(payload.tools).toEqual([
+      {
+        tool: "acme_docs__search",
+        integration: REMOTE,
+        description: "Acme Docs. Full-text search.",
+        connections: [connection({ missing_scopes: [] })],
+      },
     ]);
+    const best = payload.best_match as { input_schema: unknown; usage: string };
+    expect(best.input_schema).toEqual(inputSchema);
+    expect(best.usage).toContain("MCP server's own tool result");
+    expect(made.calls).toHaveLength(0);
   });
 
-  it("lists with one of the caller's connections when several qualify and none is named", async () => {
-    const lists: unknown[] = [];
-    const made = makeTools(
-      CALL_OWN,
-      remoteRoutes(
-        () => Response.json({}),
-        async (req) => {
-          const body = (await req.json()) as { connection_id?: string };
-          lists.push(body);
-          return body.connection_id
-            ? Response.json({ tools: [searchTool], listed: true })
-            : problem(409, "must_choose_connection", "Several connections qualify.");
-        },
-      ),
-      true,
-      fixture,
-    );
+  it("marks a tool whose server could not be listed", async () => {
+    const made = makeTools(CALL_OWN, undefined, true, {
+      listing: listingOf([
+        remoteTool({ catalog_unreadable: true, input_schema: { type: "object" } }),
+      ]),
+    });
     const payload = parseResult(
       await made.byName.get("search_integration_tools")!.handler({}, noExtra),
     );
-    expect(payload.tools).toEqual([expect.objectContaining({ tool: "acme_docs__search" })]);
-    expect(lists).toEqual([
-      { integration_id: REMOTE },
-      { integration_id: REMOTE, connection_id: CONNECTION_ID },
+    expect(payload.tools).toEqual([
+      expect.objectContaining({ tool: "acme_docs__search", catalog_unreadable: true }),
     ]);
   });
 
   it("lists and calls with the connection_id the caller names", async () => {
     const made = makeTools(
       CALL_OWN,
-      remoteRoutes(() => Response.json({ result: { content: [] } })),
+      () => Response.json({ result: { content: [] } }),
       true,
       fixture,
     );
@@ -1120,73 +985,50 @@ describe("typed tools of a remote MCP integration", () => {
         { tool: "acme_docs__search", arguments: { q: "x" }, connection_id: CONNECTION_ID },
         noExtra,
       );
-    const bodies = await Promise.all(made.calls.map((req) => req.clone().json()));
-    expect(bodies).toEqual([
-      { integration_id: REMOTE, connection_id: CONNECTION_ID },
-      {
-        integration_id: REMOTE,
-        connection_id: CONNECTION_ID,
-        name: "search",
-        arguments: { q: "x" },
-      },
-    ]);
+    const query = new URL(made.listings[0]!.url).searchParams;
+    expect(Object.fromEntries(query)).toEqual({
+      name: "acme_docs__search",
+      connection_id: CONNECTION_ID,
+    });
+    expect(await callTool(made.calls)!.json()).toEqual({
+      integration_package_id: REMOTE,
+      connection_id: CONNECTION_ID,
+      name: "search",
+      arguments: { q: "x" },
+    });
   });
 
   it("relays the listing's refusal when the tool cannot be listed", async () => {
-    const made = makeTools(
-      CALL_OWN,
-      remoteRoutes(
-        () => Response.json({}),
-        () => problem(404, "credential_not_found", "No connection is usable in this space."),
-      ),
-      true,
-      fixture,
-    );
+    const refusal = {
+      type: "https://docs.appstrate.dev/errors/credential-not-found",
+      title: "Credential Not Found",
+      status: 404,
+      detail: "No connection is usable in this space.",
+      instance: "urn:appstrate:request:req_1",
+      code: "credential_not_found",
+      request_id: "req_1",
+    };
+    const made = makeTools(CALL_OWN, () => Response.json({}), true, {
+      listing: listingOf([], { unlisted: [{ integration_package_id: REMOTE, refusal }] }),
+    });
     const result = await made.byName
       .get("call_integration_tool")!
       .handler({ tool: "acme_docs__search", arguments: { q: "x" } }, noExtra);
     expect(result.isError).toBe(true);
-    expect(parseResult(result)).toMatchObject({ code: "credential_not_found" });
-    expect(made.calls.some((req) => new URL(req.url).pathname.endsWith("/tools/call"))).toBe(false);
+    expect(parseResult(result)).toEqual(refusal);
+    expect(made.calls).toHaveLength(0);
   });
 
-  it("marks a tool whose server could not be listed", async () => {
-    const made = makeTools(
-      CALL_OWN,
-      remoteRoutes(
-        () => Response.json({}),
-        () =>
-          Response.json({
-            tools: [{ name: "search", input_schema: { type: "object" } }],
-            listed: false,
-          }),
-      ),
-      true,
-      fixture,
-    );
-    const payload = parseResult(
-      await made.byName.get("search_integration_tools")!.handler({}, noExtra),
-    );
-    expect(payload.tools).toEqual([
-      expect.objectContaining({ tool: "acme_docs__search", catalog_unreadable: true }),
-    ]);
-  });
-
-  it("calls the tool through the proxy's tool route and relays the server's result", async () => {
+  it("calls the tool through the proxy's tool route by its server name and relays its result", async () => {
     const upstream = { content: [{ type: "text" as const, text: "3 documents" }] };
-    const made = makeTools(
-      CALL_OWN,
-      remoteRoutes(() => Response.json({ result: upstream })),
-      true,
-      fixture,
-    );
+    const made = makeTools(CALL_OWN, () => Response.json({ result: upstream }), true, fixture);
     const result = await made.byName
       .get("call_integration_tool")!
       .handler({ tool: "acme_docs__search", arguments: { q: "invoices" } }, noExtra);
     expect(result).toEqual(upstream);
-    const call = made.calls.find((req) => new URL(req.url).pathname.endsWith("/tools/call"))!;
+    const call = callTool(made.calls)!;
     expect(await call.json()).toEqual({
-      integration_id: REMOTE,
+      integration_package_id: REMOTE,
       name: "search",
       arguments: { q: "invoices" },
     });
@@ -1194,23 +1036,18 @@ describe("typed tools of a remote MCP integration", () => {
   });
 
   it("refuses a missing required argument before calling", async () => {
-    const made = makeTools(
-      CALL_OWN,
-      remoteRoutes(() => Response.json({})),
-      true,
-      fixture,
-    );
+    const made = makeTools(CALL_OWN, () => Response.json({}), true, fixture);
     const result = await made.byName
       .get("call_integration_tool")!
       .handler({ tool: "acme_docs__search", arguments: {} }, noExtra);
     expect(parseResult(result)).toMatchObject({ code: "missing_argument" });
-    expect(made.calls.some((req) => new URL(req.url).pathname.endsWith("/tools/call"))).toBe(false);
+    expect(callTool(made.calls)).toBeUndefined();
   });
 
   it("relays the route's refusal as an error result", async () => {
     const made = makeTools(
       CALL_OWN,
-      remoteRoutes(() => problem(502, "bad_gateway", "The MCP server failed.")),
+      () => problem(502, "bad_gateway", "The MCP server failed."),
       true,
       fixture,
     );

@@ -20,7 +20,7 @@
  * The upstream is a stub of the global `fetch` the proxy calls, as in
  * `test/integration/routes/credential-proxy.test.ts`, which covers the proxy's access rule and
  * what reaches the upstream; argument handling and result shaping are covered request by request
- * in `test/unit/modules/mcp/connection-tools.test.ts`.
+ * in `test/unit/modules/mcp/integration-tools.test.ts`.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
@@ -127,7 +127,7 @@ async function mintInstanceToken(ctx: TestContext): Promise<string> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      client_name: "MCP client (connection tools)",
+      client_name: "MCP client (integration tools)",
       redirect_uris: [REDIRECT_URI],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
@@ -234,7 +234,7 @@ const get = (path: string, overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-describe("mcp connection tools", () => {
+describe("mcp integration tools", () => {
   /** The organization's owner: preset `admin` in the default space. */
   let owner: TestContext;
 

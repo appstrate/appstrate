@@ -536,8 +536,8 @@ const connectionOutsideRunSchema = {
   },
 } as const;
 
-/** One integration `GET /api/credential-proxy/integrations` lists. */
-const integrationOutsideRunSchema = {
+/** An integration without a usable connection, as `GET /api/credential-proxy/tools` lists it. */
+const notReadyIntegrationSchema = {
   type: "object",
   required: ["integration_package_id", "display_name", "proxy_connection"],
   additionalProperties: false,
@@ -553,7 +553,8 @@ const integrationOutsideRunSchema = {
       additionalProperties: false,
       description:
         "What a call naming no connection gets for this caller, as the integration detail's " +
-        "`proxy_connection` states it, judged against the latest published version.",
+        "`proxy_connection` states it, judged against the latest published version: one of " +
+        "`none`, `needs_reconnection`, `not_permitted`, `default_unavailable`, `unusable`.",
       properties: proxyConnectionVerdictProperties,
     },
     refusal: {
@@ -561,9 +562,89 @@ const integrationOutsideRunSchema = {
       description:
         "Present when the verdict is a refusal the selection describes: the `not_connected` " +
         "item of `none` (with the `auth_key` and `required_scopes` a connect flow targets), " +
-        "else the first item of the refusal (`needs_reconnection`, `must_choose_connection`, " +
-        "`pinned_connection_unavailable`…). Absent on `ready`, `not_required` and " +
-        "`not_permitted`.",
+        "else the first item of the refusal (`needs_reconnection`, " +
+        "`pinned_connection_unavailable`…). Absent on `not_permitted`.",
+    },
+  },
+} as const;
+
+const { integration_package_id: _toolIntegration, ...toolConnectionProperties } =
+  connectionOutsideRunSchema.properties;
+
+/** One tool `GET /api/credential-proxy/tools` lists. */
+const integrationToolSchema = {
+  type: "object",
+  required: ["name", "kind", "integration_package_id", "description", "connections"],
+  additionalProperties: false,
+  properties: {
+    name: {
+      type: "string",
+      description:
+        "The tool's name: `{ns}__api_call` (`{ns}__api_call__{auth}` when several auths of " +
+        "the integration expose one) or `{ns}__{tool}` for a typed tool, `{ns}` being the " +
+        "package id normalised, with a suffix hashed from the package id when another listed " +
+        "package normalises alike.",
+    },
+    kind: {
+      type: "string",
+      enum: ["api_call", "remote"],
+      description:
+        "`api_call`: called through `/api/credential-proxy/proxy` with one of `connections`; " +
+        "`remote`: a typed tool of the integration's MCP server, called through " +
+        "`/api/credential-proxy/tools/call` by its `remote_name`.",
+    },
+    integration_package_id: {
+      type: "string",
+      description: "Integration package id: the `X-Integration-Id` of a call.",
+    },
+    description: { type: "string" },
+    auth_key: {
+      type: "string",
+      description: "`api_call` only: the auth whose connections it reaches.",
+    },
+    connection_required: {
+      type: "boolean",
+      description:
+        "`api_call` only: the integration also has connections of another auth, so a call " +
+        "names one of `connections` (`X-Connection-Id`).",
+    },
+    remote_name: {
+      type: "string",
+      description:
+        "`remote` only: the name the server lists the tool by, which `tools/call` takes.",
+    },
+    input_schema: {
+      type: "object",
+      additionalProperties: true,
+      description: "`remote` only: the tool's input schema, sanitised as in a run.",
+    },
+    catalog_unreadable: {
+      type: "boolean",
+      enum: [true],
+      description:
+        "`remote` only: the server's `tools/list` could not be read, so the tool is a declared " +
+        "name, without description and with an empty object schema.",
+    },
+    connections: {
+      type: "array",
+      description:
+        "The connections it reaches, as `GET /api/credential-proxy/connections` lists them.",
+      items: {
+        type: "object",
+        required: connectionOutsideRunSchema.required.filter(
+          (field) => field !== "integration_package_id",
+        ),
+        properties: {
+          ...toolConnectionProperties,
+          missing_scopes: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "`remote` only: the scopes the tool's `tools_policy` entry requires on the " +
+              "connection's auth that it lacks; a call with it answers `409 insufficient_scopes`.",
+          },
+        },
+      },
     },
   },
 } as const;
@@ -629,137 +710,89 @@ export const credentialProxyPaths = {
       },
     },
   },
-  "/api/credential-proxy/integrations": {
+  "/api/credential-proxy/tools": {
     get: {
-      operationId: "listCredentialProxyIntegrations",
+      operationId: "listIntegrationTools",
       tags: ["Credential Proxy"],
-      summary: "List the integrations active in the space, with what a call outside a run gets",
+      summary: "List the tools the caller can call outside a run",
       description:
-        "Each integration active in the space that has a published version, with the verdict " +
-        "of a call to `/api/credential-proxy/proxy` without `X-Run-Id` and without " +
-        "`X-Connection-Id` (`proxy_connection`), judged against that version for this caller, " +
-        "under the reach the proxy applies (`credential-proxy:call` or " +
-        "`credential-proxy:call-own` alone). Where `GET /api/credential-proxy/connections` lists " +
-        "the connections a call may use, this lists the integrations, those without a usable " +
-        "connection included. A refused verdict carries the selection's item (`refusal`), as a " +
-        "run launch's 409 does; with `X-Appstrate-Connect-Offers: 1`, an item a connect flow " +
-        "clears for the caller carries a `connect_url`. No credential is decrypted to build it. " +
-        "Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose " +
-        "`credential_proxy_open` is `false` answers `403 credential_proxy_closed`.",
+        "Every tool a call outside a run reaches in this space, for this caller: each " +
+        "integration's `api_call` tools (called through `/api/credential-proxy/proxy`) whose " +
+        "auth has a connection the caller reaches, and, for an integration backed by a remote " +
+        "MCP server, the typed tools that server offers (called through " +
+        "`/api/credential-proxy/tools/call`): the integration catalog's selection (its " +
+        "`tools_policy` keys, or every tool the server lists when `allow_undeclared_tools` is " +
+        "`true`), less `hidden_tools` and the connect tool, described by the server's " +
+        "`tools/list`. Each server is listed with the connection the proxy selects (or the " +
+        "`connection_id` named, when it is one of that integration's; when the selection asks " +
+        "for a choice, the first of the caller's connections it accepts), cached per " +
+        "connection and integration version for 5 minutes, and journaled as one call of the " +
+        "connection when the listing reaches the server. Each tool carries the connections it " +
+        "reaches, the rows of `GET /api/credential-proxy/connections`. `not_ready` lists the " +
+        "integrations active in the space the caller has no usable connection of, with the " +
+        "verdict of a call naming none; with `X-Appstrate-Connect-Offers: 1`, a refusal item a " +
+        "connect flow clears carries a `connect_url`. `unlisted` lists the remote integrations " +
+        "whose server the proxy refused to list (connection selection, permission, " +
+        "`authorized_uris`, an unrenderable URL), each with that refusal. Read with the access " +
+        "rule of `/api/credential-proxy/proxy` without `X-Run-Id`, against each integration's " +
+        "latest published version. Requires `credential-proxy:call-own` or " +
+        "`credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers " +
+        "`403 credential_proxy_closed`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
         { $ref: "#/components/parameters/ConnectOffers" },
-      ],
-      responses: {
-        "200": {
-          description: "The integrations active in the space, sorted by id",
-          headers: STD_RESPONSE_HEADERS,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object", "data", "hasMore"],
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: { type: "array", items: integrationOutsideRunSchema },
-                  hasMore: { type: "boolean" },
-                },
-              },
-            },
-          },
+        {
+          name: "integration_package_id",
+          in: "query",
+          required: false,
+          description: "Lists the tools of this integration alone (`@scope/name`).",
+          schema: { type: "string", minLength: 1 },
         },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": {
+        {
+          name: "name",
+          in: "query",
+          required: false,
           description:
-            "`forbidden` — the principal holds neither `credential-proxy:call-own` nor " +
-            "`credential-proxy:call`; `credential_proxy_closed` — the space's " +
-            "`credential_proxy_open` is `false`.",
-          content: {
-            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
-          },
+            "Resolves the tool of this name alone: an `api_call` tool lists no server, and only " +
+            "the remote integrations whose namespace starts the name are listed. `not_ready` is " +
+            "then empty.",
+          schema: { type: "string", minLength: 1 },
         },
-      },
-    },
-  },
-  "/api/credential-proxy/tools/list": {
-    post: {
-      operationId: "listRemoteIntegrationTools",
-      tags: ["Credential Proxy"],
-      summary: "List the typed tools of a remote MCP integration",
-      description:
-        'The tools the integration\'s remote MCP server (`source.kind: "remote"`, Streamable ' +
-        "HTTP) offers through one connection, outside a run: the integration catalog's " +
-        "selection (its `tools_policy` keys, or every tool the server lists when " +
-        "`allow_undeclared_tools` is `true`), less `hidden_tools` and the connect tool, each " +
-        "described by the server's `tools/list` with its description and schemas sanitised as " +
-        "in a run. The connection is selected first, as `/api/credential-proxy/proxy` " +
-        "selects it, and a server URL built from connection variables is rendered from its " +
-        "variables. The listing is cached per connection and integration version for 5 " +
-        "minutes, and read only after that selection. The exchange goes through the credential proxy with the access rule of " +
-        "`/api/credential-proxy/proxy` without `X-Run-Id`, against the integration's latest " +
-        "published version. A server that cannot be listed answers the declared names alone " +
-        "with `listed: false`. Requires `credential-proxy:call-own` or `credential-proxy:call`. " +
-        "A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`.",
-      parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
-        { $ref: "#/components/parameters/ConnectOffers" },
+        {
+          name: "connection_id",
+          in: "query",
+          required: false,
+          description:
+            "The connection the server of the integration it belongs to is listed with, as " +
+            "`X-Connection-Id` names one on `/api/credential-proxy/proxy`.",
+          schema: { type: "string", format: "uuid" },
+        },
       ],
-      requestBody: {
-        required: true,
-        content: {
-          "application/json": {
-            schema: {
-              type: "object",
-              required: ["integration_id"],
-              additionalProperties: false,
-              properties: {
-                integration_id: {
-                  type: "string",
-                  minLength: 1,
-                  description: "Integration package id (`@scope/name`).",
-                },
-                connection_id: {
-                  type: "string",
-                  format: "uuid",
-                  description:
-                    "The connection the server is listed with, as `X-Connection-Id` names one on `/api/credential-proxy/proxy`. Omitted, the proxy's selection picks it.",
-                },
-              },
-            },
-          },
-        },
-      },
       responses: {
         "200": {
-          description: "The offered tools, in catalog order.",
+          description: "The tools, sorted by integration, `api_call` tools first within one.",
           headers: STD_RESPONSE_HEADERS,
           content: {
             "application/json": {
               schema: {
                 type: "object",
-                required: ["tools", "listed"],
+                required: ["tools", "not_ready", "unlisted"],
+                additionalProperties: false,
                 properties: {
-                  tools: {
+                  tools: { type: "array", items: integrationToolSchema },
+                  not_ready: { type: "array", items: notReadyIntegrationSchema },
+                  unlisted: {
                     type: "array",
                     items: {
                       type: "object",
-                      required: ["name", "input_schema"],
-                      description:
-                        "An MCP tool, as the server listed it after sanitisation: its name, description and input schema.",
+                      required: ["integration_package_id", "refusal"],
                       additionalProperties: false,
                       properties: {
-                        name: { type: "string" },
-                        description: { type: "string" },
-                        input_schema: { type: "object", additionalProperties: true },
+                        integration_package_id: { type: "string" },
+                        refusal: { $ref: "#/components/schemas/ProblemDetail" },
                       },
                     },
-                  },
-                  listed: {
-                    type: "boolean",
-                    description:
-                      "`false` when the server's `tools/list` could not be read: `tools` holds the declared names, each with an empty object schema.",
                   },
                 },
               },
@@ -768,21 +801,11 @@ export const credentialProxyPaths = {
         },
         "400": { $ref: "#/components/responses/ValidationError" },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "409": {
+        "403": {
           description:
-            "The connection selection of `/api/credential-proxy/proxy` refused: " +
-            "`must_choose_connection` (`errors[0].candidate_connections`; retry with one `id` " +
-            "in `connection_id`), `needs_reconnection`, `pinned_connection_unavailable`. With " +
-            "`X-Appstrate-Connect-Offers: 1`, an item a connect flow clears carries a `connect_url`.",
-          content: problemContent,
-        },
-        "422": {
-          description:
-            "`integration_not_remote` — the integration is not backed by a Streamable HTTP MCP " +
-            "server; `remote_url_unrenderable` — its server URL is built from the connection's " +
-            "variables and they do not render it.",
+            "`forbidden` — the principal holds neither `credential-proxy:call-own` nor " +
+            "`credential-proxy:call`, or authenticates with a session cookie; " +
+            "`credential_proxy_closed` — the space's `credential_proxy_open` is `false`.",
           content: {
             "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
           },
@@ -798,7 +821,8 @@ export const credentialProxyPaths = {
       summary: "Call a typed tool of a remote MCP integration",
       description:
         "One `tools/call` on the integration's remote MCP server, outside a run, for a tool " +
-        "`/api/credential-proxy/tools/list` offers; a tool outside that selection answers " +
+        "`GET /api/credential-proxy/tools` lists by its `remote_name`; a tool outside the " +
+        "integration catalog's selection answers " +
         "`404` before any exchange. The exchange goes through the credential proxy with the " +
         "access rule and the connection selection of `/api/credential-proxy/proxy` without " +
         "`X-Run-Id`, against the integration's latest published version, and is journaled as " +
@@ -817,10 +841,10 @@ export const credentialProxyPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["integration_id", "name"],
+              required: ["integration_package_id", "name"],
               additionalProperties: false,
               properties: {
-                integration_id: {
+                integration_package_id: {
                   type: "string",
                   minLength: 1,
                   description: "Integration package id (`@scope/name`).",

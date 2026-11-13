@@ -5,7 +5,7 @@
  *
  * When a module re-enters the platform in-process via `app.fetch()` (the MCP
  * server's tools do, each dispatching to the route it stands for — see
- * `modules/mcp/tools.ts` and `modules/mcp/connection-tools.ts`), the synthetic
+ * `modules/mcp/tools.ts` and `modules/mcp/api-call-batch.ts`), the synthetic
  * request carries the SAME bearer token the external caller presented. That
  * token may be audience-bound to a single protected resource (e.g.
  * `/api/mcp/o/:org`); the outbound half of `enforceResourceAudience`

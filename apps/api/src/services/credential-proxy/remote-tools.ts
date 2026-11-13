@@ -59,8 +59,6 @@ interface ProxiedMcpFetchInput {
   caller: ProxyCaller;
   /** Bounds every exchange. */
   deadline: AbortSignal;
-  /** Whether an exchange, by its JSON-RPC body, gets a call-journal row. */
-  journals: (body: string | null) => boolean;
 }
 
 /**
@@ -73,6 +71,10 @@ export const MAX_EXCHANGE_BYTES = 2 * 1024 * 1024;
  * A `fetch` for `createMcpHttpClient` that sends each MCP exchange through `proxyCall`. The SDK
  * echoes the server's own values (`Mcp-Session-Id`, `nextCursor`), so headers go literally: no
  * placeholder they carry reaches a credential.
+ *
+ * The call journal keeps one row per listing and one per tool call: the exchange carrying a
+ * `tools/call`, or the first page of a `tools/list` ({@link isJournaledExchange}). The handshake
+ * and later pages add none, and a catalog served from cache makes no exchange at all.
  */
 export function proxiedMcpFetch(input: ProxiedMcpFetchInput): typeof fetch {
   const { scope, deadline } = input;
@@ -84,7 +86,7 @@ export function proxiedMcpFetch(input: ProxiedMcpFetchInput): typeof fetch {
     const body = typeof init?.body === "string" ? init.body : null;
     const started = Date.now();
     const journal = (connectionId: string, outcome: string) => {
-      if (!input.journals(body)) return;
+      if (!isJournaledExchange(body)) return;
       void trackAudit(
         recordConnectionCall({
           ...input.caller,
@@ -131,19 +133,18 @@ export function proxiedMcpFetch(input: ProxiedMcpFetchInput): typeof fetch {
   }) as typeof fetch;
 }
 
-/** Whether a JSON-RPC body is a `tools/call` request: the exchange the journal keeps a row of. */
-function isToolsCall(body: string | null): boolean {
+/** Whether a JSON-RPC body is a `tools/call`, or a `tools/list` asking for no cursor. */
+function isJournaledExchange(body: string | null): boolean {
   if (body === null) return false;
+  let message: unknown;
   try {
-    const message: unknown = JSON.parse(body);
-    return (
-      typeof message === "object" &&
-      message !== null &&
-      (message as { method?: unknown }).method === "tools/call"
-    );
+    message = JSON.parse(body);
   } catch {
     return false;
   }
+  if (typeof message !== "object" || message === null) return false;
+  const { method, params } = message as { method?: unknown; params?: { cursor?: unknown } };
+  return method === "tools/call" || (method === "tools/list" && params?.cursor === undefined);
 }
 
 /** Listing a catalog: a few round trips, each answered within seconds by a healthy server. */
@@ -162,11 +163,11 @@ const catalogCache = createCache<Tool[]>({
   ttlMs: CATALOG_TTL_MS,
 });
 
-interface RemoteToolsInput {
+/** Who lists or calls a remote integration's tools outside a run, and how. */
+export interface RemoteToolsCaller {
   scope: SpaceScope;
   actor: Actor;
   reach: ProxyReach;
-  integrationId: string;
   caller: ProxyCaller;
   /** The caller's request: its going away ends the exchange. */
   signal: AbortSignal;
@@ -177,6 +178,8 @@ interface RemoteToolsInput {
    */
   connectOffers: ConnectOfferPolicy | null;
 }
+
+type RemoteToolsInput = RemoteToolsCaller & { integrationId: string };
 
 /** The latest published manifest, the one `proxyCall` authorizes outside a run against. */
 async function remoteManifest(integrationId: string, orgId: string): Promise<IntegrationManifest> {
@@ -284,7 +287,6 @@ function offeredRemoteToolNames(
 async function withClient<T>(
   input: RemoteToolsInput & { connectionId: string; timeoutMs: number },
   url: string,
-  journals: (body: string | null) => boolean,
   use: (client: AppstrateMcpClient, deadline: AbortSignal) => Promise<T>,
 ): Promise<T> {
   const timeout = AbortSignal.timeout(input.timeoutMs);
@@ -300,7 +302,6 @@ async function withClient<T>(
         reach: input.reach,
         caller: input.caller,
         deadline,
-        journals,
       }),
       signal: deadline,
       onWarning: (message, data) =>
@@ -348,7 +349,6 @@ export async function listRemoteTools(
       withClient(
         { ...input, connectionId, timeoutMs: LIST_TIMEOUT_MS },
         url,
-        () => false,
         async (client, deadline) => {
           const { tools } = await client.listTools({ signal: deadline });
           return tools.flatMap((tool) => sanitiseToolDescriptor(tool) ?? []);
@@ -358,7 +358,7 @@ export async function listRemoteTools(
   } catch (err) {
     // A refusal made before any exchange is the caller's to see; a server fault leaves the names.
     if (err instanceof ApiError || (err instanceof ProxyCallError && !err.connectionId)) {
-      throw remoteFailure(err, input.integrationId, url);
+      throw mcpServerFailure(err, { integrationId: input.integrationId, url });
     }
     logger.warn("credential-proxy: remote tools/list failed", {
       integrationId: input.integrationId,
@@ -411,34 +411,43 @@ export async function callRemoteTool(
     const result = await withClient(
       { ...input, connectionId, timeoutMs: CALL_TIMEOUT_MS },
       url,
-      isToolsCall,
       (client, deadline) =>
         client.callTool({ name: input.name, arguments: input.arguments }, { signal: deadline }),
     );
     return stripForgedRuntimeEvents(result);
   } catch (err) {
-    throw remoteFailure(err, input.integrationId, url);
+    throw mcpServerFailure(err, {
+      integrationId: input.integrationId,
+      url,
+      failed: "did not answer the tool call",
+    });
   }
 }
 
 /**
- * The error a failed exchange answers: the proxy's own refusal as it is, a server fault as a 502
- * naming the server's origin only (its message is untrusted text).
+ * The error a failed MCP exchange answers: the proxy's own refusal as it is, a server fault as a
+ * 502 naming the server's origin only (its message is untrusted text). A 401 or 403 is the server
+ * refusing the connection's credential, or, for an integration declaring no auth, asking for one.
  */
-function remoteFailure(err: unknown, integrationId: string, url: string): Error {
+export function mcpServerFailure(
+  err: unknown,
+  input: { integrationId: string; url: string; unauthenticated?: boolean; failed?: string },
+): Error {
   if (err instanceof ApiError) return err;
   if (err instanceof ProxyCallError) return proxyProblem(err.code, err.message);
-  const origin = URL.parse(url)?.origin;
+  const origin = URL.parse(input.url)?.origin;
   logger.warn("credential-proxy: remote MCP exchange failed", {
-    integrationId,
+    integrationId: input.integrationId,
     origin,
     error: getErrorMessage(err),
   });
   const status = httpStatusOf(err);
   if (status === 401 || status === 403) {
     return badGateway(
-      `The MCP server at ${origin} refused the connection's credential (HTTP ${status}); reconnect the integration.`,
+      input.unauthenticated
+        ? `The MCP server at ${origin} asks for a credential (HTTP ${status}), but the integration declares no authentication.`
+        : `The MCP server at ${origin} refused the connection's credential (HTTP ${status}); reconnect the integration.`,
     );
   }
-  return badGateway(`The MCP server at ${origin} did not answer the tool call.`);
+  return badGateway(`The MCP server at ${origin} ${input.failed ?? "did not answer"}.`);
 }

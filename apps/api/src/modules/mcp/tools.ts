@@ -92,9 +92,14 @@ import {
   trySetHeader,
   type Refusal,
 } from "./tool-results.ts";
-import { buildConnectionTools } from "./connection-tools.ts";
-import type { IntegrationManifest } from "@appstrate/core/integration";
-import { readIntegrationManifestForProxy } from "../../services/integration-service.ts";
+import { buildIntegrationTools } from "./integration-tools.ts";
+import {
+  DEFAULT_SEARCH_LIMIT,
+  MAX_SEARCH_LIMIT,
+  searchLimit,
+  searchScore,
+  searchTokens,
+} from "./search.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
 import {
   describeSpace,
@@ -204,19 +209,6 @@ export interface McpToolContext {
   contextInjected?: boolean;
   /** Org-wide connection only: its spaces; `permissions` and `scope` are the entered one's. */
   orgSpaces?: OrgWideSpaces;
-  /**
-   * The manifest an integration tool is listed and called under. Defaults to the one the
-   * credential proxy authorizes a call outside a run against (`readIntegrationManifestForProxy`).
-   */
-  readIntegrationManifest?: (packageId: string) => Promise<IntegrationManifest | null>;
-}
-
-/** The latest published manifest of an integration, as the proxy reads it outside a run. */
-function publishedIntegrationManifest(orgId: string) {
-  return async (packageId: string): Promise<IntegrationManifest | null> => {
-    const loaded = await readIntegrationManifestForProxy(packageId, orgId, null);
-    return loaded.ok ? loaded.manifest : null;
-  };
 }
 
 /** Never let an observer error affect the tool result. */
@@ -228,8 +220,6 @@ function emit(ctx: McpToolContext, event: McpToolEvent): void {
   }
 }
 
-const DEFAULT_SEARCH_LIMIT = 25;
-const MAX_SEARCH_LIMIT = 100;
 const METHODS_WITH_BODY = new Set(["POST", "PUT", "PATCH"]);
 /**
  * Auth-context headers the router forwards from the inbound MCP request onto
@@ -305,12 +295,10 @@ function fileResourceLink(doc: RunAndWaitFile): {
 }
 
 function scoreOperation(op: CatalogOperation, tokens: string[]): number {
-  if (tokens.length === 0) return 0;
-  const haystack =
-    `${op.operationId} ${op.summary} ${op.description} ${op.pathTemplate} ${op.tags.join(" ")}`.toLowerCase();
-  let score = 0;
-  for (const token of tokens) if (haystack.includes(token)) score += 1;
-  return score;
+  return searchScore(
+    `${op.operationId} ${op.summary} ${op.description} ${op.pathTemplate} ${op.tags.join(" ")}`,
+    tokens,
+  );
 }
 
 /**
@@ -425,11 +413,9 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const start = performance.now();
     const { operations, componentSchemas } = getCatalog();
-    const query = asString(args.query)?.trim().toLowerCase() ?? "";
     const tag = asString(args.tag)?.toLowerCase();
-    const rawLimit = typeof args.limit === "number" ? args.limit : DEFAULT_SEARCH_LIMIT;
-    const limit = Math.min(Math.max(1, Math.floor(rawLimit)), MAX_SEARCH_LIMIT);
-    const tokens = query.split(/\s+/).filter(Boolean);
+    const limit = searchLimit(args.limit);
+    const tokens = searchTokens(args.query);
 
     let matches = [...operations.values()];
     if (tag) matches = matches.filter((op) => op.tags.some((t) => t.toLowerCase() === tag));
@@ -1928,14 +1914,12 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
     buildReadFileTool(ctx),
     ...buildPackageFileTools(ctx, surface.importsPackages),
     ...(surface.proxies
-      ? buildConnectionTools({
+      ? buildIntegrationTools({
           origin: ctx.origin,
           authHeaders: ctx.authHeaders,
           dispatch: ctx.dispatch,
           observe: (event) => emit(ctx, event),
           runs: surface.runs,
-          readManifest:
-            ctx.readIntegrationManifest ?? publishedIntegrationManifest(ctx.scope.orgId),
         })
       : []),
     // Redundant for a context-injecting caller; search_operations stays for `best_match`.

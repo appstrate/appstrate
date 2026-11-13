@@ -254,7 +254,7 @@ export async function forceRefreshIntegrationProxyCredentials(
 }
 
 /** One connection a call outside a run may use (`GET /api/credential-proxy/connections`). */
-interface ConnectionOutsideRun {
+export interface ConnectionOutsideRun {
   integration_package_id: string;
   connection_id: string;
   label: string;
@@ -275,6 +275,21 @@ export async function listConnectionsOutsideRun(
   actor: Actor,
   reach: ProxyReach,
 ): Promise<ConnectionOutsideRun[]> {
+  return (await connectionsOutsideRun(scope, actor, reach)).connections;
+}
+
+/**
+ * {@link listConnectionsOutsideRun}, with the published manifest of each integration listed: the
+ * version a call outside a run is authorized against.
+ */
+export async function connectionsOutsideRun(
+  scope: { orgId: string; spaceId: string },
+  actor: Actor,
+  reach: ProxyReach,
+): Promise<{
+  connections: ConnectionOutsideRun[];
+  manifests: ReadonlyMap<string, IntegrationManifest>;
+}> {
   const rows = await listReachableConnections({ spaceId: scope.spaceId, actor }, reach);
   const integrationIds = [...new Set(rows.map((row) => row.integrationId))];
   const [active, orgDefaults, manifests] = await Promise.all([
@@ -307,11 +322,17 @@ export async function listConnectionsOutsideRun(
       },
     ];
   });
+  const listedManifests = new Map<string, IntegrationManifest>();
+  for (const connection of listed) {
+    const loaded = manifestOf.get(connection.integration_package_id);
+    if (loaded?.ok) listedManifests.set(connection.integration_package_id, loaded.manifest);
+  }
   // Grouped by integration; within one, oldest first.
-  return listed.sort((a, b) => a.integration_package_id.localeCompare(b.integration_package_id));
+  listed.sort((a, b) => a.integration_package_id.localeCompare(b.integration_package_id));
+  return { connections: listed, manifests: listedManifests };
 }
 
-/** An integration active in the space, as `GET /api/credential-proxy/integrations` lists it. */
+/** An integration active in the space, with what a call outside a run naming no connection gets. */
 interface IntegrationOutsideRun {
   integration_package_id: string;
   display_name: string;
@@ -332,8 +353,12 @@ export async function listIntegrationsOutsideRun(
   actor: Actor,
   reach: ProxyReach,
   connectOffers: ConnectOfferPolicy | null,
+  /** Judges this integration alone. */
+  only?: string,
 ): Promise<IntegrationOutsideRun[]> {
-  const ids = await listIntegrationIdsActiveInSpace(scope);
+  const ids = (await listIntegrationIdsActiveInSpace(scope)).filter(
+    (id) => only === undefined || id === only,
+  );
   const loaded = await Promise.all(
     ids.map((id) => readIntegrationManifestForProxy(id, scope.orgId, null)),
   );

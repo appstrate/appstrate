@@ -209,7 +209,7 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     );
   });
 
-  it("journals each MCP exchange as a proxied call of the connection", async () => {
+  it("journals the listing as one proxied call of the connection", async () => {
     await seedProxyIntegration(ctx, remote());
     const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
     expect((await sync(ctx, { connection_id: connectionId })).status).toBe(200);
@@ -220,15 +220,8 @@ describe("POST /api/integrations/{packageId}/discover", () => {
       .select()
       .from(connectionCalls)
       .where(eq(connectionCalls.connectionId, connectionId));
-    // The era probe (400), initialize, the `initialized` notification (202), three pages.
-    expect(rows.map((row) => row.outcome).sort()).toEqual([
-      "200",
-      "200",
-      "200",
-      "200",
-      "202",
-      "400",
-    ]);
+    // The listing's first page alone: the era probe, the handshake and the later pages add none.
+    expect(rows.map((row) => row.outcome)).toEqual(["200"]);
     for (const row of rows) {
       expect(row).toMatchObject({
         connectionId,
@@ -332,7 +325,7 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     expect(server.methods).toEqual([]);
   });
 
-  it("syncs a draft never published, through the draft's auth, journaling each exchange", async () => {
+  it("syncs a draft never published, through the draft's auth, journaling its listing", async () => {
     await seedPackage({
       id: ID,
       orgId: ctx.orgId,
@@ -356,8 +349,8 @@ describe("POST /api/integrations/{packageId}/discover", () => {
       .select()
       .from(connectionCalls)
       .where(eq(connectionCalls.connectionId, connectionId));
-    // The era probe, initialize, initialized, three pages.
-    expect(rows).toHaveLength(6);
+    // One row for the listing, over three pages.
+    expect(rows).toHaveLength(1);
   });
 
   it("authorizes against the draft, not the published version", async () => {

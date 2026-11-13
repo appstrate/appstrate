@@ -11,8 +11,9 @@
  * core via the sidecar's MCP `{ns}__api_call` tools instead.
  *
  * `GET /api/credential-proxy/connections` lists what the caller reaches outside
- * a run. `POST /api/credential-proxy/tools/list` and `/tools/call` reach the
- * typed tools of an integration backed by a remote MCP server, outside a run.
+ * a run. `GET /api/credential-proxy/tools` lists every tool the caller may call
+ * outside a run, the typed tools of remote MCP servers included, and
+ * `POST /api/credential-proxy/tools/call` calls one of those typed tools.
  *
  * Security: this is the single most sensitive endpoint in the public
  * API surface. Controls:
@@ -87,6 +88,7 @@ import { requireSpaceContext } from "../middleware/space-context.ts";
 import {
   ApiError,
   invalidRequest,
+  parseBody,
   forbidden,
   internalError,
   payloadTooLarge,
@@ -104,22 +106,23 @@ import {
 } from "../services/credential-proxy/access.ts";
 import {
   listConnectionsOutsideRun,
-  listIntegrationsOutsideRun,
   runBoundSelection,
 } from "../services/credential-proxy/integration-resolver.ts";
-import { callRemoteTool, listRemoteTools } from "../services/credential-proxy/remote-tools.ts";
+import { listIntegrationTools } from "../services/credential-proxy/integration-tools.ts";
+import { callRemoteTool } from "../services/credential-proxy/remote-tools.ts";
 import type { AppEnv } from "../types/index.ts";
 
 import { getCookieJarStore } from "../infra/index.ts";
 import { getCredentialProxyLimits } from "../services/proxy-limits.ts";
 
-export const listRemoteToolsSchema = z.strictObject({
-  integration_id: z.string().min(1),
+const listIntegrationToolsQuerySchema = z.strictObject({
+  integration_package_id: z.string().min(1).optional(),
+  name: z.string().min(1).optional(),
   connection_id: z.uuid().optional(),
 });
 
 export const callRemoteToolSchema = z.strictObject({
-  integration_id: z.string().min(1),
+  integration_package_id: z.string().min(1),
   connection_id: z.uuid().optional(),
   name: z.string().min(1),
   arguments: z.record(z.string(), z.unknown()).optional(),
@@ -139,20 +142,6 @@ export function createCredentialProxyRouter() {
     assertCredentialProxyOpen(c.get("space")!);
     const reach = reachOutsideRun(callerPermissions(c));
     const data = await listConnectionsOutsideRun(getSpaceScope(c), getActor(c), reach);
-    return c.json(listResponse(data));
-  });
-
-  // The integrations active here, each with what a call naming no connection gets: the
-  // connections an integration lacks, where `/connections` lists those it has.
-  router.get("/integrations", requirePermission("credential-proxy", "call-own"), async (c) => {
-    assertCredentialProxyOpen(c.get("space")!);
-    const reach = reachOutsideRun(callerPermissions(c));
-    const data = await listIntegrationsOutsideRun(
-      getSpaceScope(c),
-      getActor(c),
-      reach,
-      connectOfferPolicyFromRequest(c),
-    );
     return c.json(listResponse(data));
   });
 
@@ -499,10 +488,11 @@ export function createCredentialProxyRouter() {
     },
   );
 
-  // The typed tools of a remote MCP integration (`credential-proxy/remote-tools.ts`), under the
-  // access rule of `/proxy` outside a run. The limiter keys on the route pattern, so `/tools/list`,
-  // `/tools/call` and `/proxy` each count in their own bucket: discovery never spends the budget
-  // of calls, and each `tools/call` counts once.
+  // The tools callable outside a run (`credential-proxy/integration-tools.ts`) and the typed tools
+  // of a remote MCP integration (`credential-proxy/remote-tools.ts`), under the access rule of
+  // `/proxy` outside a run. The limiter keys on the route pattern, so `/tools`, `/tools/call` and
+  // `/proxy` each count in their own bucket: discovery never spends the budget of calls, and each
+  // `tools/call` counts once.
   const remoteToolsCaller = (c: Context<AppEnv>) => {
     assertBearerOnly(c.get("authMethod"), "Credential proxy", {
       firstPartyLoopback: c.get("firstPartyLoopback"),
@@ -522,19 +512,19 @@ export function createCredentialProxyRouter() {
     };
   };
 
-  router.post(
-    "/tools/list",
+  router.get(
+    "/tools",
     rateLimit(limits.rate_per_min),
     requirePermission("credential-proxy", "call-own"),
     async (c) => {
       const caller = remoteToolsCaller(c);
-      const body = await readJsonBody(c, listRemoteToolsSchema);
-      const catalog = await listRemoteTools({
-        ...caller,
-        integrationId: body.integration_id,
-        ...(body.connection_id ? { connectionId: body.connection_id } : {}),
+      const query = parseBody(listIntegrationToolsQuerySchema, c.req.query());
+      const listing = await listIntegrationTools(caller, {
+        ...(query.integration_package_id ? { integrationId: query.integration_package_id } : {}),
+        ...(query.name ? { name: query.name } : {}),
+        ...(query.connection_id ? { connectionId: query.connection_id } : {}),
       });
-      return c.json(catalog);
+      return c.json(listing);
     },
   );
 
@@ -547,7 +537,7 @@ export function createCredentialProxyRouter() {
       const body = await readJsonBody(c, callRemoteToolSchema);
       const result = await callRemoteTool({
         ...caller,
-        integrationId: body.integration_id,
+        integrationId: body.integration_package_id,
         ...(body.connection_id ? { connectionId: body.connection_id } : {}),
         name: body.name,
         arguments: body.arguments ?? {},
