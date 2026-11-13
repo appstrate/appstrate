@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Server half of `appstrate code sync`: a client of the MCP Skills extension
- * (SEP-2640) through its REST reflection (`GET /api/mcp/skills…`, documented in
- * the OpenAPI). One list call per space (its published skills, or its drafts),
+ * Server half of `appstrate code sync`: reads the skills as the instance serves
+ * them to MCP clients (the MCP Skills extension, SEP-2640) through the package
+ * API (`GET /api/packages/skills/served…`, documented in the OpenAPI). One list call per space (its published skills, or its drafts),
  * and one archive download per changed skill, each file checked against its
  * served digest; concurrency is capped because the routes are rate limited.
  */
@@ -43,7 +43,7 @@ export const MAX_CONCURRENCY = 8;
 
 export type SkillSource = TargetState["source"];
 
-const SKILLS_PATH = "/api/mcp/skills";
+const SKILLS_PATH = "/api/packages/skills/served";
 const DRAFT_VERSION = "draft";
 const DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
 
@@ -200,7 +200,7 @@ export async function listSyncableSkills(
     if (err instanceof ApiError && err.status === 404) {
       throw new SkillSyncError(
         `Listing the skills of space ${spaceId} failed: ${SKILLS_PATH} answered 404 (${err.message})`,
-        "code sync reads skills through the instance's mcp module: the instance does not run it (ask its administrator to add `mcp` to MODULES), or the space is not readable.",
+        "The instance does not serve this route (its version is older than this CLI's: ask its administrator to upgrade it), or the space is not readable.",
       );
     }
     throw err;

@@ -120,6 +120,7 @@ import {
   validateAgentIntegrationSelections,
 } from "../services/integration-scope-validation.ts";
 import { SCOPED_PACKAGE_ROUTE } from "./scoped-package-route.ts";
+import { buildServedSkills, servedSkillsContext } from "../services/served-skills.ts";
 import { assertSpaceId, isSpaceId } from "../lib/ids.ts";
 import {
   resolvePackageFileValidator,
@@ -1834,8 +1835,49 @@ const requireAnyPackageWrite = requireAnyPermission(PACKAGE_WRITE_PERMISSIONS);
 // Router
 // ═══════════════════════════════════════════════
 
+/** The skills of the space the request entered, as the platform serves them. */
+function requestServedSkills(c: Context<AppEnv>) {
+  return buildServedSkills(
+    servedSkillsContext(c, [
+      { orgId: c.get("orgId"), spaceId: c.get("space")!.id, permissions: c.get("permissions")! },
+    ]),
+  );
+}
+
 export function createPackagesRouter() {
   const router = new Hono<AppEnv>();
+
+  // --- The served skills, for `appstrate code sync` ---
+  //
+  // The entries and the files of the space's skills as the MCP Skills extension
+  // (SEP-2640) serves them, through the same function (`services/served-skills.ts`),
+  // with the token every REST route takes. `served` is a literal segment under
+  // `/skills`: `/skills/{scope}/{name}` takes a scope starting with `@`, and the
+  // type-agnostic `/{scope}/{name}/…` acts take one too, so neither matches these
+  // paths. Registered before the per-type routes all the same, so a literal
+  // segment always comes first.
+  const readSkills = requirePermission("skills", "read");
+  router.get("/skills/served", rateLimit(50), readSkills, async (c) => {
+    const definition = c.req.query("definition") ?? "published";
+    if (definition !== "published" && definition !== "draft") {
+      throw invalidRequest("`definition` must be `published` or `draft`", "definition");
+    }
+    return c.json(listResponse(await requestServedSkills(c).list(definition)));
+  });
+  router.get("/skills/served/archive", rateLimit(50), readSkills, async (c) => {
+    const uri = c.req.query("uri");
+    if (!uri) throw invalidRequest("The `uri` query parameter is required", "uri");
+    const files = await requestServedSkills(c).skillFiles(uri);
+    if (!files) throw notFound(`No skill readable at ${uri}`);
+    return new Response(new Uint8Array(zipArtifact(files)), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/zip",
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, no-cache",
+      },
+    });
+  });
 
   // --- Package CRUD routes (skills, agents, integrations) ---
   for (const rcfg of Object.values(ROUTE_CONFIGS)) {

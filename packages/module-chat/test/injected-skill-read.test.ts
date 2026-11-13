@@ -252,9 +252,12 @@ describe("one skill, the same bytes for the chat, an MCP client and `code sync`"
     }
 
     // `code sync`: the archive it checks against the entry's digests and writes as is.
-    const archive = await app.request(`/api/mcp/skills/archive?uri=${encodeURIComponent(uri)}`, {
-      headers: { ...headers, "X-Space-Id": owner.defaultSpaceId },
-    });
+    const archive = await app.request(
+      `/api/packages/skills/served/archive?uri=${encodeURIComponent(uri)}`,
+      {
+        headers: { ...headers, "X-Space-Id": owner.defaultSpaceId },
+      },
+    );
     expect(archive.status).toBe(200);
     const files = unzipArtifact(new Uint8Array(await archive.arrayBuffer()));
     const decoder = new TextDecoder();

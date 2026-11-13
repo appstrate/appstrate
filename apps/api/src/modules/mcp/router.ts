@@ -104,7 +104,8 @@ import {
   type McpSurface,
 } from "./tools.ts";
 import { buildOperationIndex, buildOrgWideOperationIndex, operationIdGranted } from "./catalog.ts";
-import { createSkillRouter, skillServerFor } from "./skill-routes.ts";
+import { buildSkillServer } from "./skills.ts";
+import { servedSkillsContext } from "../../services/served-skills.ts";
 import { SKILL_URI_PREFIX } from "@appstrate/core/skill-uri";
 import {
   listReachableSpaces,
@@ -688,13 +689,15 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const files = buildFileResourceProvider(toolCtx);
     // `skills/*` and `resources/read` for `skill://` (SEP-2640), in every space this
     // connection reaches, each read with the caller's permissions in that space.
-    const skills = skillServerFor(
-      c,
-      (orgSpaces?.reachable ?? [{ id: scope.spaceId, permissions }]).map((space) => ({
-        orgId: org,
-        spaceId: space.id,
-        permissions: space.permissions,
-      })),
+    const skills = buildSkillServer(
+      servedSkillsContext(
+        c,
+        (orgSpaces?.reachable ?? [{ id: scope.spaceId, permissions }]).map((space) => ({
+          orgId: org,
+          spaceId: space.id,
+          permissions: space.permissions,
+        })),
+      ),
     );
     const resources: AppstrateResourceProvider = {
       read: (uri, extra) =>
@@ -759,9 +762,6 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
   };
   app.all(MCP_PATH, notAllowed);
   app.all(MCP_SPACE_PATH, notAllowed);
-
-  // The skill server as REST, for `appstrate code sync`.
-  app.route("/", createSkillRouter());
 
   return app;
 }

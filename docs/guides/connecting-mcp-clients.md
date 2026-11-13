@@ -280,13 +280,12 @@ the `resources` capability. Results carry no cache attributes.
   caller holds `chat:write` there — even if the skill is switched off or
   `skills:read` is withdrawn mid-turn, since its `SKILL.md` is already in
   context.
-- **REST.** `appstrate code sync` reads the same entries and bytes over REST,
-  for the space `X-Space-Id` names and behind `skills:read` there:
-  `GET /api/mcp/skills` (the entries of `skills/list`; with
+- **REST.** `appstrate code sync` reads the same entries and bytes through the
+  package API, for the space `X-Space-Id` names and behind `skills:read` there:
+  `GET /api/packages/skills/served` (the entries of `skills/list`; with
   `?definition=draft`, the drafts you may read, at their `@draft` URIs) and
-  `GET /api/mcp/skills/archive?uri=` (a ZIP of every file `resources/read`
-  serves for the skill whose `SKILL.md` is at `uri`). Neither route is an
-  operation of the MCP catalog.
+  `GET /api/packages/skills/served/archive?uri=` (a ZIP of every file
+  `resources/read` serves for the skill whose `SKILL.md` is at `uri`).
 
 ## The tool surface
 

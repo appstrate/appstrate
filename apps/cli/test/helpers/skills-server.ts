@@ -2,9 +2,9 @@
 
 /**
  * A stand-in for the routes `appstrate code sync` reads — `GET /api/spaces` and
- * the REST reflection of the MCP Skills extension (`GET /api/mcp/skills`,
- * `/api/mcp/skills/archive`) — driven by a table of skills rather than by per-test URL
- * matching.
+ * the served skills of the package API (`GET /api/packages/skills/served`,
+ * `/api/packages/skills/served/archive`) — driven by a table of skills rather
+ * than by per-test URL matching.
  *
  * Entries are served the way the server serves them: packaging entries
  * dropped, the `SKILL.md` `name` pointed at the served name with the shared
@@ -262,7 +262,7 @@ export function createSkillServer(
       return json({ object: "list", data: spaces.map(spaceWire) });
     }
 
-    if (path === "/api/mcp/skills") {
+    if (path === "/api/packages/skills/served") {
       // The list IS the ACTIVE set of the space at the definition asked — its
       // published skills, or the drafts this caller may read — the narrowing the
       // server applies, reproduced here so a sync that read a wider listing fails.
@@ -282,7 +282,7 @@ export function createSkillServer(
     }
 
     const uri = url.searchParams.get("uri") ?? "";
-    if (path === "/api/mcp/skills/archive") {
+    if (path === "/api/packages/skills/served/archive") {
       const found = locate(uri, spaceId);
       if (!found || found.filePath !== "SKILL.md") {
         return json({ code: "not_found", message: `No skill readable at ${uri}` }, 404);

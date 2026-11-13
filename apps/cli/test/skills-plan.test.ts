@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `lib/skills-sync/plan.ts` — catalogue reading (`GET /api/mcp/skills`),
+ * `lib/skills-sync/plan.ts` — catalogue reading (`GET /api/packages/skills/served`),
  * pinning by served digests, slug assignment and the verified download
- * (`GET /api/mcp/skills/archive`).
+ * (`GET /api/packages/skills/served/archive`).
  *
  * `globalThis.fetch` is stubbed with the shared skill server
  * (`helpers/skills-server.ts`) rather than injected: the CLI's whole auth
@@ -351,7 +351,8 @@ describe("fetchSkillFiles", () => {
     const served = globalThis.fetch;
     let archiveReads = 0;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-      if (new URL(String(input)).pathname === "/api/mcp/skills/archive") archiveReads += 1;
+      if (new URL(String(input)).pathname === "/api/packages/skills/served/archive")
+        archiveReads += 1;
       return served(input, init);
     }) as unknown as typeof fetch;
 
@@ -370,7 +371,7 @@ describe("fetchSkillFiles", () => {
     const original = await fetchSkillFiles("default", skill);
     const serveArchive = (files: Record<string, Uint8Array>) => {
       globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
-        new URL(String(input)).pathname === "/api/mcp/skills/archive"
+        new URL(String(input)).pathname === "/api/packages/skills/served/archive"
           ? new Response(new Uint8Array(zipArtifact(files)), {
               headers: { "Content-Type": "application/zip" },
             })
@@ -428,7 +429,7 @@ describe("listSyncableSkills — what the list route answers", () => {
     createSkillServer([{ id: "@acme/pdf", skillMd: skillMd("pdf") }]).install();
     const served = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
-      new URL(String(input)).pathname === "/api/mcp/skills"
+      new URL(String(input)).pathname === "/api/packages/skills/served"
         ? response()
         : served(input, init)) as unknown as typeof fetch;
   }
@@ -445,7 +446,7 @@ describe("listSyncableSkills — what the list route answers", () => {
     expect(() => resolveSkill(listed!)).toThrow(/Malformed skill entry/);
   });
 
-  it("explains a 404: the instance may not run the mcp module", async () => {
+  it("explains a 404: the instance may not serve the route", async () => {
     serveList(() =>
       Response.json({ code: "not_found", detail: "API endpoint not found" }, { status: 404 }),
     );
@@ -454,6 +455,6 @@ describe("listSyncableSkills — what the list route answers", () => {
       /answered 404/,
     );
     const error = await listSyncableSkills("default", "spc_1", "published").catch((e) => e);
-    expect((error as { hint?: string }).hint).toMatch(/mcp module/);
+    expect((error as { hint?: string }).hint).toMatch(/does not serve this route/);
   });
 });

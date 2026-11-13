@@ -229,7 +229,7 @@ describe("skills/get on a draft", () => {
     const meta = { _meta: { [SKILL_DEFINITION_META_KEY]: "draft" } };
     const listed = (await call(ownerHeaders(), "skills/list", meta)).result?.skills as Entry[];
     const rest = (await (
-      await app.request("/api/mcp/skills?definition=draft", {
+      await app.request("/api/packages/skills/served?definition=draft", {
         headers: { ...ownerHeaders(), "X-Space-Id": owner.defaultSpaceId },
       })
     ).json()) as { data: Entry[] };
@@ -255,14 +255,15 @@ describe("skills/get on a draft", () => {
   });
 });
 
-describe("REST reflection (`appstrate code sync`)", () => {
+describe("served skills of the package API (`appstrate code sync`)", () => {
   const rest = (headers: Record<string, string>, path: string) =>
     app.request(path, { headers: { ...headers, "X-Space-Id": owner.defaultSpaceId } });
-  const archivePath = (uri: string) => `/api/mcp/skills/archive?uri=${encodeURIComponent(uri)}`;
+  const archivePath = (uri: string) =>
+    `/api/packages/skills/served/archive?uri=${encodeURIComponent(uri)}`;
 
   it("serves the entries and bytes the MCP endpoint serves to the same caller", async () => {
     const mcp = await call(inSpace(ownerHeaders(), owner.defaultSpaceId), "skills/list", {});
-    const listed = await rest(ownerHeaders(), "/api/mcp/skills");
+    const listed = await rest(ownerHeaders(), "/api/packages/skills/served");
     expect(listed.status).toBe(200);
     const body = (await listed.json()) as { object: string; data: Entry[] };
     expect(body.object).toBe("list");
@@ -286,7 +287,7 @@ describe("REST reflection (`appstrate code sync`)", () => {
   });
 
   it("covers the space X-Space-Id names only", async () => {
-    const body = (await (await rest(ownerHeaders(), "/api/mcp/skills")).json()) as {
+    const body = (await (await rest(ownerHeaders(), "/api/packages/skills/served")).json()) as {
       data: Entry[];
     };
     expect(body.data.map((e) => e.uri)).toContain(toneUri());
@@ -311,14 +312,14 @@ describe("REST reflection (`appstrate code sync`)", () => {
   it("lists the drafts an author may read with definition=draft, and none to a reader", async () => {
     const draftUri = `skill://${owner.defaultSpaceId}/skillsext/tone@draft/tone/SKILL.md`;
     const mcp = await call(ownerHeaders(), "skills/get", { uri: draftUri });
-    const res = await rest(ownerHeaders(), "/api/mcp/skills?definition=draft");
+    const res = await rest(ownerHeaders(), "/api/packages/skills/served?definition=draft");
     expect(res.status).toBe(200);
     const drafts = ((await res.json()) as { data: Entry[] }).data;
     const draft = drafts.find((e) => e.uri === draftUri)!;
     expect(draft).toEqual(mcp.result?.skill as Entry);
     expect(draft.frontmatter.metadata).toBeUndefined();
     const reader = await guest({ [owner.defaultSpaceId]: ["skills:read"] });
-    const readerDrafts = await rest(reader, "/api/mcp/skills?definition=draft");
+    const readerDrafts = await rest(reader, "/api/packages/skills/served?definition=draft");
     expect(((await readerDrafts.json()) as { data: Entry[] }).data).toEqual([]);
     expect((await rest(reader, archivePath(draftUri))).status).toBe(404);
   });
@@ -327,12 +328,14 @@ describe("REST reflection (`appstrate code sync`)", () => {
     await seedUnpublishedSkill("@skillsext/fresh", "fresh");
     const draftUri = `skill://${owner.defaultSpaceId}/skillsext/fresh@draft/fresh/SKILL.md`;
     const drafts = (await (
-      await rest(ownerHeaders(), "/api/mcp/skills?definition=draft")
+      await rest(ownerHeaders(), "/api/packages/skills/served?definition=draft")
     ).json()) as {
       data: Entry[];
     };
     expect(drafts.data.map((e) => e.uri)).toContain(draftUri);
-    const published = (await (await rest(ownerHeaders(), "/api/mcp/skills")).json()) as {
+    const published = (await (
+      await rest(ownerHeaders(), "/api/packages/skills/served")
+    ).json()) as {
       data: Entry[];
     };
     expect(published.data.map((e) => e.uri).some((uri) => uri.includes("/fresh"))).toBe(false);
@@ -357,7 +360,7 @@ describe("REST reflection (`appstrate code sync`)", () => {
   });
 
   it("serves the published version in metadata.version", async () => {
-    const body = (await (await rest(ownerHeaders(), "/api/mcp/skills")).json()) as {
+    const body = (await (await rest(ownerHeaders(), "/api/packages/skills/served")).json()) as {
       data: Entry[];
     };
     const tone = body.data.find((e) => e.uri === toneUri())!;
@@ -366,10 +369,12 @@ describe("REST reflection (`appstrate code sync`)", () => {
 
   it("refuses a caller without skills:read, a request without uri, and an unknown definition", async () => {
     const headers = await guest({ [owner.defaultSpaceId]: ["mcp:read"] });
-    expect((await rest(headers, "/api/mcp/skills")).status).toBe(403);
+    expect((await rest(headers, "/api/packages/skills/served")).status).toBe(403);
     expect((await rest(headers, archivePath(toneUri()))).status).toBe(403);
-    expect((await rest(ownerHeaders(), "/api/mcp/skills/archive")).status).toBe(400);
-    expect((await rest(ownerHeaders(), "/api/mcp/skills?definition=latest")).status).toBe(400);
+    expect((await rest(ownerHeaders(), "/api/packages/skills/served/archive")).status).toBe(400);
+    expect(
+      (await rest(ownerHeaders(), "/api/packages/skills/served?definition=latest")).status,
+    ).toBe(400);
   });
 });
 
