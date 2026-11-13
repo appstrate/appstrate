@@ -65,6 +65,15 @@ async function signInEmail(email: string, password: string, emergency = false) {
   };
 }
 
+/** The session a response ends on: a refresh may set the old one before the new one. */
+function lastSessionCookie(res: Response): string {
+  const values = res.headers
+    .getSetCookie()
+    .map((c) => /^better-auth\.session_token=([^;]+)/.exec(c)?.[1])
+    .filter((v): v is string => !!v);
+  return `better-auth.session_token=${values.at(-1)}`;
+}
+
 async function sessionCount(userId: string): Promise<number> {
   return (await db.select().from(session).where(eq(session.userId, userId))).length;
 }
@@ -170,6 +179,34 @@ describe("an enforced domain", () => {
         createdAt.getTime() + ENFORCED_SESSION_MAX_AGE_MS,
       );
     });
+  });
+
+  it("never extends an enforced session by chaining password changes", async () => {
+    const owner = await createTestUser({ email: `chain@${DOMAIN}`, emailVerified: true });
+    await addOrgMember(ctx.orgId, owner.id, "owner");
+    await db.delete(session).where(eq(session.userId, owner.id));
+    let cookie = lastSessionCookie((await signInEmail(owner.email, PASSWORD, true)).res);
+    const original = new Date(Date.now() - 23 * 60 * 60 * 1000);
+    await db.update(session).set({ createdAt: original }).where(eq(session.userId, owner.id));
+    let password = PASSWORD;
+    for (let i = 0; i < 3; i++) {
+      const next = `Rotated${i}Password123!`;
+      const res = await client.post(
+        "/change-password",
+        { currentPassword: password, newPassword: next, revokeOtherSessions: true },
+        cookie,
+      );
+      expect(res.status).toBe(200);
+      cookie = lastSessionCookie(res);
+      password = next;
+    }
+    await app.request("/api/profile", { headers: { Cookie: cookie } });
+    const rows = await db.select().from(session).where(eq(session.userId, owner.id));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.createdAt.getTime()).toBe(original.getTime());
+    expect(rows[0]!.expiresAt.getTime()).toBeLessThanOrEqual(
+      original.getTime() + ENFORCED_SESSION_MAX_AGE_MS,
+    );
   });
 
   it("refuses a password sign-up at the domain", async () => {

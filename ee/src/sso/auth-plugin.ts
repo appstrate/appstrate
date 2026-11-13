@@ -196,7 +196,7 @@ function originOf(
 async function beforeSessionCreate(
   session: { userId: string; expiresAt: Date },
   context: HookContext | null,
-): Promise<{ data: { expiresAt: Date } } | void> {
+): Promise<{ data: { expiresAt: Date; createdAt?: Date } } | void> {
   const user = await readUser(session.userId, context);
   if (!user || user.realm !== "platform") return;
   const policy = await policyForEmail(user.email);
@@ -216,7 +216,12 @@ async function beforeSessionCreate(
     });
     throw refusal(context, decision.code);
   }
-  return { data: { expiresAt: decision.expiresAt } };
+  return {
+    data: {
+      expiresAt: decision.expiresAt,
+      ...(decision.createdAt ? { createdAt: decision.createdAt } : {}),
+    },
+  };
 }
 
 /**
