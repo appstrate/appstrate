@@ -46,7 +46,6 @@ export function useIntegrationListColumns(
       header: t("integrations.col.server"),
       width: 140,
       elastic: true,
-      tier: 3,
       cell: ({ server }) => (
         <span className="text-muted-foreground truncate font-mono text-xs">
           {server ? `${server.name} ${server.version}` : "—"}
@@ -58,7 +57,6 @@ export function useIntegrationListColumns(
       header: t("integrations.col.connections"),
       width: 112,
       align: "end",
-      tier: 2,
       cell: (integration) => {
         const count = connectionCounts && (connectionCounts.get(integration.id) ?? 0);
         return (
@@ -72,7 +70,6 @@ export function useIntegrationListColumns(
       id: "version",
       header: t("integrations.col.version"),
       width: 88,
-      tier: 3,
       cell: (integration) => (
         <span className="text-muted-foreground truncate font-mono text-xs">
           {integration.version ?? "—"}

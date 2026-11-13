@@ -15,7 +15,6 @@ export function RunsTable({
   error,
   empty,
   banner,
-  tiered,
   surface,
 }: {
   runs: EnrichedRun[];
@@ -31,8 +30,6 @@ export function RunsTable({
   empty: ReactNode;
   /** Pinned above the first row (e.g. a scheduled next run). */
   banner?: ReactNode;
-  /** Read columns wait for room by their tier; see `DataTable`. */
-  tiered?: boolean;
   surface?: "framed" | "integrated";
 }) {
   const { t } = useTranslation(["agents"]);
@@ -51,7 +48,6 @@ export function RunsTable({
       error={error}
       empty={empty}
       banner={banner}
-      tiered={tiered}
       surface={surface}
       rowKey={(run) => run.id}
       // A deleted agent has no agent page, so `/agents/:packageId/runs/:id`

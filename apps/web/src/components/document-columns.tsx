@@ -41,21 +41,18 @@ export function useDocumentColumns({
       id: "purpose",
       header: t("column.purpose"),
       width: 104,
-      tier: 2,
       cell: (doc) => <CellText>{t(`purpose.${doc.purpose}`)}</CellText>,
     },
     {
       id: "type",
       header: t("column.type"),
       width: 92,
-      tier: 2,
       cell: (doc) => <CellText title={doc.mime}>{t(`type.${mimeKind(doc.mime)}`)}</CellText>,
     },
     {
       id: "size",
       header: t("column.size"),
       width: 72,
-      tier: 3,
       align: "end",
       cell: (doc) => (
         <span className="text-muted-foreground text-xs tabular-nums">{formatBytes(doc.size)}</span>
@@ -65,7 +62,6 @@ export function useDocumentColumns({
       id: "created",
       header: t("column.created"),
       width: 120,
-      tier: 3,
       align: "end",
       cell: (doc) => <CellDate value={doc.createdAt} granularity="datetime" />,
     },
@@ -73,7 +69,6 @@ export function useDocumentColumns({
       id: "retention",
       header: t("column.retention"),
       width: 112,
-      tier: 3,
       cell: (doc) => (
         <span className="text-xs">
           {doc.expiresAt ? (

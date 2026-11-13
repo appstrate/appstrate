@@ -157,8 +157,7 @@ export function useProviderColumns({
                   {label}
                 </CellText>
               )}
-              {/* Mes clés holds keys and subscriptions together: the kind reads under the name,
-                  where no width tier can hide it. */}
+              {/* Mes clés holds keys and subscriptions together: the kind reads under the name. */}
               {showType && <CellText>{typeText(row.kind)}</CellText>}
               {pk?.owner_type === "user" && pk.owner_id !== userId && pk.owner_name && (
                 <CellText title={pk.owner_name}>{pk.owner_name}</CellText>
@@ -193,7 +192,6 @@ export function useProviderColumns({
       header: t("providers.col.provider"),
       width: 90,
       elastic: true,
-      tier: 2,
       cell: (row) => {
         // The instance spans several services: its row says where its models come from.
         const text = row.serviceName ?? (row.kind === "system" ? t("providers.instanceName") : "—");
@@ -223,7 +221,6 @@ export function useProviderColumns({
       // A badge or two: the room it does not need goes to the name and models.
       width: 100,
       elastic: true,
-      tier: 2,
       cell: (row) => (
         <RowStateCell
           states={rowStates(row)}

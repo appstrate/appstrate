@@ -396,30 +396,29 @@ credentials (`lib/model-picker.ts`); a new surface that picks a model uses this 
   or with `elastic` the floor of a column that shares what is left. A header that
   truncates at 1440 px is a column too narrow, fix the width. Text a cell truncates
   carries its full value in `title` (a name, an email, a list); a column that holds
-  a name has a floor that fits a usual one. Every column is drawn and the table
-  scrolls sideways, unless the table is `tiered` (a narrow panel, a modal, a detail
-  tab): then a READ column waits for room by its `tier`.
+  a name has a floor that fits a usual one. A column whose cells say what they are
+  (a status badge) sets `hideHeader`: its head is read by screen readers and named
+  in the column menu, but not drawn. Every column the reader keeps is drawn,
+  at every width, and a table too wide for its container scrolls sideways: the
+  width never hides a column, the column menu does.
   Its required `tableId` is the stable key for column widths, independent of its
   translated accessible `label`; occurrences of the same table share that key.
   `PackageCollection` callers compose their columns and visibility menu directly,
   sharing `usePackageNameColumn` for the identity column (its second line is the
   description, else the package id in mono, so every row keeps one height).
 - **Three rules for every table** (both live in `DataTable`, no caller opts in):
-  1. **A column that can be acted on never disappears.** A column declares what it
-     is in its definition: a READ column (text, badge, date) may carry a `tier`
-     and wait for room in a `tiered` table (tier `2` for a 36rem table, `3` for a
-     56rem one); a CONTROL column (`control: true`: a select, a switch, a tick, a
-     button, a link that does something) has no tier and is always drawn. The type
-     forbids a `tier` on a control, and `DataTable` itself drops any tier given to a
-     control or to the row's « … » column (`components/test/data-table.test.tsx`), so
-     mark every column that holds a control. When a table does not fit, it scrolls
-     sideways and holds its name column (the first read column, with the ticks before it)
-     and its row's end (the headerless « … » column) in place (`sticky`), so a row
-     is always named and its actions are always in reach. A scroll is better than
+  1. **No column disappears on its own.** A column declares what it is in its
+     definition: a READ column (text, badge, date) or a CONTROL column
+     (`control: true`: a select, a switch, a tick, a button, a link that does
+     something). The row's name is the read column marked `identity`, else the first
+     read column; the column menu cannot hide it. When a table does not fit, it
+     scrolls sideways and holds its name column (with the fixed-width columns before
+     it) and its row's end (the headerless « … » column) in place (`sticky`), so a
+     row is always named and its actions are always in reach. A scroll is better than
      a lost control, and a « … » menu is not the place for a dropdown: a control
      that is the setting (role, share, default) stays in its own column.
   2. **A row is a link.** The cover link stretches over the row; the named link
-     lives in the first read cell.
+     lives in the name cell.
   3. **Columns resize.** Drag the right edge of a head; a double-click gives the
      column back its declared width. The width is kept per table (its `label`) in
      `localStorage`, never goes under the declared one, and the table works without

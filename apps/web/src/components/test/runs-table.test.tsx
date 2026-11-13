@@ -32,13 +32,13 @@ const agentIdentity = () => ({ icon: "lucide:chart-bar", color: "blue" });
  */
 function Harness({
   runs,
-  hideAgentName,
+  oneAgent,
   ...props
 }: {
   runs: EnrichedRun[];
-  hideAgentName?: boolean;
+  oneAgent?: boolean;
 } & Omit<Parameters<typeof RunsTable>[0], "runs" | "columns" | "agentName" | "empty">) {
-  const columns = useRunColumns({ agentName, agentIdentity, hideAgentName });
+  const columns = useRunColumns({ agentName, agentIdentity, oneAgent });
   return <RunsTable runs={runs} columns={columns} agentName={agentName} empty={null} {...props} />;
 }
 
@@ -59,12 +59,11 @@ describe("the runs column set", () => {
   });
 
   it("renders the run's facts in their columns", () => {
-    expect(html).toContain("#42");
+    expect(html).toContain(`#42 · ${STARTED_AT_LABEL}`); // under the agent, in « Run »
     expect(html).toContain("Rapport trimestriel");
     expect(html).toContain("Alice"); // trigger
     expect(html).toContain('aria-label="eu-proxy"'); // the egress it went through
-    expect(html).toContain("4,2\u202fs"); // duration
-    expect(html).toContain(STARTED_AT_LABEL);
+    expect(html).toContain("4,2\u202fs"); // duration, at the end of « Run »
   });
 
   it("draws the agent's tile before its name", () => {
@@ -74,12 +73,11 @@ describe("the runs column set", () => {
 
   it("leads to the run, under a name that says which run", () => {
     expect(html).toContain('href="/agents/@acme/reporter/runs/run_1"');
-    // Not "#42": the link sits in the agent column, and a row has to be
-    // identifiable out of context.
+    // Not just the agent: a row has to be identifiable out of context.
     expect(html).toContain('aria-label="Run #42 (Rapport trimestriel)"');
   });
 
-  it("holds the run's identity and timing, not its outcome", () => {
+  it("holds which run, how it ended, its timing and its launch — not its outcome", () => {
     // The outcome (error, output, files) lives on the run's own page: a list
     // cell can only truncate it.
     function Probe() {
@@ -87,7 +85,7 @@ describe("the runs column set", () => {
         .map((column) => column.id)
         .join(",");
     }
-    expect(render(<Probe />)).toBe("num,agent,status,trigger,duration,date");
+    expect(render(<Probe />)).toBe("status,run,trigger");
   });
 });
 
@@ -104,24 +102,35 @@ describe("the trigger column", () => {
   });
 });
 
-describe("what a surface subtracts", () => {
-  it("drops the agent column inside an agent, head and cells together", () => {
-    const html = table([makeRun()], { hideAgentName: true });
-    expect(html).not.toContain(agentsFr["schedule.agent"]);
+describe("the status column", () => {
+  it("draws no head: the badge says what it is", () => {
+    const html = table();
+    expect(html).toMatch(/<th[^>]*data-column="status"[^>]*>\s*<span class="sr-only">/);
+  });
+});
+
+describe("the row's link", () => {
+  it("sits on « Run », though the status comes first", () => {
+    const html = table();
+    expect(html).toMatch(
+      /<a aria-label="Run #42 \(Rapport trimestriel\)"[^>]*>\s*<div[^>]*>[\s\S]*?Rapport trimestriel/,
+    );
+    const status = html.match(/<td[^>]*data-column="status"[^>]*>[\s\S]*?<\/td>/)?.[0] ?? "";
+    expect(status).not.toContain('aria-label="Run #42');
+  });
+});
+
+describe("inside one agent", () => {
+  const html = table([makeRun()], { oneAgent: true });
+
+  it("leads « Run » with the number, without repeating the agent", () => {
+    expect(html).toContain(">#42<");
     expect(html).not.toContain(">Rapport trimestriel<");
-    expect(html).not.toContain("#2563eb1f");
-    // The row's accessible NAME keeps it, though: a link has to say which run
-    // it leads to even when the column that showed it is gone.
-    expect(html).toContain('aria-label="Run #42 (Rapport trimestriel)"');
-    // The row still leads somewhere: the link moves to the next surviving column.
-    expect(html).toContain('href="/agents/@acme/reporter/runs/run_1"');
+    expect(html).not.toContain("bg-identity-");
   });
 
-  it("keeps the badges that explain a missing Cancel or Re-run", () => {
-    const html = table([makeRun({ package_ephemeral: false, runOrigin: "remote" })], {
-      hideAgentName: true,
-    });
-    expect(html).toContain(agentsFr["runs.remoteBadge"]);
+  it("still names the row's link after the agent", () => {
+    expect(html).toContain('aria-label="Run #42 (Rapport trimestriel)"');
   });
 });
 

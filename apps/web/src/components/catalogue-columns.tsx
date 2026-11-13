@@ -66,8 +66,8 @@ export function useCatalogueSelectColumn({
 
 /**
  * The one origin column of every package table: the provider, with the home space
- * (which governs the draft) under it. A column each would cost the tier-3 budget a
- * whole track. A system package has no home space.
+ * (which governs the draft) under it. A column each would cost a whole track. A
+ * system package has no home space.
  */
 export function useCatalogueOriginColumn<
   T extends { source?: string | null; autoInstalled?: boolean } = CardItem,
@@ -77,7 +77,6 @@ export function useCatalogueOriginColumn<
     id: "origin",
     header: t("catalogue.origin"),
     width: 128,
-    tier: 3,
     cell: (item) => {
       const home = item.source === "system" ? null : homeNameOf?.(item);
       return (
@@ -148,7 +147,6 @@ export function useCatalogueProtocolColumn<T = CardItem>(
     id: "protocol",
     header: t("catalogue.column.protocol"),
     width: 88,
-    tier: 2,
     cell: (item) => {
       const protocol = protocolOf(item);
       return protocol ? (

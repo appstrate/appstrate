@@ -173,7 +173,6 @@ export function MemoryPanel({
         )}
         <DataTable
           tableId="package-memories"
-          tiered
           label={t("agents:detail.tabMemory")}
           columns={columns}
           rows={filteredItems}

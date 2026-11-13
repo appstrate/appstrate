@@ -94,7 +94,8 @@ function OperationalSummary({ packageId, detail }: { packageId: string; detail: 
     <div className="flex flex-col gap-8" data-agent-operational-overview>
       <div className="grid gap-6 xl:grid-cols-3">
         <DetailSectionCard title={t("detail.overview.runs")} icon={PlayCircle} bodyClassName="p-0">
-          <dl className="grid h-full divide-y">
+          {/* A container for the compact status below: it follows the card's width. */}
+          <dl className="@container grid h-full divide-y">
             <OperationalStat
               size="sm"
               label={

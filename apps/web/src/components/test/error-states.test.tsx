@@ -40,7 +40,7 @@ describe("RunList", () => {
           undefined,
           undefined,
           undefined,
-          20,
+          15,
           0,
         ),
       })

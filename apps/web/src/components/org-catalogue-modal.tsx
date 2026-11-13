@@ -158,8 +158,8 @@ export function OrgCatalogueModal({
   const agentLook = new Map((agentsHere ?? []).map((agent) => [agent.id, agent] as const));
   const integrationById = new Map((integrations ?? []).map((row) => [row.id, row] as const));
   const librarySpaces = library?.spaces ?? [];
-  // The current space leads (not the server's default-first order): it is the column that
-  // survives a narrow width (tier 2, in `useCatalogueSpaceColumns`).
+  // The current space leads (not the server's default-first order): it is the first space
+  // column a reader sees before scrolling sideways.
   const spaces = [...librarySpaces].sort(
     (a, b) => Number(b.id === spaceId) - Number(a.id === spaceId),
   );

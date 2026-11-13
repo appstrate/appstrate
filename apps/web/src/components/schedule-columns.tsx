@@ -75,7 +75,6 @@ export function useScheduleColumns({
       header: t("schedules.column.cron"),
       width: 140,
       elastic: true,
-      tier: 2,
       cell: (schedule) => {
         const recurrence = describeSchedule(schedule);
         return (
@@ -110,7 +109,6 @@ export function useScheduleColumns({
       width: 110,
       elastic: true,
       align: "end",
-      tier: 3,
       cell: (schedule) => (
         <CellDate value={scheduleNextRunAt(schedule)} timeZone={schedule.timezone} />
       ),
@@ -120,7 +118,6 @@ export function useScheduleColumns({
       header: t("schedules.column.last"),
       width: 110,
       elastic: true,
-      tier: 3,
       cell: (schedule) =>
         schedule.last_run_at ? (
           <span className="text-muted-foreground truncate text-xs">
@@ -137,7 +134,6 @@ export function useScheduleColumns({
       id: "actor",
       header: t("schedules.column.actor"),
       width: 132,
-      tier: 3,
       cell: (schedule) => (
         <ActorLabel
           actor_type={schedule.actor_type}

@@ -37,7 +37,7 @@ import {
 } from "../lib/query-keys";
 import { inlineRunDisplayName, runPageTitle } from "../lib/run-title";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
-import { RunHeaderActions, RunHeaderSummary } from "../components/run-detail/run-header-summary";
+import { RunHeaderActions } from "../components/run-detail/run-header-actions";
 import { RunExecutionView } from "../components/run-detail/run-execution-view";
 import { RunResultsView } from "../components/run-detail/run-results-view";
 import { RunSnapshotInspector } from "../components/run-detail/run-snapshot-inspector";
@@ -359,7 +359,6 @@ function RunDetailBody() {
 
       <div className="overflow-visible" data-run-detail-surface>
         <DetailTabPanel value="overview">
-          <RunHeaderSummary run={enrichedRun} />
           <RunSnapshotInspector
             run={enrichedRun}
             turns={turnRows}
