@@ -497,7 +497,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `409 insufficient_scopes` with `missing_scopes`, `required_scopes` and
   `remedy`, and one on an auth that does not serve the tool
   `auth_serves_no_selected_tool`, before anything is sent; the search lists,
-  per connection of each tool, its `missing_scopes`.
+  per connection of each tool, its `missing_scopes`. With
+  `X-Appstrate-Connect-Offers: 1`, which the MCP tools send, a selection
+  refusal's item a connect flow clears (a reconnection of the caller's own
+  connection) carries a `connect_url`, minted by the run launch's minter under
+  its policy (`integrations:connect`, never on `insufficient_scopes`).
   `call_integration_tool` takes an optional `connection_id` and sends
   one `tools/call` through the credential proxy, which injects the
   connection's credential and journals one call. Two routes back them, `POST

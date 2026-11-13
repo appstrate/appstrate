@@ -27248,6 +27248,9 @@
           },
           {
             "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "$ref": "#/components/parameters/ConnectOffers"
           }
         ],
         "requestBody": {
@@ -27334,7 +27337,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "The connection selection of `/api/credential-proxy/proxy` refused: `must_choose_connection` (`errors[0].candidate_connections`; retry with one `id` in `connection_id`), `needs_reconnection`, `pinned_connection_unavailable`.",
+            "description": "The connection selection of `/api/credential-proxy/proxy` refused: `must_choose_connection` (`errors[0].candidate_connections`; retry with one `id` in `connection_id`), `needs_reconnection`, `pinned_connection_unavailable`. With `X-Appstrate-Connect-Offers: 1`, an item a connect flow clears carries a `connect_url`.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -27371,6 +27374,9 @@
           },
           {
             "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "$ref": "#/components/parameters/ConnectOffers"
           }
         ],
         "requestBody": {
@@ -27447,7 +27453,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "The connection selection of `/api/credential-proxy/proxy` refused, judged for the named tool: `must_choose_connection` (`errors[0].candidate_connections`, each with its `missing_scopes` for the tool; retry with one `id` in `connection_id`), `needs_reconnection`, `pinned_connection_unavailable`; `insufficient_scopes` — the connection lacks scopes the tool's `tools_policy` entry requires (`errors[0].missing_scopes`, `required_scopes`, `auth_key`, `connection_id`, `owned_by_actor`, `remedy`); `auth_serves_no_selected_tool` — the connection's auth does not serve the tool.",
+            "description": "The connection selection of `/api/credential-proxy/proxy` refused, judged for the named tool: `must_choose_connection` (`errors[0].candidate_connections`, each with its `missing_scopes` for the tool; retry with one `id` in `connection_id`), `needs_reconnection`, `pinned_connection_unavailable`; `insufficient_scopes` — the connection lacks scopes the tool's `tools_policy` entry requires (`errors[0].missing_scopes`, `required_scopes`, `auth_key`, `connection_id`, `owned_by_actor`, `remedy`); `auth_serves_no_selected_tool` — the connection's auth does not serve the tool. With `X-Appstrate-Connect-Offers: 1`, an item a connect flow clears carries a `connect_url` (a reconnection of the caller's own connection; never `insufficient_scopes`, whose `remedy` says what to do).",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -32447,7 +32453,7 @@
         "name": "X-Appstrate-Connect-Offers",
         "in": "header",
         "required": false,
-        "description": "Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, and each such item of a launch response's `warnings`, also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it.",
+        "description": "Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, each such item of a launch response's `warnings`, and each such item of a `/api/credential-proxy/tools/*` connection-selection 409 also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it.",
         "schema": {
           "type": "string",
           "enum": ["1"]

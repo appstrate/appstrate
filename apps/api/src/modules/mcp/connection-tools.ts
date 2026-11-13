@@ -21,6 +21,7 @@ import type { AppstrateRequestExtra, AppstrateToolDefinition } from "@appstrate/
 import { isPlatformRequestHeader } from "@appstrate/connect/platform-request-headers";
 import { renderFieldPath } from "@appstrate/core/api-errors";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
+import { RUN_CONNECT_OFFERS_HEADER } from "@appstrate/core/run-and-wait-client";
 import { isTextShapedContentType } from "@appstrate/core/mime";
 import {
   getApiCallConfigs,
@@ -733,6 +734,15 @@ const REMOTE_TOOL_USAGE =
   "chooses as for an `api_call`. The result is the MCP server's own tool result, relayed " +
   `as is up to ${MAX_RESULT_BYTES} bytes; \`isError: true\` is the tool's own failure.`;
 
+/**
+ * A request to the proxy's tool routes. It asks for connect links: the MCP client hands a
+ * refusal's `connect_url` to the human driving it, as `run_and_wait` does (see
+ * `RUN_CONNECT_OFFERS_HEADER`).
+ */
+function remoteToolsRequestHeaders(): Headers {
+  return new Headers({ "Content-Type": "application/json", [RUN_CONNECT_OFFERS_HEADER]: "1" });
+}
+
 /** Upstream arguments: the server validates them against its own schema. */
 const remoteArgumentsSchema = z.record(z.string(), z.unknown());
 
@@ -754,10 +764,7 @@ async function remoteTools(
     const response = await ctx.dispatch(
       new Request(new URL(REMOTE_TOOLS_LIST_PATH, ctx.origin).toString(), {
         method: "POST",
-        headers: dispatchHeaders(
-          ctx.authHeaders,
-          new Headers({ "Content-Type": "application/json" }),
-        ),
+        headers: dispatchHeaders(ctx.authHeaders, remoteToolsRequestHeaders()),
         body: JSON.stringify({
           integration_id: integration.id,
           ...(named ? { connection_id: named } : {}),
@@ -834,10 +841,7 @@ async function executeRemoteTool(
   const response = await ctx.dispatch(
     new Request(new URL(REMOTE_TOOLS_CALL_PATH, ctx.origin).toString(), {
       method: "POST",
-      headers: dispatchHeaders(
-        ctx.authHeaders,
-        new Headers({ "Content-Type": "application/json" }),
-      ),
+      headers: dispatchHeaders(ctx.authHeaders, remoteToolsRequestHeaders()),
       body: JSON.stringify({
         integration_id: integrationId,
         ...(connectionId ? { connection_id: connectionId } : {}),

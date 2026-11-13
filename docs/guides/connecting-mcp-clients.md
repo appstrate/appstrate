@@ -456,7 +456,9 @@ role. Runs keep their connections there:
   `new_connection` or `rebind_by_admin`), one on an auth that does not serve the
   tool with `auth_serves_no_selected_tool`, both before anything is sent; when
   several qualify, the refusal lists the candidate connections, each with its
-  `missing_scopes` for the tool. A call is journaled as one call of
+  `missing_scopes` for the tool. A refusal you can clear by reconnecting your
+  own connection carries a `connect_url` to open when you hold
+  `integrations:connect`, as a run launch's does. A call is journaled as one call of
   that connection and counted once against the rate limit; it returns the
   server's own tool result (`isError: true` is the tool's failure), refused
   past 256 KiB. The server's tool annotations are not relayed:

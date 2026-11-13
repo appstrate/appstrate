@@ -618,6 +618,7 @@ export const credentialProxyPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/ConnectOffers" },
       ],
       requestBody: {
         required: true,
@@ -687,7 +688,8 @@ export const credentialProxyPaths = {
           description:
             "The connection selection of `/api/credential-proxy/proxy` refused: " +
             "`must_choose_connection` (`errors[0].candidate_connections`; retry with one `id` " +
-            "in `connection_id`), `needs_reconnection`, `pinned_connection_unavailable`.",
+            "in `connection_id`), `needs_reconnection`, `pinned_connection_unavailable`. With " +
+            "`X-Appstrate-Connect-Offers: 1`, an item a connect flow clears carries a `connect_url`.",
           content: problemContent,
         },
         "422": {
@@ -721,6 +723,7 @@ export const credentialProxyPaths = {
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
+        { $ref: "#/components/parameters/ConnectOffers" },
       ],
       requestBody: {
         required: true,
@@ -791,7 +794,9 @@ export const credentialProxyPaths = {
             "connection lacks scopes the tool's `tools_policy` entry requires " +
             "(`errors[0].missing_scopes`, `required_scopes`, `auth_key`, `connection_id`, " +
             "`owned_by_actor`, `remedy`); `auth_serves_no_selected_tool` — the connection's auth " +
-            "does not serve the tool.",
+            "does not serve the tool. With `X-Appstrate-Connect-Offers: 1`, an item a connect " +
+            "flow clears carries a `connect_url` (a reconnection of the caller's own connection; " +
+            "never `insufficient_scopes`, whose `remedy` says what to do).",
           content: problemContent,
         },
         "422": {

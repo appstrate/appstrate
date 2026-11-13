@@ -89,14 +89,46 @@ const remote = (
   ...(opts.variables ? { variables: opts.variables } : {}),
 });
 
+/** `remote()` with an `oauth` auth, on which `create` requires the `write` scope. */
+const withOauth = (): IntegrationManifest => {
+  const manifest = remote();
+  return {
+    ...manifest,
+    auths: {
+      ...manifest.auths,
+      oauth: {
+        type: "oauth2",
+        authorization_endpoint: "https://idp.example.com/authorize",
+        token_endpoint: "https://idp.example.com/token",
+        authorized_uris: [`${server.origin}/**`],
+        delivery: {
+          http: {
+            in: "header",
+            name: "Authorization",
+            prefix: "Bearer ",
+            value: "{$credential.access_token}",
+          },
+        },
+      },
+    },
+    tools_policy: { search: {}, create: { required_scopes: { oauth: ["write"] } }, forge: {} },
+  } as unknown as IntegrationManifest;
+};
+
 describe("POST /api/credential-proxy/tools/*", () => {
   let ctx: TestContext;
   let apiKey: string;
 
-  const post = (path: "list" | "call", body: unknown, key = apiKey) =>
+  const post = (
+    path: "list" | "call",
+    body: unknown,
+    key = apiKey,
+    extraHeaders: Record<string, string> = {},
+  ) =>
     getTestApp().request(`/api/credential-proxy/tools/${path}`, {
       method: "POST",
       headers: {
+        ...extraHeaders,
         Authorization: `Bearer ${key}`,
         "X-Org-Id": ctx.orgId,
         "X-Space-Id": ctx.defaultSpaceId,
@@ -201,28 +233,7 @@ describe("POST /api/credential-proxy/tools/*", () => {
   });
 
   it("refuses a call the selected connection lacks the tool's scopes for, before any exchange", async () => {
-    const manifest = remote();
-    await seedProxyIntegration(ctx, {
-      ...manifest,
-      auths: {
-        ...manifest.auths,
-        oauth: {
-          type: "oauth2",
-          authorization_endpoint: "https://idp.example.com/authorize",
-          token_endpoint: "https://idp.example.com/token",
-          authorized_uris: [`${server.origin}/**`],
-          delivery: {
-            http: {
-              in: "header",
-              name: "Authorization",
-              prefix: "Bearer ",
-              value: "{$credential.access_token}",
-            },
-          },
-        },
-      },
-      tools_policy: { search: {}, create: { required_scopes: { oauth: ["write"] } }, forge: {} },
-    } as unknown as IntegrationManifest);
+    await seedProxyIntegration(ctx, withOauth());
     const connectionId = await seedProxyConnection(ctx, ID, "oauth", { access_token: TOKEN });
 
     // Listing selects no tool: the same connection serves it.
@@ -241,6 +252,59 @@ describe("POST /api/credential-proxy/tools/*", () => {
       remedy: "upgrade_or_new",
     });
     expect(server.requests.length).toBe(exchanges);
+  });
+
+  describe("a connect link on a selection refusal", () => {
+    const OFFERS = { "X-Appstrate-Connect-Offers": "1" };
+    let connectKey: string;
+
+    beforeEach(async () => {
+      connectKey = (
+        await seedApiKey({
+          orgId: ctx.orgId,
+          spaceId: ctx.defaultSpaceId,
+          createdBy: ctx.user.id,
+          scopes: ["credential-proxy:call-own", "integrations:connect"],
+        })
+      ).rawKey;
+      await seedProxyIntegration(ctx, withOauth());
+    });
+
+    it("reconnects the caller's own connection, when asked for", async () => {
+      const connectionId = await seedProxyConnection(ctx, ID, "oauth", { access_token: TOKEN });
+      await db
+        .update(integrationConnections)
+        .set({ needsReconnection: true })
+        .where(eq(integrationConnections.id, connectionId));
+      const call = { integration_id: ID, name: "search", arguments: {} };
+
+      const offered = await post("call", call, connectKey, OFFERS);
+      expect(offered.status).toBe(409);
+      const problem = (await offered.json()) as { code: string; errors: Record<string, unknown>[] };
+      expect(problem.code).toBe("needs_reconnection");
+      expect(problem.errors[0]).toMatchObject({ connection_id: connectionId, auth_key: "oauth" });
+      expect(problem.errors[0]!.connect_url).toStartWith("http");
+
+      const bare = (await (await post("call", call, connectKey)).json()) as {
+        errors: Record<string, unknown>[];
+      };
+      expect(bare.errors[0]).not.toHaveProperty("connect_url");
+      expect(server.requests).toHaveLength(0);
+    });
+
+    it("offers none on insufficient_scopes, whose remedy says what to do", async () => {
+      await seedProxyConnection(ctx, ID, "oauth", { access_token: TOKEN });
+      const res = await post(
+        "call",
+        { integration_id: ID, name: "create", arguments: {} },
+        connectKey,
+        OFFERS,
+      );
+      expect(res.status).toBe(409);
+      const problem = (await res.json()) as { code: string; errors: Record<string, unknown>[] };
+      expect(problem.code).toBe("insufficient_scopes");
+      expect(problem.errors[0]).not.toHaveProperty("connect_url");
+    });
   });
 
   describe("a server URL built from the connection's variables", () => {

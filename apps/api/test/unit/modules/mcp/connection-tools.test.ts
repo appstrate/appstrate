@@ -951,6 +951,8 @@ describe("typed tools of a remote MCP integration", () => {
     const listed = made.calls[0]!;
     expect(new URL(listed.url).pathname).toBe("/api/credential-proxy/tools/list");
     expect(await listed.json()).toEqual({ integration_id: REMOTE });
+    // A refusal's connect link reaches the human driving the client.
+    expect(listed.headers.get("x-appstrate-connect-offers")).toBe("1");
   });
 
   it("lists a tool with, per connection, the scopes its policy requires that it lacks", async () => {
@@ -1098,6 +1100,7 @@ describe("typed tools of a remote MCP integration", () => {
       name: "search",
       arguments: { q: "invoices" },
     });
+    expect(call.headers.get("x-appstrate-connect-offers")).toBe("1");
   });
 
   it("refuses a missing required argument before calling", async () => {

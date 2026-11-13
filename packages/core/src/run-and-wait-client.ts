@@ -82,21 +82,23 @@ export type RunAndWaitHeaders = Headers | Record<string, string> | Array<[string
 
 /**
  * Request header asking the run-kickoff routes to mint a hosted-connect session
- * for every actor-actionable item of a `missing_integration_connection` 409 and
+ * for every actor-actionable item of a `missing_integration_connection` 409 (and
+ * the credential proxy's tool routes, for a connection-selection 409) and
  * return it as `connect_url` on that item (RFC 6750 / Arcade.dev pattern: the
  * error carries the remedy, so nothing has to be called to obtain it).
  *
  * A minted `connect_url` is a bearer capability that creates a connection AS
  * the calling actor. Set this header ONLY from a caller that either renders the
  * connect card itself (the chat) or hands the link straight to the human who is
- * that actor — the external MCP `run_and_wait` tool qualifies, because the model
- * driving it already receives a `connect_url` from `initiateIntegrationConnect`
- * on that very same path, so this is not a new exposure class. Never set it from
+ * that actor — the external MCP `run_and_wait` and `call_integration_tool` tools
+ * qualify, because the model driving them already receives a `connect_url` from
+ * `initiateIntegrationConnect` on that very same path, so this is not a new
+ * exposure class. Never set it from
  * a caller that logs its responses, persists them, or forwards them to a third
  * party; the dashboard, the CLI, the GitHub Action, the scheduler and dry-run
  * validation all leave it unset and keep driving the connect kickoff themselves.
  *
- * Sent on the LAUNCH request only; the poll loop never carries it.
+ * For a run, sent on the LAUNCH request only; the poll loop never carries it.
  */
 export const RUN_CONNECT_OFFERS_HEADER = "X-Appstrate-Connect-Offers";
 

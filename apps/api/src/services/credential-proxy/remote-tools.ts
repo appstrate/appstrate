@@ -25,12 +25,14 @@ import {
   type IntegrationManifest,
 } from "@appstrate/core/integration";
 import type { Actor } from "../../lib/actor.ts";
+import type { ConnectOfferPolicy } from "../../lib/connect-offer-policy.ts";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { ApiError, badGateway, notFound } from "../../lib/errors.ts";
+import { ApiError, badGateway, notFound, type ResolutionFieldError } from "../../lib/errors.ts";
 import { logger } from "../../lib/logger.ts";
 import { proxyProblem } from "../../lib/proxy-status.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import { trackAudit } from "../audit.ts";
+import { attachConnectOffers } from "../connect/preflight-connect-offer.ts";
 import { selectAccessibleConnection, type ProxyReach } from "../integration-connections.ts";
 import { renderRemoteSource } from "../integration-manifest-helpers.ts";
 import {
@@ -165,6 +167,11 @@ interface RemoteToolsInput {
   caller: ProxyCaller;
   /** The caller's request: its going away ends the exchange. */
   signal?: AbortSignal;
+  /**
+   * The caller asked for connect links (`RUN_CONNECT_OFFERS_HEADER`): a selection refusal's
+   * items then carry a `connect_url` where a run launch's would (`attachConnectOffers`).
+   */
+  connectOffers?: ConnectOfferPolicy | null;
 }
 
 /** The latest published manifest, the one `proxyCall` authorizes outside a run against. */
@@ -204,7 +211,9 @@ async function remoteConnection(
       reach: input.reach,
       ...(tool !== undefined ? { tool } : {}),
     },
-  );
+  ).catch(async (err: unknown) => {
+    throw await withConnectOffers(err, input);
+  });
   if (!connection) {
     throw proxyProblem(
       "credential_not_found",
@@ -228,6 +237,32 @@ async function remoteConnection(
     });
   }
   return { connectionId: connection.id, url: remote.url };
+}
+
+/**
+ * A selection refusal whose items a connect flow clears, each with its `connect_url`, under the
+ * policy and by the one minter of a run launch's 409 (`attachConnectOffers`); any other error as
+ * it is.
+ */
+async function withConnectOffers(err: unknown, input: RemoteToolsInput): Promise<unknown> {
+  const policy = input.connectOffers;
+  if (!policy || !(err instanceof ApiError) || !err.fieldErrors?.length) return err;
+  const errors = await attachConnectOffers({
+    errors: err.fieldErrors as ResolutionFieldError[],
+    scope: input.scope,
+    actor: input.actor,
+    policy,
+  });
+  return new ApiError({
+    status: err.status,
+    code: err.code,
+    title: err.title,
+    detail: err.message,
+    errors,
+    ...(err.param !== undefined ? { param: err.param } : {}),
+    ...(err.headers ? { headers: err.headers } : {}),
+    ...(err.extensions ? { extensions: err.extensions } : {}),
+  });
 }
 
 /**

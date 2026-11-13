@@ -78,6 +78,7 @@ import { listResponse } from "../lib/list-response.ts";
 import { getSpaceScope } from "../lib/scope.ts";
 import { logger } from "../lib/logger.ts";
 import { callerPermissions } from "../lib/permissions.ts";
+import { connectOfferPolicyFromRequest } from "../lib/connect-offer-policy.ts";
 import { assertBearerOnly } from "../lib/bearer-only.ts";
 import { relayIdempotencyKey } from "../middleware/idempotency.ts";
 import { rateLimit } from "../middleware/rate-limit.ts";
@@ -502,6 +503,7 @@ export function createCredentialProxyRouter() {
         requestId: c.get("requestId"),
       },
       signal: c.req.raw.signal,
+      connectOffers: connectOfferPolicyFromRequest(c),
     };
   };
 
