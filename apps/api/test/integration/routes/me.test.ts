@@ -10,7 +10,7 @@
  * preserves the zero-footprint test invariant.
  */
 
-import { describe, it, expect, beforeEach } from "bun:test";
+import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
@@ -30,6 +30,18 @@ import {
 } from "../../helpers/seed.ts";
 import { db } from "../../helpers/db.ts";
 import { seedShares } from "../../helpers/connection-shares.ts";
+import {
+  seedProxyConnection,
+  seedProxyIntegration,
+} from "../../helpers/credential-proxy-fixtures.ts";
+import {
+  httpHeaderDelivery,
+  localIntegrationManifest,
+} from "../../helpers/integration-manifests.ts";
+import {
+  __resetSystemIntegrationsForTest,
+  initSystemIntegrations,
+} from "../../../src/services/integration-client-registry.ts";
 import { assertDbHas, assertDbMissing } from "../../helpers/assertions.ts";
 import {
   auditEvents,
@@ -245,6 +257,93 @@ describe("Me API (/api/me)", () => {
       expect(byId.get("@ctx/gmail")?.source).toBe("own");
       expect(byId.get("@ctx/clickup")?.source).toBe("shared");
       expect(byId.has("@ctx/other-space")).toBe(false);
+    });
+
+    describe("connections[].active", () => {
+      afterEach(() => {
+        __resetSystemIntegrationsForTest();
+      });
+
+      async function readConnections(spaceId = ctx.defaultSpaceId) {
+        const res = await app.request("/api/me/context", {
+          headers: authHeaders(ctx, { "X-Space-Id": spaceId }),
+        });
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as {
+          connections: { integration_package_id: string; active: boolean }[];
+        };
+        return new Map(body.connections.map((c) => [c.integration_package_id, c.active]));
+      }
+
+      /** An org-scope connection (serving every space of the org) of the caller. */
+      const seedOrgConnection = (integrationId: string) =>
+        seedConnectionFor({
+          orgId: ctx.orgId,
+          spaceId: null,
+          originSpaceId: ctx.defaultSpaceId,
+          integrationId,
+          userId: ctx.user.id,
+        });
+
+      it("lists an org-scope connection of an integration not activated in the space as inactive", async () => {
+        await seedOrgConnection("@ctx/twilio");
+        const team = await seedSpace({ orgId: ctx.orgId, name: "Team" });
+        await seedSpacePackage(team.id, "@ctx/twilio");
+
+        expect((await readConnections()).get("@ctx/twilio")).toBe(false);
+        expect((await readConnections(team.id)).get("@ctx/twilio")).toBe(true);
+      });
+
+      it("lists the same connection as active once the integration is activated in the space", async () => {
+        await seedOrgConnection("@ctx/twilio");
+        await seedSpacePackage(ctx.defaultSpaceId, "@ctx/twilio");
+
+        expect((await readConnections()).get("@ctx/twilio")).toBe(true);
+      });
+
+      it("follows a system integration's activation: active without a row, inactive when switched off", async () => {
+        initSystemIntegrations([{ id: "@ctx/system-mail" }]);
+        await seedOrgConnection("@ctx/system-mail");
+
+        expect((await readConnections()).get("@ctx/system-mail")).toBe(true);
+
+        await seedSpacePackage(ctx.defaultSpaceId, "@ctx/system-mail", { enabled: false });
+        expect((await readConnections()).get("@ctx/system-mail")).toBe(false);
+      });
+
+      it("lists as active every integration GET /api/credential-proxy/connections lists", async () => {
+        const manifest = (name: string) =>
+          localIntegrationManifest({
+            name,
+            auths: {
+              api: {
+                type: "api_key",
+                authorizedUris: ["https://api.example.com/**"],
+                delivery: httpHeaderDelivery({ name: "X-Api-Key", field: "api_key" }),
+              },
+            },
+          });
+        await seedProxyIntegration(ctx, manifest("@ctx/active-a"));
+        await seedProxyConnection(ctx, "@ctx/active-a", "api", { api_key: "k" });
+        await seedProxyIntegration(ctx, manifest("@ctx/active-b"));
+        await seedProxyConnection(ctx, "@ctx/active-b", "api", { api_key: "k" });
+        await seedOrgConnection("@ctx/inactive");
+
+        const res = await app.request("/api/credential-proxy/connections", {
+          headers: authHeaders(ctx),
+        });
+        expect(res.status).toBe(200);
+        const proxied = new Set(
+          ((await res.json()) as { data: { integration_package_id: string }[] }).data.map(
+            (c) => c.integration_package_id,
+          ),
+        );
+        expect([...proxied].sort()).toEqual(["@ctx/active-a", "@ctx/active-b"]);
+
+        const listed = await readConnections();
+        for (const id of proxied) expect(listed.get(id)).toBe(true);
+        expect(listed.get("@ctx/inactive")).toBe(false);
+      });
     });
 
     it("names the space it resolved, following X-Space-Id rather than the default", async () => {
