@@ -18,7 +18,7 @@
  *   through `MODULES`, and a static import makes one mandatory and drags a
  *   differently-licensed tree into the Apache-2.0 one. The loader's computed
  *   `import(specifier)` is invisible to a specifier scan; a literal one is not.
- *   Apache-2.0 → commercial. NOTHING outside `packages/module-ee/` may statically
+ *   Apache-2.0 → commercial. NOTHING outside `packages/module-ee/` or `ee/` may statically
  *   import it — see `reviewCommercialDependencies`.
  * `apps/web` is out of scope of the core→module rule (the SPA imports a module's
  * UI on purpose). Test files are exempt module→module, and the platform→module
@@ -252,8 +252,19 @@ export function reviewPlatformModuleImports(imports: readonly PlatformImport[]):
  * The commercial tree — the repository's ONE non-Apache-2.0 directory, the same
  * prefix `verify-license-boundary.ts` checks headers against.
  */
-const COMMERCIAL_MODULE_PREFIX = "packages/module-ee/";
-const COMMERCIAL_MODULE_SPEC = "@appstrate/module-ee";
+const COMMERCIAL_TREES: readonly { prefix: string; spec: string }[] = [
+  { prefix: "packages/module-ee/", spec: "@appstrate/module-ee" },
+  { prefix: "ee/", spec: "@appstrate/ee" },
+];
+
+function commercialTreeOf(imp: PlatformImport): { prefix: string } | undefined {
+  return COMMERCIAL_TREES.find(
+    ({ prefix, spec }) =>
+      imp.spec === spec ||
+      imp.spec.startsWith(`${spec}/`) ||
+      imp.resolved?.startsWith(prefix) === true,
+  );
+}
 
 /**
  * Decide which files take a STATIC dependency on the commercial tree. Pure — the
@@ -271,14 +282,11 @@ const COMMERCIAL_MODULE_SPEC = "@appstrate/module-ee";
 export function reviewCommercialDependencies(imports: readonly PlatformImport[]): string[] {
   const problems: string[] = [];
   for (const imp of imports) {
-    const reaches =
-      imp.spec === COMMERCIAL_MODULE_SPEC ||
-      imp.spec.startsWith(`${COMMERCIAL_MODULE_SPEC}/`) ||
-      imp.resolved?.startsWith(COMMERCIAL_MODULE_PREFIX) === true;
-    if (!reaches) continue;
+    const tree = commercialTreeOf(imp);
+    if (!tree) continue;
     problems.push(
-      `${imp.file} imports \`${imp.spec}\` → reaches into \`${COMMERCIAL_MODULE_PREFIX}\`, the one ` +
-        `source-available tree in this repository. No Apache-2.0 file may depend on it statically: ` +
+      `${imp.file} imports \`${imp.spec}\` → reaches into \`${tree.prefix}\`, a ` +
+        `source-available tree of this repository. No Apache-2.0 file may depend on it statically: ` +
         `the module is opt-in through MODULES and removable from a redistribution, so this import ` +
         `is both a licence leak and a build that dies with the directory.`,
     );
@@ -353,6 +361,17 @@ if (import.meta.main) {
       }
       MODULE_ROOTS[id] = resolve(ROOT, "packages", dir);
     }
+  }
+
+  // The commercial `ee/` package, a module of its own at the repository root (id `enterprise`).
+  if (await Bun.file(resolve(ROOT, "ee/src/index.ts")).exists()) {
+    if (MODULE_ROOTS.enterprise) {
+      console.error(
+        `❌ module id \`enterprise\` is claimed twice: ${MODULE_ROOTS.enterprise} and ${resolve(ROOT, "ee")}.`,
+      );
+      process.exit(1);
+    }
+    MODULE_ROOTS.enterprise = resolve(ROOT, "ee");
   }
 
   const problems: string[] = [];
@@ -449,7 +468,7 @@ if (import.meta.main) {
   // above already read can report twice: both lines are true and both are fatal.
   const commercialImports: PlatformImport[] = [];
   const licensedFiles = trackedFiles(SOURCE_GLOBS, "source file", "skip").filter(
-    (file) => !file.startsWith(COMMERCIAL_MODULE_PREFIX),
+    (file) => !COMMERCIAL_TREES.some(({ prefix }) => file.startsWith(prefix)),
   );
   // Bounded batches: one `await` per file is I/O-bound enough to blow this gate's own test
   // timeout, and one `Promise.all` over everything would blow `ulimit -n`.
@@ -483,7 +502,8 @@ if (import.meta.main) {
     console.log(
       `✅ module isolation clean — ${filesScanned} files across ${Object.keys(MODULE_ROOTS).length} modules, ` +
         `${platformFilesScanned} platform files with no static module import, ` +
-        `${licensedFiles.length} tracked files with no static import of ${COMMERCIAL_MODULE_PREFIX}` +
+        `${licensedFiles.length} tracked files with no static import of ` +
+        `${COMMERCIAL_TREES.map(({ prefix }) => prefix).join(" or ")}` +
         `${accepted > 0 ? `, ${accepted} accepted cross-module import(s)` : ", no cross-module imports"}.`,
     );
     for (const e of ACCEPTED_CROSS_MODULE_IMPORTS) {

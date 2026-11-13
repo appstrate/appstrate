@@ -33,8 +33,8 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
     bun install --frozen-lockfile
 
 # ── Stage 2b: Runtime install (shipped workspace members only) ────
-# The final image ships exactly three node_modules trees — root (the shared
-# `.bun` store), apps/api, and packages/* — so the runtime install is filtered
+# The final image ships exactly four node_modules trees — root (the shared
+# `.bun` store), apps/api, packages/* and ee — so the runtime install is filtered
 # to that subgraph. This drops apps/web (monaco-editor, react-icons,
 # lucide-react …), apps/cli, e2e (playwright) and the root dev toolchain
 # (turbo, typescript, prettier, eslint, redocly) from the store the final
@@ -60,7 +60,7 @@ RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
 FROM manifests AS deps-runtime
 
 RUN --mount=type=cache,target=/root/.bun/install/cache,sharing=locked \
-    bun install --frozen-lockfile --filter '@appstrate/api' --filter './packages/*'
+    bun install --frozen-lockfile --filter '@appstrate/api' --filter './packages/*' --filter './ee'
 
 # ── Stage 3: Build ────────────────────────────────────────────────
 FROM oven/bun:1.4.2-alpine AS build
@@ -109,7 +109,7 @@ WORKDIR /app
 # module-chat); the glob can't miss a member and skips absent dirs instead
 # of failing the build.
 COPY --from=deps-runtime /app/node_modules ./node_modules
-COPY --from=deps-runtime --parents /app/./apps/api/node_modules /app/./packages/*/node_modules ./
+COPY --from=deps-runtime --parents /app/./apps/api/node_modules /app/./packages/*/node_modules /app/./ee/node_modules ./
 
 # ── Workspace package sources (Bun runs TypeScript directly — no build step) ──
 # Graph-derived via `COPY --parents`: apps/api source + every packages/*/src
@@ -124,6 +124,8 @@ COPY --from=deps-runtime --parents /app/./apps/api/node_modules /app/./packages/
 # (validation, schema, db client, auth, modules, env, connect, runner-pi).
 COPY --from=build --parents /app/./apps/api/src /app/./apps/api/package.json ./
 COPY --from=build --parents /app/./packages/*/src /app/./packages/*/package.json ./
+# The commercial root package `ee/` (enterprise sign-in), loaded through MODULES.
+COPY --from=build --parents /app/./ee/src /app/./ee/package.json /app/./ee/drizzle ./
 
 # Non-`src` package assets that must ship alongside their package source.
 # Every `packages/*/drizzle` is graph-derived like the `src` globs above, so a
@@ -145,7 +147,7 @@ RUN mkdir -p data storage && chown -R bun:bun data storage
 # Ensure the unprivileged `bun` user owns the workspace package trees
 # COPYed in as root (so any runtime scratch writes under node_modules
 # succeed).
-RUN chown -R bun:bun /app/packages /app/apps/api/node_modules
+RUN chown -R bun:bun /app/packages /app/ee /app/apps/api/node_modules
 
 # Root package.json needed for workspace resolution
 COPY --from=build /app/package.json ./
@@ -164,9 +166,10 @@ COPY --from=build /app/scripts/verify-system-models.ts ./scripts/verify-system-m
 RUN ln -s ../apps/api/node_modules scripts/node_modules
 
 # The image ships two licences: Apache-2.0 for the platform, and the commercial
-# one for packages/module-ee, which is shipped by the `packages/*` globs above.
+# one for packages/module-ee and ee/, which are shipped by the globs above.
 COPY --from=build /app/LICENSE /app/NOTICE ./
 COPY --from=build --chown=bun:bun /app/packages/module-ee/LICENSE ./packages/module-ee/LICENSE
+COPY --from=build --chown=bun:bun /app/ee/LICENSE ./ee/LICENSE
 
 # su-exec for lightweight privilege drop in entrypoint
 RUN apk add --no-cache su-exec

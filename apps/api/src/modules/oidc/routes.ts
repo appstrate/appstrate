@@ -453,7 +453,27 @@ function allowSignupForClient(client: { allowSignup: boolean }): boolean {
  * login page. Codes we don't recognize fall back to a generic message so the
  * user isn't left with a silent white screen.
  */
+/**
+ * Refusals from an organization's sign-in policy (the commercial enterprise
+ * sign-in module): the address belongs to a domain that requires Microsoft, or
+ * the Microsoft account comes from another tenant than the organization's.
+ */
+const SSO_REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
+  sso_required:
+    "Votre organisation exige la connexion avec Microsoft pour cette adresse. Utilisez « Continuer avec Microsoft ».",
+  sso_tenant_mismatch:
+    "Ce compte Microsoft n'appartient pas à l'organisation qui détient cette adresse. Connectez-vous avec votre compte professionnel.",
+};
+
+/** The policy refusal a Better Auth error body carries, if any. */
+function ssoRefusalIn(bodyText: string): string | null {
+  const code = Object.keys(SSO_REFUSAL_MESSAGES).find((c) => bodyText.includes(`"${c}"`));
+  return code ? SSO_REFUSAL_MESSAGES[code]! : null;
+}
+
 function mapLoginErrorCode(code: string): string {
+  const refusal = SSO_REFUSAL_MESSAGES[code];
+  if (refusal) return refusal;
   switch (code) {
     case "signup_disabled":
       return "L'inscription n'est pas ouverte sur cet espace. Contactez un administrateur pour être ajouté à l'organisation.";
@@ -1190,6 +1210,8 @@ export function createOidcRouter() {
         logger.error("oidc: signInEmail infra error", { error: msg, email });
         return renderError("Erreur serveur temporaire, veuillez réessayer.", 500, email);
       }
+      const refusal = ssoRefusalIn(JSON.stringify((err as { body?: unknown }).body ?? null));
+      if (refusal) return renderError(refusal, 403, email);
       logger.warn("oidc: signInEmail threw", { error: msg, email });
       return renderError("Email ou mot de passe incorrect.", 401, email);
     }
@@ -1215,6 +1237,8 @@ export function createOidcRouter() {
         });
         return c.html(sentPage.value);
       }
+      const refusal = ssoRefusalIn(bodyText);
+      if (refusal) return renderError(refusal, 403, email);
       return renderError("Email ou mot de passe incorrect.", 401, email);
     }
 
@@ -1514,6 +1538,8 @@ export function createOidcRouter() {
       )) as Response;
     } catch (err) {
       const msg = getErrorMessage(err);
+      const refusal = ssoRefusalIn(JSON.stringify((err as { body?: unknown }).body ?? null));
+      if (refusal) return renderRegError(refusal, 403, email, name);
       logger.error("oidc: signUpEmail failed", { error: msg, email });
       if (msg.includes("already exists") || msg.includes("duplicate")) {
         return renderRegError(
@@ -1533,6 +1559,8 @@ export function createOidcRouter() {
         body: bodyText.slice(0, 400),
         email,
       });
+      const refusal = ssoRefusalIn(bodyText);
+      if (refusal) return renderRegError(refusal, 403, email, name);
       if (authResponse.status === 422 || bodyText.includes("already exists")) {
         return renderRegError(
           "Un compte existe déjà avec cet email. Essayez de vous connecter.",
