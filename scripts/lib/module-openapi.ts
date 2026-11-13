@@ -35,7 +35,7 @@ interface CollectedModuleOpenApi {
   ownedTagNames: Set<string>;
 }
 
-/** A discovered workspace-package module under `packages/module-*`. */
+/** A discovered workspace-package module under `packages/module-*`, or the root `ee/`. */
 interface WorkspaceModuleDir {
   /** Package directory name, e.g. "module-chat". */
   name: string;
@@ -55,6 +55,11 @@ interface WorkspaceModuleDir {
  */
 export function discoverWorkspaceModuleDirs(packagesDir: string): WorkspaceModuleDir[] {
   if (!existsSync(packagesDir)) return [];
+  // The commercial `ee/` package sits at the repository root, beside `packages/`.
+  const eeDir = join(packagesDir, "..", "ee");
+  const ee: WorkspaceModuleDir[] = existsSync(join(eeDir, "src/index.ts"))
+    ? [{ name: "ee", srcDir: join(eeDir, "src"), entryFile: join(eeDir, "src/index.ts") }]
+    : [];
   return readdirSync(packagesDir)
     .filter((name) => {
       if (!name.startsWith("module-")) return false;
@@ -69,7 +74,8 @@ export function discoverWorkspaceModuleDirs(packagesDir: string): WorkspaceModul
       name,
       srcDir: join(packagesDir, name, "src"),
       entryFile: join(packagesDir, name, "src/index.ts"),
-    }));
+    }))
+    .concat(ee);
 }
 
 /**

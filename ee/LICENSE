@@ -1,0 +1,26 @@
+Appstrate Commercial License
+
+Copyright (c) 2025-2026 Appstrate. All rights reserved.
+
+This directory is NOT covered by the Apache License 2.0 that governs the rest
+of this repository.
+
+You may read this source code, review it, and submit contributions to it under
+the repository's Contributor License Agreement. You may run it for the sole
+purpose of developing, testing or evaluating such a contribution.
+
+Any other use requires a written commercial agreement with Appstrate. Without
+one you may not:
+
+  - run this software in production, or use it to provide a service to anyone;
+  - copy, modify, distribute or sublicense it, in source or binary form;
+  - use it to build or operate a service that competes with Appstrate.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE
+OR OTHER DEALINGS IN THE SOFTWARE.
+
+To obtain a commercial licence, contact hello@appstrate.dev.

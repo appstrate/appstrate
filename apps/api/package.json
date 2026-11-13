@@ -21,6 +21,7 @@
     "@appstrate/core": "workspace:*",
     "@appstrate/db": "workspace:*",
     "@appstrate/emails": "workspace:*",
+    "@appstrate/ee": "workspace:*",
     "@appstrate/env": "workspace:*",
     "@appstrate/mcp-transport": "workspace:*",
     "@appstrate/module-chat": "workspace:*",

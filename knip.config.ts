@@ -570,6 +570,16 @@ const config: KnipConfig = {
     "packages/module-observability": {
       entry: [...manifestEntries("packages/module-observability"), "test/tables.ts"],
     },
+    // The commercial root package: same shape as module-ee (own journal, own truncate list,
+    // Postgres-only test requirement, drizzle config run by `db:generate`).
+    ee: {
+      entry: [
+        ...manifestEntries("ee"),
+        "test/tables.ts",
+        "test/requirements.ts",
+        "drizzle/drizzle.config.ts",
+      ],
+    },
 
     "packages/core": {
       // Every target of the `exports` map. Published on npm and consumed out
