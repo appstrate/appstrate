@@ -385,6 +385,8 @@ type ConnectionSelectionContext = {
    * run they are then not read again. Never mutated.
    */
   orgDefaults?: Record<string, OrgDefaultPick>;
+  /** The tool the call runs, when it names one: the selection then serves it (`proxyRequirement`). */
+  tool?: string;
 } & ProxySelectionPath;
 
 /**
@@ -394,7 +396,9 @@ type ConnectionSelectionContext = {
  * id must be one of its members and is picked alone (the resolver would bind the imposed set
  * whole), an unnamed call binds the default; under `own` no org default applies, and an
  * integration an enforced one governs answers `call_permission_required`. `null` when nothing
- * answers, as for an id out of reach (a colleague's row or none). The pick passes health checks.
+ * answers, as for an id out of reach (a colleague's row or none). The pick passes health checks,
+ * and serves `context.tool` when the call names one: a row short of its scopes or on an auth that
+ * does not serve it answers `insufficient_scopes` or `auth_serves_no_selected_tool`.
  */
 export async function selectAccessibleConnection(
   packageId: string,
@@ -467,7 +471,7 @@ export async function selectAccessibleConnection(
   }
 
   const { resolved, errors } = resolveConnections({
-    requirements: [proxyRequirement(packageId, manifest)],
+    requirements: [proxyRequirement(packageId, manifest, context.tool)],
     accessibleConnections: rows,
     pins: [],
     orgDefaults,

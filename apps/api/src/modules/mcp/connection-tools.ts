@@ -24,6 +24,7 @@ import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { isTextShapedContentType } from "@appstrate/core/mime";
 import {
   getApiCallConfigs,
+  missingScopesForConnection,
   resolveIntegrationToolCatalog,
   type IntegrationManifest,
 } from "@appstrate/core/integration";
@@ -447,6 +448,31 @@ interface ListedIntegration {
   connections: ListedConnection[];
 }
 
+/**
+ * `connections`, each with the scopes `tool`'s `tools_policy` entry requires on its auth that it
+ * lacks (`missing_scopes`): the rule the proxy's selection applies to a typed tool's call
+ * (`proxyRequirement`), which answers `insufficient_scopes` with such a connection.
+ */
+function withMissingScopes(
+  manifest: IntegrationManifest,
+  tool: string,
+  connections: readonly ListedConnection[],
+): ListedConnection[] {
+  return connections.map((connection) => {
+    const granted = Array.isArray(connection.scopes_granted)
+      ? connection.scopes_granted.filter((scope): scope is string => typeof scope === "string")
+      : [];
+    const missing = missingScopesForConnection({
+      manifest,
+      authKey: connection.auth_key,
+      granted,
+      agentTools: [tool],
+      agentScopes: [],
+    });
+    return { ...connection, missing_scopes: missing };
+  });
+}
+
 /** What an integration tool's call comes back with, unless it refuses its arguments. */
 interface ToolCallOutcome {
   result: CallToolResult;
@@ -668,7 +694,11 @@ async function integrationTools(
     .filter((config) => catalog.has(config.toolName))
     .map((config) => ({
       config,
-      connections: integration.connections.filter((c) => c.auth_key === config.authKey),
+      connections: withMissingScopes(
+        manifest,
+        config.toolName,
+        integration.connections.filter((c) => c.auth_key === config.authKey),
+      ),
     }))
     .filter((entry) => entry.connections.length > 0)
     .map(({ config, connections }): IntegrationTool => {
@@ -773,7 +803,7 @@ async function remoteTools(
         usage: REMOTE_TOOL_USAGE,
         schema: remoteArgumentsSchema,
         inputSchema: upstream.input_schema,
-        connections: integration.connections,
+        connections: withMissingScopes(manifest, upstream.name, integration.connections),
         execute: (
           args: Record<string, unknown>,
           extra: AppstrateRequestExtra,
@@ -878,7 +908,10 @@ function buildSearchIntegrationToolsTool(ctx: ConnectionToolContext): AppstrateT
       "`connection_id` to pass, the `authorized_uris` a target must match (unless " +
       "`allow_all_uris`; an entry may hold a `{$credential.<field>}` the proxy alone resolves, " +
       "see the `target` argument of `input_schema`), its `scopes_granted`, and what a call " +
-      "would still refuse: `needs_reconnection`, and `call_permission_required` (an enforced " +
+      "would still refuse: `missing_scopes` (the scopes the tool's policy requires on the " +
+      "connection's auth that it lacks; a typed tool's call with it answers " +
+      "`insufficient_scopes`), `needs_reconnection`, and " +
+      "`call_permission_required` (an enforced " +
       "organization default governs the integration and you hold `credential-proxy:call-own` " +
       "alone). Both flags describe a call passing that `connection_id`; with none passed and " +
       "`credential-proxy:call` held, an organization default applies first. A connection you " +

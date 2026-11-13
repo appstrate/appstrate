@@ -184,25 +184,63 @@ describe("POST /api/credential-proxy/tools/*", () => {
       })
     ).rawKey;
 
-    const cold = await post(
-      "list",
-      { integration_id: ID, connection_id: connectionId },
-      colleagueKey,
-    );
-    expect(cold.status).toBe(404);
     // The owner's listing fills the cache for that connection.
     expect((await post("list", { integration_id: ID, connection_id: connectionId })).status).toBe(
       200,
     );
+    const exchanges = server.requests.length;
     const warm = await post(
       "list",
       { integration_id: ID, connection_id: connectionId },
       colleagueKey,
     );
     expect(warm.status).toBe(404);
-    expect(((await warm.json()) as { code: string }).code).toBe(
-      ((await cold.json()) as { code: string }).code,
-    );
+    expect(((await warm.json()) as { code: string }).code).toBe("credential_not_found");
+    // Refused by the selection: neither the cache nor the server answered the colleague.
+    expect(server.requests.length).toBe(exchanges);
+  });
+
+  it("refuses a call the selected connection lacks the tool's scopes for, before any exchange", async () => {
+    const manifest = remote();
+    await seedProxyIntegration(ctx, {
+      ...manifest,
+      auths: {
+        ...manifest.auths,
+        oauth: {
+          type: "oauth2",
+          authorization_endpoint: "https://idp.example.com/authorize",
+          token_endpoint: "https://idp.example.com/token",
+          authorized_uris: [`${server.origin}/**`],
+          delivery: {
+            http: {
+              in: "header",
+              name: "Authorization",
+              prefix: "Bearer ",
+              value: "{$credential.access_token}",
+            },
+          },
+        },
+      },
+      tools_policy: { search: {}, create: { required_scopes: { oauth: ["write"] } }, forge: {} },
+    } as unknown as IntegrationManifest);
+    const connectionId = await seedProxyConnection(ctx, ID, "oauth", { access_token: TOKEN });
+
+    // Listing selects no tool: the same connection serves it.
+    expect((await post("list", { integration_id: ID })).status).toBe(200);
+    const exchanges = server.requests.length;
+    const res = await post("call", { integration_id: ID, name: "create", arguments: {} });
+    expect(res.status).toBe(409);
+    const problem = (await res.json()) as { code: string; errors: Record<string, unknown>[] };
+    expect(problem.code).toBe("insufficient_scopes");
+    expect(problem.errors[0]).toMatchObject({
+      connection_id: connectionId,
+      auth_key: "oauth",
+      missing_scopes: ["write"],
+      required_scopes: ["write"],
+      owned_by_actor: true,
+      remedy: "upgrade_or_new",
+    });
+    expect(server.requests.length).toBe(exchanges);
   });
 
   describe("a server URL built from the connection's variables", () => {

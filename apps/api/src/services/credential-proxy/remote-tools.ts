@@ -186,16 +186,24 @@ async function remoteManifest(integrationId: string, orgId: string): Promise<Int
 /**
  * The caller's connection of the integration, selected as `proxyCall` selects it (named id,
  * organization defaults, reach), and the server URL rendered from its variables (AFPS §7.12).
+ * With `tool`, the selection serves that tool: its auths and the scopes its `tools_policy` entry
+ * requires (`insufficient_scopes` names what is missing and the remedy).
  */
 async function remoteConnection(
   input: RemoteToolsInput & { connectionId?: string },
   manifest: IntegrationManifest,
+  tool?: string,
 ): Promise<{ connectionId: string; url: string }> {
   const connection = await selectAccessibleConnection(
     input.integrationId,
     manifest,
     input.connectionId ?? null,
-    { spaceId: input.scope.spaceId, actor: input.actor, reach: input.reach },
+    {
+      spaceId: input.scope.spaceId,
+      actor: input.actor,
+      reach: input.reach,
+      ...(tool !== undefined ? { tool } : {}),
+    },
   );
   if (!connection) {
     throw proxyProblem(
@@ -351,7 +359,8 @@ export async function listRemoteTools(
 
 /**
  * One `tools/call` on a remote integration's server, for a tool its catalog offers; the result's
- * forged runtime events are dropped. A tool outside the catalog is refused before any exchange.
+ * forged runtime events are dropped. A tool outside the catalog, or a connection that does not
+ * serve the tool (its auth, its scopes), is refused before any exchange.
  */
 export async function callRemoteTool(
   input: RemoteToolsInput & {
@@ -370,7 +379,7 @@ export async function callRemoteTool(
   if (!offered.has(input.name)) {
     throw notFound(`Integration '${input.integrationId}' offers no tool named '${input.name}'`);
   }
-  const { connectionId, url } = await remoteConnection(input, manifest);
+  const { connectionId, url } = await remoteConnection(input, manifest, input.name);
   try {
     const result = await withClient(
       { ...input, connectionId, timeoutMs: CALL_TIMEOUT_MS },

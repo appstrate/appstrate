@@ -12551,6 +12551,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The connection selection of `/api/credential-proxy/proxy` refused, judged for the named tool: `must_choose_connection` (`errors[0].candidate_connections`, each with its `missing_scopes` for the tool; retry with one `id` in `connection_id`), `needs_reconnection`, `pinned_connection_unavailable`; `insufficient_scopes` — the connection lacks scopes the tool's `tools_policy` entry requires (`errors[0].missing_scopes`, `required_scopes`, `auth_key`, `connection_id`, `owned_by_actor`, `remedy`); `auth_serves_no_selected_tool` — the connection's auth does not serve the tool. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description `integration_not_remote` — the integration is not backed by a Streamable HTTP MCP server; `remote_url_unrenderable` — its server URL is built from the connection's variables and they do not render it. */
             422: {
                 headers: {
@@ -12623,6 +12632,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
+            /** @description The connection selection of `/api/credential-proxy/proxy` refused: `must_choose_connection` (`errors[0].candidate_connections`; retry with one `id` in `connection_id`), `needs_reconnection`, `pinned_connection_unavailable`. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
             /** @description `integration_not_remote` — the integration is not backed by a Streamable HTTP MCP server; `remote_url_unrenderable` — its server URL is built from the connection's variables and they do not render it. */
             422: {
                 headers: {

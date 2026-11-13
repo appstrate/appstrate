@@ -492,7 +492,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `catalog_unreadable`). The connection is selected once, by the credential
   proxy's rule, before the catalog cache is read, the server URL is rendered
   (a URL built from connection variables uses that connection's) and anything
-  is sent. `call_integration_tool` takes an optional `connection_id` and sends
+  is sent. A call selects the connection for the tool it runs: one lacking the
+  scopes the tool's `tools_policy` entry requires answers
+  `409 insufficient_scopes` with `missing_scopes`, `required_scopes` and
+  `remedy`, and one on an auth that does not serve the tool
+  `auth_serves_no_selected_tool`, before anything is sent; the search lists,
+  per connection of each tool, its `missing_scopes`.
+  `call_integration_tool` takes an optional `connection_id` and sends
   one `tools/call` through the credential proxy, which injects the
   connection's credential and journals one call. Two routes back them, `POST
 /api/credential-proxy/tools/list` and `POST /api/credential-proxy/tools/call`,

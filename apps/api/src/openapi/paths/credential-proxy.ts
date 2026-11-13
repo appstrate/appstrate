@@ -683,6 +683,13 @@ export const credentialProxyPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "The connection selection of `/api/credential-proxy/proxy` refused: " +
+            "`must_choose_connection` (`errors[0].candidate_connections`; retry with one `id` " +
+            "in `connection_id`), `needs_reconnection`, `pinned_connection_unavailable`.",
+          content: problemContent,
+        },
         "422": {
           description:
             "`integration_not_remote` — the integration is not backed by a Streamable HTTP MCP " +
@@ -775,6 +782,18 @@ export const credentialProxyPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
+        "409": {
+          description:
+            "The connection selection of `/api/credential-proxy/proxy` refused, judged for the " +
+            "named tool: `must_choose_connection` (`errors[0].candidate_connections`, each " +
+            "with its `missing_scopes` for the tool; retry with one `id` in `connection_id`), " +
+            "`needs_reconnection`, `pinned_connection_unavailable`; `insufficient_scopes` — the " +
+            "connection lacks scopes the tool's `tools_policy` entry requires " +
+            "(`errors[0].missing_scopes`, `required_scopes`, `auth_key`, `connection_id`, " +
+            "`owned_by_actor`, `remedy`); `auth_serves_no_selected_tool` — the connection's auth " +
+            "does not serve the tool.",
+          content: problemContent,
+        },
         "422": {
           description:
             "`integration_not_remote` — the integration is not backed by a Streamable HTTP MCP " +

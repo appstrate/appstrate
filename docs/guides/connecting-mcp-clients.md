@@ -410,7 +410,9 @@ role. Runs keep their connections there:
   `connections` lists what a call would accept: per connection, the
   `connection_id` to pass, `label`, `auth_key`, `scopes_granted`, `owned_by_actor`
   (`false` for another member's), the `authorized_uris` a target must match,
-  `allow_all_uris`, `needs_reconnection` and `call_permission_required`. It never carries a credential value: an entry that
+  `allow_all_uris`, `needs_reconnection`, `call_permission_required` and
+  `missing_scopes`: the scopes the tool's `tools_policy` entry requires on the
+  connection's auth that it lacks. It never carries a credential value: an entry that
   depends on one reads `{$credential.<field>}`, and you target it by writing
   `{{<field>}}` at that place in `target` (`{{webhook_url}}` for an entry that
   is `{$credential.webhook_url}` alone, `https://{{host}}/v1/items` for
@@ -447,8 +449,14 @@ role. Runs keep their connections there:
   through the credential proxy (`POST /api/credential-proxy/tools/call`), on the
   connection named by the `connection_id` argument of `call_integration_tool`
   (one of the tool's `connections`) or, without it, the one the proxy selects
-  as for an `api_call`; when several qualify, the refusal lists the candidate
-  connections. A call is journaled as one call of
+  as for an `api_call`, judged for that tool: a connection lacking the scopes
+  the tool's `tools_policy` entry requires is refused with
+  `409 insufficient_scopes` (`missing_scopes`, `required_scopes`, `auth_key`,
+  `connection_id`, `owned_by_actor`, and the `remedy`: `upgrade_or_new`,
+  `new_connection` or `rebind_by_admin`), one on an auth that does not serve the
+  tool with `auth_serves_no_selected_tool`, both before anything is sent; when
+  several qualify, the refusal lists the candidate connections, each with its
+  `missing_scopes` for the tool. A call is journaled as one call of
   that connection and counted once against the rate limit; it returns the
   server's own tool result (`isError: true` is the tool's failure), refused
   past 256 KiB. The server's tool annotations are not relayed:

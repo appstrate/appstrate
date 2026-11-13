@@ -670,10 +670,14 @@ describe("mcp connection tools", () => {
           [TOOL, INTEGRATION_ID],
         ]);
         const rows = tools[0]!.connections;
-        // Every field of the listing's rows, the integration carried by the tool.
-        expect((invoked.data.body as { data: unknown[] }).data).toEqual(
-          rows.map((row) => ({ integration_package_id: INTEGRATION_ID, ...row })),
-        );
+        // Every field of the listing's rows, the integration carried by the tool, and the
+        // scopes the tool requires that the row lacks.
+        expect(
+          (invoked.data.body as { data: unknown[] }).data.map((row) => ({
+            ...(row as Record<string, unknown>),
+            missing_scopes: [],
+          })),
+        ).toEqual(rows.map((row) => ({ integration_package_id: INTEGRATION_ID, ...row })));
         return rows
           .map((row): [string, boolean] => [row.connection_id, row.owned_by_actor])
           .sort(([a], [b]) => a.localeCompare(b));

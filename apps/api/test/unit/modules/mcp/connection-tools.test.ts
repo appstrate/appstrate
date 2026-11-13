@@ -255,7 +255,8 @@ describe("search_integration_tools", () => {
           tool: TOOL,
           integration: INTEGRATION,
           description: expect.stringContaining("Acme Items."),
-          connections: [connection],
+          // Every field of the row, and the scopes the tool requires that it lacks.
+          connections: [{ ...connection, missing_scopes: [] }],
         },
       ],
     });
@@ -950,6 +951,41 @@ describe("typed tools of a remote MCP integration", () => {
     const listed = made.calls[0]!;
     expect(new URL(listed.url).pathname).toBe("/api/credential-proxy/tools/list");
     expect(await listed.json()).toEqual({ integration_id: REMOTE });
+  });
+
+  it("lists a tool with, per connection, the scopes its policy requires that it lacks", async () => {
+    const SCOPED_ID = "2b0d7c4e-5f6a-4b8c-9d1e-3f2a1b0c9d8e";
+    const made = makeTools(
+      CALL_OWN,
+      remoteRoutes(() => Response.json({})),
+      true,
+      {
+        listing: listingOf([
+          connectionRow({ integration_package_id: REMOTE, auth_key: "oauth" }),
+          connectionRow({
+            integration_package_id: REMOTE,
+            connection_id: SCOPED_ID,
+            auth_key: "oauth",
+            scopes_granted: ["read"],
+          }),
+        ]),
+        manifests: {
+          [REMOTE]: {
+            ...remoteManifest,
+            auths: { oauth: { type: "oauth2" } },
+            tools_policy: { search: { required_scopes: { oauth: ["read"] } } },
+          } as unknown as IntegrationManifest,
+        },
+      },
+    );
+    const payload = parseResult(
+      await made.byName.get("search_integration_tools")!.handler({ integration: REMOTE }, noExtra),
+    );
+    const [tool] = payload.tools as { connections: Record<string, unknown>[] }[];
+    expect(tool!.connections.map((c) => [c.connection_id, c.missing_scopes])).toEqual([
+      [CONNECTION_ID, ["read"]],
+      [SCOPED_ID, []],
+    ]);
   });
 
   it("lists with one of the caller's connections when several qualify and none is named", async () => {
