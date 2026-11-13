@@ -553,6 +553,26 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       }
     });
 
+    // Start the sink liveness heartbeat when reporting to a platform.
+    // Shared helper with runtime-pi: POSTs to `{url}/heartbeat` over
+    // the same HMAC channel, bumps `runs.last_heartbeat_at`, the server
+    // watchdog sweeps rows whose heartbeat slipped past the threshold
+    // and finalises them as `failed`. A local-only CLI run (no
+    // reportSession) has no platform to talk to — skip. It starts before the
+    // remote MCP integrations connect: the run is `running` from the
+    // runtime-ready event on, and their startup may outlast the stall threshold.
+    if (reportSession) {
+      heartbeat = startSinkHeartbeat({
+        url: `${reportSession.sinkUrl.replace(/\/$/, "")}/heartbeat`,
+        runSecret: reportSession.runSecret,
+        onError: (err) => {
+          if (!opts.json) {
+            process.stderr.write(`warn: heartbeat failed: ${getErrorMessage(err)}\n`);
+          }
+        },
+      });
+    }
+
     // ─── 7a'. MCP tools of unauthenticated remote integrations ────────
     // No credential to inject: the CLI connects to `source.remote.url` itself
     // (to the run's MCP server on the instance for an integration bound to the
@@ -603,24 +623,6 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
       ...(outputSchema ? { outputSchema } : {}),
       ...piLoopOptions,
     });
-
-    // Start the sink liveness heartbeat when reporting to a platform.
-    // Shared helper with runtime-pi: POSTs to `{url}/heartbeat` over
-    // the same HMAC channel, bumps `runs.last_heartbeat_at`, the server
-    // watchdog sweeps rows whose heartbeat slipped past the threshold
-    // and finalises them as `failed`. A local-only CLI run (no
-    // reportSession) has no platform to talk to — skip.
-    if (reportSession) {
-      heartbeat = startSinkHeartbeat({
-        url: `${reportSession.sinkUrl.replace(/\/$/, "")}/heartbeat`,
-        runSecret: reportSession.runSecret,
-        onError: (err) => {
-          if (!opts.json) {
-            process.stderr.write(`warn: heartbeat failed: ${getErrorMessage(err)}\n`);
-          }
-        },
-      });
-    }
 
     await runner.run({
       bundle,
