@@ -94,8 +94,13 @@ function microsoftSessionRequired(detail: string): ApiError {
   return conflict("microsoft_session_required", detail);
 }
 
-/** Bind the tenant of the owner's own, recent Microsoft sign-in. Never a typed value. */
-export async function linkTenant(actor: Actor): Promise<void> {
+/**
+ * Bind the tenant of the owner's own, recent Microsoft sign-in. Never a typed
+ * value. Replacing a different tenant already bound takes `replace: true`, so a
+ * crafted link that sends an owner through a Microsoft sign-in of another
+ * tenant cannot rebind the organization on its own.
+ */
+export async function linkTenant(actor: Actor, opts: { replace?: boolean } = {}): Promise<void> {
   assertOwnerSession(actor);
   const origin = await microsoftTenantOfSession(actor.sessionId, actor.userId);
   if (!origin || Date.now() - origin.createdAt.getTime() > LINK_SIGN_IN_MAX_AGE_MS) {
@@ -107,6 +112,12 @@ export async function linkTenant(actor: Actor): Promise<void> {
   if (before?.tenantId === origin.tenantId) return;
   if (before?.enforcedAt) {
     throw conflict("sso_enforced", "Lift the enforcement before binding another tenant.");
+  }
+  if (before?.tenantId && !opts.replace) {
+    throw conflict(
+      "tenant_already_linked",
+      "Another tenant is bound to the organization. Confirm to replace it.",
+    );
   }
   await saveConnection(actor.orgId, {
     tenantId: origin.tenantId,

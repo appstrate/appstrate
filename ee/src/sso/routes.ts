@@ -34,6 +34,7 @@ type SsoEnv = {
 };
 
 export const settingsPatchSchema = z.object({ join_role: z.enum(["member", "guest"]) }).strict();
+export const linkTenantBodySchema = z.object({ replace: z.boolean().optional() }).strict();
 export const domainBodySchema = z.object({ domain: z.string().min(1).max(253) }).strict();
 
 function actorOf(c: Context<SsoEnv>): Actor {
@@ -99,7 +100,8 @@ export function createSsoRouter() {
   });
 
   router.post("/api/org-sso/tenant", write, async (c) => {
-    await linkTenant(actorOf(c));
+    const body = await readJsonBody(c, linkTenantBodySchema, { allowEmpty: true });
+    await linkTenant(actorOf(c), { replace: body.replace === true });
     return respondWithSettings(c);
   });
 

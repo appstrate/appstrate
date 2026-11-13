@@ -13,7 +13,12 @@ import type { AppstrateModule, ModuleInitContext } from "@appstrate/core/module"
 import { closeEeDb, openEeDb } from "./db.ts";
 import { setPlatform } from "./platform.ts";
 import { enterpriseSignInPlugin, refuseEnforcedSignup } from "./sso/auth-plugin.ts";
-import { domainBodySchema, settingsPatchSchema, createSsoRouter } from "./sso/routes.ts";
+import {
+  createSsoRouter,
+  domainBodySchema,
+  linkTenantBodySchema,
+  settingsPatchSchema,
+} from "./sso/routes.ts";
 import { openApiComponentSchemas, openApiPaths, openApiTags } from "./sso/openapi.ts";
 import { deleteOrganization } from "./sso/store.ts";
 
@@ -58,6 +63,12 @@ const eeModule: AppstrateModule = {
         path: "/api/org-sso",
         jsonSchema: z.toJSONSchema(settingsPatchSchema) as Record<string, unknown>,
         description: "Set the auto-join role",
+      },
+      {
+        method: "POST",
+        path: "/api/org-sso/tenant",
+        jsonSchema: z.toJSONSchema(linkTenantBodySchema) as Record<string, unknown>,
+        description: "Bind the tenant of the caller's own Microsoft sign-in",
       },
       {
         method: "POST",

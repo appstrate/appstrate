@@ -9,6 +9,7 @@ import {
   socialCallbackError,
   ssoDomainBody,
   ssoJoinRoleBody,
+  ssoLinkTenantBody,
   type SsoDomain,
   type SsoSettings,
 } from "../org-sso";
@@ -46,6 +47,8 @@ describe("request pieces", () => {
 
   it("sends the join role under its wire name", () => {
     expect(ssoJoinRoleBody("guest")).toEqual({ join_role: "guest" });
+    expect(ssoLinkTenantBody(false)).toEqual({});
+    expect(ssoLinkTenantBody(true)).toEqual({ replace: true });
   });
 
   it("asks for the emergency sign-in with emergency=1", () => {

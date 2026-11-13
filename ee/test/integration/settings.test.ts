@@ -270,6 +270,21 @@ describe("/api/org-sso", () => {
       expect(await res.json()).toMatchObject({ tenant_id: TENANT, caller_tenant_id: TENANT });
     });
 
+    it("replaces a different bound tenant only when asked to explicitly", async () => {
+      await seedSso({ orgId: owner.orgId, tenantId: OTHER_TENANT, domains: [] });
+      await seedMicrosoftSession(await sessionIdOf(owner.user.id), owner.user.id, TENANT);
+      const implicit = await call(owner, "POST", "/api/org-sso/tenant");
+      expect(implicit.status).toBe(409);
+      expect(((await implicit.json()) as { code: string }).code).toBe("tenant_already_linked");
+      expect(
+        ((await (await call(owner, "GET", "/api/org-sso")).json()) as Settings).tenant_id,
+      ).toBe(OTHER_TENANT);
+
+      const explicit = await call(owner, "POST", "/api/org-sso/tenant", { replace: true });
+      expect(explicit.status).toBe(200);
+      expect(((await explicit.json()) as Settings).tenant_id).toBe(TENANT);
+    });
+
     it("does not let a session of another user stand for the caller's", async () => {
       const someone = await createTestUser();
       await seedMicrosoftSession(await sessionIdOf(owner.user.id), someone.id, TENANT);

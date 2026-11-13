@@ -25,6 +25,14 @@ export function ssoDomainBody(input: string): { domain: string } {
   return { domain: input.trim() };
 }
 
+/**
+ * `POST /api/org-sso/tenant`. Replacing a tenant already bound is only ever an
+ * owner's confirmed choice; the return from a Microsoft sign-in never sends it.
+ */
+export function ssoLinkTenantBody(replace: boolean): { replace?: true } {
+  return replace ? { replace: true } : {};
+}
+
 /** `PATCH /api/org-sso`. */
 export function ssoJoinRoleBody(role: SsoJoinRole): { join_role: SsoJoinRole } {
   return { join_role: role };

@@ -38,6 +38,7 @@ import {
   SSO_CONNECT_PARAM,
   ssoDomainBody,
   ssoJoinRoleBody,
+  ssoLinkTenantBody,
   type EnforcementBlocker,
   type SsoDomain,
   type SsoJoinRole,
@@ -59,6 +60,7 @@ const JOIN_ROLE_KEYS: Record<SsoJoinRole, string> = {
 type SsoMutations = ReturnType<typeof useOrgSsoMutations>;
 
 type PendingConfirm =
+  | { kind: "replaceTenant" }
   | { kind: "unlink" }
   | { kind: "enforce" }
   | { kind: "lift" }
@@ -115,7 +117,15 @@ function EnterpriseSsoSettings({ settings }: { settings: SsoSettings }) {
       { replace: true, state: location.state },
     );
     if (connect && !refused && canWrite)
-      linkTenant.mutate({}, { onError: (err) => toastError(err) });
+      linkTenant.mutate(
+        { body: ssoLinkTenantBody(false) },
+        {
+          onError: (err) =>
+            err.code === "tenant_already_linked"
+              ? setPendingConfirm({ kind: "replaceTenant" })
+              : toastError(err),
+        },
+      );
   }, [location, navigate, canWrite, linkTenant]);
 
   // A session a Microsoft sign-in opened less than 15 minutes ago binds at once; any other asks
@@ -126,11 +136,13 @@ function EnterpriseSsoSettings({ settings }: { settings: SsoSettings }) {
       return;
     }
     linkTenant.mutate(
-      {},
+      { body: ssoLinkTenantBody(false) },
       {
         onError: (err) => {
           if (err.code === "microsoft_session_required") {
             signInWithMicrosoft(true);
+          } else if (err.code === "tenant_already_linked") {
+            setPendingConfirm({ kind: "replaceTenant" });
           } else {
             toastError(err);
           }
@@ -495,6 +507,16 @@ function SsoConfirmModal({
     onConfirm: () => {},
   };
   switch (pending?.kind) {
+    case "replaceTenant":
+      props = {
+        title: t("orgSso.replaceTitle"),
+        description: t("orgSso.replaceDesc"),
+        confirmLabel: t("orgSso.replace"),
+        variant: "destructive",
+        isPending: mutations.linkTenant.isPending,
+        onConfirm: () => mutations.linkTenant.mutate({ body: ssoLinkTenantBody(true) }, done),
+      };
+      break;
     case "unlink":
       props = {
         title: t("orgSso.unlinkTitle"),
