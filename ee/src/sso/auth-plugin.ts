@@ -97,13 +97,18 @@ async function currentState(): Promise<SignInState | null> {
 
 let authAdapter: UserReader | null = null;
 
+/** Better Auth's adapter, inside the hook's own transaction when there is one. */
+async function adapterFor(context: HookContext | null): Promise<UserReader | null> {
+  return context
+    ? ((await getCurrentAdapter(context.context.adapter as never)) as unknown as UserReader)
+    : authAdapter;
+}
+
 async function readUser(
   userId: string,
   context: HookContext | null,
 ): Promise<{ email: string; realm: string } | null> {
-  const adapter: UserReader | null = context
-    ? ((await getCurrentAdapter(context.context.adapter as never)) as unknown as UserReader)
-    : authAdapter;
+  const adapter = await adapterFor(context);
   if (!adapter) return null;
   const row = await adapter.findOne<{ email: string; realm?: string }>({
     model: "user",
@@ -111,6 +116,22 @@ async function readUser(
     select: ["email", "realm"],
   });
   return row ? { email: row.email, realm: row.realm ?? "platform" } : null;
+}
+
+async function ownerOfMicrosoftAccount(
+  accountId: string,
+  context: HookContext | null,
+): Promise<string | null> {
+  const adapter = await adapterFor(context);
+  const row = await adapter?.findOne<{ userId: string }>({
+    model: "account",
+    where: [
+      { field: "providerId", value: MICROSOFT },
+      { field: "accountId", value: accountId },
+    ],
+    select: ["userId"],
+  });
+  return row?.userId ?? null;
 }
 
 async function policyForEmail(email: string | null | undefined): Promise<DomainPolicy | null> {
@@ -158,16 +179,22 @@ function refusal(context: HookContext | null, code: SsoRefusal): unknown {
  * Microsoft's token endpoint over TLS (the same token its provider decodes for
  * the profile), so the signature is not re-checked here.
  */
-export function idTokenClaims(idToken: unknown): { tenantId: string | null; email: string | null } {
-  const none = { tenantId: null, email: null };
+export function idTokenClaims(idToken: unknown): {
+  tenantId: string | null;
+  email: string | null;
+  /** `oid`: the account id Better Auth keys a Microsoft account on. */
+  objectId: string | null;
+} {
+  const none = { tenantId: null, email: null, objectId: null };
   if (typeof idToken !== "string") return none;
   try {
     const claims = JSON.parse(
       Buffer.from(idToken.split(".")[1] ?? "", "base64url").toString("utf8"),
-    ) as { tid?: unknown; email?: unknown };
+    ) as { tid?: unknown; email?: unknown; oid?: unknown };
     return {
       tenantId: typeof claims.tid === "string" ? claims.tid : null,
       email: typeof claims.email === "string" ? claims.email : null,
+      objectId: typeof claims.oid === "string" ? claims.oid : null,
     };
   } catch {
     return none;
@@ -185,13 +212,21 @@ async function onMicrosoftAccount(
   context: HookContext | null,
 ): Promise<void> {
   if (account.providerId !== MICROSOFT || context?.path !== CALLBACK_PATH) return;
-  const { tenantId, email } = idTokenClaims(account.idToken);
+  const { tenantId, email, objectId } = idTokenClaims(account.idToken);
   const state = await currentState();
   if (state) {
     state.microsoftTenant = tenantId;
     state.microsoftEmail = email;
   }
-  const owner = typeof account.userId === "string" ? await readUser(account.userId, context) : null;
+  // A sign-in refreshes an existing account's tokens without naming its user:
+  // find the account by the identity's `oid`, so its realm is known there too.
+  const ownerId =
+    typeof account.userId === "string"
+      ? account.userId
+      : objectId
+        ? await ownerOfMicrosoftAccount(objectId, context)
+        : null;
+  const owner = ownerId ? await readUser(ownerId, context) : null;
   if (owner && owner.realm !== "platform") return;
   for (const address of [email, owner?.email]) {
     const policy = await policyForEmail(address);

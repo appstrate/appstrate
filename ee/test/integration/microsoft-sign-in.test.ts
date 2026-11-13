@@ -164,6 +164,25 @@ describe("Microsoft sign-in for an address of a bound domain", () => {
     expect(await roleIn(ctx.orgId, ceo.id)).toBeNull();
   });
 
+  it("leaves an end-user account's Microsoft sign-in to its own realm's rules", async () => {
+    await seedSso({ orgId: ctx.orgId });
+    const endUser = await createTestUser({ email: `client@${DOMAIN}`, emailVerified: true });
+    await db.update(user).set({ realm: "end_user:spc_test" }).where(eq(user.id, endUser.id));
+    await db.insert(account).values({
+      id: crypto.randomUUID(),
+      accountId: "oid-client",
+      providerId: "microsoft",
+      userId: endUser.id,
+    });
+    // Another tenant: the organization's policy would refuse it, but the account is not a member's.
+    const res = await microsoftSignIn(app, {
+      email: `client@${DOMAIN}`,
+      tenantId: OTHER_TENANT,
+      oid: "oid-client",
+    });
+    expect(redirectError(res)).not.toBe("sso_tenant_mismatch");
+  });
+
   it("caps an enforced session at 24 h from creation", async () => {
     await seedSso({ orgId: ctx.orgId, enforced: true });
     const before = Date.now();
