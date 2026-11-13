@@ -213,21 +213,15 @@ describe("validateManifest", () => {
     expect(deps.skills).toEqual({ "@test/skill": "^1.0.0" });
   });
 
-  it("rejects `runtime_tools` on author input, naming the platform integration", () => {
-    const result = validateManifest(validAgentManifest({ runtime_tools: ["log"] }));
-    expect(result.valid).toBe(false);
-    expect(result.errors).toHaveLength(1);
-    expect(result.errors[0]).toStartWith("runtime_tools:");
-    expect(result.errors[0]).toContain('dependencies.integrations["@appstrate/platform"]');
-    expect(result.errors[0]).toContain('integrations_configuration["@appstrate/platform"]');
-  });
-
-  it("tolerates `runtime_tools` on a stored manifest, untouched", () => {
-    const result = validateManifest(validAgentManifest({ runtime_tools: ["log", "output"] }), {
-      retiredVocabulary: "tolerate",
-    });
-    expect(result.valid).toBe(true);
-    expect((result.manifest as Record<string, unknown>).runtime_tools).toEqual(["log", "output"]);
+  it("rejects `runtime_tools` in both directions, naming the platform integration", () => {
+    for (const options of [undefined, { retiredVocabulary: "tolerate" } as const]) {
+      const result = validateManifest(validAgentManifest({ runtime_tools: ["log"] }), options);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toHaveLength(1);
+      expect(result.errors[0]).toStartWith("runtime_tools:");
+      expect(result.errors[0]).toContain('dependencies.integrations["@appstrate/platform"]');
+      expect(result.errors[0]).toContain('integrations_configuration["@appstrate/platform"]');
+    }
   });
 
   // The fix must not close `dependencies`: AFPS §10 mandates extensibility for

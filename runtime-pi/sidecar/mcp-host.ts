@@ -628,18 +628,11 @@ export class McpHost {
    * Build {@link AppstrateToolDefinition}s — a flat list ready for
    * `createMcpServer(...)`. The handler dispatches `tools/call` to the
    * upstream client identified by the prefix.
-   *
-   * Optional `inject` parameter merges first-party tools into the same
-   * flat list. The host does
-   * not validate name collisions between first-party and third-party
-   * tools — first-party names take precedence.
    */
-  buildTools(inject: AppstrateToolDefinition[] = []): AppstrateToolDefinition[] {
-    const firstPartyNames = new Set(inject.map((t) => t.descriptor.name));
+  buildTools(): AppstrateToolDefinition[] {
     const labelsBySlot = this.labelsBySlot();
-    const thirdParty: AppstrateToolDefinition[] = [];
+    const tools: AppstrateToolDefinition[] = [];
     for (const desc of this.toolDescriptors) {
-      if (firstPartyNames.has(desc.name)) continue;
       const routes = this.toolRoutes.get(desc.name)!;
       const forward = async (
         route: ToolRoute,
@@ -669,14 +662,14 @@ export class McpHost {
       // slot names its connection, so a call always states the account it acts on.
       if (labelsBySlot.get(this.toolToNamespace.get(desc.name)!)!.size < 2) {
         const [sole] = [...routes.values()];
-        thirdParty.push({
+        tools.push({
           descriptor: desc,
           handler: async (args, extra) => forward(sole!, args, extra),
         });
         continue;
       }
       const labels = routeLabels(routes);
-      thirdParty.push({
+      tools.push({
         descriptor: withConnectionParam(desc, routes),
         handler: async (args, extra): Promise<CallToolResult> => {
           const { [CONNECTION_PARAM]: selected, ...rest } = args;
@@ -686,7 +679,7 @@ export class McpHost {
         },
       });
     }
-    return [...inject, ...thirdParty];
+    return tools;
   }
 
   /**

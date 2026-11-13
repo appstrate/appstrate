@@ -26,19 +26,20 @@ import { packagePersistence } from "@appstrate/db/schema";
 import type { PackagePersistenceRow } from "@appstrate/db/schema";
 import type { Actor } from "../../lib/actor.ts";
 import { packagePersistenceContentSchema } from "../../lib/jsonb-schemas.ts";
+import { invalidRequest } from "../../lib/errors.ts";
 
 /**
  * Validate any JSON value bound for `package_persistence.content` against
- * the shared Zod schema (JSON-safe + soft 64 KB cap). Throws on failure
- * with a path-prefixed message so callers (sidecar tool handlers, route
- * handlers) bubble a clear `invalidRequest` to the agent. Strings are
- * passed through unchanged — the AFPS `note` tool stores plain text.
+ * the shared Zod schema (JSON-safe + soft 64 KB cap). Throws `invalidRequest`
+ * (400) with a path-prefixed message, the one error the writers below raise
+ * for a refused value, so a caller can tell it from a database failure.
+ * Strings are passed through unchanged — the `note` tool stores plain text.
  */
 function assertValidContent(value: unknown, label: string): void {
   const parsed = packagePersistenceContentSchema.safeParse(value);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
-    throw new Error(`Invalid ${label} content: ${issue?.message ?? "JSON validation failed"}`);
+    throw invalidRequest(`Invalid ${label} content: ${issue?.message ?? "JSON validation failed"}`);
   }
 }
 
@@ -206,7 +207,7 @@ export async function upsertPinned(
     key.length > MAX_PINNED_KEY_LENGTH ||
     !PINNED_KEY_PATTERN.test(key)
   ) {
-    throw new Error(
+    throw invalidRequest(
       `Invalid pinned slot key "${key}" — must match ${PINNED_KEY_PATTERN} and be ≤${MAX_PINNED_KEY_LENGTH} chars`,
     );
   }

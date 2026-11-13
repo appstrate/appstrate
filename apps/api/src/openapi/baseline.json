@@ -4634,15 +4634,9 @@
       "post": {
         "operationId": "runToolsMcpPost",
         "tags": ["Runs"],
-        "summary": "Run MCP server of a remote run",
-        "description": "Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the `@appstrate/platform` system integration — `log`, `note`, `pin`, `recall_memory`, `run_history`, `notify` — for one `running` run. Each tool writes at call time: `log` appends a run log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's checkpoint snapshot that `run_history` returns, `notify` an `agent_message` notification to each recipient of the run's completion notification, once per run. Mounted here for the host executing a remote run. Requires `agents:run`, and serves only a remote run that the caller launched, in the caller's org and space — any other run returns 404 rather than confirming it exists — while it is `running` (403 otherwise).",
+        "summary": "Run MCP server of a remote run (HMAC)",
+        "description": "Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the `@appstrate/platform` system integration — `log`, `note`, `pin`, `recall_memory`, `run_history`, `notify` — for one run. Each tool writes at call time: `log` appends a run log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's checkpoint snapshot that `run_history` returns, `notify` an `agent_message` notification to each recipient of the run's completion notification, once per run. Rate-limited to 200 messages a minute per run. Mounted here for the host executing a remote run. Same Standard Webhooks HMAC auth as the event routes, keyed on the run's sink secret: the signature covers the exact request body bytes. It holds as long as the sink is open, whatever the caller's session. A platform-origin run answers 404 (its sidecar serves these tools on `/internal/mcp`).",
         "parameters": [
-          {
-            "$ref": "#/components/parameters/XOrgId"
-          },
-          {
-            "$ref": "#/components/parameters/XSpaceId"
-          },
           {
             "name": "runId",
             "in": "path",
@@ -4650,8 +4644,33 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "webhook-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "webhook-timestamp",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "webhook-signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
+        "security": [],
         "requestBody": {
           "required": true,
           "content": {
@@ -4697,13 +4716,39 @@
               }
             }
           },
+          "202": {
+            "description": "The body held only JSON-RPC notifications or responses (e.g. `notifications/initialized`): accepted, no body."
+          },
           "400": {
-            "description": "`application/json`: the MCP transport's JSON-RPC error — unparseable JSON, an invalid JSON-RPC message, or an unsupported `MCP-Protocol-Version` header. `application/problem+json`: a request the platform refuses before the transport.",
+            "description": "`application/json`: the MCP transport's JSON-RPC error — unparseable JSON (`-32700`), an invalid JSON-RPC message or batch (`-32700`/`-32600`), or an unsupported `MCP-Protocol-Version` header (`-32000`). `application/problem+json`: a request the platform refuses before the transport.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true
+                  "description": "A JSON-RPC 2.0 error envelope.",
+                  "properties": {
+                    "jsonrpc": {
+                      "type": "string",
+                      "enum": ["2.0"]
+                    },
+                    "id": {
+                      "type": "null"
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "data": {}
+                      },
+                      "required": ["code", "message"]
+                    }
+                  },
+                  "required": ["jsonrpc", "id", "error"]
                 }
               },
               "application/problem+json": {
@@ -4714,10 +4759,7 @@
             }
           },
           "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "description": "`forbidden` — the caller lacks `agents:run`, or the run is not `running`.",
+            "description": "`missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance`",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4727,10 +4769,145 @@
             }
           },
           "404": {
-            "$ref": "#/components/responses/NotFound"
+            "description": "`not_found` — no run with this id, or a platform-origin run.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "`Accept` does not list both `application/json` and `text/event-stream` (`-32000`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "A JSON-RPC 2.0 error envelope.",
+                  "properties": {
+                    "jsonrpc": {
+                      "type": "string",
+                      "enum": ["2.0"]
+                    },
+                    "id": {
+                      "type": "null"
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "data": {}
+                      },
+                      "required": ["code", "message"]
+                    }
+                  },
+                  "required": ["jsonrpc", "id", "error"]
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "`run_sink_closed` | `run_sink_expired`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`payload_too_large` — the request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware, before the MCP transport).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`Content-Type` is not `application/json` (`-32000`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "A JSON-RPC 2.0 error envelope.",
+                  "properties": {
+                    "jsonrpc": {
+                      "type": "string",
+                      "enum": ["2.0"]
+                    },
+                    "id": {
+                      "type": "null"
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "data": {}
+                      },
+                      "required": ["code", "message"]
+                    }
+                  },
+                  "required": ["jsonrpc", "id", "error"]
+                }
+              }
+            }
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/EncryptionKeyUnavailable"
+          }
+        }
+      },
+      "get": {
+        "operationId": "runToolsMcpGet",
+        "tags": ["Runs"],
+        "summary": "Run MCP server of a remote run (GET)",
+        "description": "The GET channel of the run MCP server. The server is stateless and opens no standalone server-initiated SSE stream, so GET (and every verb but POST) answers 405.",
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [],
+        "responses": {
+          "405": {
+            "description": "`method_not_allowed` — the stateless server has no GET stream; `Allow: POST`.",
+            "headers": {
+              "Allow": {
+                "schema": {
+                  "type": "string",
+                  "example": "POST"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -17307,7 +17484,7 @@
         "operationId": "internalRunToolsMcpPost",
         "tags": ["Internal"],
         "summary": "Run MCP server of a platform run",
-        "description": "Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the `@appstrate/platform` system integration — `log`, `note`, `pin`, `recall_memory`, `run_history`, `notify` — for one `running` run. Each tool writes at call time: `log` appends a run log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's checkpoint snapshot that `run_history` returns, `notify` an `agent_message` notification to each recipient of the run's completion notification, once per run. Mounted here for the sidecar. Container-to-host only. Auth via Bearer run token, which names the run; a run that is not `running` is refused with 403.",
+        "description": "Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the `@appstrate/platform` system integration — `log`, `note`, `pin`, `recall_memory`, `run_history`, `notify` — for one run. Each tool writes at call time: `log` appends a run log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's checkpoint snapshot that `run_history` returns, `notify` an `agent_message` notification to each recipient of the run's completion notification, once per run. Rate-limited to 200 messages a minute per run. Mounted here for the sidecar. Container-to-host only. Auth via Bearer run token, which names the run; a run that is not `running` is refused with 403.",
         "security": [
           {
             "bearerExecToken": []
@@ -17358,13 +17535,39 @@
               }
             }
           },
+          "202": {
+            "description": "The body held only JSON-RPC notifications or responses (e.g. `notifications/initialized`): accepted, no body."
+          },
           "400": {
-            "description": "`application/json`: the MCP transport's JSON-RPC error — unparseable JSON, an invalid JSON-RPC message, or an unsupported `MCP-Protocol-Version` header. `application/problem+json`: a request the platform refuses before the transport.",
+            "description": "`application/json`: the MCP transport's JSON-RPC error — unparseable JSON (`-32700`), an invalid JSON-RPC message or batch (`-32700`/`-32600`), or an unsupported `MCP-Protocol-Version` header (`-32000`). `application/problem+json`: a request the platform refuses before the transport.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "additionalProperties": true
+                  "description": "A JSON-RPC 2.0 error envelope.",
+                  "properties": {
+                    "jsonrpc": {
+                      "type": "string",
+                      "enum": ["2.0"]
+                    },
+                    "id": {
+                      "type": "null"
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "data": {}
+                      },
+                      "required": ["code", "message"]
+                    }
+                  },
+                  "required": ["jsonrpc", "id", "error"]
                 }
               },
               "application/problem+json": {
@@ -17383,8 +17586,117 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
+          "406": {
+            "description": "`Accept` does not list both `application/json` and `text/event-stream` (`-32000`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "A JSON-RPC 2.0 error envelope.",
+                  "properties": {
+                    "jsonrpc": {
+                      "type": "string",
+                      "enum": ["2.0"]
+                    },
+                    "id": {
+                      "type": "null"
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "data": {}
+                      },
+                      "required": ["code", "message"]
+                    }
+                  },
+                  "required": ["jsonrpc", "id", "error"]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`payload_too_large` — the request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware, before the MCP transport).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`Content-Type` is not `application/json` (`-32000`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "A JSON-RPC 2.0 error envelope.",
+                  "properties": {
+                    "jsonrpc": {
+                      "type": "string",
+                      "enum": ["2.0"]
+                    },
+                    "id": {
+                      "type": "null"
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "data": {}
+                      },
+                      "required": ["code", "message"]
+                    }
+                  },
+                  "required": ["jsonrpc", "id", "error"]
+                }
+              }
+            }
+          },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      },
+      "get": {
+        "operationId": "internalRunToolsMcpGet",
+        "tags": ["Internal"],
+        "summary": "Run MCP server of a platform run (GET)",
+        "description": "The GET channel of the run MCP server. The server is stateless and opens no standalone server-initiated SSE stream, so GET (and every verb but POST) answers 405. Container-to-host only.",
+        "security": [
+          {
+            "bearerExecToken": []
+          }
+        ],
+        "responses": {
+          "405": {
+            "description": "`method_not_allowed` — the stateless server has no GET stream; `Allow: POST`.",
+            "headers": {
+              "Allow": {
+                "schema": {
+                  "type": "string",
+                  "example": "POST"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -36277,7 +36589,7 @@
       },
       "AgentManifest": {
         "type": "object",
-        "description": "AFPS Agent manifest extended with Appstrate platform fields. Standard fields are defined by the AFPS Agent schema. Extension fields use the x- prefix per AFPS §10.",
+        "description": "AFPS Agent manifest. Standard fields are defined by the AFPS Agent schema; Appstrate's extensions live under `_meta` keys of the `dev.appstrate/` namespace (`_meta[\"dev.appstrate/*\"]`, AFPS §10).",
         "allOf": [
           {
             "$ref": "https://schemas.afps.dev/v0/agent.schema.json"

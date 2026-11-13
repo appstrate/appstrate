@@ -14,17 +14,21 @@
  *
  * An integration bound to the runtime (`isRuntimeBoundIntegration`, e.g. `@appstrate/platform`)
  * takes the same path with another target: the run's MCP server on the instance the run reports
- * to (`/api/runs/{runId}/mcp`), authenticated with the CLI's own session. A run that reports to
- * no instance leaves it unbound.
+ * to (`/api/runs/{runId}/mcp`), every request signed with the run secret as the run's events are
+ * (Standard Webhooks headers over the exact body, a fresh message id and timestamp each), so the
+ * tools stay reachable for the whole run. A run that reports to no instance leaves it unbound.
+ * Any other integration's requests carry no credential.
  *
  * Every request goes through `guardedFetchChain`, as the CLI's `api_call` engine does: the host
  * of the target URL is the caller's own (a dev server on localhost is reachable), any other host
- * a redirect leads to is checked against the SSRF blocklist.
+ * a redirect leads to is checked against the SSRF blocklist, and is sent no signature.
  *
- * An integration whose server cannot be reached, does not answer the connection and `tools/list`
- * within {@link REMOTE_MCP_STARTUP_TIMEOUT_MS}, fails its `tools/list` or exposes no admitted tool
- * is returned in `unavailable` with the platform's wording
- * ({@link UNAVAILABLE_INTEGRATION_REASONS}): the run starts without it.
+ * The integrations connect concurrently; their tools are named in declaration order, so the
+ * allocation does not depend on which server answers first. An integration whose server cannot be
+ * reached, does not answer the connection and `tools/list` within
+ * {@link REMOTE_MCP_STARTUP_TIMEOUT_MS}, fails its `tools/list` or exposes no admitted tool is
+ * returned in `unavailable` with the platform's wording ({@link UNAVAILABLE_INTEGRATION_REASONS}):
+ * the run starts without it.
  */
 
 import {
@@ -33,6 +37,7 @@ import {
   type IntegrationRef,
 } from "@appstrate/afps-runtime/resolvers";
 import { UNAVAILABLE_INTEGRATION_REASONS, type Bundle } from "@appstrate/afps-runtime/bundle";
+import { sign, type SignedEnvelopeHeaders } from "@appstrate/afps-runtime/events";
 import { renderUrlTemplate } from "@appstrate/afps-shared/connection-variables";
 import { guardedFetchChain, SsrfBlockedError } from "@appstrate/afps-shared/guarded-fetch";
 import type { HostResolver } from "@appstrate/afps-shared/ssrf-dns";
@@ -68,13 +73,16 @@ export interface RemoteMcpExtensions {
   close(): Promise<void>;
 }
 
+/** The run's MCP server on the instance it reports to, and the run secret signing its requests. */
+export interface RunToolsMcp {
+  url: string;
+  runSecret: string;
+}
+
 interface BuildRemoteMcpExtensionsOptions {
   bundle: Bundle;
-  /**
-   * The MCP server of the run on the instance it reports to, with the session's auth headers;
-   * absent when the run reports to no instance.
-   */
-  runToolsMcp?: { url: string; headers: Record<string, string> };
+  /** Absent when the run reports to no instance. */
+  runToolsMcp?: RunToolsMcp;
   /**
    * Exposed names the run's other tools already hold (its `{ns}__api_call…` tools): neither
    * they nor their namespaces are given to a remote integration's tool.
@@ -91,9 +99,9 @@ interface BuildRemoteMcpExtensionsOptions {
 const CLIENT_INFO = { name: "appstrate-cli-remote-integration", version: "0.1.0" };
 
 /**
- * Bound on the connection and `tools/list` of one integration: integrations connect one after the
- * other before the run starts, so a server that accepts the connection and never answers delays
- * the run by this much at most. Tool calls keep the client's default timeout.
+ * Bound on the connection and `tools/list` of one integration: integrations connect concurrently
+ * before the run starts, so a server that accepts the connection and never answers delays the run
+ * by this much at most. Tool calls keep the client's default timeout.
  */
 const REMOTE_MCP_STARTUP_TIMEOUT_MS = 10_000;
 
@@ -113,19 +121,27 @@ export async function buildRemoteMcpExtensions(
   // `{namespace}__{body}`: a normalised namespace never holds `__`.
   const namespaces = new Set([...toolNames].map((name) => name.slice(0, name.indexOf("__"))));
 
-  for (const ref of readIntegrationRefs(opts.bundle)) {
+  const targets = readIntegrationRefs(opts.bundle).flatMap((ref) => {
     const target = remoteTarget(opts.bundle, ref, agentTools.get(ref.name), opts.runToolsMcp);
-    if (!target) continue;
-    if ("reason" in target) {
-      unavailable.push({ id: ref.name, reason: target.reason });
+    return target ? [{ ref, target }] : [];
+  });
+  // In declaration order whatever the order the servers answer in.
+  const outcomes = await Promise.all(
+    targets.map(async ({ ref, target }): Promise<ConnectionOutcome> => {
+      if ("reason" in target) return { ref, reason: target.reason };
+      const connected = await connectAndList(target, opts);
+      return "reason" in connected
+        ? { ref, reason: connected.reason }
+        : { ref, target, ...connected };
+    }),
+  );
+
+  for (const outcome of outcomes) {
+    if ("reason" in outcome) {
+      unavailable.push({ id: outcome.ref.name, reason: outcome.reason });
       continue;
     }
-    const connected = await connectAndList(target.url, target.headers, opts);
-    if ("reason" in connected) {
-      unavailable.push({ id: ref.name, reason: connected.reason });
-      continue;
-    }
-    const { client, tools } = connected;
+    const { ref, target, client, tools } = outcome;
     const namespace = allocateMcpToolNamespace(normaliseMcpToolNamespace(ref.name), namespaces);
     const admitted = tools.filter(
       (tool) => toolExclusion(tool.name, target.allowlist, target.hidden) === null,
@@ -166,17 +182,30 @@ export async function buildRemoteMcpExtensions(
   };
 }
 
+type ConnectionOutcome =
+  | { ref: IntegrationRef; reason: string }
+  | {
+      ref: IntegrationRef;
+      target: Exclude<RemoteTarget, { reason: string }>;
+      client: AppstrateMcpClient;
+      tools: Tool[];
+    };
+
+/** The signature headers of one request, computed over the exact body it sends. */
+type RequestSigner = (body: string) => SignedEnvelopeHeaders;
+
 type RemoteTarget =
   | {
       url: string;
-      headers: Record<string, string>;
+      /** Set for the run's own MCP server only: no other target is sent a credential. */
+      signRequest?: RequestSigner;
       allowlist: ReadonlySet<string> | null;
       hidden: ReadonlySet<string>;
     }
   | { reason: string };
 
 /**
- * The server, request headers and tool filters of `ref` when it is an unauthenticated remote
+ * The server, request signer and tool filters of `ref` when it is an unauthenticated remote
  * integration the agent selects at least one tool of; `undefined` for any other integration.
  * `allowlist: null` is the `"*"` wildcard: every upstream tool but the hidden ones.
  */
@@ -201,7 +230,16 @@ function remoteTarget(
 
   if (isRuntimeBoundIntegration(manifest)) {
     if (!runToolsMcp) return { reason: UNAVAILABLE_INTEGRATION_REASONS.unbound };
-    return { url: runToolsMcp.url, headers: runToolsMcp.headers, ...filters };
+    const { url, runSecret } = runToolsMcp;
+    // What `HttpSink` sends with each event: a fresh message id and timestamp per request.
+    const signRequest: RequestSigner = (body) =>
+      sign({
+        msgId: crypto.randomUUID(),
+        timestampSec: Math.floor(Date.now() / 1000),
+        body,
+        secret: runSecret,
+      });
+    return { url, signRequest, ...filters };
   }
 
   if (typeof source.remote?.url !== "string") {
@@ -220,23 +258,32 @@ function remoteTarget(
   if (source.remote?.transport !== "streamable-http") {
     return { reason: UNAVAILABLE_INTEGRATION_REASONS.resolve_error };
   }
-  return { url, headers: {}, ...filters };
+  return { url, ...filters };
 }
 
 /** One connection and its complete `tools/list`, or the reason the integration is unavailable. */
 async function connectAndList(
-  url: string,
-  headers: Record<string, string>,
+  { url, signRequest }: { url: string; signRequest?: RequestSigner },
   opts: BuildRemoteMcpExtensionsOptions,
 ): Promise<{ client: AppstrateMcpClient; tools: Tool[] } | { reason: string }> {
   const declaredHost = new URL(url).hostname;
   const guardedFetch: typeof fetch = Object.assign(
     async (input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
-      const href = typeof input === "string" || input instanceof URL ? input : input.url;
-      const { response } = await guardedFetchChain(href, init, {
-        allowHost: (host) => host === declaredHost,
-        ...(opts.resolveHost ? { resolve: opts.resolveHost } : {}),
-      });
+      // The MCP client calls `fetch(url, init)`: a `Request` would carry a method, body and
+      // headers this wrapper does not read.
+      if (input instanceof Request) {
+        throw new TypeError("remote MCP fetch takes a URL, not a Request");
+      }
+      const { response } = await guardedFetchChain(
+        input,
+        signRequest ? signed(init, signRequest) : init,
+        {
+          allowHost: (host) => host === declaredHost,
+          // A redirect to another origin is sent no signature.
+          sensitiveHeaders: SIGNATURE_HEADERS,
+          ...(opts.resolveHost ? { resolve: opts.resolveHost } : {}),
+        },
+      );
       return response;
     },
     { preconnect: fetch.preconnect },
@@ -247,7 +294,6 @@ async function connectAndList(
   try {
     client = await createMcpHttpClient(url, {
       fetch: guardedFetch,
-      extraHeaders: headers,
       clientInfo: CLIENT_INFO,
       signal,
     });
@@ -268,6 +314,20 @@ async function connectAndList(
   }
 }
 
+const SIGNATURE_HEADERS = ["webhook-id", "webhook-timestamp", "webhook-signature"] as const;
+
+/**
+ * `init` with the signature headers of its body; a request without a body (a GET or DELETE of the
+ * MCP client) is signed over the empty body.
+ */
+function signed(init: RequestInit | undefined, signRequest: RequestSigner): RequestInit {
+  const body = init?.body ?? "";
+  if (typeof body !== "string") throw new TypeError("a signed MCP request carries a string body");
+  const headers = new Headers(init?.headers);
+  for (const [name, value] of Object.entries(signRequest(body))) headers.set(name, value);
+  return { ...init, headers };
+}
+
 /** A Pi tool forwarding every call verbatim to `upstreamName` on the integration's server. */
 function remoteToolExtension(
   client: AppstrateMcpClient,
@@ -283,6 +343,9 @@ function remoteToolExtension(
         (descriptor.inputSchema as Record<string, unknown>) ?? { type: "object", properties: {} },
       ),
       async execute(_toolCallId, params, signal) {
+        // Requesting progress makes the client's per-call timeout an idle one, restarted by
+        // each notification (and capped in total): a long call that reports progress is not
+        // cut. Nothing else reads the notifications.
         const result = await client.callTool(
           { name: upstreamName, arguments: (params as Record<string, unknown>) ?? {} },
           { ...(signal ? { signal } : {}), onProgress: () => {} },

@@ -2,8 +2,8 @@
 
 /**
  * Run-sink authentication for the routes an agent process calls back on
- * (`POST /api/runs/:runId/events`, `/finalize`, and
- * `POST /api/runs/:runId/files`).
+ * (`POST /api/runs/:runId/events`, `/finalize`, `/heartbeat`, the workspace
+ * fetches, `POST /api/runs/:runId/files`, and `POST /api/runs/:runId/mcp`).
  *
  * These routes are called from agent processes that hold no user session —
  * the authentic principal is the **run itself**. Proof of authenticity is
@@ -147,8 +147,8 @@ async function claimMsgId(runId: string, msgId: string): Promise<void> {
 }
 
 /**
- * `POST /api/runs/:runId/events` and `/finalize` — the HMAC signs the raw body
- * bytes (not a JSON re-serialisation), and the `webhook-id` is exposed for the
+ * `POST /api/runs/:runId/events`, `/finalize` and `/mcp` — the HMAC signs the
+ * raw body bytes (not a JSON re-serialisation), and the `webhook-id` is exposed for the
  * handler's replay dedup (`ingestRunEvent` owns the claim there, because it
  * also owns the release-on-error the runner's same-id retry depends on).
  */

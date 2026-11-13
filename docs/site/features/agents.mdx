@@ -173,13 +173,13 @@ The `output` tool exists exactly when `output.schema` is declared, and the run m
 
 ## Capabilities
 
-| Capability                                                                      | Where it is declared                                         | Page                                                |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------------ | --------------------------------------------------- |
-| Skills                                                                          | `dependencies.skills`                                        | [Skills](/features/skills)                          |
-| Integrations (third-party APIs and MCP servers behind a connection)             | `dependencies.integrations` and `integrations_configuration` | [Integrations](/integrations/how-integrations-work) |
-| MCP servers (executable bundles referenced by integrations)                     | `dependencies.mcp_servers`                                   | [Packages](/features/packages)                      |
-| Platform tools (`log`, `note`, `pin`, `recall_memory`, `run_history`, `notify`) | `dependencies.integrations` (`@appstrate/platform`)          | [Tools](/features/tools)                            |
-| Memory                                                                          | `note` / `pin` tools and the `recall_memory` tool            | [Memory](/features/memory)                          |
+| Capability                                                                                   | Where it is declared                                                                                    | Page                                                |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Skills                                                                                       | `dependencies.skills`                                                                                   | [Skills](/features/skills)                          |
+| Integrations (third-party APIs and MCP servers behind a connection)                          | `dependencies.integrations` and `integrations_configuration`                                            | [Integrations](/integrations/how-integrations-work) |
+| MCP servers (executable bundles referenced by integrations)                                  | `dependencies.mcp_servers`                                                                              | [Packages](/features/packages)                      |
+| Platform tools (`log`, `note`, `pin`, `recall_memory`, `run_history`; `notify` on selection) | `dependencies.integrations` (`@appstrate/platform`); `notify` in its `integrations_configuration` tools | [Tools](/features/tools)                            |
+| Memory                                                                                       | `note` / `pin` tools and the `recall_memory` tool                                                       | [Memory](/features/memory)                          |
 
 Attachment is **manifest-only**: edit the draft, then publish a version. There is no separate endpoint to attach a skill or a tool.
 

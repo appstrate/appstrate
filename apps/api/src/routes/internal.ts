@@ -29,7 +29,14 @@ import {
   runPinnedVersionGoneDetail,
 } from "../services/run-effective-agent.ts";
 import type { RunAgentGone, RunPinnedVersionGone } from "../services/run-effective-agent.ts";
-import { ApiError, forbidden, notFound, conflict, invalidRequest } from "../lib/errors.ts";
+import {
+  ApiError,
+  forbidden,
+  notFound,
+  conflict,
+  invalidRequest,
+  methodNotAllowed,
+} from "../lib/errors.ts";
 import { actorFromIds, type Actor } from "../lib/actor.ts";
 import {
   forceRefreshOAuthModelProviderToken,
@@ -210,12 +217,16 @@ const EMPTY_CREDENTIALS_WIRE = {
 export function createInternalRouter() {
   const router = new Hono();
 
-  // Rate limit all internal endpoints (200 req/min per token)
+  // Rate limit all internal endpoints: 200 req/min per run token and per
+  // concrete path (`limiterPath` falls back to the path under a `*` pattern),
+  // so `/internal/mcp` has a budget of its own, apart from the credential and
+  // token fetches — the figure the remote mount of the same server has.
   router.use("/*", rateLimitByBearer(200));
 
   // POST /internal/mcp — the run MCP server (`@appstrate/platform` tools) for
   // the sidecar. The run token names the run; `verifyRunToken` refuses a run
-  // that is not `running`.
+  // that is not `running`. Every other verb is a 405 (`Allow: POST`): the
+  // stateless server has no GET stream and no session.
   router.post("/mcp", async (c) => {
     const { runId, run } = await verifyRunToken(c);
     return serveRunMcp(c, {
@@ -226,6 +237,9 @@ export function createInternalRouter() {
       userId: run.userId,
       endUserId: run.endUserId,
     });
+  });
+  router.all("/mcp", () => {
+    throw methodNotAllowed(["POST"]);
   });
 
   // ─── OAuth Model Provider tokens ──────────────────────────────────────

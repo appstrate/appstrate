@@ -2,23 +2,19 @@
 
 /**
  * The run MCP server (`services/run-tools-mcp.ts`) on its two mounts:
- * `POST /internal/mcp` (run token) and `POST /api/runs/{runId}/mcp` (standard
- * auth, remote run the caller launched).
+ * `POST /internal/mcp` (run token) and `POST /api/runs/{runId}/mcp` (the run's
+ * sink signature, remote runs only).
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
+import { encrypt } from "@appstrate/connect";
+import { sign } from "@appstrate/afps-runtime/events";
 import { notifications, packagePersistence, runLogs, runs } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
-import {
-  authHeaders,
-  createTestContext,
-  memberContext,
-  memberHolding,
-  type TestContext,
-} from "../../helpers/auth.ts";
+import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
 import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../helpers/mcp.ts";
 import { seedAgent, seedEndUser, seedRun } from "../../helpers/seed.ts";
 import { addMemories, listPinnedSlots } from "../../../src/services/state/package-persistence.ts";
@@ -31,16 +27,24 @@ interface ToolResult {
   isError?: boolean;
 }
 
+/** Headers for one request, given the exact body it carries. */
+type HeadersFor = Record<string, string> | ((body: string) => Record<string, string>);
+
 async function rpc(
   path: string,
-  headers: Record<string, string>,
+  headers: HeadersFor,
   method: string,
   params: Record<string, unknown> = {},
 ): Promise<{ status: number; envelope: JsonRpcEnvelope }> {
+  const body = JSON.stringify({ jsonrpc: "2.0", id: 1, method, params });
   const res = await app.request(path, {
     method: "POST",
-    headers: { ...headers, "content-type": "application/json", Accept: MCP_ACCEPT },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    headers: {
+      ...(typeof headers === "function" ? headers(body) : headers),
+      "content-type": "application/json",
+      Accept: MCP_ACCEPT,
+    },
+    body,
   });
   const text = await res.text();
   let envelope: JsonRpcEnvelope = {};
@@ -54,7 +58,7 @@ async function rpc(
 
 async function callTool(
   path: string,
-  headers: Record<string, string>,
+  headers: HeadersFor,
   name: string,
   args: Record<string, unknown>,
 ): Promise<ToolResult> {
@@ -138,7 +142,10 @@ describe("run MCP server", () => {
       const { envelope } = await rpc(path, bearer(run.id), "tools/list");
       const names = (envelope.result!.tools as Array<{ name: string }>).map((t) => t.name);
       expect(Object.keys(manifest.tools_policy).sort()).toEqual([...names].sort());
-      expect([...manifest.default_tools].sort()).toEqual([...names].sort());
+      // `notify` reaches people: an agent receives it by selecting it, never by default.
+      expect([...manifest.default_tools].sort()).toEqual(
+        names.filter((n) => n !== "notify").sort(),
+      );
     });
 
     it("`log` appends a progress run log at call time", async () => {
@@ -160,10 +167,25 @@ describe("run MCP server", () => {
 
     it("refuses arguments outside the input schema as a tool error", async () => {
       const run = await seedRunningRun();
-      const result = await callTool(path, bearer(run.id), "log", { level: "loud", message: "x" });
-      expect(result.isError).toBe(true);
-      expect(result.content[0]!.text).toContain("log: invalid arguments");
+      for (const [tool, args] of [
+        ["log", { level: "loud", message: "x" }],
+        ["log", { level: "info", message: "x".repeat(2001) }],
+        ["note", { content: "x".repeat(2001) }],
+      ] as const) {
+        const result = await callTool(path, bearer(run.id), tool, args);
+        expect(result.isError).toBe(true);
+        expect(result.content[0]!.text).toContain(`${tool}: invalid arguments`);
+      }
       expect(await db.select().from(runLogs).where(eq(runLogs.runId, run.id))).toHaveLength(0);
+      expect(
+        await db.select().from(packagePersistence).where(eq(packagePersistence.runId, run.id)),
+      ).toHaveLength(0);
+    });
+
+    it("answers 405 with `Allow: POST` to a GET", async () => {
+      const res = await app.request(path, { method: "GET", headers: { Accept: MCP_ACCEPT } });
+      expect(res.status).toBe(405);
+      expect(res.headers.get("Allow")).toBe("POST");
     });
 
     it("`note` and `pin` persist even when the run dies before finalize", async () => {
@@ -190,17 +212,6 @@ describe("run MCP server", () => {
       expect(byContent("team fact")).toMatchObject({ actorType: "shared", actorId: null });
       expect(byContent({ tone: "dry" })).toMatchObject({ key: "persona", pinned: true });
       expect(rows).toHaveLength(3);
-    });
-
-    it("`note` stores a memory whose trim splits a surrogate pair, the half replaced", async () => {
-      const run = await seedRunningRun();
-      await callTool(path, bearer(run.id), "note", { content: `${"a".repeat(1999)}😀` });
-
-      const rows = await db
-        .select()
-        .from(packagePersistence)
-        .where(eq(packagePersistence.runId, run.id));
-      expect(rows.map((r) => r.content)).toEqual([`${"a".repeat(1999)}\uFFFD`]);
     });
 
     it("`recall_memory` returns the notes written through `note`, once each", async () => {
@@ -476,48 +487,92 @@ describe("run MCP server", () => {
 
   describe("POST /api/runs/{runId}/mcp", () => {
     const path = (runId: string) => `/api/runs/${runId}/mcp`;
+    const SECRET = "a".repeat(43);
+    const OTHER_SECRET = "b".repeat(43);
 
-    it("serves a running remote run the caller launched", async () => {
-      const run = await seedRunningRun({ runOrigin: "remote" });
-      const result = await callTool(path(run.id), authHeaders(ctx), "log", {
+    /** Standard Webhooks headers over the exact body, as the CLI signs its `/events`. */
+    const signed =
+      (secret: string) =>
+      (body: string): Record<string, string> => {
+        const headers = sign({
+          msgId: `msg_${crypto.randomUUID()}`,
+          timestampSec: Math.floor(Date.now() / 1000),
+          body,
+          secret,
+        });
+        return {
+          "webhook-id": headers["webhook-id"],
+          "webhook-timestamp": headers["webhook-timestamp"],
+          "webhook-signature": headers["webhook-signature"],
+        };
+      };
+
+    function seedRemoteRun(overrides: Partial<Parameters<typeof seedRun>[0]> = {}) {
+      return seedRunningRun({
+        runOrigin: "remote",
+        sinkSecretEncrypted: encrypt(SECRET),
+        sinkExpiresAt: new Date(Date.now() + 3_600_000),
+        ...overrides,
+      });
+    }
+
+    it("serves a remote run whose sink secret signs the body, in the run's actor scope", async () => {
+      const run = await seedRemoteRun();
+      const result = await callTool(path(run.id), signed(SECRET), "log", {
         level: "info",
         message: "from the CLI",
       });
       expect(result.isError).toBeUndefined();
       const rows = await db.select().from(runLogs).where(eq(runLogs.runId, run.id));
       expect(rows.map((r) => r.message)).toEqual(["from the CLI"]);
+
+      await callTool(path(run.id), signed(SECRET), "note", { content: "CLI fact" });
+      const [memory] = await db
+        .select()
+        .from(packagePersistence)
+        .where(eq(packagePersistence.runId, run.id));
+      expect(memory).toMatchObject({ actorType: "user", actorId: ctx.user.id });
     });
 
-    it("returns 401 without credentials", async () => {
-      const run = await seedRunningRun({ runOrigin: "remote" });
+    it("returns 401 without signature headers", async () => {
+      const run = await seedRemoteRun();
       const { status } = await rpc(path(run.id), {}, "tools/list");
       expect(status).toBe(401);
     });
 
-    it("returns 403 without `agents:run`", async () => {
-      const reader = await memberHolding(ctx, ["runs:read"]);
-      const run = await seedRunningRun({ runOrigin: "remote", userId: reader.user.id });
-      const { status } = await rpc(path(run.id), authHeaders(reader), "tools/list");
-      expect(status).toBe(403);
+    it("returns 401 for a signature over another body", async () => {
+      const run = await seedRemoteRun();
+      const { status } = await rpc(path(run.id), () => signed(SECRET)("{}"), "tools/list");
+      expect(status).toBe(401);
     });
 
-    it("returns 403 when the run is not running", async () => {
-      const run = await seedRunningRun({ runOrigin: "remote", status: "success" });
-      const { status } = await rpc(path(run.id), authHeaders(ctx), "tools/list");
-      expect(status).toBe(403);
+    it("returns 401 for another run's secret", async () => {
+      const run = await seedRemoteRun();
+      await seedRemoteRun({ sinkSecretEncrypted: encrypt(OTHER_SECRET) });
+      const { status } = await rpc(path(run.id), signed(OTHER_SECRET), "tools/list");
+      expect(status).toBe(401);
     });
 
-    it("returns 404 for another member's run, even to an owner who reads every run", async () => {
-      const colleague = await memberContext(ctx, "admin");
-      const run = await seedRunningRun({ runOrigin: "remote", userId: colleague.user.id });
-      const { status } = await rpc(path(run.id), authHeaders(ctx), "tools/list");
+    it("returns 410 once the sink is closed — a finished run", async () => {
+      const run = await seedRemoteRun({ status: "success", sinkClosedAt: new Date() });
+      const { status } = await rpc(path(run.id), signed(SECRET), "tools/list");
+      expect(status).toBe(410);
+    });
+
+    it("returns 404 for a platform-origin run, whose sidecar serves these tools", async () => {
+      const run = await seedRemoteRun({ runOrigin: "platform" });
+      const { status } = await rpc(path(run.id), signed(SECRET), "tools/list");
       expect(status).toBe(404);
     });
 
-    it("returns 404 for a platform-origin run", async () => {
-      const run = await seedRunningRun({ runOrigin: "platform" });
-      const { status } = await rpc(path(run.id), authHeaders(ctx), "tools/list");
-      expect(status).toBe(404);
+    it("answers 405 with `Allow: POST` to a GET", async () => {
+      const run = await seedRemoteRun();
+      const res = await app.request(path(run.id), {
+        method: "GET",
+        headers: { Accept: MCP_ACCEPT },
+      });
+      expect(res.status).toBe(405);
+      expect(res.headers.get("Allow")).toBe("POST");
     });
   });
 });

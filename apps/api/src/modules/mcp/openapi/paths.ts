@@ -9,6 +9,7 @@
  */
 
 import { SPACE_ID_RE } from "@appstrate/db/ids";
+import { jsonRpcTransportError } from "../../../openapi/responses.ts";
 
 const jsonRpcRequestBody = {
   required: true,
@@ -28,35 +29,6 @@ const jsonRpcRequestBody = {
     },
   },
 } as const;
-
-/** A refusal the SDK transport answers itself: a JSON-RPC 2.0 error with `id: null`. */
-function jsonRpcTransportError(description: string) {
-  return {
-    description,
-    content: {
-      "application/json": {
-        schema: {
-          type: "object",
-          description: "A JSON-RPC 2.0 error envelope.",
-          properties: {
-            jsonrpc: { type: "string", enum: ["2.0"] },
-            id: { type: "null" },
-            error: {
-              type: "object",
-              properties: {
-                code: { type: "integer" },
-                message: { type: "string" },
-                data: {},
-              },
-              required: ["code", "message"],
-            },
-          },
-          required: ["jsonrpc", "id", "error"],
-        },
-      },
-    },
-  } as const;
-}
 
 const orgPathParameter = {
   name: "org",

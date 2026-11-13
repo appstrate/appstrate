@@ -2942,8 +2942,8 @@ export const schemas = {
   AgentManifest: {
     type: "object",
     description:
-      "AFPS Agent manifest extended with Appstrate platform fields. " +
-      "Standard fields are defined by the AFPS Agent schema. Extension fields use the x- prefix per AFPS §10.",
+      "AFPS Agent manifest. Standard fields are defined by the AFPS Agent schema; Appstrate's " +
+      'extensions live under `_meta` keys of the `dev.appstrate/` namespace (`_meta["dev.appstrate/*"]`, AFPS §10).',
     allOf: [{ $ref: "https://schemas.afps.dev/v0/agent.schema.json" }],
   },
   FileConstraintsMap: {

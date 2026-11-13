@@ -158,6 +158,11 @@ const TERMINAL_CATCH_ALLS: ReadonlyArray<{ route: string; why: string }> = [
     route: "ALL /api/mcp/o/:org/s/:space",
     why: "405 `Allow: POST` for every verb the POST route leaves",
   },
+  {
+    route: "ALL /api/runs/:runId/mcp",
+    why: "405 `Allow: POST` for every verb the POST route leaves",
+  },
+  { route: "ALL /internal/mcp", why: "405 `Allow: POST` for every verb the POST route leaves" },
   { route: "ALL /api/credential-proxy/proxy", why: "forwards the caller's method upstream" },
 ];
 

@@ -37,17 +37,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **BREAKING: the `runtime_tools` agent field is retired** (`@appstrate/core/validation`, #2199).
   `agentManifestSchema` does not declare it, and `dropRetiredRuntimeTools`,
-  `OUTPUT_TOOL_REQUIRED`, `ValidateManifestResult.droppedRuntimeTools` and
-  `ParsedPackageZip.droppedRuntimeTools` are removed. `validateManifest` refuses an agent
-  manifest carrying `runtime_tools` on the author path, naming
-  `dependencies.integrations["@appstrate/platform"]` and `integrations_configuration`, and
-  tolerates it untouched on the stored path, like the retired `dependencies` keys. The option
-  governing both is renamed: `RetiredRuntimeToolsPolicy` → **`RetiredVocabularyPolicy`**,
-  `ValidateManifestOptions.retiredRuntimeTools` / `ParsePackageZipOptions.retiredRuntimeTools` →
-  **`retiredVocabulary`**, with the values `"reject"` and **`"tolerate"`** (was `"drop"`).
+  `ValidateManifestResult.droppedRuntimeTools` and `ParsedPackageZip.droppedRuntimeTools` are
+  removed. `validateManifest` refuses an agent manifest carrying `runtime_tools` whatever the
+  direction, naming `dependencies.integrations["@appstrate/platform"]` and
+  `integrations_configuration`. The option that still tells the directions apart covers the
+  retired `dependencies` keys only, and is renamed: `RetiredRuntimeToolsPolicy` →
+  **`RetiredVocabularyPolicy`**, `ValidateManifestOptions.retiredRuntimeTools` /
+  `ParsePackageZipOptions.retiredRuntimeTools` → **`retiredVocabulary`**, with the values
+  `"reject"` and **`"tolerate"`** (was `"drop"`).
 
 - **BREAKING: `launchRunAndWait` inline defaults** (`@appstrate/core/run-and-wait-client`,
-  #2199). `dependencies.integrations["@appstrate/platform"] = "^1.0.0"` is added when
+  #2199). `dependencies.integrations["@appstrate/platform"] = PLATFORM_INTEGRATION_RANGE`
+  (`"^1.0.0"`) is added when
   `dependencies.integrations` does not name that id, and
   `integrations_configuration["@appstrate/platform"] = { tools: ["log"] }` only when neither
   table names it; the caller's own entries are kept. An absent `output` defaults to the open
@@ -62,16 +63,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`PLATFORM_INTEGRATION_ID`** (`@appstrate/core/integration`, #2199):
-  `"@appstrate/platform"`, the id of the system integration that ships the run tools. The
-  manifests the platform writes on an author's behalf name it; `isRuntimeBoundIntegration`
-  never reads it.
+- **`PLATFORM_INTEGRATION_ID`** and **`PLATFORM_INTEGRATION_RANGE`**
+  (`@appstrate/core/integration`, #2199): `"@appstrate/platform"`, the id of the system
+  integration that ships the run tools, and `"^1.0.0"`, the range under which the manifests the
+  platform writes on an author's behalf declare it; `isRuntimeBoundIntegration` never reads
+  either.
 
 - **Runtime-bound integrations** (`@appstrate/core/integration`, #2199).
   **`PLATFORM_META_KEY`** (`"dev.appstrate/platform"`) is the `_meta` key that binds an
   integration's MCP endpoint to the runtime executing the run; `integrationManifestSchema`
   accepts it only on an integration without `auths` and with `source.kind: "remote"`.
-  **`isRuntimeBoundIntegration(manifest)`** is the one predicate that reads it, and
+  **`isRuntimeBoundIntegration(manifest)`** is the one predicate that reads it (its value must
+  be a JSON object, AFPS §10.1: `null` binds nothing), and
   **`findRuntimeBinding(manifest)`** is its write-path refusal for packages the platform did not
   ship.
 

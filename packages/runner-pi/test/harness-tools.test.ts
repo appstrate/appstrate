@@ -2,9 +2,9 @@
 
 /**
  * The harness tools `output` and `publish_file`, driven through the Pi tool
- * each extension registers: a valid call emits its canonical run event (with a
- * numeric `timestamp`) and replies; a refused call throws, Pi's tool-error
- * signal, and emits nothing.
+ * each extension registers: a valid call emits its canonical run event and
+ * replies; a refused call throws, Pi's tool-error signal, and emits nothing.
+ * The runner's stamping of those events is pinned in `output-tool.test.ts`.
  */
 
 import { beforeEach, describe, it, expect } from "bun:test";
@@ -28,7 +28,7 @@ interface RegisteredTool {
 }
 
 const emitted: HarnessToolEvent[] = [];
-const emit = (event: HarnessToolEvent): void => {
+const emit = async (event: HarnessToolEvent): Promise<void> => {
   emitted.push(event);
 };
 beforeEach(() => {
@@ -53,24 +53,6 @@ const publishedFile: PublishedFile = {
   size: 42,
   sha256: "abc123",
 };
-
-describe("harness tool events", () => {
-  // Every emitted canonical event MUST carry a numeric `timestamp`: the
-  // reducer copies it into RunResult, where the finalize endpoint requires a
-  // number.
-  it("stamps a numeric timestamp on every emitted event", async () => {
-    const publish = registered(buildPublishFileExtension(async () => publishedFile, emit));
-    for (const [tool, args] of [
-      [output({ type: "object" }), { data: { ok: true } }],
-      [publish, { path: "a.txt" }],
-    ] as const) {
-      emitted.length = 0;
-      await tool.execute("call-1", args);
-      expect(emitted).toHaveLength(1);
-      expect(typeof emitted[0]!.timestamp).toBe("number");
-    }
-  });
-});
 
 describe("output — schema exposure", () => {
   it("is named output and advertises the declared schema as the `data` argument", () => {
@@ -141,9 +123,7 @@ describe("output — validation", () => {
     });
     const result = await tool.execute("call-1", { data: { name: "Ada", age: 36 } });
     expect(result.content[0]!.text).toBe("Output recorded");
-    expect(emitted).toEqual([
-      { type: "output.emitted", data: { name: "Ada", age: 36 }, timestamp: expect.any(Number) },
-    ]);
+    expect(emitted).toEqual([{ type: "output.emitted", data: { name: "Ada", age: 36 } }]);
   });
 });
 
@@ -228,9 +208,7 @@ describe("publish_file", () => {
     });
     expect(result.content[0]!.text).toBe("Published Final report.html → appfile://file_primary");
     expect(requests).toEqual([["outputs/final.html", "Final report.html"]]);
-    expect(emitted).toEqual([
-      { ...filePublishedEvent(publishedFile), timestamp: expect.any(Number) },
-    ]);
+    expect(emitted).toEqual([filePublishedEvent(publishedFile)]);
   });
 
   it("builds the file.published event from the stored file", () => {

@@ -8,11 +8,12 @@
  * ({@link buildPublishFileExtension}), registered around an injected HTTP
  * uploader.
  *
- * Event delivery: the runner passes each extension the `emit` function of the
- * run's single event sink; a successful call emits its canonical run event
- * through it, stamped with a production-time `timestamp`, before returning. A
- * refused call throws (Pi's tool-error signal, see `pi-tool-result.ts`), so the
- * terminal-tool early stop never fires on it.
+ * Event delivery: the runner passes each extension an `emit` function that
+ * stamps the event's `runId` and `timestamp` and writes it to the run's event
+ * sink; a successful call awaits it before returning, so the event is settled
+ * before the run can finalize. A refused call throws (Pi's tool-error signal,
+ * see `pi-tool-result.ts`) and emits nothing, so the terminal-tool early stop
+ * never fires on it.
  */
 
 import { asJSONSchemaObject } from "@appstrate/core/form";
@@ -33,7 +34,7 @@ export interface HarnessToolEvent {
   [k: string]: unknown;
 }
 
-type Emit = (event: HarnessToolEvent) => void;
+type Emit = (event: HarnessToolEvent) => Promise<void>;
 
 interface HarnessTool {
   name: string;
@@ -52,9 +53,7 @@ function harnessToolExtension(tool: HarnessTool, emit: Emit): ExtensionFactory {
       parameters: unsafeSchema<Record<string, unknown>>(tool.inputSchema),
       async execute(_toolCallId, params): Promise<PiToolResult> {
         const { event, reply } = await tool.call((params ?? {}) as Record<string, unknown>);
-        // Canonical run events carry a required `timestamp` and the run sink
-        // does not stamp one: stamp it here, at the single emit point of both tools.
-        emit({ timestamp: Date.now(), ...event });
+        await emit(event);
         return { content: [{ type: "text", text: reply }], details: undefined };
       },
     });

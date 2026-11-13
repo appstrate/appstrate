@@ -15,7 +15,7 @@ Each notification belongs to one **recipient** and one space, and has its own re
 | `package_shared` | A package is shared **with a person**. The payload names the package, its type and who shared it. | The person, in their personal space.                                                                             |
 | `agent_message`  | A running agent calls the `notify` [platform tool](/features/tools#platform-tools).               | The recipients of the run's `run_completed`, at most once per run.                                               |
 
-A `run_completed` payload carries the `packageId` and the final `status`, which is enough to render the bell without another request. An `agent_message` payload carries the `packageId`, the `title` and the `message` the agent wrote, and its `runId` is the run that sent it. Runs of an inline agent do not notify, since their result is already in front of the caller: their `notify` call is refused.
+A `run_completed` payload carries the `packageId` and the final `status`, which is enough to render the bell without another request. An `agent_message` payload carries the `packageId`, the `title` and the `message` the agent wrote, and its `runId` is the run that sent it. Runs of an inline agent do not notify, since their result is already in front of the caller: their `notify` call is refused. An agent has `notify` only when its manifest selects it under `integrations_configuration["@appstrate/platform"].tools`; it is not one of the integration's default tools. The message is not instant: the bell shows it at its next refresh, which happens when the run ends, when the live connection reconnects, and every five minutes.
 
 ## Reading the feed
 

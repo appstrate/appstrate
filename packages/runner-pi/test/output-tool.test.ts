@@ -43,4 +43,48 @@ describe("PiRunner — output tool", () => {
       required: ["n"],
     });
   });
+
+  // The runner stamps `runId` and `timestamp` on a harness event (the reducer
+  // copies `timestamp` into RunResult, where the finalize endpoint requires a
+  // number), and the call settles its write before the run finalizes.
+  it("emits `output.emitted` stamped with the run id and a timestamp", async () => {
+    let calls = 0;
+    const { sink } = await runAgainstStub({
+      model: stubGatewayModel("openai-completions"),
+      runner: { modelRetry: false, outputSchema: { type: "object" } },
+      respond: () => {
+        if (calls++ > 0) return new Response("stop", { status: 400 });
+        const chunk = (delta: unknown, finish: string | null) =>
+          `data: ${JSON.stringify({
+            id: "c1",
+            object: "chat.completion.chunk",
+            created: 0,
+            model: "gateway-model",
+            choices: [{ index: 0, delta, finish_reason: finish }],
+          })}\n\n`;
+        const toolCall = {
+          index: 0,
+          id: "call_1",
+          type: "function",
+          function: { name: "output", arguments: JSON.stringify({ data: { ok: true } }) },
+        };
+        return new Response(
+          chunk({ role: "assistant", tool_calls: [toolCall] }, null) +
+            chunk({}, "tool_calls") +
+            "data: [DONE]\n\n",
+          { headers: { "Content-Type": "text/event-stream" } },
+        );
+      },
+    });
+    const emitted = sink.events.filter((event) => event.type === "output.emitted");
+    expect(emitted).toEqual([
+      {
+        type: "output.emitted",
+        data: { ok: true },
+        runId: "run_test",
+        timestamp: expect.any(Number),
+      },
+    ]);
+    expect(sink.finalized?.output).toEqual({ ok: true });
+  });
 });

@@ -9,10 +9,7 @@
  * `PATCH /api/runs/:runId/sink/extend` — extend `sink_expires_at` for a
  * long-running remote run.
  *
- * `POST /api/runs/:runId/mcp` — the run MCP server (`services/run-tools-mcp.ts`)
- * for the host executing a remote run.
- *
- * All three routes authenticate via JWT bearer (interactive CLI) or API key
+ * Both routes authenticate via JWT bearer (interactive CLI) or API key
  * with the `agents:run` scope (headless — GitHub Action, CI); an inline
  * `source` also takes `agents:write`. HMAC-signed
  * event ingestion lives in a separate router (`runs-events.ts`) because
@@ -43,9 +40,7 @@ import {
 } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { getActor } from "../lib/actor.ts";
-import { ownRunsFilter, runVisibilityFilter } from "../lib/run-visibility.ts";
-import { runAgentIdentity } from "../services/state/runs.ts";
-import { serveRunMcp } from "../services/run-tools-mcp.ts";
+import { runVisibilityFilter } from "../lib/run-visibility.ts";
 import { recordAuditFromContext } from "../services/audit.ts";
 import { getPlatformRunLimits } from "../services/run-limits.ts";
 import {
@@ -549,50 +544,6 @@ export function createRunsRemoteRouter() {
       return c.json({ id: runId, expiresAt: newExpiresAt.toISOString() });
     },
   );
-
-  // POST /api/runs/:runId/mcp — the run MCP server (`@appstrate/platform`
-  // tools) for the host executing a remote run. Same auth as creation
-  // (`agents:run`), and only on a running remote run the caller launched:
-  // the tools write memories and slots in the run's actor scope, which no
-  // other principal may write, `runs:read-all` included. Any other run is a
-  // 404 so nothing leaks about its existence; the caller's own run once it has
-  // left `running` is a 403.
-  router.post("/runs/:runId/mcp", rateLimit(200), requirePermission("agents", "run"), async (c) => {
-    const runId = c.req.param("runId");
-    if (!runId) throw invalidRequest("runId path parameter is required", "runId");
-    const [run] = await db
-      .select({
-        packageId: runs.packageId,
-        agentScope: runs.agentScope,
-        agentName: runs.agentName,
-        userId: runs.userId,
-        endUserId: runs.endUserId,
-        orgId: runs.orgId,
-        spaceId: runs.spaceId,
-        status: runs.status,
-      })
-      .from(runs)
-      .where(
-        and(
-          eq(runs.id, runId),
-          eq(runs.orgId, c.get("orgId")),
-          eq(runs.spaceId, c.get("spaceId")),
-          eq(runs.runOrigin, "remote"),
-          ownRunsFilter(getActor(c)),
-        ),
-      )
-      .limit(1);
-    if (!run) throw notFound(`remote run ${runId} not found`);
-    if (run.status !== "running") throw forbidden("Run is not running");
-    return serveRunMcp(c, {
-      runId,
-      orgId: run.orgId,
-      spaceId: run.spaceId,
-      packageId: runAgentIdentity(run),
-      userId: run.userId,
-      endUserId: run.endUserId,
-    });
-  });
 
   return router;
 }

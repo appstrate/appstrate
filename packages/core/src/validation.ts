@@ -453,11 +453,9 @@ function parseWithSchema(
 }
 
 /**
- * How {@link validateManifest} treats the manifest vocabulary the platform
- * retired: the `dependencies` keys AFPS 2.0 retired — `tools` (replaced by
- * `mcp_servers`) and `providers` (replaced by `integrations`) — and the agent
- * field `runtime_tools` (replaced by the `@appstrate/platform` integration). The
- * one behaviour that MUST differ by direction:
+ * How {@link validateManifest} treats the `dependencies` keys AFPS 2.0 retired —
+ * `tools` (replaced by `mcp_servers`) and `providers` (replaced by
+ * `integrations`). The one behaviour that MUST differ by direction:
  *
  *   - `"reject"` (default) — the manifest is AUTHOR INPUT (create, update,
  *     import, an inline manifest from an API client, a repo-authored system
@@ -465,15 +463,19 @@ function parseWithSchema(
  *     so the author must see it, with its replacement named.
  *   - `"tolerate"` — the manifest was ALREADY PERSISTED (a stored draft, a
  *     published version snapshot or archive). A retired key is TOLERATED, left
- *     exactly where it is: it is inert (no reader reads it), and rewriting a
- *     stored manifest's bytes here would change its integrity hash. Surfacing it
- *     belongs to the install-warning channel, not to this validator.
+ *     exactly where it is: it is inert (no reader reads it), and a published
+ *     archive is immutable — its integrity hash covers its bytes — so it could
+ *     never be repaired. Surfacing it belongs to the install-warning channel,
+ *     not to this validator.
+ *
+ * The retired agent field `runtime_tools` is outside this policy: it is
+ * refused in both directions, because the agent had tools under it.
  */
 export type RetiredVocabularyPolicy = "reject" | "tolerate";
 
 /**
- * The retired agent field and the message naming its replacement, returned on
- * the author direction of {@link validateManifest}.
+ * The retired agent field and the message naming its replacement, returned by
+ * {@link validateManifest} whatever the direction.
  */
 const RETIRED_RUNTIME_TOOLS_ERROR =
   'runtime_tools: `runtime_tools` is retired — declare `dependencies.integrations["@appstrate/platform"]` ' +
@@ -519,20 +521,21 @@ export function validateManifest(
   const obj = raw as Record<string, unknown>;
   const type = obj.type;
 
-  // Retired vocabulary: on the author direction, reject and name the
-  // replacement. See {@link RetiredVocabularyPolicy} for why the keys still
-  // parse. Checked before the type dispatch because every package type may
-  // declare `dependencies`.
-  if (options?.retiredVocabulary !== "tolerate") {
-    const errors = findRetiredDependencyKeys(obj).map(
-      ({ key, replacement }) =>
-        `dependencies.${key}: \`dependencies.${key}\` is a retired AFPS 1.x key — rename it to \`dependencies.${replacement}\`. No consumer reads it, so the dependencies declared under it are silently ignored.`,
-    );
-    if (type === "agent" && Object.prototype.hasOwnProperty.call(obj, "runtime_tools")) {
-      errors.push(RETIRED_RUNTIME_TOOLS_ERROR);
-    }
-    if (errors.length > 0) return { valid: false, errors };
+  // Retired vocabulary: reject and name the replacement — the `dependencies`
+  // keys on the author direction only (see {@link RetiredVocabularyPolicy} for
+  // why they still parse), `runtime_tools` in both. Checked before the type
+  // dispatch because every package type may declare `dependencies`.
+  const errors =
+    options?.retiredVocabulary === "tolerate"
+      ? []
+      : findRetiredDependencyKeys(obj).map(
+          ({ key, replacement }) =>
+            `dependencies.${key}: \`dependencies.${key}\` is a retired AFPS 1.x key — rename it to \`dependencies.${replacement}\`. No consumer reads it, so the dependencies declared under it are silently ignored.`,
+        );
+  if (type === "agent" && Object.prototype.hasOwnProperty.call(obj, "runtime_tools")) {
+    errors.push(RETIRED_RUNTIME_TOOLS_ERROR);
   }
+  if (errors.length > 0) return { valid: false, errors };
 
   // AFPS (§3.4): mcp-server identity lives at the manifest root —
   // `type: "mcp-server"`, `name`, `schema_version`, and `dependencies` are

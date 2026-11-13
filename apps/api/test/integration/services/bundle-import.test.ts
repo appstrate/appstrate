@@ -357,46 +357,6 @@ describe("bundle import — upstream manifest rejection + rollback", () => {
       .where(eq(packageVersions.packageId, packageId));
     expect(versions).toHaveLength(0);
   });
-
-  it("refuses an agent carrying `runtime_tools`, naming @appstrate/platform, and writes nothing", async () => {
-    const ctx = await createTestContext({ orgSlug: "gateorgc" });
-    const packageId = "@gateorgc/legacy";
-    const identity = `${packageId}@1.0.0` as const;
-    const manifest = {
-      name: packageId,
-      version: "1.0.0",
-      type: "agent",
-      schema_version: "0.2",
-      display_name: "Legacy",
-      runtime_tools: ["log"],
-    };
-    const files = new Map<string, Uint8Array>([
-      ["manifest.json", enc(JSON.stringify(manifest, null, 2))],
-      ["prompt.md", enc("Prompt.")],
-    ]);
-    const bundle: Bundle = {
-      bundleFormatVersion: "1.0",
-      root: identity,
-      packages: new Map([[identity, { ...pkgFromFiles(files, identity), manifest }]]),
-      integrity: "sha256-abc",
-    };
-
-    const err = await importBundle(
-      bundle,
-      { orgId: ctx.orgId, spaceId: ctx.defaultSpaceId },
-      ctx.user.id,
-      noShare,
-    ).catch((e: unknown) => e);
-
-    expect(err).toBeInstanceOf(ApiError);
-    expect((err as ApiError).status).toBe(400);
-    expect((err as ApiError).message).toContain("@appstrate/platform");
-    const versions = await db
-      .select({ id: packageVersions.id })
-      .from(packageVersions)
-      .where(eq(packageVersions.packageId, packageId));
-    expect(versions).toHaveLength(0);
-  });
 });
 
 describe("importBundle — cross-tenant ownership claim (CRIT-08)", () => {

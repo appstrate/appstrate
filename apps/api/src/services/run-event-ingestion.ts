@@ -142,6 +142,8 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
       packageId: runs.packageId,
       agentScope: runs.agentScope,
       agentName: runs.agentName,
+      userId: runs.userId,
+      endUserId: runs.endUserId,
       runOrigin: runs.runOrigin,
       sinkSecretEncrypted: runs.sinkSecretEncrypted,
       sinkExpiresAt: runs.sinkExpiresAt,

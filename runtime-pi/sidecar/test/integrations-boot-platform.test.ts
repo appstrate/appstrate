@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "bun:test";
-import { connectPlatformIntegration } from "../integrations-boot.ts";
+import { connectPlatformIntegration, RemoteMcpError } from "../integrations-boot.ts";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { handlerFetch, legacyMcpHandler } from "@appstrate/mcp-transport/testing";
@@ -57,6 +57,41 @@ describe("connectPlatformIntegration", () => {
     for (const request of seen) {
       expect(request.url).toBe(`${PLATFORM_API_URL}/internal/mcp`);
       expect(request.auth).toBe("Bearer run-token");
+    }
+  });
+
+  // A platform call is bounded by the integration clients' per-call timeout:
+  // `APPSTRATE_MCP_TOOL_TIMEOUT_MS` when the operator sets it, else the MCP SDK's
+  // 60 s default. The agent's calls request progress, so the bound is an idle
+  // one; the platform reports none, so it holds from the call's start.
+  it("ends a hung tools/call in a timeout error within the per-call bound", async () => {
+    const hung: AppstrateToolDefinition = {
+      descriptor: { name: "log", inputSchema: { type: "object" } },
+      handler: () => new Promise(() => {}),
+    };
+    const previous = process.env.APPSTRATE_MCP_TOOL_TIMEOUT_MS;
+    process.env.APPSTRATE_MCP_TOOL_TIMEOUT_MS = "200";
+    let client: Awaited<ReturnType<typeof connectPlatformIntegration>> | undefined;
+    try {
+      client = await connectPlatformIntegration(spec, {
+        platformApiUrl: PLATFORM_API_URL,
+        runToken: "run-token",
+        fetchFn: handlerFetch(legacyMcpHandler({ tools: [hung] })),
+      });
+      const startedAt = Date.now();
+      const error = await client
+        .callTool({ name: "log", arguments: {} }, { onProgress: () => {} })
+        .then(
+          () => undefined,
+          (err: unknown) => err,
+        );
+      expect(error).toBeInstanceOf(RemoteMcpError);
+      expect((error as RemoteMcpError).failure).toBe("timeout");
+      expect(Date.now() - startedAt).toBeLessThan(2_000);
+    } finally {
+      if (previous === undefined) delete process.env.APPSTRATE_MCP_TOOL_TIMEOUT_MS;
+      else process.env.APPSTRATE_MCP_TOOL_TIMEOUT_MS = previous;
+      await client?.close().catch(() => {});
     }
   });
 

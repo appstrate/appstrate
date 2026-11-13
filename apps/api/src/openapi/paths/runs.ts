@@ -3,6 +3,7 @@
 import { connectionConflictContent, problemContent } from "../responses.ts";
 import {
   RUN_TOOLS_MCP_DESCRIPTION,
+  runToolsMcpMethodNotAllowed,
   runToolsMcpRequestBody,
   runToolsMcpResponses,
 } from "./run-tools-mcp.ts";
@@ -1901,30 +1902,38 @@ const canonicalRunsPaths = {
     post: {
       operationId: "runToolsMcpPost",
       tags: ["Runs"],
-      summary: "Run MCP server of a remote run",
+      summary: "Run MCP server of a remote run (HMAC)",
       description:
         RUN_TOOLS_MCP_DESCRIPTION +
-        " Mounted here for the host executing a remote run. Requires `agents:run`, and serves only a remote run that the caller launched, in the caller's org and space — any other run returns 404 rather than confirming it exists — while it is `running` (403 otherwise).",
+        " Mounted here for the host executing a remote run. Same Standard Webhooks HMAC auth as the event routes, keyed on the run's sink secret: the signature covers the exact request body bytes. It holds as long as the sink is open, whatever the caller's session. A platform-origin run answers 404 (its sidecar serves these tools on `/internal/mcp`).",
       parameters: [
-        { $ref: "#/components/parameters/XOrgId" },
-        { $ref: "#/components/parameters/XSpaceId" },
         { name: "runId", in: "path", required: true, schema: { type: "string" } },
+        { name: "webhook-id", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-timestamp", in: "header", required: true, schema: { type: "string" } },
+        { name: "webhook-signature", in: "header", required: true, schema: { type: "string" } },
       ],
+      security: [],
       requestBody: runToolsMcpRequestBody,
       responses: {
         ...runToolsMcpResponses,
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": {
-          description: "`forbidden` — the caller lacks `agents:run`, or the run is not `running`.",
-          content: {
-            "application/problem+json": {
-              schema: { $ref: "#/components/schemas/ProblemDetail" },
-            },
-          },
+        "401": runSinkUnauthorized,
+        "404": {
+          description: "`not_found` — no run with this id, or a platform-origin run.",
+          content: problemContent,
         },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "429": { $ref: "#/components/responses/RateLimited" },
+        "410": runSinkGone,
+        "503": { $ref: "#/components/responses/EncryptionKeyUnavailable" },
       },
+    },
+    get: {
+      operationId: "runToolsMcpGet",
+      tags: ["Runs"],
+      summary: "Run MCP server of a remote run (GET)",
+      description:
+        "The GET channel of the run MCP server. The server is stateless and opens no standalone server-initiated SSE stream, so GET (and every verb but POST) answers 405.",
+      parameters: [{ name: "runId", in: "path", required: true, schema: { type: "string" } }],
+      security: [],
+      responses: { "405": runToolsMcpMethodNotAllowed },
     },
   },
 } as const;

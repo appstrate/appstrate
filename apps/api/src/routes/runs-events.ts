@@ -7,6 +7,7 @@
  *
  *   POST /api/runs/:runId/events           — one signed CloudEvent
  *   POST /api/runs/:runId/events/finalize  — terminal RunResult, idempotent
+ *   POST /api/runs/:runId/mcp              — the run MCP server of a remote run
  *
  * Authentication is Standard Webhooks HMAC (via `verifyRunSignature`). No
  * user principal — the request's legitimacy is proven cryptographically.
@@ -23,7 +24,7 @@ import { z } from "zod";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
-import { invalidRequest, notFound, conflict } from "../lib/errors.ts";
+import { invalidRequest, methodNotAllowed, notFound, conflict } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { rateLimitByRunId, rateLimitRunFiles } from "../middleware/rate-limit.ts";
 import {
@@ -31,6 +32,7 @@ import {
   verifyRunUploadSignature,
 } from "../middleware/verify-run-signature.ts";
 import { ingestRunEvent, finalizeRun } from "../services/run-event-ingestion.ts";
+import { serveRunMcp } from "../services/run-tools-mcp.ts";
 import { createFileFromStream } from "../services/files.ts";
 import { getRunAttribution } from "../services/state/runs.ts";
 import { recordAudit } from "../services/audit.ts";
@@ -229,6 +231,12 @@ export function createRunsEventsRouter() {
   // burst 30) so the finalize `outputs/` sweep's many small POSTs never exhaust
   // — or get starved by — the high-rate event-ingestion budget above.
   const fileLimiter = rateLimitRunFiles(30, 6);
+  // The run MCP server gets a per-minute budget of its own: one point per
+  // MCP message (`initialize`, `tools/list`, each tool call), 200 a minute —
+  // the figure the sidecar's mount of the same server has (`/internal/mcp`,
+  // `rateLimitByBearer(200)`). The 60 s window keeps its bucket apart from the
+  // 1 s event budget above, which is sized for telemetry, not tool calls.
+  const mcpLimiter = rateLimitByRunId(200, 60);
 
   // MIDDLEWARE ORDER — the signature guard runs FIRST on every route below,
   // the per-run limiter second. Both limiters key on the `:runId` from the
@@ -485,6 +493,34 @@ export function createRunsEventsRouter() {
     if (!stream) throw notFound(`file ${name} not found for run ${run.id}`);
     c.header("Content-Type", "application/octet-stream");
     return c.body(stream);
+  });
+
+  // POST /api/runs/:runId/mcp — the run MCP server (`@appstrate/platform`
+  // tools) for the host executing a remote run, authenticated like the routes
+  // above: the signature covers the exact request body. The tools write in
+  // the run's actor scope at call time.
+  //
+  // Remote runs only. A platform run's container holds the sink secret too
+  // (it signs its events), but it reaches these tools through its sidecar,
+  // which serves only the tools the agent selected; signing here would hand
+  // it all six. A platform run answers the 404 of an unknown run.
+  router.post("/runs/:runId/mcp", verifyRunSignature, mcpLimiter, async (c) => {
+    const run = c.get("run")!;
+    if (run.runOrigin !== "remote") throw notFound(`run ${run.id} not found`);
+    return serveRunMcp(c, {
+      runId: run.id,
+      orgId: run.orgId,
+      spaceId: run.spaceId,
+      packageId: run.packageId,
+      userId: run.userId,
+      endUserId: run.endUserId,
+    });
+  });
+  // The stateless server has no GET stream and no session to DELETE: every
+  // other verb is a 405 with `Allow: POST`, as the Streamable HTTP transport
+  // requires of a server that offers no GET stream.
+  router.all("/runs/:runId/mcp", () => {
+    throw methodNotAllowed(["POST"]);
   });
 
   return router;

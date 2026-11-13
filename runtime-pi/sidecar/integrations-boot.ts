@@ -772,7 +772,12 @@ export async function connectPlatformIntegration(
   const baseFetch = opts.fetchFn ?? fetch;
   const platformFetch: typeof fetch = Object.assign(
     async (input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
-      const target = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
+      // The MCP client calls `fetch(url, init)`: a `Request` would carry a method, body and
+      // headers this wrapper does not read.
+      if (input instanceof Request) {
+        throw new TypeError("the platform MCP fetch takes a URL, not a Request");
+      }
+      const target = new URL(input);
       if (target.origin !== origin) {
         throw new RemoteCredentialRefusal(
           `integration ${spec.integrationId}: the platform endpoint is ${origin}, refusing ${target.origin}; the run token is not sent`,

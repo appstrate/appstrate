@@ -567,10 +567,9 @@ export class PiRunner {
       // Shared thrown-failure epilogue (abort-rethrow → emit appstrate.error →
       // best-effort drain → reduce → stamp status/usage/cost → finalize). Usage
       // + cost come from the session bridge when captured; a very early throw
-      // stamps explicit zero usage. The "drain" here converges the bridge's pending fire-and-forget emits
-      // (`drainPending`) before finalize closes the sink, not a runtime-event
-      // journal; it emits nothing new, so reducing before vs after it is
-      // equivalent.
+      // stamps explicit zero usage. The drain converges the bridge's pending
+      // fire-and-forget emits (`drainPending`) before finalize closes the sink;
+      // it emits nothing new, so reducing before vs after it is equivalent.
       const bridge = bridgeRef.current;
       await finalizeThrownFailure({
         events,
@@ -683,12 +682,15 @@ export class PiRunner {
       enabled: this.opts.modelCompaction ?? true,
     });
 
-    // Harness tool events (`output`, `publish_file`) go straight into the
-    // run's sink, like every event the bridge emits; `run()` reads them back
-    // at finalize.
-    const emitHarnessEvent = (event: HarnessToolEvent): void => {
-      void internalSink.emit({ ...event, runId: context.runId } as RunEvent);
-    };
+    // Harness tool events (`output`, `publish_file`) go into the run's sink
+    // stamped here, like every event the bridge emits, and a sink failure is
+    // swallowed as the bridge swallows it: the event is already recorded for
+    // the reducer, which `run()` reads at finalize. The tool awaits the write,
+    // so no harness emit is still in flight when the session settles.
+    const emitHarnessEvent = (event: HarnessToolEvent): Promise<void> =>
+      internalSink
+        .emit({ ...event, runId: context.runId, timestamp: Date.now() } as RunEvent)
+        .catch(() => {});
     const { outputSchema, fileUploader } = this.opts;
     const harnessExtensions: ExtensionFactory[] = [
       ...(outputSchema ? [buildOutputExtension(outputSchema, emitHarnessEvent)] : []),

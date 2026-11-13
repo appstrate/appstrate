@@ -31,16 +31,16 @@ The runner registers two tools without any declaration:
 
 ## Platform tools
 
-The `@appstrate/platform` system integration serves six tools from the platform that runs the agent. Declaring the dependency gives all six; `integrations_configuration["@appstrate/platform"].tools` restricts the selection. The model sees them as `appstrate_platform__<tool>`.
+The `@appstrate/platform` system integration serves six tools from the platform that runs the agent. Declaring the dependency gives all of them but `notify`, which reaches people and is given only to an agent that selects it; `integrations_configuration["@appstrate/platform"].tools` sets the selection. The model sees them as `appstrate_platform__<tool>`.
 
-| Tool            | Purpose                                                                                                                                                            |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `log`           | Sends a progress message (`info`, `warn`, `error`) that the user sees live.                                                                                        |
-| `note`          | Appends a long-term memory (up to 2000 characters), private to the actor by default or `shared` for the space.                                                     |
-| `pin`           | Upserts a named slot that is pinned into the prompt of every run (`checkpoint`, `persona`, ...).                                                                   |
-| `recall_memory` | Searches the memory archive.                                                                                                                                       |
-| `run_history`   | Returns the metadata of recent runs.                                                                                                                               |
-| `notify`        | Sends an in-app [notification](/features/notifications) (title up to 100 characters, message up to 500) to the people the run's completion notifies, once per run. |
+| Tool            | Purpose                                                                                                                                                                                 |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `log`           | Sends a progress message (`info`, `warn`, `error`, up to 2000 characters) that the user sees live.                                                                                      |
+| `note`          | Appends a long-term memory (up to 2000 characters), private to the actor by default or `shared` for the space.                                                                          |
+| `pin`           | Upserts a named slot that is pinned into the prompt of every run (`checkpoint`, `persona`, ...).                                                                                        |
+| `recall_memory` | Searches the memory archive.                                                                                                                                                            |
+| `run_history`   | Returns the metadata of recent runs.                                                                                                                                                    |
+| `notify`        | Sends an in-app [notification](/features/notifications) (title up to 100 characters, message up to 500) to the people the run's completion notifies, once per run. Selected explicitly. |
 
 Excerpt of the agent manifest:
 

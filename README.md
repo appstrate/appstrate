@@ -256,7 +256,7 @@ The API is organized into 30+ route domains. The live endpoint count is whatever
 
 Agents inside the sandboxed container interact with the platform exclusively through MCP (Model Context Protocol). The sidecar exposes `/mcp` as a Streamable HTTP server; the agent never sees raw credentials, the platform API URL, or HTTP routes. Every tool of the run's integrations is exposed as `{ns}__{tool}`:
 
-- The `@appstrate/platform` system integration serves the platform's own tools (`log`, `note`, `pin`, `recall_memory`, `run_history`, `notify`) from the platform's run MCP server, exposed as `appstrate_platform__<tool>`.
+- The `@appstrate/platform` system integration serves the platform's own tools from the platform's run MCP server, exposed as `appstrate_platform__<tool>`: an agent that declares it gets `log`, `note`, `pin`, `recall_memory` and `run_history` by default, and selects `notify` explicitly.
 - Per spawned integration the sidecar exposes `{ns}__api_call({ method, target, headers?, body?, responseMode? })` — credentials injected server-side; URLs validated against the integration's `auths.{key}.authorized_uris`. Optional `{ns}__api_upload` when an auth declares `_meta["dev.appstrate/api"].auths.{key}.upload_protocols`.
 - Integrations backed by an MCP server (`source.kind = local` or `remote`) additionally surface their own tools under the same `{ns}__{tool}` prefix.
 

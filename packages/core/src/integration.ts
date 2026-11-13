@@ -50,6 +50,7 @@ import {
   type AfpsHttpDelivery,
 } from "@appstrate/afps-shared/delivery-http";
 import { normaliseMcpToolBody } from "@appstrate/afps-shared/mcp-naming";
+import { isPlainObject } from "./safe-json.ts";
 import { JsonPathSyntaxError, parseJsonPath } from "@appstrate/afps-shared/jsonpath";
 import { variableRefs } from "@appstrate/afps-shared/connection-variables";
 import { loginBlockIssues, type LoginBlockView } from "@appstrate/afps-shared/runtime-expression";
@@ -96,23 +97,27 @@ const APPSTRATE_META_NAMESPACE = API_META_KEY.slice(0, API_META_KEY.indexOf("/")
 export const PLATFORM_META_KEY = "dev.appstrate/platform";
 
 /**
- * Id of the system integration that ships the run tools (`log`, `note`, `pin`, `recall_memory`,
- * `run_history`) and carries {@link PLATFORM_META_KEY}. An agent declares it to receive those
- * tools; the manifests the platform writes on an author's behalf (inline-run defaults, the
- * default agent) name it. Whether an integration is bound to the runtime is never read from this
- * id: {@link isRuntimeBoundIntegration} decides.
+ * Id of the system integration that ships the run tools and carries {@link PLATFORM_META_KEY}
+ * (its catalog: `scripts/system-packages/integration-platform-1.0.0/manifest.json`). An agent
+ * declares it to receive those tools; the manifests the platform writes on an author's behalf
+ * (inline-run defaults, the default agent, the `runtime_tools` migration script) name it.
+ * Whether an integration is bound to the runtime is never read from this id:
+ * {@link isRuntimeBoundIntegration} decides.
  */
 export const PLATFORM_INTEGRATION_ID = "@appstrate/platform";
 
+/** The range under which the platform declares {@link PLATFORM_INTEGRATION_ID} on an author's behalf. */
+export const PLATFORM_INTEGRATION_RANGE = "^1.0.0";
+
 /**
  * Is this integration bound to the runtime ({@link PLATFORM_META_KEY})? THE predicate: the spawn
- * resolver, the sidecar, activation and the write rule read it, never the package id.
+ * resolver, the sidecar, activation and the write rule read it, never the package id. The value
+ * must be a JSON object (AFPS §10.1), so `null` or a scalar binds nothing.
  */
 export function isRuntimeBoundIntegration(manifest: unknown): boolean {
-  if (!manifest || typeof manifest !== "object") return false;
-  const meta = (manifest as { _meta?: unknown })._meta;
-  if (!meta || typeof meta !== "object") return false;
-  return (meta as Record<string, unknown>)[PLATFORM_META_KEY] !== undefined;
+  if (!isPlainObject(manifest)) return false;
+  const meta = manifest._meta;
+  return isPlainObject(meta) && isPlainObject(meta[PLATFORM_META_KEY]);
 }
 
 /**

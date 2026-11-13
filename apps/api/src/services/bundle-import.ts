@@ -447,19 +447,6 @@ export async function importBundle(
     // reuse the parse above; other types are parsed only after the reuse check.
     parsedZip ??= parseIncomingPackage();
 
-    // `runtime_tools` is not inert like a retired `dependencies` key: the agent had
-    // tools under it, and stored as it is the version would run without them. A bundle
-    // exported by an instance that has run `scripts/migration/0053` carries the
-    // `@appstrate/platform` declaration instead.
-    if (parsedZip.type === "agent" && Object.hasOwn(parsedZip.manifest, "runtime_tools")) {
-      throw invalidRequest(
-        `Invalid package '${identity}' in bundle: \`runtime_tools\` is retired — declare ` +
-          '`dependencies.integrations["@appstrate/platform"]` and select its tools under ' +
-          '`integrations_configuration["@appstrate/platform"].tools`, or export the bundle again ' +
-          "from an instance that has run scripts/migration/0053-migrate-runtime-tools.sql.",
-      );
-    }
-
     // Surface `_meta` policy warnings for all package types — the validator
     // soft-fails malformed namespace keys to console.warn only (per AFPS §10.1
     // "consumers MUST NOT reject unknown `_meta` keys"). Lift them to the

@@ -13,6 +13,7 @@ import {
   UNAVAILABLE_INTEGRATION_REASONS,
   type Bundle,
 } from "@appstrate/afps-runtime/bundle";
+import { verify } from "@appstrate/afps-runtime/events";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { forgetProtocolEras, legacyMcpHandler } from "@appstrate/mcp-transport/testing";
 import { buildRemoteMcpExtensions } from "../src/commands/run/remote-mcp.ts";
@@ -272,7 +273,87 @@ describe("run --local — unauthenticated remote MCP integrations", () => {
   });
 });
 
+/** An agent declaring one unauthenticated remote integration per URL, in this order. */
+function makeMultiBundle(urls: readonly string[]): Bundle {
+  const base = makeBundle();
+  const root = base.packages.get(base.root)!;
+  const ids = urls.map((_, i) => `@acme/server${i}`);
+  const packages = new Map<string, unknown>([
+    [
+      base.root,
+      {
+        ...root,
+        manifest: {
+          ...root.manifest,
+          dependencies: { integrations: Object.fromEntries(ids.map((id) => [id, "^1.0.0"])) },
+        },
+      },
+    ],
+    ...ids.map((id, i): [string, unknown] => [
+      `${id}@1.0.0`,
+      {
+        identity: `${id}@1.0.0`,
+        manifest: {
+          name: id,
+          version: "1.0.0",
+          schema_version: "0.1",
+          type: "integration",
+          source: { kind: "remote", remote: { url: urls[i], transport: "streamable-http" } },
+          default_tools: ["a"],
+        },
+        files: new Map(),
+        integrity: "",
+      },
+    ]),
+  ]);
+  return { ...base, packages } as unknown as Bundle;
+}
+
+describe("run --local — several remote integrations", () => {
+  it("connects them concurrently and names their tools in declaration order", async () => {
+    const handler = legacyMcpHandler({ tools: [echoTool("a")] });
+    const slow = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: async (req) => {
+        await Bun.sleep(150);
+        return handler(req);
+      },
+    });
+    const silent = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: () => new Promise<Response>(() => {}),
+    });
+    try {
+      const bundle = makeMultiBundle([
+        `http://127.0.0.1:${slow.port}/mcp`,
+        `http://127.0.0.1:${silent.port}/mcp`,
+        `http://127.0.0.1:${silent.port}/mcp`,
+        serverUrl,
+      ]);
+      const started = Date.now();
+      const { extensions, tools } = await wire(bundle, { startupTimeoutMs: 1_000 });
+      try {
+        // Two silent servers one after the other would take two startup timeouts.
+        expect(Date.now() - started).toBeLessThan(1_900);
+        expect(tools.map((t) => t.name)).toEqual(["acme_server0__a", "acme_server3__a"]);
+        expect(extensions.unavailable.map((entry) => entry.id)).toEqual([
+          "@acme/server1",
+          "@acme/server2",
+        ]);
+      } finally {
+        await extensions.close();
+      }
+    } finally {
+      slow.stop(true);
+      silent.stop(true);
+    }
+  });
+});
+
 describe("run --local — integration bound to the runtime", () => {
+  const RUN_SECRET = "run-secret";
   const runtimeBound = {
     source: {
       kind: "remote",
@@ -280,20 +361,41 @@ describe("run --local — integration bound to the runtime", () => {
     },
     _meta: { "dev.appstrate/platform": {} },
   };
+  interface SeenRequest {
+    method: string;
+    msgId: string | null;
+    authorization: string | null;
+    verified: boolean;
+  }
   let runServer: ReturnType<typeof Bun.serve>;
   let runServerUrl: string;
-  const authorizations: Array<string | null> = [];
+  const seen: SeenRequest[] = [];
 
+  /** The run's MCP server: every request must carry a valid signature of its exact body. */
   beforeAll(() => {
     const handler = legacyMcpHandler({ tools: [echoTool("a"), echoTool("b")] });
     runServer = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
-      fetch: (req) => {
-        authorizations.push(req.headers.get("authorization"));
-        if (req.headers.get("authorization") !== "Bearer session-token") {
-          return new Response("unauthorized", { status: 401 });
-        }
+      fetch: async (req) => {
+        const body = await req.clone().text();
+        const msgId = req.headers.get("webhook-id");
+        const verified =
+          msgId !== null &&
+          verify({
+            msgId,
+            timestampSec: Number(req.headers.get("webhook-timestamp")),
+            body,
+            secret: RUN_SECRET,
+            signatureHeader: req.headers.get("webhook-signature") ?? "",
+          }).ok;
+        seen.push({
+          method: req.method,
+          msgId,
+          authorization: req.headers.get("authorization"),
+          verified,
+        });
+        if (!verified) return new Response("invalid signature", { status: 401 });
         return handler(req);
       },
     });
@@ -304,36 +406,80 @@ describe("run --local — integration bound to the runtime", () => {
     runServer.stop(true);
   });
 
-  it("reaches the run's MCP server with the session headers, filtered by the selection", async () => {
-    authorizations.length = 0;
+  beforeEach(() => {
+    seen.length = 0;
+  });
+
+  it("signs every request to the run's MCP server with the run secret, filtered by the selection", async () => {
     const { extensions, tools } = await wire(
       makeBundle({ tools: ["a"], integration: runtimeBound }),
-      {
-        runToolsMcp: {
-          url: runServerUrl,
-          headers: { Authorization: "Bearer session-token", "X-Space-Id": "spc_1" },
-        },
-      },
+      { runToolsMcp: { url: runServerUrl, runSecret: RUN_SECRET } },
     );
     try {
       expect(extensions.unavailable).toEqual([]);
       expect(tools.map((t) => t.name)).toEqual(["acme_docs__a"]);
       const result = await tools[0]!.execute("call_1", { q: "hi" });
       expect(result.content[0]?.text).toBe("a:hi");
-      expect(authorizations.length).toBeGreaterThan(0);
-      expect(authorizations.every((value) => value === "Bearer session-token")).toBe(true);
     } finally {
       await extensions.close();
+    }
+    expect(seen.length).toBeGreaterThan(1);
+    expect(seen.every((request) => request.verified && request.authorization === null)).toBe(true);
+    // The client's GET (its server-to-client stream) is signed over the empty body.
+    expect(seen.map((request) => request.method)).toContain("GET");
+    // A fresh message id per request.
+    expect(new Set(seen.map((request) => request.msgId)).size).toBe(seen.length);
+  });
+
+  it("refuses the integration when the signature is made with another secret", async () => {
+    const { extensions, tools } = await wire(makeBundle({ integration: runtimeBound }), {
+      runToolsMcp: { url: runServerUrl, runSecret: "another-secret" },
+    });
+    expect(tools).toEqual([]);
+    expect(extensions.unavailable).toEqual([
+      { id: DOCS, reason: UNAVAILABLE_INTEGRATION_REASONS.resolve_error },
+    ]);
+  });
+
+  it("sends no signature and no Authorization header to an integration not bound to the runtime", async () => {
+    const plain = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (req) => {
+        seen.push({
+          method: req.method,
+          msgId: req.headers.get("webhook-id"),
+          authorization: req.headers.get("authorization"),
+          verified: req.headers.has("webhook-signature"),
+        });
+        return legacyMcpHandler({ tools: [echoTool("a"), echoTool("b")] })(req);
+      },
+    });
+    try {
+      const { extensions, tools } = await wire(
+        makeBundle({ url: `http://127.0.0.1:${plain.port}/mcp` }),
+        { runToolsMcp: { url: runServerUrl, runSecret: RUN_SECRET } },
+      );
+      try {
+        await tools[0]!.execute("call_1", { q: "hi" });
+      } finally {
+        await extensions.close();
+      }
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.every((r) => r.msgId === null && !r.verified && r.authorization === null)).toBe(
+        true,
+      );
+    } finally {
+      plain.stop(true);
     }
   });
 
   it("leaves the integration unbound when the run reports to no instance", async () => {
-    authorizations.length = 0;
     const { extensions, tools } = await wire(makeBundle({ integration: runtimeBound }));
     expect(tools).toEqual([]);
     expect(extensions.unavailable).toEqual([
       { id: DOCS, reason: UNAVAILABLE_INTEGRATION_REASONS.unbound },
     ]);
-    expect(authorizations).toEqual([]);
+    expect(seen).toEqual([]);
   });
 });

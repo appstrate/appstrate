@@ -846,7 +846,7 @@ describe("summarizeArtifacts bounds (server ingest contract)", () => {
 
 describe("publish_file tool", () => {
   const emitted: HarnessToolEvent[] = [];
-  const emit = (event: HarnessToolEvent): void => {
+  const emit = async (event: HarnessToolEvent): Promise<void> => {
     emitted.push(event);
   };
   beforeEach(() => {

@@ -3100,6 +3100,13 @@ describe("runtime binding (_meta dev.appstrate/platform)", () => {
     );
     expect(isRuntimeBoundIntegration(null)).toBe(false);
     expect(isRuntimeBoundIntegration({ _meta: "x" })).toBe(false);
+    // AFPS §10.1: a `_meta` value is a JSON object.
+    expect(
+      isRuntimeBoundIntegration(baseManifest({ _meta: { "dev.appstrate/platform": null } })),
+    ).toBe(false);
+    expect(
+      isRuntimeBoundIntegration(baseManifest({ _meta: { "dev.appstrate/platform": [] } })),
+    ).toBe(false);
   });
 
   it("findRuntimeBinding reports the key for the write path", () => {

@@ -23,7 +23,7 @@
     "run_history": {},
     "notify": {}
   },
-  "default_tools": ["log", "note", "pin", "recall_memory", "run_history", "notify"],
+  "default_tools": ["log", "note", "pin", "recall_memory", "run_history"],
   "_meta": {
     "dev.appstrate/package": {
       "author": "Appstrate"

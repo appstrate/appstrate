@@ -489,11 +489,13 @@ async function runCommandLocal(opts: RunCommandOptions): Promise<void> {
     // `Date.now()` captured at function entry would miss the import
     // phase entirely because ES module imports are evaluated before any
     // top-level statement runs.
+    //
+    // `extensions` counts the tools wired at this point, the `api_call` ones: the remote MCP
+    // tools connect after it, once the run is `running` and its heartbeat started.
     const emittedRunId = reportSession?.runId ?? runId;
-    const extensionsCount = apiCallFactories.length;
     await emitRuntimeReady(sink, emittedRunId, {
       bundleLoaded: true,
-      extensions: extensionsCount,
+      extensions: apiCallFactories.length,
       bootDurationMs: performance.now(),
     }).catch((err) => {
       // Do not fail the run because the heartbeat failed — the sink's

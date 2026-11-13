@@ -5,6 +5,7 @@ import { CREDENTIAL_FAILURE_CAUSES } from "@appstrate/core/sidecar-types";
 import { CREDENTIAL_FAILURE_SENTENCES } from "../../lib/credential-failure.ts";
 import {
   RUN_TOOLS_MCP_DESCRIPTION,
+  runToolsMcpMethodNotAllowed,
   runToolsMcpRequestBody,
   runToolsMcpResponses,
 } from "./run-tools-mcp.ts";
@@ -125,8 +126,16 @@ export const internalPaths = {
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "429": { $ref: "#/components/responses/RateLimited" },
       },
+    },
+    get: {
+      operationId: "internalRunToolsMcpGet",
+      tags: ["Internal"],
+      summary: "Run MCP server of a platform run (GET)",
+      description:
+        "The GET channel of the run MCP server. The server is stateless and opens no standalone server-initiated SSE stream, so GET (and every verb but POST) answers 405. Container-to-host only.",
+      security: [{ bearerExecToken: [] }],
+      responses: { "405": runToolsMcpMethodNotAllowed },
     },
   },
   "/internal/oauth-token/{credentialId}": {

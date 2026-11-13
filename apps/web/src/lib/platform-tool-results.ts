@@ -5,6 +5,10 @@
  * `run_history` (an MCP text part holding `{ memories }` / a `{ data }` envelope;
  * an already-parsed or bare-string result reads the same). `null` = unknown
  * shape, the caller keeps the raw JSON.
+ *
+ * A run's log records no tool namespace, so the names are the unsuffixed
+ * `appstrate_platform__<tool>`: a run whose namespace allocation suffixed it
+ * (`appstrate_platform_2`, on a collision) shows those results as raw JSON.
  */
 
 import { PLATFORM_INTEGRATION_ID } from "@appstrate/core/integration";

@@ -25,11 +25,12 @@
  *                           when telemetry is down.
  */
 
-import { HttpSink } from "@appstrate/afps-runtime/sinks";
+import { HttpSink, sinkSiblingUrl } from "@appstrate/afps-runtime/sinks";
 import { UNAVAILABLE_INTEGRATION_REASONS, type Bundle } from "@appstrate/afps-runtime/bundle";
 import { parseScopedName } from "@appstrate/core/naming";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { connectionRefusalLines, parseLaunchItems, type LaunchItem } from "./launch-warnings.ts";
+import type { RunToolsMcp } from "./remote-mcp.ts";
 
 export type ReportMode = "auto" | "true" | "false";
 export type ReportFallback = "abort" | "console";
@@ -81,11 +82,11 @@ export interface ReportSession {
   /** The registration's `warnings`: integrations the run starts without. */
   warnings: LaunchItem[];
   /**
-   * The instance's MCP server of this run (`/api/runs/{runId}/mcp`) and the headers that
-   * authenticate the CLI's own session to it: the endpoint of an integration bound to the
-   * runtime (`isRuntimeBoundIntegration`).
+   * The instance's MCP server of this run (`/api/runs/{runId}/mcp`, beside the sink URL) and the
+   * run secret each request to it is signed with, as the sink's events are: the endpoint of an
+   * integration bound to the runtime (`isRuntimeBoundIntegration`), reachable for the whole run.
    */
-  runToolsMcp: { url: string; headers: Record<string, string> };
+  runToolsMcp: RunToolsMcp;
 }
 
 /** User-provided execution-environment metadata attached to the run record. */
@@ -150,17 +151,16 @@ export async function startReportSession(
   opts: ReportOptions,
   contextSnapshot: ReportContextSnapshot,
 ): Promise<ReportSession> {
-  const runsUrl = `${ctx.instance.replace(/\/$/, "")}/api/runs`;
-  const url = `${runsUrl}/remote`;
-  const authHeaders: Record<string, string> = {
+  const url = `${ctx.instance.replace(/\/$/, "")}/api/runs/remote`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
     Authorization: `Bearer ${ctx.bearerToken}`,
     // `/api/runs/*` is space-scoped; dashboard-user JWTs don't pin a space,
     // so the middleware requires `X-Space-Id` explicitly. Missing this
     // rejects every remote run with "Space context required".
     "X-Space-Id": ctx.spaceId,
   };
-  if (ctx.orgId) authHeaders["X-Org-Id"] = ctx.orgId;
-  const headers: Record<string, string> = { "Content-Type": "application/json", ...authHeaders };
+  if (ctx.orgId) headers["X-Org-Id"] = ctx.orgId;
 
   const sink = opts.ttlSeconds ? { sink: { ttl_seconds: opts.ttlSeconds } } : {};
   const baseBody = {
@@ -231,10 +231,7 @@ export async function startReportSession(
     sinkUrl: payload.url,
     runSecret: payload.secret,
     warnings: parseLaunchItems(payload.warnings),
-    runToolsMcp: {
-      url: `${runsUrl}/${encodeURIComponent(payload.id)}/mcp`,
-      headers: authHeaders,
-    },
+    runToolsMcp: { url: sinkSiblingUrl(payload.url, "mcp"), runSecret: payload.secret },
   };
 }
 

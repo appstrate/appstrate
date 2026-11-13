@@ -1,58 +1,29 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `scripts/migration/0053-migrate-runtime-tools.sql` against seeded manifests, and the boot
- * gate that refuses to start until it has run (`assertRuntimeToolsMigrated`).
+ * `scripts/migration/0052-migrate-runtime-tools.ts` against seeded manifests, and the boot
+ * gate that refuses to start while a manifest still carries `runtime_tools`
+ * (`assertRuntimeToolsMigrated`).
  *
- * Nothing reads `runtime_tools`: an agent receives `log`, `note`, `pin`, `recall_memory` and
- * `run_history` by declaring `@appstrate/platform`. The script is the whole mechanism that keeps
- * a stored agent's tools, so the rewrite is asserted on its rows, and on the malformed shape it
- * must leave alone.
+ * Nothing reads `runtime_tools`: an agent receives the run tools by declaring
+ * `@appstrate/platform`. The script is the whole mechanism that keeps a stored agent's tools, so
+ * the rewrite is asserted on its rows, and on the malformed shape it must leave alone.
  */
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
-import { db, getPGliteClient, reservePgConnection } from "@appstrate/db/client";
+import { db } from "@appstrate/db/client";
 import { packages, packageVersions } from "@appstrate/db/schema";
 import { truncateAll } from "../../helpers/db.ts";
 import { seedPackage, seedPackageVersion } from "../../helpers/seed.ts";
 import { createTestContext } from "../../helpers/auth.ts";
 import { assertRuntimeToolsMigrated, unmigratedRuntimeToolsCount } from "../../../src/lib/boot.ts";
-
-const SCRIPT = new URL(
-  "../../../../../scripts/migration/0053-migrate-runtime-tools.sql",
-  import.meta.url,
-).pathname;
-
-/**
- * Run the `BEGIN … COMMIT` script through the raw driver (`db.execute` sends one statement per
- * call). Same helper as `oauth-client-self-service-fold-migration.test.ts`.
- */
-async function execScript(source: string): Promise<void> {
-  const pglite = getPGliteClient();
-  if (pglite) {
-    try {
-      await pglite.exec(source);
-    } catch (error) {
-      await pglite.exec("ROLLBACK").catch(() => undefined);
-      throw error;
-    }
-    return;
-  }
-  const conn = await reservePgConnection();
-  if (!conn) throw new Error("no raw database connection available");
-  try {
-    await conn.sql.unsafe(source);
-  } catch (error) {
-    await conn.sql.unsafe("ROLLBACK").catch(() => undefined);
-    throw error;
-  } finally {
-    conn.release();
-  }
-}
+import { runMigrateRuntimeTools } from "../../../../../scripts/migration/0052-migrate-runtime-tools.ts";
 
 const AGENT = "@migr/agent";
 const MALFORMED = "@migr/malformed";
+const OPEN_OUTPUT = "@migr/open-output";
+const UNDECLARED = "@migr/undeclared";
 
 function agentManifest(id: string, extra: Record<string, unknown>): Record<string, unknown> {
   return { name: id, version: "1.0.0", type: "agent", schema_version: "0.2", ...extra };
@@ -74,11 +45,17 @@ async function versionOf(id: string): Promise<Record<string, unknown>> {
   return row!.m as Record<string, unknown>;
 }
 
-describe("scripts/migration/0053 — runtime_tools moved to @appstrate/platform", () => {
+const apply = (lines: string[] = []) =>
+  runMigrateRuntimeTools({ apply: true, out: (line) => lines.push(line) });
+
+describe("scripts/migration/0052 — runtime_tools moved to @appstrate/platform", () => {
   beforeEach(async () => {
     await truncateAll();
     const orgId = (await createTestContext({ orgSlug: "migr" })).org.id;
-    const withTools = agentManifest(AGENT, { runtime_tools: ["log", "output", "pin"] });
+    const withTools = agentManifest(AGENT, {
+      runtime_tools: ["log", "output", "pin"],
+      output: { schema: { type: "object", properties: { n: { type: "number" } } } },
+    });
     await seedPackage({ id: AGENT, orgId, draftManifest: withTools });
     await seedPackageVersion({ packageId: AGENT, version: "1.0.0", manifest: withTools });
     // `integrations_configuration."@appstrate/platform"` is a scalar: merging the tools
@@ -88,10 +65,22 @@ describe("scripts/migration/0053 — runtime_tools moved to @appstrate/platform"
       integrations_configuration: { "@appstrate/platform": "oops" },
     });
     await seedPackage({ id: MALFORMED, orgId, draftManifest: malformed });
+    await seedPackage({
+      id: OPEN_OUTPUT,
+      orgId,
+      draftManifest: agentManifest(OPEN_OUTPUT, { runtime_tools: ["output"] }),
+    });
+    await seedPackage({ id: UNDECLARED, orgId, draftManifest: agentManifest(UNDECLARED, {}) });
   });
 
   it("rewrites draft and version, and leaves a non-object platform configuration alone", async () => {
-    await execScript(await Bun.file(SCRIPT).text());
+    const result = await apply();
+    expect(result.version).toEqual({ rewritten: 1, outputSchemaAdded: 0, malformed: [] });
+    expect(result.draft).toEqual({
+      rewritten: 3,
+      outputSchemaAdded: 1,
+      malformed: [`${MALFORMED} (draft)`],
+    });
 
     const expected = {
       dependencies: { integrations: { "@appstrate/platform": "^1.0.0" } },
@@ -103,6 +92,10 @@ describe("scripts/migration/0053 — runtime_tools moved to @appstrate/platform"
       expect(m).not.toHaveProperty("runtime_tools");
       expect(m.dependencies).toEqual(expected.dependencies);
       expect(m.integrations_configuration).toEqual(expected.integrations_configuration);
+      // A declared schema is the agent's own: never replaced.
+      expect(m.output).toEqual({
+        schema: { type: "object", properties: { n: { type: "number" } } },
+      });
     }
 
     const untouched = await draftOf(MALFORMED);
@@ -110,13 +103,47 @@ describe("scripts/migration/0053 — runtime_tools moved to @appstrate/platform"
     expect(untouched.integrations_configuration).toEqual({ "@appstrate/platform": "oops" });
   });
 
+  it("gives an agent that selected `output` without a schema the open schema, so it keeps the tool", async () => {
+    await apply();
+    const m = await draftOf(OPEN_OUTPUT);
+    expect(m).not.toHaveProperty("runtime_tools");
+    expect(m.output).toEqual({
+      schema: { type: "object", properties: {}, additionalProperties: true },
+    });
+    expect(m.integrations_configuration).toEqual({
+      "@appstrate/platform": { tools: ["recall_memory", "run_history"] },
+    });
+  });
+
+  it("declares the integration on an agent that never carried runtime_tools", async () => {
+    await apply();
+    const m = await draftOf(UNDECLARED);
+    expect(m.dependencies).toEqual({ integrations: { "@appstrate/platform": "^1.0.0" } });
+    expect(m.integrations_configuration).toEqual({
+      "@appstrate/platform": { tools: ["recall_memory", "run_history"] },
+    });
+    expect(m).not.toHaveProperty("output");
+  });
+
+  it("writes nothing on a dry run, and nothing on a second apply", async () => {
+    const before = await draftOf(AGENT);
+    const dry = await runMigrateRuntimeTools({ apply: false, out: () => undefined });
+    expect(dry.draft.rewritten).toBe(3);
+    expect(await draftOf(AGENT)).toEqual(before);
+
+    await apply();
+    const again = await apply();
+    expect(again.version.rewritten).toBe(0);
+    expect(again.draft.rewritten).toBe(0);
+  });
+
   it("boot refuses while a stored agent manifest carries runtime_tools", async () => {
-    expect(await unmigratedRuntimeToolsCount()).toBe(3);
+    expect(await unmigratedRuntimeToolsCount()).toBe(4);
     await expect(assertRuntimeToolsMigrated(null)).rejects.toThrow(
-      /3 stored agent manifest\(s\) still carry runtime_tools[\s\S]*Refusing to boot: run[\s\S]*0053-migrate-runtime-tools\.sql/,
+      /4 stored agent manifest\(s\) still carry runtime_tools[\s\S]*Refusing to boot: run[\s\S]*0052-migrate-runtime-tools\.ts --apply/,
     );
 
-    await execScript(await Bun.file(SCRIPT).text());
+    await apply();
 
     // The malformed manifest is the one the script skips: fixed by hand, the boot passes.
     expect(await unmigratedRuntimeToolsCount()).toBe(1);
@@ -135,7 +162,7 @@ describe("assertRuntimeToolsMigrated", () => {
 
   it("names the embedded data directory and asks for the platform to be stopped", async () => {
     await expect(assertRuntimeToolsMigrated("/data/pglite", async () => 2)).rejects.toThrow(
-      /2 stored agent manifest[\s\S]*\/data\/pglite[\s\S]*while it is stopped/,
+      /2 stored agent manifest[\s\S]*PGLITE_DATA_DIR=\/data\/pglite bun scripts\/migration\/0052[\s\S]*while it is stopped/,
     );
   });
 

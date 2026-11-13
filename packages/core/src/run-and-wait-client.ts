@@ -4,7 +4,7 @@ import { isFileProducedByRun } from "./file-uri.ts";
 import { asRecordOrNull } from "./safe-json.ts";
 import { encodePackageIdPath, toSlug } from "./naming.ts";
 import { terminalRunStatusValues } from "./run-status.ts";
-import { PLATFORM_INTEGRATION_ID } from "./integration.ts";
+import { PLATFORM_INTEGRATION_ID, PLATFORM_INTEGRATION_RANGE } from "./integration.ts";
 import { AFPS_SCHEMA_URLS, AFPS_SCHEMA_VERSION } from "./validation.ts";
 
 /**
@@ -159,7 +159,7 @@ type MaterializedManifest =
  * replaces its default verbatim, with one exception: the tables keyed by
  * package id (`dependencies.integrations`, `integrations_configuration`)
  * receive their defaults entry by entry, and the caller's own entries are
- * never touched. `dependencies.integrations["@appstrate/platform"] = "^1.0.0"`
+ * never touched. `dependencies.integrations["@appstrate/platform"] = PLATFORM_INTEGRATION_RANGE`
  * is added when `dependencies.integrations` does not name that id;
  * `integrations_configuration["@appstrate/platform"] = { tools: ["log"] }` is
  * added only when NEITHER table names it, so a caller who declares the
@@ -216,7 +216,7 @@ function materializeInlineManifest(manifest: Record<string, unknown>): Materiali
   if (dependencies && integrations && !names(integrations)) {
     materialized.dependencies = {
       ...dependencies,
-      integrations: { ...integrations, [PLATFORM_INTEGRATION_ID]: "^1.0.0" },
+      integrations: { ...integrations, [PLATFORM_INTEGRATION_ID]: PLATFORM_INTEGRATION_RANGE },
     };
   }
   if (configuration && !names(integrations) && !names(configuration)) {

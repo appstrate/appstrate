@@ -650,6 +650,8 @@ All external inputs are validated using Zod schemas before processing:
 
 **Output validation:** When an agent defines `output.schema`, the runner injects the `output` tool (`buildOutputExtension`, `packages/runner-pi/src/harness-tools.ts`) with the schema as its input schema — the model sees the exact JSON Schema in the tool definition and the tool call is AJV-validated in-container. At ingestion, the platform re-validates the result against the schema (`run-event-ingestion.ts`); on mismatch — or when the agent never called `output` despite required fields — the run is marked **failed**. This dual-layer approach (tool-level + platform-level) prevents malformed output from being persisted as a successful run.
 
+**Package signatures and rewritten manifests:** a version export (`GET /api/agents/{scope}/{name}/bundle`) writes the version's catalog manifest (the jsonb row) over the archive's `manifest.json` and drops the archive's `signature.sig` when the two differ (`withCatalogManifest`, `bundle-assembly.ts`), since the signature covers the archive's bytes. `scripts/migration/0052-migrate-runtime-tools.ts` rewrites the catalog manifest of every agent version, so every agent version signed before it exports unsigned, and that bundle is refused on import under `AFPS_SIGNATURE_POLICY=required`. `GET /api/packages/{scope}/{name}/{version}/download` serves the archive as published, which its integrity hash covers: the archive of a version that carried `runtime_tools` still carries it, and an import refuses it.
+
 **Standard:** Input validation addresses **OWASP API Security Top 10** risks **API8:2023** (Security Misconfiguration) and aligns with **OWASP Top 10 for LLM Applications** **LLM05:2025** (Improper Output Handling).
 
 ---

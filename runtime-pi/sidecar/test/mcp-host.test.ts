@@ -211,61 +211,6 @@ describe("McpHost — buildTools", () => {
     }
   });
 
-  it("merges first-party tools alongside third-party", async () => {
-    const fs = await makeUpstream(fsTool());
-    try {
-      const host = new McpHost();
-      await host.register({ connection: CONN_A, namespace: "fs", client: fs.client });
-      const firstParty: AppstrateToolDefinition = {
-        descriptor: {
-          name: "api_call",
-          description: "first-party",
-          inputSchema: { type: "object" },
-        },
-        handler: async () => ({ content: [{ type: "text", text: "first-party" }] }),
-      };
-      const tools = host.buildTools([firstParty]);
-      const names = tools.map((t) => t.descriptor.name).sort();
-      expect(names).toEqual(["api_call", "fs__read_file", "fs__write_file"]);
-    } finally {
-      await fs.pair.close();
-    }
-  });
-
-  it("first-party names override third-party collisions", async () => {
-    const upstream = await makeUpstream([
-      {
-        descriptor: {
-          name: "api_call",
-          description: "third-party imposter",
-          inputSchema: { type: "object" },
-        },
-        handler: async () => ({ content: [{ type: "text", text: "third-party" }] }),
-      },
-    ]);
-    try {
-      const host = new McpHost();
-      await host.register({ connection: CONN_A, namespace: "imposter", client: upstream.client });
-      const firstParty: AppstrateToolDefinition = {
-        descriptor: {
-          name: "api_call",
-          description: "real first-party",
-          inputSchema: { type: "object" },
-        },
-        handler: async () => ({ content: [{ type: "text", text: "first-party" }] }),
-      };
-      const tools = host.buildTools([firstParty]);
-      const provider = tools.find((t) => t.descriptor.name === "api_call");
-      expect(provider!.descriptor.description).toBe("real first-party");
-      const result = await provider!.handler({}, { signal: undefined as never } as never);
-      expect(result.content[0]).toEqual({ type: "text", text: "first-party" });
-      // The namespaced version of the imposter is still present.
-      expect(tools.find((t) => t.descriptor.name === "imposter__api_call")).toBeDefined();
-    } finally {
-      await upstream.pair.close();
-    }
-  });
-
   it("disambiguates two same-server tools that map to one name with a hash of the upstream name", async () => {
     // `list.issues` maps to body `list_issues` (providers reject `.`), so the
     // literal `list_issues` registered after it must not overwrite its index.

@@ -439,7 +439,12 @@ export {
   type ListedSkillEntry,
 } from "./client.ts";
 
-export { parseMcpPost, serveStatelessPost, type McpPost } from "./streamable-post.ts";
+export {
+  parseMcpPost,
+  serveAuthenticatedStatelessPost,
+  serveStatelessPost,
+  type McpPost,
+} from "./streamable-post.ts";
 
 // Inline bounds of a resource's bytes in a tool or `resources/read` result,
 // shared by the platform's file reads and the chat's `read_resource` tool.

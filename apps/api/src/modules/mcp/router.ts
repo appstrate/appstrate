@@ -36,7 +36,6 @@ import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createResourceServerChallenge } from "@better-auth/oauth-provider";
 // `createInsufficientScopeError` marks the error it returns in a module-level
 // WeakSet, and `createResourceServerChallenge` recognises it by asking
@@ -58,7 +57,7 @@ import { APIError } from "better-auth/api";
 import {
   createMcpServer,
   parseMcpPost,
-  serveStatelessPost,
+  serveAuthenticatedStatelessPost,
   type AppstrateResourceProvider,
   type McpPost,
 } from "@appstrate/mcp-transport";
@@ -726,27 +725,17 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
         prompts,
       },
     );
-    const raw = c.req.raw;
-    const body = await c.req.arrayBuffer();
-    // `null`: the SDK reads the bytes itself and answers its own parse error.
-    const post = c.get("mcpPost") ?? null;
-    const transport = new WebStandardStreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: !post?.requestsProgress,
-      // Disabled deliberately: the SDK's Host-header allowlist would reject
-      // legitimate reverse-proxied hosts, and the rebinding threat it guards
-      // (a browser tricked into POSTing to a localhost MCP server) doesn't
-      // apply here — `/api/mcp/o/:org` requires platform auth (Bearer/API key,
-      // or a SameSite session cookie), so a cross-site page cannot drive it.
-      enableDnsRebindingProtection: false,
-    });
-
-    // The SDK reads these bytes only when they did not parse here.
-    const forwarded = new Request(raw.url, { method: raw.method, headers: raw.headers, body });
-
-    // Any audit insert the tool layer triggered is already tracked (see
-    // `observe` above) and flushed at shutdown, not here.
-    return serveStatelessPost(server, transport, forwarded, post);
+    // `/api/mcp/o/:org` requires platform auth (Bearer/API key, or a SameSite
+    // session cookie), so a cross-site page cannot drive it. `null` post: the
+    // SDK reads the bytes itself and answers its own parse error. Any audit
+    // insert the tool layer triggered is already tracked (see `observe` above)
+    // and flushed at shutdown, not here.
+    return serveAuthenticatedStatelessPost(
+      server,
+      c.req.raw,
+      await c.req.arrayBuffer(),
+      c.get("mcpPost") ?? null,
+    );
   };
   app.post(MCP_PATH, serveMcp);
   app.post(MCP_SPACE_PATH, serveMcp);

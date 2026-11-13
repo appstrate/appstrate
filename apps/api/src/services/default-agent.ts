@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { PLATFORM_INTEGRATION_ID } from "@appstrate/core/integration";
+import { PLATFORM_INTEGRATION_ID, PLATFORM_INTEGRATION_RANGE } from "@appstrate/core/integration";
 import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import { createOrgItem } from "./package-items/crud.ts";
 import { CONFIG_BY_TYPE } from "./package-items/config.ts";
@@ -55,7 +55,7 @@ export async function provisionDefaultAgentForOrg(
     const manifest = {
       ...HELLO_WORLD_MANIFEST,
       name: packageId,
-      dependencies: { integrations: { [PLATFORM_INTEGRATION_ID]: "^1.0.0" } },
+      dependencies: { integrations: { [PLATFORM_INTEGRATION_ID]: PLATFORM_INTEGRATION_RANGE } },
     };
 
     await createOrgItem(

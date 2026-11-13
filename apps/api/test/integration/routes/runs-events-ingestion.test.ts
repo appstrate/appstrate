@@ -30,7 +30,7 @@ import type { ModelPayer } from "@appstrate/core/model-payer";
 import { describe, it, expect, beforeEach, afterEach, afterAll, spyOn, type Mock } from "bun:test";
 import { asc, eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { runs, runLogs, llmUsage, packages, packagePersistence } from "@appstrate/db/schema";
+import { runs, runLogs, llmUsage, packages } from "@appstrate/db/schema";
 import { and } from "drizzle-orm";
 import { encrypt } from "@appstrate/connect";
 import { sign } from "@appstrate/afps-runtime/events";
@@ -2646,21 +2646,12 @@ describe("Postgres-poisoned values (#1501)", () => {
     expect(log).toMatchObject({ message: `console${FFFD}tail`, data: { text: `a${FFFD}b` } });
   });
 
-  it("writes no memory or pinned slot from the finalize body — `note` and `pin` write them", async () => {
+  it("finalizes past a body key the platform does not read", async () => {
     const runId = await seedRunWithSink(ctx, AGENT);
 
-    const res = await finalize(runId, {
-      memories: [{ content: "m1" }],
-      pinned: { checkpoint: { content: { step: 1 } } },
-    });
+    const res = await finalize(runId, { status: "failed", unread: { anything: 1 } });
     expect(res.status).toBe(200);
-
-    const rows = await db
-      .select()
-      .from(packagePersistence)
-      .where(eq(packagePersistence.runId, runId));
-    expect(rows).toEqual([]);
-    expect((await readRun(runId)).checkpoint).toBeNull();
+    expect((await readRun(runId)).status).toBe("failed");
   });
 
   it("drains a buffered successor behind a dirty event that arrives late", async () => {
