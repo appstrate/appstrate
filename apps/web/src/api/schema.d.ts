@@ -1180,7 +1180,7 @@ export interface paths {
         };
         /**
          * List the connections the caller can call outside a run
-         * @description What a call to `/api/credential-proxy/proxy` without `X-Run-Id` would accept from this caller in this space, of the integrations active in the space that have a published version. Read with the rule the proxy applies. With `credential-proxy:call-own` alone: the caller's OWN connections (user or end-user) usable here, and never one another member shared into the space. With `credential-proxy:call`: those and the connections shared into the space, each telling which it is (`owned_by_actor`); of an integration governed by an enforced org default, that default's members only. Grouped by integration, oldest first within one. An entry the caller does not own is used when named with `X-Connection-Id` or designated by an org default. `call_permission_required` and `needs_reconnection` describe a call NAMING that entry with `X-Connection-Id`. A call naming none follows the order that parameter describes on `/api/credential-proxy/proxy`: several own entries of one integration need it, and with `credential-proxy:call` an org default binds its set before the caller's own connection, refusing the call while one of its members is out of the caller's reach or needs reconnecting. No credential is decrypted to build it. Requires `credential-proxy:call-own` or `credential-proxy:call`.
+         * @description What a call to `/api/credential-proxy/proxy` without `X-Run-Id` would accept from this caller in this space, of the integrations active in the space that have a published version. Read with the rule the proxy applies. With `credential-proxy:call-own` alone: the caller's OWN connections (user or end-user) usable here, and never one another member shared into the space. With `credential-proxy:call`: those and the connections shared into the space, each telling which it is (`owned_by_actor`); of an integration governed by an enforced org default, that default's members only. Grouped by integration, oldest first within one. An entry the caller does not own is used when named with `X-Connection-Id` or designated by an org default. `call_permission_required` and `needs_reconnection` describe a call NAMING that entry with `X-Connection-Id`. A call naming none follows the order that parameter describes on `/api/credential-proxy/proxy`: several own entries of one integration need it, and with `credential-proxy:call` an org default binds its set before the caller's own connection, refusing the call while one of its members is out of the caller's reach or needs reconnecting. No credential is decrypted to build it. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`, whatever the caller's role.
          */
         get: operations["listCredentialProxyConnections"];
         put?: never;
@@ -4862,7 +4862,7 @@ export interface paths {
         head?: never;
         /**
          * Update a space
-         * @description Update space name, icon, colour, settings, visibility or default role. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears `icon` or `color`. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility`, `default_role`, `icon` or `color` is a 409 `personal_space_immutable`.
+         * @description Update space name, icon, colour, settings, visibility, default role or credential proxy switch. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears `icon` or `color`. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility`, `default_role`, `icon`, `color` or `credential_proxy_open` is a 409 `personal_space_immutable`.
          */
         patch: operations["updateSpace"];
         trace?: never;
@@ -7436,6 +7436,8 @@ export interface components {
              * @enum {string}
              */
             default_role: "admin" | "builder" | "operator" | "runner" | "viewer";
+            /** @description Whether members may use the space's connections directly, outside a run: `/api/credential-proxy/connections` and `/api/credential-proxy/proxy` without `X-Run-Id`, and the MCP tools `list_connections` and `api_call`. `false` answers those routes `403 credential_proxy_closed` and withholds those tools, for every role, organization owners and admins included. Runs keep their connections: a run the platform executes reaches them through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a member who may launch an inline run from having an agent make the call inside that run; that is governed by the inline-run permission of the member's role. Default `true`. */
+            credential_proxy_open: boolean;
             /** @description Whether this space is one member's personal space. Such a space is reached by its owner alone — organization owners and admins included — takes no other members, is always `private`, and only its name can be changed. Its owner is deliberately not named on the wire. */
             personal: boolean;
             /**
@@ -11526,7 +11528,15 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            /** @description `forbidden` — the principal holds neither `credential-proxy:call-own` nor `credential-proxy:call`; `credential_proxy_closed` — the space's `credential_proxy_open` is `false`. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
         };
     };
     credentialProxyGet: {
@@ -25967,6 +25977,7 @@ export interface operations {
                      *           },
                      *           "visibility": "open",
                      *           "default_role": "operator",
+                     *           "credential_proxy_open": true,
                      *           "personal": false,
                      *           "access": "member",
                      *           "role": {
@@ -25997,6 +26008,7 @@ export interface operations {
                      *           },
                      *           "visibility": "closed",
                      *           "default_role": "operator",
+                     *           "credential_proxy_open": true,
                      *           "personal": false,
                      *           "access": "none",
                      *           "role": null,
@@ -26076,6 +26088,7 @@ export interface operations {
                      *       },
                      *       "visibility": "open",
                      *       "default_role": "operator",
+                     *       "credential_proxy_open": true,
                      *       "personal": false,
                      *       "access": "member",
                      *       "role": {
@@ -26226,6 +26239,8 @@ export interface operations {
                      * @enum {string}
                      */
                     default_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
+                    /** @description Whether members may use the space's connections directly, outside a run: `/api/credential-proxy/connections` and `/api/credential-proxy/proxy` without `X-Run-Id`, and the MCP tools `list_connections` and `api_call`. `false` answers those routes `403 credential_proxy_closed` and withholds those tools, for every role, organization owners and admins included. Runs keep their connections: a run the platform executes reaches them through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a member who may launch an inline run from having an agent make the call inside that run; that is governed by the inline-run permission of the member's role. Default `true`. */
+                    credential_proxy_open?: boolean;
                 };
             };
         };

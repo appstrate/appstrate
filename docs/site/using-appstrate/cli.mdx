@@ -337,7 +337,7 @@ The flags that matter most:
 
 - `--model-source env|preset`: your own provider key, or the instance's model presets through the LLM proxy. The automatic choice is `preset` for a package id with `--integrations remote`, and `env` otherwise. With `env`, `--model` and `--model-api` name the model and its protocol, and the key comes from `--llm-api-key` or from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` or `MISTRAL_API_KEY`.
 - `--integrations remote|local|none`: through the credential proxy (the default), from a `--creds-file`, or none.
-- `--report auto|true|false`: whether the run is registered on the instance. `auto` registers it when the CLI has credentials for an instance.
+- `--report auto|true|false`: whether the run is registered on the instance. `auto` registers it when the CLI has credentials for an instance. Without registration, integration calls are made outside a run, which a space with direct connection access turned off refuses (`403 credential_proxy_closed`).
 - `--sink-ttl <seconds>`: how long the run may keep reporting, for a run that outlives the default (see [Run liveness](/features/run-liveness)).
 - `--run-id <id>`: a platform run sends it as its [`Idempotency-Key`](/api/idempotency), so repeating the command replays the first launch instead of starting a second run.
 

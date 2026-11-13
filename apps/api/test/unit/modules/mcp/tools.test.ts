@@ -126,6 +126,39 @@ describe("mcp catalog", () => {
   });
 });
 
+describe("credential proxy closed in the space", () => {
+  const ctxFor = (permissions: string[]) => ({
+    origin: "https://test.local",
+    authHeaders: new Headers({ authorization: "Bearer tok", "x-org-id": "org_1" }),
+    permissions: withImpliedPermissions(permissions),
+    ceiling: undefined,
+    dispatch: async () => new Response("{}", { status: 200 }),
+    actor: { type: "user", id: "user_1" } as Actor,
+    scope: { orgId: "org_1", spaceId: "spc_1" },
+    authorizeBundle: async () => {},
+    placeRootAs: async () => null,
+    requestId: "req_test",
+    followRunLogs: () => () => {},
+    contextInjected: false,
+  });
+
+  for (const permission of ["credential-proxy:call-own", "credential-proxy:call"]) {
+    it(`withholds list_connections and api_call under ${permission}, and get_me stops naming them`, () => {
+      const ctx = ctxFor(["mcp:read", "mcp:invoke", permission]);
+      const names = (open: boolean) => toolsFor(ctx, true, open).map((t) => t.descriptor.name);
+      expect(names(true)).toEqual(expect.arrayContaining(["list_connections", "api_call"]));
+      expect(names(false)).not.toContain("list_connections");
+      expect(names(false)).not.toContain("api_call");
+      const getMe = (open: boolean) =>
+        toolsFor(ctx, true, open).find((t) => t.descriptor.name === "get_me")!.descriptor
+          .description!;
+      expect(getMe(true)).toContain("`list_connections`");
+      expect(getMe(false)).not.toContain("api_call");
+      expect(getMe(false)).not.toContain("list_connections");
+    });
+  }
+});
+
 /**
  * What the caller is SHOWN, per permission set. An act its grants make
  * structurally impossible is absent — not declared and then refused — so every

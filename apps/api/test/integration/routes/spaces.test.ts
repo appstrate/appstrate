@@ -207,6 +207,36 @@ describe("Spaces API", () => {
         settings: { allowedRedirectDomains: ["example.com"] },
       });
     });
+
+    it("closes and reopens the credential proxy, audited, without touching settings", async () => {
+      const space = await seedSpace({ orgId: ctx.orgId, name: "Proxy switch" });
+      const patch = (body: unknown) =>
+        app.request(`/api/spaces/${space.id}`, {
+          method: "PATCH",
+          headers: { ...authHeaders(ctx), "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      const before = await app.request(`/api/spaces/${space.id}`, { headers: authHeaders(ctx) });
+      expect(((await before.json()) as any).credential_proxy_open).toBe(true);
+
+      const closed = await patch({ credential_proxy_open: false });
+      expect(closed.status).toBe(200);
+      expect(((await closed.json()) as any).credential_proxy_open).toBe(false);
+      // Writing `settings` alone leaves the switch as it is.
+      const settings = await patch({ settings: { allowedRedirectDomains: ["example.com"] } });
+      expect(((await settings.json()) as any).credential_proxy_open).toBe(false);
+
+      const [row] = await db
+        .select()
+        .from(auditEvents)
+        .where(and(eq(auditEvents.resourceId, space.id), eq(auditEvents.action, "space.updated")))
+        .orderBy(auditEvents.createdAt)
+        .limit(1);
+      expect(row!.after).toEqual({ credentialProxyOpen: false });
+
+      const reopened = await patch({ credential_proxy_open: true });
+      expect(((await reopened.json()) as any).credential_proxy_open).toBe(true);
+    });
   });
 
   describe("PATCH /api/spaces/:id — default space visibility", () => {

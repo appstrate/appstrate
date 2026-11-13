@@ -614,6 +614,7 @@ column space_social_providers.updated_at timestamp with time zone not null defau
 column spaces.color text
 column spaces.created_at timestamp with time zone not null default now()
 column spaces.created_by text
+column spaces.credential_proxy_open boolean not null default true
 column spaces.default_role text not null default 'operator'::text
 column spaces.icon text
 column spaces.id text not null

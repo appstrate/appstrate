@@ -132,6 +132,17 @@ export const EMOJI_ICON_WRITE_RULE =
  * and one `color`, both always present, both nullable. The one definition every
  * resource carrying an identity spreads.
  */
+/** `credential_proxy_open` on the space object and on `PATCH /api/spaces/{id}`. */
+export const CREDENTIAL_PROXY_OPEN_DESCRIPTION =
+  "Whether members may use the space's connections directly, outside a run: " +
+  "`/api/credential-proxy/connections` and `/api/credential-proxy/proxy` without `X-Run-Id`, and " +
+  "the MCP tools `list_connections` and `api_call`. `false` answers those routes " +
+  "`403 credential_proxy_closed` and withholds those tools, for every role, organization owners " +
+  "and admins included. Runs keep their connections: a run the platform executes reaches them " +
+  "through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a " +
+  "member who may launch an inline run from having an agent make the call inside that run; " +
+  "that is governed by the inline-run permission of the member's role. Default `true`.";
+
 export const APPEARANCE_PROPERTIES = {
   icon: {
     type: ["string", "null"],
@@ -2705,6 +2716,7 @@ export const schemas = {
       "settings",
       "visibility",
       "default_role",
+      "credential_proxy_open",
       "personal",
       "access",
       "role",
@@ -2740,6 +2752,10 @@ export const schemas = {
         type: "string",
         enum: [...SPACE_ROLE_PRESETS],
         description: "Preset the implicit members of an `open` space hold",
+      },
+      credential_proxy_open: {
+        type: "boolean",
+        description: CREDENTIAL_PROXY_OPEN_DESCRIPTION,
       },
       personal: {
         type: "boolean",

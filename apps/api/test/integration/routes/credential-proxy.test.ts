@@ -20,6 +20,8 @@
  *   - `X-Run-Id` confines the call to the run's bound connections; without it the caller's
  *     own connections are reachable, and with `credential-proxy:call` those usable in the space
  *   - `GET /api/credential-proxy/connections` lists what a call without a run reaches
+ *   - a space with `credential_proxy_open = false` refuses both routes without `X-Run-Id`
+ *     (`credential_proxy_closed`), whatever the permission, and keeps serving a remote run
  *   - upstream `Set-Cookie` never relayed; the server-side jar keeps continuity
  *   - the call journal: a row per call that may have sent the credential (the
  *     upstream answered, or the call failed after dispatch), none for a refusal
@@ -60,6 +62,7 @@ import {
   integrationConnections,
   integrationOrgDefaults,
   integrationConnectionShares,
+  spaces,
 } from "@appstrate/db/schema";
 import { drainAudits } from "../../../src/services/audit.ts";
 import { CURRENT_API_VERSION } from "../../../src/lib/api-versions.ts";
@@ -1314,6 +1317,26 @@ describe("POST /api/credential-proxy/proxy — the permission of each path", () 
     const detail = await refusal(await call(CALL, await ownRun("platform")));
     expect(detail).toContain("the platform executes");
   });
+
+  it("closed space: 403 credential_proxy_closed without X-Run-Id under either permission, a remote run still served", async () => {
+    await db
+      .update(spaces)
+      .set({ credentialProxyOpen: false })
+      .where(eq(spaces.id, ctx.defaultSpaceId));
+    for (const scopes of [["credential-proxy:call"], ["credential-proxy:call-own"]]) {
+      const body = await expectProblem(await call(scopes), 403, {
+        code: "credential_proxy_closed",
+      });
+      expect(body.detail).toContain(ctx.defaultSpaceId);
+    }
+    expect(upstreamCalls).toBe(0);
+    expect((await call(["credential-proxy:call"], await ownRun())).status).toBe(200);
+    expect(upstreamCalls).toBe(1);
+    // The run path keeps its own rule: call-own alone is refused for a run, closed or not.
+    await expectProblem(await call(["credential-proxy:call-own"], await ownRun()), 403, {
+      code: "forbidden",
+    });
+  });
 });
 
 describe("POST /api/credential-proxy/proxy — outside a run with credential-proxy:call-own alone, the caller's own connections only", () => {
@@ -1891,6 +1914,19 @@ describe("GET /api/credential-proxy/connections", () => {
     const body = await expectProblem(await list(["runs:read"]), 403, { code: "forbidden" });
     expect(body.detail).toBe("Insufficient permissions: credential-proxy:call-own required");
     expect((await list(["credential-proxy:call"])).status).toBe(200);
+  });
+
+  it("closed space: 403 credential_proxy_closed naming the space, under either permission", async () => {
+    await db
+      .update(spaces)
+      .set({ credentialProxyOpen: false })
+      .where(eq(spaces.id, ctx.defaultSpaceId));
+    for (const scopes of [["credential-proxy:call"], ["credential-proxy:call-own"]]) {
+      const body = await expectProblem(await list(scopes), 403, {
+        code: "credential_proxy_closed",
+      });
+      expect(body.detail).toContain(ctx.defaultSpaceId);
+    }
   });
 
   it("lists the caller's own usable connections as the proxy serves them, never a colleague's", async () => {

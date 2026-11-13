@@ -68,6 +68,7 @@ import {
 } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
 import { withoutConnectOffers } from "../../services/connect/preflight-connect-offer.ts";
+import { credentialProxyClosedDetail } from "../../services/credential-proxy/access.ts";
 import { logger } from "../../lib/logger.ts";
 import { ceilingHolds } from "../../lib/route-requirements.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
@@ -1750,7 +1751,7 @@ export function buildFileResourceProvider(ctx: McpToolContext): AppstrateResourc
   };
 }
 
-function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
+function buildGetMeTool(ctx: McpToolContext, proxies: boolean): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "get_me",
     description:
@@ -1758,8 +1759,9 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
       "the space the request resolved to (every list returned is scoped to it), " +
       "and the integrations the caller already has connected and could attach to an agent: one " +
       "entry per integration active in that space with a connection the caller may bind there, " +
-      "its own or shared into the space. The connections `api_call` can use are listed by " +
-      "`list_connections`. Call this first to ground who you are acting for, what the " +
+      "its own or shared into the space. " +
+      (proxies ? "The connections `api_call` can use are listed by `list_connections`. " : "") +
+      "Call this first to ground who you are acting for, what the " +
       "caller's role allows (operations beyond it fail at invoke time), and which integrations " +
       "to prefer when building or configuring an agent.",
     annotations: {
@@ -1827,6 +1829,8 @@ export function deriveMcpSurface(
   actor: Actor,
   /** The credential proxy accepts the credential this request carries (it is bearer-only). */
   proxyAcceptsCredential: boolean,
+  /** The space leaves the credential proxy open outside a run (`assertCredentialProxyOpen`). */
+  proxyOpen: boolean,
 ): McpSurface {
   const granted = (operationId: string): boolean =>
     operationIdGranted(operationId, permissions, ceiling);
@@ -1845,7 +1849,8 @@ export function deriveMcpSurface(
     // `credential-proxy:call-own` (implied by `credential-proxy:call`), read off the
     // listing's route, which guards as `/proxy` does.
     // `mcp:invoke` is checked here and nowhere else.
-    proxies: invokes && proxyAcceptsCredential && granted("listCredentialProxyConnections"),
+    proxies:
+      invokes && proxyAcceptsCredential && proxyOpen && granted("listCredentialProxyConnections"),
   };
 }
 
@@ -1915,7 +1920,7 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
         })
       : []),
     // Redundant for a context-injecting caller; search_operations stays for `best_match`.
-    ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx)]),
+    ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx, surface.proxies)]),
   ];
   const { orgSpaces } = ctx;
   const pinned = orgSpaces === undefined;
@@ -1987,6 +1992,16 @@ function withSpaceArgument(
       // `kind:"inline"` is the `composes` act, a narrower grant than `runs`.
       const need = act === "runs" && args.kind === "inline" ? "composes" : act;
       const { current } = spaces;
+      // The space's setting, not the caller's role, withholds the proxy there.
+      if (need === "proxies" && !current.credentialProxyOpen) {
+        return refusalResult({
+          code: "credential_proxy_closed",
+          error: credentialProxyClosedDetail(current),
+          space: spaceRef(current),
+          ...grantedIn(spaces, holds(need)),
+          hint: NO_FALLBACK_HINT,
+        });
+      }
       if (!holds(need)(current)) {
         return refusalResult({
           code: "not_granted",

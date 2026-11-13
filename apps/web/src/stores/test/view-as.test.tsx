@@ -402,6 +402,7 @@ function listedSpace(
     settings: {},
     visibility: "open",
     default_role: "operator",
+    credential_proxy_open: true,
     personal: false,
     access: "member",
     role: { kind: "preset", key: "operator", name: "operator" },

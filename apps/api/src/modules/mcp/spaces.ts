@@ -28,6 +28,8 @@ export interface McpSpace {
   /** The caller's role there, as `GET /api/spaces` names it. */
   role: string;
   permissions: ReadonlySet<string>;
+  /** Whether the space leaves the credential proxy open outside a run. */
+  credentialProxyOpen: boolean;
   /** The acts the caller holds there (`deriveMcpSurface` over `permissions`). */
   surface: McpSurface;
 }
@@ -67,6 +69,7 @@ export async function listReachableSpaces(
       name: space.name,
       role: toSpaceRoleWire(role)!.name,
       permissions,
+      credentialProxyOpen: space.credentialProxyOpen,
     });
   }
   return out;

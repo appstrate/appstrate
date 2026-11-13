@@ -552,6 +552,11 @@ describe("personal spaces — the write rules", () => {
     await expectProblem(await patch({ visibility: "private" }), 409, {
       code: "personal_space_immutable",
     });
+    for (const credential_proxy_open of [false, true]) {
+      await expectProblem(await patch({ credential_proxy_open }), 409, {
+        code: "personal_space_immutable",
+      });
+    }
   });
 
   it("refuses `owner_user_id` on creation — it is not a body field", async () => {

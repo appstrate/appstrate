@@ -20,6 +20,7 @@ import { fieldWriteState } from "../../lib/field-write-state";
 import { useSettingDraft } from "../../hooks/use-setting-draft";
 import { RadioGroup, RadioGroupItem } from "@appstrate/ui/components/radio-group";
 import { Label } from "@appstrate/ui/components/label";
+import { Switch } from "@appstrate/ui/components/switch";
 import { SPACE_VISIBILITIES } from "@appstrate/core/permissions";
 import { RoleCatalogState } from "../../components/role-catalog-state";
 import { SpaceRoleSelect } from "../../components/space-role-select";
@@ -74,6 +75,7 @@ function GeneralForm({
     settings?: { allowedRedirectDomains?: string[] };
     visibility: SpaceVisibility;
     default_role: SpaceRolePreset;
+    credential_proxy_open: boolean;
     /** A member's own space: always private, no members but its owner (§3.6). */
     personal: boolean;
   };
@@ -84,8 +86,8 @@ function GeneralForm({
   const updateMutation = useUpdateSpace();
   const deleteMutation = useDeleteSpace();
 
-  // The text fields are one draft with Save; visibility and default role are single
-  // choices, written as they are picked.
+  // The text fields are one draft with Save; visibility, default role and the credential
+  // proxy switch are single choices, written as they are picked.
   const draft = useSettingDraft({
     name: space.name,
     domains: space.settings?.allowedRedirectDomains ?? [],
@@ -95,6 +97,8 @@ function GeneralForm({
   const [editedDefaultRole, setEditedDefaultRole] = useState<SpaceRolePreset | null>(null);
   const activeVisibility = editedVisibility ?? space.visibility;
   const activeDefaultRole = editedDefaultRole ?? space.default_role;
+  const [editedProxyOpen, setEditedProxyOpen] = useState<boolean | null>(null);
+  const activeProxyOpen = editedProxyOpen ?? space.credential_proxy_open;
   const [pendingClose, setPendingClose] = useState<SpaceVisibility | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -139,6 +143,18 @@ function GeneralForm({
         onError: (error) => {
           toastError(error);
           setEditedDefaultRole(null);
+        },
+      },
+    );
+  };
+  const commitProxyOpen = (next: boolean) => {
+    setEditedProxyOpen(next);
+    updateMutation.mutate(
+      { params: { path: { id: spaceId } }, body: { credential_proxy_open: next } },
+      {
+        onError: (error) => {
+          toastError(error);
+          setEditedProxyOpen(null);
         },
       },
     );
@@ -349,6 +365,27 @@ function GeneralForm({
                   </div>
                 </SettingRow>
               )}
+
+              <SettingRow
+                variant="toggle"
+                label={
+                  <Label htmlFor="space-credential-proxy-open" className="cursor-pointer">
+                    {t("spaces.credentialProxyOpenLabel")}
+                  </Label>
+                }
+                description={t("spaces.credentialProxyOpenHint")}
+                details={t("spaces.credentialProxyOpenDetails")}
+                status={
+                  <SaveFeedback {...fieldWriteState(updateMutation, "credential_proxy_open")} />
+                }
+              >
+                <Switch
+                  id="space-credential-proxy-open"
+                  checked={activeProxyOpen}
+                  disabled={updateMutation.isPending}
+                  onCheckedChange={(checked) => commitProxyOpen(checked === true)}
+                />
+              </SettingRow>
             </>
           )}
         </SettingsGroup>

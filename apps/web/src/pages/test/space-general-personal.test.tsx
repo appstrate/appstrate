@@ -39,6 +39,7 @@ function generalPage(personal: boolean, domains: string[] = []): string {
     settings: { allowedRedirectDomains: domains },
     visibility: personal ? "private" : "open",
     default_role: "viewer",
+    credential_proxy_open: true,
     personal,
     access: "member",
     role: null,
