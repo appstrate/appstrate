@@ -8,7 +8,7 @@
 
 import { describe, it, expect, beforeEach, afterAll, beforeAll } from "bun:test";
 import { and, eq } from "drizzle-orm";
-import { auditEvents, session } from "@appstrate/db/schema";
+import { auditEvents, deviceCode, session } from "@appstrate/db/schema";
 import { getTestApp } from "../../../apps/api/test/helpers/app.ts";
 import { db, truncateAll } from "../../../apps/api/test/helpers/db.ts";
 import {
@@ -58,6 +58,44 @@ function call(ctx: TestContext, method: string, path: string, body?: unknown) {
     method,
     headers: orgOnlyHeaders(ctx, body ? { "Content-Type": "application/json" } : {}),
     ...(body ? { body: JSON.stringify(body) } : {}),
+  });
+}
+
+/** A CLI login (device flow approved by the session in `cookie`): its refresh token. */
+async function cliRefreshTokenFor(cookie: string): Promise<string> {
+  const { ensureCliClient } =
+    await import("../../../apps/api/src/modules/oidc/services/ensure-cli-client.ts");
+  await ensureCliClient();
+  const code = (await (
+    await client.post("/device/code", {
+      client_id: "appstrate-cli",
+      scope: "openid profile email offline_access",
+    })
+  ).json()) as { device_code: string; user_code: string };
+  await app.request(`/api/auth/device?user_code=${encodeURIComponent(code.user_code)}`, {
+    headers: { Cookie: cookie },
+  });
+  expect((await client.post("/device/approve", { userCode: code.user_code }, cookie)).status).toBe(
+    200,
+  );
+  await db
+    .update(deviceCode)
+    .set({ lastPolledAt: new Date(Date.now() - 10_000) })
+    .where(eq(deviceCode.deviceCode, code.device_code));
+  const res = await client.post("/cli/token", {
+    grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+    device_code: code.device_code,
+    client_id: "appstrate-cli",
+  });
+  expect(res.status).toBe(200);
+  return ((await res.json()) as { refresh_token: string }).refresh_token;
+}
+
+function refreshCli(refreshToken: string): Promise<Response> {
+  return client.post("/cli/token", {
+    grant_type: "refresh_token",
+    refresh_token: refreshToken,
+    client_id: "appstrate-cli",
   });
 }
 
@@ -309,6 +347,37 @@ describe("/api/org-sso", () => {
       expect((await call(owner, "DELETE", "/api/org-sso/enforcement")).status).toBe(200);
       const unlinked = await call(owner, "DELETE", "/api/org-sso/tenant");
       expect(((await unlinked.json()) as Settings).tenant_id).toBeNull();
+    });
+
+    it("ends the domain's CLI and OAuth tokens too, not only sessions", async () => {
+      await seedSso({ orgId: owner.orgId });
+      await seedMicrosoftSession(await sessionIdOf(owner.user.id), owner.user.id, TENANT);
+      const atDomain = await createTestUser({ email: `alice@${DOMAIN}` });
+      const elsewhere = await createTestUser({ email: "bob@elsewhere.test" });
+      const domainToken = await cliRefreshTokenFor(atDomain.cookie);
+      const otherToken = await cliRefreshTokenFor(elsewhere.cookie);
+
+      expect((await call(owner, "POST", "/api/org-sso/enforcement")).status).toBe(200);
+
+      expect((await refreshCli(domainToken)).status).toBeGreaterThanOrEqual(400);
+      expect((await refreshCli(otherToken)).status).toBe(200);
+    });
+
+    it("ends the access of a domain verified while enforcement is on", async () => {
+      await seedSso({ orgId: owner.orgId, enforced: true });
+      const added = (await (
+        await call(owner, "POST", "/api/org-sso/domains", { domain: "later.test" })
+      ).json()) as Settings;
+      const later = added.domains.find((d) => d.domain === "later.test")!;
+      const atLater = await createTestUser({ email: "carol@later.test" });
+      const token = await cliRefreshTokenFor(atLater.cookie);
+      txtRecords[later.txt_record_name] = [[later.txt_record_value]];
+
+      expect((await call(owner, "POST", `/api/org-sso/domains/${later.id}/verify`)).status).toBe(
+        200,
+      );
+      expect(await client.profileStatus(atLater.cookie)).toBe(401);
+      expect((await refreshCli(token)).status).toBeGreaterThanOrEqual(400);
     });
 
     it("audits every change", async () => {

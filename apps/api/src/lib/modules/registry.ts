@@ -32,7 +32,7 @@ import { recordAuditFromContext } from "../../services/audit.ts";
 import { reachAcrossSpaces, toReachableSpaceWire } from "../reachable-spaces.ts";
 import { callerPersonalOwnerId, credentialConfinedToSpaces } from "../view-as.ts";
 import { provisionMember } from "../../services/organizations.ts";
-import { endSessionsForEmailDomain } from "../../services/user-sessions.ts";
+import { endAccessForEmailDomain } from "../../services/email-domain-access.ts";
 import type { AppEnv } from "../../types/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -118,8 +118,8 @@ function buildPlatformServices(): PlatformServices {
       provision: (orgId, userId, role) =>
         db.transaction((tx) => provisionMember(tx, orgId, userId, role)),
     },
-    sessions: {
-      endForEmailDomain: endSessionsForEmailDomain,
+    access: {
+      endForEmailDomain: endAccessForEmailDomain,
     },
   };
 }

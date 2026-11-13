@@ -3,14 +3,16 @@
 import { and, eq, like } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { user } from "@appstrate/db/schema";
-import { endOtherSessions, getAuth } from "@appstrate/db/auth";
+import { endOtherAccessAfterCredentialChange, getAuth } from "@appstrate/db/auth";
 
 /**
- * End every session of the platform accounts whose address is at exactly
- * `domain`, but `keepSessionId`. Resolves to the number of accounts. Accounts
- * of an end-user realm are untouched: their sessions answer to their space.
+ * End everything a password change ends (`endOtherAccessAfterCredentialChange`:
+ * sessions but `keepSessionId`, sign-in links, social-link states, pairings,
+ * and the tokens modules revoke on that event) for every platform account whose
+ * address is at exactly `domain`. Idempotent. Resolves to the number of
+ * accounts. Accounts of an end-user realm are untouched: they answer to their space.
  */
-export async function endSessionsForEmailDomain(
+export async function endAccessForEmailDomain(
   domain: string,
   keepSessionId: string | null,
 ): Promise<number> {
@@ -19,12 +21,12 @@ export async function endSessionsForEmailDomain(
   // anything but a hostname rather than escape it.
   if (!/^[a-z0-9.-]+$/.test(normalized)) throw new Error(`not a domain: ${domain}`);
   const accounts = await db
-    .select({ id: user.id })
+    .select({ id: user.id, email: user.email })
     .from(user)
     .where(and(eq(user.realm, "platform"), like(user.email, `%@${normalized}`)));
   const { internalAdapter } = await getAuth().$context;
   for (const account of accounts) {
-    await endOtherSessions(internalAdapter, account.id, keepSessionId);
+    await endOtherAccessAfterCredentialChange(internalAdapter, account, keepSessionId);
   }
   return accounts.length;
 }

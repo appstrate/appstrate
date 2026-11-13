@@ -9,7 +9,7 @@
 import type { ModuleInitContext, ModuleOrgMember, PlatformServices } from "@appstrate/core/module";
 
 export interface EePlatform {
-  services: Pick<PlatformServices, "logger" | "audit" | "members" | "sessions">;
+  services: Pick<PlatformServices, "logger" | "audit" | "members" | "access">;
   getOrgMembers(orgId: string, userIds: readonly string[]): Promise<ModuleOrgMember[]>;
 }
 

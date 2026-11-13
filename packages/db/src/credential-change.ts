@@ -23,11 +23,7 @@ const SESSION_DELETE_BATCH = 100;
  */
 export const credentialChangeHook = hookSlot<(userId: string) => Promise<void>>();
 
-/**
- * End every session of `userId` but `keepSessionId`, through Better Auth so its
- * session-delete hooks run (back-channel logout).
- */
-export async function endOtherSessions(
+async function endOtherSessions(
   sessions: SessionStore,
   userId: string,
   keepSessionId: string | null,
@@ -40,6 +36,7 @@ export async function endOtherSessions(
         ? and(eq(session.userId, userId), ne(session.id, keepSessionId))
         : eq(session.userId, userId),
     );
+  // Through Better Auth so its session-delete hooks run (back-channel logout).
   for (let i = 0; i < others.length; i += SESSION_DELETE_BATCH) {
     await sessions.deleteSessions(others.slice(i, i + SESSION_DELETE_BATCH).map((s) => s.token));
   }
