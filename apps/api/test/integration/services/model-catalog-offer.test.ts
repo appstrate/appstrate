@@ -35,22 +35,20 @@ const record = catalogRecordLike("anthropic", "claude-sonnet-5-5", "anthropic-me
 const SUBSCRIPTION_PROVIDER_ID = "test-subscription-catalog";
 
 function registerSubscriptionProvider(): void {
-  try {
-    registerModelProvider({
-      providerId: SUBSCRIPTION_PROVIDER_ID,
-      displayName: "Test Subscription",
-      iconUrl: "anthropic",
-      apiShape: "anthropic-messages",
-      defaultBaseUrl: "https://subscription.example.test",
-      baseUrlOverridable: false,
-      authMode: "oauth2",
-      catalogProviderId: "anthropic",
-      featuredModels: ["claude-sonnet-5-5"],
-      modelDiscovery: { mode: "static" },
-    });
-  } catch {
-    // Already registered in this process — the registry rejects duplicates.
-  }
+  // Registered once per process: the registry refuses a duplicate id.
+  if (getModelProvider(SUBSCRIPTION_PROVIDER_ID)) return;
+  registerModelProvider({
+    providerId: SUBSCRIPTION_PROVIDER_ID,
+    displayName: "Test Subscription",
+    iconUrl: "anthropic",
+    apiShape: "anthropic-messages",
+    defaultBaseUrl: "https://subscription.example.test",
+    baseUrlOverridable: false,
+    authMode: "oauth2",
+    catalogProviderId: "anthropic",
+    featuredModels: ["claude-sonnet-5-5"],
+    modelDiscovery: { mode: "static" },
+  });
 }
 
 describe("live model catalog — what an org and a system model get", () => {
