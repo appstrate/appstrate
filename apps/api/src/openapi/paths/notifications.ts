@@ -35,11 +35,22 @@ function notificationOf(kind: string, payload: Record<string, unknown>) {
 }
 
 /**
- * The feed's entries. A finished run is not one: its read state is served with
- * the runs (`unread` on a run, `GET /api/runs?unread=true`).
+ * The feed's entries: what needs the recipient's attention, decided when it is
+ * written. A finished run is notified only when it failed or timed out; its
+ * read state (`unread` on a run) is served with the runs.
  */
 const notificationObject = {
   oneOf: [
+    notificationOf("run_completed", {
+      required: ["packageId", "status"],
+      properties: {
+        packageId: {
+          type: ["string", "null"],
+          description: "The run's agent; null once the agent is deleted.",
+        },
+        status: { type: "string", enum: ["failed", "timeout"] },
+      },
+    }),
     notificationOf("package_shared", {
       required: ["packageId", "package_type", "shared_by_name"],
       properties: {
@@ -58,7 +69,7 @@ export const notificationsPaths = {
       tags: ["Notifications"],
       summary: "List notifications",
       description:
-        'Keyset-paginated list of the current recipient\'s notifications, newest first. Follow the `Link: rel="next"` header (`?startingAfter=<id>`) to page. `?unread=true` returns unread only. A finished run is not in the feed: see `GET /api/runs?unread=true`.',
+        'Keyset-paginated list of the current recipient\'s notifications, newest first. Follow the `Link: rel="next"` header (`?startingAfter=<id>`) to page. `?unread=true` returns unread only. A finished run is in it only when it failed or timed out; every unread run is `GET /api/runs?unread=true`.',
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -138,7 +149,7 @@ export const notificationsPaths = {
       tags: ["Notifications"],
       summary: "Get unread notification count",
       description:
-        "Returns the number of unread notifications in the current recipient's feed (finished runs excluded: `GET /api/runs?unread=true`).",
+        "Returns the number of unread notifications in the current recipient's feed. Unread runs are counted by `GET /api/runs?unread=true`.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -203,7 +214,7 @@ export const notificationsPaths = {
       tags: ["Notifications"],
       summary: "Mark all notifications as read",
       description:
-        "Marks every unread notification of the current recipient's feed read (finished runs excluded: `PUT /api/runs/read-all`). Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
+        "Marks every unread notification of the current recipient's feed read. It leaves the runs unread: `PUT /api/runs/read-all` reads them, and their notifications with them. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },

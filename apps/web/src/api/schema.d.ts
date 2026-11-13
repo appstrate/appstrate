@@ -2794,7 +2794,7 @@ export interface paths {
         };
         /**
          * List notifications
-         * @description Keyset-paginated list of the current recipient's notifications, newest first. Follow the `Link: rel="next"` header (`?startingAfter=<id>`) to page. `?unread=true` returns unread only. A finished run is not in the feed: see `GET /api/runs?unread=true`.
+         * @description Keyset-paginated list of the current recipient's notifications, newest first. Follow the `Link: rel="next"` header (`?startingAfter=<id>`) to page. `?unread=true` returns unread only. A finished run is in it only when it failed or timed out; every unread run is `GET /api/runs?unread=true`.
          */
         get: operations["listNotifications"];
         put?: never;
@@ -2815,7 +2815,7 @@ export interface paths {
         get?: never;
         /**
          * Mark all notifications as read
-         * @description Marks every unread notification of the current recipient's feed read (finished runs excluded: `PUT /api/runs/read-all`). Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.
+         * @description Marks every unread notification of the current recipient's feed read. It leaves the runs unread: `PUT /api/runs/read-all` reads them, and their notifications with them. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.
          */
         put: operations["markAllNotificationsRead"];
         post?: never;
@@ -2834,7 +2834,7 @@ export interface paths {
         };
         /**
          * Get unread notification count
-         * @description Returns the number of unread notifications in the current recipient's feed (finished runs excluded: `GET /api/runs?unread=true`).
+         * @description Returns the number of unread notifications in the current recipient's feed. Unread runs are counted by `GET /api/runs?unread=true`.
          */
         get: operations["getUnreadNotificationCount"];
         put?: never;
@@ -4483,7 +4483,7 @@ export interface paths {
         get?: never;
         /**
          * Mark every run read
-         * @description Marks every unread run of the space read for the caller (read state is per recipient). Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.
+         * @description Marks every unread run of the space read for the caller (read state is per recipient), and the notifications the bell held for them. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.
          */
         put: operations["markAllRunsRead"];
         post?: never;
@@ -4591,7 +4591,7 @@ export interface paths {
         get?: never;
         /**
          * Mark a run read
-         * @description Marks one run read for the caller (read state is per recipient; the dashboard calls it when a finished run is opened). Idempotent: a missing run or one the caller holds no read state for is a no-op, always 204.
+         * @description Marks one run read for the caller (read state is per recipient; the dashboard calls it when a finished run is opened), and its notification when the bell held one. Idempotent: a missing run or one the caller holds no read state for is a no-op, always 204.
          */
         put: operations["markRunRead"];
         post?: never;
@@ -18970,7 +18970,31 @@ export interface operations {
                     "application/json": {
                         /** @enum {string} */
                         object: "list";
-                        data: {
+                        data: ({
+                            /**
+                             * Format: uuid
+                             * @description Notification id
+                             */
+                            id: string;
+                            /** @constant */
+                            type: "run_completed";
+                            /** @description Originating run id, when the notification references one */
+                            runId: string | null;
+                            /** @description Render-without-join data. */
+                            payload: {
+                                /** @description The run's agent; null once the agent is deleted. */
+                                packageId: string | null;
+                                /** @enum {string} */
+                                status: "failed" | "timeout";
+                            } | null;
+                            /**
+                             * Format: date-time
+                             * @description When the recipient marked it read; null if unread
+                             */
+                            read_at: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
+                        } | {
                             /**
                              * Format: uuid
                              * @description Notification id
@@ -18994,7 +19018,7 @@ export interface operations {
                             read_at: string | null;
                             /** Format: date-time */
                             createdAt: string;
-                        }[];
+                        })[];
                         /** @description True when another page follows — page via the Link header cursor */
                         hasMore: boolean;
                     };

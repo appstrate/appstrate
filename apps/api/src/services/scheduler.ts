@@ -14,7 +14,7 @@ import { batchLoadUserNames } from "../lib/user-helpers.ts";
 import { logger } from "../lib/logger.ts";
 import type { ScheduleWireDto, EnrichedSchedule } from "@appstrate/shared-types";
 import { createFailedRun } from "./state/runs.ts";
-import { unreadRunCondition } from "./state/notifications.ts";
+import { unreadRunCondition } from "./state/run-reads.ts";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import {
   prepareAndExecuteRun,

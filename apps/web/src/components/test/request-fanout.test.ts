@@ -152,11 +152,10 @@ describe("notification freshness", () => {
     expect(keys()).toContain('["get","/api/notifications/unread-count"]');
   });
 
-  // No finished run is in the feed: its unread state rides on the run caches,
-  // which a terminal frame already refreshes (`broadRunKeys`).
-  it("leaves the feed alone on a terminal run seen live", () => {
+  // A failed run lands in the bell, so a terminal frame re-reads the feed.
+  it("still invalidates them on a terminal run seen live", () => {
     expect(GLOBAL_SYNC).toContain("TERMINAL_RUN_STATUSES.has(status)");
-    expect([...GLOBAL_SYNC.matchAll(/invalidateNotificationQueries\(/g)]).toHaveLength(1);
+    expect([...GLOBAL_SYNC.matchAll(/invalidateNotificationQueries\(/g)].length).toBeGreaterThan(1);
   });
 });
 

@@ -17,9 +17,9 @@ import { setCursorLinkHeader } from "../lib/pagination-link.ts";
 import { parseListPagination } from "../lib/list-query.ts";
 
 /**
- * The recipient's notification feed — the dashboard bell. A finished run is
- * not in it: its read state is served with the runs (`GET /api/runs?unread=true`,
- * `PUT /api/runs/{id}/read`, `PUT /api/runs/read-all`).
+ * The recipient's notification feed — the dashboard bell: what needs their
+ * attention (a failed run, a share). A run's read state is served with the
+ * runs (`GET /api/runs?unread=true`, `PUT /api/runs/{id}/read`, `read-all`).
  */
 export function createNotificationsRouter() {
   const router = new Hono<AppEnv>();

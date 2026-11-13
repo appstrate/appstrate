@@ -14,6 +14,7 @@ import {
   packages,
   orgInvitations,
   notifications,
+  runReads,
   schedules,
   files,
   uploads,
@@ -489,6 +490,15 @@ async function removeMemberInTx(
         eq(notifications.orgId, orgId),
         eq(notifications.recipientType, "user"),
         eq(notifications.recipientId, userId),
+      ),
+    );
+  await tx
+    .delete(runReads)
+    .where(
+      and(
+        eq(runReads.orgId, orgId),
+        eq(runReads.recipientType, "user"),
+        eq(runReads.recipientId, userId),
       ),
     );
 

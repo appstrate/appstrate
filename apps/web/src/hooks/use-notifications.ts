@@ -6,12 +6,12 @@ import { useCurrentSpaceId } from "./use-current-space";
 import { useOrgScope } from "./use-org-scope";
 
 /**
- * The notification feed — the dashboard bell. A finished run is not in it: its
+ * The notification feed — the dashboard bell: a failed run, a share. A run's
  * read state rides with the runs (`use-run-reads.ts`).
  *
- * The feed is pull-only: nothing on the realtime stream announces a share, so
- * the poll is what brings one in, and a reconnect re-reads it
- * (`use-global-run-sync`).
+ * A finished run re-reads the feed from the realtime stream
+ * (`use-global-run-sync`, on every terminal frame and every reconnect); nothing
+ * announces a share, so the poll is what brings one in.
  */
 const NOTIFICATION_POLL_INTERVAL_MS = 300_000;
 

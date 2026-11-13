@@ -58,7 +58,7 @@ import {
   readTokenUsage,
   runAgentIdentity,
 } from "./state/runs.ts";
-import { createRunNotifications } from "./state/notifications.ts";
+import { recordRunFinished } from "./state/run-reads.ts";
 import {
   addMemories as addUnifiedMemories,
   upsertPinned,
@@ -826,19 +826,17 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   };
   void emitEvent("onRunStatusChange", broadcastParams);
 
-  // Fan out in-app notifications — one row per recipient. Only
-  // the CAS winner reaches here, so this runs exactly once per run. Awaited
-  // (after the broadcast) rather than detached: the run is already terminal
-  // and the broadcast has already fired, so the small INSERT adds negligible
-  // latency, and awaiting it keeps the write from outliving the request — a
-  // detached promise would otherwise race a concurrent run-delete / test
-  // teardown. Best-effort by contract: a transient INSERT failure is logged
-  // and swallowed, never failing the runner finalize. The `notifications`
-  // table is the sole source of notification read-state; a dropped fan-out
-  // means a missing bell entry, not a stuck run-list badge (the badge derives
-  // from the same table).
-  await createRunNotifications(scope, run.id).catch((err) => {
-    logger.error("finalize: notification fan-out failed (run already terminal)", {
+  // Record the finished run for its recipients: unread (`run_reads`), and
+  // notified when it needs attention. Only the CAS winner reaches here, so this
+  // runs exactly once per run. Awaited (after the broadcast) rather than
+  // detached: the run is already terminal and the broadcast has already fired,
+  // so the small INSERTs add negligible latency, and awaiting keeps the write
+  // from outliving the request — a detached promise would race a concurrent
+  // run-delete / test teardown. Best-effort by contract: a transient failure is
+  // logged and swallowed, never failing the runner finalize; it costs a missing
+  // unread dot and bell entry, never a stuck run.
+  await recordRunFinished(scope, run.id).catch((err) => {
+    logger.error("finalize: run read-state fan-out failed (run already terminal)", {
       runId: run.id,
       err: getErrorMessage(err),
     });

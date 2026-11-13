@@ -20,10 +20,9 @@ import { runs } from "./runs.ts";
 /**
  * In-app notifications — one row per recipient (fan-out on write).
  *
- * Replaces the previous design where read-state lived on the `runs` row
- * itself (`runs.notifiedAt` / `runs.readAt`), which made the read flag
- * global: marking a notification read flipped it for every viewer, and a
- * non-owner's mark-as-read silently matched zero rows.
+ * The bell's feed: what needs the recipient's attention (a failed run, a
+ * package shared with them), decided when the row is written. A run's read
+ * state is `run_reads`, whether or not the run was notified.
  *
  * The recipient is modelled as a single polymorphic pair
  * (`recipientType` + `recipientId`) — the same shape as the `Actor`
@@ -54,7 +53,11 @@ import { runs } from "./runs.ts";
 export const notificationTypeValues = ["run_completed", "package_shared"] as const;
 export type NotificationType = (typeof notificationTypeValues)[number];
 
-/** The render-without-join payload of each kind. */
+/**
+ * The render-without-join payload of each kind. `run_completed` is written only
+ * for a run that needs attention (`failed`, `timeout`): a run's read state is
+ * `run_reads`, not a notification.
+ */
 export interface NotificationPayloads {
   run_completed: { packageId: string | null; status: RunStatus };
   package_shared: { packageId: string; package_type: PackageType; shared_by_name: string };
@@ -98,8 +101,8 @@ export const notifications = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
-    // The bell only ever queries unread rows (count, unread feed, unread
-    // counts-by-agent), so a single PARTIAL index keyed
+    // The bell only ever queries unread rows (count, unread feed), so a
+    // single PARTIAL index keyed
     // `(org, space, recipient_type, recipient_id, created_at DESC, id DESC)
     // WHERE read_at IS NULL` backs every hot read: the (org, space, recipient)
     // prefix serves the unread count, the created_at/id tail serves the unread
@@ -122,7 +125,7 @@ export const notifications = pgTable(
       )
       .where(sql`${table.readAt} IS NULL`),
     // Backs the run_id FK ON DELETE CASCADE + by-run lookups
-    // (markNotificationReadByRun).
+    // (`markRunNotificationsRead`: opening a run reads its notification).
     index("idx_notifications_run").on(table.runId),
     // Recipient-keyed, NON-partial (migration 0050). The partial index above
     // cannot serve the two delete-by-recipient callers — member removal

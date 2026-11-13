@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
+- **Run `scripts/migration/0052-run-reads.sql` once after deploying** (drizzle
+  `0103` creates `run_reads`). It copies each run's read state out of the
+  `run_completed` notifications and removes the notifications of runs that did
+  not fail or time out. Until it runs, runs finished before the deploy read as
+  read and the bell still lists them. The app may keep running; detail in
+  `scripts/migration/README.md`.
+
 - **Fixed: the runner bootstrap keeps its env across sudo-rs** (#2153).
   `get.appstrate.dev/runner` elevated with `sudo -E`, which sudo-rs (the default
   sudo since Ubuntu 25.10) ignores with only a warning, so `runner install` lost
@@ -102,20 +109,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **Breaking (API): a run's read state moves to the runs; the notification
-  bell no longer lists finished runs.** The bell repeated the unread runs the
-  runs page already shows, and "unread" was split across two APIs: a run carried
-  `unread`, a schedule `unread_count`, but the totals and the acks lived under
-  `/api/notifications`. Now:
-  - `GET /api/runs?unread=true` lists the caller's unread runs (its `total` is
-    the Runs badge), `PUT /api/runs/{id}/read` marks one read,
-    `PUT /api/runs/read-all` marks them all.
-  - `GET /api/agents` items carry `unread_count`, like a schedule.
-  - `/api/notifications` (list, `unread-count`, `{id}/read`, `read-all`) is the
-    bell's feed only — package shares today — and never serves a finished run.
-  - Removed: `GET /api/notifications/unread-counts-by-agent` (use `unread_count`
-    on `GET /api/agents`) and `PUT /api/notifications/read/{runId}` (use
-    `PUT /api/runs/{id}/read`).
+- **Breaking (API): a run's read state leaves the notifications; the bell
+  shows only what needs attention.** Every finished run used to be a bell
+  notification, so the bell repeated the unread runs of the runs page, and the
+  unread totals and acks lived under `/api/notifications`. Now:
+  - A run's read state is its own (`run_reads`): `GET /api/runs?unread=true`
+    lists the caller's unread runs (its `total` is the Runs badge),
+    `PUT /api/runs/{id}/read` marks one read, `PUT /api/runs/read-all` all;
+    `GET /api/agents` items carry `unread_count`, like a schedule.
+  - The bell (`/api/notifications`) receives a run only when it ended `failed`
+    or `timeout`, plus package shares. Opening the run reads its notification.
+  - Removed: `GET /api/notifications/unread-counts-by-agent` (use
+    `unread_count` on `GET /api/agents`) and
+    `PUT /api/notifications/read/{runId}` (use `PUT /api/runs/{id}/read`).
 
 - **A model test says what it checked** (#2148). A successful model test reads
   « Credential valid — model not tested », and the `testModel` /

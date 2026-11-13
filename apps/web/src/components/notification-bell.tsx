@@ -3,8 +3,10 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { Bell, CheckCheck, Circle } from "lucide-react";
 import { CountBadge } from "./count-badge";
+import { RunStatusBadge } from "./status-badge";
 import { Button } from "@appstrate/ui/components/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Sheet, SheetContent, SheetTrigger } from "@appstrate/ui/components/sheet";
@@ -18,28 +20,55 @@ import {
   useNotifications,
 } from "../hooks/use-notifications";
 import { useCanReach } from "../hooks/use-can-reach";
+import { useAgents } from "../hooks/use-packages";
 import { useIsMobile } from "@appstrate/ui/use-mobile";
 import { formatDateField } from "../lib/format-date";
 import { catalogueHref } from "../lib/catalogue-link";
 import type { paths } from "../api/client";
 
-/** One notification as returned by `GET /api/notifications` — a finished run is never one. */
+/** One notification as returned by `GET /api/notifications`. */
 type NotificationItem =
   paths["/api/notifications"]["get"]["responses"]["200"]["content"]["application/json"]["data"][number];
 
+/** What a row says and where it leads (`null` when that page is closed to the caller). */
+interface NotificationRow {
+  title: string;
+  status: string | null;
+  target: string | null;
+}
+
 /**
- * Where a share leads, or `null` when that page is closed to the caller:
- * notifications follow the session's ceiling, not the space's reads.
+ * One row per kind. Notifications follow the session's ceiling, not the
+ * space's reads, so each target is asked of `canReach`.
  */
-function notificationTarget(
+function notificationRow(
   notification: NotificationItem,
+  agentName: (packageId: string) => string,
   canReach: (target: string) => boolean,
-): string | null {
-  // One share, one decision: open THAT package's sheet, not a list to search.
-  const share = notification.payload;
-  if (!share) return null;
-  const href = catalogueHref(share.package_type, { packageId: share.packageId });
-  return canReach(href) ? href : null;
+  t: TFunction<["common", "agents"]>,
+): NotificationRow {
+  if (notification.type === "package_shared") {
+    // One share, one decision: open THAT package's sheet, not a list to search.
+    const share = notification.payload;
+    const href = share ? catalogueHref(share.package_type, { packageId: share.packageId }) : null;
+    return {
+      title: t("notifications.packageShared", {
+        name: share?.shared_by_name ?? "",
+        package: share?.packageId ?? "",
+      }),
+      status: null,
+      target: href && canReach(href) ? href : null,
+    };
+  }
+  // A run that needs attention: it failed or timed out.
+  const packageId = notification.payload?.packageId ?? null;
+  const href =
+    packageId && notification.runId ? `/agents/${packageId}/runs/${notification.runId}` : null;
+  return {
+    title: packageId ? agentName(packageId) : t("runs.deletedAgent", { ns: "agents" }),
+    status: notification.payload?.status ?? null,
+    target: href && canReach(href) ? href : null,
+  };
 }
 
 /**
@@ -50,6 +79,7 @@ function notificationTarget(
 export function NotificationContent({
   unread,
   notifications,
+  agentName,
   canReach,
   onItemClick,
   markAllRead,
@@ -58,6 +88,8 @@ export function NotificationContent({
 }: {
   unread: number;
   notifications: NotificationItem[];
+  /** An agent's display name, from its package id. */
+  agentName: (packageId: string) => string;
   canReach: (target: string) => boolean;
   onItemClick: (notificationId: string) => void;
   markAllRead: () => void;
@@ -66,7 +98,7 @@ export function NotificationContent({
   /** The list could not be read. */
   failed?: boolean;
 }) {
-  const { t } = useTranslation("common");
+  const { t } = useTranslation(["common", "agents"]);
 
   return (
     <>
@@ -110,17 +142,15 @@ export function NotificationContent({
       ) : (
         <div className="max-h-[60vh] overflow-y-auto sm:max-h-96">
           {notifications.map((notification) => {
-            const target = notificationTarget(notification, canReach);
+            const { title, status, target } = notificationRow(notification, agentName, canReach, t);
             const body = (
               <>
                 <Circle size={8} className="fill-destructive text-destructive mt-1.5 shrink-0" />
                 <div className="min-w-0 flex-1">
-                  <span className="mb-0.5 block truncate text-sm font-medium">
-                    {t("notifications.packageShared", {
-                      name: notification.payload?.shared_by_name ?? "",
-                      package: notification.payload?.packageId ?? "",
-                    })}
-                  </span>
+                  <div className="mb-0.5 flex items-center justify-between gap-2">
+                    <span className="truncate text-sm font-medium">{title}</span>
+                    {status && <RunStatusBadge status={status} />}
+                  </div>
                   <p className="text-muted-foreground text-xs">
                     {formatDateField(notification.createdAt)}
                   </p>
@@ -148,6 +178,7 @@ export function NotificationContent({
 
 export function NotificationBell() {
   const { t } = useTranslation("common");
+  const { data: agents } = useAgents();
   const { data: count } = useUnreadCount();
   const {
     data: notifications,
@@ -160,6 +191,7 @@ export function NotificationBell() {
   const isMobile = useIsMobile();
   const canReach = useCanReach();
   const unread = count ?? 0;
+  const agentNames = new Map(agents?.map((a) => [a.id, a.display_name ?? a.id]));
 
   const handleClick = (notificationId: string) => {
     markRead.mutate({ params: { path: { id: notificationId } } });
@@ -185,6 +217,7 @@ export function NotificationBell() {
   const contentProps = {
     unread,
     notifications: notifications ?? [],
+    agentName: (packageId: string) => agentNames.get(packageId) ?? packageId,
     canReach,
     onItemClick: handleClick,
     markAllRead: () => markAllRead.mutate({}),

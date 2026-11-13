@@ -6,7 +6,7 @@ import type { Context } from "hono";
 import type { AppEnv } from "../types/index.ts";
 import { listResponse } from "../lib/list-response.ts";
 import { getRunningRunCounts } from "../services/state/runs.ts";
-import { getUnreadRunCountsByAgent } from "../services/state/notifications.ts";
+import { getUnreadRunCountsByAgent } from "../services/state/run-reads.ts";
 import {
   listPinnedSlots,
   listMemories,

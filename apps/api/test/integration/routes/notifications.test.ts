@@ -13,14 +13,11 @@ import {
 import { seedAgent, seedApiKey, seedRun, seedSpace } from "../../helpers/seed.ts";
 import { walkLinkPages } from "../../helpers/pagination.ts";
 import Ajv from "ajv";
-import {
-  createPackageShareNotification,
-  createRunNotifications,
-} from "../../../src/services/state/notifications.ts";
+import { createPackageShareNotification } from "../../../src/services/state/notifications.ts";
+import { recordRunFinished } from "../../../src/services/state/run-reads.ts";
 import { notificationsPaths } from "../../../src/openapi/paths/notifications.ts";
 import { db } from "@appstrate/db/client";
 import { notifications } from "@appstrate/db/schema";
-import { eq } from "drizzle-orm";
 
 const app = getTestApp();
 
@@ -28,14 +25,19 @@ interface NotificationDto {
   id: string;
   type: string;
   runId: string | null;
-  payload: { packageId?: string; package_type?: string; shared_by_name?: string } | null;
+  payload: {
+    packageId?: string;
+    package_type?: string;
+    shared_by_name?: string;
+    status?: string;
+  } | null;
   read_at: string | null;
   createdAt: string;
 }
 
-// The feed (the dashboard bell) holds every kind but runs. A finished run's
-// read state is a `run_completed` row of the same table, served by the run
-// surfaces — see run-reads.test.ts.
+// The feed (the dashboard bell) holds every notification of the caller: a
+// package share, and a run that failed or timed out. A run's read state is a
+// separate `run_reads` row served by the run surfaces — see run-reads.test.ts.
 
 describe("Notifications feed API (per-recipient)", () => {
   let ctx: TestContext;
@@ -68,18 +70,21 @@ describe("Notifications feed API (per-recipient)", () => {
     });
   }
 
-  /** Seed an agent + a run, then run the real fan-out (a `run_completed` row). */
-  async function seedNotifiedRun(agentName = "notif-agent") {
+  /** Seed an agent + a run, then record it finished (read state, and a bell entry if it failed). */
+  async function seedNotifiedRun(
+    agentName = "notif-agent",
+    status: "success" | "failed" | "timeout" = "success",
+  ) {
     const id = `@notiforg/${agentName}`;
     await seedAgent({ id, orgId: ctx.orgId, createdBy: ctx.user.id }).catch(() => {});
     const run = await seedRun({
       packageId: id,
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
-      status: "success",
+      status,
       userId: ctx.user.id,
     });
-    await createRunNotifications(scope(), run.id);
+    await recordRunFinished(scope(), run.id);
     return run;
   }
 
@@ -96,6 +101,12 @@ describe("Notifications feed API (per-recipient)", () => {
     const res = await app.request(`/api/notifications${query}`, { headers });
     expect(res.status).toBe(200);
     return ((await res.json()) as { data: NotificationDto[] }).data;
+  }
+
+  /** `total` of the caller's unread runs. */
+  async function unreadRunTotal(): Promise<number> {
+    const res = await app.request("/api/runs?unread=true&limit=1", { headers: authHeaders(ctx) });
+    return ((await res.json()) as { total: number }).total;
   }
 
   async function markRead(headers: Record<string, string>, id: string): Promise<number> {
@@ -118,22 +129,29 @@ describe("Notifications feed API (per-recipient)", () => {
       expect(data[0]!.read_at).toBeNull();
     });
 
-    it("answers in the shape its OpenAPI branch declares", async () => {
+    it("answers each kind in the shape its OpenAPI branch declares", async () => {
       await seedShare();
+      await seedNotifiedRun("branch-agent", "failed");
       const item =
         notificationsPaths["/api/notifications"].get.responses["200"].content["application/json"]
           .schema.properties.data.items;
       const validate = new Ajv({ strict: false, validateFormats: false }).compile(item);
 
       const data = await listNotifications(authHeaders(ctx));
-      expect(data.map((n) => n.type)).toEqual(["package_shared"]);
+      expect(data.map((n) => n.type).sort()).toEqual(["package_shared", "run_completed"]);
       for (const n of data)
         expect({ valid: validate(n), errors: validate.errors }).toEqual({
           valid: true,
           errors: null,
         });
-      // The payload does not validate under another kind's discriminator.
-      expect(validate({ ...data[0]!, type: "run_completed" })).toBe(false);
+      const failed = data.find((n) => n.type === "run_completed")!;
+      expect(failed.payload?.status).toBe("failed");
+      // A kind's payload does not validate under the other kind's branch.
+      expect(validate({ ...failed, type: "package_shared" })).toBe(false);
+      // A succeeded run is not a status the bell carries.
+      expect(validate({ ...failed, payload: { ...failed.payload, status: "success" } })).toBe(
+        false,
+      );
     });
 
     it("unread=true hides already-read notifications", async () => {
@@ -156,8 +174,18 @@ describe("Notifications feed API (per-recipient)", () => {
       expect(allBody.data[0]!.id).toBe(id);
     });
 
-    it("never lists a finished run, nor counts it", async () => {
-      await seedNotifiedRun();
+    it("lists a failed or timed-out run, and counts it", async () => {
+      const failed = await seedNotifiedRun("f-agent", "failed");
+      const timedOut = await seedNotifiedRun("t-agent", "timeout");
+
+      const data = await listNotifications(authHeaders(ctx), "");
+      expect(data.map((n) => n.runId).sort()).toEqual([failed.id, timedOut.id].sort());
+      expect(data.every((n) => n.type === "run_completed")).toBe(true);
+      expect(await unreadCount(authHeaders(ctx))).toBe(2);
+    });
+
+    it("never lists a successful run, nor counts it", async () => {
+      await seedNotifiedRun("ok-agent", "success");
       await seedShare();
 
       const data = await listNotifications(authHeaders(ctx), "");
@@ -253,20 +281,23 @@ describe("Notifications feed API (per-recipient)", () => {
       expect(await unreadCount(authHeaders(ctx))).toBe(1);
     });
 
-    it("returns 404 for a run's read-state row, and leaves the run unread", async () => {
-      const run = await seedNotifiedRun();
-      const [row] = await db
-        .select({ id: notifications.id, readAt: notifications.readAt })
-        .from(notifications)
-        .where(eq(notifications.runId, run.id));
+    it("returns 404 for another recipient's run notification", async () => {
+      const userB = await createTestUser();
+      await addOrgMember(ctx.orgId, userB.id);
+      await seedNotifiedRun("other-fail", "failed");
+      const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
 
-      expect(await markRead(authHeaders(ctx), row!.id)).toBe(404);
+      expect(await markRead(headersFor(userB), id)).toBe(404);
+      expect(await unreadCount(authHeaders(ctx))).toBe(1);
+    });
 
-      const [after] = await db
-        .select({ readAt: notifications.readAt })
-        .from(notifications)
-        .where(eq(notifications.id, row!.id));
-      expect(after!.readAt).toBeNull();
+    it("reading a run's notification leaves the run unread", async () => {
+      await seedNotifiedRun("stay-unread", "failed");
+      const id = (await listNotifications(authHeaders(ctx)))[0]!.id;
+
+      expect(await markRead(authHeaders(ctx), id)).toBe(204);
+      expect(await unreadCount(authHeaders(ctx))).toBe(0);
+      expect(await unreadRunTotal()).toBe(1);
     });
   });
 
@@ -317,25 +348,18 @@ describe("Notifications feed API (per-recipient)", () => {
       expect(await unreadCount(authHeaders(ctx))).toBe(0);
     });
 
-    it("leaves run read state unread", async () => {
-      const run = await seedNotifiedRun();
+    it("reads a failed run's notification but leaves the run unread", async () => {
+      await seedNotifiedRun("fail-all", "failed");
       await seedShare();
 
       const res = await app.request("/api/notifications/read-all", {
         method: "PUT",
         headers: authHeaders(ctx),
       });
-      expect(((await res.json()) as { updated_count: number }).updated_count).toBe(1);
+      expect(((await res.json()) as { updated_count: number }).updated_count).toBe(2);
 
-      const [row] = await db
-        .select({ readAt: notifications.readAt })
-        .from(notifications)
-        .where(eq(notifications.runId, run.id));
-      expect(row!.readAt).toBeNull();
-      const unreadRuns = await app.request("/api/runs?unread=true&limit=1", {
-        headers: authHeaders(ctx),
-      });
-      expect(((await unreadRuns.json()) as { total: number }).total).toBe(1);
+      expect(await unreadCount(authHeaders(ctx))).toBe(0);
+      expect(await unreadRunTotal()).toBe(1);
     });
   });
 
