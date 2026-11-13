@@ -19,7 +19,6 @@
 
 import type { Context } from "hono";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
   createMcpServer,
@@ -28,11 +27,9 @@ import {
   type AppstrateToolDefinition,
   type CallToolResult,
 } from "@appstrate/mcp-transport";
-import { db } from "@appstrate/db/client";
-import { runs } from "@appstrate/db/schema";
 import { actorFromIds } from "../lib/actor.ts";
 import { listResponse } from "../lib/list-response.ts";
-import { appendRunLog, getRecentRuns, RUN_HISTORY_FIELDS } from "./state/runs.ts";
+import { appendRunLog, getRecentRuns, RUN_HISTORY_FIELDS, setRunCheckpoint } from "./state/runs.ts";
 import {
   addMemories,
   CHECKPOINT_KEY,
@@ -254,7 +251,7 @@ function buildRunTools(run: RunToolsRun): AppstrateToolDefinition[] {
       // `runs.checkpoint` is the per-run snapshot `run_history` reads; the
       // persistence row above keeps only the latest checkpoint per scope.
       if (key === CHECKPOINT_KEY && isPlainRecord(content)) {
-        await db.update(runs).set({ checkpoint: content }).where(eq(runs.id, run.runId));
+        await setRunCheckpoint({ orgId: run.orgId, spaceId: run.spaceId }, run.runId, content);
       }
       return textResult(`Pinned slot "${key}" updated`);
     },

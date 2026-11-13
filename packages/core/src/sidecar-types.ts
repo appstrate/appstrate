@@ -334,6 +334,13 @@ export interface IntegrationSpawnSpec {
        */
       url?: string;
       /**
+       * Set for an integration bound to the runtime that executes the run
+       * (`isRuntimeBoundIntegration`, `@appstrate/core/integration`), in place
+       * of {@link url}: the sidecar opens the platform's run MCP server
+       * (`{platformApiUrl}/internal/mcp`) and authenticates with the run token.
+       */
+      platformEndpoint?: true;
+      /**
        * AFPS §7.1 — remote MCP transport selector, mirroring the manifest's
        * `source.remote.transport` enum. REQUIRED for remote sources: the
        * sidecar dispatches on it and hard-fails on anything that is not one

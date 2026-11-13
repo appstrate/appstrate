@@ -921,6 +921,23 @@ export async function updateRun(
 }
 
 /**
+ * Record the run's checkpoint snapshot (`runs.checkpoint`) — the per-run copy
+ * `getRecentRuns` serves to the next run, scoped to the run's org and space.
+ */
+export async function setRunCheckpoint(
+  scope: SpaceScope,
+  id: string,
+  checkpoint: Record<string, unknown>,
+): Promise<void> {
+  await db
+    .update(runs)
+    .set({ checkpoint })
+    .where(
+      scopedWhere(runs, { orgId: scope.orgId, spaceId: scope.spaceId, extra: [eq(runs.id, id)] }),
+    );
+}
+
+/**
  * Append an integration id to `runs.metadata.degraded_integrations[]` — the
  * record that a tool/api_call on that integration hit a terminal auth failure
  * (401/403 that survived the proxy's refresh+retry) during this run. Surfaced

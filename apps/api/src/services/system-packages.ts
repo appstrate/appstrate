@@ -13,6 +13,7 @@ import { createVersionAndUpload } from "./package-versions.ts";
 import { uploadPackageFiles, SYSTEM_STORAGE_NAMESPACE } from "./package-items/storage.ts";
 import { storageFolderForType } from "./package-items/config.ts";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
+import { isRuntimeBoundIntegration } from "@appstrate/core/integration";
 
 export type { SystemPackageEntry };
 
@@ -93,6 +94,21 @@ function getAllSystemPackageVersions(): readonly SystemPackageEntry[] {
 
 export function isSystemPackage(id: string): boolean {
   return systemPackages.has(id);
+}
+
+/**
+ * Ids of the system integrations bound to the runtime that executes the run
+ * ({@link isRuntimeBoundIntegration}). They are part of the run itself, so the
+ * activation rule switches them on in every space that holds no row for them.
+ */
+export function listRuntimeBoundSystemIntegrationIds(): string[] {
+  const ids: string[] = [];
+  for (const entry of systemPackages.values()) {
+    if (entry.type === "integration" && isRuntimeBoundIntegration(entry.manifest)) {
+      ids.push(entry.packageId);
+    }
+  }
+  return ids;
 }
 
 /**

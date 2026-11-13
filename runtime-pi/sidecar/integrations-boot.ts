@@ -727,6 +727,50 @@ export async function connectRemoteHttpIntegration(
 }
 
 /**
+ * Open the platform's run MCP server for an integration bound to the runtime
+ * (`spec.manifest.server.platformEndpoint`): `{platformApiUrl}/internal/mcp`,
+ * authenticated by the run token. The platform API is the origin the sidecar
+ * already trusts with the run token, so this client skips the SSRF guard for
+ * that exact origin and refuses every other one, redirects included.
+ */
+export async function connectPlatformIntegration(
+  spec: IntegrationSpawnSpec,
+  opts: Pick<BundleFetchOptions, "platformApiUrl" | "runToken" | "fetchFn">,
+  deps: Pick<ConnectRemoteHttpDeps, "createClient" | "connectDeadlineMs"> = {},
+): Promise<AppstrateMcpClient> {
+  const createClient = deps.createClient ?? createMcpHttpClient;
+  const endpoint = `${opts.platformApiUrl.replace(/\/$/, "")}/internal/mcp`;
+  const origin = new URL(endpoint).origin;
+  const baseFetch = opts.fetchFn ?? fetch;
+  const platformFetch: typeof fetch = Object.assign(
+    async (input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
+      const target = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
+      if (target.origin !== origin) {
+        throw new RemoteCredentialRefusal(
+          `integration ${spec.integrationId}: the platform endpoint is ${origin}, refusing ${target.origin}; the run token is not sent`,
+        );
+      }
+      const headers = new Headers(init?.headers);
+      headers.set("Authorization", `Bearer ${opts.runToken}`);
+      return baseFetch(target, { ...init, headers, redirect: "error" });
+    },
+    { preconnect: fetch.preconnect },
+  );
+  const toolTimeoutMs = toolTimeoutMsFromEnv();
+  const client = await createClient(endpoint, {
+    fetch: platformFetch,
+    clientInfo: { name: "appstrate-sidecar-platform-integration", version: "0.1.0" },
+    onWarning: (message, data) =>
+      logger.warn(message, { integrationId: spec.integrationId, ...data }),
+    retry: { deadlineMs: deps.connectDeadlineMs ?? 30_000 },
+    ...(toolTimeoutMs !== undefined ? { defaultTimeoutMs: toolTimeoutMs } : {}),
+  }).catch((err: unknown) => {
+    throw remoteMcpFailure(err, origin);
+  });
+  return withRemoteFailures(client, origin);
+}
+
+/**
  * P2 — mint a `connect.tool` + `runAt: "run-start"` session at boot.
  *
  * Called after the integration's MCP client connected, its MITM source was
@@ -1666,7 +1710,9 @@ export async function bootIntegrations(
       // no per-tool upstream URL can be enforced through a hosted MCP —
       // the upstream decides.
       if (spec.sourceKind === "remote") {
-        const { client, authKey } = await connectRemoteHttpIntegration(spec, source);
+        const { client, authKey } = spec.manifest.server?.platformEndpoint
+          ? { client: await connectPlatformIntegration(spec, bundleFetchOpts), authKey: null }
+          : await connectRemoteHttpIntegration(spec, source);
         // On the caller-owned teardown collector as soon as it is open, so a
         // failed registration still closes the Streamable HTTP client.
         clients.push(client);
