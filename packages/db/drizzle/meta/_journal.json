@@ -722,6 +722,13 @@
       "when": 1792240060000,
       "tag": "0102_integration_pin_additions",
       "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1792243660000,
+      "tag": "0103_space_credential_proxy_open",
+      "breakpoints": true
     }
   ]
 }

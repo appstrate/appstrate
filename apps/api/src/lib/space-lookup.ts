@@ -32,6 +32,8 @@ export interface SpaceContextRow {
   ownerUserId: string | null;
   /** When the owner left the organization — the sweeper's window (RBAC spec §3.6). */
   orphanedAt: Date | null;
+  /** Whether the credential proxy serves calls made outside a run here (`assertCredentialProxyOpen`). */
+  credentialProxyOpen: boolean;
 }
 
 /** Projection behind {@link SpaceContextRow} — declared once so its readers cannot drift. */
@@ -44,6 +46,7 @@ export const SPACE_CONTEXT_COLUMNS = {
   defaultRole: spaces.defaultRole,
   ownerUserId: spaces.ownerUserId,
   orphanedAt: spaces.orphanedAt,
+  credentialProxyOpen: spaces.credentialProxyOpen,
 } as const;
 
 /**

@@ -16,12 +16,13 @@ import {
 
 /**
  * The tools the router declares for `ctx`'s caller. `proxyAcceptsCredential`: what the router
- * reads off the request's auth method; the contexts built here forward a bearer.
+ * reads off the request's auth method; the contexts built here forward a bearer. `proxyOpen`:
+ * the space's `credential_proxy_open`.
  */
-export function toolsFor(ctx: McpToolContext, proxyAcceptsCredential = true) {
+export function toolsFor(ctx: McpToolContext, proxyAcceptsCredential = true, proxyOpen = true) {
   return buildMcpTools(
     ctx,
-    deriveMcpSurface(ctx.permissions, ctx.ceiling, ctx.actor, proxyAcceptsCredential),
+    deriveMcpSurface(ctx.permissions, ctx.ceiling, ctx.actor, proxyAcceptsCredential, proxyOpen),
   );
 }
 
@@ -31,7 +32,7 @@ export function instructionsFor(permissions: Iterable<string>, contextInjected =
   return buildServerInstructions(
     set,
     undefined,
-    deriveMcpSurface(set, undefined, { type: "user", id: "user_1" }, true),
+    deriveMcpSurface(set, undefined, { type: "user", id: "user_1" }, true, true),
     contextInjected,
   );
 }

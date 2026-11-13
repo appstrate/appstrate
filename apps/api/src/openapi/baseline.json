@@ -17827,6 +17827,16 @@
             },
             "required": false,
             "description": "The `credential_revision` of the credential that was rejected. Omitted only by a caller that holds no credentials payload (a local MCP server reporting a rejected credential it received at spawn); its rejection is then counted against the connection's current credential."
+          },
+          {
+            "name": "rejected_request",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["handshake"]
+            },
+            "description": "`handshake`: the rejected request is the MCP handshake (`initialize`) the sidecar sends to a remote MCP server at boot, which no agent input shapes. An auth nothing can refresh is then flagged on this first rejection (`410`) instead of counted toward `INTEGRATION_REFRESH_MAX_FAILURES`. Omitted for a request made on the agent's behalf (tool call, `api_call`, MITM request). An OAuth2 credential that can be refreshed is refreshed either way."
           }
         ],
         "responses": {
@@ -17841,7 +17851,7 @@
             }
           },
           "400": {
-            "description": "The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. A malformed `credential_revision` (empty included) is an `invalid_request` too.",
+            "description": "The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. A malformed `credential_revision` (empty included) or a `rejected_request` other than `handshake` is an `invalid_request` too.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -17870,7 +17880,7 @@
             }
           },
           "410": {
-            "description": "`integration_connection_needs_reconnection`: the credential is dead and the connection is flagged `needsReconnection`; the run records the integration as degraded and the sidecar stops retrying. Counted failures flag it at `INTEGRATION_REFRESH_MAX_FAILURES` (an OAuth2 token only once expired past `INTEGRATION_REFRESH_GRACE_SECONDS`).",
+            "description": "`integration_connection_needs_reconnection`: the credential is dead and the connection is flagged `needsReconnection`; the run records the integration as degraded and the sidecar stops retrying. Counted failures flag it at `INTEGRATION_REFRESH_MAX_FAILURES` (an OAuth2 token only once expired past `INTEGRATION_REFRESH_GRACE_SECONDS`); a rejected handshake (`rejected_request=handshake`) of an auth nothing can refresh flags it at once.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -23490,6 +23500,7 @@
                   },
                   "visibility": "open",
                   "default_role": "operator",
+                  "credential_proxy_open": true,
                   "personal": false,
                   "access": "member",
                   "role": {
@@ -23578,6 +23589,7 @@
                       },
                       "visibility": "open",
                       "default_role": "operator",
+                      "credential_proxy_open": true,
                       "personal": false,
                       "access": "member",
                       "role": {
@@ -23603,6 +23615,7 @@
                       },
                       "visibility": "closed",
                       "default_role": "operator",
+                      "credential_proxy_open": true,
                       "personal": false,
                       "access": "none",
                       "role": null,
@@ -23691,7 +23704,7 @@
         "operationId": "updateSpace",
         "tags": ["Spaces"],
         "summary": "Update a space",
-        "description": "Update space name, icon, colour, settings, visibility or default role. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears `icon` or `color`. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility`, `default_role`, `icon` or `color` is a 409 `personal_space_immutable`.",
+        "description": "Update space name, icon, colour, settings, visibility, default role or credential proxy switch. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears `icon` or `color`. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility`, `default_role`, `icon`, `color` or `credential_proxy_open` is a 409 `personal_space_immutable`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -23762,6 +23775,10 @@
                     "type": "string",
                     "enum": ["admin", "builder", "operator", "runner", "viewer"],
                     "description": "Preset the implicit members of an `open` space hold"
+                  },
+                  "credential_proxy_open": {
+                    "type": "boolean",
+                    "description": "Whether members may use the space's connections directly, outside a run: `/api/credential-proxy/connections` and `/api/credential-proxy/proxy` without `X-Run-Id`, and the MCP tools `list_connections` and `api_call`. `false` answers those routes `403 credential_proxy_closed` and withholds those tools, for every role, organization owners and admins included. Runs keep their connections: a run the platform executes reaches them through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a member who may launch an inline run from having an agent make the call inside that run; that is governed by the inline-run permission of the member's role. Default `true`."
                   }
                 },
                 "additionalProperties": false
@@ -27100,7 +27117,7 @@
         "operationId": "listCredentialProxyConnections",
         "tags": ["Credential Proxy"],
         "summary": "List the connections the caller can call outside a run",
-        "description": "What a call to `/api/credential-proxy/proxy` without `X-Run-Id` would accept from this caller in this space, of the integrations active in the space that have a published version. Read with the rule the proxy applies. With `credential-proxy:call-own` alone: the caller's OWN connections (user or end-user) usable here, and never one another member shared into the space. With `credential-proxy:call`: those and the connections shared into the space, each telling which it is (`owned_by_actor`); of an integration governed by an enforced org default, that default's members only. Grouped by integration, oldest first within one. An entry the caller does not own is used when named with `X-Connection-Id` or designated by an org default. `call_permission_required` and `needs_reconnection` describe a call NAMING that entry with `X-Connection-Id`. A call naming none follows the order that parameter describes on `/api/credential-proxy/proxy`: several own entries of one integration need it, and with `credential-proxy:call` an org default binds its set before the caller's own connection, refusing the call while one of its members is out of the caller's reach or needs reconnecting. No credential is decrypted to build it. Requires `credential-proxy:call-own` or `credential-proxy:call`.",
+        "description": "What a call to `/api/credential-proxy/proxy` without `X-Run-Id` would accept from this caller in this space, of the integrations active in the space that have a published version. Read with the rule the proxy applies. With `credential-proxy:call-own` alone: the caller's OWN connections (user or end-user) usable here, and never one another member shared into the space. With `credential-proxy:call`: those and the connections shared into the space, each telling which it is (`owned_by_actor`); of an integration governed by an enforced org default, that default's members only. Grouped by integration, oldest first within one. An entry the caller does not own is used when named with `X-Connection-Id` or designated by an org default. `call_permission_required` and `needs_reconnection` describe a call NAMING that entry with `X-Connection-Id`. A call naming none follows the order that parameter describes on `/api/credential-proxy/proxy`: several own entries of one integration need it, and with `credential-proxy:call` an org default binds its set before the caller's own connection, refusing the call while one of its members is out of the caller's reach or needs reconnecting. No credential is decrypted to build it. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`, whatever the caller's role.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -27207,7 +27224,14 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
-            "$ref": "#/components/responses/Forbidden"
+            "description": "`forbidden` — the principal holds neither `credential-proxy:call-own` nor `credential-proxy:call`; `credential_proxy_closed` — the space's `credential_proxy_open` is `false`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -35872,6 +35896,7 @@
           "settings",
           "visibility",
           "default_role",
+          "credential_proxy_open",
           "personal",
           "access",
           "role",
@@ -35932,6 +35957,10 @@
             "type": "string",
             "enum": ["admin", "builder", "operator", "runner", "viewer"],
             "description": "Preset the implicit members of an `open` space hold"
+          },
+          "credential_proxy_open": {
+            "type": "boolean",
+            "description": "Whether members may use the space's connections directly, outside a run: `/api/credential-proxy/connections` and `/api/credential-proxy/proxy` without `X-Run-Id`, and the MCP tools `list_connections` and `api_call`. `false` answers those routes `403 credential_proxy_closed` and withholds those tools, for every role, organization owners and admins included. Runs keep their connections: a run the platform executes reaches them through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a member who may launch an inline run from having an agent make the call inside that run; that is governed by the inline-run permission of the member's role. Default `true`."
           },
           "personal": {
             "type": "boolean",

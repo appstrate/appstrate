@@ -468,6 +468,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **A space can close direct access to its connections** (#2204). A space
+  admin turns off « Direct connection access » in the space settings
+  (`credential_proxy_open: false` on `PATCH /api/spaces/{id}`, a new column
+  `spaces.credential_proxy_open`, default `true`, migration `0103`). The
+  credential proxy then answers calls that name no run
+  (`GET /api/credential-proxy/connections`, `/api/credential-proxy/proxy`
+  without `X-Run-Id`) with `403 credential_proxy_closed` for every role,
+  organization owners and admins included, and the MCP tools
+  `list_connections` and `api_call` are not declared for that space;
+  `get_me` stops naming them there. Runs are unaffected: platform runs reach
+  their connections through the sidecar, remote runs (`X-Run-Id`) their bound
+  ones. The switch does not stop a member allowed to launch inline runs from
+  having an agent make the call inside a run. The space object carries
+  `credential_proxy_open`; a personal space keeps it open (`409
+personal_space_immutable`). Operators: `packages/db/schema-catalog.txt`
+  gains the column.
+
 - **A model refused for the runtime version says so** (#2148). When a provider
   refuses a model for the client version the agent SDK announces (Anthropic's
   `claude_code_version_too_old` on a Claude Code subscription), the chat shows

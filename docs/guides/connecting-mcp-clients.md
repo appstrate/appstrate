@@ -313,8 +313,8 @@ guards require today. The package `:write` permissions are `agents:write`,
 | `run_and_wait`             | `mcp:invoke` + `agents:run` + `runs:read` or `runs:read-all`          | **Launch and wait.** Starts an agent run (`kind:"agent"`) or an inline run (`kind:"inline"`) and waits for its outcome (see below).                                         |
 | `list_files`               | `files:read`                                                          | List files visible to the caller (uploads + agent outputs), each with an `appfile://` URI.                                                                                  |
 | `import_package_file`      | `mcp:invoke` + a package `:write` permission; not end-users           | Import a validated archive as a package.                                                                                                                                    |
-| `list_connections`         | `mcp:invoke` + `credential-proxy:call-own` or `credential-proxy:call` | The connections you can call outside a run, with the ids and `authorized_uris` `api_call` takes (see below).                                                                |
-| `api_call`                 | `mcp:invoke` + `credential-proxy:call-own` or `credential-proxy:call` | Call third-party APIs with a connection's credential injected by the platform: one request or a batch (see below).                                                          |
+| `list_connections`         | `mcp:invoke` + `credential-proxy:call-own` or `credential-proxy:call` | The connections you can call outside a run, with the ids and `authorized_uris` `api_call` takes (see below). Absent in a space that closes direct connection access.        |
+| `api_call`                 | `mcp:invoke` + `credential-proxy:call-own` or `credential-proxy:call` | Call third-party APIs with a connection's credential injected by the platform: one request or a batch (see below). Absent in a space that closes direct connection access.  |
 
 `run_and_wait` needs both halves because it launches AND polls the run back
 under your own credentials: `agents:run` without a run-read permission would
@@ -374,6 +374,12 @@ permission check, rate limit and call journal apply as over REST. They are
 declared to a caller authenticated by a bearer (an API key or an OAuth token)
 who holds `mcp:invoke` and `credential-proxy:call-own` or `credential-proxy:call`;
 who holds each is stated in `docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.4.
+In a space whose admin turned off direct connection access
+(`credential_proxy_open: false`, `PATCH /api/spaces/{id}`), neither tool is
+declared for that space, whatever your role, and the REST route answers
+`403 credential_proxy_closed`. On the organization URL, `space_id` naming such a
+space is refused with `not_granted`. Runs keep their connections there:
+`run_and_wait` can still have an agent make the call inside a run.
 
 - **What you reach.** With `credential-proxy:call-own` alone, your OWN
   connections usable in the space, never one another member shared: that one,

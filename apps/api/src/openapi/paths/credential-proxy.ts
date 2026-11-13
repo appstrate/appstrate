@@ -558,7 +558,9 @@ export const credentialProxyPaths = {
         "with `credential-proxy:call` an org default binds its set before the caller's own " +
         "connection, refusing the call while one of its members is out of the caller's reach " +
         "or needs reconnecting. No credential is decrypted to build it. Requires " +
-        "`credential-proxy:call-own` or `credential-proxy:call`.",
+        "`credential-proxy:call-own` or `credential-proxy:call`. A space whose " +
+        "`credential_proxy_open` is `false` answers `403 credential_proxy_closed`, whatever the " +
+        "caller's role.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -582,7 +584,15 @@ export const credentialProxyPaths = {
           },
         },
         "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
+        "403": {
+          description:
+            "`forbidden` — the principal holds neither `credential-proxy:call-own` nor " +
+            "`credential-proxy:call`; `credential_proxy_closed` — the space's " +
+            "`credential_proxy_open` is `false`.",
+          content: {
+            "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
+          },
+        },
       },
     },
   },

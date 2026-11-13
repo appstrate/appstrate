@@ -93,7 +93,11 @@ import { recordConnectionCall } from "../services/credential-proxy/call-journal.
 import { trackAudit } from "../services/audit.ts";
 import { PROXY_CONTROL_HEADERS } from "../services/credential-proxy/control-headers.ts";
 import { isValidSessionId, bindOrCheckSession } from "../services/credential-proxy/session.ts";
-import { authorizeProxyCall, reachOutsideRun } from "../services/credential-proxy/access.ts";
+import {
+  assertCredentialProxyOpen,
+  authorizeProxyCall,
+  reachOutsideRun,
+} from "../services/credential-proxy/access.ts";
 import {
   listConnectionsOutsideRun,
   runBoundSelection,
@@ -114,6 +118,7 @@ export function createCredentialProxyRouter() {
 
   // What the caller reaches outside a run: the rows and the rule `/proxy` selects from.
   router.get("/connections", requirePermission("credential-proxy", "call-own"), async (c) => {
+    assertCredentialProxyOpen(c.get("space")!);
     const reach = reachOutsideRun(callerPermissions(c));
     const data = await listConnectionsOutsideRun(getSpaceScope(c), getActor(c), reach);
     return c.json(listResponse(data));
@@ -157,6 +162,8 @@ export function createCredentialProxyRouter() {
           runId,
           onDenied: (required) => reportPermissionDenial(c, required),
         });
+      } else {
+        assertCredentialProxyOpen(c.get("space")!);
       }
 
       // Canonical header is `X-Integration-Id` (suffix parity with `X-Connection-Id`).

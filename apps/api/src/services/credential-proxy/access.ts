@@ -10,14 +10,16 @@
  *     enough: registering a remote run would otherwise hand out raw access to that connection.
  *   - outside a run: `credential-proxy:call` reaches the connections usable in the space,
  *     `credential-proxy:call-own` the caller's own only ({@link reachOutsideRun},
- *     `selectAccessibleConnection`).
+ *     `selectAccessibleConnection`), and only in a space whose admin left the proxy open
+ *     ({@link assertCredentialProxyOpen}).
  *
  * The REST route decides it here, and the MCP module's `api_call` tool re-enters that route.
  */
 
 import type { Actor } from "../../lib/actor.ts";
 import type { Permission } from "../../lib/permissions.ts";
-import { forbidden } from "../../lib/errors.ts";
+import { ApiError, forbidden } from "../../lib/errors.ts";
+import type { SpaceContextRow } from "../../lib/space-lookup.ts";
 import type { ProxyReach } from "../integration-connections.ts";
 import { requireAttributableRun } from "../state/runs.ts";
 
@@ -40,6 +42,26 @@ export function reachOutsideRunIfPermitted(permissions: ReadonlySet<string>): Pr
   return permissions.has(PROXY_CALL_PERMISSION) || permissions.has(PROXY_CALL_OWN_PERMISSION)
     ? reachOutsideRun(permissions)
     : null;
+}
+
+/**
+ * Throws `403 credential_proxy_closed` when the space's admin closed the proxy outside a run
+ * (`spaces.credential_proxy_open`), whatever the caller's role, org owners and admins included.
+ * A run's calls are not concerned: the platform's reach their connections through the sidecar, a
+ * remote run's are bounded by {@link authorizeProxyCall}.
+ */
+export function assertCredentialProxyOpen(
+  space: Pick<SpaceContextRow, "id" | "name" | "credentialProxyOpen">,
+): void {
+  if (space.credentialProxyOpen) return;
+  throw new ApiError({
+    status: 403,
+    code: "credential_proxy_closed",
+    title: "Credential Proxy Closed",
+    detail:
+      `Space '${space.name}' (${space.id}) closes the credential proxy outside a run: its ` +
+      "connections are reached by a run only. A space admin can reopen it in the space settings.",
+  });
 }
 
 /** Throws unless the caller may call the proxy for the run it names with `X-Run-Id`. */
