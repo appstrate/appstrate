@@ -288,6 +288,24 @@ describe("an enforced domain, mail on", () => {
     await db.delete(session).where(eq(session.userId, alice.id));
   });
 
+  it("refuses to create an account at the domain through a magic link", async () => {
+    const email = `fresh@${DOMAIN}`;
+    expect(
+      (
+        await client.post("/sign-in/magic-link", {
+          email,
+          callbackURL: "/",
+          errorCallbackURL: "/login",
+        })
+      ).status,
+    ).toBe(200);
+    const res = await app.request(
+      `/api/auth/magic-link/verify?token=${links.tokenFor(email)}&callbackURL=%2F&errorCallbackURL=%2Flogin`,
+    );
+    expect(redirectError(res)).toBe("sso_required");
+    expect(await db.select().from(user).where(eq(user.email, email))).toHaveLength(0);
+  });
+
   it("refuses the magic link at its verification, with a redirect naming the reason", async () => {
     const send = await client.post("/sign-in/magic-link", {
       email: alice.email,
