@@ -638,6 +638,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- **`get_me` lists only the integrations active in the space** (#2146).
+  `GET /api/me/context` listed every integration with a connection the caller
+  may bind in the space, including an org-scope connection of an integration
+  not activated there, which `list_connections`, `api_call` and runs refuse.
+  `connections[]` now holds the active integrations only, as the agent and
+  skill hints of the same payload do, and the `get_me` tool description points
+  to `list_connections` for the connections `api_call` can use.
+
 - **A remote MCP integration whose credential is rejected at boot is flagged on
   the first run** (#2181). A 401 on the MCP handshake of an API key, basic or
   other unrefreshable credential counted toward `INTEGRATION_REFRESH_MAX_FAILURES`
