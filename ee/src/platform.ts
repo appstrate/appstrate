@@ -24,13 +24,6 @@ export function getPlatform(): EePlatform {
   return platform;
 }
 
-/** Test-only: swap the handles and return the previous ones. */
-export function swapPlatformForTesting(next: EePlatform | null): EePlatform | null {
-  const previous = platform;
-  platform = next;
-  return previous;
-}
-
 /** The caller's role in `orgId`, or `null` when not a member. */
 export async function orgRoleOf(orgId: string, userId: string): Promise<string | null> {
   const [member] = await getPlatform().getOrgMembers(orgId, [userId]);
