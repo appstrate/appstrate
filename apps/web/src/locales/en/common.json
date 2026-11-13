@@ -145,6 +145,7 @@
   "apiError.social_account_already_linked": "This account is already linked to another user.",
   "apiError.credential_account_not_found": "This account has no password.",
   "apiError.credential_change_revocation_failed": "Your password was changed, but not all of your other sign-ins could be revoked. Request a new reset link, or change it again from your settings.",
+  "apiError.credential_proxy_closed": "This space closes direct access to its connections: only runs use them. A space admin can reopen it in the space settings.",
   "apiError.signup_disabled": "Sign-ups are closed on this instance: an administrator must invite you.",
   "apiError.signup_domain_not_allowed": "Sign-ups are not open to email addresses of this domain.",
   "apiError.email_change_refused": "This email address cannot be used.",

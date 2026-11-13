@@ -58,10 +58,19 @@ export function assertCredentialProxyOpen(
     status: 403,
     code: "credential_proxy_closed",
     title: "Credential Proxy Closed",
-    detail:
-      `Space '${space.name}' (${space.id}) closes the credential proxy outside a run: its ` +
-      "connections are reached by a run only. A space admin can reopen it in the space settings.",
+    detail: credentialProxyClosedDetail(space),
   });
+}
+
+/**
+ * Why a closed space refuses a call outside a run: the `credential_proxy_closed` refusal of the
+ * REST route and of the MCP module's org-wide `space_id` check.
+ */
+export function credentialProxyClosedDetail(space: { id: string; name: string }): string {
+  return (
+    `Space '${space.name}' (${space.id}) closes the credential proxy outside a run: its ` +
+    "connections are reached by a run only. A space admin can reopen it in the space settings."
+  );
 }
 
 /** Throws unless the caller may call the proxy for the run it names with `X-Run-Id`. */

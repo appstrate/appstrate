@@ -123,7 +123,9 @@ What happens under the hood:
 > retried. `not_granted` is final: your role in the space named by `space` does
 > not allow the action, `granted_in` lists the spaces where it does, and the
 > result asks the model to report the refusal rather than redo the action in
-> another space. Only an unknown tool name is a JSON-RPC `-32602`.
+> another space. `credential_proxy_closed` is final in the same way: the space
+> named by `space` closes `list_connections` and `api_call` to every role. Only
+> an unknown tool name is a JSON-RPC `-32602`.
 >
 > A refusal is about the call itself. An operation the route answered with an
 > HTTP error (an `invoke_operation` call, or a `run_and_wait` launch the route
@@ -378,7 +380,8 @@ In a space whose admin turned off direct connection access
 (`credential_proxy_open: false`, `PATCH /api/spaces/{id}`), neither tool is
 declared for that space, whatever your role, and the REST route answers
 `403 credential_proxy_closed`. On the organization URL, `space_id` naming such a
-space is refused with `not_granted`. Runs keep their connections there:
+space is refused with `credential_proxy_closed`, which names the space and no
+role. Runs keep their connections there:
 `run_and_wait` can still have an agent make the call inside a run.
 
 - **What you reach.** With `credential-proxy:call-own` alone, your OWN

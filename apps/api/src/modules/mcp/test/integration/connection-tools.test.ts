@@ -438,7 +438,14 @@ describe("mcp connection tools", () => {
         requests: [get("/contacts")],
       });
       expect(refused.isError).toBe(true);
-      expect(refused.data).toMatchObject({ code: "not_granted" });
+      expect(refused.data).toMatchObject({
+        code: "credential_proxy_closed",
+        space: { id: closed.id, name: "Coffre" },
+        granted_in: [owner.defaultSpaceId],
+      });
+      const error = String(refused.data.error);
+      expect(error).toContain(`'Coffre' (${closed.id}) closes the credential proxy outside a run`);
+      expect(error).not.toContain("role");
       expect(upstreamCalls).toHaveLength(0);
     });
   });

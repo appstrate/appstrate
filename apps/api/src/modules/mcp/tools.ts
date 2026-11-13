@@ -68,6 +68,7 @@ import {
 } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
 import { withoutConnectOffers } from "../../services/connect/preflight-connect-offer.ts";
+import { credentialProxyClosedDetail } from "../../services/credential-proxy/access.ts";
 import { logger } from "../../lib/logger.ts";
 import { ceilingHolds } from "../../lib/route-requirements.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
@@ -1991,6 +1992,16 @@ function withSpaceArgument(
       // `kind:"inline"` is the `composes` act, a narrower grant than `runs`.
       const need = act === "runs" && args.kind === "inline" ? "composes" : act;
       const { current } = spaces;
+      // The space's setting, not the caller's role, withholds the proxy there.
+      if (need === "proxies" && !current.credentialProxyOpen) {
+        return refusalResult({
+          code: "credential_proxy_closed",
+          error: credentialProxyClosedDetail(current),
+          space: spaceRef(current),
+          ...grantedIn(spaces, holds(need)),
+          hint: NO_FALLBACK_HINT,
+        });
+      }
       if (!holds(need)(current)) {
         return refusalResult({
           code: "not_granted",

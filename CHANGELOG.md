@@ -477,12 +477,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   without `X-Run-Id`) with `403 credential_proxy_closed` for every role,
   organization owners and admins included, and the MCP tools
   `list_connections` and `api_call` are not declared for that space;
-  `get_me` stops naming them there. Runs are unaffected: platform runs reach
+  `get_me` stops naming them there. On the organization URL, a call whose
+  `space_id` names that space is refused with `credential_proxy_closed`. Runs are unaffected: platform runs reach
   their connections through the sidecar, remote runs (`X-Run-Id`) their bound
   ones. The switch does not stop a member allowed to launch inline runs from
   having an agent make the call inside a run. The space object carries
-  `credential_proxy_open`; a personal space keeps it open (`409
-personal_space_immutable`). Operators: `packages/db/schema-catalog.txt`
+  `credential_proxy_open`; a personal space keeps it open
+  (`409 personal_space_immutable`). Operators: `packages/db/schema-catalog.txt`
   gains the column.
 
 - **A model refused for the runtime version says so** (#2148). When a provider

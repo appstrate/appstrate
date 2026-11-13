@@ -50,6 +50,7 @@ type RefusalCode =
   | "unknown_space"
   | "space_mismatch"
   | "not_granted"
+  | "credential_proxy_closed"
   | "not_found"
   | "too_large";
 
@@ -68,7 +69,10 @@ export interface Refusal {
   accepted?: readonly string[];
   /** Org-wide: the space the call was refused in (same shape as successes). */
   space?: { id: string; name: string };
-  /** Org-wide `not_granted`: reachable space IDS granting it; absent when all do. */
+  /**
+   * Org-wide `not_granted` and `credential_proxy_closed`: reachable space IDS granting it;
+   * absent when all do.
+   */
   granted_in?: readonly string[];
   required_permissions?: readonly string[];
   ceiling_permissions?: readonly string[];
