@@ -127,13 +127,26 @@ const REFUSAL_MESSAGES: Record<SsoRefusal, string> = {
 /** Browser GETs answered with a redirect carrying the code, like Better Auth's own refusals. */
 const REDIRECTED_PATHS: ReadonlySet<string> = new Set(["/magic-link/verify", "/verify-email"]);
 
+/**
+ * Where a refusal redirects: the caller-supplied callback when it stays on the
+ * platform's own origin, the platform's root otherwise. The query value is
+ * taken as Better Auth parsed it, never decoded a second time.
+ */
+function sameOriginTarget(raw: unknown, baseURL: string): URL {
+  const home = new URL("/", baseURL);
+  if (typeof raw !== "string") return home;
+  try {
+    const target = new URL(raw, baseURL);
+    return target.origin === home.origin ? target : home;
+  } catch {
+    return home;
+  }
+}
+
 function refusal(context: HookContext | null, code: SsoRefusal): unknown {
   if (context?.path && REDIRECTED_PATHS.has(context.path)) {
     const raw = context.query?.errorCallbackURL ?? context.query?.callbackURL;
-    const target = new URL(
-      typeof raw === "string" ? decodeURIComponent(raw) : "/",
-      context.context.baseURL,
-    );
+    const target = sameOriginTarget(raw, context.context.baseURL);
     target.searchParams.set("error", code);
     return context.redirect(target.toString());
   }
