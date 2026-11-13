@@ -380,7 +380,8 @@ who holds each is stated in `docs/architecture/RBAC_PERMISSIONS_SPEC.md` §3.4.
 In a space whose admin turned off direct connection access
 (`credential_proxy_open: false`, `PATCH /api/spaces/{id}`), neither tool is
 declared for that space, whatever your role, and the REST route answers
-`403 credential_proxy_closed`. On the organization URL, `space_id` naming such a
+`403 credential_proxy_closed`. `get_me`'s description then says the space's
+admin closed it. On the organization URL, `space_id` naming such a
 space is refused with `credential_proxy_closed`, which names the space and no
 role. Runs keep their connections there:
 `run_and_wait` can still have an agent make the call inside a run.

@@ -1752,7 +1752,7 @@ export function buildFileResourceProvider(ctx: McpToolContext): AppstrateResourc
   };
 }
 
-function buildGetMeTool(ctx: McpToolContext, proxies: boolean): AppstrateToolDefinition {
+function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "get_me",
     description:
@@ -1761,9 +1761,12 @@ function buildGetMeTool(ctx: McpToolContext, proxies: boolean): AppstrateToolDef
       "and the integrations the caller already has connected and could attach to an agent: one " +
       "entry per integration active in that space with a connection the caller may bind there, " +
       "its own or shared into the space. " +
-      (proxies
+      (surface.proxies
         ? "The integration tools you can call with them are listed by `search_integration_tools`. "
-        : "") +
+        : surface.proxiesClosed
+          ? "You cannot call them directly here: an admin closed this space's credential proxy " +
+            "outside a run. Agents you run still use them. "
+          : "") +
       "Call this first to ground who you are acting for, what the " +
       "caller's role allows (operations beyond it fail at invoke time), and which integrations " +
       "to prefer when building or configuring an agent.",
@@ -1824,6 +1827,11 @@ export interface McpSurface {
   importsPackages: boolean;
   /** `search_integration_tools` and `call_integration_tool`: the credential proxy outside a run. */
   proxies: boolean;
+  /**
+   * Those two tools are withheld by the space's setting alone (`isCredentialProxyOpen`), not by
+   * the caller's grants: `get_me` says so, since an undeclared tool explains nothing.
+   */
+  proxiesClosed: boolean;
 }
 
 export function deriveMcpSurface(
@@ -1839,6 +1847,9 @@ export function deriveMcpSurface(
     operationIdGranted(operationId, permissions, ceiling);
   const invokes = permissions.has("mcp:invoke");
   const runs = invokes && granted("runAgent") && granted("getRun");
+  // `credential-proxy:call-own` (implied by `credential-proxy:call`), read off the listing's
+  // route, which guards as `/proxy` does. `mcp:invoke` is checked here and nowhere else.
+  const mayProxy = invokes && proxyAcceptsCredential && granted("listCredentialProxyConnections");
   return {
     invokes,
     runs,
@@ -1849,11 +1860,8 @@ export function deriveMcpSurface(
     // each package's `write`, but `mcp:invoke` and the user actor (the import
     // is recorded under a user id) are checked here and nowhere else.
     importsPackages: invokes && actor.type === "user" && granted("importBundle"),
-    // `credential-proxy:call-own` (implied by `credential-proxy:call`), read off the
-    // listing's route, which guards as `/proxy` does.
-    // `mcp:invoke` is checked here and nowhere else.
-    proxies:
-      invokes && proxyAcceptsCredential && proxyOpen && granted("listCredentialProxyConnections"),
+    proxies: mayProxy && proxyOpen,
+    proxiesClosed: mayProxy && !proxyOpen,
   };
 }
 
@@ -1923,7 +1931,7 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
         })
       : []),
     // Redundant for a context-injecting caller; search_operations stays for `best_match`.
-    ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx, surface.proxies)]),
+    ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx, surface)]),
   ];
   const { orgSpaces } = ctx;
   const pinned = orgSpaces === undefined;

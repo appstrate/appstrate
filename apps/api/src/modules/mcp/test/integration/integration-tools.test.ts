@@ -950,6 +950,23 @@ describe("mcp integration tools", () => {
       expect(envelope.error).toMatchObject({ code: -32602 });
       expect(String(envelope.error?.message)).toContain("Unknown tool: call_integration_tool");
       expect(server.requests).toEqual([]);
+
+      // `get_me` says why they are absent; open again, it points at the search instead.
+      const describeGetMe = async () => {
+        const listed = await mcp(caller, "tools/list", {});
+        const tools = (listed.result as { tools: { name: string; description: string }[] }).tools;
+        return tools.find((tool) => tool.name === "get_me")!.description;
+      };
+      const closed = await describeGetMe();
+      expect(closed).toContain("an admin closed this space's credential proxy");
+      expect(closed).not.toContain("are listed by `search_integration_tools`");
+      await db
+        .update(spaces)
+        .set({ credentialProxyOpen: true })
+        .where(eq(spaces.id, owner.defaultSpaceId));
+      const open = await describeGetMe();
+      expect(open).toContain("are listed by `search_integration_tools`");
+      expect(open).not.toContain("closed this space's credential proxy");
     });
   });
 });

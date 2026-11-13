@@ -347,6 +347,7 @@ function unionSurface(spaces: readonly McpSpace[]): McpSurface {
     listsFiles: any("listsFiles"),
     importsPackages: any("importsPackages"),
     proxies: any("proxies"),
+    proxiesClosed: any("proxiesClosed"),
   };
 }
 
