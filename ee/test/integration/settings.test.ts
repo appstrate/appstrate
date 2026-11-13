@@ -380,6 +380,27 @@ describe("/api/org-sso", () => {
       expect((await refreshCli(token)).status).toBeGreaterThanOrEqual(400);
     });
 
+    it("finishes the revocation when enforcement is applied again", async () => {
+      await seedSso({ orgId: owner.orgId });
+      await seedMicrosoftSession(await sessionIdOf(owner.user.id), owner.user.id, TENANT);
+      expect((await call(owner, "POST", "/api/org-sso/enforcement")).status).toBe(200);
+      // A session a revocation cut short left behind.
+      const survivor = await createTestUser({ email: `dave@${DOMAIN}` });
+      expect(await client.profileStatus(survivor.cookie)).toBe(200);
+
+      const again = await call(owner, "POST", "/api/org-sso/enforcement");
+      expect(again.status).toBe(200);
+      expect(await client.profileStatus(survivor.cookie)).toBe(401);
+      expect(await client.profileStatus(owner.cookie)).toBe(200);
+      const actions = (
+        await db
+          .select({ action: auditEvents.action })
+          .from(auditEvents)
+          .where(eq(auditEvents.orgId, owner.orgId))
+      ).map((row) => row.action);
+      expect(actions).toContain("org_sso.enforcement_reapplied");
+    });
+
     it("audits every change", async () => {
       await seedSso({ orgId: owner.orgId, tenantId: null, domains: [] });
       await seedMicrosoftSession(await sessionIdOf(owner.user.id), owner.user.id, TENANT);

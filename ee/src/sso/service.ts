@@ -248,6 +248,10 @@ export async function removeDomain(actor: Actor, domainId: string): Promise<void
  * only from a session the bound tenant opened, so the owner enforcing it has
  * just proven the way in still works. The domains' accounts then lose every
  * other session and token, so each one comes back through Microsoft.
+ *
+ * Marked first, revoked second: nothing can sign in by password between the
+ * two. Calling it again on an enforced organization re-runs the revocation,
+ * which is how a run cut short is finished.
  */
 export async function enforce(actor: Actor): Promise<{ endedAccounts: number }> {
   assertOwnerSession(actor);
@@ -265,12 +269,13 @@ export async function enforce(actor: Actor): Promise<{ endedAccounts: number }> 
       "Sign in with Microsoft from the organization's tenant before enforcing it, so that you cannot lock yourself out.",
     );
   }
-  if (before.enforcedAt) return { endedAccounts: 0 };
-  await saveConnection(actor.orgId, { enforcedAt: new Date(), enforcedBy: actor.userId });
+  if (!before.enforcedAt) {
+    await saveConnection(actor.orgId, { enforcedAt: new Date(), enforcedBy: actor.userId });
+  }
   const domains = verified.map((d) => d.domain);
   const endedAccounts = await endDomainAccess(domains, actor);
   await actor.audit({
-    action: "org_sso.enforced",
+    action: before.enforcedAt ? "org_sso.enforcement_reapplied" : "org_sso.enforced",
     before: auditView(before),
     after: { ...auditView(await getConnection(actor.orgId)), domains, endedAccounts },
   });
