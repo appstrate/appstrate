@@ -23,6 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`@appstrate/core/model-error`: a structured reason beside the category.**
+  **`MODEL_ERROR_REASONS`** and **`ModelErrorReason`** (`runtime_version_too_old`), and an
+  optional `reason` on `ModelErrorClassification` that `classifyModelError` and
+  `describeModelFailure` set when a `<status> <JSON body>` refusal names a known
+  `error.details.error_code` (Anthropic's `claude_code_version_too_old`). The category, its
+  `retryable` and the five persisted categories are unchanged. `AppstrateTurnMetadata`
+  (`@appstrate/core/chat-turn-metadata`) gains the optional `errorReason`. (#2148)
 - **`@appstrate/core/skill-uri`**: the `skill://` URIs of the MCP Skills extension (SEP-2640)
   as Appstrate serves them — **`SKILL_URI_PREFIX`**, **`skillFileUri`**, **`parseSkillUri`**
   (the canonical spelling only, a file path `isSafeArchivePath` accepts, a valid skill name),

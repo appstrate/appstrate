@@ -462,6 +462,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **A model refused for the runtime version says so** (#2148). When a provider
+  refuses a model for the client version the agent SDK announces (Anthropic's
+  `claude_code_version_too_old` on a Claude Code subscription), the chat shows
+  that the runtime must be updated by an Appstrate release and that another
+  model is to be chosen meanwhile, instead of the generic rejected-request
+  sentence, with neither a retry nor a reconnection link, live and after
+  reload. The run trail records it as
+  `run_logs.data.error_reason: "runtime_version_too_old"` beside the unchanged
+  `error_category`. It is read from the refusal's structured code only.
+
 - **`GET /api/agents` rows carry `published`** (#2172): `true` when the agent
   has a published version (or is a system agent), so launching it without a
   version selector resolves; `false` for a draft-only agent. The row's

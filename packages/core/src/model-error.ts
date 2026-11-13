@@ -74,6 +74,29 @@ export const MODEL_ERROR_RETRYABLE_BY_CATEGORY: Record<ModelErrorCategory, boole
   unknown: true,
 };
 
+/**
+ * A structured cause the provider named for a failure, finer than its category.
+ *
+ * It sits BESIDE the category and never changes it: the category alone decides
+ * `retryable` and the persisted vocabulary stays those five classes. A reason
+ * lets a reader pick a sentence the category cannot carry.
+ *
+ * - `runtime_version_too_old`: the provider refuses the model for the client
+ *   version the agent SDK announces (Anthropic's
+ *   `error.details.error_code: "claude_code_version_too_old"` on a subscription
+ *   credential). Only a platform release with a newer SDK clears it; neither a
+ *   reconnection nor an identical retry does, and other models of the same
+ *   credential keep working.
+ */
+export const MODEL_ERROR_REASONS = ["runtime_version_too_old"] as const;
+
+export type ModelErrorReason = (typeof MODEL_ERROR_REASONS)[number];
+
+/** Provider `error.details.error_code` values, mapped to the reason they name. */
+const REASON_BY_PROVIDER_ERROR_CODE: Readonly<Record<string, ModelErrorReason>> = {
+  claude_code_version_too_old: "runtime_version_too_old",
+};
+
 export interface ModelErrorInput {
   /**
    * Raw provider text. Never leaves the server on the chat surface — only the
@@ -93,12 +116,47 @@ export interface ModelErrorClassification {
   retryable: boolean;
   /** Public platform request id, when the upstream envelope exposed one. */
   requestId?: string;
+  /** The structured cause the provider's refusal body names, when it names a known one. */
+  reason?: ModelErrorReason;
 }
 
 /** Status the message text admits to, when the caller did not supply one. */
 function statusFromMessage(message: string): number | undefined {
   const matched = /\b([45]\d\d)\b/.exec(message);
   return matched ? Number(matched[1]) : undefined;
+}
+
+/**
+ * The agent SDK's wording of a provider refusal: `<status> <JSON body>`. The status is an HTTP
+ * one (100–599), the range `runs.model_error_status` accepts.
+ */
+const PROVIDER_REFUSAL = /^([1-5]\d\d) (\{[\s\S]*\})$/;
+
+/** The JSON object of a provider refusal body, or undefined when it is not one. */
+function refusalBody(body: string): Record<string, unknown> | undefined {
+  try {
+    const parsed: unknown = JSON.parse(body);
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The reason a `<status> <JSON body>` refusal names in `error.details.error_code`. Read from
+ * that structured code only — never from the provider's prose nor from the model id.
+ */
+function reasonFromRefusal(message: string): ModelErrorReason | undefined {
+  const refusal = PROVIDER_REFUSAL.exec(message);
+  const body = refusal ? refusalBody(refusal[2]!) : undefined;
+  const { error } = (body ?? {}) as { error?: { details?: { error_code?: unknown } } };
+  const code = error?.details?.error_code;
+  return typeof code === "string" &&
+    Object.prototype.hasOwnProperty.call(REASON_BY_PROVIDER_ERROR_CODE, code)
+    ? REASON_BY_PROVIDER_ERROR_CODE[code]
+    : undefined;
 }
 
 /**
@@ -145,6 +203,7 @@ export function classifyModelError(input: ModelErrorInput): ModelErrorClassifica
   const normalized = message.toLowerCase();
   const status = input.status ?? statusFromMessage(message);
   const requestId = /\b(req_[A-Za-z0-9_-]+)\b/.exec(message)?.[1];
+  const reason = reasonFromRefusal(message);
 
   let category: ModelErrorCategory;
   if (
@@ -187,6 +246,7 @@ export function classifyModelError(input: ModelErrorInput): ModelErrorClassifica
     category,
     retryable: MODEL_ERROR_RETRYABLE_BY_CATEGORY[category],
     ...(requestId ? { requestId } : {}),
+    ...(reason ? { reason } : {}),
   };
 }
 
@@ -198,12 +258,6 @@ export interface ModelFailure extends ModelErrorClassification {
   status?: number;
   providerMessage?: string;
 }
-
-/**
- * The agent SDK's wording of a provider refusal: `<status> <JSON body>`. The status is an HTTP
- * one (100–599), the range `runs.model_error_status` accepts.
- */
-const PROVIDER_REFUSAL = /^([1-5]\d\d) (\{[\s\S]*\})$/;
 
 /**
  * Read one failed model call's text ONCE, server-side, into what a reader branches on — so no
@@ -223,13 +277,9 @@ export function describeModelFailure(message: string): ModelFailure {
 }
 
 function providerSentence(body: string): string | undefined {
-  try {
-    const parsed: unknown = JSON.parse(body);
-    if (typeof parsed !== "object" || parsed === null) return undefined;
-    const { error, message } = parsed as { error?: { message?: unknown }; message?: unknown };
-    const found = error?.message ?? message;
-    return typeof found === "string" && found.trim() ? found.trim() : undefined;
-  } catch {
-    return undefined;
-  }
+  const parsed = refusalBody(body);
+  if (!parsed) return undefined;
+  const { error, message } = parsed as { error?: { message?: unknown }; message?: unknown };
+  const found = error?.message ?? message;
+  return typeof found === "string" && found.trim() ? found.trim() : undefined;
 }

@@ -98,6 +98,24 @@ describe("SessionBridgeHandle.getTerminalError", () => {
     });
   });
 
+  it("carries the structured reason a provider refusal names onto the run trail", () => {
+    const session = createFakeSession();
+    const sink = createInternalCapture();
+    installSessionBridge(session, sink, RUN_ID);
+    endTurn(session, {
+      role: "assistant",
+      stopReason: "error",
+      errorMessage:
+        '400 {"type":"error","error":{"type":"invalid_request_error","message":"Claude Code 2.1.280 does not support this model","details":{"error_code":"claude_code_version_too_old"}}}',
+      content: [],
+    });
+    expect(errorEventData(sink)).toEqual({
+      error_category: "invalid_request",
+      error_retryable: false,
+      error_reason: "runtime_version_too_old",
+    });
+  });
+
   it("returns a RunError on stopReason 'aborted' (provider abort, not user cancel)", () => {
     const session = createFakeSession();
     const handle = installSessionBridge(session, createInternalCapture(), RUN_ID);
