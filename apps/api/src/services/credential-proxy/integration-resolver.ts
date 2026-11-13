@@ -104,7 +104,7 @@ export function runBoundSelection(input: {
  * against the latest published version, or the one `version` names.
  *
  * `version` is internal-only: no HTTP door sets it. The `/api/credential-proxy/proxy` route (and
- * the MCP `api_call` tool, which re-enters it) builds its input field by field and never names it;
+ * the MCP `call_integration_tool`, which re-enters it) builds its input field by field and never names it;
  * the one caller is the server sync of a draft (`integration-server-sync.ts`), whose route
  * requires write authority on the package's home, the authority a run launched with the
  * integration's draft (`dependency_overrides`, `403 draft_not_writable`) requires.

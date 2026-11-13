@@ -1,14 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `list_connections` and `api_call`: the credential proxy outside a run, as two tools.
+ * `search_integration_tools` and `call_integration_tool`: the tools of the integrations the caller
+ * holds a connection of, outside a run, behind two discovery tools.
  *
- * Both dispatch in-process to the proxy's own routes (`routes/credential-proxy.ts`), one
- * dispatch per upstream call, so the guard, the rate limit and the access rule
+ * An integration's tool is named as in a run (`{ns}__api_call`, `{ns}__api_call__{auth}` when
+ * several of its auths expose one). Both tools read the caller's connections from the proxy's
+ * listing route and dispatch every upstream request in-process to the proxy route
+ * (`routes/credential-proxy.ts`), so the guard, the rate limit and the access rule
  * (`services/credential-proxy/access.ts`) are the REST door's and none is restated here. The
- * proxy route is kept out of the operation catalog (`isExcludedPath`): `api_call` is the one MCP
- * path to it, with typed arguments where the route takes control headers and a bounded result
- * where it relays the upstream body.
+ * proxy route is kept out of the operation catalog (`isExcludedPath`): `call_integration_tool` is
+ * the one MCP path to it, with typed arguments where the route takes control headers and a
+ * bounded result where it relays the upstream body.
  */
 
 import { z } from "zod";
@@ -18,6 +21,12 @@ import { isPlatformRequestHeader } from "@appstrate/connect/platform-request-hea
 import { renderFieldPath } from "@appstrate/core/api-errors";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { isTextShapedContentType } from "@appstrate/core/mime";
+import {
+  getApiCallConfigs,
+  resolveIntegrationToolCatalog,
+  type IntegrationManifest,
+} from "@appstrate/core/integration";
+import { allocateMcpToolNamespace, normaliseMcpToolNamespace } from "@appstrate/core/naming";
 import { logger } from "../../lib/logger.ts";
 import { isRelayedResponse } from "../../lib/proxy-status.ts";
 import {
@@ -48,6 +57,8 @@ interface ConnectionToolContext {
   observe: McpObserver;
   /** The caller is also offered `run_and_wait`, so the descriptions may name it. */
   runs: boolean;
+  /** The manifest a call outside a run is authorized against, `null` when none loads. */
+  readManifest: (packageId: string) => Promise<IntegrationManifest | null>;
 }
 
 const CONNECTIONS_PATH = "/api/credential-proxy/connections";
@@ -110,10 +121,6 @@ const RESPONSE_HEADERS = [
 ] as const;
 
 const requestSchema = z.strictObject({
-  integration_package_id: z
-    .string()
-    .min(1)
-    .describe("Integration package id (`@scope/name`), from list_connections."),
   method: z.enum(METHODS),
   target: z
     .string()
@@ -149,10 +156,13 @@ const requestSchema = z.strictObject({
     .string()
     .min(1)
     .optional()
-    .describe("Which connection to use, when you hold several of the integration."),
+    .describe(
+      "Which of the tool's `connections` to use. Required when the tool lists several and its " +
+        "integration also has connections of another auth.",
+    ),
 });
 
-/** The arguments of `api_call`: what the handler parses, and the schema the tool declares. */
+/** The arguments of a `{ns}__api_call` tool: what the handler parses, and its `input_schema`. */
 const apiCallSchema = z.strictObject({
   requests: z
     .array(requestSchema)
@@ -232,11 +242,11 @@ function encodeBody(text: string): Uint8Array<ArrayBuffer> {
   return new Uint8Array(new TextEncoder().encode(text));
 }
 
-function argumentsRefusal(error: z.ZodError): Refusal {
+/** The refusal of a parse; `prefix` places the parsed object among the tool's arguments. */
+function argumentsRefusal(error: z.ZodError, prefix: PropertyKey[] = []): Refusal {
+  const path = (issuePath: PropertyKey[]) => renderFieldPath([...prefix, ...issuePath]);
   const unknown = error.issues.flatMap((issue) =>
-    issue.code === "unrecognized_keys"
-      ? issue.keys.map((key) => renderFieldPath([...issue.path, key]))
-      : [],
+    issue.code === "unrecognized_keys" ? issue.keys.map((key) => path([...issue.path, key])) : [],
   );
   if (unknown.length > 0) {
     return {
@@ -248,8 +258,8 @@ function argumentsRefusal(error: z.ZodError): Refusal {
   const issues = error.issues.slice(0, MAX_REPORTED_ISSUES);
   return {
     code: "invalid_argument",
-    error: issues.map((issue) => `${renderFieldPath(issue.path)}: ${issue.message}`).join("; "),
-    arguments: [...new Set(issues.map((issue) => renderFieldPath(issue.path)))],
+    error: issues.map((issue) => `${path(issue.path)}: ${issue.message}`).join("; "),
+    arguments: [...new Set(issues.map((issue) => path(issue.path)))],
   };
 }
 
@@ -262,9 +272,9 @@ function prepareCall(
   ctx: ConnectionToolContext,
   request: ApiCallRequest,
   index: number,
-  shared: { sessionId: string; maxResponseBytes: number },
+  shared: { integrationId: string; sessionId: string; maxResponseBytes: number },
 ): PreparedCall | Refusal {
-  const at = (argument: string) => `requests[${index}].${argument}`;
+  const at = (argument: string) => `arguments.requests[${index}].${argument}`;
   const invalid = (argument: string, error: string): Refusal => ({
     code: "invalid_argument",
     error,
@@ -304,12 +314,12 @@ function prepareCall(
 
   dispatchHeaders(ctx.authHeaders, headers);
   const controls: Array<[header: string, value: string | undefined, argument: string]> = [
-    ["X-Integration-Id", request.integration_package_id, at("integration_package_id")],
+    ["X-Integration-Id", shared.integrationId, "tool"],
     ["X-Target", request.target, at("target")],
     ["X-Connection-Id", request.connection_id, at("connection_id")],
-    ["X-Session-Id", shared.sessionId, "session_id"],
+    ["X-Session-Id", shared.sessionId, "arguments.session_id"],
     ["X-Substitute-Body", request.substitute_body ? "1" : undefined, at("substitute_body")],
-    ["X-Max-Response-Size", String(shared.maxResponseBytes), "max_response_bytes"],
+    ["X-Max-Response-Size", String(shared.maxResponseBytes), "arguments.max_response_bytes"],
   ];
   for (const [header, value, argument] of controls) {
     if (value === undefined) continue;
@@ -417,69 +427,236 @@ function projectOutcomes(outcomes: readonly Outcome[]): {
   return { results, failed, budgetSpent };
 }
 
-function buildListConnectionsTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
+/** One of the caller's connections, as the listing route returns it, less its integration. */
+type ListedConnection = Record<string, unknown> & { connection_id: string; auth_key: string };
+
+/** One tool of an integration the caller holds a connection of. */
+interface IntegrationTool {
+  /** `{ns}__{tool}`, the name `call_integration_tool` takes. */
+  name: string;
+  /** The integration package id (`@scope/name`). */
+  integration: string;
+  description: string;
+  /** The connections it reaches: those of its auth. */
+  connections: ListedConnection[];
+  /** The integration also has callable connections of another auth. */
+  sharesIntegration: boolean;
+}
+
+const DEFAULT_SEARCH_LIMIT = 25;
+const MAX_SEARCH_LIMIT = 100;
+
+const API_CALL_DESCRIPTION =
+  "Call the integration's API with a connection's credential injected by the platform, never " +
+  "shown to you: one request or a batch of up to " +
+  `${MAX_REQUESTS}. Requests run concurrently, not in order, and each counts against the ` +
+  "proxy's rate limit. Returns `{ session_id, results }`, one entry per request, in order: " +
+  "the upstream's answer (`status`, `headers`, a text `body` cut at `max_response_bytes`) or the " +
+  "platform's refusal (`error`).";
+
+function apiCallDescription(manifest: IntegrationManifest, authKey: string, multiAuth: boolean) {
+  const about = typeof manifest.description === "string" ? ` ${manifest.description}` : "";
+  const auth = multiAuth ? ` Uses its \`${authKey}\` auth.` : "";
+  return `${manifest.display_name ?? manifest.name}.${about}${auth} ${API_CALL_DESCRIPTION}`;
+}
+
+const API_CALL_INPUT_SCHEMA = z.toJSONSchema(apiCallSchema, { target: "draft-7" });
+
+/**
+ * The tools of the integrations the caller holds a connection of, sorted by integration: for each,
+ * the `api_call` tools its catalog exposes (selection `"*"`, less `hidden_tools` and connect
+ * tools) whose auth has a connection. Namespaces are allocated in that order, as a run's sidecar
+ * allocates them. The listing route's refusal comes back as is.
+ */
+async function loadIntegrationTools(
+  ctx: ConnectionToolContext,
+): Promise<{ tools: IntegrationTool[] } | { refused: { status: number; body: unknown } }> {
+  const response = await ctx.dispatch(
+    new Request(new URL(CONNECTIONS_PATH, ctx.origin).toString(), {
+      method: "GET",
+      headers: dispatchHeaders(ctx.authHeaders),
+    }),
+  );
+  const body = asRecord(await response.json().catch(() => undefined));
+  if (!response.ok || !Array.isArray(body?.data)) {
+    return { refused: { status: response.status, body: body ?? null } };
+  }
+  const byIntegration = new Map<string, ListedConnection[]>();
+  for (const row of body.data as Array<Record<string, unknown>>) {
+    const { integration_package_id: integration, ...connection } = row;
+    if (typeof integration !== "string") continue;
+    const rows = byIntegration.get(integration) ?? [];
+    rows.push(connection as ListedConnection);
+    byIntegration.set(integration, rows);
+  }
+  const integrations = [...byIntegration.keys()].sort();
+  const manifests = await Promise.all(integrations.map((id) => ctx.readManifest(id)));
+
+  const tools: IntegrationTool[] = [];
+  const usedNamespaces = new Set<string>();
+  for (const [i, integration] of integrations.entries()) {
+    const manifest = manifests[i];
+    if (!manifest) continue;
+    const connections = byIntegration.get(integration)!;
+    const catalog = new Set(
+      resolveIntegrationToolCatalog({ integration: manifest }).map((entry) => entry.name),
+    );
+    const configs = getApiCallConfigs(manifest);
+    const reachable = configs
+      .filter((config) => catalog.has(config.toolName))
+      .map((config) => ({
+        config,
+        connections: connections.filter((c) => c.auth_key === config.authKey),
+      }))
+      .filter((entry) => entry.connections.length > 0);
+    if (reachable.length === 0) continue;
+    const namespace = allocateMcpToolNamespace(
+      normaliseMcpToolNamespace(integration),
+      usedNamespaces,
+    );
+    usedNamespaces.add(namespace);
+    for (const { config, connections: own } of reachable) {
+      tools.push({
+        name: `${namespace}__${config.toolName}`,
+        integration,
+        description: apiCallDescription(manifest, config.authKey, configs.length > 1),
+        connections: own,
+        sharesIntegration: own.length < connections.length,
+      });
+    }
+  }
+  return { tools };
+}
+
+function scoreTool(tool: IntegrationTool, tokens: readonly string[]): number {
+  const haystack = `${tool.name} ${tool.integration} ${tool.description}`.toLowerCase();
+  let score = 0;
+  for (const token of tokens) if (haystack.includes(token)) score += 1;
+  return score;
+}
+
+/** A tool as a search lists it. */
+function listedTool(tool: IntegrationTool): Record<string, unknown> {
+  return {
+    tool: tool.name,
+    integration: tool.integration,
+    description: tool.description,
+    connections: tool.connections,
+  };
+}
+
+function buildSearchIntegrationToolsTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
-    name: "list_connections",
+    name: "search_integration_tools",
     description:
-      "List what api_call accepts from you in this space. With `credential-proxy:call`: your " +
-      "own connections and those other members shared into it (`owned_by_actor: false`); with " +
-      "`credential-proxy:call-own` alone, your own only. Each has the `integration_package_id` " +
-      "and `connection_id` to pass, the `authorized_uris` a target must match (unless " +
+      "Search the tools of the integrations you hold a connection of in this space, by keyword " +
+      "and/or integration; with neither, list every tool you can call. Each result has the " +
+      "`tool` name to pass to call_integration_tool, its `integration`, a `description`, and " +
+      "the `connections` it reaches. With `credential-proxy:call`: your own connections and " +
+      "those other members shared into the space (`owned_by_actor: false`); with " +
+      "`credential-proxy:call-own` alone, your own only. Each connection has the " +
+      "`connection_id` to pass, the `authorized_uris` a target must match (unless " +
       "`allow_all_uris`; an entry may hold a `{$credential.<field>}` the proxy alone resolves, " +
-      "see api_call's `target`), its `scopes_granted`, and what such a call would still " +
-      "refuse: `needs_reconnection`, and `call_permission_required` (an enforced organization " +
-      "default governs the integration and you hold `credential-proxy:call-own` alone). Both " +
-      "flags describe a call passing that `connection_id`; with none passed and " +
+      "see the `target` argument), its `scopes_granted`, and what a call would still refuse: " +
+      "`needs_reconnection`, and `call_permission_required` (an enforced organization default " +
+      "governs the integration and you hold `credential-proxy:call-own` alone). Both flags " +
+      "describe a call passing that `connection_id`; with none passed and " +
       "`credential-proxy:call` held, an organization default applies first. A connection you " +
       "do not own is used when you pass its `connection_id` or an organization default " +
       "designates it. With `credential-proxy:call-own` alone, a connection another member " +
       "shared and a `call_permission_required` integration are reached through " +
-      (ctx.runs ? "a run (run_and_wait)." : "an agent run only."),
+      (ctx.runs ? "a run (run_and_wait). " : "an agent run only. ") +
+      "With `query` or `integration`, `best_match` carries the top result's full " +
+      "`input_schema`, so a clear hit needs no other call before call_integration_tool.",
     annotations: {
-      title: "List callable connections",
+      title: "Search integration tools",
       readOnlyHint: true,
       idempotentHint: true,
       openWorldHint: false,
     },
-    inputSchema: { type: "object", additionalProperties: false, properties: {} },
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        query: {
+          type: "string",
+          description: "Free-text keywords matched against tool name, integration and description.",
+        },
+        integration: {
+          type: "string",
+          description: "Restrict to one integration, by package id (`@scope/name`).",
+        },
+        limit: {
+          type: "integer",
+          description: `Max results (default ${DEFAULT_SEARCH_LIMIT}, max ${MAX_SEARCH_LIMIT}).`,
+          minimum: 1,
+          maximum: MAX_SEARCH_LIMIT,
+        },
+      },
+    },
   };
 
-  const handler = async (): Promise<CallToolResult> => {
+  const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const start = performance.now();
-    const response = await ctx.dispatch(
-      new Request(new URL(CONNECTIONS_PATH, ctx.origin).toString(), {
+    const loaded = await loadIntegrationTools(ctx);
+    if ("refused" in loaded) {
+      ctx.observe({
+        tool: "search_integration_tools",
+        durationMs: performance.now() - start,
         method: "GET",
-        headers: dispatchHeaders(ctx.authHeaders),
-      }),
-    );
-    const body = asRecord(await response.json().catch(() => undefined));
-    const connections: unknown[] | undefined =
-      response.ok && Array.isArray(body?.data) ? body.data : undefined;
+        path: CONNECTIONS_PATH,
+        status: loaded.refused.status,
+        outcome: "invoked",
+      });
+      // The route's refusal, as `invoke_operation` would relay it.
+      return jsonResult(loaded.refused, true);
+    }
+    const query = typeof args.query === "string" ? args.query.trim().toLowerCase() : "";
+    const integration = typeof args.integration === "string" ? args.integration : undefined;
+    const rawLimit = typeof args.limit === "number" ? args.limit : DEFAULT_SEARCH_LIMIT;
+    const limit = Math.min(Math.max(1, Math.floor(rawLimit)), MAX_SEARCH_LIMIT);
+    const tokens = query.split(/\s+/).filter(Boolean);
+
+    const matches = loaded.tools
+      .filter((tool) => integration === undefined || tool.integration === integration)
+      .map((tool, order) => ({ tool, order, score: scoreTool(tool, tokens) }))
+      .filter(({ score }) => tokens.length === 0 || score > 0)
+      .sort((a, b) => b.score - a.score || a.order - b.order)
+      .map(({ tool }) => tool);
+    const shown = matches.slice(0, limit);
     ctx.observe({
-      tool: "list_connections",
+      tool: "search_integration_tools",
       durationMs: performance.now() - start,
-      method: "GET",
-      path: CONNECTIONS_PATH,
-      status: response.status,
+      shownCount: shown.length,
       outcome: "invoked",
-      ...(connections ? { shownCount: connections.length } : {}),
     });
-    // The route's refusal, as `invoke_operation` would relay it.
-    if (!connections) return jsonResult({ status: response.status, body: body ?? null }, true);
-    return jsonResult({ connections });
+    const top = shown[0];
+    const searched = tokens.length > 0 || integration !== undefined;
+    return jsonResult({
+      total: matches.length,
+      tools: shown.map(listedTool),
+      ...(searched && top
+        ? { best_match: { ...listedTool(top), input_schema: API_CALL_INPUT_SCHEMA } }
+        : {}),
+    });
   };
 
   return { descriptor, handler };
 }
 
-function buildApiCallTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
+const callSchema = z.strictObject({
+  tool: z.string().min(1),
+  arguments: z.record(z.string(), z.unknown()),
+});
+
+function buildCallIntegrationToolTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
   const descriptor: Tool = {
-    name: "api_call",
+    name: "call_integration_tool",
     description:
-      "Call third-party APIs with a connection's credential injected by the platform, never " +
-      "shown to you: one request or a batch. It reaches the connections list_connections " +
-      "lists; call that first for the ids, each connection's `authorized_uris`, and the " +
-      "integrations that need a run. Call directly for deterministic or bulk reads and " +
+      "Call a tool search_integration_tools returned, by its `tool` name, with `arguments` " +
+      "following its `input_schema`. A `{ns}__api_call` tool calls third-party APIs with a " +
+      "connection's credential injected by the platform, never shown to you: one request or a " +
+      "batch, all to its integration. Call directly for deterministic or bulk reads and " +
       "writes" +
       (ctx.runs
         ? "; delegate to run_and_wait instead when the task needs judgement, several dependent " +
@@ -507,13 +684,27 @@ function buildApiCallTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
       "`needs_reconnection`, `unauthorized_target`, `rate_limited`. A " +
       "`detail` naming `X-Connection-Id` means `connection_id`.",
     annotations: {
-      title: "Call an API through a connection",
+      title: "Call an integration tool",
       readOnlyHint: false,
       destructiveHint: true,
       idempotentHint: false,
       openWorldHint: true,
     },
-    inputSchema: z.toJSONSchema(apiCallSchema, { target: "draft-7" }) as Tool["inputSchema"],
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["tool", "arguments"],
+      properties: {
+        tool: {
+          type: "string",
+          description: "The tool's name, as search_integration_tools returned it.",
+        },
+        arguments: {
+          type: "object",
+          description: "The tool's arguments, following its `input_schema`.",
+        },
+      },
+    },
   };
 
   const handler = async (
@@ -524,41 +715,104 @@ function buildApiCallTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
     // A malformed call is refused whole, before any request is sent.
     const refuse = (refusal: Refusal): CallToolResult => {
       ctx.observe({
-        tool: "api_call",
+        tool: "call_integration_tool",
         durationMs: performance.now() - start,
         outcome: "rejected",
       });
       return refusalResult(refusal);
     };
-    if (args.requests === undefined) {
+    for (const name of ["tool", "arguments"] as const) {
+      if (args[name] === undefined) {
+        return refuse({
+          code: "missing_argument",
+          error: `${name} is required.`,
+          arguments: [name],
+        });
+      }
+    }
+    const call = callSchema.safeParse(args);
+    if (!call.success) return refuse(argumentsRefusal(call.error));
+
+    const loaded = await loadIntegrationTools(ctx);
+    if ("refused" in loaded) {
+      ctx.observe({
+        tool: "call_integration_tool",
+        durationMs: performance.now() - start,
+        method: "GET",
+        path: CONNECTIONS_PATH,
+        status: loaded.refused.status,
+        outcome: "invoked",
+      });
+      return jsonResult(loaded.refused, true);
+    }
+    const tool = loaded.tools.find((candidate) => candidate.name === call.data.tool);
+    if (!tool) {
       return refuse({
-        code: "missing_argument",
-        error: "requests is required.",
-        arguments: ["requests"],
+        code: "unknown_tool",
+        error: `No integration tool named ${call.data.tool} is callable by you in this space.`,
+        arguments: ["tool"],
+        hint: "Take the name from search_integration_tools.",
       });
     }
-    const parsed = apiCallSchema.safeParse(args);
-    if (!parsed.success) return refuse(argumentsRefusal(parsed.error));
+
+    if (call.data.arguments.requests === undefined) {
+      return refuse({
+        code: "missing_argument",
+        error: "arguments.requests is required.",
+        arguments: ["arguments.requests"],
+      });
+    }
+    const parsed = apiCallSchema.safeParse(call.data.arguments);
+    if (!parsed.success) return refuse(argumentsRefusal(parsed.error, ["arguments"]));
     const { requests } = parsed.data;
     // The proxy's cookie-jar session: a fresh one unless the caller continues a previous call's.
     const sessionId = parsed.data.session_id ?? crypto.randomUUID();
     const maxResponseBytes = parsed.data.max_response_bytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+    const shared = { integrationId: tool.integration, sessionId, maxResponseBytes };
+    const connectionIds = tool.connections.map((connection) => connection.connection_id);
 
     const calls: PreparedCall[] = [];
     for (const [index, request] of requests.entries()) {
-      const call = prepareCall(ctx, request, index, { sessionId, maxResponseBytes });
-      if ("code" in call) return refuse(call);
-      calls.push(call);
+      const argument = `arguments.requests[${index}].connection_id`;
+      let connectionId = request.connection_id;
+      if (connectionId !== undefined && !connectionIds.includes(connectionId)) {
+        return refuse({
+          code: "invalid_argument",
+          error: `${argument} names none of ${tool.name}'s connections.`,
+          arguments: [argument],
+          hint: `Pass one of: ${connectionIds.join(", ")}.`,
+        });
+      }
+      // The proxy chooses among every connection of the integration: an auth's tool names its own.
+      if (connectionId === undefined && tool.sharesIntegration) {
+        if (connectionIds.length > 1) {
+          return refuse({
+            code: "missing_argument",
+            error: `${argument} is required: ${tool.name} reaches several connections.`,
+            arguments: [argument],
+            hint: `Pass one of: ${connectionIds.join(", ")}.`,
+          });
+        }
+        connectionId = connectionIds[0];
+      }
+      const prepared = prepareCall(
+        ctx,
+        { ...request, ...(connectionId ? { connection_id: connectionId } : {}) },
+        index,
+        shared,
+      );
+      if ("code" in prepared) return refuse(prepared);
+      calls.push(prepared);
     }
 
     const signal: AbortSignal | undefined = extra.signal;
-    const outcomes = await mapWithConcurrency(calls, CONCURRENCY, (call) => {
+    const outcomes = await mapWithConcurrency(calls, CONCURRENCY, (prepared) => {
       // An abort sends nothing more and fails the call.
       signal?.throwIfAborted();
       // One request failing below the proxy's own error handling must not lose the others.
-      return dispatchCall(ctx, call, signal).catch((err: unknown): Outcome => {
+      return dispatchCall(ctx, prepared, signal).catch((err: unknown): Outcome => {
         if (signal?.aborted) throw err;
-        logger.error("mcp: api_call dispatch failed", {
+        logger.error("mcp: call_integration_tool dispatch failed", {
           error: err instanceof Error ? err.name : typeof err,
         });
         return {
@@ -568,7 +822,7 @@ function buildApiCallTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
     });
     const { results, failed, budgetSpent } = projectOutcomes(outcomes);
     ctx.observe({
-      tool: "api_call",
+      tool: "call_integration_tool",
       durationMs: performance.now() - start,
       shownCount: results.length,
       outcome: "invoked",
@@ -595,5 +849,5 @@ function buildApiCallTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
 
 /** Declared together, to a caller `McpSurface.proxies` holds for. */
 export function buildConnectionTools(ctx: ConnectionToolContext): AppstrateToolDefinition[] {
-  return [buildListConnectionsTool(ctx), buildApiCallTool(ctx)];
+  return [buildSearchIntegrationToolsTool(ctx), buildCallIntegrationToolTool(ctx)];
 }

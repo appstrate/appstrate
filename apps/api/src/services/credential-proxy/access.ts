@@ -12,7 +12,7 @@
  *     `credential-proxy:call-own` the caller's own only ({@link reachOutsideRun},
  *     `selectAccessibleConnection`).
  *
- * The REST route decides it here, and the MCP module's `api_call` tool re-enters that route.
+ * The REST route decides it here, and the MCP module's `call_integration_tool` re-enters that route.
  */
 
 import type { Actor } from "../../lib/actor.ts";

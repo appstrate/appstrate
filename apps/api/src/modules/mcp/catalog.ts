@@ -74,7 +74,7 @@ function extractHeaderParams(node: OperationNode): string[] {
   return names;
 }
 
-/** The credential proxy's route: kept out of the catalog, dispatched to by `api_call` alone. */
+/** The credential proxy's route: kept out of the catalog, dispatched to by `call_integration_tool` alone. */
 export const CREDENTIAL_PROXY_PATH = "/api/credential-proxy/proxy";
 
 /** The served-skill routes of the package API, which `appstrate code sync` reads. */
@@ -88,8 +88,8 @@ const SERVED_SKILLS_PATHS: ReadonlySet<string> = new Set([
  * 9728 well-known (no recursive self-invocation), the served-skill routes (the
  * endpoint serves skills through the Skills extension, not as operations), the
  * spec document and its viewer, which `describe_operation` already serves
- * piecewise, and the credential proxy, which the `api_call` tool alone reaches
- * (`connection-tools.ts`).
+ * piecewise, and the credential proxy, which `call_integration_tool` alone
+ * reaches (`connection-tools.ts`).
  */
 function isExcludedPath(pathTemplate: string): boolean {
   return (

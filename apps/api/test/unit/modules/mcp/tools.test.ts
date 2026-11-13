@@ -99,7 +99,7 @@ describe("mcp catalog", () => {
     expect(operations).not.toContain("getServedSkillArchive");
   });
 
-  it("keeps the credential proxy out: `api_call` is its one MCP path", async () => {
+  it("keeps the credential proxy out: `call_integration_tool` is its one MCP path", async () => {
     const operations = [...getCatalog().operations.values()];
     expect(operations.filter((op) => op.pathTemplate === "/api/credential-proxy/proxy")).toEqual(
       [],
