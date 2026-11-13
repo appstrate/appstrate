@@ -124,19 +124,6 @@ function clampArtifacts(input: unknown): unknown {
 export const RunResultSchema = z
   .object({
     output: z.unknown().nullable().optional(),
-    logs: z
-      .array(
-        z.object({
-          // Cosmetic display fields — degrade rather than reject. A missing
-          // `timestamp` (built-in `log` tool over the sidecar/MCP path used to
-          // omit it) defaults to ingestion time instead of failing finalize.
-          level: z.enum(["info", "warn", "error"]).catch("info"),
-          message: z.string().catch(""),
-          timestamp: z.number().catch(() => Date.now()),
-        }),
-      )
-      .optional()
-      .default([]),
     error: z
       .object({
         message: z.string(),
@@ -298,7 +285,6 @@ export function createRunsEventsRouter() {
     }
     const result: TerminalRunResult = {
       output: d.output ?? null,
-      logs: d.logs,
       ...(d.error ? { error: d.error } : {}),
       status: d.status,
       ...(d.durationMs !== undefined ? { durationMs: d.durationMs } : {}),

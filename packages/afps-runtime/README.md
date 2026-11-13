@@ -136,7 +136,6 @@ const prompt = await renderPrompt({
 // `@appstrate/afps-runtime/runner`) and fold it into a RunResult.
 const { sink, snapshot } = createReducerSink();
 const events: RunEvent[] = [
-  { type: "log.written", timestamp: Date.now(), runId: "run_1", level: "info", message: "hello" },
   { type: "output.emitted", timestamp: Date.now(), runId: "run_1", data: { done: true } },
 ];
 for (const ev of events) await sink.handle(ev);
@@ -158,7 +157,7 @@ console.log(snapshot().output); // { done: true }
 | `@appstrate/afps-runtime/events`      | CloudEvents envelope + Standard Webhooks signing                                                                  |
 | `@appstrate/afps-runtime/template`    | Logic-less Mustache with JSON sanitisation                                                                        |
 | `@appstrate/afps-runtime/conformance` | Adapter interface + built-in cases + report runner                                                                |
-| `@appstrate/afps-runtime/types`       | `RunEvent`, `ExecutionContext`, `RunResult`, `LogLevel`, …                                                        |
+| `@appstrate/afps-runtime/types`       | `RunEvent`, `ExecutionContext`, `RunResult`, `CanonicalRunEvent`, …                                               |
 
 ## Conformance
 

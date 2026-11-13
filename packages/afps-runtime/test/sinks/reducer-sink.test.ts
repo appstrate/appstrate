@@ -28,16 +28,6 @@ describe("createReducerSink", () => {
     expect(snapshot().output).toEqual([1, 2, 3]);
   });
 
-  it("captures log.written entries", async () => {
-    const { sink, snapshot } = createReducerSink();
-    await sink.handle(event("log.written", { level: "info", message: "booting" }));
-    await sink.handle(event("log.written", { level: "warn", message: "retry" }));
-    expect(snapshot().logs).toEqual([
-      { level: "info", message: "booting", timestamp: 0 },
-      { level: "warn", message: "retry", timestamp: 0 },
-    ]);
-  });
-
   it("ignores third-party event types in the snapshot", async () => {
     const { sink, snapshot } = createReducerSink();
     await sink.handle(event("custom.thing", { payload: 42 }));
@@ -46,12 +36,9 @@ describe("createReducerSink", () => {
 
   it("finalize() replaces the snapshot with the runner-provided result", async () => {
     const { sink, snapshot } = createReducerSink();
-    await sink.handle(event("log.written", { level: "info", message: "a" }));
+    await sink.handle(event("output.emitted", { data: { draft: true } }));
     const runnerResult = {
-      ...reduceEvents([
-        event("log.written", { level: "info", message: "final" }),
-        event("output.emitted", { data: { done: true } }),
-      ]),
+      ...reduceEvents([event("output.emitted", { data: { done: true } })]),
       status: "success" as const,
     };
     await sink.finalize(runnerResult);
@@ -62,7 +49,7 @@ describe("createReducerSink", () => {
     const events = [
       event("output.emitted", { data: { a: 1 } }),
       event("output.emitted", { data: { b: 2 } }),
-      event("log.written", { level: "info", message: "done" }),
+      event("appstrate.progress", { message: "done" }),
     ];
     const { sink, snapshot } = createReducerSink();
     for (const ev of events) {

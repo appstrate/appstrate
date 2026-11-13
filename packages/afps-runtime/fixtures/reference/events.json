@@ -1,12 +1,5 @@
 [
   {
-    "type": "log.written",
-    "timestamp": 0,
-    "runId": "ref_run_001",
-    "level": "info",
-    "message": "starting reference run"
-  },
-  {
     "type": "output.emitted",
     "timestamp": 0,
     "runId": "ref_run_001",

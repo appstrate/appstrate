@@ -1494,11 +1494,10 @@ const canonicalRunsPaths = {
             schema: {
               type: "object",
               description:
-                "AFPS runtime `TerminalRunResult` — `output`, `logs`, the required terminal `status`, optional `error`/`durationMs`, and authoritative `usage`/`cost`. Unknown top-level keys are ignored, so a platform and a runner of different versions still agree.",
+                "AFPS runtime `TerminalRunResult` — `output`, the required terminal `status`, optional `error`/`durationMs`, and authoritative `usage`/`cost`. Unknown top-level keys are ignored, so a platform and a runner of different versions still agree.",
               required: ["status"],
               properties: {
                 output: {},
-                logs: { type: "array" },
                 error: {
                   type: "object",
                   properties: {

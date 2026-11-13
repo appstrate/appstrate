@@ -32,7 +32,11 @@ describe("buildCloudEventEnvelope", () => {
   });
 
   it("mirrors the RunEvent type verbatim (no rewriting)", () => {
-    const mappings: readonly string[] = ["output.emitted", "log.written", "@my-org/audit.logged"];
+    const mappings: readonly string[] = [
+      "output.emitted",
+      "appstrate.progress",
+      "@my-org/audit.logged",
+    ];
     for (const type of mappings) {
       const env = buildCloudEventEnvelope({
         event: event(type),
@@ -90,21 +94,21 @@ describe("buildCloudEventEnvelope", () => {
   it("builds canonical and third-party envelopes identically apart from type", () => {
     // With the stamp gone, canonicality has no effect on the envelope at all.
     const canonical = buildCloudEventEnvelope({
-      event: event("log.written", { level: "info", message: "x" }),
+      event: event("appstrate.progress", { message: "x" }),
       sequence: 7,
       id: "id",
     });
     const thirdParty = buildCloudEventEnvelope({
-      event: event("@scope/custom.verb", { level: "info", message: "x" }),
+      event: event("@scope/custom.verb", { message: "x" }),
       sequence: 7,
       id: "id",
     });
-    expect(canonical).toEqual({ ...thirdParty, type: "log.written" });
+    expect(canonical).toEqual({ ...thirdParty, type: "appstrate.progress" });
   });
 
   it("uses event.timestamp as default nowMs", () => {
     const env = buildCloudEventEnvelope({
-      event: event("log.written", { level: "info", message: "x" }),
+      event: event("appstrate.progress", { message: "x" }),
       sequence: 0,
       id: "id",
     });

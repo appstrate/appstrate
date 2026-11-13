@@ -1,19 +1,5 @@
 [
   {
-    "type": "log.written",
-    "timestamp": 0,
-    "runId": "brief_001",
-    "level": "info",
-    "message": "Pulling sources for topic"
-  },
-  {
-    "type": "log.written",
-    "timestamp": 0,
-    "runId": "brief_001",
-    "level": "info",
-    "message": "Cross-referencing with 2 prior memories"
-  },
-  {
     "type": "output.emitted",
     "timestamp": 0,
     "runId": "brief_001",

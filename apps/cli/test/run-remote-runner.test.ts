@@ -497,7 +497,7 @@ describe("runRemote — happy path", () => {
     expect(parsed.output).toEqual({ final: 42 });
     expect(parsed).not.toHaveProperty("memories");
     expect(parsed).not.toHaveProperty("pinned");
-    expect(parsed.logs).toEqual([]);
+    expect(parsed).not.toHaveProperty("logs");
     expect(parsed.durationMs).toBe(42_000);
     expect(parsed.cost).toBe(0.0123);
     expect(parsed.error).toBeUndefined();

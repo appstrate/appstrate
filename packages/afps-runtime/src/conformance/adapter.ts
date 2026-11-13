@@ -72,7 +72,7 @@ export interface ConformanceAdapter {
    *
    * 1. Emit each event through its internal sink in arrival order.
    * 2. Reduce the events into a `RunResult` using the canonical
-   *    semantics (`output.emitted` → replace, `log.written` → append).
+   *    semantics (`output.emitted` → replace).
    *
    * Optional — adapters that do not implement execution leave
    * this undefined and L4 cases skip.

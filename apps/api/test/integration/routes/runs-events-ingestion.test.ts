@@ -247,8 +247,8 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
 
     const envelope = {
-      ...buildEnvelope(runId, "log.written", { level: "info", message: "hi" }, 1),
-      dataschema: "https://schemas.afps.dev/v0/events/log.written.schema.json",
+      ...buildEnvelope(runId, "output.emitted", { data: { ok: true } }, 1),
+      dataschema: "https://schemas.afps.dev/v0/events/output.emitted.schema.json",
     };
     const res = await postEvent(runId, envelope);
 
@@ -263,7 +263,7 @@ describe("POST /api/runs/:runId/events — ingestion without Redis-specific coup
     const runId = await seedRunWithSink(ctx, "@test/ingest-agent");
 
     const envelope = {
-      ...buildEnvelope(runId, "log.written", { level: "info", message: "hi" }, 1),
+      ...buildEnvelope(runId, "output.emitted", { data: { ok: true } }, 1),
       subject: "not-modelled",
     };
     const res = await postEvent(runId, envelope);
@@ -805,7 +805,6 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     const result = {
       checkpoint: { step: 3 },
       output: { answer: 42 },
-      logs: [],
       status: "success",
       durationMs: 1234,
       usage: { input_tokens: 10, output_tokens: 5 },
@@ -833,7 +832,6 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     } satisfies RunArtifactsSummary;
     const res = await postFinalize(runId, {
       output: { ok: true },
-      logs: [],
       status: "success",
       usage: { input_tokens: 10, output_tokens: 5 },
       artifacts,
@@ -855,7 +853,6 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
 
     const res = await postFinalize(runId, {
       output: { ok: true },
-      logs: [],
       status: "success",
       usage: { input_tokens: 10, output_tokens: 5 },
     });
@@ -877,7 +874,6 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     // degrades to `undefined` (column null) instead.
     const res = await postFinalize(runId, {
       output: { ok: true },
-      logs: [],
       status: "success",
       usage: { input_tokens: 10, output_tokens: 5 },
       // `status` outside the enum + `published` a string.
@@ -905,7 +901,6 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     // understand is persisted.
     const res = await postFinalize(runId, {
       output: { ok: true },
-      logs: [],
       status: "success",
       usage: { input_tokens: 10, output_tokens: 5 },
       artifacts: {
@@ -938,7 +933,6 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     }));
     const res = await postFinalize(runId, {
       output: { ok: true },
-      logs: [],
       status: "success",
       usage: { input_tokens: 10, output_tokens: 5 },
       artifacts: { status: "partial", published: 3, failed },
@@ -967,7 +961,6 @@ describe("POST /api/runs/:runId/events/finalize — complete result persistence"
     const runId = await seedRunWithSink(ctx, "@test/final-agent");
     const res = await postFinalize(runId, {
       output: null,
-      logs: [],
       report: "# Legacy report",
       status: "success",
       usage: { input_tokens: 10, output_tokens: 5 },

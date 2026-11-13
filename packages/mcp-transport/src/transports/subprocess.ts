@@ -5,8 +5,8 @@
  * and speak newline-delimited JSON-RPC over its stdio.
  *
  * Why a hand-rolled transport rather than the SDK's `StdioClientTransport`:
- *   - We need explicit control over stderr capture (the transducer
- *     routes it as `log.written` CloudEvents).
+ *   - We need explicit control over stderr capture (each line goes to
+ *     the caller's `onStderrLine`).
  *   - We harden against the documented MCP CVEs: per-line size cap,
  *     per-line rate cap, strict UTF-8, environment hygiene (see
  *     {@link SubprocessTransport.buildEnv} — an allowlist on what we

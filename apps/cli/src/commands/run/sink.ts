@@ -283,8 +283,8 @@ function createHumanSink(
           return;
         }
         default: {
-          // Be quiet about low-signal events (log.written)
-          // by default — JSONL mode exposes them fully.
+          // Third-party event types stay quiet by default —
+          // JSONL mode exposes them fully.
           return;
         }
       }

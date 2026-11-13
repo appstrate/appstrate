@@ -9,10 +9,10 @@
  * envelope (`type: string` + open index signature) so third-party tools
  * can emit any payload without amending the spec. That openness is
  * correct at the spec layer but defeats TypeScript exhaustiveness in
- * the runtime, where two reserved namespaces (`output.*`, `log.*`) carry
- * stable, runtime-meaningful shapes.
+ * the runtime, where the reserved `output.*` namespace carries a stable,
+ * runtime-meaningful shape.
  *
- * {@link CanonicalRunEvent} narrows those two — and the `appstrate.*`
+ * {@link CanonicalRunEvent} narrows it — and the `appstrate.*`
  * platform-internal events the runner emits — into a real discriminated
  * union. Switches over `event.type` get exhaustiveness via the standard
  * `_exhaustive: never` pattern. Unknown event types fall into the open
@@ -49,13 +49,6 @@ export interface OutputEmittedEvent extends BaseEnvelope {
   data: unknown;
 }
 
-/** `@afps/log` — `log()` tool. */
-export interface LogWrittenEvent extends BaseEnvelope {
-  type: "log.written";
-  level: "info" | "warn" | "error";
-  message: string;
-}
-
 /** `appstrate.progress` — runner-emitted lifecycle breadcrumb (container started, runtime ready, …). */
 export interface AppstrateProgressEvent extends BaseEnvelope {
   type: "appstrate.progress";
@@ -89,16 +82,11 @@ export interface AppstrateMetricEvent extends BaseEnvelope {
 
 /** Discriminated union over every canonical event the runtime owns. */
 export type CanonicalRunEvent =
-  | OutputEmittedEvent
-  | LogWrittenEvent
-  | AppstrateProgressEvent
-  | AppstrateErrorEvent
-  | AppstrateMetricEvent;
+  OutputEmittedEvent | AppstrateProgressEvent | AppstrateErrorEvent | AppstrateMetricEvent;
 
 /** All canonical event-type strings — useful for prefix checks. */
 export const CANONICAL_EVENT_TYPES = [
   "output.emitted",
-  "log.written",
   "appstrate.progress",
   "appstrate.error",
   "appstrate.metric",
@@ -176,10 +164,6 @@ const isPresent = (v: unknown): boolean => v !== undefined;
  */
 export const CANONICAL_CONSTRAINTS = {
   "output.emitted": [{ path: "data", holds: required(isPresent) }],
-  "log.written": [
-    { path: "level", holds: required((v) => v === "info" || v === "warn" || v === "error") },
-    { path: "message", holds: required(isString) },
-  ],
   "appstrate.progress": [
     { path: "message", holds: required(isString) },
     // Optional structured context: `Record<string, unknown>`, so an array /
@@ -243,7 +227,7 @@ export function firstViolatedConstraint(event: RunEvent): string | undefined {
 /**
  * True when the event's `type` is one of the canonical strings AND its
  * payload satisfies the canonical shape. Returns `false` for tampered
- * payloads (e.g. `log.written` without a string `message`) so callers
+ * payloads (e.g. `appstrate.progress` without a string `message`) so callers
  * can fall back to the open-envelope branch instead of trusting an
  * ill-formed event.
  *

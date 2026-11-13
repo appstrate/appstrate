@@ -83,7 +83,7 @@ async function flushMicrotasks(): Promise<void> {
 describe("isStdoutEventLine", () => {
   it("accepts a structurally valid canonical event", () => {
     expect(isStdoutEventLine({ type: "output.emitted", data: { ok: true } })).toBe(true);
-    expect(isStdoutEventLine({ type: "log.written", level: "info", message: "x" })).toBe(true);
+    expect(isStdoutEventLine({ type: "appstrate.progress", message: "x" })).toBe(true);
   });
 
   it("rejects primitives, arrays, null, and untyped objects", () => {
@@ -106,14 +106,15 @@ describe("isStdoutEventLine", () => {
     expect(isStdoutEventLine({ type: "report.appended", content: "# Report" })).toBe(false);
     expect(isStdoutEventLine({ type: "memory.added", content: "m" })).toBe(false);
     expect(isStdoutEventLine({ type: "pinned.set", key: "k", content: 1 })).toBe(false);
+    expect(isStdoutEventLine({ type: "log.written", level: "info", message: "x" })).toBe(false);
   });
 
   it("rejects canonical types with malformed payloads", () => {
     // `output.emitted` requires `data` to be present.
     expect(isStdoutEventLine({ type: "output.emitted" })).toBe(false);
-    // `log.written` requires a valid level and string message.
-    expect(isStdoutEventLine({ type: "log.written", level: "bogus", message: "x" })).toBe(false);
-    expect(isStdoutEventLine({ type: "log.written", level: "info" })).toBe(false);
+    // `appstrate.progress` requires a string message and an object `data`.
+    expect(isStdoutEventLine({ type: "appstrate.progress" })).toBe(false);
+    expect(isStdoutEventLine({ type: "appstrate.progress", message: "x", data: [] })).toBe(false);
     // `appstrate.metric` bands and counters follow the token-usage rule.
     expect(
       isStdoutEventLine({
@@ -137,17 +138,14 @@ describe("mergeTerminalResult", () => {
   it("prefers aggregate values when present, falls back to runner values", () => {
     const aggregate: RunResult = {
       output: { foo: "bar" },
-      logs: [{ level: "info", message: "x", timestamp: 100 }],
     };
     const runner: TerminalRunResult = {
       output: { foo: "baz" },
-      logs: [{ level: "info", message: "y", timestamp: 50 }],
       status: "success",
       durationMs: 123,
     };
     const merged = mergeTerminalResult(aggregate, runner);
     expect(merged.output).toEqual({ foo: "bar" });
-    expect(merged.logs).toEqual([{ level: "info", message: "x", timestamp: 100 }]);
     // Terminal metadata always comes from the runner.
     expect(merged.status).toBe("success");
     expect(merged.durationMs).toBe(123);
@@ -157,13 +155,11 @@ describe("mergeTerminalResult", () => {
     const aggregate = emptyRunResult();
     const runner: TerminalRunResult = {
       output: { answer: 42 },
-      logs: [{ level: "warn", message: "w", timestamp: 1 }],
       status: "failed",
       error: { message: "boom" },
     };
     const merged = mergeTerminalResult(aggregate, runner);
     expect(merged.output).toEqual({ answer: 42 });
-    expect(merged.logs).toHaveLength(1);
     expect(merged.status).toBe("failed");
     expect(merged.error).toEqual({ message: "boom" });
   });
@@ -458,18 +454,17 @@ describe("attachStdoutBridge — writeRaw", () => {
 // ---------------------------------------------------------------------------
 
 describe("attachStdoutBridge — aggregation via finalize", () => {
-  it("aggregates output.emitted + log.written across session + stdout", async () => {
+  it("aggregates output.emitted across session + stdout", async () => {
     const underlying = recordingSink();
     const stdout = makeFakeStdout();
     const bridge = attachStdoutBridge({ sink: underlying, runId: "r", stdout });
 
     // Session-style: emit via the bridge sink directly (what a runner does).
     await bridge.sink.handle({
-      type: "log.written",
+      type: "output.emitted",
       timestamp: 1,
       runId: "r",
-      level: "info",
-      message: "step 1",
+      data: { draft: true },
     });
 
     // Stdout-style: a tool writes a JSON line.
@@ -491,7 +486,6 @@ describe("attachStdoutBridge — aggregation via finalize", () => {
     expect(underlying.finalized).not.toBeNull();
     const final = underlying.finalized!;
     expect(final.output).toEqual({ answer: 42 });
-    expect(final.logs).toEqual([{ level: "info", message: "step 1", timestamp: 1 }]);
     expect(final.status).toBe("success");
     expect(final.durationMs).toBe(500);
     bridge.restore();
@@ -517,17 +511,15 @@ describe("attachStdoutBridge — aggregation via finalize", () => {
     const bridge = attachStdoutBridge({ sink: underlying, runId: "r", stdout });
 
     await bridge.sink.handle({
-      type: "log.written",
+      type: "appstrate.progress",
       timestamp: 1,
       runId: "r",
-      level: "info",
       message: "m1",
     });
     await bridge.sink.handle({
-      type: "log.written",
+      type: "appstrate.progress",
       timestamp: 2,
       runId: "r",
-      level: "info",
       message: "m2",
     });
 

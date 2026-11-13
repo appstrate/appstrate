@@ -4,7 +4,7 @@
 /**
  * RunEvent → RunResult reducer.
  *
- * Aggregates `output.emitted` and `log.written` into the {@link RunResult}.
+ * Aggregates `output.emitted` into the {@link RunResult}.
  * Every other event is passed through silently: the sink still sees it, but
  * it does not contribute to the aggregated result.
  *
@@ -25,7 +25,6 @@ export interface ReduceOptions {
 export function emptyRunResult(): RunResult {
   return {
     output: null,
-    logs: [],
   };
 }
 
@@ -45,7 +44,7 @@ export function zeroTokenUsage(): TokenUsage {
  * want an immutable pipeline can seed a fresh accumulator per call.
  *
  * Open-envelope `RunEvent`s flow in; `isCanonicalRunEvent` narrows the
- * four reserved namespaces (memory / pinned / output / log) + the
+ * reserved `output.*` namespace + the
  * runner-internal `appstrate.*` namespace to a discriminated union, so the
  * switch is exhaustively typed. Third-party / unknown events are silently
  * passed through — the sink still sees them, they just do not contribute
@@ -58,13 +57,6 @@ export function foldEvent(result: RunResult, event: RunEvent): void {
   switch (canonical.type) {
     case "output.emitted":
       result.output = canonical.data ?? null;
-      return;
-    case "log.written":
-      result.logs.push({
-        level: canonical.level,
-        message: canonical.message,
-        timestamp: canonical.timestamp,
-      });
       return;
     case "appstrate.progress":
     case "appstrate.error":

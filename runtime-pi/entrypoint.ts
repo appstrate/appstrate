@@ -188,7 +188,7 @@ const sink = new HttpSink({
 // rationale. What matters here: the wrapper folds every event PiRunner
 // hands the sink into an in-memory `RunResult` aggregate, then merges that
 // aggregate into the finalize POST — this is how `result.output`
-// and `result.logs` reach the platform at all. (The
+// reaches the platform at all. (The
 // module also intercepts `process.stdout.write` for out-of-process runners;
 // inside this container nothing writes canonical events that way.)
 const bridge = attachStdoutBridge({ sink, runId: AGENT_RUN_ID });

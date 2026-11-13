@@ -217,10 +217,8 @@ export interface RunRemoteOptions {
   /**
    * Optional path — final RunResult JSON written here. Shape parity
    * with the local path's `--output`: top-level keys match the AFPS
-   * `RunResult` (`output`, `logs`, `error`, `status`, `durationMs`,
-   * `cost`). `logs` is emitted as an empty default — the remote path
-   * does not have a server-side endpoint surfacing the runner's reduced AFPS
-   * state, only `runs.result`. Two remote-only extras (`runId`,
+   * `RunResult` (`output`, `error`, `status`, `durationMs`, `cost`),
+   * reconstructed from the run record (`runs.result`). Two remote-only extras (`runId`,
    * `instance`) are added for debuggability.
    */
   outputPath?: string | undefined;
@@ -764,16 +762,15 @@ async function safeReadBody(res: Response): Promise<unknown> {
  * the persisted `result/result` snapshot).
  *
  * The forward mapping lives in
- * `apps/api/src/services/adapters/appstrate-event-sink.ts` —
+ * `apps/api/src/services/run-launcher/appstrate-event-sink.ts` —
  * any change there must update this function in lockstep, otherwise
  * `appstrate run` (remote) and `appstrate run --local` will drift
  * apart on rendering.
  *
  * Lossy cases worth knowing:
- *   - `progress/progress` rows can come from either `appstrate.progress`
- *     or `log.written` events; both render the same way through the
- *     console sink (progress branch with optional tool data, log.written
- *     hits the silent default), so we always map to `appstrate.progress`.
+ *   - `progress/log` rows have no event counterpart: the `log` tool of
+ *     `@appstrate/platform` writes them when it is called, so they map to
+ *     `null`.
  *   - `appstrate.metric` events leave no row — they're synthesized
  *     separately at end-of-run from `runs.tokenUsage` + `runs.cost`.
  *   - `note` / `pin` leave no `run_logs` row: the run MCP server writes
@@ -872,9 +869,7 @@ function buildMetricEvent(record: RemoteRunRecord): RunEvent | null {
 
 /**
  * Reconstruct a {@link RunResult} from the run record + terminal status,
- * matching the shape `EventSink.finalize` consumes locally. Fields the
- * record cannot reconstruct (per-event `logs`) are emitted as empty
- * defaults — the dashboard remains the source of truth for those surfaces. `usage` is
+ * matching the shape `EventSink.finalize` consumes locally. `usage` is
  * reconstructed from the run row when present and otherwise explicit zero.
  * `output` carries `runs.result` (the AFPS `output()` value),
  * matching `RunResult.output`. The status is mapped one-to-one.
@@ -886,7 +881,6 @@ function buildRunResultPayload(
   const storedResult = isPlainObject(record.result) ? record.result : null;
   const result: TerminalRunResult = {
     output: storedResult && "output" in storedResult ? storedResult.output : null,
-    logs: [],
     status,
   };
   if (record.error) {

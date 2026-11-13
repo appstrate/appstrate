@@ -75,7 +75,6 @@ function progressEvent(message: string, data?: unknown): RunEvent {
 function emptyResult(): TerminalRunResult {
   return {
     output: null,
-    logs: [],
     status: "success",
   };
 }

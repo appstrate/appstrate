@@ -71,20 +71,6 @@ export async function persistRunEvent(
       return null;
     }
 
-    case "log.written": {
-      const level = event.level;
-      const message = event.message;
-      if (
-        (level === "info" || level === "warn" || level === "error") &&
-        typeof message === "string"
-      ) {
-        // `event='log'` marks rows from the agent's explicit `log` tool, not
-        // auto-emitted breadcrumbs. The chat run card shows ONLY these.
-        await appendRunLog(scope, runId, "progress", "log", message, null, level, executor);
-      }
-      return null;
-    }
-
     case FILE_PUBLISHED_EVENT_TYPE: {
       // The `files` row already exists (POST /api/runs/:id/files); this event
       // only persists a run_log so the file streams over the run_log SSE. The

@@ -140,18 +140,6 @@ describe("persistRunEvent", () => {
     expect((fileLogs[0]!.data as { file_id: string }).file_id).toBe("file_canonical");
   });
 
-  it("maps log.written into run_logs with the original level + message", async () => {
-    await persist(event("log.written", { level: "info", message: "booting" }));
-    await persist(event("log.written", { level: "warn", message: "retry" }));
-
-    const progressLogs = (await loadLogs()).filter((l) => l.type === "progress");
-    expect(progressLogs.map((l) => l.message)).toEqual(["booting", "retry"]);
-    expect(progressLogs.map((l) => l.level)).toEqual(["info", "warn"]);
-    // `log.written` is tagged `event='log'` (vs lifecycle/tool `'progress'`) so
-    // the chat run card can show ONLY the agent's explicit log-tool output.
-    expect(progressLogs.map((l) => l.event)).toEqual(["log", "log"]);
-  });
-
   it("maps appstrate.progress into progress run_logs with message/data/level", async () => {
     await persist(
       event("appstrate.progress", {

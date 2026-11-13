@@ -532,6 +532,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `output` and `publish_file` tools emit their event through the `emit` their
   handler receives; `@appstrate/core` drops `RUNTIME_TOOL_EVENTS_META_KEY`,
   `CANONICAL_RUNTIME_TOOL_EVENT_TYPES` and `reEmitRuntimeToolEvents`.
+- **`log.written` is no longer a canonical run event, and the finalize body no
+  longer carries logs** (#2199). Nothing emits it: `log` writes its `run_logs` row
+  when the tool is called. Ingestion writes no row for a `log.written` envelope,
+  `POST /api/runs/{runId}/events/finalize` ignores `logs`, and
+  `@appstrate/afps-runtime` drops `LogWrittenEvent`, `RunResult.logs`, `LogEntry`
+  and `LogLevel`; the stdout bridge passes such a line through as plain output.
 
 ### Added
 

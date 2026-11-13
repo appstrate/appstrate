@@ -7,17 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Removed — memories and pinned slots leave `RunResult` (#2199)
+### Removed — memories, pinned slots and logs leave `RunResult` (#2199)
 
 - **BREAKING:** `RunResult.memories`, `RunResult.pinned` and the `Memory` / `PinnedSlot` types
   are removed. `foldEvent` / `reduceEvents` leave `memory.added` and `pinned.set` out of the
   aggregate: the server that serves the `note` and `pin` tools persists them when the tool is
-  called. `mergeTerminalResult` merges `output` and `logs` only.
+  called.
 - **BREAKING:** `memory.added` and `pinned.set` are no longer canonical run events: nothing
   emits them. `MemoryAddedEvent` and `PinnedSetEvent` leave `CanonicalRunEvent`, the two types
   leave `CANONICAL_EVENT_TYPES` and `CANONICAL_CONSTRAINTS`, so `isCanonicalRunEvent` and the
-  stdout bridge reject them. Conformance case L4.1 scripts `log.written` and `output.emitted`
-  only.
+  stdout bridge reject them.
+- **BREAKING:** `log.written` is no longer a canonical run event: nothing emits it, the server
+  that serves the `log` tool writes the log line when the tool is called. `LogWrittenEvent`
+  leaves `CanonicalRunEvent`, `CANONICAL_EVENT_TYPES` and `CANONICAL_CONSTRAINTS`;
+  `RunResult.logs`, `LogEntry` and `LogLevel` are removed, and `mergeTerminalResult` merges
+  `output` only. Conformance case L4.1 scripts a third-party event and two `output.emitted`;
+  L4.3 checks `output` only.
 
 ### Changed — the output schema is read by `readDeclaredOutputSchema` (#2197)
 

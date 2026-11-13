@@ -5,13 +5,6 @@ import type { TokenUsage } from "@appstrate/afps-shared/token-usage";
 import type { TerminalRunStatus } from "@appstrate/core/run-status";
 
 /**
- * Severity levels carried by `log.written` run events. Mirrored on the
- * aggregated {@link LogEntry} so the reducer can surface the same
- * vocabulary back to callers.
- */
-export type LogLevel = "info" | "warn" | "error";
-
-/**
  * Aggregated state at the end of a run.
  *
  * Built by the runtime by reducing the stream of {@link RunEvent} values
@@ -19,13 +12,11 @@ export type LogLevel = "info" | "warn" | "error";
  *
  * - `output.emitted` events replace `output` wholesale (last-write-wins;
  *   the reducer assigns `result.output = event.data`, it does NOT merge)
- * - `log.written` events append to `logs`
  *
  * Passed to {@link EventSink.finalize} when the run ends.
  */
 export interface RunResult {
   output: unknown | null;
-  logs: LogEntry[];
   error?: RunError;
   /**
    * Terminal status, stamped by the runner (events alone cannot tell "success"
@@ -92,12 +83,6 @@ export interface RunArtifactsSummary {
  * importers keep working.
  */
 export type { TokenUsage };
-
-export interface LogEntry {
-  level: LogLevel;
-  message: string;
-  timestamp: number;
-}
 
 /**
  * Error envelope for a failed run.

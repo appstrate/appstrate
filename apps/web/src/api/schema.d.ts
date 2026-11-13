@@ -25152,7 +25152,6 @@ export interface operations {
             content: {
                 "application/json": {
                     output?: unknown;
-                    logs?: unknown[];
                     error?: {
                         message?: string;
                         stack?: string;

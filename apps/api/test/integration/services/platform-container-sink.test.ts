@@ -555,7 +555,6 @@ describe("executeAgentInBackground — server-side finalize synthesis", () => {
       run: sinkRun!,
       result: {
         output: null,
-        logs: [],
         status: "success",
       },
     });

@@ -12,8 +12,8 @@
  *      it into an in-memory {@link RunResult} aggregate (`foldEvent`)
  *      before forwarding downstream, and on `finalize(result)` merges
  *      that aggregate with the runner's terminal metadata
- *      (`mergeTerminalResult`). Without this wrapper `result.output` and
- *      `result.logs` are empty for any runner whose internal reducer only sees session events —
+ *      (`mergeTerminalResult`). Without this wrapper `result.output` is
+ *      empty for any runner whose internal reducer only sees session events —
  *      PiRunner is exactly that case. Removing the wrapper silently
  *      drops the output of every run.
  *   2. **Stdout interception (only fires for out-of-process emitters).**
@@ -129,8 +129,8 @@ function withParsedMetricUsage(value: unknown): unknown {
  * Merge runner-emitted terminal metadata with a separately-aggregated
  * {@link RunResult}.
  *
- *   - Per-event aggregates (output / logs) take the bridge's value
- *     when non-empty, otherwise fall back to the
+ *   - The per-event aggregate (output) takes the bridge's value
+ *     when non-null, otherwise falls back to the
  *     runner's. Lets a runner that already produced a complete result
  *     (anything that doesn't go through stdout-JSONL tools) pass through
  *     unchanged.
@@ -146,7 +146,6 @@ export function mergeTerminalResult(
   return {
     ...runnerResult,
     output: aggregate.output ?? runnerResult.output,
-    logs: aggregate.logs.length > 0 ? aggregate.logs : runnerResult.logs,
   };
 }
 

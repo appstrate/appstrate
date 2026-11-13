@@ -7,8 +7,8 @@
  * Every {@link RunEvent} posted to an `HttpSink` is wrapped in a
  * CloudEvents 1.0 envelope so it is interoperable with Knative, Argo,
  * observability tooling, and the wider eventing ecosystem. The CloudEvent
- * `type` mirrors the RunEvent `type` verbatim — e.g. `output.emitted`,
- * `log.written`, or any third-party `@scope/tool.verb`.
+ * `type` mirrors the RunEvent `type` verbatim — e.g. `output.emitted`
+ * or any third-party `@scope/tool.verb`.
  *
  * ## No `dataschema`
  *

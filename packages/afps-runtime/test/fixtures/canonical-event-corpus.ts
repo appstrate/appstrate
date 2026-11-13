@@ -14,7 +14,7 @@
  * ## Labels
  *
  * Each fixture's `label` names the constraint it exercises — e.g.
- * "log.written — numeric message" is the wrong-typed-value case for
+ * "appstrate.progress — numeric message" is the wrong-typed-value case for
  * `message`, and "— missing message" is the omission case. Labels are for
  * humans reading an assertion diff; they are not what proves coverage.
  *
@@ -72,28 +72,6 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
   {
     label: "output.emitted — explicitly undefined data",
     event: { ...base, type: "output.emitted", data: undefined },
-    valid: false,
-  },
-
-  // --- log.written ----------------------------------------------------
-  {
-    label: "log.written — info line",
-    event: { ...base, type: "log.written", level: "info", message: "x" },
-    valid: true,
-  },
-  {
-    label: "log.written — unknown level",
-    event: { ...base, type: "log.written", level: "debug", message: "x" },
-    valid: false,
-  },
-  {
-    label: "log.written — missing message",
-    event: { ...base, type: "log.written", level: "info" },
-    valid: false,
-  },
-  {
-    label: "log.written — numeric message",
-    event: { ...base, type: "log.written", level: "warn", message: 42 },
     valid: false,
   },
 
