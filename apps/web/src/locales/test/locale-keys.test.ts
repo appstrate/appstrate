@@ -284,7 +284,7 @@ const DYNAMIC_KEY_PREFIXES = [
   "run.artifacts.code.", // components/run-artifacts.ts — artifactFailureCodeKey()
   "run.connSource.", // components/run-detail/run-snapshot-inspector.tsx
   "run.status.", // packages/module-chat/src/ui/run-events.ts — runStatusLineKey()
-  "run.triggerType.", // components/run-trigger.tsx, components/run-detail/run-header-summary.tsx + run-snapshot-inspector.tsx
+  "run.triggerType.", // components/run-trigger.tsx + run-detail/run-snapshot-inspector.tsx
   "schedule.disabledReason.", // components/schedule-status-badge.tsx, pages/schedule-detail.tsx
   "spaceMembers.source.", // components/space-seat-columns.tsx
   "spaces.visibility.", // pages/workspace-settings/general.tsx — t(`spaces.visibility.${value}`)
