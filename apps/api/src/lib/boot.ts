@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { db, isEmbeddedDb, reservePgConnection, toRows } from "@appstrate/db/client";
-import type { SQL } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
+import { PENDING_RUNTIME_TOOLS_COUNT } from "../../../../scripts/migration/0052-migrate-runtime-tools.ts";
 import { CURRENT_API_VERSION, listSupportedVersions } from "./api-versions.ts";
 import { listOrgsWithUnsupportedApiVersion } from "../services/organizations.ts";
 import { expireOldInvitations } from "../services/invitations.ts";
@@ -133,6 +134,11 @@ export async function bootCritical(): Promise<void> {
   // Refuse to boot while a package share has no `space_packages` row, where nothing reads it.
   // Detection only; the fold is an operator task, see the function's doc comment.
   await assertPackageSharesFolded(embeddedDataDir);
+
+  // Refuse to boot while a stored agent manifest still carries `runtime_tools`, which nothing
+  // reads. Detection of that field only; the rewrite is an operator task, see the function's doc
+  // comment.
+  await assertRuntimeToolsMigrated(embeddedDataDir);
 
   await assertKeyringCoversCiphertexts();
 
@@ -753,6 +759,56 @@ export async function unfoldedPackageShareCount(
   const { sql: rawSql } = await import("drizzle-orm");
   const [row] = toRows<{ pending: number }>(
     await database.execute(rawSql`SELECT count(*)::int AS pending FROM package_shares`),
+  );
+  return row?.pending ?? 0;
+}
+
+/**
+ * Refuse to boot while a stored agent manifest (`package_versions.manifest`,
+ * `packages.draft_manifest`) still carries `runtime_tools`
+ * (`carriesRuntimeTools`, `scripts/migration/0052-migrate-runtime-tools.ts`): nothing reads the
+ * field, so every such agent runs without the `@appstrate/platform` tools it had. Refuses rather
+ * than warns, like {@link assertOAuthResourceColumnsPresent}.
+ *
+ * Its reach is that field and nothing more. The script also adds the dependency to the agents that
+ * never carried it (they were served `recall_memory` and `run_history` without declaring
+ * anything), and no guard can detect that half: an agent without the dependency is a legitimate
+ * state once its author removes it. So the script is required in the deployment window even when
+ * this check passes.
+ *
+ * The command it names targets the database this process runs on: `DATABASE_URL`, or, on an
+ * embedded database (`embeddedDataDir`), that directory named through `PGLITE_DATA_DIR`.
+ * `pendingRewrites` is injected for tests.
+ */
+export async function assertRuntimeToolsMigrated(
+  embeddedDataDir: string | null,
+  pendingRewrites: () => Promise<number> = unmigratedRuntimeToolsCount,
+): Promise<void> {
+  const pending = await pendingRewrites();
+  if (pending === 0) return;
+
+  const script = "bun scripts/migration/0052-migrate-runtime-tools.ts";
+  const command =
+    embeddedDataDir === null
+      ? `\`${script}\` (dry run), then \`${script} --apply\`, with this DATABASE_URL`
+      : `\`PGLITE_DATA_DIR=${embeddedDataDir} ${script}\` (dry run), then the same with ` +
+        "`--apply`, from the platform's directory while it is stopped (an embedded database " +
+        "opens in one process at a time)";
+  throw new Error(
+    `Agent manifests not migrated: ${pending} stored agent manifest(s) still carry runtime_tools, ` +
+      "so scripts/migration/0052-migrate-runtime-tools.ts has not run. Until it runs, those " +
+      "agents run without the @appstrate/platform tools they had. " +
+      `Refusing to boot: run ${command}, then restart. A manifest the script leaves untouched ` +
+      "(it lists them as malformed) is fixed by hand.",
+  );
+}
+
+/** `database` is injected for tests that probe a second embedded database. */
+export async function unmigratedRuntimeToolsCount(
+  database: { execute(query: SQL): PromiseLike<unknown> } = db,
+): Promise<number> {
+  const [row] = toRows<{ pending: number }>(
+    await database.execute(sql.raw(PENDING_RUNTIME_TOOLS_COUNT)),
   );
   return row?.pending ?? 0;
 }

@@ -554,9 +554,7 @@ describe("executeAgentInBackground — server-side finalize synthesis", () => {
     await finalizeRun({
       run: sinkRun!,
       result: {
-        memories: [],
         output: null,
-        logs: [],
         status: "success",
       },
     });

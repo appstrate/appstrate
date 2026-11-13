@@ -23,7 +23,6 @@ import { MetadataSection } from "../components/agent-editor/metadata-section";
 import { AgentAppearanceFields } from "../components/agent-editor/agent-appearance-fields";
 import { SchemaFieldList } from "../components/agent-editor/schema-field-list";
 import { ResourceSection } from "../components/agent-editor/resource-section";
-import { RuntimeToolsGroup } from "../components/agent-editor/runtime-tools-group";
 import { SourceSection } from "../components/integration-editor/source-section";
 import { getSource, isRemoteSourceUrl } from "../components/integration-editor/utils";
 import { IntegrationIconField } from "../components/integration-editor/integration-icon-field";
@@ -36,10 +35,7 @@ import {
   manifestSchemaWrapper,
   getResourceEntries,
   setResourceEntries,
-  getRuntimeTools,
-  setRuntimeTools,
   withNormalizedManifest,
-  withOutputTool,
   fieldsToSchema,
 } from "../components/agent-editor/utils";
 import type { ResourceEntry, SchemaField } from "../components/agent-editor/types";
@@ -103,10 +99,7 @@ function AgentEditorInner({
   const onSchemaChange = (key: "input" | "output") => (fields: SchemaField[]) => {
     const wrapper = fieldsToSchema(fields, key, manifestSchemaWrapper(state.manifest, key)?.schema);
     if (wrapper) {
-      setState((s) => {
-        const manifest = { ...s.manifest, [key]: wrapper };
-        return { ...s, manifest: key === "output" ? withOutputTool(manifest) : manifest };
-      });
+      setState((s) => ({ ...s, manifest: { ...s.manifest, [key]: wrapper } }));
     } else {
       setState((s) => {
         const { [key]: _, ...rest } = s.manifest;
@@ -114,13 +107,6 @@ function AgentEditorInner({
       });
     }
   };
-
-  const setManifestRuntimeTools = (next: string[]) =>
-    setState((s) => {
-      const m = { ...s.manifest };
-      setRuntimeTools(m, next);
-      return { ...s, manifest: m };
-    });
 
   const resourceTabs = {
     skills: {
@@ -152,15 +138,12 @@ function AgentEditorInner({
         { id: "schema", label: t("editor.tabSchema") },
         { id: "skills", label: t("common:nav.skills") },
         { id: "integrations", label: t("common:nav.integrations") },
-        // The manifest's `runtime_tools`, not integration packages.
-        { id: "tools", label: t("integrationEditor.tabTools") },
       ]}
       descriptions={{
         general: t("editor.description.general"),
         schema: t("editor.description.schema"),
         skills: t("editor.description.skills"),
         integrations: t("editor.description.integrations"),
-        tools: t("editor.runtimeToolsHint"),
       }}
     >
       {activeTab === "general" && (
@@ -202,12 +185,6 @@ function AgentEditorInner({
             )}
           </div>
         </MetadataSection>
-      )}
-      {activeTab === "tools" && (
-        <RuntimeToolsGroup
-          selected={getRuntimeTools(state.manifest)}
-          onChange={setManifestRuntimeTools}
-        />
       )}
       {activeTab === "schema" && (
         <div className="flex flex-col gap-6">

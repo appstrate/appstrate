@@ -466,14 +466,19 @@ its in-chat progress surface or `resource_link` deliverables.
 For `kind:"inline"`, `manifest` is a partial canonical AFPS manifest. A normal
 call can provide only a task-specific `display_name` plus its dependencies and
 integration configuration; `run_and_wait` derives `name` and defaults the
-omitted AFPS boilerplate, `runtime_tools` (`log`, `output`,
-`publish_file`), and an open object output schema. Defaults fill absent top-level
-fields only. Every supplied field is preserved as an exact
-replacement—arrays and nested objects are not merged, and
-`runtime_tools: []` remains empty. Clients can therefore provide a complete
+omitted AFPS boilerplate and an open object output schema. Defaults fill absent
+top-level fields only. Every supplied field is preserved as an exact
+replacement—arrays and nested objects are not merged. The platform also adds
+the `@appstrate/platform` dependency unless `dependencies.integrations` already
+names it, and selects its `log` tool in `integrations_configuration` unless
+either `dependencies.integrations` or `integrations_configuration` names it (the
+dependency alone keeps its `default_tools`); it never changes the caller's
+entries, and
+`integrations_configuration["@appstrate/platform"] = { tools: [] }` removes the
+tools. Clients can therefore provide a complete
 deterministic manifest and override every field, including a strict
-`output.schema` (which requires `output` in an explicitly overridden
-`runtime_tools`).
+`output.schema`. The run has the `output` tool exactly when its manifest
+declares an `output.schema`.
 
 Streaming/SSE operations (live logs, realtime) cannot be called through
 `invoke_operation` — use `run_and_wait`, fetch logs, or poll instead. Nor can

@@ -23,7 +23,7 @@ export type ManifestDeliveryHttp = NonNullable<
 
 /**
  * Header the AGENT container stamps on every request to its sidecar's control
- * surface (`/llm/*`, `/mcp`, `/integrations/boot-report`, `/runtime-events`),
+ * surface (`/llm/*`, `/mcp`, `/integrations/boot-report`),
  * carrying {@link SidecarConfig.sidecarAuthToken}.
  *
  * A dedicated header rather than `Authorization`: on `/llm/*` that slot already
@@ -124,24 +124,6 @@ export interface SidecarLaunchSpec {
    * `runtime-pi/sidecar/server.ts`.
    */
   integrations?: ReadonlyArray<IntegrationSpawnSpec>;
-  /**
-   * Platform runtime tools the agent selected (`manifest.runtime_tools`):
-   * any of `output` / `log` / `note` / `pin`. The sidecar hosts
-   * the selected ones as in-process MCP tools on the agent-facing `/mcp`
-   * surface (`@appstrate/core/runtime-tool-defs`), so they are unified with
-   * the integration tools instead of being Pi-SDK-specific extensions.
-   * Empty / omitted = none. Serialised as the `RUNTIME_TOOLS_JSON` env var.
-   */
-  runtimeTools?: readonly string[];
-  /**
-   * Output JSON Schema (`manifest.output.schema`). Forwarded so the
-   * sidecar's `output` runtime tool exposes it as the `data` argument
-   * schema (visible to the model in the tool definition) and AJV-validates
-   * calls against it.
-   * Serialised as the `OUTPUT_SCHEMA` env var. Omitted when the agent
-   * declares no output schema.
-   */
-  outputSchema?: Record<string, unknown>;
   /**
    * P4 — connect-run mode (`runAt: "link"`). When set, the sidecar runs in
    * "connect mode": it boots the SINGLE integration carried in `integrations`,
@@ -342,6 +324,13 @@ export interface IntegrationSpawnSpec {
        * by `integrationManifestSchema`).
        */
       url?: string;
+      /**
+       * Set for an integration bound to the runtime that executes the run
+       * (`isRuntimeBoundIntegration`, `@appstrate/core/integration`), in place
+       * of {@link url}: the sidecar opens the platform's run MCP server
+       * (`{platformApiUrl}/internal/mcp`) and authenticates with the run token.
+       */
+      platformEndpoint?: true;
       /**
        * AFPS §7.1 — remote MCP transport selector, mirroring the manifest's
        * `source.remote.transport` enum. REQUIRED for remote sources: the

@@ -26,7 +26,7 @@ import {
   assertIntegrationVersionsResolved,
   resolveRunIntegrationVersions,
 } from "./integration-service.ts";
-import { resolveVersion, versionArtifactUnavailable } from "./package-versions.ts";
+import { getVersionRow, resolveVersion, versionArtifactUnavailable } from "./package-versions.ts";
 import { db } from "@appstrate/db/client";
 import { packageVersions } from "@appstrate/db/schema";
 import { eq } from "drizzle-orm";
@@ -139,11 +139,13 @@ export async function resolveExportVersion(
 /**
  * Build an export Bundle for the given package at the resolved version.
  *
- * Downloads the AFPS ZIP for `(packageId, version)` from storage, runs it
- * through the same extraction primitive as ingestion (`extractRootFromAfps`),
- * and assembles its members via {@link buildExportBundle}. The result
- * is a canonical multi-package Bundle that can be serialised to bytes via
- * {@link writeBundleToBuffer} and streamed to the caller.
+ * The root's MANIFEST is the version's catalog row (`package_versions.manifest`),
+ * the one a server-side run of that version executes (`resolveAgentRunVersion`);
+ * its other files come from the version's AFPS ZIP, extracted by the same
+ * primitive as ingestion (`extractRootFromAfps`). One selector cannot mean two
+ * sets of bytes depending on which door asked. Members are assembled via
+ * {@link buildExportBundle}; the result serialises via
+ * {@link writeBundleToBuffer}, which recomputes every RECORD and integrity.
  */
 export async function buildBundleForAgentExport(
   packageId: string,
@@ -151,10 +153,30 @@ export async function buildBundleForAgentExport(
   opts: { versionSpec?: string | null; metadata?: BundleMetadata } = {},
 ): Promise<Bundle> {
   const version = await resolveExportVersion(packageId, opts.versionSpec);
+  const row = await getVersionRow(packageId, version);
+  if (!row) throw notFound(`Version '${version}' not found for '${packageId}'`);
   const zip = await downloadVersionZip(packageId, version);
   if (!zip) throw versionArtifactUnavailable(packageId, version);
-  const root = extractRootFromAfps(new Uint8Array(zip));
+  const root = withCatalogManifest(extractRootFromAfps(new Uint8Array(zip)), row.manifest);
   return buildExportBundle(root, scope, opts.metadata);
+}
+
+/**
+ * `root` with `manifest` as its manifest. Returned as-is when the archive's
+ * manifest already says the same thing, so its bytes (and a `signature.sig`
+ * over them) are kept. Otherwise `manifest.json` is rewritten and
+ * `signature.sig` is dropped: the signature covers the archive's bytes, which
+ * the root no longer carries.
+ */
+function withCatalogManifest(
+  root: BundlePackage,
+  manifest: Record<string, unknown>,
+): BundlePackage {
+  if (Bun.deepEquals(root.manifest, manifest)) return root;
+  const files = new Map(root.files);
+  files.set("manifest.json", new TextEncoder().encode(JSON.stringify(manifest, null, 2)));
+  files.delete("signature.sig");
+  return { ...root, manifest: manifest as BundlePackage["manifest"], files, integrity: "" };
 }
 
 /**

@@ -43,8 +43,7 @@
  *  3. **`EXCLUDED_SCOPES`**: the measured inventory of places this repo
  *     legitimately spells one of these names in camelCase — Better Auth's
  *     `profiles.displayName`, model-provider and platform-MODULE descriptors,
- *     wire DTOs and React view models, `maxSize` as a byte limit,
- *     `runtimeTools` as a TS-internal field. Each entry is scoped to the KEYS
+ *     wire DTOs and React view models, `maxSize` as a byte limit. Each entry is scoped to the KEYS
  *     it exempts, not to the whole file, and every entry is checked to still
  *     suppress something — see `EXCLUDED_SCOPES` for both rules.
  *
@@ -68,7 +67,6 @@ const BANNED_KEYS = [
   "maxSize",
   "iconUrl",
   "providersConfiguration",
-  "runtimeTools",
 ] as const;
 
 type BannedKey = (typeof BANNED_KEYS)[number];
@@ -126,10 +124,6 @@ const BYTE_LIMIT =
   "`maxSize` here is a byte cap — Hono's body limit, the upload cap, an HTTP " +
   "response cap, the file widget's prop. It is an ordinary TS parameter name and " +
   "has nothing to do with the AFPS `max_size` file constraint.";
-
-const RUNTIME_TOOLS_INTERNAL =
-  "`runtimeTools` here is a TS-internal field of the runtime-tools catalog and of " +
-  "the launcher plan/options objects, not the manifest's `runtime_tools` array.";
 
 const EXCLUDED_SCOPES: readonly ExcludedScope[] = [
   // ── Group 1: the user's display name ──
@@ -297,25 +291,6 @@ const EXCLUDED_SCOPES: readonly ExcludedScope[] = [
   },
   { path: "packages/ui/src/schema-form/file-widget.tsx", keys: ["maxSize"], reason: BYTE_LIMIT },
   { path: "apps/web/src/hooks/use-schema-form-labels.ts", keys: ["maxSize"], reason: BYTE_LIMIT },
-
-  // ── Group 5: `runtimeTools` as a TS-internal field ──
-  {
-    path: "packages/core/src/runtime-tools-catalog.ts",
-    keys: ["displayName"],
-    reason: RUNTIME_TOOLS_INTERNAL,
-  },
-  {
-    path: "apps/api/src/services/run-launcher/pi.ts",
-    keys: ["runtimeTools"],
-    reason: RUNTIME_TOOLS_INTERNAL,
-  },
-  { path: "apps/cli/src/commands/run.ts", keys: ["runtimeTools"], reason: RUNTIME_TOOLS_INTERNAL },
-  {
-    path: "packages/runner-pi/src/runtime-tools/",
-    keys: ["runtimeTools"],
-    reason: RUNTIME_TOOLS_INTERNAL,
-  },
-  { path: "runtime-pi/sidecar/server.ts", keys: ["runtimeTools"], reason: RUNTIME_TOOLS_INTERNAL },
 ];
 
 /** Is this (file, key) pair covered by a documented exclusion? */
@@ -337,11 +312,10 @@ function isTestFile(filePath: string): boolean {
 
 // Per-line exemptions: legitimate read fallbacks and M8 cleanup writes.
 //
-// The four patterns below are BUILT from `BANNED_KEYS` rather than repeating
-// its nine names inline four times, which is what they used to do. A key added
-// to the list above but forgotten in one of these alternations would have been
-// reported with none of its exemptions honoured — a false positive nobody could
-// silence except by editing this file, which is the wrong way round.
+// The patterns below that name a key are BUILT from `BANNED_KEYS` rather than
+// repeating its names inline: a key added to the list above but forgotten in one
+// of these alternations would be reported with none of its exemptions honoured —
+// a false positive nobody could silence except by editing this file.
 const KEY_ALT = BANNED_KEYS.join("|");
 const LINE_EXEMPTIONS: RegExp[] = [
   // Documented per-line opt-outs.
@@ -357,8 +331,6 @@ const LINE_EXEMPTIONS: RegExp[] = [
   // M8 cleanup: `displayName: undefined` — a documented writer-side strip of a
   // legacy sibling key.
   new RegExp(`\\b(${KEY_ALT})\\s*:\\s*undefined\\b`),
-  // M8 cleanup: `delete m.runtimeTools`.
-  new RegExp(`\\bdelete\\s+[\\w\\[\\]'"\`.()]+\\.(${KEY_ALT})\\b`),
   // `as { displayName?: … }` type-narrowing READS. The writer-shape regex below
   // filters most reads implicitly; this covers the cast form it cannot.
   new RegExp(`\\bas\\s*\\{[^}]*\\b(${KEY_ALT})\\b`),
@@ -510,7 +482,7 @@ function reportHits(hits: Hit[]): void {
   );
   console.error(
     "AFPS requires canonical snake_case (display_name, schema_version, file_constraints, ui_hints,\n" +
-      "property_order, max_size, icon_url, runtime_tools, …). If this hit is a legitimate read-fallback or\n" +
+      "property_order, max_size, icon_url, …). If this hit is a legitimate read-fallback or\n" +
       "documented carve-out, prefix the line with `// canonical-casing-exempt` or `// back-compat`. If a\n" +
       "whole surface legitimately spells the name in camelCase (a DB column, a module descriptor, a view\n" +
       "model), add a key-scoped entry to EXCLUDED_SCOPES with the reason. If it's a writer context, switch\n" +

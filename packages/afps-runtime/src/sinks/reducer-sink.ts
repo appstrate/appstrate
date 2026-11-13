@@ -8,9 +8,9 @@
  * {@link foldEvent} helper so the aggregated {@link RunResult} is
  * available at any point during a run, not only after the runner calls
  * `reduceEvents(events)` in one shot. Consumers that need to observe
- * memories / state / output as they land (e.g. a platform
- * event sink that fans out to persistence) can compose this sink with
- * their own side-effect sink via {@link CompositeSink}.
+ * the output as it lands (e.g. a platform event sink that fans out to
+ * persistence) can compose this sink with their own side-effect sink via
+ * {@link CompositeSink}.
  *
  * `finalize(result)` overrides the accumulated snapshot with the
  * runner-provided canonical result, so callers that read `snapshot()`

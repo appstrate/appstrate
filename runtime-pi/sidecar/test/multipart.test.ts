@@ -83,7 +83,7 @@ async function makeMultipartApp(overrides?: Partial<AppDeps>) {
   return createTestApp({
     ...appDeps,
     runtimeDeps,
-    additionalMcpToolsProvider: () => host.buildTools(),
+    mcpToolsProvider: () => host.buildTools(),
   });
 }
 

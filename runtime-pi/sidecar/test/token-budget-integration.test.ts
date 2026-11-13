@@ -7,8 +7,8 @@
  * These tests exercise the full path:
  *
  *   agent → POST /mcp (JSON-RPC) → mountMcp → tools/call →
- *     api_call / run_history / recall_memory →
- *       executeApiCall (or platform fetchFn) →
+ *     api_call →
+ *       executeApiCall →
  *         responseToToolResult — the function under test, where the
  *         token-budget tracker is consulted.
  *
@@ -20,8 +20,6 @@
  *     per-call cap (issue #390 secondary scenario).
  *   - the budget tracker's own accounting (`consumedTokens`) reflects
  *     what was inlined and what was spilled.
- *   - `run_history` and `recall_memory` honour the same gate as
- *     `api_call`.
  */
 
 import { describe, it, expect, mock } from "bun:test";
@@ -137,9 +135,7 @@ async function buildTestApp(opts: {
   }
   mountMcp(app, {
     blobStore,
-    tokenBudget: opts.tokenBudget,
-    additionalToolsProvider: () => host.buildTools(),
-    proxyDeps,
+    toolsProvider: () => host.buildTools(),
   });
   return app;
 }
@@ -357,58 +353,6 @@ describe("token-aware spill — run-budget accounting", () => {
   });
 });
 
-describe("token-aware spill — applied to all platform tools", () => {
-  it("run_history is gated by the token budget", async () => {
-    const oversized = "y".repeat(60_000); // ~17 K tokens
-    const fetchFn = mock(
-      async () =>
-        new Response(oversized, {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-    );
-    const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
-    const app = await buildTestApp({
-      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
-      tokenBudget,
-    });
-
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: { name: "run_history", arguments: { limit: 1 } },
-    });
-    const result = res.json.result as CallToolResult;
-    expect(result.content[0]!.type).toBe("resource_link");
-    // Spilled on the per-call cap; nothing recorded against the run budget.
-    expect(estimateTokens(oversized)).toBeGreaterThan(4_000);
-    expect(tokenBudget.consumedTokens()).toBe(0);
-  });
-
-  it("recall_memory is gated by the token budget", async () => {
-    const oversized = "z".repeat(60_000);
-    const fetchFn = mock(
-      async () =>
-        new Response(oversized, {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-    );
-    const tokenBudget = new TokenBudget({ inlineCapTokens: 4_000, runBudgetTokens: 100_000 });
-    const app = await buildTestApp({
-      deps: makeDeps({ fetchFn: fetchFn as unknown as typeof fetch }),
-      tokenBudget,
-    });
-
-    const res = await rpc(app, {
-      method: "tools/call",
-      params: { name: "recall_memory", arguments: { q: "foo" } },
-    });
-    const result = res.json.result as CallToolResult;
-    expect(result.content[0]!.type).toBe("resource_link");
-    expect(tokenBudget.consumedTokens()).toBe(0);
-  });
-});
-
 describe("token-aware spill — env-var configuration via createApp", () => {
   // `createApp` reads the env vars at boot; verify the wiring runs.
   // The actual TokenBudget constructor invariants are tested in
@@ -450,7 +394,7 @@ describe("token-aware spill — env-var configuration via createApp", () => {
       const app = createTestApp({
         ...appDeps,
         runtimeDeps,
-        additionalMcpToolsProvider: () => host.buildTools(),
+        mcpToolsProvider: () => host.buildTools(),
       });
       const res = await rpc(app, {
         method: "tools/call",

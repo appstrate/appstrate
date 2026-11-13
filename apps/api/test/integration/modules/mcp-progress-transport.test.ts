@@ -26,6 +26,7 @@ import {
   seedDefaultOrgModel,
   waitForRunPipelineSettled,
 } from "../../helpers/run-connection-fixtures.ts";
+import { installRuntimeBoundSystemPackages } from "../../helpers/runtime-bound-system-packages.ts";
 import { _setOrchestratorForTesting } from "../../../src/services/orchestrator/index.ts";
 
 const app = getTestApp();
@@ -82,6 +83,8 @@ function holdRuns(): void {
   });
 }
 
+let restoreSystemPackages: () => void;
+
 beforeAll(() => {
   _setOrchestratorForTesting({
     ...createFakeOrchestrator(),
@@ -98,6 +101,7 @@ afterAll(() => {
 
 beforeEach(async () => {
   await truncateAll();
+  restoreSystemPackages = await installRuntimeBoundSystemPackages();
   ctx = await createTestContext();
   // Pinned: this suite is about the transport, not the space a call names.
   headers = mcpAuthHeaders(ctx);
@@ -107,6 +111,7 @@ beforeEach(async () => {
 afterEach(async () => {
   openGate();
   await waitForRunPipelineSettled();
+  restoreSystemPackages();
 });
 
 describe("mcp transport: SSE only when progress is asked for", () => {

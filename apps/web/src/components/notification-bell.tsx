@@ -138,30 +138,49 @@ export function NotificationContent({
             const packageId = payloadString(notification.payload, "packageId");
             // A SHARE has no run behind it, so no status: read as a run it was titled "Agent supprimé".
             const shared = notification.type === "package_shared";
-            const status = shared ? null : payloadString(notification.payload, "status");
+            // A message the agent sent from its run (`notify`): its own title and text, no status.
+            const agentMessage =
+              notification.type === "agent_message" ? notification.payload : null;
+            const status =
+              notification.type === "run_completed"
+                ? payloadString(notification.payload, "status")
+                : null;
+            const agentName = packageId
+              ? (agentNameMap.get(packageId) ?? packageId)
+              : t("runs.deletedAgent", { ns: "agents" });
             const displayName = shared
               ? t("notifications.packageShared", {
                   name: payloadString(notification.payload, "shared_by_name") ?? "",
                   package: packageId ?? "",
                 })
-              : packageId
-                ? (agentNameMap.get(packageId) ?? packageId)
-                : t("runs.deletedAgent", { ns: "agents" });
+              : agentMessage
+                ? agentMessage.title
+                : agentName;
             const target = notificationTarget(notification, packageId, canReach);
             const body = (
               <>
                 <Circle size={8} className="fill-destructive text-destructive mt-1.5 shrink-0" />
                 <div className="min-w-0 flex-1">
                   <div className="mb-0.5 flex items-center justify-between gap-2">
-                    {agentsPending && packageId && !shared ? (
+                    {agentsPending && packageId && !shared && !agentMessage ? (
                       <Skeleton className="h-4 w-32" />
                     ) : (
                       <span className="truncate text-sm font-medium">{displayName}</span>
                     )}
                     {status && <RunStatusBadge status={status} />}
                   </div>
+                  {agentMessage && (
+                    <p className="mb-0.5 line-clamp-3 text-xs break-words whitespace-pre-line">
+                      {agentMessage.message}
+                    </p>
+                  )}
                   <p className="text-muted-foreground text-xs">
-                    {formatDateField(notification.createdAt)}
+                    {agentMessage && !agentsPending
+                      ? t("notifications.agentMessageFrom", {
+                          agent: agentName,
+                          date: formatDateField(notification.createdAt),
+                        })
+                      : formatDateField(notification.createdAt)}
                   </p>
                 </div>
               </>

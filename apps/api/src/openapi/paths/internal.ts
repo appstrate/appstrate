@@ -3,6 +3,12 @@
 import { MAX_CONNECTIONS_PER_INTEGRATION } from "@appstrate/core/integration";
 import { CREDENTIAL_FAILURE_CAUSES } from "@appstrate/core/sidecar-types";
 import { CREDENTIAL_FAILURE_SENTENCES } from "../../lib/credential-failure.ts";
+import {
+  RUN_TOOLS_MCP_DESCRIPTION,
+  runToolsMcpMethodNotAllowed,
+  runToolsMcpRequestBody,
+  runToolsMcpResponses,
+} from "./run-tools-mcp.ts";
 
 /** A credential endpoint's `410`/`502`: a problem whose `cause` member says why. */
 function credentialFailure(description: string) {
@@ -105,141 +111,31 @@ const connectionSelector400 = {
 } as const;
 
 export const internalPaths = {
-  "/internal/run-history": {
-    get: {
-      operationId: "getRunHistory",
+  "/internal/mcp": {
+    post: {
+      operationId: "internalRunToolsMcpPost",
       tags: ["Internal"],
-      summary: "Fetch run history",
-      description: "Container-to-host only. Auth via Bearer run token.",
+      summary: "Run MCP server of a platform run",
+      description:
+        RUN_TOOLS_MCP_DESCRIPTION +
+        " Mounted here for the sidecar. Container-to-host only. Auth via Bearer run token, which names the run; a run that is not `running` is refused with 403.",
       security: [{ bearerExecToken: [] }],
-      parameters: [
-        {
-          name: "limit",
-          in: "query",
-          description: "Max number of runs to return (1-50, default 10)",
-          schema: { type: "integer", minimum: 1, maximum: 50, default: 10 },
-        },
-        {
-          name: "fields",
-          in: "query",
-          description:
-            'Comma-separated fields to include: "checkpoint", "result" (default: "checkpoint")',
-          schema: { type: "string", default: "checkpoint" },
-        },
-      ],
+      requestBody: runToolsMcpRequestBody,
       responses: {
-        "200": {
-          description: "Run history",
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["object", "data", "hasMore"],
-                properties: {
-                  object: { type: "string", enum: ["list"] },
-                  data: { type: "array", items: { type: "object" } },
-                  hasMore: { type: "boolean" },
-                },
-              },
-              example: {
-                object: "list",
-                hasMore: false,
-                data: [
-                  {
-                    id: "run_cm9abc123",
-                    status: "success",
-                    checkpoint: { lastProcessedId: 42 },
-                    date: "2026-01-14T09:00:00Z",
-                    duration: 1234,
-                  },
-                ],
-              },
-            },
-          },
-        },
-        "400": {
-          $ref: "#/components/responses/ValidationError",
-          description:
-            "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry.",
-        },
+        ...runToolsMcpResponses,
         "401": { $ref: "#/components/responses/Unauthorized" },
         "403": { $ref: "#/components/responses/Forbidden" },
         "404": { $ref: "#/components/responses/NotFound" },
-        "500": { $ref: "#/components/responses/InternalServerError" },
       },
     },
-  },
-  "/internal/memories": {
     get: {
-      operationId: "recallMemories",
+      operationId: "internalRunToolsMcpGet",
       tags: ["Internal"],
-      summary: "Recall archive memories",
+      summary: "Run MCP server of a platform run (GET)",
       description:
-        "Backs the agent-facing `recall_memory` MCP tool. Returns archive memories (pinned=false) visible to the run's actor, optionally filtered by an ILIKE substring match against content. Pinned memories are NOT returned — they are already injected into the system prompt. Container-to-host only. Auth via Bearer run token.",
+        "The GET channel of the run MCP server. The server is stateless and opens no standalone server-initiated SSE stream, so GET (and every verb but POST) answers 405. Container-to-host only.",
       security: [{ bearerExecToken: [] }],
-      parameters: [
-        {
-          name: "q",
-          in: "query",
-          description:
-            "Optional case-insensitive substring filter on memory content. Empty / absent returns the most recent archive memories.",
-          schema: { type: "string" },
-        },
-        {
-          name: "limit",
-          in: "query",
-          description: "Max number of memories to return (1-50, default 10).",
-          schema: { type: "integer", minimum: 1, maximum: 50, default: 10 },
-        },
-      ],
-      responses: {
-        "200": {
-          description: "Recalled memories",
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                required: ["memories"],
-                properties: {
-                  memories: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      required: ["id", "content", "createdAt", "actor_type"],
-                      properties: {
-                        id: { type: "integer" },
-                        content: {},
-                        createdAt: { type: "string", format: "date-time" },
-                        actor_type: {
-                          type: "string",
-                          enum: ["user", "end_user", "shared"],
-                        },
-                        actor_id: { type: ["string", "null"] },
-                      },
-                    },
-                  },
-                },
-              },
-              example: {
-                memories: [
-                  {
-                    id: 42,
-                    content: "User prefers Python over JS for data tasks",
-                    createdAt: "2026-04-20T10:00:00Z",
-                    actor_type: "user",
-                    actor_id: "usr_abc",
-                  },
-                ],
-              },
-            },
-          },
-        },
-        "400": { $ref: "#/components/responses/ValidationError" },
-        "401": { $ref: "#/components/responses/Unauthorized" },
-        "403": { $ref: "#/components/responses/Forbidden" },
-        "404": { $ref: "#/components/responses/NotFound" },
-        "500": { $ref: "#/components/responses/InternalServerError" },
-      },
+      responses: { "405": runToolsMcpMethodNotAllowed },
     },
   },
   "/internal/oauth-token/{credentialId}": {

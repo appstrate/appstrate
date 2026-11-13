@@ -40,8 +40,7 @@ An agent is the core unit of work. It is defined by a **prompt** that describes 
 An agent package declares:
 
 - An **input schema** (JSON Schema) for the parameters a person or a schedule supplies at launch, and an optional **output schema** the result must satisfy. A space can store default input values and lock some of them.
-- **Dependencies**: the [skills](/features/skills), MCP servers and integrations it uses.
-- **Runtime tools**: built-in tools such as `output`, `log`, `note`, `pin` and `publish_file`.
+- **Dependencies**: the [skills](/features/skills), MCP servers and integrations it uses, among them `@appstrate/platform` for the [platform tools](/features/tools#platform-tools) (`log`, `note`, `pin`, …).
 
 An agent also gets persistence across runs:
 
@@ -80,7 +79,7 @@ A run is a single agent execution. Its lifecycle:
 
 A run starts from the dashboard, the chat, a [schedule](/features/scheduling), the CLI, the API or an [MCP client](/using-appstrate/mcp-clients). Each run gets two cooperating parts:
 
-1. **Sidecar.** Holds the run's credentials, proxies the model calls, and exposes the agent's tools over MCP: integration tools, `api_call` with credential injection, `run_history` and `recall_memory`. It checks every outbound target against the integration's allowed URIs.
+1. **Sidecar.** Holds the run's credentials, proxies the model calls, and exposes the agent's tools over MCP: integration tools, `api_call` with credential injection, and the platform tools of `@appstrate/platform` (`run_history`, `recall_memory`, …). It checks every outbound target against the integration's allowed URIs.
 2. **Agent.** The [Pi Coding Agent](/features/sandbox-and-sidecar) process that receives the prompt and talks only to its sidecar. It never holds the credentials.
 
 Where they run depends on the install. Docker tiers use one container pair per run on a private network, so concurrent runs of the same agent are isolated from each other. Tier 0 uses Bun subprocesses without container isolation. A Firecracker backend (early preview, opt-in) gives each run its own microVM.

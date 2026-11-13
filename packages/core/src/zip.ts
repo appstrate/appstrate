@@ -10,7 +10,7 @@ import {
   type PackageType,
   type IntegrationManifest,
   type McpServerManifest,
-  type RetiredRuntimeToolsPolicy,
+  type RetiredVocabularyPolicy,
 } from "./validation.ts";
 import {
   checkCompanionFiles,
@@ -264,14 +264,6 @@ export interface ParsedPackageZip {
    * previous `_meta["dev.afps/mcp-server"].name` indirection.
    */
   packageId: string;
-  /**
-   * `runtime_tools` ids the platform retired, stripped from {@link manifest}
-   * while parsing. Always `[]` unless the caller passed
-   * `retiredRuntimeTools: "drop"` — the drop is silent by construction, so a
-   * caller that opted into it MUST surface this (install warning, log) rather
-   * than let the capability loss disappear.
-   */
-  droppedRuntimeTools: string[];
 }
 
 /** Error thrown during package ZIP parsing with a machine-readable error code. */
@@ -315,16 +307,16 @@ export interface ParsePackageZipOptions {
   /** Maximum compressed size in bytes. Defaults to 10 MB. */
   maxSize?: number;
   /**
-   * How the embedded manifest's retired `runtime_tools` ids are treated —
+   * How the embedded manifest's retired vocabulary is treated —
    * forwarded verbatim to `validateManifest`. Defaults to `"reject"`, because
    * a ZIP is author input unless the caller knows otherwise.
    *
-   * Pass `"drop"` ONLY when the archive is content the platform already holds
+   * Pass `"tolerate"` ONLY when the archive is content the platform already holds
    * and cannot repair in place (a re-import of a published, integrity-checked
    * artifact). See the doctrine on
-   * {@link import("./validation.ts").RetiredRuntimeToolsPolicy}.
+   * {@link import("./validation.ts").RetiredVocabularyPolicy}.
    */
-  retiredRuntimeTools?: RetiredRuntimeToolsPolicy;
+  retiredVocabulary?: RetiredVocabularyPolicy;
 }
 
 /**
@@ -334,7 +326,7 @@ export interface ParsePackageZipOptions {
  * Includes zip bomb protection and wrapper folder stripping.
  * @param zipBuffer - The raw ZIP file as a Uint8Array
  * @param options - {@link ParsePackageZipOptions}
- * @returns Parsed package with manifest, content, files, type, and any dropped runtime-tool ids
+ * @returns Parsed package with manifest, content, files and type
  * @throws PackageZipError for size limits, invalid ZIP, missing/invalid manifest, or missing content
  * @example
  * const zip = await readFile("my-agent.afps");
@@ -419,7 +411,7 @@ export function parsePackageZip(
   }
 
   const validation = validateManifest(manifestRaw, {
-    retiredRuntimeTools: opts.retiredRuntimeTools ?? "reject",
+    retiredVocabulary: opts.retiredVocabulary ?? "reject",
   });
   if (!validation.valid) {
     const detail = validation.errors.join("; ");
@@ -500,6 +492,5 @@ export function parsePackageZip(
     files,
     type: type as PackageType,
     packageId,
-    droppedRuntimeTools: validation.droppedRuntimeTools,
   };
 }

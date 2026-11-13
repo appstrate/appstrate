@@ -14,14 +14,14 @@ function event(type: string, extra: Record<string, unknown> = {}): RunEvent {
 describe("buildCloudEventEnvelope", () => {
   it("builds a valid CloudEvents 1.0 envelope for a canonical event", () => {
     const env = buildCloudEventEnvelope({
-      event: event("memory.added", { content: "hi" }),
+      event: event("@my-org/audit.logged", { content: "hi" }),
       sequence: 3,
       id: "01HXYZ000000000000000000",
       nowMs: 1714000000000,
     });
     expect(env).toEqual({
       specversion: "1.0",
-      type: "memory.added",
+      type: "@my-org/audit.logged",
       source: "/afps/runs/run_abc",
       id: "01HXYZ000000000000000000",
       time: "2024-04-24T23:06:40.000Z",
@@ -33,10 +33,8 @@ describe("buildCloudEventEnvelope", () => {
 
   it("mirrors the RunEvent type verbatim (no rewriting)", () => {
     const mappings: readonly string[] = [
-      "memory.added",
-      "pinned.set",
       "output.emitted",
-      "log.written",
+      "appstrate.progress",
       "@my-org/audit.logged",
     ];
     for (const type of mappings) {
@@ -96,21 +94,21 @@ describe("buildCloudEventEnvelope", () => {
   it("builds canonical and third-party envelopes identically apart from type", () => {
     // With the stamp gone, canonicality has no effect on the envelope at all.
     const canonical = buildCloudEventEnvelope({
-      event: event("log.written", { level: "info", message: "x" }),
+      event: event("appstrate.progress", { message: "x" }),
       sequence: 7,
       id: "id",
     });
     const thirdParty = buildCloudEventEnvelope({
-      event: event("@scope/custom.verb", { level: "info", message: "x" }),
+      event: event("@scope/custom.verb", { message: "x" }),
       sequence: 7,
       id: "id",
     });
-    expect(canonical).toEqual({ ...thirdParty, type: "log.written" });
+    expect(canonical).toEqual({ ...thirdParty, type: "appstrate.progress" });
   });
 
   it("uses event.timestamp as default nowMs", () => {
     const env = buildCloudEventEnvelope({
-      event: event("log.written", { level: "info", message: "x" }),
+      event: event("appstrate.progress", { message: "x" }),
       sequence: 0,
       id: "id",
     });

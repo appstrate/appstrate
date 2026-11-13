@@ -316,21 +316,8 @@ async function runPlatformContainerImpl(
       ...(plan.integrations && plan.integrations.length > 0
         ? { integrations: plan.integrations }
         : {}),
-      // Platform runtime tools (output/log/note/pin) the sidecar
-      // hosts as in-process MCP tools — unified with the integration tool
-      // surface.
-      ...(plan.runtimeTools && plan.runtimeTools.length > 0
-        ? { runtimeTools: plan.runtimeTools }
-        : {}),
     };
 
-    const hasOutputSchema =
-      plan.outputSchema?.properties && Object.keys(plan.outputSchema.properties).length > 0;
-    // Forward the output schema to the sidecar so its `output` runtime tool
-    // can constrain + validate the `data` argument.
-    if (hasOutputSchema && plan.outputSchema) {
-      sidecarSpec.outputSchema = plan.outputSchema as unknown as Record<string, unknown>;
-    }
     // The agent container never receives a credential: its sidecar
     // authenticates upstream — see `runtime-pi/sidecar/`.
     const containerEnv = buildRuntimePiEnv({

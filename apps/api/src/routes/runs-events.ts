@@ -7,6 +7,7 @@
  *
  *   POST /api/runs/:runId/events           — one signed CloudEvent
  *   POST /api/runs/:runId/events/finalize  — terminal RunResult, idempotent
+ *   POST /api/runs/:runId/mcp              — the run MCP server of a remote run
  *
  * Authentication is Standard Webhooks HMAC (via `verifyRunSignature`). No
  * user principal — the request's legitimacy is proven cryptographically.
@@ -23,7 +24,7 @@ import { z } from "zod";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
 import { runs } from "@appstrate/db/schema";
-import { invalidRequest, notFound, conflict } from "../lib/errors.ts";
+import { invalidRequest, methodNotAllowed, notFound, conflict } from "../lib/errors.ts";
 import { readJsonBody } from "@appstrate/core/request-body";
 import { rateLimitByRunId, rateLimitRunFiles } from "../middleware/rate-limit.ts";
 import {
@@ -31,6 +32,7 @@ import {
   verifyRunUploadSignature,
 } from "../middleware/verify-run-signature.ts";
 import { ingestRunEvent, finalizeRun } from "../services/run-event-ingestion.ts";
+import { serveRunMcp } from "../services/run-tools-mcp.ts";
 import { createFileFromStream } from "../services/files.ts";
 import { getRunAttribution } from "../services/state/runs.ts";
 import { recordAudit } from "../services/audit.ts";
@@ -123,38 +125,7 @@ function clampArtifacts(input: unknown): unknown {
  */
 export const RunResultSchema = z
   .object({
-    memories: z
-      .array(
-        z.object({
-          content: z.string().catch(""),
-          scope: z.enum(["actor", "shared"]).optional().catch(undefined),
-        }),
-      )
-      .optional()
-      .default([]),
-    pinned: z
-      .record(
-        z.string(),
-        z.object({
-          content: z.unknown(),
-          scope: z.enum(["actor", "shared"]).optional().catch(undefined),
-        }),
-      )
-      .optional(),
     output: z.unknown().nullable().optional(),
-    logs: z
-      .array(
-        z.object({
-          // Cosmetic display fields — degrade rather than reject. A missing
-          // `timestamp` (built-in `log` tool over the sidecar/MCP path used to
-          // omit it) defaults to ingestion time instead of failing finalize.
-          level: z.enum(["info", "warn", "error"]).catch("info"),
-          message: z.string().catch(""),
-          timestamp: z.number().catch(() => Date.now()),
-        }),
-      )
-      .optional()
-      .default([]),
     error: z
       .object({
         message: z.string(),
@@ -260,6 +231,12 @@ export function createRunsEventsRouter() {
   // burst 30) so the finalize `outputs/` sweep's many small POSTs never exhaust
   // — or get starved by — the high-rate event-ingestion budget above.
   const fileLimiter = rateLimitRunFiles(30, 6);
+  // The run MCP server gets a per-minute budget of its own: one point per
+  // MCP message (`initialize`, `tools/list`, each tool call), 200 a minute —
+  // the figure the sidecar's mount of the same server has (`/internal/mcp`,
+  // `rateLimitByBearer(200)`). The 60 s window keeps its bucket apart from the
+  // 1 s event budget above, which is sized for telemetry, not tool calls.
+  const mcpLimiter = rateLimitByRunId(200, 60);
 
   // MIDDLEWARE ORDER — the signature guard runs FIRST on every route below,
   // the per-run limiter second. Both limiters key on the `:runId` from the
@@ -315,10 +292,7 @@ export function createRunsEventsRouter() {
       logger.warn("usage: malformed tier bands dropped", { runId: run.id, seam: "finalize" });
     }
     const result: TerminalRunResult = {
-      memories: d.memories,
-      ...(d.pinned !== undefined ? { pinned: d.pinned } : {}),
       output: d.output ?? null,
-      logs: d.logs,
       ...(d.error ? { error: d.error } : {}),
       status: d.status,
       ...(d.durationMs !== undefined ? { durationMs: d.durationMs } : {}),
@@ -409,7 +383,7 @@ export function createRunsEventsRouter() {
   // POST /api/runs/:runId/files — agent-published run output.
   //
   // The agent container streams a file it produced (an HTML report, a CSV, …)
-  // here, either via the `publish_file` runtime tool or the entrypoint's
+  // here, either via the runner's `publish_file` tool or the entrypoint's
   // end-of-run `outputs/` sweep. Authenticated by the SAME run HMAC as the GET
   // provisioning routes (verified over an empty body so the up-to-100 MiB
   // payload streams straight to storage without being buffered for the hash).
@@ -519,6 +493,34 @@ export function createRunsEventsRouter() {
     if (!stream) throw notFound(`file ${name} not found for run ${run.id}`);
     c.header("Content-Type", "application/octet-stream");
     return c.body(stream);
+  });
+
+  // POST /api/runs/:runId/mcp — the run MCP server (`@appstrate/platform`
+  // tools) for the host executing a remote run, authenticated like the routes
+  // above: the signature covers the exact request body. The tools write in
+  // the run's actor scope at call time.
+  //
+  // Remote runs only. A platform run's container holds the sink secret too
+  // (it signs its events), but it reaches these tools through its sidecar,
+  // which serves only the tools the agent selected; signing here would hand
+  // it all six. A platform run answers the 404 of an unknown run.
+  router.post("/runs/:runId/mcp", verifyRunSignature, mcpLimiter, async (c) => {
+    const run = c.get("run")!;
+    if (run.runOrigin !== "remote") throw notFound(`run ${run.id} not found`);
+    return serveRunMcp(c, {
+      runId: run.id,
+      orgId: run.orgId,
+      spaceId: run.spaceId,
+      packageId: run.packageId,
+      userId: run.userId,
+      endUserId: run.endUserId,
+    });
+  });
+  // The stateless server has no GET stream and no session to DELETE: every
+  // other verb is a 405 with `Allow: POST`, as the Streamable HTTP transport
+  // requires of a server that offers no GET stream.
+  router.all("/runs/:runId/mcp", () => {
+    throw methodNotAllowed(["POST"]);
   });
 
   return router;

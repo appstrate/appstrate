@@ -61,20 +61,11 @@ describe("Parity E2E — full adapter stack", () => {
         message: "booting",
         level: "info",
       },
-      { type: "memory.added", timestamp: Date.now(), runId, content: "learned A" },
-      { type: "memory.added", timestamp: Date.now(), runId, content: "learned B" },
       {
         type: "output.emitted",
         timestamp: Date.now(),
         runId,
         data: { deliverable: "shipped" },
-      },
-      {
-        type: "pinned.set",
-        timestamp: Date.now(),
-        runId,
-        key: "checkpoint",
-        content: { counter: 7 },
       },
     ];
 
@@ -99,8 +90,6 @@ describe("Parity E2E — full adapter stack", () => {
 
     // Snapshot is the runtime's own RunResult shape — no platform projection.
     expect(snap.output).toEqual({ deliverable: "shipped" });
-    expect(snap.pinned!.checkpoint).toEqual({ content: { counter: 7 } });
-    expect(snap.memories).toEqual([{ content: "learned A" }, { content: "learned B" }]);
 
     // DB side-effect: run_logs received one row per observable event
     // (output + progress).

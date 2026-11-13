@@ -6,7 +6,7 @@
  *
  * The sidecar exposes a single `/mcp` endpoint to the agent. Inside, we
  * aggregate tools from multiple MCP servers:
- *   - First-party (in-process): {ns}__api_call, run_history, recall_memory.
+ *   - First-party (in-process): {ns}__api_call.
  *   - Third-party (subprocess via SubprocessTransport): notion-mcp,
  *     filesystem-mcp, etc.
  *
@@ -36,14 +36,13 @@ import {
   normaliseMcpToolBody,
   normaliseMcpToolNamespace,
 } from "@appstrate/core/naming";
-import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
 import type { IntegrationSpawnSpec } from "@appstrate/core/sidecar-types";
 import {
-  MAX_PARAMETER_DESCRIPTION_BYTES,
-  MAX_TOOL_DESCRIPTION_BYTES,
+  exposedToolDescriptor,
   notifyDetached,
   sanitiseTextField,
   sanitiseToolDescriptor,
+  toolExclusion,
   type AppstrateMcpClient,
   type AppstrateRequestExtra,
   type AppstrateToolDefinition,
@@ -127,23 +126,6 @@ function relayProgress(extra: AppstrateRequestExtra): ProgressRelay | undefined 
       windowTimer = undefined;
     },
   };
-}
-
-/**
- * Drop the first-party runtime-event channel from a third-party tool result.
- * `dev.appstrate/events` under `_meta` is the trusted channel the platform's
- * own runtime tools (output/log/note/pin) use to surface canonical run
- * events; an integration upstream has no legitimate reason to set it, so we
- * remove it to prevent run-event forgery. Returns the result untouched when
- * the key is not present (the common case).
- */
-function stripForgedRuntimeEvents(result: CallToolResult): CallToolResult {
-  const meta = result._meta;
-  if (!meta || !(RUNTIME_TOOL_EVENTS_META_KEY in meta)) {
-    return result;
-  }
-  const { [RUNTIME_TOOL_EVENTS_META_KEY]: _dropped, ...rest } = meta;
-  return { ...result, _meta: rest };
 }
 
 interface McpHostUpstream {
@@ -420,7 +402,7 @@ export class McpHost {
     // A slot served by several connections puts the selector on every tool it
     // holds, so none of them may declare `connection` itself.
     const admitted = tools.filter(
-      (tool) => (!allowlist || allowlist.has(tool.name)) && !hiddenSet?.has(tool.name),
+      (tool) => toolExclusion(tool.name, allowlist, hiddenSet) === null,
     );
     const slotLabels = this.labelsBySlot().get(normalisedNs) ?? new Set<string>();
     if (admitted.length > 0 && [...slotLabels].some((other) => other !== label)) {
@@ -442,9 +424,7 @@ export class McpHost {
     const trustedReplacements = new Set<string>();
     if (upstream.trusted) {
       const incomingNames = new Set<string>();
-      for (const tool of tools) {
-        if (allowlist && !allowlist.has(tool.name)) continue;
-        if (hiddenSet && hiddenSet.has(tool.name)) continue;
+      for (const tool of admitted) {
         const candidate = `${normalisedNs}__${tool.name}`;
         if (!isValidToolName(candidate)) {
           throw new Error(
@@ -482,25 +462,12 @@ export class McpHost {
       }
     }
     for (const tool of tools) {
-      if (allowlist && !allowlist.has(tool.name)) {
+      const exclusion = toolExclusion(tool.name, allowlist, hiddenSet);
+      if (exclusion !== null) {
         this.options.onLog?.({
           source: `host:${normalisedNs}`,
           level: "info",
-          data: {
-            event: "tool_excluded_by_allowlist",
-            originalName: tool.name,
-          },
-        });
-        continue;
-      }
-      if (hiddenSet && hiddenSet.has(tool.name)) {
-        this.options.onLog?.({
-          source: `host:${normalisedNs}`,
-          level: "info",
-          data: {
-            event: "tool_excluded_by_hidden_tools",
-            originalName: tool.name,
-          },
+          data: { event: `tool_excluded_by_${exclusion}`, originalName: tool.name },
         });
         continue;
       }
@@ -580,26 +547,14 @@ export class McpHost {
           continue;
         }
       }
-      let descriptor: Tool = { ...sanitised, name: finalName };
       if (finalName !== `${normalisedNs}__${tool.name}`) {
-        // The model only sees the exposed name; give it the upstream one so it
-        // can match the tool against the server's own documentation.
         this.options.onLog?.({
           source: `host:${normalisedNs}`,
           level: "info",
           data: { event: "tool_name_rewritten", originalName: tool.name, name: finalName },
         });
-        const upstreamName = JSON.stringify(
-          sanitiseTextField(tool.name, MAX_PARAMETER_DESCRIPTION_BYTES),
-        );
-        descriptor = {
-          ...descriptor,
-          description: sanitiseTextField(
-            `Upstream tool name: ${upstreamName}.${sanitised.description ? `\n\n${sanitised.description}` : ""}`,
-            MAX_TOOL_DESCRIPTION_BYTES,
-          ),
-        };
       }
+      const descriptor = exposedToolDescriptor(sanitised, normalisedNs, finalName);
       this.toolToNamespace.set(finalName, normalisedNs);
       this.toolRoutes.set(
         finalName,
@@ -673,18 +628,11 @@ export class McpHost {
    * Build {@link AppstrateToolDefinition}s — a flat list ready for
    * `createMcpServer(...)`. The handler dispatches `tools/call` to the
    * upstream client identified by the prefix.
-   *
-   * Optional `inject` parameter merges first-party tools ({ns}__api_call,
-   * run_history, recall_memory) into the same flat list. The host does
-   * not validate name collisions between first-party and third-party
-   * tools — first-party names take precedence.
    */
-  buildTools(inject: AppstrateToolDefinition[] = []): AppstrateToolDefinition[] {
-    const firstPartyNames = new Set(inject.map((t) => t.descriptor.name));
+  buildTools(): AppstrateToolDefinition[] {
     const labelsBySlot = this.labelsBySlot();
-    const thirdParty: AppstrateToolDefinition[] = [];
+    const tools: AppstrateToolDefinition[] = [];
     for (const desc of this.toolDescriptors) {
-      if (firstPartyNames.has(desc.name)) continue;
       const routes = this.toolRoutes.get(desc.name)!;
       const forward = async (
         route: ToolRoute,
@@ -695,14 +643,12 @@ export class McpHost {
         const budget = route.trusted ? undefined : this.options.outputBudget;
         let result: CallToolResult;
         try {
-          result = stripForgedRuntimeEvents(
-            await route.client.callTool(
-              { name: route.originalName, arguments: args },
-              {
-                ...(extra.signal ? { signal: extra.signal } : {}),
-                ...(relay ? { onProgress: relay.onProgress } : {}),
-              },
-            ),
+          result = await route.client.callTool(
+            { name: route.originalName, arguments: args },
+            {
+              ...(extra.signal ? { signal: extra.signal } : {}),
+              ...(relay ? { onProgress: relay.onProgress } : {}),
+            },
           );
         } catch (err) {
           // A JSON-RPC error message (or an HTTP body a transport echoes) is tool text too.
@@ -716,14 +662,14 @@ export class McpHost {
       // slot names its connection, so a call always states the account it acts on.
       if (labelsBySlot.get(this.toolToNamespace.get(desc.name)!)!.size < 2) {
         const [sole] = [...routes.values()];
-        thirdParty.push({
+        tools.push({
           descriptor: desc,
           handler: async (args, extra) => forward(sole!, args, extra),
         });
         continue;
       }
       const labels = routeLabels(routes);
-      thirdParty.push({
+      tools.push({
         descriptor: withConnectionParam(desc, routes),
         handler: async (args, extra): Promise<CallToolResult> => {
           const { [CONNECTION_PARAM]: selected, ...rest } = args;
@@ -733,7 +679,7 @@ export class McpHost {
         },
       });
     }
-    return [...inject, ...thirdParty];
+    return tools;
   }
 
   /**

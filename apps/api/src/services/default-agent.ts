@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { PLATFORM_INTEGRATION_ID, PLATFORM_INTEGRATION_RANGE } from "@appstrate/core/integration";
 import { AFPS_SCHEMA_VERSION } from "@appstrate/core/validation";
 import { createOrgItem } from "./package-items/crud.ts";
 import { CONFIG_BY_TYPE } from "./package-items/config.ts";
@@ -50,14 +51,11 @@ export async function provisionDefaultAgentForOrg(
   try {
     const packageId = `@${orgSlug}/hello-world`;
 
-    // The demo agent declares no dependencies: it only needs the prompt plus
-    // the runtime tools every agent gets by default. (`dependencies` is kept
-    // explicit rather than omitted — that is the manifest shape this agent has
-    // always been persisted with.)
+    // The demo agent needs only its prompt and the platform run tools.
     const manifest = {
       ...HELLO_WORLD_MANIFEST,
       name: packageId,
-      dependencies: {},
+      dependencies: { integrations: { [PLATFORM_INTEGRATION_ID]: PLATFORM_INTEGRATION_RANGE } },
     };
 
     await createOrgItem(

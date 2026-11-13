@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import type { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { isJSONRPCRequest } from "@modelcontextprotocol/sdk/types.js";
 
 export interface McpPost {
@@ -102,4 +102,33 @@ export async function serveStatelessPost(
   if (isSseResponse(response)) return releaseWhenSettled(response, release);
   await release();
   return response;
+}
+
+/**
+ * Answer one POST of an authenticated endpoint with `server` on a fresh
+ * stateless transport: no session, a JSON answer unless a request asks for
+ * progress, and the SDK's Host-header allowlist off — it would reject
+ * reverse-proxied hosts, and the DNS-rebinding attack it guards against (a
+ * browser driving a localhost server) needs an endpoint that answers without
+ * the caller's credential. `body` holds the request's bytes, already read by
+ * the caller, and `post` their {@link parseMcpPost} parse; the SDK reads the
+ * bytes itself only when they did not parse.
+ */
+export function serveAuthenticatedStatelessPost(
+  server: Server,
+  request: Request,
+  body: ArrayBuffer,
+  post: McpPost | null,
+): Promise<Response> {
+  const transport = new WebStandardStreamableHTTPServerTransport({
+    sessionIdGenerator: undefined,
+    enableJsonResponse: !post?.requestsProgress,
+    enableDnsRebindingProtection: false,
+  });
+  const forwarded = new Request(request.url, {
+    method: request.method,
+    headers: request.headers,
+    body,
+  });
+  return serveStatelessPost(server, transport, forwarded, post);
 }

@@ -24,9 +24,7 @@ class RecordingSink implements EventSink {
 }
 
 const emptyResult: TerminalRunResult = {
-  memories: [],
   output: null,
-  logs: [],
   status: "success",
 };
 
@@ -40,7 +38,7 @@ describe("CompositeSink", () => {
     const b = new RecordingSink();
     const composite = new CompositeSink([a, b]);
 
-    const ev = event("memory.added", { content: "x" });
+    const ev = event("@my-org/audit.logged", { content: "x" });
     await composite.handle(ev);
 
     expect(a.events).toEqual([ev]);
@@ -65,7 +63,7 @@ describe("CompositeSink", () => {
     const c = new RecordingSink();
     const composite = new CompositeSink([a, b, c]);
 
-    const ev = event("log.written", { level: "info", message: "x" });
+    const ev = event("@my-org/audit.logged", { message: "x" });
 
     await expect(composite.handle(ev)).rejects.toThrow(/boom/);
 
@@ -87,7 +85,7 @@ describe("CompositeSink", () => {
 
   it("works with zero children (no-op)", async () => {
     const composite = new CompositeSink([]);
-    await composite.handle(event("log.written", { level: "info", message: "x" }));
+    await composite.handle(event("@my-org/audit.logged", { message: "x" }));
     await composite.finalize(emptyResult);
   });
 });

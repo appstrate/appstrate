@@ -36,7 +36,6 @@ import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { z } from "zod";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createResourceServerChallenge } from "@better-auth/oauth-provider";
 // `createInsufficientScopeError` marks the error it returns in a module-level
 // WeakSet, and `createResourceServerChallenge` recognises it by asking
@@ -58,7 +57,7 @@ import { APIError } from "better-auth/api";
 import {
   createMcpServer,
   parseMcpPost,
-  serveStatelessPost,
+  serveAuthenticatedStatelessPost,
   type AppstrateResourceProvider,
   type McpPost,
 } from "@appstrate/mcp-transport";
@@ -220,7 +219,7 @@ export function buildServerInstructions(
     ? " Call `import_package_file` only when validation returns BOTH `valid: true` AND `importable: true`, and the user asked to add the package. If conflicts make it non-importable, report them instead of attempting a doomed mutation."
     : "";
   const inlineShortcut = inline
-    ? " For an inline run, pass a PARTIAL canonical AFPS `manifest`: normally set a concise task-specific `display_name` plus the dependencies/configuration needed for the task. The platform derives `name` and defaults omitted boilerplate, `runtime_tools` (log, output, publish_file), and an open object output schema. Every provided field replaces its default exactly; arrays and nested objects are never merged, so `runtime_tools: []` stays empty. You may override every field with a complete deterministic manifest; a strict `output.schema` requires an explicit runtime tool selection containing `output`. The chat shows ONLY lines the run emits via `log`, so instruct it in the top-level `prompt` to log meaningful steps whenever that tool is selected."
+    ? ' For an inline run, pass a PARTIAL canonical AFPS `manifest`: normally set a concise task-specific `display_name` plus the dependencies/configuration needed for the task. The platform derives `name` and defaults omitted boilerplate and an open object output schema; every provided field replaces its default exactly, without merging arrays or nested objects. The platform also adds the `@appstrate/platform` dependency unless `dependencies.integrations` already names it, and selects its `log` tool in `integrations_configuration` unless either `dependencies.integrations` or `integrations_configuration` names it (the dependency alone keeps its `default_tools`); it never changes your entries, and `integrations_configuration["@appstrate/platform"] = { tools: [] }` removes the tools. You may override every field with a complete deterministic manifest. The run has the `output` tool exactly when its manifest declares an `output.schema`. The chat shows ONLY lines the run emits via `log`, so instruct it in the top-level `prompt` to log meaningful steps whenever that tool is selected.'
     : "";
   // Authoring a package means an inline run writing it; without that grant
   // only the validation half of the bullet is true.
@@ -726,27 +725,17 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
         prompts,
       },
     );
-    const raw = c.req.raw;
-    const body = await c.req.arrayBuffer();
-    // `null`: the SDK reads the bytes itself and answers its own parse error.
-    const post = c.get("mcpPost") ?? null;
-    const transport = new WebStandardStreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: !post?.requestsProgress,
-      // Disabled deliberately: the SDK's Host-header allowlist would reject
-      // legitimate reverse-proxied hosts, and the rebinding threat it guards
-      // (a browser tricked into POSTing to a localhost MCP server) doesn't
-      // apply here — `/api/mcp/o/:org` requires platform auth (Bearer/API key,
-      // or a SameSite session cookie), so a cross-site page cannot drive it.
-      enableDnsRebindingProtection: false,
-    });
-
-    // The SDK reads these bytes only when they did not parse here.
-    const forwarded = new Request(raw.url, { method: raw.method, headers: raw.headers, body });
-
-    // Any audit insert the tool layer triggered is already tracked (see
-    // `observe` above) and flushed at shutdown, not here.
-    return serveStatelessPost(server, transport, forwarded, post);
+    // `/api/mcp/o/:org` requires platform auth (Bearer/API key, or a SameSite
+    // session cookie), so a cross-site page cannot drive it. `null` post: the
+    // SDK reads the bytes itself and answers its own parse error. Any audit
+    // insert the tool layer triggered is already tracked (see `observe` above)
+    // and flushed at shutdown, not here.
+    return serveAuthenticatedStatelessPost(
+      server,
+      c.req.raw,
+      await c.req.arrayBuffer(),
+      c.get("mcpPost") ?? null,
+    );
   };
   app.post(MCP_PATH, serveMcp);
   app.post(MCP_SPACE_PATH, serveMcp);

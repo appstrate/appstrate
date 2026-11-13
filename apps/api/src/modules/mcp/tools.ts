@@ -1082,9 +1082,12 @@ const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
     description:
       "Partial canonical AFPS agent manifest (kind:inline). Usually only `display_name` " +
       "plus task-specific dependencies/configuration are needed; `name` is derived and " +
-      "AFPS boilerplate, runtime tools, and an open output schema are defaulted. Every " +
-      "provided field is an exact top-level replacement: arrays and nested objects are not " +
-      "merged, and `runtime_tools: []` is preserved. You may instead provide a complete, " +
+      "AFPS boilerplate and an open output schema are defaulted. Every provided field is an " +
+      "exact top-level replacement: arrays and nested objects are not merged. The platform adds " +
+      "the `@appstrate/platform` dependency unless `dependencies.integrations` names it, and " +
+      "selects its `log` tool unless `dependencies.integrations` or " +
+      "`integrations_configuration` names it. You may " +
+      "instead provide a complete, " +
       "strict deterministic manifest and override every field. Do NOT put the prompt inside " +
       "the manifest — it goes in the separate top-level `prompt` argument.",
     properties: {
@@ -1109,14 +1112,6 @@ const INLINE_ONLY_RUN_AND_WAIT_PROPERTIES: Record<string, object> = {
         type: "object",
         description: "Exact AFPS integration configuration override.",
         additionalProperties: true,
-      },
-      runtime_tools: {
-        type: "array",
-        description:
-          "Exact runtime-tool selection. Omit for " +
-          "log/output/publish_file defaults; " +
-          "an explicit [] disables them all.",
-        items: { type: "string" },
       },
       output: {
         type: "object",
@@ -1174,13 +1169,17 @@ function buildRunAndWaitTool(ctx: McpToolContext, inline: boolean): AppstrateToo
       (inline
         ? "For an inline run, `manifest` is a PARTIAL canonical AFPS manifest: normally set " +
           "only a concise task-specific `display_name` plus task dependencies/configuration. The " +
-          "platform derives `name` and fills omitted AFPS boilerplate, `runtime_tools` (log, output, " +
-          "publish_file), and an open object output schema. Defaults apply only " +
-          "to fields you omit; " +
-          "every field you provide replaces its default exactly, with no array or nested-object merge. " +
-          "That includes `runtime_tools: []`, which stays empty and disables every default runtime tool. " +
+          "platform derives `name` and fills omitted AFPS boilerplate, with an open object " +
+          "`output` schema. Defaults apply only to top-level fields you omit; every field you " +
+          "provide replaces its default exactly, with no array or nested-object merge. The " +
+          "platform also adds the `@appstrate/platform` dependency unless `dependencies.integrations` " +
+          "already names it, and selects its `log` tool in `integrations_configuration` unless " +
+          "either `dependencies.integrations` or `integrations_configuration` names it (the " +
+          "dependency alone keeps its `default_tools`); it never changes your entries, and " +
+          '`integrations_configuration["@appstrate/platform"] = { tools: [] }` removes the tools. ' +
           "A complete deterministic manifest may override every field, including a strict " +
-          "`output.schema`; when it does, its explicit `runtime_tools` must include `output`. The chat " +
+          "`output.schema`. The run has the `output` tool exactly when its manifest declares an " +
+          "`output.schema`. The chat " +
           "shows only lines emitted through `log`, so instruct the run to log meaningful steps whenever " +
           "that tool is selected. Never use an id or a generic display name such as `one-shot`. "
         : "") +

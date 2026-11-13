@@ -99,6 +99,10 @@ describe("mcp catalog", () => {
     expect(operations).not.toContain("getServedSkillArchive");
   });
 
+  it("keeps the run MCP server out: it is a transport for the host executing a run", () => {
+    expect([...getCatalog().operations.keys()]).not.toContain("runToolsMcpPost");
+  });
+
   it("keeps the credential proxy out: `api_call` is its one MCP path", async () => {
     const operations = [...getCatalog().operations.values()];
     expect(operations.filter((op) => op.pathTemplate === "/api/credential-proxy/proxy")).toEqual(

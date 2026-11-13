@@ -36,6 +36,8 @@ function makeRun(overrides: Partial<RunSinkContext> = {}): RunSinkContext {
     orgId: "org_1",
     spaceId: "spc_1",
     packageId: "@acme/agent",
+    userId: null,
+    endUserId: null,
     runOrigin: "remote",
     sinkSecretEncrypted: encrypt("s".repeat(32)),
     sinkExpiresAt: new Date(Date.now() + 3600_000),
@@ -55,7 +57,7 @@ function makeRun(overrides: Partial<RunSinkContext> = {}): RunSinkContext {
 
 describe("verifyRunSignatureHeaders", () => {
   const secret = "s".repeat(32);
-  const body = JSON.stringify({ specversion: "1.0", type: "log.written" });
+  const body = JSON.stringify({ specversion: "1.0", type: "appstrate.progress" });
 
   it("accepts a well-formed signed request", () => {
     const timestampSec = Math.floor(Date.now() / 1000);

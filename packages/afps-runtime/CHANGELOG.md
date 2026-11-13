@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed — the stdout bridge (#2199)
+
+- **BREAKING:** `attachStdoutBridge`, `mergeTerminalResult` and the `sinks/stdout-bridge`
+  module are removed. Nothing writes a canonical event to stdout: the runner emits every
+  event, `output.emitted` and `file.published` included, into the run's sink, and reduces
+  them itself.
+
+### Removed — memories, pinned slots and logs leave `RunResult` (#2199)
+
+- **BREAKING:** `RunResult.memories`, `RunResult.pinned` and the `Memory` / `PinnedSlot` types
+  are removed. `foldEvent` / `reduceEvents` leave `memory.added` and `pinned.set` out of the
+  aggregate: the server that serves the `note` and `pin` tools persists them when the tool is
+  called.
+- **BREAKING:** `memory.added` and `pinned.set` are no longer canonical run events: nothing
+  emits them. `MemoryAddedEvent` and `PinnedSetEvent` leave `CanonicalRunEvent`, the two types
+  leave `CANONICAL_EVENT_TYPES` and `CANONICAL_CONSTRAINTS`, so `isCanonicalRunEvent` rejects
+  them.
+- **BREAKING:** `log.written` is no longer a canonical run event: nothing emits it, the server
+  that serves the `log` tool writes the log line when the tool is called. `LogWrittenEvent`
+  leaves `CanonicalRunEvent`, `CANONICAL_EVENT_TYPES` and `CANONICAL_CONSTRAINTS`;
+  `RunResult.logs`, `LogEntry` and `LogLevel` are removed. Conformance case L4.1 scripts a third-party event and two `output.emitted`;
+  L4.3 checks `output` only.
+
+### Changed — the output schema is read by `readDeclaredOutputSchema` (#2197)
+
+- `buildPlatformPromptInputs` derives `outputSchema` with `readDeclaredOutputSchema`
+  (`@appstrate/afps-shared/output-schema`): an empty `output.schema` (`{}`) yields none, the
+  same reading the runner uses to inject the `output` tool. `renderPlatformPrompt` renders
+  `## Output Format` for every `outputSchema` it receives.
+
 ### Changed — `fetchApiCall` returns a redirect off the allowlist (#2154)
 
 - When gated (no `allowAllUris`), a 3xx whose `Location` matches no `authorizedUris` entry is

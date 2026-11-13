@@ -3,7 +3,7 @@ title: Memory
 description: How agents keep a checkpoint, named slots and an archive of notes across runs, and who can read them.
 ---
 
-A run starts with a fresh sandbox, so anything the agent should remember must be written to the platform. Appstrate gives agents three kinds of persistent state. They live in one store and are written with two opt-in [runtime tools](/features/tools), `note` and `pin`.
+A run starts with a fresh sandbox, so anything the agent should remember must be written to the platform. Appstrate gives agents three kinds of persistent state. They live in one store and are written with two [platform tools](/features/tools), `note` and `pin`.
 
 | Kind               | Written with                 | Visible to the agent                    | Typical use                                        |
 | ------------------ | ---------------------------- | --------------------------------------- | -------------------------------------------------- |
@@ -11,10 +11,15 @@ A run starts with a fresh sandbox, so anything the agent should remember must be
 | **Checkpoint**     | `pin("checkpoint", content)` | Injected as the **Checkpoint** section  | Where the last run stopped: cursors, processed ids |
 | **Archive memory** | `note(content)`              | Only on demand, through `recall_memory` | Facts and discoveries worth keeping                |
 
-To use them, add the tools to `runtime_tools`. Excerpt of the agent manifest:
+To use them, declare the `@appstrate/platform` integration. Excerpt of the agent manifest:
 
 ```json
-{ "runtime_tools": ["output", "note", "pin"] }
+{
+  "dependencies": { "integrations": { "@appstrate/platform": "^1.0.0" } },
+  "integrations_configuration": {
+    "@appstrate/platform": { "tools": ["note", "pin", "recall_memory"] }
+  }
+}
 ```
 
 ## Pinned slots and the checkpoint

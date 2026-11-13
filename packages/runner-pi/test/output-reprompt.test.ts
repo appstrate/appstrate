@@ -48,7 +48,7 @@ describe("maybeRepromptForOutput — guards", () => {
   it("does NOT re-prompt when the agent already called output", async () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
-    const bridge = installSessionBridge(session, sink, RUN_ID, { terminalTools: ["output"] });
+    const bridge = installSessionBridge(session, sink, RUN_ID, { outputRequired: true });
 
     callOutput(session);
     endTurn(session, { role: "assistant", stopReason: "stop", content: [] });
@@ -56,7 +56,7 @@ describe("maybeRepromptForOutput — guards", () => {
     const reprompted = await maybeRepromptForOutput({
       session,
       bridge,
-      terminalTools: ["output"],
+      outputRequired: true,
       sink,
       runId: RUN_ID,
     });
@@ -66,7 +66,7 @@ describe("maybeRepromptForOutput — guards", () => {
     expect(repromptEvents(sink.events)).toHaveLength(0);
   });
 
-  it("does NOT re-prompt when `output` is not a terminal tool (agent declares no output schema)", async () => {
+  it("does NOT re-prompt when the run owes no `output` (agent declares no output schema)", async () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
     const bridge = installSessionBridge(session, sink, RUN_ID);
@@ -76,7 +76,7 @@ describe("maybeRepromptForOutput — guards", () => {
     const reprompted = await maybeRepromptForOutput({
       session,
       bridge,
-      terminalTools: [],
+      outputRequired: false,
       sink,
       runId: RUN_ID,
     });
@@ -88,7 +88,7 @@ describe("maybeRepromptForOutput — guards", () => {
   it("re-prompts exactly once, with a warn-level `output_reprompt` breadcrumb, on a clean finish without output", async () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
-    const bridge = installSessionBridge(session, sink, RUN_ID, { terminalTools: ["output"] });
+    const bridge = installSessionBridge(session, sink, RUN_ID, { outputRequired: true });
 
     endTurn(session, {
       role: "assistant",
@@ -99,7 +99,7 @@ describe("maybeRepromptForOutput — guards", () => {
     const reprompted = await maybeRepromptForOutput({
       session,
       bridge,
-      terminalTools: ["output"],
+      outputRequired: true,
       sink,
       runId: RUN_ID,
       now: () => 1234,
@@ -123,7 +123,7 @@ describe("maybeRepromptForOutput — guards", () => {
   it("does NOT re-prompt a cancelled run (abort signal already fired)", async () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
-    const bridge = installSessionBridge(session, sink, RUN_ID, { terminalTools: ["output"] });
+    const bridge = installSessionBridge(session, sink, RUN_ID, { outputRequired: true });
 
     endTurn(session, { role: "assistant", stopReason: "stop", content: [] });
 
@@ -133,7 +133,7 @@ describe("maybeRepromptForOutput — guards", () => {
     const reprompted = await maybeRepromptForOutput({
       session,
       bridge,
-      terminalTools: ["output"],
+      outputRequired: true,
       sink,
       runId: RUN_ID,
       signal: controller.signal,
@@ -147,7 +147,7 @@ describe("maybeRepromptForOutput — guards", () => {
   it("does NOT re-prompt a session whose last turn ended aborted (no terminal tool completed)", async () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
-    const bridge = installSessionBridge(session, sink, RUN_ID, { terminalTools: ["output"] });
+    const bridge = installSessionBridge(session, sink, RUN_ID, { outputRequired: true });
 
     endTurn(session, {
       role: "assistant",
@@ -159,7 +159,7 @@ describe("maybeRepromptForOutput — guards", () => {
     const reprompted = await maybeRepromptForOutput({
       session,
       bridge,
-      terminalTools: ["output"],
+      outputRequired: true,
       sink,
       runId: RUN_ID,
     });
@@ -171,7 +171,7 @@ describe("maybeRepromptForOutput — guards", () => {
   it("does NOT re-prompt a session whose last turn ended in a provider error", async () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
-    const bridge = installSessionBridge(session, sink, RUN_ID, { terminalTools: ["output"] });
+    const bridge = installSessionBridge(session, sink, RUN_ID, { outputRequired: true });
 
     endTurn(session, {
       role: "assistant",
@@ -183,7 +183,7 @@ describe("maybeRepromptForOutput — guards", () => {
     const reprompted = await maybeRepromptForOutput({
       session,
       bridge,
-      terminalTools: ["output"],
+      outputRequired: true,
       sink,
       runId: RUN_ID,
     });
@@ -195,7 +195,7 @@ describe("maybeRepromptForOutput — guards", () => {
   it("propagates a cancellation raised DURING the corrective turn", async () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
-    const bridge = installSessionBridge(session, sink, RUN_ID, { terminalTools: ["output"] });
+    const bridge = installSessionBridge(session, sink, RUN_ID, { outputRequired: true });
 
     endTurn(session, { role: "assistant", stopReason: "stop", content: [] });
 
@@ -208,7 +208,7 @@ describe("maybeRepromptForOutput — guards", () => {
       maybeRepromptForOutput({
         session,
         bridge,
-        terminalTools: ["output"],
+        outputRequired: true,
         sink,
         runId: RUN_ID,
         race: (promise) => Promise.race([promise, rejection]) as typeof promise,
@@ -221,14 +221,14 @@ describe("maybeRepromptForOutput — corrective turn is restricted to `output` +
   it("exposes ONLY `output` and `read` on the corrective turn, and narrows before prompting", async () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
-    const bridge = installSessionBridge(session, sink, RUN_ID, { terminalTools: ["output"] });
+    const bridge = installSessionBridge(session, sink, RUN_ID, { outputRequired: true });
 
     endTurn(session, { role: "assistant", stopReason: "stop", content: [] });
 
     const reprompted = await maybeRepromptForOutput({
       session,
       bridge,
-      terminalTools: ["output"],
+      outputRequired: true,
       sink,
       runId: RUN_ID,
     });
@@ -248,14 +248,14 @@ describe("maybeRepromptForOutput — corrective turn is restricted to `output` +
   it("tells the model it may re-read its own files — never forbids the one tool it grants", async () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
-    const bridge = installSessionBridge(session, sink, RUN_ID, { terminalTools: ["output"] });
+    const bridge = installSessionBridge(session, sink, RUN_ID, { outputRequired: true });
 
     endTurn(session, { role: "assistant", stopReason: "stop", content: [] });
 
     await maybeRepromptForOutput({
       session,
       bridge,
-      terminalTools: ["output"],
+      outputRequired: true,
       sink,
       runId: RUN_ID,
     });
@@ -274,14 +274,14 @@ describe("maybeRepromptForOutput — corrective turn is restricted to `output` +
     // but asking for a name that cannot resolve hides which tools the turn
     // really got. Narrowing must still happen — `output` is what matters.
     const session = createFakeSession({ toolRegistry: ["bash", "edit", "write", "output"] });
-    const bridge = installSessionBridge(session, sink, RUN_ID, { terminalTools: ["output"] });
+    const bridge = installSessionBridge(session, sink, RUN_ID, { outputRequired: true });
 
     endTurn(session, { role: "assistant", stopReason: "stop", content: [] });
 
     const reprompted = await maybeRepromptForOutput({
       session,
       bridge,
-      terminalTools: ["output"],
+      outputRequired: true,
       sink,
       runId: RUN_ID,
     });
@@ -294,19 +294,19 @@ describe("maybeRepromptForOutput — corrective turn is restricted to `output` +
 
   it("does NOT narrow — and never issues a tool-less turn — when the SDK registry has no `output`", async () => {
     const sink = createInternalCapture();
-    // `terminalTools` says the runner was configured with `output`, but the SDK
+    // `outputRequired` says the runner was configured with `output`, but the SDK
     // registry never resolved that name. Narrowing would leave only `read` (or
     // nothing), so the turn must go out unrestricted and let the platform's
     // finalize-time validation stay the fallback.
     const session = createFakeSession({ toolRegistry: ["read", "bash", "edit", "write"] });
-    const bridge = installSessionBridge(session, sink, RUN_ID, { terminalTools: ["output"] });
+    const bridge = installSessionBridge(session, sink, RUN_ID, { outputRequired: true });
 
     endTurn(session, { role: "assistant", stopReason: "stop", content: [] });
 
     const reprompted = await maybeRepromptForOutput({
       session,
       bridge,
-      terminalTools: ["output"],
+      outputRequired: true,
       sink,
       runId: RUN_ID,
     });
@@ -322,7 +322,7 @@ describe("maybeRepromptForOutput — corrective turn is restricted to `output` +
   it("leaves the tool set untouched when a guard declines the corrective turn", async () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
-    const bridge = installSessionBridge(session, sink, RUN_ID, { terminalTools: ["output"] });
+    const bridge = installSessionBridge(session, sink, RUN_ID, { outputRequired: true });
 
     callOutput(session);
     endTurn(session, { role: "assistant", stopReason: "stop", content: [] });
@@ -330,7 +330,7 @@ describe("maybeRepromptForOutput — corrective turn is restricted to `output` +
     const reprompted = await maybeRepromptForOutput({
       session,
       bridge,
-      terminalTools: ["output"],
+      outputRequired: true,
       sink,
       runId: RUN_ID,
     });
@@ -365,7 +365,7 @@ describe("PiRunner.run — missing-output re-prompt end to end", () => {
           content: [{ type: "text", text: "Sélection de 7 informations marquantes effectuée" }],
         });
       },
-      { terminalTools: ["output"] },
+      { outputSchema: { type: "object" } },
     );
 
     await runner.run({ bundle: STUB_BUNDLE, context: makeContext(), eventSink: sink });
@@ -390,7 +390,7 @@ describe("PiRunner.run — missing-output re-prompt end to end", () => {
         };
         endTurn(session, { role: "assistant", stopReason: "stop", content: [] });
       },
-      { terminalTools: ["output"] },
+      { outputSchema: { type: "object" } },
     );
 
     await runner.run({ bundle: STUB_BUNDLE, context: makeContext(), eventSink: sink });
@@ -419,7 +419,7 @@ describe("PiRunner.run — missing-output re-prompt end to end", () => {
           content: [],
         });
       },
-      { terminalTools: ["output"] },
+      { outputSchema: { type: "object" } },
     );
 
     await runner.run({ bundle: STUB_BUNDLE, context: makeContext(), eventSink: sink });

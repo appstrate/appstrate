@@ -134,7 +134,7 @@ appstrate/
 
 Import from workspace packages using their published subpaths. **Core has no barrel** — import each module by subpath.
 
-- `@appstrate/core/*` — validation, zip, naming, dependencies, integrity, semver, version-policy, system-packages, form, schemas, logger, env, storage, ssrf, dist-tags, module, permissions, runtime-tools-catalog, integration, mcp-server, sidecar-types
+- `@appstrate/core/*` — validation, zip, naming, dependencies, integrity, semver, version-policy, system-packages, form, schemas, logger, env, storage, ssrf, dist-tags, module, permissions, integration, mcp-server, sidecar-types
 - `@appstrate/db/schema` -- Drizzle schema. **Every** table lives here, including the ones a module reads/writes (`schema/oidc.ts`, `schema/webhooks.ts`, …). Modules own no schema, no migrations, no `schema.ts` of their own
 - `@appstrate/db/client` -- `db` + `listenClient`
 - `@appstrate/env` -- `getEnv()` (Zod-validated, cached, fail-fast)
@@ -173,10 +173,10 @@ User Browser (BrowserRouter SPA)  Platform (Bun + Hono :3000)
      |   Docker network: appstrate-exec-{runId} (isolated bridge)
      |   ┌─ Sidecar Container (alias "sidecar") ──────────────┐
      |   │  RUN_TOKEN, PLATFORM_API_URL via env               │
-     |   │  /mcp (JSON-RPC stateless): run_history,           │
-     |   │    recall_memory, {ns}__api_call (cred injection), │
-     |   │    {ns}__{tool} (spawned integrations — one runner │
-     |   │    container per integration)                      │
+     |   │  /mcp (JSON-RPC stateless): {ns}__api_call (cred   │
+     |   │    injection), {ns}__{tool} (spawned integrations  │
+     |   │    — one runner container per integration; remote  │
+     |   │    ones, @appstrate/platform → /internal/mcp)      │
      |   ├─ Agent Container (Pi Coding Agent, Bun) ───────────┤
      |   │  AGENT_PROMPT, LLM_*; SIDECAR_AUTH_TOKEN (sidecar- │
      |   │  only bearer, NOT the run token); it + SIDECAR_URL │
@@ -203,7 +203,7 @@ Agent manifest splits dependency from config: version on `dependencies.integrati
 **`docs/architecture/SIDECAR.md` owns this surface** — the tool list, the argument shapes, the auth token, the SSRF tiers and the `/llm/*` behaviour all live there, next to the retry and egress detail that only makes sense alongside them. Do not re-describe them here; a second copy drifts, and the copy that used to live here had. The shape, so you can recognise it:
 
 - The sidecar exposes `/mcp` (Streamable HTTP, stateless JSON-RPC) as the agent's exclusive cross-boundary surface, alongside `/health`, `GET /integrations/boot-report` and `ALL /llm/*`
-- Tools are registered as Pi tools at container boot (`runtime-pi/mcp/direct.ts`): `{ns}__api_call` (+ `{ns}__api_upload`) per opted-in integration auth, plus the first-party `run_history` and `recall_memory`
+- Tools are registered as Pi tools at container boot (`runtime-pi/mcp/direct.ts`): `{ns}__api_call` (+ `{ns}__api_upload`) per opted-in integration auth, plus every tool of the run's integrations under `{ns}__{tool}` — `run_history` and `recall_memory` included, served by the `@appstrate/platform` system integration through the platform's run MCP server (`POST /internal/mcp`)
 - Every route except `/health` requires the per-run `x-appstrate-sidecar-auth` token; deny-by-default middleware in `runtime-pi/sidecar/app.ts`
 - Zero-knowledge enforcement: `runtime-pi/launcher.ts` hands `SIDECAR_URL`, `SIDECAR_AUTH_TOKEN` and the sink credentials to the entrypoint over stdin, never in its environment, and both processes are non-dumpable — withholding the URL removes the convenience, the token removes the capability
 - The legacy HTTP `/proxy` and `/run-history` routes are fully retired — runners 1.x are not compatible
@@ -218,9 +218,9 @@ Agent manifest splits dependency from config: version on `dependencies.integrati
 
 - Single `package_persistence` table with `(actor_type, actor_id)` scope (`member` / `end_user` / `shared`) and orthogonal `(key, pinned)` attributes
 - Three quadrants: archive (key=null, pinned=false), pinned memo (key=null, pinned=true), pinned named slot (key=string, pinned=true)
-- Write tools: `note(content, scope?)` and `pin(key, content, scope?)` are **runtime tools**, defined in `packages/core/src/runtime-tool-defs.ts` and selected per agent via `runtime_tools`. They are not packages — there is no `@appstrate/note` or `@appstrate/pin` in `system-packages/`
+- Write tools: `note(content, scope?)` and `pin(key, content, scope?)` are tools of the `@appstrate/platform` system integration, served by the run MCP server (`apps/api/src/services/run-tools-mcp.ts`), which writes at call time
 - Legacy `add-memory` / `set-checkpoint` system tools are retired; `runs.state` + `package_memories` are merged into `package_persistence`
-- Wire format: `RunResult.pinned: Record<string, PinnedSlot>` (top-level `RunResult.checkpoint` mirror was dropped)
+- The finalize body (`RunResult`) carries no memories or pinned slots; `pin("checkpoint", …)` also writes `runs.checkpoint` at call time
 
 ### AFPS bundle runtime — `@appstrate/afps-runtime`
 

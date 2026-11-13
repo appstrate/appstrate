@@ -4678,7 +4678,7 @@ export interface paths {
         put?: never;
         /**
          * Publish an agent-produced file (HMAC, streaming)
-         * @description Posted by the agent runtime — via the `publish_file` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` file attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `FILE_MAX_BYTES`, 100 MiB by default); metadata is carried in the `X-File-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing file with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).
+         * @description Posted by the agent runtime — via the runner's `publish_file` tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` file attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `FILE_MAX_BYTES`, 100 MiB by default); metadata is carried in the `X-File-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing file with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).
          */
         post: operations["publishRunFile"];
         delete?: never;
@@ -4701,6 +4701,30 @@ export interface paths {
         get: operations["fetchRunFile"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{runId}/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Run MCP server of a remote run (GET)
+         * @description The GET channel of the run MCP server. The server is stateless and opens no standalone server-initiated SSE stream, so GET (and every verb but POST) answers 405.
+         */
+        get: operations["runToolsMcpGet"];
+        put?: never;
+        /**
+         * Run MCP server of a remote run (HMAC)
+         * @description Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the `@appstrate/platform` system integration — `log`, `note`, `pin`, `recall_memory`, `run_history`, `notify` — for one run. Each tool writes at call time: `log` appends a run log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's checkpoint snapshot that `run_history` returns, `notify` an `agent_message` notification to each recipient of the run's completion notification, once per run. Rate-limited to 200 messages a minute per run. Mounted here for the host executing a remote run. Same Standard Webhooks HMAC auth as the event routes, keyed on the run's sink secret: the signature covers the exact request body bytes. It holds as long as the sink is open, whatever the caller's session. A platform-origin run answers 404 (its sidecar serves these tools on `/internal/mcp`).
+         */
+        post: operations["runToolsMcpPost"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5475,6 +5499,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/internal/mcp": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Run MCP server of a platform run (GET)
+         * @description The GET channel of the run MCP server. The server is stateless and opens no standalone server-initiated SSE stream, so GET (and every verb but POST) answers 405. Container-to-host only.
+         */
+        get: operations["internalRunToolsMcpGet"];
+        put?: never;
+        /**
+         * Run MCP server of a platform run
+         * @description Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the `@appstrate/platform` system integration — `log`, `note`, `pin`, `recall_memory`, `run_history`, `notify` — for one run. Each tool writes at call time: `log` appends a run log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's checkpoint snapshot that `run_history` returns, `notify` an `agent_message` notification to each recipient of the run's completion notification, once per run. Rate-limited to 200 messages a minute per run. Mounted here for the sidecar. Container-to-host only. Auth via Bearer run token, which names the run; a run that is not `running` is refused with 403.
+         */
+        post: operations["internalRunToolsMcpPost"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/internal/mcp-server-bundle/{scope}/{name}": {
         parameters: {
             query?: never;
@@ -5487,26 +5535,6 @@ export interface paths {
          * @description Container-to-host only. Auth via Bearer run token. Called by the sidecar's integrations-boot to materialise an integration's MCP server before spawning a runner container. In AFPS a local-source integration references a SEPARATE mcp-server package via `source.server.name`; this endpoint serves that package's bundle. It verifies that the run's agent declares an ACTIVE integration (in `dependencies.integrations`) that references this mcp-server — orthogonal access control to the credentials endpoint. An ephemeral CONNECT run has neither a run row nor an agent, so its token is authorised instead against the launcher-published grant, by exact match on the single mcp-server and concrete version its spawn spec resolved — strictly narrower than the dependency walk, never wider. Returns the raw ZIP archive (`application/zip`). The sidecar passes `?version=` with the concrete version the spawn resolver pinned from `source.server.version` so the bytes match the manifest the resolver read. It is omitted for system mcp-servers: the spawn resolver answers those from the in-memory boot registry, which holds one version per id, so no concrete version is pinned onto the spawn spec and there is nothing for the sidecar to forward. (They do have `package_versions` rows — the route simply never reaches that lookup for them, short-circuiting on the registry first.) For any other mcp-server `?version=` is mandatory — omitting it is a 400, never a fallback to the newest published version (that fallback would skew the manifest from the bytes).
          */
         get: operations["getMcpServerBundle"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/internal/memories": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Recall archive memories
-         * @description Backs the agent-facing `recall_memory` MCP tool. Returns archive memories (pinned=false) visible to the run's actor, optionally filtered by an ILIKE substring match against content. Pinned memories are NOT returned — they are already injected into the system prompt. Container-to-host only. Auth via Bearer run token.
-         */
-        get: operations["recallMemories"];
         put?: never;
         post?: never;
         delete?: never;
@@ -5549,26 +5577,6 @@ export interface paths {
          * @description Sidecar-only. Auth via Bearer run token. Forces a refresh regardless of expiry; on a revoked or missing refresh token, flips needsReconnection=true on the connection and returns 410.
          */
         post: operations["refreshOAuthModelProviderToken"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/internal/run-history": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Fetch run history
-         * @description Container-to-host only. Auth via Bearer run token.
-         */
-        get: operations["getRunHistory"];
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5802,8 +5810,8 @@ export interface components {
                 };
             };
         };
-        /** @description AFPS Agent manifest extended with Appstrate platform fields. Standard fields are defined by the AFPS Agent schema. Most extension fields use the x- prefix per AFPS §10, with the exception of the Appstrate-specific top-level `runtime_tools` field documented below. */
-        AgentManifest: ({
+        /** @description AFPS Agent manifest. Standard fields are defined by the AFPS Agent schema; Appstrate's extensions live under `_meta` keys of the `dev.appstrate/` namespace (`_meta["dev.appstrate/*"]`, AFPS §10). */
+        AgentManifest: {
             name: string;
             version: string;
             /** @constant */
@@ -5944,9 +5952,6 @@ export interface components {
             timeout?: number;
         } & {
             [key: string]: unknown;
-        }) & {
-            /** @description Appstrate top-level extension: runtime tools the agent may use. Optional. An id outside this enum is rejected on author input and dropped (with the drop reported) when read back from a stored manifest. */
-            runtime_tools?: ("output" | "log" | "note" | "pin" | "publish_file")[];
         };
         AgentSkillRef: {
             id: string;
@@ -7020,7 +7025,7 @@ export interface components {
             } | null;
             /** @description What the run produced: the structured output, and nothing else. Human-facing deliverables are files (see the run's files), not fields here. `null` while the run is in flight or when no output was emitted. */
             result: {
-                /** @description Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped. */
+                /** @description Structured JSON emitted via the `output` tool the runner injects from the agent's `output.schema`. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped. */
                 output?: unknown;
             } | null;
             /** @description Terminal summary of the run's end-of-run `outputs/` sweep. `status: "partial"` means at least one deliverable was LOST (upload abandoned after retries, or a file over the per-file cap); `failed` lists each lost file's name + a stable code (`file_too_large`, `quota_exceeded`, `conflict`, `upload_failed`). Independent of the run `status` — a successful run can still be `partial`. Null on older runs / containers that never reported it. */
@@ -19013,6 +19018,32 @@ export interface operations {
                             read_at: string | null;
                             /** Format: date-time */
                             createdAt: string;
+                        } | {
+                            /**
+                             * Format: uuid
+                             * @description Notification id
+                             */
+                            id: string;
+                            /** @constant */
+                            type: "agent_message";
+                            /** @description Originating run id, when the notification references one */
+                            runId: string | null;
+                            /** @description Render-without-join data. */
+                            payload: {
+                                /** @description The agent of the run that sent it; null when the run no longer references its agent. */
+                                packageId: string | null;
+                                /** @description Headline the agent wrote (`notify` tool). */
+                                title: string;
+                                /** @description Body the agent wrote (`notify` tool). */
+                                message: string;
+                            } | null;
+                            /**
+                             * Format: date-time
+                             * @description When the recipient marked it read; null if unread
+                             */
+                            read_at: string | null;
+                            /** Format: date-time */
+                            createdAt: string;
                         })[];
                         /** @description True when another page follows — page via the Link header cursor */
                         hasMore: boolean;
@@ -22433,7 +22464,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgPackageItemDetail"];
                 };
             };
-            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization. */
+            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. Every agent manifest rule answers `invalid_manifest`. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -22680,7 +22711,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgPackageItemDetail"];
                 };
             };
-            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`. */
+            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. Every agent manifest rule answers `invalid_manifest`. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -22777,7 +22808,7 @@ export interface operations {
                     "application/json": components["schemas"]["PackageVersionDetail"];
                 };
             };
-            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`. */
+            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. Every agent manifest rule answers `invalid_manifest`. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -22938,7 +22969,7 @@ export interface operations {
                     "application/json": components["schemas"]["OrgPackageItemDetail"];
                 };
             };
-            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`. */
+            /** @description Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. Every agent manifest rule answers `invalid_manifest`. */
             400: components["responses"]["ValidationError"];
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
@@ -25151,10 +25182,7 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": {
-                    memories?: unknown[];
-                    pinned?: Record<string, never>;
                     output?: unknown;
-                    logs?: unknown[];
                     error?: {
                         message?: string;
                         stack?: string;
@@ -25534,6 +25562,170 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+            503: components["responses"]["EncryptionKeyUnavailable"];
+        };
+    };
+    runToolsMcpGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description `method_not_allowed` — the stateless server has no GET stream; `Allow: POST`. */
+            405: {
+                headers: {
+                    Allow?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    runToolsMcpPost: {
+        parameters: {
+            query?: never;
+            header: {
+                "webhook-id": string;
+                "webhook-timestamp": string;
+                "webhook-signature": string;
+            };
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    jsonrpc: "2.0";
+                    id?: string | number | null;
+                    method: string;
+                    params?: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description JSON-RPC response. Served as `text/event-stream` when a request carries `params._meta.progressToken`, as `application/json` otherwise. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                    "text/event-stream": string;
+                };
+            };
+            /** @description The body held only JSON-RPC notifications or responses (e.g. `notifications/initialized`): accepted, no body. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `application/json`: the MCP transport's JSON-RPC error — unparseable JSON (`-32700`), an invalid JSON-RPC message or batch (`-32700`/`-32600`), or an unsupported `MCP-Protocol-Version` header (`-32000`). `application/problem+json`: a request the platform refuses before the transport. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        jsonrpc: "2.0";
+                        id: null;
+                        error: {
+                            code: number;
+                            message: string;
+                            data?: unknown;
+                        };
+                    };
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance` */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `not_found` — no run with this id, or a platform-origin run. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `Accept` does not list both `application/json` and `text/event-stream` (`-32000`). */
+            406: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        jsonrpc: "2.0";
+                        id: null;
+                        error: {
+                            code: number;
+                            message: string;
+                            data?: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description `run_sink_closed` | `run_sink_expired` */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `payload_too_large` — the request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware, before the MCP transport). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `Content-Type` is not `application/json` (`-32000`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        jsonrpc: "2.0";
+                        id: null;
+                        error: {
+                            code: number;
+                            message: string;
+                            data?: unknown;
+                        };
+                    };
                 };
             };
             429: components["responses"]["RateLimited"];
@@ -28750,6 +28942,137 @@ export interface operations {
             };
         };
     };
+    internalRunToolsMcpGet: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description `method_not_allowed` — the stateless server has no GET stream; `Allow: POST`. */
+            405: {
+                headers: {
+                    Allow?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    internalRunToolsMcpPost: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    jsonrpc: "2.0";
+                    id?: string | number | null;
+                    method: string;
+                    params?: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description JSON-RPC response. Served as `text/event-stream` when a request carries `params._meta.progressToken`, as `application/json` otherwise. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                    "text/event-stream": string;
+                };
+            };
+            /** @description The body held only JSON-RPC notifications or responses (e.g. `notifications/initialized`): accepted, no body. */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `application/json`: the MCP transport's JSON-RPC error — unparseable JSON (`-32700`), an invalid JSON-RPC message or batch (`-32700`/`-32600`), or an unsupported `MCP-Protocol-Version` header (`-32000`). `application/problem+json`: a request the platform refuses before the transport. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        jsonrpc: "2.0";
+                        id: null;
+                        error: {
+                            code: number;
+                            message: string;
+                            data?: unknown;
+                        };
+                    };
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description `Accept` does not list both `application/json` and `text/event-stream` (`-32000`). */
+            406: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        jsonrpc: "2.0";
+                        id: null;
+                        error: {
+                            code: number;
+                            message: string;
+                            data?: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description `payload_too_large` — the request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware, before the MCP transport). */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `Content-Type` is not `application/json` (`-32000`). */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        jsonrpc: "2.0";
+                        id: null;
+                        error: {
+                            code: number;
+                            message: string;
+                            data?: unknown;
+                        };
+                    };
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
     getMcpServerBundle: {
         parameters: {
             query?: {
@@ -28797,59 +29120,6 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-        };
-    };
-    recallMemories: {
-        parameters: {
-            query?: {
-                /** @description Optional case-insensitive substring filter on memory content. Empty / absent returns the most recent archive memories. */
-                q?: string;
-                /** @description Max number of memories to return (1-50, default 10). */
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Recalled memories */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "memories": [
-                     *         {
-                     *           "id": 42,
-                     *           "content": "User prefers Python over JS for data tasks",
-                     *           "createdAt": "2026-04-20T10:00:00Z",
-                     *           "actor_type": "user",
-                     *           "actor_id": "usr_abc"
-                     *         }
-                     *       ]
-                     *     }
-                     */
-                    "application/json": {
-                        memories: {
-                            id: number;
-                            content: unknown;
-                            /** Format: date-time */
-                            createdAt: string;
-                            /** @enum {string} */
-                            actor_type: "user" | "end_user" | "shared";
-                            actor_id?: string | null;
-                        }[];
-                    };
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
         };
     };
     getOAuthModelProviderToken: {
@@ -28963,59 +29233,6 @@ export interface operations {
                 };
             };
             503: components["responses"]["EncryptionKeyUnavailable"];
-        };
-    };
-    getRunHistory: {
-        parameters: {
-            query?: {
-                /** @description Max number of runs to return (1-50, default 10) */
-                limit?: number;
-                /** @description Comma-separated fields to include: "checkpoint", "result" (default: "checkpoint") */
-                fields?: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Run history */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "object": "list",
-                     *       "hasMore": false,
-                     *       "data": [
-                     *         {
-                     *           "id": "run_cm9abc123",
-                     *           "status": "success",
-                     *           "checkpoint": {
-                     *             "lastProcessedId": 42
-                     *           },
-                     *           "date": "2026-01-14T09:00:00Z",
-                     *           "duration": 1234
-                     *         }
-                     *       ]
-                     *     }
-                     */
-                    "application/json": {
-                        /** @enum {string} */
-                        object: "list";
-                        data: Record<string, never>[];
-                        hasMore: boolean;
-                    };
-                };
-            };
-            /** @description A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry. */
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-            500: components["responses"]["InternalServerError"];
         };
     };
     acceptInvitation: {

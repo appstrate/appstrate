@@ -85,7 +85,7 @@ export async function assertMcpServerActivatable(
   try {
     const bytes = await downloadVersionZip(packageId, version.version, version.integrity);
     if (!bytes) throw new Error(`archive for ${packageId}@${version.version} is missing`);
-    const parsed = parsePackageZip(new Uint8Array(bytes), { retiredRuntimeTools: "drop" });
+    const parsed = parsePackageZip(new Uint8Array(bytes), { retiredVocabulary: "tolerate" });
     if (parsed.type !== "mcp-server" || parsed.packageId !== packageId) {
       throw new Error(
         `archive identity is ${parsed.packageId} (${parsed.type}), expected ${packageId} (mcp-server)`,

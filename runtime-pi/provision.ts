@@ -18,6 +18,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { sign } from "@appstrate/afps-runtime/events";
+import { sinkSiblingUrl } from "@appstrate/afps-runtime/sinks";
 import { computeBackoffDelayMs, isRetryableHttpStatus } from "@appstrate/afps-shared/backoff";
 import { getErrorMessage } from "@appstrate/core/errors";
 
@@ -160,7 +161,7 @@ export async function signedGetWithRetry(url: string, deps: ProvisionDeps): Prom
  * loud instead.
  */
 export async function provisionWorkspace(deps: ProvisionDeps): Promise<void> {
-  const url = deps.sinkUrl.replace(/\/events$/, "/workspace");
+  const url = sinkSiblingUrl(deps.sinkUrl, "workspace");
   let res: Response;
   try {
     res = await signedGetWithRetry(url, deps);
@@ -235,7 +236,7 @@ export async function provisionFiles(deps: ProvisionDeps): Promise<void> {
   // produce a `documents`-keyed body here, because the only writer of that
   // body is the platform's `parseRunFilesManifest`, which throws on the
   // retired spelling rather than serving it.
-  const manifestUrl = deps.sinkUrl.replace(/\/events$/, "/files");
+  const manifestUrl = sinkSiblingUrl(deps.sinkUrl, "files");
   let manifestRes: Response;
   try {
     manifestRes = await signedGetWithRetry(manifestUrl, deps);

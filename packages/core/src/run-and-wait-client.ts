@@ -4,6 +4,7 @@ import { isFileProducedByRun } from "./file-uri.ts";
 import { asRecordOrNull } from "./safe-json.ts";
 import { encodePackageIdPath, toSlug } from "./naming.ts";
 import { terminalRunStatusValues } from "./run-status.ts";
+import { PLATFORM_INTEGRATION_ID, PLATFORM_INTEGRATION_RANGE } from "./integration.ts";
 import { AFPS_SCHEMA_URLS, AFPS_SCHEMA_VERSION } from "./validation.ts";
 
 /**
@@ -154,16 +155,21 @@ type MaterializedManifest =
  * Turn the concise manifest accepted by `run_and_wait` into the one canonical
  * AFPS manifest sent to the inline-run route.
  *
- * This is a shallow defaulting boundary by design: defaults fill ABSENT
- * top-level fields only, while every caller-supplied field replaces its
- * default verbatim. In particular, an explicit `runtime_tools: []` remains an
- * empty array; no capability is silently re-injected. Nested deterministic
- * contracts such as `output.schema` therefore remain entirely caller-owned.
- *
- * `output` is part of the convenience runtime-tools default rather than an
- * independent default. Once a caller explicitly selects `runtime_tools`, an
- * absent `output` stays absent so side-effect-only agents — including
- * `runtime_tools: []` — remain expressible.
+ * Defaults fill ABSENT top-level fields, and every caller-supplied field
+ * replaces its default verbatim, with one exception: the tables keyed by
+ * package id (`dependencies.integrations`, `integrations_configuration`)
+ * receive their defaults entry by entry, and the caller's own entries are
+ * never touched. `dependencies.integrations["@appstrate/platform"] = PLATFORM_INTEGRATION_RANGE`
+ * is added when `dependencies.integrations` does not name that id;
+ * `integrations_configuration["@appstrate/platform"] = { tools: ["log"] }` is
+ * added only when NEITHER table names it, so a caller who declares the
+ * dependency alone gets the integration's `default_tools`. A caller opts out
+ * of the platform tools by writing the configuration entry, e.g.
+ * `integrations_configuration["@appstrate/platform"] = { tools: [] }`. A
+ * `dependencies` or `dependencies.integrations` value that is not an object is
+ * left as written, for manifest validation to refuse. Nested deterministic
+ * contracts such as `output.schema` remain entirely caller-owned, and
+ * `output: {}` (no schema) gives a run without the `output` tool.
  */
 function materializeInlineManifest(manifest: Record<string, unknown>): MaterializedManifest {
   const hasOwn = (key: string): boolean => Object.prototype.hasOwnProperty.call(manifest, key);
@@ -188,17 +194,39 @@ function materializeInlineManifest(manifest: Record<string, unknown>): Materiali
   if (!hasOwn("name")) defaults.name = derivedName;
   if (!hasOwn("type")) defaults.type = "agent";
   if (!hasOwn("version")) defaults.version = "1.0.0";
-  if (!hasOwn("dependencies")) defaults.dependencies = {};
-  if (!hasOwn("runtime_tools")) {
-    defaults.runtime_tools = ["log", "output", "publish_file"];
-    if (!hasOwn("output")) {
-      defaults.output = {
-        schema: { type: "object", properties: {}, additionalProperties: true },
-      };
-    }
+  if (!hasOwn("output")) {
+    defaults.output = {
+      schema: { type: "object", properties: {}, additionalProperties: true },
+    };
   }
 
-  return { manifest: { ...defaults, ...manifest } };
+  const materialized: Record<string, unknown> = { ...defaults, ...manifest };
+  const names = (table: Record<string, unknown> | null): boolean =>
+    table !== null && Object.prototype.hasOwnProperty.call(table, PLATFORM_INTEGRATION_ID);
+
+  const dependencies = hasOwn("dependencies") ? asRecordOrNull(manifest.dependencies) : {};
+  const integrations =
+    dependencies && Object.prototype.hasOwnProperty.call(dependencies, "integrations")
+      ? asRecordOrNull(dependencies.integrations)
+      : {};
+  const configuration = hasOwn("integrations_configuration")
+    ? asRecordOrNull(manifest.integrations_configuration)
+    : {};
+
+  if (dependencies && integrations && !names(integrations)) {
+    materialized.dependencies = {
+      ...dependencies,
+      integrations: { ...integrations, [PLATFORM_INTEGRATION_ID]: PLATFORM_INTEGRATION_RANGE },
+    };
+  }
+  if (configuration && !names(integrations) && !names(configuration)) {
+    materialized.integrations_configuration = {
+      ...configuration,
+      [PLATFORM_INTEGRATION_ID]: { tools: ["log"] },
+    };
+  }
+
+  return { manifest: materialized };
 }
 
 /**
@@ -680,14 +708,6 @@ export async function launchRunAndWait(
               "run_and_wait, alongside `manifest` — move it out of the manifest and retry."
           : "`prompt` is required for kind:'inline'. Pass it as a top-level argument " +
               "alongside `manifest` (not inside it).",
-      );
-    }
-    const selected = manifest.runtime_tools;
-    if (selected !== undefined && !Array.isArray(selected)) {
-      return refuseArguments(
-        "invalid_argument",
-        "`manifest.runtime_tools` must be an array for kind:'inline'.",
-        ["manifest.runtime_tools"],
       );
     }
     const materialized = materializeInlineManifest(manifest);

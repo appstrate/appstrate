@@ -241,6 +241,20 @@ describe("startReportSession — integration readiness", () => {
     expect(session.warnings).toEqual([WARNING]);
   });
 
+  it("returns the run's MCP server beside the sink URL with the run secret, no session header", async () => {
+    stub = installStubFetch(() => ok());
+    const session = await startReportSession(
+      SOURCE,
+      REPORT_CTX,
+      { mode: "true", fallback: "abort" },
+      SNAPSHOT,
+    );
+    expect(session.runToolsMcp).toEqual({
+      url: "https://app.example.com/api/runs/run_test/mcp",
+      runSecret: SUCCESS_BODY.secret,
+    });
+  });
+
   /** What `appstrate run --report` prints for this session, per stream. */
   function announce(session: ReportSession | null, json: boolean) {
     const out = { stdout: "", stderr: "" };

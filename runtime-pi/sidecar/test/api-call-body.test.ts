@@ -71,7 +71,7 @@ async function makeApp(overrides?: Partial<AppDeps>, token = "tok-abc") {
   return createTestApp({
     ...appDeps,
     runtimeDeps,
-    additionalMcpToolsProvider: () => host.buildTools(),
+    mcpToolsProvider: () => host.buildTools(),
   });
 }
 

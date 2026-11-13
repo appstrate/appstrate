@@ -63,14 +63,14 @@ describe("isCanonicalRunEvent — type-guard narrowing", () => {
     const event: RunEvent = {
       timestamp: 1,
       runId: "r1",
-      type: "log.written",
-      level: "warn",
+      type: "appstrate.progress",
       message: "x",
+      data: { step: 1 },
     };
-    if (isCanonicalRunEvent(event) && event.type === "log.written") {
+    if (isCanonicalRunEvent(event) && event.type === "appstrate.progress") {
       // TypeScript narrowing — these accesses are typed.
-      expect(event.level).toBe("warn");
       expect(event.message).toBe("x");
+      expect(event.data).toEqual({ step: 1 });
     } else {
       throw new Error("expected canonical narrowing");
     }
@@ -81,11 +81,11 @@ describe("CANONICAL_EVENT_TYPES", () => {
   it("matches the union exhaustively (compile + runtime)", () => {
     // Compile-time: each entry must be a CanonicalRunEvent['type']
     const arr: ReadonlyArray<CanonicalRunEvent["type"]> = CANONICAL_EVENT_TYPES;
-    // The one place the count is pinned to a literal: 4 reserved AFPS
-    // namespaces (memory/pinned/output/log) + 3 appstrate.* platform-internal
-    // events (progress/error/metric). Every other file derives from
+    // The one place the count is pinned to a literal: 1 reserved AFPS
+    // namespace (output) + 3 appstrate.* platform-internal events
+    // (progress/error/metric). Every other file derives from
     // `CANONICAL_EVENT_TYPES.length` so the literal has a single home.
-    expect(arr.length).toBe(7);
+    expect(arr.length).toBe(4);
     expect(new Set(arr).size).toBe(arr.length);
   });
 

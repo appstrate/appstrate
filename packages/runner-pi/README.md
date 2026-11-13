@@ -27,23 +27,21 @@ shapes closely enough that a floating range would break silently:
 
 ## Exports
 
-Five subpaths, all declared in `package.json`. `src/index.ts` is the
+Subpaths are declared in `package.json`. `src/index.ts` is the
 authoritative list — the groups below say what each cluster is FOR; they are not
 a narrower "supported subset", and nothing enforces one.
 
 The barrel is not a superset of the rest: a symbol sits in `.` only when
 something OUTSIDE this package imports it FROM the barrel, so a subpath is the
-sole route to anything read only through that subpath. `RUN_HISTORY_INJECTED_TOOL`
-and `RECALL_MEMORY_INJECTED_TOOL` are the live example — the sidecar takes them
-from `./runtime-tools`, and they are deliberately absent from `.`.
+sole route to anything read only through that subpath.
 
-| Subpath           | Contents                                                                               |
-| ----------------- | -------------------------------------------------------------------------------------- |
-| `.`               | The clusters listed below.                                                             |
-| `./runtime-tools` | The built-in runtime tools the agent can call during a run, with their descriptors.    |
-| `./provider-map`  | Provider mapping on its own, for callers that want it without the barrel.              |
-| `./model-compat`  | The pi-ai `model.compat` flag bag and its pricing invariants.                          |
-| `./loop-env`      | `parsePiLoopEnv`: the strict env reader of the Pi loop knobs (retry, compaction, cap). |
+| Subpath           | Contents                                                                                                    |
+| ----------------- | ----------------------------------------------------------------------------------------------------------- |
+| `.`               | The clusters listed below.                                                                                  |
+| `./provider-map`  | Provider mapping on its own, for callers that want it without the barrel.                                   |
+| `./model-compat`  | The pi-ai `model.compat` flag bag and its pricing invariants.                                               |
+| `./loop-env`      | `parsePiLoopEnv`: the strict env reader of the Pi loop knobs (retry, compaction, cap).                      |
+| `./harness-tools` | The harness tools `PiRunner` registers (`output`, `publish_file`), `FileUploader` and `filePublishedEvent`. |
 
 From `.`:
 
@@ -59,10 +57,7 @@ From `.`:
 - **Container plumbing** (what Appstrate's own sandbox uses) —
   `buildRuntimePiEnv`, `pickOperatorSidecarEnv`, `emitRuntimeReady`,
   `emitBootProgress`, `startSinkHeartbeat`.
-- **Runtime tools** — `RUNTIME_INJECTED_TOOLS`, `buildRuntimeToolFactories`,
-  `callToolResultToPi`, `buildRuntimeToolExtensions`, `buildPublishFileExtension`,
-  `spillResourcesToWorkspace`. The individual tool descriptors live on
-  `./runtime-tools`, not here.
+- **MCP forwarding** — `callToolResultToPi`, `spillResourcesToWorkspace`.
 
 ## What it handles
 

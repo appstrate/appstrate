@@ -38,7 +38,6 @@ import type { ExtensionFactory, Api, Model } from "./pi-sdk.ts";
 import {
   bundleMemberDir,
   prepareBundleForPi,
-  buildPublishFileExtension,
   emitRuntimeReady,
   emitBootProgress,
   startSinkHeartbeat,
@@ -46,11 +45,12 @@ import {
   type PiRunner,
 } from "@appstrate/runner-pi";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { canonicalizeRuntimeToolIds } from "@appstrate/core/runtime-tools-catalog";
+import { readDeclaredOutputSchema } from "@appstrate/afps-shared/output-schema";
 import { SIDECAR_AUTH_HEADER } from "@appstrate/core/sidecar-types";
 import { readBundleFromFile } from "@appstrate/afps-runtime/bundle";
-import { HttpSink, attachStdoutBridge } from "@appstrate/afps-runtime/sinks";
+import { HttpSink } from "@appstrate/afps-runtime/sinks";
 import type { ExecutionContext, RunEvent } from "@appstrate/afps-runtime/types";
+import type { EventSink } from "@appstrate/afps-runtime/interfaces";
 import { emptyRunResult } from "@appstrate/afps-runtime/runner";
 import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
 import {
@@ -65,11 +65,6 @@ import { makeProcessNonDumpable } from "./non-dumpable.ts";
 import { receiveSecrets } from "@appstrate/runner-pi/secret-env";
 import { buildMcpDirectFactories } from "./mcp/direct.ts";
 import { fetchIntegrationBootReport } from "./mcp/integration-boot-report.ts";
-import {
-  createRuntimeEventDrainer,
-  drainAndEmitInto,
-  type RuntimeEventDrainer,
-} from "@appstrate/core/runtime-event-drain";
 import {
   agentPackagePath,
   provisionWorkspace,
@@ -189,17 +184,6 @@ const sink = new HttpSink({
   maxBackoffMs: 2000,
 });
 
-// --- 0a. Result-aggregating sink wrapper ---
-// See `@appstrate/afps-runtime/sinks/stdout-bridge` for the full design
-// rationale. What matters here: the wrapper folds every event PiRunner
-// hands the sink into an in-memory `RunResult` aggregate, then merges that
-// aggregate into the finalize POST — this is how `result.output`,
-// `result.pinned`, and `result.memories` reach the platform at all. (The
-// module also intercepts `process.stdout.write` for out-of-process runners;
-// inside this container nothing writes canonical events that way.)
-const bridge = attachStdoutBridge({ sink, runId: AGENT_RUN_ID });
-const bridgedSink = bridge.sink;
-
 // --- Liveness keep-alive ---
 //
 // Start the runner-side heartbeat against POST {SINK_URL}/heartbeat.
@@ -295,7 +279,7 @@ async function die(message: string, data?: Record<string, unknown>): Promise<nev
  * not stdout — the `data` marker keeps each on its own log entry.
  */
 async function progress(message: string, data?: Record<string, unknown>): Promise<void> {
-  await emitBootProgress(bridgedSink, AGENT_RUN_ID!, message, {
+  await emitBootProgress(sink, AGENT_RUN_ID!, message, {
     data: { boot: true, ...data },
   }).catch(() => {});
 }
@@ -452,31 +436,18 @@ phaseTimings.bundlePrepareMs = Math.round(performance.now() - bundlePrepareStart
 // not the load. The honest total is emitted on `runtime ready`.
 await progress("bundle loaded", { bundlePrepareMs: phaseTimings.bundlePrepareMs });
 
-// The agent's selected runtime tools (`manifest.runtime_tools`), read once from
-// the root package manifest. Reused by the `publish_file` gate and the
-// PiRunner's terminal-tool decision.
-//
-// Canonicalized here too. The platform already strips ids it cannot build
-// from the bundle (`buildAgentPackage`), so this is a second line of defence
-// at the trust boundary rather than the only one — and the gates below are
-// exact string matches, so an unrecognised id reaching them silently
-// unregisters the publish tool. The version skew that would deliver one (a NEW
-// image against an OLDER platform) is refused at boot by the image-trio tag
-// rule, except where that rule is blind: a floating tag rebuilt on one side, a
-// digest-pinned ref, and a platform with no build identity. Filtering once, at
-// the single read, costs a function call and does not depend on which of those
-// is true.
-const declaredRuntimeTools: string[] = canonicalizeRuntimeToolIds(
-  (bundle.packages.get(bundle.root)?.manifest as { runtime_tools?: unknown[] } | undefined)
-    ?.runtime_tools ?? [],
-).ids;
+const rootManifest = bundle.packages.get(bundle.root)?.manifest;
+
+// The agent's declared output schema: its presence gives the run the `output`
+// tool, built by the PiRunner (`outputSchema` option).
+const outputSchema = readDeclaredOutputSchema(rootManifest);
 
 // --- 2c. Phase C: wire sidecar-backed tools via MCP ---
 // Every sidecar-backed capability is surfaced as a typed Pi tool whose
 // implementation forwards to the sidecar's MCP `tools/call` endpoint:
 //   - `{ns}__api_call({ method, target, … })` — credential-injecting proxy.
-//   - `run_history` — recent past-run metadata.
-//   - `recall_memory({ q?, limit? })` — archive memory store.
+//   - `{ns}__{tool}` — every tool of a spawned, remote or platform-bound
+//     integration (`appstrate_platform__recall_memory`, …).
 // The agent LLM never sees the sidecar URL; the contract ("agent never
 // talks to the sidecar directly") is enforced via the env-var deletion
 // in 2d below.
@@ -484,25 +455,11 @@ const declaredRuntimeTools: string[] = canonicalizeRuntimeToolIds(
 const sidecarUrl = env.sidecarUrl;
 const sidecarAuthToken = env.sidecarAuthToken;
 
-// Shared runtime-event drainer (one per run, in-memory cursor). The sidecar
-// executes each runtime tool ONCE and journals its canonical events; the Pi
-// runner drains this on its single sink after each forwarded tool call, plus
-// a retrying final drain. One instance so the cursor stays consistent across
-// intermediate + final drains.
-const runtimeDrainer: RuntimeEventDrainer = createRuntimeEventDrainer({
-  url: `${sidecarUrl.replace(/\/$/, "")}/runtime-events`,
-  headers: { Host: "sidecar", [SIDECAR_AUTH_HEADER]: sidecarAuthToken },
-  logger: {
-    warn: (msg, data) => logLine("warn", msg, data),
-    error: (msg, data) => logLine("error", msg, data),
-  },
-});
-
 let mcpClient: AppstrateMcpClient;
 await progress("connecting to sidecar");
 const mcpConnectStart = performance.now();
 try {
-  // Retry the initial MCP handshake — the platform now starts the agent
+  // Retry the initial MCP handshake — the platform starts the agent
   // in parallel with sidecar boot, so the sidecar's /mcp
   // may briefly answer ECONNREFUSED / ENOTFOUND while the container is
   // still wiring its listener and the Docker DNS alias is propagating.
@@ -566,7 +523,7 @@ if ("error" in bootResult) {
 } else {
   const bootReport = bootResult.report;
   for (const crumb of bootReport.breadcrumbs) {
-    await emitBootProgress(bridgedSink, AGENT_RUN_ID!, crumb.message, {
+    await emitBootProgress(sink, AGENT_RUN_ID!, crumb.message, {
       level: crumb.level,
       ...(crumb.data ? { data: crumb.data } : {}),
     }).catch(() => {});
@@ -587,54 +544,21 @@ if ("error" in bootResult) {
 }
 
 try {
-  // `buildMcpDirectFactories` registers `run_history` and
-  // `recall_memory`, plus one forwarding factory per namespaced
-  // integration tool (including the generic `{ns}__api_call`). Runtime
-  // tools (log/note/pin/output) are executed once by the sidecar and
-  // journaled; the drainer pulls them on the run sink after each forwarded
-  // call — never trusted from `_meta`.
-  //
-  // Pi drains each tool call inline in `execute()` right after `callTool`
-  // resolves — the sidecar appends the events synchronously inside the
-  // wrapped handler BEFORE responding, so the per-call drain always captures
-  // them in time (no "events land after the stream ends" gap to
-  // backstop). What the per-call drain CANNOT cover is a
-  // transient localhost failure of the LAST call's single best-effort drain
-  // (no subsequent call retries it). The retrying final drain for that case
-  // is injected via `piEventSink` (below): PiRunner owns its finalize, so a
-  // drain placed after `runner.run()` would be too late — wrapping the sink
-  // runs it BEFORE the stdout-bridge merges its aggregate into the POST.
+  // `buildMcpDirectFactories` registers one forwarding factory per
+  // namespaced integration tool the sidecar advertises (including the
+  // generic `{ns}__api_call`).
   const factories = await buildMcpDirectFactories({
     mcp: mcpClient,
     runId: AGENT_RUN_ID,
     workspace: WORKSPACE,
-    drainer: runtimeDrainer,
     emit: (event) => {
-      void bridgedSink.handle(event as RunEvent);
+      void sink.handle(event as RunEvent);
     },
   });
   extensionFactories.push(...factories);
 } catch (err) {
   await emitError(`Failed to wire MCP-backed tools: ${getErrorMessage(err)}`);
   process.exit(1);
-}
-
-// --- 2d. publish_file runtime tool (opt-in via manifest.runtime_tools) ---
-// Unlike the four pure event-emitter runtime tools (served by the sidecar over
-// MCP), `publish_file` performs an HTTP upload back to the platform — so it is
-// ALWAYS registered
-// in-process here (the sidecar has no path to the files route), gated on
-// the agent selecting it. It carries the run's HMAC signer via the injected
-// `uploadRunFile`; its `file.published` event rides the bridged sink.
-if (declaredRuntimeTools.includes("publish_file")) {
-  extensionFactories.push(
-    buildPublishFileExtension({
-      uploader: uploadRunFile,
-      emit: (event) => {
-        void bridgedSink.handle(event as RunEvent);
-      },
-    }),
-  );
 }
 
 // --- 3. Model + system prompt from env ---
@@ -692,7 +616,7 @@ if ((await piSdkWarmup) === null) {
   }
 }
 
-await emitRuntimeReady(bridgedSink, AGENT_RUN_ID, {
+await emitRuntimeReady(sink, AGENT_RUN_ID, {
   bundleLoaded: true,
   extensions: extensionFactories.length,
   bootDurationMs: performance.now(),
@@ -708,12 +632,6 @@ await emitRuntimeReady(bridgedSink, AGENT_RUN_ID, {
 
 /** Construct the Pi runner (every run). */
 function buildPiRunner(): PiRunner {
-  // When the agent selected the `output` runtime tool, a successful call is
-  // the run's semantic end — stop the SDK loop there instead of paying one
-  // more LLM round-trip for a trailing text-only turn whose content the
-  // communication contract discards anyway. Gated on the manifest selection
-  // so a bundle-defined tool that happens to be named `output` (no
-  // `runtime_tools` opt-in) keeps the SDK's natural stop.
   return createRuntimePiRunner({
     model,
     // No rates reached this container (unpriced model, or a withheld alias
@@ -727,7 +645,11 @@ function buildPiRunner(): PiRunner {
     agentDir: "/tmp/pi-agent",
     extensionFactories,
     authStoragePath: "/tmp/pi-auth/auth.json",
-    ...(declaredRuntimeTools.includes("output") ? { terminalTools: ["output"] } : {}),
+    // The runner registers `output` and stops on its first successful call
+    // when the agent declares an output schema.
+    ...(outputSchema ? { outputSchema } : {}),
+    // A platform run always has an uploader, so it always has `publish_file`.
+    fileUploader: uploadRunFile,
     modelRetry: env.modelRetry,
     modelCompaction: env.modelCompaction,
     ...(env.toolResultByteLimit !== undefined
@@ -777,7 +699,7 @@ async function runOutputsSweep(): Promise<SweepResult | null> {
     publishedSourceHashes: publishedFileSourceHashes,
     maxFileBytes: OUTPUTS_SWEEP_MAX_FILE_BYTES,
     emit: (event) => {
-      void bridgedSink.handle(event as RunEvent);
+      void sink.handle(event as RunEvent);
     },
     logWarn: (message, data) => logLine("warn", message, data),
   }).catch((err) => {
@@ -788,26 +710,14 @@ async function runOutputsSweep(): Promise<SweepResult | null> {
   });
 }
 
-// Pi-path finalize wrapper. Two things must happen before the finalize POST:
-//   1. Final runtime-event drain — Pi drains each tool call
-//      inline (see the factories block above), but the LAST call's single
-//      best-effort drain has no subsequent call to retry a transient localhost
-//      failure, so we drain-until-empty + bounded retry through the SAME bridged
-//      sink the per-call drains use.
-//   2. The outputs sweep — auto-publish `workspace/outputs/` deliverables so
-//      their `file.published` events ride the run stream before it closes.
+// Pi-path finalize wrapper. The outputs sweep must run before the finalize
+// POST: it auto-publishes `workspace/outputs/` deliverables so their
+// `file.published` events ride the run stream before it closes.
 // PiRunner owns its finalize, so wrapping the sink is the only injection point
-// that runs BEFORE the stdout-bridge merges its aggregate into the finalize POST.
-const piEventSink: typeof bridgedSink = {
-  handle: (event) => bridgedSink.handle(event),
+// that runs before the finalize POST.
+const piEventSink: EventSink = {
+  handle: (event) => sink.handle(event),
   finalize: async (result) => {
-    await drainAndEmitInto({
-      drainer: runtimeDrainer,
-      emit: (e) => bridgedSink.handle(e as RunEvent),
-      now: Date.now,
-      runId: AGENT_RUN_ID!,
-      final: true,
-    });
     const sweep = await runOutputsSweep();
     // Stamp the terminal artifacts summary onto the finalize payload so the
     // platform persists it on the run row and can surface a "partial
@@ -816,7 +726,7 @@ const piEventSink: typeof bridgedSink = {
     // terminal success/failure (the runner owns that); a successful run can
     // still have lost a deliverable.
     if (sweep) result.artifacts = summarizeArtifacts(sweep);
-    await bridgedSink.finalize(result);
+    await sink.finalize(result);
   },
 };
 

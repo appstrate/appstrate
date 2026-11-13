@@ -14,7 +14,6 @@ import {
 } from "@afps-spec/schema";
 import { integrationManifestSchema, type IntegrationManifest } from "./integration.ts";
 import { mcpServerManifestSchema, type McpServerManifest } from "./mcp-server.ts";
-import { SELECTABLE_RUNTIME_TOOLS, canonicalizeRuntimeToolIds } from "./runtime-tools-catalog.ts";
 import { findRetiredDependencyKeys } from "./dependencies.ts";
 import { parseSkillFrontmatter } from "@appstrate/afps-shared/companion-files";
 import { asRecord } from "./safe-json.ts";
@@ -316,35 +315,12 @@ const agentManifestObjectSchema = afpsAgentManifestObjectSchema.extend({
   // the canonical schema as of @afps-spec/schema@0.5.0; no local widening is
   // needed — the inherited shape already matches the Appstrate runtime
   // contract (`dependencies.ts` `ToolsWildcard` / `isToolsWildcard`).
-  // First-party runtime tools enabled for this agent — all opt-in, none
-  // auto-injected (`output` included). `output` is required to be present
-  // only when an output schema is declared (enforced by the superRefine
-  // below). Snake_case `runtime_tools`. This is an
-  // Appstrate manifest extension with no AFPS equivalent — kept as a
-  // documented top-level snake_case field rather than namespaced under
-  // `_meta`, because it is woven through the run pipeline (catalog
-  // validation, prompt builder, sidecar tool registration) and namespacing
-  // it would be disproportionate.
-  // The enum is {@link SELECTABLE_RUNTIME_TOOLS}, which is the canonical list
-  // and nothing else — there are no retired spellings left to accept. An id
-  // the platform does not know is DROPPED structurally by
-  // `dropRetiredRuntimeTools` before Zod ever sees it, and the drop is
-  // reported to the caller rather than guessed at. Resolution is deliberately
-  // not a Zod `.transform()`: that makes the field unrepresentable in the
-  // generated AFPS JSON Schema and erases the enum.
-  runtime_tools: z.array(z.enum(SELECTABLE_RUNTIME_TOOLS)).optional(),
 });
 
-/** The issue code of the agent rule "an output schema needs the `output` runtime tool". */
-export const OUTPUT_TOOL_REQUIRED = "output_tool_required";
-
 /**
- * `output` is opt-in like every runtime tool (none is auto-injected). But an
- * agent that declares an `output.schema` promises a typed result, so it MUST
- * enable the `output` tool — otherwise it has no way to emit that result and
- * the run would fail post-hoc output validation. Caught at save/import time
- * here so the editor surfaces it on the `runtimeTools` field. Agents with no
- * output schema may finish without ever calling output (side-effect-only run).
+ * The agent manifest schema: the AFPS base object plus the cross-field rules
+ * Zod cannot express structurally (orphan integration configuration, resource
+ * hints).
  */
 export const agentManifestSchema = agentManifestObjectSchema.superRefine((m, ctx) => {
   // AFPS §4.4 — re-apply the canonical orphan-key rule (the base AFPS schema
@@ -357,27 +333,6 @@ export const agentManifestSchema = agentManifestObjectSchema.superRefine((m, ctx
   ];
   if (resourceHints !== undefined) {
     refineAgentResourceHints(resourceHints, ctx);
-  }
-
-  const outputSchema = (m as { output?: { schema?: unknown } }).output?.schema;
-  const hasOutputSchema =
-    outputSchema != null &&
-    typeof outputSchema === "object" &&
-    Object.keys(outputSchema as object).length > 0;
-  if (!hasOutputSchema) return;
-
-  const runtimeTools = (m as { runtime_tools?: unknown }).runtime_tools;
-  const selectsOutput = Array.isArray(runtimeTools) && runtimeTools.includes("output");
-  if (!selectsOutput) {
-    ctx.addIssue({
-      code: "custom",
-      path: ["runtime_tools"],
-      // Its own code: the one rule on `runtime_tools` a reader is told in their language.
-      params: { code: OUTPUT_TOOL_REQUIRED },
-      message:
-        "The 'output' runtime tool must be enabled when an output schema is defined — " +
-        "an agent that declares an output schema must be able to return its result.",
-    });
   }
 });
 
@@ -446,26 +401,17 @@ export type ValidateManifestResult =
       valid: true;
       errors: [];
       manifest: Manifest | AgentManifest | SkillManifest | IntegrationManifest | McpServerManifest;
-      /**
-       * `runtime_tools` ids stripped from the parsed manifest because the
-       * platform retired them. Always empty unless the caller opted into
-       * {@link ValidateManifestOptions.retiredRuntimeTools} `"drop"` — the
-       * drop is silent by construction, so read this to surface it (log,
-       * warn the operator) instead of losing the signal.
-       */
-      droppedRuntimeTools: string[];
     }
   | {
       valid: false;
       errors: string[];
       /**
        * The same failures, structured: `path` dotted, and `code` set on a rule that carries its
-       * own (e.g. {@link OUTPUT_TOOL_REQUIRED}). Absent on a dispatcher-level failure
+       * own. Absent on a dispatcher-level failure
        * (unknown type, retired keys), which only `errors` states.
        */
       issues?: ManifestIssue[];
       manifest?: undefined;
-      droppedRuntimeTools?: undefined;
     };
 
 /** One structured manifest validation failure. */
@@ -483,7 +429,6 @@ function parseWithSchema(
     | typeof integrationManifestSchema
     | typeof mcpServerManifestSchema,
   raw: unknown,
-  droppedRuntimeTools: string[] = [],
 ): ValidateManifestResult {
   // `_meta` validation is delegated entirely to the canonical per-type schema.
   // As of AFPS 0.1 the upstream `metaSchema` is STRICT — it enforces the
@@ -504,118 +449,47 @@ function parseWithSchema(
     return { valid: false, errors, issues };
   }
 
-  return { valid: true, errors: [], manifest: result.data, droppedRuntimeTools };
+  return { valid: true, errors: [], manifest: result.data };
 }
 
 /**
- * Canonicalize an ALREADY-STORED agent manifest's `runtime_tools`: strip the
- * entries the platform no longer knows how to build, and collapse duplicates.
- *
- * **Every drop is reported, never swallowed.** The `dropped` array reaches the
- * caller, which is what makes a removal auditable instead of an agent quietly
- * losing a tool. There is deliberately no alias table any more: an id the
- * platform does not know is not guessed at, it is removed and named.
- *
- * The runtime-tool set evolves, and a removal is not retroactive: manifests
- * persisted before it (DB drafts, and published ZIPs which are immutable by
- * construction) keep the retired id forever. Read paths re-validate the stored
- * manifest, so a hard enum rejection there would make every such agent
- * permanently unrunnable. The runner already ignores ids it cannot build
- * ({@link buildRuntimeToolDefs} in `runtime-tool-defs.ts`); this mirrors that
- * contract for the read direction.
- *
- * Purely structural — no Zod round-trip. Key order, unknown fields and the
- * absence of schema defaults are preserved exactly, because the version
- * snapshot path serialises the result into an integrity-hashed artifact: a
- * re-parse that reordered keys would silently defeat publish dedup.
- * Returns the input untouched (same reference) when nothing needs dropping.
- *
- * **When a drop empties the list, the key is REMOVED, not left as `[]`.** AFPS
- * makes `runtime_tools` optional with no default, so absent and `[]` parse to
- * the same agent — but they are different bytes, and this helper is not the
- * only writer: the agent editor's `setRuntimeTools` also drops the field on an
- * empty selection. Emitting `[]` here would mean an agent whose only tool was
- * retired serialises one way through the editor and another way through the
- * publish path, i.e. two integrity hashes for one manifest. Deleting a key does
- * not reorder the survivors, so the structural contract above still holds.
- *
- * That rule is scoped to the drop, and deliberately so: this is a DROPPER, not
- * a canonicaliser. A manifest that *already* declares `runtime_tools: []` — a
- * shape no platform writer emits (the editor deletes on an empty selection, the
- * schema has no `.default([])`, and the publish path only rewrites what it
- * dropped) but which AFPS permits and a CLI/curl/hand-written manifest.json can
- * author — is returned UNTOUCHED, key and all. Canonicalising it would mean
- * rewriting the bytes of a manifest with nothing wrong in it, purely as a side
- * effect of asking "are any ids retired?" — which is precisely the blast-radius
- * widening the structural contract exists to prevent, and it would cost the
- * same-reference identity above. Absent and `[]` therefore remain two accepted
- * spellings of "no runtime tools" for an author who insists on the latter; what
- * this helper guarantees is only that IT never mints the second one.
- *
- * Only `type: "agent"` manifests carry `runtime_tools`; any other type is
- * returned as-is.
- */
-export function dropRetiredRuntimeTools(manifest: Record<string, unknown>): {
-  manifest: Record<string, unknown>;
-  dropped: string[];
-} {
-  if (manifest.type !== "agent") return { manifest, dropped: [] };
-  const raw = manifest.runtime_tools;
-  if (!Array.isArray(raw)) return { manifest, dropped: [] };
-  const { ids, dropped, changed } = canonicalizeRuntimeToolIds(raw);
-  if (!changed) return { manifest, dropped: [] };
-  const next = { ...manifest };
-  if (ids.length > 0) next.runtime_tools = ids;
-  else delete next.runtime_tools;
-  return { manifest: next, dropped };
-}
-
-/**
- * How {@link validateManifest} treats the manifest vocabulary the platform
- * retired — the one behaviour that MUST differ by direction. It governs BOTH
- * retired kinds, because they are two expressions of a single question ("is
- * this manifest author input, or something already persisted?") and splitting
- * them into two flags would let a future call site set one and forget the
- * other, which is precisely how the author-input rejection was lost once
- * already:
- *
- *   1. `runtime_tools` ids the platform retired (or an author mistyped).
- *   2. `dependencies` keys AFPS 2.0 retired — `tools` (now `mcp_servers`) and
- *      `providers` (now `integrations`).
- *
- * The two policy values:
+ * How {@link validateManifest} treats the `dependencies` keys AFPS 2.0 retired —
+ * `tools` (replaced by `mcp_servers`) and `providers` (replaced by
+ * `integrations`). The one behaviour that MUST differ by direction:
  *
  *   - `"reject"` (default) — the manifest is AUTHOR INPUT (create, update,
  *     import, an inline manifest from an API client, a repo-authored system
- *     package). A retired or misspelled id is a mistake the author must see;
- *     silently dropping it ships an agent missing a tool with no signal, and a
- *     retired dependency key declares a dependency no reader will ever honour.
- *   - `"drop"` — the manifest was ALREADY PERSISTED (a stored draft, a
- *     published version snapshot). Those cannot be fixed in place — a
- *     published artifact is immutable by construction — so:
- *       - retired `runtime_tools` ids are stripped and the manifest stays valid
- *         and runnable (read {@link ValidateManifestResult.droppedRuntimeTools}
- *         to log what went), and
- *       - a retired `dependencies` key is TOLERATED, left exactly where it is.
- *         It is inert (no reader has ever read it) so there is nothing to strip,
- *         and rewriting a stored manifest's bytes here would change its
- *         integrity hash. Surfacing it belongs to the install-warning channel,
- *         not to this validator.
+ *     package). A retired key declares something no reader will ever honour,
+ *     so the author must see it, with its replacement named.
+ *   - `"tolerate"` — the manifest was ALREADY PERSISTED (a stored draft, a
+ *     published version snapshot or archive). A retired key is TOLERATED, left
+ *     exactly where it is: it is inert (no reader reads it), and a published
+ *     archive is immutable — its integrity hash covers its bytes — so it could
+ *     never be repaired. Surfacing it belongs to the install-warning channel,
+ *     not to this validator.
  *
- * The name is historical — the flag predates the dependency-key rule and is
- * part of the published `@appstrate/core` surface, so it is kept rather than
- * renamed for a nicety.
+ * The retired agent field `runtime_tools` is outside this policy: it is
+ * refused in both directions, because the agent had tools under it.
  */
-export type RetiredRuntimeToolsPolicy = "reject" | "drop";
+export type RetiredVocabularyPolicy = "reject" | "tolerate";
+
+/**
+ * The retired agent field and the message naming its replacement, returned by
+ * {@link validateManifest} whatever the direction.
+ */
+const RETIRED_RUNTIME_TOOLS_ERROR =
+  'runtime_tools: `runtime_tools` is retired — declare `dependencies.integrations["@appstrate/platform"]` ' +
+  "and select its tools (`log`, `note`, `pin`, `recall_memory`, `run_history`, `notify`) under " +
+  '`integrations_configuration["@appstrate/platform"].tools`. `output` is injected when ' +
+  "`output.schema` is declared and `publish_file` is always available, so neither is selected.";
 
 /** Options for {@link validateManifest}. */
 export interface ValidateManifestOptions {
   /**
-   * Direction-dependent handling of retired manifest vocabulary — retired
-   * `runtime_tools` ids AND retired AFPS 1.x `dependencies` keys. Default
-   * `"reject"` (author input). See {@link RetiredRuntimeToolsPolicy}.
+   * Direction-dependent handling of the retired manifest vocabulary.
+   * Default `"reject"` (author input). See {@link RetiredVocabularyPolicy}.
    */
-  retiredRuntimeTools?: RetiredRuntimeToolsPolicy;
+  retiredVocabulary?: RetiredVocabularyPolicy;
 }
 
 /**
@@ -623,7 +497,7 @@ export interface ValidateManifestOptions {
  * Determines the schema from the `type` field (agent, skill, integration) and validates accordingly.
  * @param raw - The raw manifest object to validate (typically parsed from JSON)
  * @param options - Direction of the call; see {@link ValidateManifestOptions}. The
- *   default is the safe one: author input with an unknown `runtime_tools` id fails.
+ *   default is the safe one: author input declaring a retired key fails.
  * @returns Validation result with parsed manifest on success, or error messages on failure
  */
 export function validateManifest(
@@ -647,42 +521,27 @@ export function validateManifest(
   const obj = raw as Record<string, unknown>;
   const type = obj.type;
 
-  // AFPS 1.x retired dependency vocabulary: on the author direction, reject
-  // and name the replacement key. See {@link RetiredRuntimeToolsPolicy}
-  // for why the keys still parse. Checked before the type dispatch because
-  // every package type may declare `dependencies`.
-  if (options?.retiredRuntimeTools !== "drop") {
-    const retiredDeps = findRetiredDependencyKeys(obj);
-    if (retiredDeps.length > 0) {
-      return {
-        valid: false,
-        errors: retiredDeps.map(
+  // Retired vocabulary: reject and name the replacement — the `dependencies`
+  // keys on the author direction only (see {@link RetiredVocabularyPolicy} for
+  // why they still parse), `runtime_tools` in both. Checked before the type
+  // dispatch because every package type may declare `dependencies`.
+  const errors =
+    options?.retiredVocabulary === "tolerate"
+      ? []
+      : findRetiredDependencyKeys(obj).map(
           ({ key, replacement }) =>
             `dependencies.${key}: \`dependencies.${key}\` is a retired AFPS 1.x key — rename it to \`dependencies.${replacement}\`. No consumer reads it, so the dependencies declared under it are silently ignored.`,
-        ),
-      };
-    }
+        );
+  if (type === "agent" && Object.prototype.hasOwnProperty.call(obj, "runtime_tools")) {
+    errors.push(RETIRED_RUNTIME_TOOLS_ERROR);
   }
+  if (errors.length > 0) return { valid: false, errors };
 
   // AFPS (§3.4): mcp-server identity lives at the manifest root —
   // `type: "mcp-server"`, `name`, `schema_version`, and `dependencies` are
   // all root fields. Dispatch purely on the root `type` discriminator.
   if (type === "mcp-server") return parseWithSchema(mcpServerManifestSchema, raw);
-  if (type === "agent") {
-    const { manifest, dropped } = dropRetiredRuntimeTools(obj);
-    if (options?.retiredRuntimeTools !== "drop") {
-      // Author direction (default): an id that resolves to NOTHING must surface
-      // as a field error the editor can render, so the raw manifest is handed
-      // to Zod and the `runtime_tools` enum rejects it. When nothing was
-      // dropped, the canonicalized manifest is what gets parsed and persisted
-      // — `canonicalizeRuntimeToolIds` collapses duplicates, which is the only
-      // thing it does now: it holds no alias table, so no id is rewritten to
-      // another spelling here.
-      if (dropped.length > 0) return parseWithSchema(agentManifestSchema, raw);
-      return parseWithSchema(agentManifestSchema, manifest);
-    }
-    return parseWithSchema(agentManifestSchema, manifest, dropped);
-  }
+  if (type === "agent") return parseWithSchema(agentManifestSchema, raw);
   if (type === "skill") return parseWithSchema(skillManifestSchema, raw);
   if (type === "integration") return parseWithSchema(integrationManifestSchema, raw);
 

@@ -22,6 +22,35 @@ export const connectionConflictContent = {
   },
 } as const;
 
+/** A refusal the MCP SDK transport answers itself: a JSON-RPC 2.0 error with `id: null`. */
+export function jsonRpcTransportError(description: string) {
+  return {
+    description,
+    content: {
+      "application/json": {
+        schema: {
+          type: "object",
+          description: "A JSON-RPC 2.0 error envelope.",
+          properties: {
+            jsonrpc: { type: "string", enum: ["2.0"] },
+            id: { type: "null" },
+            error: {
+              type: "object",
+              properties: {
+                code: { type: "integer" },
+                message: { type: "string" },
+                data: {},
+              },
+              required: ["code", "message"],
+            },
+          },
+          required: ["jsonrpc", "id", "error"],
+        },
+      },
+    },
+  } as const;
+}
+
 /**
  * Reusable OpenAPI response definitions — RFC 9457 Problem Details format.
  */

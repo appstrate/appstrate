@@ -4,8 +4,9 @@
  * Agent-container file publishing — the run→platform outbound channel.
  *
  * Two consumers share this module:
- *   - the `publish_file` runtime tool, which calls {@link createRunFileUploader}
- *     to upload a single workspace file the agent chose to publish; and
+ *   - the `publish_file` harness tool, which `PiRunner` (`@appstrate/runner-pi`) registers around
+ *     the {@link createRunFileUploader} uploader to upload a single workspace
+ *     file the agent chose to publish; and
  *   - the end-of-run {@link sweepOutputs} pass, which auto-publishes every file
  *     the agent wrote under `workspace/outputs/`.
  *
@@ -23,11 +24,15 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { sign } from "@appstrate/afps-runtime/events";
+import { sinkSiblingUrl } from "@appstrate/afps-runtime/sinks";
 import { resolveWorkspaceFile } from "@appstrate/afps-runtime/resolvers";
 import { getErrorMessage } from "@appstrate/core/errors";
-import { filePublishedEvent } from "@appstrate/core/runtime-tool-defs";
 import { encodeFilenameHeader, sanitizeFilename } from "@appstrate/core/naming";
-import type { FileUploader, PublishedFile } from "@appstrate/core/runtime-tool-defs";
+import {
+  filePublishedEvent,
+  type FileUploader,
+  type PublishedFile,
+} from "@appstrate/runner-pi/harness-tools";
 import type { RunArtifactsSummary } from "@appstrate/afps-runtime/runner";
 
 /**
@@ -203,7 +208,7 @@ export function createRunFileUploader(deps: RunFileUploaderDeps): FileUploader {
   // other end of this request; and if one somehow were, a hard upload failure
   // naming the status is the RIGHT outcome. A fallback would convert it into a
   // published file silently landing on a path the platform no longer serves.
-  const url = deps.sinkUrl.replace(/\/events$/, "/files");
+  const url = sinkSiblingUrl(deps.sinkUrl, "files");
 
   return async (relPath, name) => {
     // `publish_file` promises a workspace-relative path. Keep that

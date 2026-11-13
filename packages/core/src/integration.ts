@@ -50,6 +50,7 @@ import {
   type AfpsHttpDelivery,
 } from "@appstrate/afps-shared/delivery-http";
 import { normaliseMcpToolBody } from "@appstrate/afps-shared/mcp-naming";
+import { isPlainObject } from "./safe-json.ts";
 import { JsonPathSyntaxError, parseJsonPath } from "@appstrate/afps-shared/jsonpath";
 import { variableRefs } from "@appstrate/afps-shared/connection-variables";
 import { loginBlockIssues, type LoginBlockView } from "@appstrate/afps-shared/runtime-expression";
@@ -77,6 +78,62 @@ const TEMPLATE_SCHEME_PREFIX = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//;
 export const API_META_KEY = "dev.appstrate/api";
 
 const APPSTRATE_META_NAMESPACE = API_META_KEY.slice(0, API_META_KEY.indexOf("/") + 1);
+
+// ─────────────────────────────────────────────
+// Appstrate vendor extension: runtime binding (`_meta["dev.appstrate/platform"]`)
+// ─────────────────────────────────────────────
+
+/**
+ * `_meta` key binding an integration to the runtime that executes the run: its MCP endpoint is the
+ * runtime's own, and the runtime authenticates to it. The declared `source.remote.url` is never
+ * contacted by a runtime that honours the key; a runtime that does not know the key leaves the
+ * integration unbound.
+ *
+ * Shape: `{}` (AFPS `_meta` values are objects; the key's presence is the declaration). Legal
+ * only on an unauthenticated (`auths` absent) `source.kind: "remote"` integration
+ * (`integrationManifestSchema`). Only a system package may carry it: every org write
+ * path refuses it (`findRuntimeBinding`), because the runtime hands its run token to that endpoint.
+ */
+export const PLATFORM_META_KEY = "dev.appstrate/platform";
+
+/**
+ * Id of the system integration that ships the run tools and carries {@link PLATFORM_META_KEY}
+ * (its catalog: `scripts/system-packages/integration-platform-1.0.0/manifest.json`). An agent
+ * declares it to receive those tools; the manifests the platform writes on an author's behalf
+ * (inline-run defaults, the default agent, the `runtime_tools` migration script) name it.
+ * Whether an integration is bound to the runtime is never read from this id:
+ * {@link isRuntimeBoundIntegration} decides.
+ */
+export const PLATFORM_INTEGRATION_ID = "@appstrate/platform";
+
+/** The range under which the platform declares {@link PLATFORM_INTEGRATION_ID} on an author's behalf. */
+export const PLATFORM_INTEGRATION_RANGE = "^1.0.0";
+
+/**
+ * Is this integration bound to the runtime ({@link PLATFORM_META_KEY})? THE predicate: the spawn
+ * resolver, the sidecar, activation and the write rule read it, never the package id. The value
+ * must be a JSON object (AFPS §10.1), so `null` or a scalar binds nothing.
+ */
+export function isRuntimeBoundIntegration(manifest: unknown): boolean {
+  if (!isPlainObject(manifest)) return false;
+  const meta = manifest._meta;
+  return isPlainObject(meta) && isPlainObject(meta[PLATFORM_META_KEY]);
+}
+
+/**
+ * WRITE-path refusal of {@link PLATFORM_META_KEY} on a package the platform did not ship. The
+ * caller applies it to every non-system manifest it stores.
+ */
+export function findRuntimeBinding(manifest: unknown): { path: IssuePath; message: string }[] {
+  return isRuntimeBoundIntegration(manifest)
+    ? [
+        {
+          path: ["_meta", PLATFORM_META_KEY],
+          message: `_meta["${PLATFORM_META_KEY}"] is reserved for system packages`,
+        },
+      ]
+    : [];
+}
 
 /**
  * Resumable-upload protocols an api_call auth MAY advertise under
@@ -682,6 +739,26 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
           });
         }
       }
+    }
+  }
+
+  // (5b) `_meta["dev.appstrate/platform"]` (runtime binding): only on an unauthenticated
+  // `remote` integration — the runtime authenticates to its own endpoint, so an auth would never
+  // be used, and only a remote source has an MCP endpoint to bind.
+  if (isRuntimeBoundIntegration(manifest)) {
+    if (manifest.auths !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        message: `_meta["${PLATFORM_META_KEY}"] requires an integration without auths`,
+        path: ["auths"],
+      });
+    }
+    if (manifest.source?.kind !== "remote") {
+      ctx.addIssue({
+        code: "custom",
+        message: `_meta["${PLATFORM_META_KEY}"] requires source.kind "remote"`,
+        path: ["source", "kind"],
+      });
     }
   }
 

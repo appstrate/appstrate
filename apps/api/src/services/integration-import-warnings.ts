@@ -13,7 +13,7 @@ import { acquiresByConnectLogin } from "@appstrate/core/integration";
  * Author input carrying one is REJECTED upstream by `validateManifest` — this
  * channel exists for the other direction: a manifest the platform already holds
  * (a published, integrity-checked artifact re-ingested through a bundle) cannot
- * be repaired in place, so it is validated with `retiredRuntimeTools: "drop"`
+ * be repaired in place, so it is validated with `retiredVocabulary: "tolerate"`
  * and keeps its retired key. The key is inert (no reader has ever read it), so
  * nothing is stripped and nothing breaks — but the operator should learn that
  * the dependencies declared under it were never honoured, and that a republish

@@ -15,6 +15,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: `@appstrate/core/runtime-tool-defs` is removed** (#2197, #2199), with
+  `buildRuntimeToolDefs`, `BuildRuntimeToolDefsOptions`, `buildOutputToolDef`,
+  `buildPublishFileDef`,
+  `filePublishedEvent`, `FilePublishedEvent`, `FileUploader`, `PublishedFile`, `RuntimeToolDef`,
+  `RuntimeToolEvent`, `RuntimeToolResult`, `RUNTIME_TOOL_EVENTS_META_KEY`,
+  `CANONICAL_RUNTIME_TOOL_EVENT_TYPES` and `reEmitRuntimeToolEvents`. `output` and
+  `publish_file` are harness tools of `@appstrate/runner-pi`; `log`, `note` and `pin` are tools
+  of the `@appstrate/platform` system integration; the `_meta["dev.appstrate/events"]` channel
+  is gone. `output` exists exactly when `readDeclaredOutputSchema`
+  (`@appstrate/afps-shared/output-schema`) finds a schema.
+
+- **BREAKING: `@appstrate/core/runtime-tools-catalog` and `@appstrate/core/runtime-event-drain`
+  are removed** (#2199), with `SELECTABLE_RUNTIME_TOOLS`, `EVENT_EMITTER_RUNTIME_TOOLS`,
+  `RUNTIME_TOOL_CATALOG`, `SelectableRuntimeTool`, `EventEmitterRuntimeTool`,
+  `RuntimeToolCatalogEntry`, `isSelectableRuntimeTool`, `canonicalizeRuntimeToolIds`,
+  `CanonicalizedRuntimeToolIds`, `createRuntimeEventDrainer`, `drainAndEmitInto`,
+  `RuntimeEventDrainer`, `RuntimeEventDrainerOptions`, `DrainOptions`, `DrainAndEmitOptions` and
+  `DrainLogger`. `SidecarLaunchSpec.outputSchema` and `SidecarLaunchSpec.runtimeTools`
+  (`@appstrate/core/sidecar-types`) are removed.
+
+- **BREAKING: the `runtime_tools` agent field is retired** (`@appstrate/core/validation`, #2199).
+  `agentManifestSchema` does not declare it, and `dropRetiredRuntimeTools`,
+  `ValidateManifestResult.droppedRuntimeTools` and `ParsedPackageZip.droppedRuntimeTools` are
+  removed. `validateManifest` refuses an agent manifest carrying `runtime_tools` whatever the
+  direction, naming `dependencies.integrations["@appstrate/platform"]` and
+  `integrations_configuration`. The option that still tells the directions apart covers the
+  retired `dependencies` keys only, and is renamed: `RetiredRuntimeToolsPolicy` →
+  **`RetiredVocabularyPolicy`**, `ValidateManifestOptions.retiredRuntimeTools` /
+  `ParsePackageZipOptions.retiredRuntimeTools` → **`retiredVocabulary`**, with the values
+  `"reject"` and **`"tolerate"`** (was `"drop"`).
+
+- **BREAKING: `launchRunAndWait` inline defaults** (`@appstrate/core/run-and-wait-client`,
+  #2199). `dependencies.integrations["@appstrate/platform"] = PLATFORM_INTEGRATION_RANGE`
+  (`"^1.0.0"`) is added when
+  `dependencies.integrations` does not name that id, and
+  `integrations_configuration["@appstrate/platform"] = { tools: ["log"] }` only when neither
+  table names it; the caller's own entries are kept. An absent `output` defaults to the open
+  object schema. The `runtime_tools` default and the refusal of a non-array
+  `manifest.runtime_tools` are removed.
+
 - **BREAKING: `EnforcedChatSkill` gains the required `uri`** (`@appstrate/core/chat-contract`):
   the `skill://` URI of an enforced skill's `SKILL.md` (`null` with `content` when no version
   resolves), and `content` is that `SKILL.md` as the MCP Skills extension serves it, so the
@@ -22,6 +62,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returns both. (#2175)
 
 ### Added
+
+- **`PLATFORM_INTEGRATION_ID`** and **`PLATFORM_INTEGRATION_RANGE`**
+  (`@appstrate/core/integration`, #2199): `"@appstrate/platform"`, the id of the system
+  integration that ships the run tools, and `"^1.0.0"`, the range under which the manifests the
+  platform writes on an author's behalf declare it; `isRuntimeBoundIntegration` never reads
+  either.
+
+- **Runtime-bound integrations** (`@appstrate/core/integration`, #2199).
+  **`PLATFORM_META_KEY`** (`"dev.appstrate/platform"`) is the `_meta` key that binds an
+  integration's MCP endpoint to the runtime executing the run; `integrationManifestSchema`
+  accepts it only on an integration without `auths` and with `source.kind: "remote"`.
+  **`isRuntimeBoundIntegration(manifest)`** is the one predicate that reads it (its value must
+  be a JSON object, AFPS §10.1: `null` binds nothing), and
+  **`findRuntimeBinding(manifest)`** is its write-path refusal for packages the platform did not
+  ship.
 
 - **`@appstrate/core/model-error`: a structured reason beside the category.**
   **`MODEL_ERROR_REASONS`** and **`ModelErrorReason`** (`runtime_version_too_old`), and an
@@ -65,9 +120,7 @@ providerMessage? }` — the `<status> <JSON body>` envelope of a provider refusa
   server-side — and the category vocabulary as a runtime tuple.
 - **`ValidateManifestResult.issues`** (`@appstrate/core/validation`): on an invalid
   manifest, the failures structured as **`ManifestIssue`** `{ path, message, code? }` beside the `errors`
-  strings; `code` is set on a rule that carries its own — today
-  **`OUTPUT_TOOL_REQUIRED`** (`"output_tool_required"`, an output schema without the
-  `output` runtime tool). **`ValidationFieldError.line` / `.column`**
+  strings; `code` is set on a rule that carries its own. **`ValidationFieldError.line` / `.column`**
   (`@appstrate/core/api-errors`): the 1-based position of a file-level failure.
 - **`AGENT_UI_META_KEY`** (`@appstrate/core/validation`): `"dev.appstrate/ui"`,
   the `_meta` key holding an agent's presentation (`color`), next to

@@ -60,8 +60,8 @@ const defaultInlineManifest = (overrides: Record<string, unknown>) => ({
   schema_version: AFPS_SCHEMA_VERSION,
   type: "agent",
   version: "1.0.0",
-  dependencies: {},
-  runtime_tools: ["log", "output", "publish_file"],
+  dependencies: { integrations: { "@appstrate/platform": "^1.0.0" } },
+  integrations_configuration: { "@appstrate/platform": { tools: ["log"] } },
   output: { schema: { type: "object", properties: {}, additionalProperties: true } },
   ...overrides,
 });
@@ -196,7 +196,9 @@ describe("run_and_wait", () => {
     expect(tool.descriptor.description).toContain("build a `.zip` or `.afps` archive");
     expect(tool.descriptor.description).not.toContain("publish_archive");
     expect(tool.descriptor.description).toMatch(/fields you omit/i);
-    expect(tool.descriptor.description).toContain("runtime_tools: []");
+    expect(tool.descriptor.description).toContain(
+      "selects its `log` tool in `integrations_configuration` unless either `dependencies.integrations` or `integrations_configuration` names it (the dependency alone keeps its `default_tools`)",
+    );
     expect(tool.descriptor.description).not.toMatch(/one main user-facing file/i);
     expect(tool.descriptor.description).not.toMatch(/several peer files/i);
     expect(tool.descriptor.inputSchema.properties).not.toHaveProperty("primary_deliverable");
@@ -209,7 +211,8 @@ describe("run_and_wait", () => {
     expect(manifestSchema.properties).toEqual(
       expect.objectContaining({
         display_name: expect.any(Object),
-        runtime_tools: expect.any(Object),
+        dependencies: expect.any(Object),
+        integrations_configuration: expect.any(Object),
         output: expect.any(Object),
       }),
     );

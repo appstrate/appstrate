@@ -3786,19 +3786,10 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "description": "AFPS runtime `TerminalRunResult` — `memories`, `pinned`, `output`, `logs`, the required terminal `status`, optional `error`/`durationMs`, and authoritative `usage`/`cost`. Unknown top-level keys are ignored, so a platform and a runner of different versions still agree.",
+                "description": "AFPS runtime `TerminalRunResult` — `output`, the required terminal `status`, optional `error`/`durationMs`, and authoritative `usage`/`cost`. Unknown top-level keys are ignored, so a platform and a runner of different versions still agree.",
                 "required": ["status"],
                 "properties": {
-                  "memories": {
-                    "type": "array"
-                  },
-                  "pinned": {
-                    "type": "object"
-                  },
                   "output": {},
-                  "logs": {
-                    "type": "array"
-                  },
                   "error": {
                     "type": "object",
                     "properties": {
@@ -4252,7 +4243,7 @@
         "operationId": "publishRunFile",
         "tags": ["Runs"],
         "summary": "Publish an agent-produced file (HMAC, streaming)",
-        "description": "Posted by the agent runtime — via the `publish_file` runtime tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` file attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `FILE_MAX_BYTES`, 100 MiB by default); metadata is carried in the `X-File-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing file with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).",
+        "description": "Posted by the agent runtime — via the runner's `publish_file` tool or the end-of-run `outputs/` sweep — to store a file the agent produced as a durable `agent_output` file attached to the run. The raw file bytes are the request body (streamed straight to storage, up to `FILE_MAX_BYTES`, 100 MiB by default); metadata is carried in the `X-File-Name` and `Content-Type` headers. Same Standard Webhooks HMAC auth as the other run routes, verified over an EMPTY body (the bytes stream unbuffered; integrity is the returned sha256). Enforced synchronously: the per-file cap and per-run output budget cut the stream mid-flight (413, deleting any partial object); the org storage quota returns 403. Idempotent for sweep retries: an identical (run, sha256, name) upload returns the existing file with 200 instead of storing it twice. Requires the run to be `running` (409 `run_not_running` otherwise). Each `webhook-id` is single-use: because the signature covers an empty body, replaying a captured header set with different bytes is refused with 409 `message_replayed` (the runtime signs a fresh id per attempt, so retries are unaffected).",
         "parameters": [
           {
             "name": "runId",
@@ -4635,6 +4626,288 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/runs/{runId}/mcp": {
+      "post": {
+        "operationId": "runToolsMcpPost",
+        "tags": ["Runs"],
+        "summary": "Run MCP server of a remote run (HMAC)",
+        "description": "Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the `@appstrate/platform` system integration — `log`, `note`, `pin`, `recall_memory`, `run_history`, `notify` — for one run. Each tool writes at call time: `log` appends a run log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's checkpoint snapshot that `run_history` returns, `notify` an `agent_message` notification to each recipient of the run's completion notification, once per run. Rate-limited to 200 messages a minute per run. Mounted here for the host executing a remote run. Same Standard Webhooks HMAC auth as the event routes, keyed on the run's sink secret: the signature covers the exact request body bytes. It holds as long as the sink is open, whatever the caller's session. A platform-origin run answers 404 (its sidecar serves these tools on `/internal/mcp`).",
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "webhook-id",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "webhook-timestamp",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "webhook-signature",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "A JSON-RPC 2.0 request envelope (MCP Streamable HTTP).",
+                "properties": {
+                  "jsonrpc": {
+                    "type": "string",
+                    "enum": ["2.0"]
+                  },
+                  "id": {
+                    "type": ["string", "number", "null"]
+                  },
+                  "method": {
+                    "type": "string"
+                  },
+                  "params": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                },
+                "required": ["jsonrpc", "method"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JSON-RPC response. Served as `text/event-stream` when a request carries `params._meta.progressToken`, as `application/json` otherwise.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The body held only JSON-RPC notifications or responses (e.g. `notifications/initialized`): accepted, no body."
+          },
+          "400": {
+            "description": "`application/json`: the MCP transport's JSON-RPC error — unparseable JSON (`-32700`), an invalid JSON-RPC message or batch (`-32700`/`-32600`), or an unsupported `MCP-Protocol-Version` header (`-32000`). `application/problem+json`: a request the platform refuses before the transport.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "A JSON-RPC 2.0 error envelope.",
+                  "properties": {
+                    "jsonrpc": {
+                      "type": "string",
+                      "enum": ["2.0"]
+                    },
+                    "id": {
+                      "type": "null"
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "data": {}
+                      },
+                      "required": ["code", "message"]
+                    }
+                  },
+                  "required": ["jsonrpc", "id", "error"]
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "`missing_signature_headers` | `invalid_signature` | `invalid_timestamp` | `timestamp_out_of_tolerance`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`not_found` — no run with this id, or a platform-origin run.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "406": {
+            "description": "`Accept` does not list both `application/json` and `text/event-stream` (`-32000`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "A JSON-RPC 2.0 error envelope.",
+                  "properties": {
+                    "jsonrpc": {
+                      "type": "string",
+                      "enum": ["2.0"]
+                    },
+                    "id": {
+                      "type": "null"
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "data": {}
+                      },
+                      "required": ["code", "message"]
+                    }
+                  },
+                  "required": ["jsonrpc", "id", "error"]
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "`run_sink_closed` | `run_sink_expired`",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`payload_too_large` — the request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware, before the MCP transport).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`Content-Type` is not `application/json` (`-32000`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "A JSON-RPC 2.0 error envelope.",
+                  "properties": {
+                    "jsonrpc": {
+                      "type": "string",
+                      "enum": ["2.0"]
+                    },
+                    "id": {
+                      "type": "null"
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "data": {}
+                      },
+                      "required": ["code", "message"]
+                    }
+                  },
+                  "required": ["jsonrpc", "id", "error"]
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "$ref": "#/components/responses/EncryptionKeyUnavailable"
+          }
+        }
+      },
+      "get": {
+        "operationId": "runToolsMcpGet",
+        "tags": ["Runs"],
+        "summary": "Run MCP server of a remote run (GET)",
+        "description": "The GET channel of the run MCP server. The server is stateless and opens no standalone server-initiated SSE stream, so GET (and every verb but POST) answers 405.",
+        "parameters": [
+          {
+            "name": "runId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "security": [],
+        "responses": {
+          "405": {
+            "description": "`method_not_allowed` — the stateless server has no GET stream; `Allow: POST`.",
+            "headers": {
+              "Allow": {
+                "schema": {
+                  "type": "string",
+                  "example": "POST"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -17206,84 +17479,103 @@
         }
       }
     },
-    "/internal/run-history": {
-      "get": {
-        "operationId": "getRunHistory",
+    "/internal/mcp": {
+      "post": {
+        "operationId": "internalRunToolsMcpPost",
         "tags": ["Internal"],
-        "summary": "Fetch run history",
-        "description": "Container-to-host only. Auth via Bearer run token.",
+        "summary": "Run MCP server of a platform run",
+        "description": "Model Context Protocol server (Streamable HTTP, stateless) serving the tools of the `@appstrate/platform` system integration — `log`, `note`, `pin`, `recall_memory`, `run_history`, `notify` — for one run. Each tool writes at call time: `log` appends a run log, `note` an archive memory, `pin` a pinned slot and, for the `checkpoint` key, the run's checkpoint snapshot that `run_history` returns, `notify` an `agent_message` notification to each recipient of the run's completion notification, once per run. Rate-limited to 200 messages a minute per run. Mounted here for the sidecar. Container-to-host only. Auth via Bearer run token, which names the run; a run that is not `running` is refused with 403.",
         "security": [
           {
             "bearerExecToken": []
           }
         ],
-        "parameters": [
-          {
-            "name": "limit",
-            "in": "query",
-            "description": "Max number of runs to return (1-50, default 10)",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 50,
-              "default": 10
-            }
-          },
-          {
-            "name": "fields",
-            "in": "query",
-            "description": "Comma-separated fields to include: \"checkpoint\", \"result\" (default: \"checkpoint\")",
-            "schema": {
-              "type": "string",
-              "default": "checkpoint"
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "description": "A JSON-RPC 2.0 request envelope (MCP Streamable HTTP).",
+                "properties": {
+                  "jsonrpc": {
+                    "type": "string",
+                    "enum": ["2.0"]
+                  },
+                  "id": {
+                    "type": ["string", "number", "null"]
+                  },
+                  "method": {
+                    "type": "string"
+                  },
+                  "params": {
+                    "type": "object",
+                    "additionalProperties": true
+                  }
+                },
+                "required": ["jsonrpc", "method"]
+              }
             }
           }
-        ],
+        },
         "responses": {
           "200": {
-            "description": "Run history",
+            "description": "JSON-RPC response. Served as `text/event-stream` when a request carries `params._meta.progressToken`, as `application/json` otherwise.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "required": ["object", "data", "hasMore"],
-                  "properties": {
-                    "object": {
-                      "type": "string",
-                      "enum": ["list"]
-                    },
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "type": "object"
-                      }
-                    },
-                    "hasMore": {
-                      "type": "boolean"
-                    }
-                  }
-                },
-                "example": {
-                  "object": "list",
-                  "hasMore": false,
-                  "data": [
-                    {
-                      "id": "run_cm9abc123",
-                      "status": "success",
-                      "checkpoint": {
-                        "lastProcessedId": 42
-                      },
-                      "date": "2026-01-14T09:00:00Z",
-                      "duration": 1234
-                    }
-                  ]
+                  "additionalProperties": true
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
                 }
               }
             }
           },
+          "202": {
+            "description": "The body held only JSON-RPC notifications or responses (e.g. `notifications/initialized`): accepted, no body."
+          },
           "400": {
-            "$ref": "#/components/responses/ValidationError",
-            "description": "A `limit`, or an `offset` where the list takes one, outside its declared range (`param` names it), or an unknown `fields` entry."
+            "description": "`application/json`: the MCP transport's JSON-RPC error — unparseable JSON (`-32700`), an invalid JSON-RPC message or batch (`-32700`/`-32600`), or an unsupported `MCP-Protocol-Version` header (`-32000`). `application/problem+json`: a request the platform refuses before the transport.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "A JSON-RPC 2.0 error envelope.",
+                  "properties": {
+                    "jsonrpc": {
+                      "type": "string",
+                      "enum": ["2.0"]
+                    },
+                    "id": {
+                      "type": "null"
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "data": {}
+                      },
+                      "required": ["code", "message"]
+                    }
+                  },
+                  "required": ["jsonrpc", "id", "error"]
+                }
+              },
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -17294,107 +17586,117 @@
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
-          "500": {
-            "$ref": "#/components/responses/InternalServerError"
+          "406": {
+            "description": "`Accept` does not list both `application/json` and `text/event-stream` (`-32000`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "A JSON-RPC 2.0 error envelope.",
+                  "properties": {
+                    "jsonrpc": {
+                      "type": "string",
+                      "enum": ["2.0"]
+                    },
+                    "id": {
+                      "type": "null"
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "data": {}
+                      },
+                      "required": ["code", "message"]
+                    }
+                  },
+                  "required": ["jsonrpc", "id", "error"]
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`payload_too_large` — the request body exceeds the global `API_BODY_LIMIT_BYTES` cap (enforced by the body-limit middleware, before the MCP transport).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "`Content-Type` is not `application/json` (`-32000`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "description": "A JSON-RPC 2.0 error envelope.",
+                  "properties": {
+                    "jsonrpc": {
+                      "type": "string",
+                      "enum": ["2.0"]
+                    },
+                    "id": {
+                      "type": "null"
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "integer"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "data": {}
+                      },
+                      "required": ["code", "message"]
+                    }
+                  },
+                  "required": ["jsonrpc", "id", "error"]
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
           }
         }
-      }
-    },
-    "/internal/memories": {
+      },
       "get": {
-        "operationId": "recallMemories",
+        "operationId": "internalRunToolsMcpGet",
         "tags": ["Internal"],
-        "summary": "Recall archive memories",
-        "description": "Backs the agent-facing `recall_memory` MCP tool. Returns archive memories (pinned=false) visible to the run's actor, optionally filtered by an ILIKE substring match against content. Pinned memories are NOT returned — they are already injected into the system prompt. Container-to-host only. Auth via Bearer run token.",
+        "summary": "Run MCP server of a platform run (GET)",
+        "description": "The GET channel of the run MCP server. The server is stateless and opens no standalone server-initiated SSE stream, so GET (and every verb but POST) answers 405. Container-to-host only.",
         "security": [
           {
             "bearerExecToken": []
           }
         ],
-        "parameters": [
-          {
-            "name": "q",
-            "in": "query",
-            "description": "Optional case-insensitive substring filter on memory content. Empty / absent returns the most recent archive memories.",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "description": "Max number of memories to return (1-50, default 10).",
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 50,
-              "default": 10
-            }
-          }
-        ],
         "responses": {
-          "200": {
-            "description": "Recalled memories",
-            "content": {
-              "application/json": {
+          "405": {
+            "description": "`method_not_allowed` — the stateless server has no GET stream; `Allow: POST`.",
+            "headers": {
+              "Allow": {
                 "schema": {
-                  "type": "object",
-                  "required": ["memories"],
-                  "properties": {
-                    "memories": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "required": ["id", "content", "createdAt", "actor_type"],
-                        "properties": {
-                          "id": {
-                            "type": "integer"
-                          },
-                          "content": {},
-                          "createdAt": {
-                            "type": "string",
-                            "format": "date-time"
-                          },
-                          "actor_type": {
-                            "type": "string",
-                            "enum": ["user", "end_user", "shared"]
-                          },
-                          "actor_id": {
-                            "type": ["string", "null"]
-                          }
-                        }
-                      }
-                    }
-                  }
-                },
-                "example": {
-                  "memories": [
-                    {
-                      "id": 42,
-                      "content": "User prefers Python over JS for data tasks",
-                      "createdAt": "2026-04-20T10:00:00Z",
-                      "actor_type": "user",
-                      "actor_id": "usr_abc"
-                    }
-                  ]
+                  "type": "string",
+                  "example": "POST"
+                }
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
                 }
               }
             }
-          },
-          "400": {
-            "$ref": "#/components/responses/ValidationError"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "500": {
-            "$ref": "#/components/responses/InternalServerError"
           }
         }
       }
@@ -17827,6 +18129,16 @@
             },
             "required": false,
             "description": "The `credential_revision` of the credential that was rejected. Omitted only by a caller that holds no credentials payload (a local MCP server reporting a rejected credential it received at spawn); its rejection is then counted against the connection's current credential."
+          },
+          {
+            "name": "rejected_request",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["handshake"]
+            },
+            "description": "`handshake`: the rejected request is the MCP handshake (`initialize`) the sidecar sends to a remote MCP server at boot, which no agent input shapes. An auth nothing can refresh is then flagged on this first rejection (`410`) instead of counted toward `INTEGRATION_REFRESH_MAX_FAILURES`. Omitted for a request made on the agent's behalf (tool call, `api_call`, MITM request). An OAuth2 credential that can be refreshed is refreshed either way."
           }
         ],
         "responses": {
@@ -17841,7 +18153,7 @@
             }
           },
           "400": {
-            "description": "The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. A malformed `credential_revision` (empty included) is an `invalid_request` too.",
+            "description": "The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. A malformed `credential_revision` (empty included) or a `rejected_request` other than `handshake` is an `invalid_request` too.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -17870,7 +18182,7 @@
             }
           },
           "410": {
-            "description": "`integration_connection_needs_reconnection`: the credential is dead and the connection is flagged `needsReconnection`; the run records the integration as degraded and the sidecar stops retrying. Counted failures flag it at `INTEGRATION_REFRESH_MAX_FAILURES` (an OAuth2 token only once expired past `INTEGRATION_REFRESH_GRACE_SECONDS`).",
+            "description": "`integration_connection_needs_reconnection`: the credential is dead and the connection is flagged `needsReconnection`; the run records the integration as degraded and the sidecar stops retrying. Counted failures flag it at `INTEGRATION_REFRESH_MAX_FAILURES` (an OAuth2 token only once expired past `INTEGRATION_REFRESH_GRACE_SECONDS`); a rejected handshake (`rejected_request=handshake`) of an auth nothing can refresh flags it at once.",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -18381,6 +18693,54 @@
                                   },
                                   "shared_by_name": {
                                     "type": "string"
+                                  }
+                                }
+                              },
+                              "read_at": {
+                                "type": ["string", "null"],
+                                "format": "date-time",
+                                "description": "When the recipient marked it read; null if unread"
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time"
+                              }
+                            }
+                          },
+                          {
+                            "type": "object",
+                            "required": ["id", "type", "runId", "payload", "read_at", "createdAt"],
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "Notification id"
+                              },
+                              "type": {
+                                "type": "string",
+                                "const": "agent_message"
+                              },
+                              "runId": {
+                                "type": ["string", "null"],
+                                "description": "Originating run id, when the notification references one"
+                              },
+                              "payload": {
+                                "type": ["object", "null"],
+                                "additionalProperties": false,
+                                "description": "Render-without-join data.",
+                                "required": ["packageId", "title", "message"],
+                                "properties": {
+                                  "packageId": {
+                                    "type": ["string", "null"],
+                                    "description": "The agent of the run that sent it; null when the run no longer references its agent."
+                                  },
+                                  "title": {
+                                    "type": "string",
+                                    "description": "Headline the agent wrote (`notify` tool)."
+                                  },
+                                  "message": {
+                                    "type": "string",
+                                    "description": "Body the agent wrote (`notify` tool)."
                                   }
                                 }
                               },
@@ -19765,7 +20125,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization."
+            "description": "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. Every agent manifest rule answers `invalid_manifest`. A package id under a scope the platform owns — `@appstrate/` (system packages) or `@inline/` (inline runs' shadow packages) — answers `scope_reserved` (`param: manifest.name`); a system package itself is never created by an organization."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -20165,7 +20525,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`."
+            "description": "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. Every agent manifest rule answers `invalid_manifest`."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -20246,7 +20606,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`."
+            "description": "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. Every agent manifest rule answers `invalid_manifest`."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -20518,7 +20878,7 @@
           },
           "400": {
             "$ref": "#/components/responses/ValidationError",
-            "description": "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. An agent manifest declaring an output schema without the `output` runtime tool answers the item `output_tool_required` on `manifest.runtime_tools`; every other manifest rule answers `invalid_manifest`."
+            "description": "Validation error. A SKILL.md violating AFPS §3.3 answers `validation_failed` with the offending rule as the first `errors[]` entry's `code`: `skill_invalid_frontmatter` (with `line`/`column` on a YAML syntax error), `skill_missing_frontmatter_name`, `skill_invalid_frontmatter_name`, `skill_missing_frontmatter_description` or `skill_invalid_frontmatter_description`. Every agent manifest rule answers `invalid_manifest`."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -34038,7 +34398,7 @@
             "description": "What the run produced: the structured output, and nothing else. Human-facing deliverables are files (see the run's files), not fields here. `null` while the run is in flight or when no output was emitted.",
             "properties": {
               "output": {
-                "description": "Structured JSON emitted via the agent's `output` runtime tool. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped."
+                "description": "Structured JSON emitted via the `output` tool the runner injects from the agent's `output.schema`. Validated against the agent's declared output schema when one exists — a schema mismatch flips the run to `failed` (with the validation errors in `error`) but the payload is still stored, never dropped."
               }
             }
           },
@@ -36228,23 +36588,11 @@
         }
       },
       "AgentManifest": {
-        "description": "AFPS Agent manifest extended with Appstrate platform fields. Standard fields are defined by the AFPS Agent schema. Most extension fields use the x- prefix per AFPS §10, with the exception of the Appstrate-specific top-level `runtime_tools` field documented below.",
+        "type": "object",
+        "description": "AFPS Agent manifest. Standard fields are defined by the AFPS Agent schema; Appstrate's extensions live under `_meta` keys of the `dev.appstrate/` namespace (`_meta[\"dev.appstrate/*\"]`, AFPS §10).",
         "allOf": [
           {
             "$ref": "https://schemas.afps.dev/v0/agent.schema.json"
-          },
-          {
-            "type": "object",
-            "properties": {
-              "runtime_tools": {
-                "type": "array",
-                "items": {
-                  "type": "string",
-                  "enum": ["output", "log", "note", "pin", "publish_file"]
-                },
-                "description": "Appstrate top-level extension: runtime tools the agent may use. Optional. An id outside this enum is rejected on author input and dropped (with the drop reported) when read back from a stored manifest."
-              }
-            }
           }
         ]
       },

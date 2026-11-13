@@ -59,16 +59,10 @@ import {
   runAgentIdentity,
 } from "./state/runs.ts";
 import { createRunNotifications } from "./state/notifications.ts";
-import {
-  addMemories as addUnifiedMemories,
-  upsertPinned,
-  scopeFromActor,
-  CHECKPOINT_KEY,
-} from "./state/package-persistence.ts";
-import { actorFromIds } from "../lib/actor.ts";
 import { getRunEffectiveAgent, runPinnedVersionGoneDetail } from "./run-effective-agent.ts";
 import { validateOutput } from "./schema.ts";
 import { asJSONSchemaObject } from "@appstrate/core/form";
+import { readDeclaredOutputSchema } from "@appstrate/afps-shared/output-schema";
 import { emitEvent } from "../lib/modules/module-loader.ts";
 import { isInlineShadowPackageId } from "./inline-run.ts";
 import type { RunStatusChangeParams } from "@appstrate/core/module";
@@ -148,6 +142,8 @@ export async function getRunSinkContext(runId: string): Promise<RunSinkContext |
       packageId: runs.packageId,
       agentScope: runs.agentScope,
       agentName: runs.agentName,
+      userId: runs.userId,
+      endUserId: runs.endUserId,
       runOrigin: runs.runOrigin,
       sinkSecretEncrypted: runs.sinkSecretEncrypted,
       sinkExpiresAt: runs.sinkExpiresAt,
@@ -314,8 +310,7 @@ async function ingestInner(
  *   5. Build the terminal params shared by the CAS and the broadcast.
  *   6. CAS-update the run row (status, result, cost, sink_closed_at).
  *      Idempotent: zero rows affected = already finalized.
- *   7. Persist memories + checkpoint into the unified store + terminal log
- *      rows, then emit `onRunStatusChange` (modules react asynchronously).
+ *   7. Write the terminal log rows, then emit `onRunStatusChange` (modules react asynchronously).
  *
  * Idempotent by CAS on `sink_closed_at IS NULL`: concurrent finalize retries
  * from HttpSink end up applying once.
@@ -361,6 +356,8 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   //    let a post-kickoff schema edit flip a pinned run's outcome (false
   //    failure on a tightened draft schema, false success on a loosened one).
   const effective = await getRunEffectiveAgent(run);
+  const outputSchema =
+    effective.status === "ok" ? readDeclaredOutputSchema(effective.manifest) : undefined;
 
   // 3. Derive final status + error message. Pure computation — no DB writes
   //    before the CAS so concurrent synthesis + container-posted finalize
@@ -387,7 +384,7 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     // `agent_deleted` is a designed state (see `runAgentIdentity` in
     // `state/runs.ts`). Failing the run here would fabricate a verdict about
     // work that may have completed fine, so the runner's own status stands.
-  } else if (status === "success" && effective.manifest.output?.schema) {
+  } else if (status === "success" && outputSchema) {
     // Distinguish two failure shapes that both surface as a schema mismatch:
     //   1. the agent never called `output` (`result.output` is null) — the
     //      empty `{}` only fails because required fields are absent, so a bare
@@ -399,14 +396,11 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
     // in both branches — only the error string differs.
     const outputEmitted = isPlainRecord(result.output);
     const outputRecord = isPlainRecord(result.output) ? result.output : {};
-    const validation = validateOutput(
-      outputRecord,
-      asJSONSchemaObject(effective.manifest.output.schema),
-    );
+    const validation = validateOutput(outputRecord, asJSONSchemaObject(outputSchema));
     if (!validation.valid) {
       status = "failed";
-      // Every run delivers structured output through the `output` runtime
-      // tool (the single Pi-engine channel).
+      // A run delivers structured output only through the `output` tool the
+      // runner injects from the declared `output.schema`.
       const missing = validation.errors.join("; ");
       errorMessage = outputEmitted
         ? `Output validation failed: ${missing}`
@@ -591,12 +585,6 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
   // 6. CAS close — single gate for all subsequent side effects. Concurrent
   //    finalize retries (platform synthesis vs container POST) hit the same
   //    row; the CAS lets exactly one proceed.
-  const checkpointSlot = result.pinned?.[CHECKPOINT_KEY];
-  const checkpointToPersist =
-    checkpointSlot !== undefined && isPlainRecord(checkpointSlot.content)
-      ? checkpointSlot.content
-      : null;
-
   // The CAS and the run-workspace teardown enqueue are ONE transaction: the
   // moment a run is durably terminal, the record that purges its provisioning
   // objects is durable too. (The enqueue is a bounded INSERT of two rows and
@@ -622,12 +610,6 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
         // run carries a status.
         ...(costPricingStatus !== null ? { costPricingStatus } : {}),
         sinkClosedAt: now,
-        // Per-run checkpoint snapshot — read by `getRecentRuns` to feed the
-        // sidecar `run_history` tool. The unified `package_persistence`
-        // store only keeps the latest checkpoint per actor (last-write-wins
-        // on the unique index); `runs.checkpoint` preserves the per-run
-        // history so agents can inspect what each prior run emitted.
-        ...(checkpointToPersist !== null ? { checkpoint: checkpointToPersist } : {}),
         // Terminal artifacts summary from the container's outputs sweep. Only
         // written when the runner reported it (older containers omit it) — an
         // absent value leaves the column null rather than clobbering it. Does NOT
@@ -704,83 +686,6 @@ async function finalizeRunImpl(input: FinalizeRunInput): Promise<void> {
         err: getErrorMessage(err),
       });
     }
-  }
-
-  // Resolve the run's actor for the unified persistence scope.
-  const [actorRow] = await db
-    .select({
-      userId: runs.userId,
-      endUserId: runs.endUserId,
-    })
-    .from(runs)
-    .where(eq(runs.id, run.id))
-    .limit(1);
-  const persistenceScope = scopeFromActor(
-    actorFromIds(actorRow?.userId ?? null, actorRow?.endUserId ?? null),
-  );
-
-  // Post-CAS best-effort: the run is already terminal in `runs`. Memory and
-  // pinned-slot persistence is agent-authored side-data — a transient store
-  // fault here must NOT strand the status-change broadcast below (the only
-  // signal that updates the UI / fires webhooks) nor 500 the runner for a run
-  // that is already committed terminal. Log + swallow, like the run-log writes
-  // further down. (Persistence faults are surfaced via the error log for ops.)
-  try {
-    if (result.memories?.length) {
-      // Split memories by declared scope and write each non-empty bucket.
-      const sharedContent: string[] = [];
-      const actorContent: string[] = [];
-      for (const m of result.memories) {
-        if (m.scope === "shared") sharedContent.push(m.content);
-        else actorContent.push(m.content);
-      }
-
-      if (actorContent.length > 0) {
-        await addUnifiedMemories(
-          run.packageId,
-          run.spaceId,
-          run.orgId,
-          persistenceScope,
-          actorContent,
-          run.id,
-        );
-      }
-      if (sharedContent.length > 0) {
-        await addUnifiedMemories(
-          run.packageId,
-          run.spaceId,
-          run.orgId,
-          { type: "shared" },
-          sharedContent,
-          run.id,
-        );
-      }
-    }
-
-    // Unified-persistence pinned-slot write — the single store for every
-    // named pinned slot the agent wrote via `pin({ key, content })`,
-    // including the carry-over `"checkpoint"` slot. Honors the AFPS
-    // scope when the runtime stamped one onto each slot; falls back to
-    // the run's actor scope.
-    if (result.pinned) {
-      for (const [key, slot] of Object.entries(result.pinned)) {
-        const slotScope = slot.scope === "shared" ? { type: "shared" as const } : persistenceScope;
-        await upsertPinned(
-          run.packageId,
-          run.spaceId,
-          run.orgId,
-          slotScope,
-          key,
-          slot.content,
-          run.id,
-        );
-      }
-    }
-  } catch (err) {
-    logger.error("finalize: memory/pinned persistence failed (run already terminal)", {
-      runId: run.id,
-      err: getErrorMessage(err),
-    });
   }
 
   // Post-CAS best-effort: the run is already terminal in `runs`. A
@@ -921,7 +826,7 @@ export async function synthesiseFinalize(
  * posted its own finalize ({@link synthesiseFinalize}'s callers, plus the
  * stall watchdog, which builds its own `emptyRunResult()`).
  *
- * WHY: the `output` runtime tool is persisted at emit time as a `run_logs`
+ * WHY: the `output` tool's payload is persisted at emit time as a `run_logs`
  * row, but `runs.result` is written only at finalize, from the RunResult the
  * runner posts. A synthesised terminal carries an `emptyRunResult()`, so a
  * run whose agent had ALREADY delivered its output ended with
@@ -951,7 +856,7 @@ export async function synthesiseFinalize(
  * stays `cancelled`, a timeout stays `timeout`; recovering an output never
  * touches `result.status`. It does legitimately change the outcome of the
  * output-schema validation `finalizeRunImpl` runs on a synthesised
- * `success` — a run that really did emit a valid payload now stays
+ * `success` — a run that really did emit a valid payload stays
  * `success` instead of being failed for "finished without calling the
  * required `output` tool".
  */

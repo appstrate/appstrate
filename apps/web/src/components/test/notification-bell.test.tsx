@@ -8,7 +8,8 @@
  * for the run's package fell through to `runs.deletedAgent` and announced a
  * share as "Agent supprimé", linking to `/runs`. These two cases pin the
  * branch and its control: the share names the sharer and the package and links
- * to the package's detail page, and a run notification is unchanged.
+ * to the package's detail page, and a run notification is unchanged. An
+ * `agent_message` reads as the message its agent wrote, linked to the run.
  *
  * Same no-DOM harness as the other component suites — `renderToStaticMarkup`
  * through the SPA's own i18n singleton, so the assertions read the bundle
@@ -99,6 +100,29 @@ describe("NotificationContent", () => {
 
     expect(html).toContain("Worker");
     expect(html).toContain(`href="/agents/${PACKAGE_ID}/runs/run_1"`);
+  });
+
+  it("renders an `agent_message` row as the agent's title and message, linked to its run", () => {
+    const html = renderList([
+      {
+        id: "n6",
+        type: "agent_message",
+        runId: "run_3",
+        payload: {
+          packageId: PACKAGE_ID,
+          title: "Factures prêtes",
+          message: "12 factures attendent votre relecture.",
+        },
+        read_at: null,
+        createdAt: "2026-09-10T10:00:00.000Z",
+      },
+    ]);
+
+    expect(html).toContain("Factures prêtes");
+    expect(html).toContain("12 factures attendent votre relecture.");
+    // The sender is named by the agent's display name, and the row opens the run.
+    expect(html).toContain("Message de Worker");
+    expect(html).toContain(`href="/agents/${PACKAGE_ID}/runs/run_3"`);
   });
 
   // Notifications follow the session's ceiling, not the space's run reads: a

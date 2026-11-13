@@ -25,11 +25,12 @@
  *                           when telemetry is down.
  */
 
-import { HttpSink } from "@appstrate/afps-runtime/sinks";
+import { HttpSink, sinkSiblingUrl } from "@appstrate/afps-runtime/sinks";
 import { UNAVAILABLE_INTEGRATION_REASONS, type Bundle } from "@appstrate/afps-runtime/bundle";
 import { parseScopedName } from "@appstrate/core/naming";
 import type { ConnectionOverrides } from "@appstrate/core/integration";
 import { connectionRefusalLines, parseLaunchItems, type LaunchItem } from "./launch-warnings.ts";
+import type { RunToolsMcp } from "./remote-mcp.ts";
 
 export type ReportMode = "auto" | "true" | "false";
 export type ReportFallback = "abort" | "console";
@@ -80,6 +81,12 @@ export interface ReportSession {
   runSecret: string;
   /** The registration's `warnings`: integrations the run starts without. */
   warnings: LaunchItem[];
+  /**
+   * The instance's MCP server of this run (`/api/runs/{runId}/mcp`, beside the sink URL) and the
+   * run secret each request to it is signed with, as the sink's events are: the endpoint of an
+   * integration bound to the runtime (`isRuntimeBoundIntegration`), reachable for the whole run.
+   */
+  runToolsMcp: RunToolsMcp;
 }
 
 /** User-provided execution-environment metadata attached to the run record. */
@@ -224,6 +231,7 @@ export async function startReportSession(
     sinkUrl: payload.url,
     runSecret: payload.secret,
     warnings: parseLaunchItems(payload.warnings),
+    runToolsMcp: { url: sinkSiblingUrl(payload.url, "mcp"), runSecret: payload.secret },
   };
 }
 

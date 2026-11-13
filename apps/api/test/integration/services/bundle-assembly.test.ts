@@ -22,7 +22,10 @@ import { createTestContext, type TestContext } from "../../helpers/auth.ts";
 import * as storage from "@appstrate/db/storage";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import { assembleAgentBundle } from "../../../src/services/package-storage.ts";
-import { buildBundleFromAgentDraft } from "../../../src/services/bundle-assembly.ts";
+import {
+  buildBundleForAgentExport,
+  buildBundleFromAgentDraft,
+} from "../../../src/services/bundle-assembly.ts";
 import type { AgentManifest } from "../../../src/types/index.ts";
 import {
   BundleError,
@@ -466,5 +469,62 @@ describe("bundle-assembly — unsigned integration under a required signature po
       forExecution: false,
     });
     expect(bundle.packages.has(`${INTEG}@1.0.0` as PackageIdentity)).toBe(true);
+  });
+});
+
+/**
+ * The export's root manifest is the version's catalog row — the one a run of
+ * that version executes — even when the archive's `manifest.json` says
+ * otherwise; the archive still supplies the other files.
+ */
+describe("bundle-assembly — export takes the root manifest from the catalog row", () => {
+  it("exports the jsonb manifest, keeps the archive's other files, and round-trips", async () => {
+    await truncateAll();
+    const orgId = (await createTestContext({ orgSlug: "bundletest" })).org.id;
+    const id = "@test/agent-export";
+    const base = {
+      name: id,
+      version: "1.0.0",
+      type: "agent",
+      schema_version: "0.2",
+      display_name: "Export",
+    };
+    const archiveManifest = { ...base, runtime_tools: ["log"] };
+    const catalogManifest = { ...base, description: "From the catalog row" };
+    const afps = zipSync({
+      "manifest.json": enc(JSON.stringify(archiveManifest, null, 2)),
+      "prompt.md": enc("Do the thing."),
+      "docs/notes.md": enc("Notes."),
+      "signature.sig": enc("{}"),
+    });
+    await seedPackage({ id, type: "agent", orgId });
+    await storage.uploadFile(BUCKET, `${id}/1.0.0.afps`, Buffer.from(afps));
+    await seedPackageVersion({
+      packageId: id,
+      version: "1.0.0",
+      integrity: computeIntegrity(afps),
+      artifactSize: afps.length,
+      manifest: catalogManifest,
+    });
+
+    const bundle = await buildBundleForAgentExport(
+      id,
+      { orgId, spaceId: "unused" },
+      { versionSpec: "1.0.0" },
+    );
+    const root = bundle.packages.get(bundle.root)!;
+    expect(root.manifest as Record<string, unknown>).toEqual(catalogManifest);
+    expect(JSON.parse(new TextDecoder().decode(root.files.get("manifest.json")!))).toEqual(
+      catalogManifest,
+    );
+    expect(new TextDecoder().decode(root.files.get("docs/notes.md")!)).toBe("Notes.");
+    // The archive's signature covers bytes the root no longer carries.
+    expect(root.files.has("signature.sig")).toBe(false);
+
+    // Self-consistent: the reader re-verifies every RECORD and the bundle integrity.
+    const reread = readBundleFromBuffer(writeBundleToBuffer(bundle));
+    expect(reread.packages.get(reread.root)!.manifest as Record<string, unknown>).toEqual(
+      catalogManifest,
+    );
   });
 });

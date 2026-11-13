@@ -22,7 +22,9 @@
  * ships dozens of integration packages and OFFERS only the subset
  * `SYSTEM_INTEGRATIONS` names ({@link isSystemIntegration}); the rest are
  * catalog entries a space activates deliberately. Reading `source` alone there
- * would switch the whole catalog on in every space.
+ * would switch the whole catalog on in every space. The system integrations
+ * bound to the runtime ({@link listRuntimeBoundSystemIntegrationIds}) are
+ * offered too: they serve the run's own tools.
  *
  * The two forms are twins, not two rules: a table-driven test
  * (`package-activation-parity.test.ts`) walks every (type × source × row) cell
@@ -35,6 +37,7 @@ import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { packages, spacePackages } from "@appstrate/db/schema";
 import type { PackageType } from "@appstrate/core/validation";
 import { isSystemIntegration, listSystemIntegrationIds } from "./integration-client-registry.ts";
+import { listRuntimeBoundSystemIntegrationIds } from "./system-packages.ts";
 
 /** The catalog columns the rule reads — every caller already has them. */
 export interface ActivatablePackage {
@@ -50,8 +53,15 @@ export interface ActivatablePackage {
  * package rather than at the space's decision.
  */
 export function isActiveWithoutRow(pkg: ActivatablePackage): boolean {
-  if (pkg.type === "integration") return isSystemIntegration(pkg.id);
+  if (pkg.type === "integration") {
+    return isSystemIntegration(pkg.id) || listRuntimeBoundSystemIntegrationIds().includes(pkg.id);
+  }
   return pkg.source === "system";
+}
+
+/** The integrations the deployment switches on without a row. */
+function offeredIntegrationIds(): string[] {
+  return [...listSystemIntegrationIds(), ...listRuntimeBoundSystemIntegrationIds()];
 }
 
 /**
@@ -77,7 +87,7 @@ export function isActiveHere(
  * twin instead of approximating it with `source = 'system'`.
  */
 export function activeHereSql() {
-  const offered = listSystemIntegrationIds();
+  const offered = offeredIntegrationIds();
   const systemDefault = or(
     and(ne(packages.type, "integration"), eq(packages.source, "system")),
     and(

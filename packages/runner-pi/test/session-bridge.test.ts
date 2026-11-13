@@ -1144,7 +1144,7 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     const session = createFakeSession();
     let calls = 0;
     installSessionBridge(session, sink, RUN_ID, {
-      terminalTools: ["output"],
+      outputRequired: true,
       onTerminalTool: () => {
         calls += 1;
       },
@@ -1161,7 +1161,7 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     const session = createFakeSession();
     let calls = 0;
     installSessionBridge(session, sink, RUN_ID, {
-      terminalTools: ["output"],
+      outputRequired: true,
       onTerminalTool: () => {
         calls += 1;
       },
@@ -1185,7 +1185,7 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     const session = createFakeSession();
     let exhausted = 0;
     const bridge = installSessionBridge(session, sink, RUN_ID, {
-      terminalTools: ["output"],
+      outputRequired: true,
       onTerminalTool: () => {
         exhausted += 1;
       },
@@ -1237,7 +1237,7 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     let stops = 0;
     const failed = createFakeSession();
     const failedBridge = installSessionBridge(failed, createInternalCapture(), RUN_ID, {
-      terminalTools: ["output"],
+      outputRequired: true,
       onTerminalTool: () => {
         stops += 1;
       },
@@ -1253,7 +1253,7 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     const done = createFakeSession();
     const doneSink = createInternalCapture();
     const doneBridge = installSessionBridge(done, doneSink, RUN_ID, {
-      terminalTools: ["output"],
+      outputRequired: true,
       onTerminalTool: () => {
         stops += 1;
       },
@@ -1269,7 +1269,7 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
   it("does not count a failing non-terminal tool against the budget", () => {
     const sink = createInternalCapture();
     const session = createFakeSession();
-    const bridge = installSessionBridge(session, sink, RUN_ID, { terminalTools: ["output"] });
+    const bridge = installSessionBridge(session, sink, RUN_ID, { outputRequired: true });
 
     for (let i = 0; i <= MAX_TERMINAL_TOOL_REJECTIONS; i += 1) {
       session.emit({ type: "tool_execution_end", toolName: "bash", result: "boom", isError: true });
@@ -1282,7 +1282,7 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     const session = createFakeSession();
     let calls = 0;
     installSessionBridge(session, sink, RUN_ID, {
-      terminalTools: ["output"],
+      outputRequired: true,
       onTerminalTool: () => {
         calls += 1;
       },
@@ -1298,7 +1298,7 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     const sink = createInternalCapture();
     const session = createFakeSession();
     const bridge = installSessionBridge(session, sink, RUN_ID, {
-      terminalTools: ["output"],
+      outputRequired: true,
       onTerminalTool: () => {},
     });
 
@@ -1322,7 +1322,7 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     const sink = createInternalCapture();
     const session = createFakeSession();
     const bridge = installSessionBridge(session, sink, RUN_ID, {
-      terminalTools: ["output"],
+      outputRequired: true,
       onTerminalTool: () => {},
     });
 
@@ -1346,7 +1346,7 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     const sink = createInternalCapture();
     const session = createFakeSession();
     const bridge = installSessionBridge(session, sink, RUN_ID, {
-      terminalTools: ["output"],
+      outputRequired: true,
       onTerminalTool: () => {},
     });
 
@@ -1371,7 +1371,7 @@ describe("installSessionBridge — terminal tools (early stop on output)", () =>
     const sink = createInternalCapture();
     const session = createFakeSession();
     const bridge = installSessionBridge(session, sink, RUN_ID, {
-      terminalTools: ["output"],
+      outputRequired: true,
       onTerminalTool: () => {},
     });
 

@@ -43,6 +43,9 @@ import {
   acquiresByConnectLogin,
   isUnauthenticatedIntegration,
   findConnectionlessVariables,
+  PLATFORM_META_KEY,
+  isRuntimeBoundIntegration,
+  findRuntimeBinding,
 } from "../src/integration.ts";
 import { validateManifest, metaSchema } from "../src/validation.ts";
 import { TOOL_NAME_MAX_LEN } from "../src/naming.ts";
@@ -3062,5 +3065,57 @@ describe("unauthenticated integrations (AFPS §7.2)", () => {
       { path: ["variables"], message: expect.stringContaining("cannot declare variables") },
     ]);
     expect(findConnectionlessVariables(unauthenticated)).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────
+// Runtime binding — `_meta["dev.appstrate/platform"]`
+// ─────────────────────────────────────────────
+
+describe("runtime binding (_meta dev.appstrate/platform)", () => {
+  function runtimeBound(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    const m = baseManifest({ _meta: { [PLATFORM_META_KEY]: {} }, ...overrides });
+    delete m.auths;
+    return m;
+  }
+
+  it("accepts the key on an unauthenticated remote integration", () => {
+    expect(errorPaths(runtimeBound())).toEqual([]);
+  });
+
+  it("refuses an integration that declares auths", () => {
+    const m = baseManifest({ _meta: { [PLATFORM_META_KEY]: {} } });
+    expect(errorPaths(m)).toContain("auths");
+  });
+
+  it("refuses a source other than remote", () => {
+    expect(errorPaths(runtimeBound({ source: { kind: "none" } }))).toContain("source.kind");
+  });
+
+  it("isRuntimeBoundIntegration reads the key and nothing else", () => {
+    expect(isRuntimeBoundIntegration(runtimeBound())).toBe(true);
+    expect(isRuntimeBoundIntegration(baseManifest())).toBe(false);
+    expect(isRuntimeBoundIntegration(baseManifest({ _meta: { "dev.appstrate/api": {} } }))).toBe(
+      false,
+    );
+    expect(isRuntimeBoundIntegration(null)).toBe(false);
+    expect(isRuntimeBoundIntegration({ _meta: "x" })).toBe(false);
+    // AFPS §10.1: a `_meta` value is a JSON object.
+    expect(
+      isRuntimeBoundIntegration(baseManifest({ _meta: { "dev.appstrate/platform": null } })),
+    ).toBe(false);
+    expect(
+      isRuntimeBoundIntegration(baseManifest({ _meta: { "dev.appstrate/platform": [] } })),
+    ).toBe(false);
+  });
+
+  it("findRuntimeBinding reports the key for the write path", () => {
+    expect(findRuntimeBinding(runtimeBound())).toEqual([
+      {
+        path: ["_meta", PLATFORM_META_KEY],
+        message: `_meta["${PLATFORM_META_KEY}"] is reserved for system packages`,
+      },
+    ]);
+    expect(findRuntimeBinding(baseManifest())).toEqual([]);
   });
 });

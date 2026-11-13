@@ -16,7 +16,7 @@ import { unsafeSchema, type ExtensionAPI, type ExtensionFactory } from "./pi-sdk
 import type { Bundle } from "@appstrate/afps-runtime/bundle";
 import { ApiCallFailureError } from "@appstrate/afps-runtime/errors";
 import { apiCallStatusLine } from "@appstrate/mcp-transport";
-import type { RuntimeEventEmitter } from "./runtime-tools/mcp-forward.ts";
+import type { RuntimeEventEmitter } from "./mcp-forward.ts";
 import { piToolResultOrThrow } from "./pi-tool-result.ts";
 import {
   apiCallRequestJsonSchema,
@@ -56,9 +56,15 @@ export interface ApiCallExtensions {
   factories: ExtensionFactory[];
   /** Integrations at least one factory was built for: the ones the agent can call. */
   integrationIds: ReadonlySet<string>;
+  /** The `{ns}__api_call…` names the factories register, taken for any other tool of the run. */
+  toolNames: ReadonlySet<string>;
 }
 
-const NO_EXTENSIONS: ApiCallExtensions = { factories: [], integrationIds: new Set() };
+const NO_EXTENSIONS: ApiCallExtensions = {
+  factories: [],
+  integrationIds: new Set(),
+  toolNames: new Set(),
+};
 
 /**
  * Resolve every apiCall integration declared in the bundle's manifest and
@@ -106,14 +112,16 @@ export async function buildApiCallExtensionFactory(
   // above — pair each AFPS tool with its owning integration id by index.
   const factories: ExtensionFactory[] = [];
   const integrationIds = new Set<string>();
+  const toolNames = new Set<string>();
   for (let i = 0; i < tools.length; i++) {
     const tool = tools[i]!;
     if (perTool[i]?.selected === false) continue;
     const integrationId = perTool[i]?.integrationId ?? tool.name;
     factories.push(makeApiCallExtension(tool, integrationId, opts));
     integrationIds.add(integrationId);
+    toolNames.add(tool.name);
   }
-  return { factories, integrationIds };
+  return { factories, integrationIds, toolNames };
 }
 
 /**

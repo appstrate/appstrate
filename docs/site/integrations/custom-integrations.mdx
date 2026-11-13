@@ -170,6 +170,8 @@ Declare the tools you want agents to be able to pick in `tools_policy`, with the
 
 A server that asks for no credential at all is declared without `auths` (AFPS §7.2, Preview). The integration then binds no connection, a run starts it as is, and `required: true` asks nothing of it. Its URL is saved as package configuration exactly as entered, so anyone who can read the package sees it. An integration without `auths` cannot declare `variables`, since a connection would have to hold them.
 
+`_meta["dev.appstrate/platform"]` is reserved: it binds an integration without `auths` to the platform that runs the agent, which serves its tools in place of the manifest's URL. Only a system package carries it (the `@appstrate/platform` integration of the [platform tools](/features/tools#platform-tools)), and saving, publishing or importing an organization's package that declares it is refused.
+
 ## Connection variables
 
 When where the integration connects depends on the connection (a product offered hosted and self-hosted, or only self-hosted), declare **connection variables**. The user enters their values when connecting, before any authorization step, and every auth of the integration shares them, so one package serves every instance and each connection reaches only its own. The shipped GitLab, Twenty, Coolify, Browserless and Playwright MCP integrations work this way. Abridged from the GitLab integration manifest:

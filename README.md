@@ -210,7 +210,7 @@ appstrate/
 ├── runtime-pi/               # Docker image: Pi Coding Agent SDK
 │   ├── entrypoint.ts         # SDK session → HMAC-signed CloudEvents to platform sink
 │   ├── runners/              # Per-runtime MCP runner images (node, bun, python, uv, binary)
-│   └── sidecar/server.ts     # Credential-isolating MCP server — first-party tools (run_history, recall_memory) + per-integration {ns}__api_call (+ optional {ns}__api_upload)
+│   └── sidecar/server.ts     # Credential-isolating MCP server — every tool of the run's integrations as {ns}__{tool}, incl. per-integration {ns}__api_call (+ optional {ns}__api_upload)
 │
 └── scripts/verify-openapi.ts # OpenAPI validation (coverage + structure + lint + Zod ↔ spec + Code ⊆ Spec)
 ```
@@ -239,7 +239,7 @@ The API is organized into 30+ route domains. The live endpoint count is whatever
 | **Profile**             | User profile management                                                                                                         |
 | **Invitations**         | Magic link invitation acceptance                                                                                                |
 | **Welcome**             | Post-invite profile setup                                                                                                       |
-| **Internal**            | Container-to-host routes (credentials, run history)                                                                             |
+| **Internal**            | Container-to-host routes (credentials, the run MCP server of the `@appstrate/platform` tools)                                   |
 | **Meta**                | OpenAPI spec + Swagger UI                                                                                                       |
 | **Models**              | Org-level LLM model configuration and testing                                                                                   |
 | **Health**              | Health check                                                                                                                    |
@@ -254,14 +254,15 @@ The API is organized into 30+ route domains. The live endpoint count is whatever
 
 ### Agent runtime — MCP-only
 
-Agents inside the sandboxed container interact with the platform exclusively through MCP (Model Context Protocol). The sidecar exposes `/mcp` as a Streamable HTTP server; the agent never sees raw credentials, the platform API URL, or HTTP routes. First-party tools cover platform capabilities; per-integration tools cover outbound service access:
+Agents inside the sandboxed container interact with the platform exclusively through MCP (Model Context Protocol). The sidecar exposes `/mcp` as a Streamable HTTP server; the agent never sees raw credentials, the platform API URL, or HTTP routes. Every tool of the run's integrations is exposed as `{ns}__{tool}`:
 
-- `run_history({ limit?, fields? })` — past-run metadata via per-run signed token.
-- `recall_memory({ query?, limit? })` — search the agent's archive memories written via the `note(content)` built-in runtime tool.
+- The `@appstrate/platform` system integration serves the platform's own tools from the platform's run MCP server, exposed as `appstrate_platform__<tool>`: an agent that declares it gets `log`, `note`, `pin`, `recall_memory` and `run_history` by default, and selects `notify` explicitly.
 - Per spawned integration the sidecar exposes `{ns}__api_call({ method, target, headers?, body?, responseMode? })` — credentials injected server-side; URLs validated against the integration's `auths.{key}.authorized_uris`. Optional `{ns}__api_upload` when an auth declares `_meta["dev.appstrate/api"].auths.{key}.upload_protocols`.
 - Integrations backed by an MCP server (`source.kind = local` or `remote`) additionally surface their own tools under the same `{ns}__{tool}` prefix.
 
-The agent's primary completions are served by the sidecar's `/llm/*` HTTP passthrough route the Pi SDK calls natively; sub-agent flows are handled by spawning a separate run via the platform API. The legacy HTTP `/proxy` and `/run-history` routes have been retired — runners 1.x are not compatible with the current platform. See `packages/mcp-transport/README.md` and `runtime-pi/sidecar/README.md`.
+The runner itself registers the harness tools: `output` when the agent declares an `output.schema`, and `publish_file` on every platform run.
+
+The agent's primary completions are served by the sidecar's `/llm/*` HTTP passthrough route the Pi SDK calls natively; sub-agent flows are handled by spawning a separate run via the platform API. See `packages/mcp-transport/README.md` and `runtime-pi/sidecar/README.md`.
 
 ### API Documentation
 

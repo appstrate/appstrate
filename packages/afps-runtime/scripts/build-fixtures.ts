@@ -66,26 +66,6 @@ const PROMPT = [
 const REF_RUN_ID = "ref_run_001";
 const EVENTS = [
   {
-    type: "log.written",
-    timestamp: 0,
-    runId: REF_RUN_ID,
-    level: "info",
-    message: "starting reference run",
-  },
-  {
-    type: "memory.added",
-    timestamp: 0,
-    runId: REF_RUN_ID,
-    content: "Reference agents are useful for contract tests.",
-  },
-  {
-    type: "pinned.set",
-    timestamp: 0,
-    runId: REF_RUN_ID,
-    key: "checkpoint",
-    content: { iteration: 1 },
-  },
-  {
     type: "output.emitted",
     timestamp: 0,
     runId: REF_RUN_ID,

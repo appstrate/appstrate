@@ -512,7 +512,8 @@ export function skipAuth(
   // Unified-runner run-scoped routes: event ingestion
   // (`/api/runs/:runId/events[/finalize|/heartbeat]`) and the agent
   // workspace self-provisioning fetches (`/api/runs/:runId/workspace`,
-  // `/files`, `/files/:name`). All authenticate via a Standard
+  // `/files`, `/files/:name`), and the run MCP server of a remote run
+  // (`/api/runs/:runId/mcp`). All authenticate via a Standard
   // Webhooks HMAC signature at the route layer — not via JWT / API key /
   // cookie.
   if (REMOTE_RUN_EVENT_PATH_PATTERN.test(path)) return true;
@@ -531,7 +532,7 @@ export function skipAuth(
 }
 
 const REMOTE_RUN_EVENT_PATH_PATTERN =
-  /^\/api\/runs\/[^/]+\/(events(\/finalize|\/heartbeat)?|workspace|files(\/[^/]+)?)$/;
+  /^\/api\/runs\/[^/]+\/(events(\/finalize|\/heartbeat)?|workspace|files(\/[^/]+)?|mcp)$/;
 
 /**
  * Device-flow + CLI-token content-type shim.

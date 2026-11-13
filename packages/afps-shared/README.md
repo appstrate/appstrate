@@ -40,6 +40,7 @@ import each module by subpath.
 | `./jsonpath`                         | The single-value RFC 9535 JSONPath subset every integration-manifest path field is read with (`identity_claims`, login-engine selectors).                   |
 | `./runtime-expression`               | The Arazzo runtime expressions a `connect.login` block reads its response with (`$statusCode`, `$response.body[#ptr]`, `$response.header.<name>`).          |
 | `./json-text`                        | `jsonText`: a string passes through, any other JSON value is JSON-encoded (never `[object Object]`).                                                        |
+| `./output-schema`                    | `readDeclaredOutputSchema`: a manifest's `output.schema` when it is a non-empty object, the single test of "the agent declares an output schema".           |
 
 ```ts
 import { guardedFetch } from "@appstrate/afps-shared/guarded-fetch";

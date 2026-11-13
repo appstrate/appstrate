@@ -14,15 +14,12 @@
 import { describe, it, expect } from "bun:test";
 import { createMcpHttpClient, type AppstrateToolDefinition } from "@appstrate/mcp-transport";
 import { SIDECAR_AUTH_HEADER, type IntegrationBootReport } from "@appstrate/core/sidecar-types";
-import type { RuntimeEventDrainer } from "@appstrate/core/runtime-event-drain";
 import { createApp } from "../sidecar/app.ts";
 import { buildMcpDirectFactories } from "../mcp/direct.ts";
 import { fetchIntegrationBootReport } from "../mcp/integration-boot-report.ts";
 
 const TOKEN = "sidecar-token";
 const INTEGRATION_TOOL = "up__search";
-
-const NO_EVENTS: RuntimeEventDrainer = { drain: async () => [] };
 
 const report: IntegrationBootReport = {
   ok: true,
@@ -58,7 +55,7 @@ function slowBootSidecar() {
     cookieJar: new Map(),
     integrationBootPromise: boot,
     integrationBootReportProvider: () => report,
-    additionalMcpToolsProvider: () => tools,
+    mcpToolsProvider: () => tools,
   });
   const fetchFn = ((input: URL | Request | string, init?: RequestInit) => {
     const headers = new Headers(init?.headers);
@@ -74,7 +71,6 @@ async function registeredToolNames(mcp: Awaited<ReturnType<typeof createMcpHttpC
     runId: "run-1",
     emit: () => {},
     workspace: "/tmp",
-    drainer: NO_EVENTS,
   });
   const names: string[] = [];
   const pi = { registerTool: (tool: { name: string }) => names.push(tool.name) } as never;

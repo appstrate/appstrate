@@ -119,27 +119,15 @@ export async function resolveRegistryAgent(
     // type-dispatched so an agent with a corrupt `dependencies` shape,
     // missing `schema_version`, etc. fails cleanly here instead of
     // crashing deeper in the run pipeline with a less actionable error.
-    // READ direction: the draft is already persisted, so a `runtime_tools` id
-    // retired after it was written must not make it unrunnable. Save paths
-    // reject the same id, so the drop here only ever covers pre-existing rows.
-    const draftValidation = validateManifest(pkg.manifest, { retiredRuntimeTools: "drop" });
+    // READ direction: the draft is already persisted, so a retired
+    // `dependencies` key must not make it unrunnable.
+    const draftValidation = validateManifest(pkg.manifest, { retiredVocabulary: "tolerate" });
     if (!draftValidation.valid) {
       throw new ApiError({
         status: 400,
         code: "invalid_draft_manifest",
         title: "Invalid Draft Manifest",
         detail: `Draft for '${pkg.id}' is invalid: ${draftValidation.errors.slice(0, 3).join("; ")}`,
-      });
-    }
-    if (draftValidation.droppedRuntimeTools.length > 0) {
-      // Same signal as the published branch below: the drop kept the run alive
-      // but silently removed a capability. A draft IS repairable (open it in
-      // the editor and save — the editor normalises on load), so this is the
-      // milder of the two cases, but it must not be silent either.
-      logger.warn("draft manifest names retired runtime tools (dropped for this run)", {
-        packageId: pkg.id,
-        versionLabel: "draft",
-        dropped: draftValidation.droppedRuntimeTools,
       });
     }
 
@@ -186,10 +174,9 @@ export async function resolveRegistryAgent(
   // SQL edit) — surface as 500 rather than letting an unchecked cast
   // through to the run pipeline.
   // READ direction, and the strictest case for it: a published version is
-  // immutable by construction (integrity-checked ZIP), so a `runtime_tools` id
-  // retired after publication can never be repaired in place. Dropping it is
-  // what keeps such an agent runnable — the reason the policy exists at all.
-  const manifestValidation = validateManifest(detail.manifest, { retiredRuntimeTools: "drop" });
+  // immutable by construction (integrity-checked ZIP), so a retired
+  // `dependencies` key can never be repaired in place; it is tolerated.
+  const manifestValidation = validateManifest(detail.manifest, { retiredVocabulary: "tolerate" });
   if (!manifestValidation.valid) {
     logger.error("stored published manifest failed AFPS validation", {
       packageId,
@@ -209,15 +196,6 @@ export async function resolveRegistryAgent(
       code: "not_an_agent",
       title: "Not An Agent",
       detail: `Package '${packageId}' is a ${manifestValidation.manifest.type}, not an agent`,
-    });
-  }
-  if (manifestValidation.droppedRuntimeTools.length > 0) {
-    // The drop above kept the run alive, but it is a silent capability loss —
-    // surface it so ops can tell which published versions need a republish.
-    logger.warn("published manifest names retired runtime tools (dropped for this run)", {
-      packageId,
-      version: detail.version,
-      dropped: manifestValidation.droppedRuntimeTools,
     });
   }
   const manifest = manifestValidation.manifest as AgentManifest;

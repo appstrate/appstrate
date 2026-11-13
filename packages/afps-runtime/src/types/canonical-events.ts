@@ -9,10 +9,10 @@
  * envelope (`type: string` + open index signature) so third-party tools
  * can emit any payload without amending the spec. That openness is
  * correct at the spec layer but defeats TypeScript exhaustiveness in
- * the runtime, where four reserved namespaces (`memory.*`, `pinned.*`,
- * `output.*`, `log.*`) carry stable, runtime-meaningful shapes.
+ * the runtime, where the reserved `output.*` namespace carries a stable,
+ * runtime-meaningful shape.
  *
- * {@link CanonicalRunEvent} narrows those four — and the `appstrate.*`
+ * {@link CanonicalRunEvent} narrows it — and the `appstrate.*`
  * platform-internal events the runner emits — into a real discriminated
  * union. Switches over `event.type` get exhaustiveness via the standard
  * `_exhaustive: never` pattern. Unknown event types fall into the open
@@ -43,64 +43,10 @@ interface BaseEnvelope {
   [key: string]: unknown;
 }
 
-/**
- * `@afps/memory` — `note()` tool (AFPS; replaces `add_memory()`).
- *
- * Append-only archive write. Reachable from the agent only via the
- * `recall_memory` tool — never injected into the system prompt.
- *
- * `scope` is the unified-persistence dimension:
- * - `"actor"` (default): memory belongs to the run's actor (member or end_user).
- * - `"shared"`: memory is space-wide, visible to every actor.
- *
- * Emitters MAY omit the field entirely; consumers MUST treat absent
- * `scope` as `"actor"` so the fail-safe is per-actor isolation rather
- * than cross-actor leakage.
- */
-export interface MemoryAddedEvent extends BaseEnvelope {
-  type: "memory.added";
-  content: string;
-  /** AFPS scope dimension. Defaults to `"actor"` when omitted. */
-  scope?: "actor" | "shared";
-}
-
-/**
- * `@afps/pin` — `pin(key, content)` tool (AFPS; replaces
- * `set_checkpoint()`).
- *
- * Upsert-by-key into a named pinned slot. Last-write-wins per `(scope,
- * key)`. Pinned content is rendered into the system prompt on every run.
- *
- * The `checkpoint` carry-over slot is just one valid key —
- * `key === "checkpoint"`. Other keys (e.g. `"persona"`, `"goals"`) are
- * accepted and persisted but have no special semantics in the runtime
- * reducer beyond being aggregated under {@link RunResult.pinned}.
- *
- * `scope` defaults to `"actor"` (per-run-actor isolation) when omitted.
- * Agents that genuinely want space-wide pinned slots (cron-scheduled jobs,
- * single-tenant catalogues) opt in by passing `"shared"`.
- */
-export interface PinnedSetEvent extends BaseEnvelope {
-  type: "pinned.set";
-  /** Pinned slot identifier — `"checkpoint"` is reserved for the carry-over slot. */
-  key: string;
-  /** Arbitrary JSON value stored under the pinned slot. */
-  content: unknown;
-  /** AFPS scope dimension. Defaults to `"actor"` when omitted. */
-  scope?: "actor" | "shared";
-}
-
 /** `@afps/output` — `output()` tool. Replace-on-emit semantics. */
 export interface OutputEmittedEvent extends BaseEnvelope {
   type: "output.emitted";
   data: unknown;
-}
-
-/** `@afps/log` — `log()` tool. */
-export interface LogWrittenEvent extends BaseEnvelope {
-  type: "log.written";
-  level: "info" | "warn" | "error";
-  message: string;
 }
 
 /** `appstrate.progress` — runner-emitted lifecycle breadcrumb (container started, runtime ready, …). */
@@ -136,31 +82,17 @@ export interface AppstrateMetricEvent extends BaseEnvelope {
 
 /** Discriminated union over every canonical event the runtime owns. */
 export type CanonicalRunEvent =
-  | MemoryAddedEvent
-  | PinnedSetEvent
-  | OutputEmittedEvent
-  | LogWrittenEvent
-  | AppstrateProgressEvent
-  | AppstrateErrorEvent
-  | AppstrateMetricEvent;
+  OutputEmittedEvent | AppstrateProgressEvent | AppstrateErrorEvent | AppstrateMetricEvent;
 
 /** All canonical event-type strings — useful for prefix checks. */
 export const CANONICAL_EVENT_TYPES = [
-  "memory.added",
-  "pinned.set",
   "output.emitted",
-  "log.written",
   "appstrate.progress",
   "appstrate.error",
   "appstrate.metric",
 ] as const satisfies ReadonlyArray<CanonicalRunEvent["type"]>;
 
 const CANONICAL_TYPE_SET: ReadonlySet<string> = new Set<string>(CANONICAL_EVENT_TYPES);
-
-/** Optional AFPS scope dimension — absent, or one of the two values. */
-function isValidScope(value: unknown): boolean {
-  return value === undefined || value === "actor" || value === "shared";
-}
 
 /**
  * A JSON object: not `null`, not an array. Mirrors JSON Schema's
@@ -231,23 +163,7 @@ const isPresent = (v: unknown): boolean => v !== undefined;
  * question the coverage guard asks.
  */
 export const CANONICAL_CONSTRAINTS = {
-  "memory.added": [
-    { path: "content", holds: required(isString) },
-    { path: "scope", holds: isValidScope },
-  ],
-  "pinned.set": [
-    { path: "key", holds: required((v) => typeof v === "string" && v.length > 0) },
-    // `content` is required, but an explicit `undefined` is dropped by
-    // `JSON.stringify`, so it is absent on the wire — `!== undefined`
-    // rather than an `in` check.
-    { path: "content", holds: required(isPresent) },
-    { path: "scope", holds: isValidScope },
-  ],
   "output.emitted": [{ path: "data", holds: required(isPresent) }],
-  "log.written": [
-    { path: "level", holds: required((v) => v === "info" || v === "warn" || v === "error") },
-    { path: "message", holds: required(isString) },
-  ],
   "appstrate.progress": [
     { path: "message", holds: required(isString) },
     // Optional structured context: `Record<string, unknown>`, so an array /
@@ -311,7 +227,7 @@ export function firstViolatedConstraint(event: RunEvent): string | undefined {
 /**
  * True when the event's `type` is one of the canonical strings AND its
  * payload satisfies the canonical shape. Returns `false` for tampered
- * payloads (e.g. `memory.added` without a string `content`) so callers
+ * payloads (e.g. `appstrate.progress` without a string `message`) so callers
  * can fall back to the open-envelope branch instead of trusting an
  * ill-formed event.
  *
@@ -319,16 +235,9 @@ export function firstViolatedConstraint(event: RunEvent): string | undefined {
  *
  * ## What rides on this
  *
- * Three callers, and two of them lose data when the guard says no:
- *
- *  - `../runner/reducer.ts` narrows with it before folding an event into the
- *    `RunResult`. A rejected event is **silently dropped** — no output, no
- *    memory, no metric.
- *  - `../sinks/stdout-bridge.ts` validates what the agent prints on stdout.
- *    That is a trust boundary: untrusted container output, structurally
- *    checked before it is believed.
- *  - `../events/cloudevents.ts` does not consult it. The `dataschema` stamp
- *    it used to gate is gone (see that module for why).
+ * `../runner/reducer.ts` narrows with it before folding an event into the
+ * `RunResult`. A rejected event is **silently dropped** — no output, no
+ * metric.
  *
  * So this is not a cosmetic classifier. Every constraint in
  * {@link CANONICAL_CONSTRAINTS} is a rejection path that discards data, and

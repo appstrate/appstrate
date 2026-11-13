@@ -28,6 +28,8 @@ import {
   initSystemIntegrations,
   __resetSystemIntegrationsForTest,
 } from "../../../src/services/integration-client-registry.ts";
+import { _setSystemPackagesForTesting } from "../../../src/services/system-packages.ts";
+import { PLATFORM_META_KEY } from "@appstrate/core/integration";
 import type { PackageType } from "@appstrate/core/validation";
 
 getTestApp();
@@ -122,6 +124,59 @@ describe("the SQL mirror and the in-memory twin answer the same, cell for cell",
     expect(isActiveHere({ id, type: "integration", source: "system" }, { enabled: true })).toBe(
       true,
     );
+  });
+
+  it("switches a runtime-bound system integration on without a row, and keeps a row saying false", async () => {
+    // The integration serves the run's own tools, so it is offered without a
+    // `SYSTEM_INTEGRATIONS` entry; the space's explicit opt-out still wins.
+    const id = "@parity/runtime-bound";
+    const manifest = {
+      name: id,
+      version: "1.0.0",
+      type: "integration",
+      source: {
+        kind: "remote",
+        remote: { transport: "streamable-http", url: "https://x.invalid/mcp" },
+      },
+      _meta: { [PLATFORM_META_KEY]: {} },
+    };
+    await seedPackage({
+      id,
+      orgId: null,
+      type: "integration",
+      source: "system",
+      draftManifest: manifest,
+    });
+    const restore = _setSystemPackagesForTesting(
+      new Map([
+        [
+          id,
+          {
+            packageId: id,
+            scope: "@parity",
+            name: "runtime-bound",
+            type: "integration",
+            version: "1.0.0",
+            manifest,
+            zipBuffer: Buffer.alloc(0),
+            content: "",
+            files: {},
+          },
+        ],
+      ]),
+    );
+    try {
+      expect(await sqlSaysActive(ctx.defaultSpaceId, id)).toBe(true);
+      expect(isActiveHere({ id, type: "integration", source: "system" }, null)).toBe(true);
+
+      await seedSpacePackage(ctx.defaultSpaceId, id, { enabled: false });
+      expect(await sqlSaysActive(ctx.defaultSpaceId, id)).toBe(false);
+      expect(isActiveHere({ id, type: "integration", source: "system" }, { enabled: false })).toBe(
+        false,
+      );
+    } finally {
+      restore();
+    }
   });
 
   it("asks the space, not the table: another space's row decides nothing here", async () => {

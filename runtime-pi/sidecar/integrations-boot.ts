@@ -514,12 +514,49 @@ function withRemoteFailures(client: AppstrateMcpClient, origin: string): Appstra
   };
 }
 
+/**
+ * Open a Streamable HTTP MCP client on an integration's endpoint through
+ * `fetchFn` (which owns credentials and egress), every failure — the connect
+ * and each later call — reported through {@link remoteMcpFailure}.
+ */
+async function connectStreamableHttp(
+  spec: IntegrationSpawnSpec,
+  endpoint: string,
+  fetchFn: typeof fetch,
+  clientInfo: { name: string; version: string },
+  deps: Pick<ConnectRemoteHttpDeps, "createClient" | "connectDeadlineMs">,
+): Promise<AppstrateMcpClient> {
+  const createClient = deps.createClient ?? createMcpHttpClient;
+  const toolTimeoutMs = toolTimeoutMsFromEnv();
+  return settleRemoteClient(
+    createClient(endpoint, {
+      fetch: fetchFn,
+      clientInfo,
+      onWarning: (message, data) =>
+        logger.warn(message, { integrationId: spec.integrationId, ...data }),
+      retry: { deadlineMs: deps.connectDeadlineMs ?? 30_000 },
+      ...(toolTimeoutMs !== undefined ? { defaultTimeoutMs: toolTimeoutMs } : {}),
+    }),
+    originForLog(endpoint) ?? "<unparseable>",
+  );
+}
+
+/** A connecting client, its failure and every later one reported through {@link remoteMcpFailure}. */
+async function settleRemoteClient(
+  connecting: Promise<AppstrateMcpClient>,
+  origin: string,
+): Promise<AppstrateMcpClient> {
+  const client = await connecting.catch((err: unknown) => {
+    throw remoteMcpFailure(err, origin);
+  });
+  return withRemoteFailures(client, origin);
+}
+
 export async function connectRemoteHttpIntegration(
   spec: IntegrationSpawnSpec,
   source: IntegrationCredentialsSource | null,
   deps: ConnectRemoteHttpDeps = {},
 ): Promise<{ client: AppstrateMcpClient; authKey: string | null }> {
-  const createClient = deps.createClient ?? createMcpHttpClient;
   const createSseClient = deps.createSseClient ?? defaultCreateSseClient;
 
   const serverUrl = spec.manifest.server?.url;
@@ -707,23 +744,58 @@ export async function connectRemoteHttpIntegration(
   // branches share the same per-request credential + 401-retry closure
   // (`customFetch` above), so credential injection + refresh semantics
   // are identical across Streamable HTTP and SSE.
-  const toolTimeoutMs = toolTimeoutMsFromEnv();
-  const connecting =
+  const client =
     transport === "sse"
-      ? createSseClient(serverUrl, { fetch: customFetch, clientInfo })
-      : createClient(serverUrl, {
-          fetch: customFetch,
-          clientInfo,
-          onWarning: (message, data) =>
-            logger.warn(message, { integrationId: spec.integrationId, ...data }),
-          retry: { deadlineMs: deps.connectDeadlineMs ?? 30_000 },
-          ...(toolTimeoutMs !== undefined ? { defaultTimeoutMs: toolTimeoutMs } : {}),
-        });
-  const client = await connecting.catch((err: unknown) => {
-    throw remoteMcpFailure(err, origin);
-  });
+      ? await settleRemoteClient(
+          createSseClient(serverUrl, { fetch: customFetch, clientInfo }),
+          origin,
+        )
+      : await connectStreamableHttp(spec, serverUrl, customFetch, clientInfo, deps);
   connected = true;
-  return { client: withRemoteFailures(client, origin), authKey: credential?.authKey ?? null };
+  return { client, authKey: credential?.authKey ?? null };
+}
+
+/**
+ * Open the platform's run MCP server for an integration bound to the runtime
+ * (`spec.manifest.server.platformEndpoint`): `{platformApiUrl}/internal/mcp`,
+ * authenticated by the run token. The platform API is the origin the sidecar
+ * already trusts with the run token, so this client skips the SSRF guard for
+ * that exact origin and refuses every other one, redirects included.
+ */
+export async function connectPlatformIntegration(
+  spec: IntegrationSpawnSpec,
+  opts: Pick<BundleFetchOptions, "platformApiUrl" | "runToken" | "fetchFn">,
+  deps: Pick<ConnectRemoteHttpDeps, "createClient" | "connectDeadlineMs"> = {},
+): Promise<AppstrateMcpClient> {
+  const endpoint = `${opts.platformApiUrl.replace(/\/$/, "")}/internal/mcp`;
+  const origin = new URL(endpoint).origin;
+  const baseFetch = opts.fetchFn ?? fetch;
+  const platformFetch: typeof fetch = Object.assign(
+    async (input: Parameters<typeof fetch>[0], init: Parameters<typeof fetch>[1]) => {
+      // The MCP client calls `fetch(url, init)`: a `Request` would carry a method, body and
+      // headers this wrapper does not read.
+      if (input instanceof Request) {
+        throw new TypeError("the platform MCP fetch takes a URL, not a Request");
+      }
+      const target = new URL(input);
+      if (target.origin !== origin) {
+        throw new RemoteCredentialRefusal(
+          `integration ${spec.integrationId}: the platform endpoint is ${origin}, refusing ${target.origin}; the run token is not sent`,
+        );
+      }
+      const headers = new Headers(init?.headers);
+      headers.set("Authorization", `Bearer ${opts.runToken}`);
+      return baseFetch(target, { ...init, headers, redirect: "error" });
+    },
+    { preconnect: fetch.preconnect },
+  );
+  return connectStreamableHttp(
+    spec,
+    endpoint,
+    platformFetch,
+    { name: "appstrate-sidecar-platform-integration", version: "0.1.0" },
+    deps,
+  );
 }
 
 /**
@@ -1666,7 +1738,9 @@ export async function bootIntegrations(
       // no per-tool upstream URL can be enforced through a hosted MCP —
       // the upstream decides.
       if (spec.sourceKind === "remote") {
-        const { client, authKey } = await connectRemoteHttpIntegration(spec, source);
+        const { client, authKey } = spec.manifest.server?.platformEndpoint
+          ? { client: await connectPlatformIntegration(spec, bundleFetchOpts), authKey: null }
+          : await connectRemoteHttpIntegration(spec, source);
         // On the caller-owned teardown collector as soon as it is open, so a
         // failed registration still closes the Streamable HTTP client.
         clients.push(client);

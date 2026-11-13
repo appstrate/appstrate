@@ -4,11 +4,9 @@
 /**
  * RunEvent → RunResult reducer.
  *
- * Consumes {@link RunEvent}s whose `type` is one of the reserved core
- * domains (`memory.added` / `pinned.set` / `output.emitted` /
- * `log.written`). Events with any other `type` are
- * passed through silently — the sink still sees them, but they do not
- * contribute to the aggregated result.
+ * Aggregates `output.emitted` into the {@link RunResult}.
+ * Every other event is passed through silently: the sink still sees it, but
+ * it does not contribute to the aggregated result.
  *
  * `foldEvent` is the single switch that knows how each canonical event
  * contributes to the aggregate; the batch reducer `reduceEvents` folds the
@@ -26,9 +24,7 @@ export interface ReduceOptions {
 
 export function emptyRunResult(): RunResult {
   return {
-    memories: [],
     output: null,
-    logs: [],
   };
 }
 
@@ -48,7 +44,7 @@ export function zeroTokenUsage(): TokenUsage {
  * want an immutable pipeline can seed a fresh accumulator per call.
  *
  * Open-envelope `RunEvent`s flow in; `isCanonicalRunEvent` narrows the
- * four reserved namespaces (memory / pinned / output / log) + the
+ * reserved `output.*` namespace + the
  * runner-internal `appstrate.*` namespace to a discriminated union, so the
  * switch is exhaustively typed. Third-party / unknown events are silently
  * passed through — the sink still sees them, they just do not contribute
@@ -59,30 +55,8 @@ export function foldEvent(result: RunResult, event: RunEvent): void {
   const canonical = event;
 
   switch (canonical.type) {
-    case "memory.added":
-      result.memories.push({
-        content: canonical.content,
-        ...(canonical.scope !== undefined ? { scope: canonical.scope } : {}),
-      });
-      return;
-    case "pinned.set": {
-      if (result.pinned === undefined) result.pinned = {};
-      const slot: { content: unknown; scope?: "actor" | "shared" } = {
-        content: canonical.content ?? null,
-      };
-      if (canonical.scope !== undefined) slot.scope = canonical.scope;
-      result.pinned[canonical.key] = slot;
-      return;
-    }
     case "output.emitted":
       result.output = canonical.data ?? null;
-      return;
-    case "log.written":
-      result.logs.push({
-        level: canonical.level,
-        message: canonical.message,
-        timestamp: canonical.timestamp,
-      });
       return;
     case "appstrate.progress":
     case "appstrate.error":

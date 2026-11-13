@@ -1076,6 +1076,30 @@ describe("Packages API", () => {
       expect(JSON.stringify(await res.json())).toContain("cannot declare variables");
     });
 
+    it("refuses the runtime binding key: only a system package may carry it", async () => {
+      const res = await app.request("/api/packages/integrations", {
+        method: "POST",
+        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          manifest: {
+            name: "@pkgorg/runtime-bound",
+            version: "1.0.0",
+            type: "integration",
+            schema_version: "0.3",
+            display_name: "Runtime bound",
+            source: {
+              kind: "remote",
+              remote: { url: "https://example.com/mcp", transport: "streamable-http" },
+            },
+            _meta: { "dev.appstrate/platform": {} },
+          },
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(await res.json())).toContain("reserved for system packages");
+    });
+
     it("updates an integration manifest under If-Match", async () => {
       const createRes = await app.request("/api/packages/integrations", {
         method: "POST",
@@ -1362,92 +1386,7 @@ describe("Packages API", () => {
       expect(etagVersion(res)).toBeGreaterThan(agent.lockVersion!);
     });
 
-    // ── retired `runtime_tools` ids: direction decides ──────────
-    //
-    // Read the PERSISTED draft, not the response DTO: the defect is that the
-    // handler validated one object and wrote another, so only the stored row
-    // can prove which one landed.
-    async function readDraftRuntimeTools(packageId: string): Promise<string[] | undefined> {
-      const [row] = await db
-        .select({ draftManifest: packages.draftManifest })
-        .from(packages)
-        .where(eq(packages.id, packageId))
-        .limit(1);
-      return (row!.draftManifest as { runtime_tools?: string[] }).runtime_tools;
-    }
-    //
-    // The same handler serves two directions. A SUPPLIED manifest is author
-    // input — an id the platform does not know is a mistake the author must
-    // see. An OMITTED manifest carries the stored draft forward — a read, so a
-    // legacy id is dropped rather than 400-ing a content-only save, and the
-    // normalised shape is what gets written back.
-
-    it("rejects an update whose manifest names a retired runtime tool", async () => {
-      const agent = await seedAgent({
-        id: "@pkgorg/retired-tool-agent",
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-      });
-
-      const res = await app.request("/api/packages/agents/@pkgorg/retired-tool-agent", {
-        method: "PATCH",
-        headers: authHeaders(ctx, {
-          "Content-Type": "application/json",
-          ...ifMatch(agent.lockVersion),
-        }),
-        body: JSON.stringify({
-          manifest: {
-            name: "@pkgorg/retired-tool-agent",
-            version: "0.2.0",
-            type: "agent",
-            schema_version: "0.1",
-            display_name: "Retired Tool Agent",
-            runtime_tools: ["report", "log"],
-          },
-          content: "Updated prompt.",
-        }),
-      });
-
-      expect(res.status).toBe(400);
-
-      // Nothing was persisted — the draft is exactly as seeded.
-      expect(await readDraftRuntimeTools("@pkgorg/retired-tool-agent")).toBeUndefined();
-    });
-
-    it("normalises a carried-forward draft that names a retired runtime tool", async () => {
-      const id = "@pkgorg/legacy-tool-agent";
-      const agent = await seedAgent({
-        id,
-        orgId: ctx.orgId,
-        createdBy: ctx.user.id,
-        draftManifest: {
-          name: id,
-          version: "0.1.0",
-          type: "agent",
-          schema_version: "0.1",
-          display_name: "Legacy Tool Agent",
-          runtime_tools: ["report", "log"],
-        },
-      });
-
-      // Content-only save: no `manifest` in the body, so the stored draft is
-      // carried forward. It must be written back VALIDATED, not raw.
-      const res = await app.request(`/api/packages/agents/${id}`, {
-        method: "PATCH",
-        headers: authHeaders(ctx, {
-          "Content-Type": "application/json",
-          ...ifMatch(agent.lockVersion),
-        }),
-        body: JSON.stringify({
-          content: "Only the prompt changed.",
-        }),
-      });
-
-      expect(res.status).toBe(200);
-      expect(await readDraftRuntimeTools(id)).toEqual(["log"]);
-    });
-
-    // ── retired AFPS 1.x dependency keys: same direction split (#1021) ──
+    // ── retired AFPS 1.x dependency keys: direction decides (#1021) ──
     //
     // AFPS 1.x had `dependencies.tools` / `dependencies.providers`; AFPS 2.0
     // renamed them to `mcp_servers` / `integrations`. Every reader destructures
@@ -1520,6 +1459,36 @@ describe("Packages API", () => {
       const body = JSON.stringify(await res.json());
       expect(body).toContain("dependencies.providers");
       expect(body).toContain("dependencies.integrations");
+    });
+
+    it("rejects an update whose manifest carries `runtime_tools`, naming @appstrate/platform", async () => {
+      const id = "@pkgorg/retired-runtime-tools";
+      const agent = await seedAgent({ id, orgId: ctx.orgId, createdBy: ctx.user.id });
+
+      const res = await app.request(`/api/packages/agents/${id}`, {
+        method: "PATCH",
+        headers: authHeaders(ctx, {
+          "Content-Type": "application/json",
+          ...ifMatch(agent.lockVersion),
+        }),
+        body: JSON.stringify({
+          manifest: {
+            name: id,
+            version: "0.2.0",
+            type: "agent",
+            schema_version: "0.1",
+            display_name: "Runtime Tools Agent",
+            runtime_tools: ["log"],
+          },
+          content: "Updated prompt.",
+        }),
+      });
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { errors: Array<{ field: string; message: string }> };
+      expect(body.errors).toHaveLength(1);
+      expect(body.errors[0]!.field).toBe("manifest.runtime_tools");
+      expect(body.errors[0]!.message).toContain("@appstrate/platform");
     });
 
     it("accepts the canonical dependency maps and an unrelated extension key", async () => {
@@ -2993,62 +2962,7 @@ describe("Packages API", () => {
       expect(body.type).toBe("skill");
     });
 
-    // ── retired `runtime_tools` policy: /import is the WRITE direction ──
-    //
-    // `/import` (and `/import-github`, which shares the same parse helper) is
-    // author input, NOT content the platform already holds — so a retired id
-    // and a typo both reject, with a field-precise error the operator can fix
-    // by editing one line of manifest.json. Contrast
-    // `POST /api/packages/import-bundle`, which drops (see
-    // packages-import-bundle.test.ts). If this pair ever starts returning 201,
-    // the policy has silently flipped and typos are being swallowed.
-    async function importAgentWithRuntimeTools(tools: string[]): Promise<Response> {
-      const enc = (s: string) => new TextEncoder().encode(s);
-      const afps = zipSync({
-        "manifest.json": enc(
-          JSON.stringify({
-            name: "@pkgorg/rt-policy-agent",
-            version: "1.0.0",
-            type: "agent",
-            schema_version: "0.1",
-            display_name: "Runtime Tools Policy Agent",
-            runtime_tools: tools,
-          }),
-        ),
-        "prompt.md": enc("You are an agent."),
-      });
-      const formData = new FormData();
-      formData.append("file", new File([new Uint8Array(afps)], "agent.afps"));
-      return app.request("/api/packages/import", {
-        method: "POST",
-        headers: authHeaders(ctx),
-        body: formData,
-      });
-    }
-
-    it("returns 400 for a RETIRED runtime_tools id (author input rejects)", async () => {
-      const res = await importAgentWithRuntimeTools(["output", "report"]);
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as any;
-      expect(JSON.stringify(body)).toContain("runtime_tools");
-
-      // Nothing was persisted — the reject is not a partial write.
-      const [row] = await db
-        .select({ id: packages.id })
-        .from(packages)
-        .where(eq(packages.id, "@pkgorg/rt-policy-agent"))
-        .limit(1);
-      expect(row).toBeUndefined();
-    });
-
-    it("returns 400 for a MISSPELLED runtime_tools id (author input rejects)", async () => {
-      const res = await importAgentWithRuntimeTools(["lgo"]);
-      expect(res.status).toBe(400);
-      const body = (await res.json()) as any;
-      expect(JSON.stringify(body)).toContain("runtime_tools");
-    });
-
-    // Same WRITE direction, applied to the retired AFPS 1.x dependency keys
+    // `/import` is the WRITE direction for the retired AFPS 1.x dependency keys
     // (#1021). An uploaded .afps is author input and locally repairable — the
     // error names the key and its replacement, so the operator edits one line.
     it("returns 400 for a retired dependencies key (author input rejects)", async () => {
@@ -3086,22 +3000,6 @@ describe("Packages API", () => {
         .where(eq(packages.id, "@pkgorg/dep-vocab-agent"))
         .limit(1);
       expect(row).toBeUndefined();
-    });
-
-    it("imports an agent whose runtime_tools are all still selectable", async () => {
-      // Control: the reject above must be caused by the id, not by the mere
-      // presence of `runtime_tools`.
-      const res = await importAgentWithRuntimeTools(["output", "log"]);
-      expect(res.status).toBe(201);
-      const [row] = await db
-        .select({ draftManifest: packages.draftManifest })
-        .from(packages)
-        .where(eq(packages.id, "@pkgorg/rt-policy-agent"))
-        .limit(1);
-      expect((row!.draftManifest as Record<string, unknown>).runtime_tools).toEqual([
-        "output",
-        "log",
-      ]);
     });
 
     it("returns 400 when no file is provided", async () => {
@@ -3836,18 +3734,17 @@ describe("Packages API", () => {
 
   // ═══════════════════════════════════════════════
   // Issue #974 — a fork is a READ that MINTS: it copies an already-published
-  // (immutable, unrepairable) manifest into a brand new version row + ZIP.
-  // The normalisation therefore has to happen ONCE, before the draft row is
-  // written, so the three sinks — draft row, draft storage files, published
-  // version (row + ZIP) — can never disagree.
+  // (immutable, unrepairable) manifest into a brand new version row + ZIP, and
+  // the three sinks — draft row, draft storage files, published version
+  // (row + ZIP) — must never disagree.
   // ═══════════════════════════════════════════════
 
-  describe("POST fork — published manifest normalisation", () => {
+  describe("POST fork — published manifest fidelity", () => {
     /**
      * Seed a PUBLISHED source package in another org WITHOUT going through the
-     * API: the write direction rejects a retired `runtime_tools` id, so the
-     * legacy state a fork must cope with can only be produced by writing the
-     * row + artifact directly.
+     * API: the legacy states a fork must cope with (a drifted `type`, say) are
+     * refused by the write direction, so they can only be produced by writing
+     * the row + artifact directly.
      */
     async function seedPublishedSource(
       packageId: string,
@@ -3910,75 +3807,6 @@ describe("Packages API", () => {
       return new TextDecoder().decode(entries["manifest.json"]!);
     }
 
-    it("drops a retired runtime tool from all three fork sinks", async () => {
-      const srcCtx = await createTestContext({ orgSlug: "forkret" });
-      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
-      const sourceId = "@forkret/legacy-agent";
-      await seedPublishedSource(sourceId, srcCtx.orgId, {
-        name: sourceId,
-        version: "0.1.0",
-        type: "agent",
-        schema_version: "0.1",
-        display_name: "Legacy Tool Agent",
-        description: "Published before `report` was retired",
-        runtime_tools: ["output", "report"],
-      });
-
-      const res = await app.request(`/api/packages/${sourceId}/fork`, {
-        method: "POST",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({}),
-      });
-      expect(res.status).toBe(201);
-
-      const targetId = "@pkgorg/legacy-agent";
-      // 1. the new catalog row
-      expect((await versionManifest(targetId)).runtime_tools).toEqual(["output"]);
-      // 2. the fork's draft — leave the retired id here and the fork's first
-      //    re-publish regraves it into yet another immutable artifact.
-      expect((await draftManifest(targetId)).runtime_tools).toEqual(["output"]);
-      // 3. the immutable artifact — a normalised row over a stale ZIP still
-      //    ships the retired id to every runner that downloads the bundle.
-      const zipped = JSON.parse(await artifactManifestText(targetId, "0.1.0")) as {
-        runtime_tools?: string[];
-      };
-      expect(zipped.runtime_tools).toEqual(["output"]);
-    });
-
-    it("removes the runtime_tools key entirely when every tool was retired", async () => {
-      const srcCtx = await createTestContext({ orgSlug: "forkret2" });
-      await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
-      const sourceId = "@forkret2/all-retired";
-      await seedPublishedSource(sourceId, srcCtx.orgId, {
-        name: sourceId,
-        version: "0.1.0",
-        type: "agent",
-        schema_version: "0.1",
-        display_name: "All Retired",
-        description: "Its only runtime tool no longer exists",
-        runtime_tools: ["report"],
-      });
-
-      const res = await app.request(`/api/packages/${sourceId}/fork`, {
-        method: "POST",
-        headers: authHeaders(ctx, { "Content-Type": "application/json" }),
-        body: JSON.stringify({}),
-      });
-      expect(res.status).toBe(201);
-
-      // ABSENT, not `[]`: absent and `[]` parse to the same agent but are
-      // different bytes, and the editor spells "no runtime tools" as absent.
-      // Emitting `[]` here would give one manifest two integrity hashes.
-      const targetId = "@pkgorg/all-retired";
-      expect(await versionManifest(targetId)).not.toHaveProperty("runtime_tools");
-      expect(await draftManifest(targetId)).not.toHaveProperty("runtime_tools");
-      const zipped = JSON.parse(await artifactManifestText(targetId, "0.1.0")) as Record<
-        string,
-        unknown
-      >;
-      expect(zipped).not.toHaveProperty("runtime_tools");
-    });
-
     it("forks a clean manifest unchanged — nothing reordered, nothing defaulted", async () => {
       const srcCtx = await createTestContext({ orgSlug: "forkclean" });
       await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
@@ -3989,8 +3817,7 @@ describe("Packages API", () => {
         type: "agent",
         schema_version: "0.1",
         display_name: "Clean Agent",
-        description: "Nothing to drop",
-        runtime_tools: ["output", "log"],
+        description: "Nothing to rewrite",
       });
 
       const res = await app.request(`/api/packages/${sourceId}/fork`, {
@@ -4000,14 +3827,10 @@ describe("Packages API", () => {
       });
       expect(res.status).toBe(201);
 
-      // FORWARD guard, not a proof of the fix: `dropRetiredRuntimeTools`
-      // returns the same object reference when there is nothing to drop, so
-      // this passed before the normalisation existed too. What it pins is the
-      // shape of any FUTURE normalisation added here — a Zod re-parse would
-      // reorder keys to schema order and materialise defaults, giving one
-      // manifest two integrity hashes and defeating publish dedup (#896). A
-      // source with nothing to drop must serialise to the source manifest with
-      // ONLY `name` swapped. Compared against the STORED source manifest (not
+      // FORWARD guard: a Zod re-parse of the forked manifest would reorder keys
+      // to schema order and materialise defaults, giving one manifest two
+      // integrity hashes and defeating publish dedup (#896). The fork must
+      // serialise to the source manifest with ONLY `name` swapped. Compared against the STORED source manifest (not
       // the literal above) because jsonb does not preserve authoring key order.
       const targetId = "@pkgorg/clean-agent";
       const expected = JSON.stringify(
@@ -4019,8 +3842,6 @@ describe("Packages API", () => {
     });
 
     it("is a no-op for a non-agent package — a skill forks with only `name` swapped", async () => {
-      // `runtime_tools` is agent vocabulary, so the normalisation must be
-      // invisible to the other three package types.
       const srcCtx = await createTestContext({ orgSlug: "forkskill" });
       await addOrgMember(srcCtx.orgId, ctx.user.id, "admin");
       const sourceId = "@forkskill/plain-skill";
@@ -4033,7 +3854,7 @@ describe("Packages API", () => {
           type: "skill",
           schema_version: "0.1",
           display_name: "Plain Skill",
-          description: "Nothing an agent-shaped normalisation could touch",
+          description: "A plain skill",
         },
         "# Plain Skill",
       );
@@ -4051,7 +3872,7 @@ describe("Packages API", () => {
       expect(await artifactManifestText(targetId, "0.1.0")).toBe(JSON.stringify(expected, null, 2));
       // `toMatchObject`, not `toEqual`: every draft row gets `$schema` + `type`
       // stamped by `createOrgItem` regardless of package type — pre-existing,
-      // unrelated to this normalisation. What matters here is that nothing the
+      // unrelated to the fork. What matters here is that nothing the
       // source declared was changed or lost.
       expect(await draftManifest(targetId)).toMatchObject(expected);
     });

@@ -23,8 +23,8 @@
  *
  * Two levels, deliberately different about failure:
  * {@link compileCached} is the compile funnel and THROWS on a schema Ajv
- * cannot compile — the callers that want that (`runtime-tool-defs`'s
- * `buildOutputDef`, which records the compile error, and `apps/api`'s three
+ * cannot compile — the callers that want that (`@appstrate/runner-pi`'s
+ * `buildOutputExtension`, which records the compile error, and `apps/api`'s three
  * server-only validators) call it directly. {@link validateAgainstSchema} is a
  * VALIDATOR and never throws: an uncompilable schema comes back as
  * `valid: false` carrying the compiler's message. See its docstring for why.
@@ -217,7 +217,7 @@ export function stripEmptyRequired(
  * **Contract: this function does not throw.** Every outcome — including "your
  * schema is broken" — comes back as a {@link SchemaValidationResult}. A caller
  * that wants the compile failure as an exception calls {@link compileCached}
- * directly; that is the explicit opt-in, and `runtime-tool-defs.ts` uses it.
+ * directly; that is the explicit opt-in, and `@appstrate/runner-pi`'s `harness-tools.ts` uses it.
  *
  * The contract is not decoration, it is what the two callers are written
  * against. `apps/cli`'s `validateLocalInput` renders `result.errors` and exits

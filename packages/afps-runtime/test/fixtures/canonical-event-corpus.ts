@@ -7,15 +7,15 @@
  * `isCanonicalRunEvent` (`src/types/canonical-events.ts`) is the runtime
  * structural guard that narrows an open `RunEvent` into the discriminated
  * union. A rejection is not cosmetic: the reducer drops the event from the
- * `RunResult`, and the stdout bridge refuses to believe it. This corpus is the
+ * `RunResult`. This corpus is the
  * only list of accept/reject cases for it; `test/types/canonical-events.test.ts`
  * runs every fixture through the guard and asserts the `valid` label.
  *
  * ## Labels
  *
  * Each fixture's `label` names the constraint it exercises — e.g.
- * "memory.added — numeric content" is the wrong-typed-value case for
- * `content`, and "— missing content" is the omission case. Labels are for
+ * "appstrate.progress — numeric message" is the wrong-typed-value case for
+ * `message`, and "— missing message" is the omission case. Labels are for
  * humans reading an assertion diff; they are not what proves coverage.
  *
  * ## Coverage is checked, not trusted
@@ -53,92 +53,6 @@ interface CanonicalEventFixture {
  * {@link NON_CANONICAL_EVENTS} — the guard cannot know their shape.
  */
 export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
-  // --- memory.added ---------------------------------------------------
-  {
-    label: "memory.added — minimal",
-    event: { ...base, type: "memory.added", content: "hello" },
-    valid: true,
-  },
-  {
-    label: "memory.added — explicit shared scope",
-    event: { ...base, type: "memory.added", content: "scoped", scope: "shared" },
-    valid: true,
-  },
-  {
-    label: "memory.added — explicit actor scope",
-    event: { ...base, type: "memory.added", content: "scoped", scope: "actor" },
-    valid: true,
-  },
-  {
-    label: "memory.added — missing content",
-    event: { ...base, type: "memory.added" },
-    valid: false,
-  },
-  {
-    label: "memory.added — numeric content",
-    event: { ...base, type: "memory.added", content: 42 },
-    valid: false,
-  },
-  {
-    label: "memory.added — unknown scope",
-    event: { ...base, type: "memory.added", content: "x", scope: "global" },
-    valid: false,
-  },
-
-  // --- pinned.set -----------------------------------------------------
-  {
-    label: "pinned.set — checkpoint slot",
-    event: { ...base, type: "pinned.set", key: "checkpoint", content: { counter: 1 } },
-    valid: true,
-  },
-  {
-    label: "pinned.set — named slot, scalar content",
-    event: { ...base, type: "pinned.set", key: "persona", content: "agent A" },
-    valid: true,
-  },
-  {
-    label: "pinned.set — explicit actor scope",
-    event: { ...base, type: "pinned.set", key: "checkpoint", content: { c: 2 }, scope: "actor" },
-    valid: true,
-  },
-  {
-    label: "pinned.set — null content is still a value",
-    event: { ...base, type: "pinned.set", key: "k", content: null },
-    valid: true,
-  },
-  {
-    label: "pinned.set — missing key",
-    event: { ...base, type: "pinned.set", content: 1 },
-    valid: false,
-  },
-  {
-    label: "pinned.set — missing content",
-    event: { ...base, type: "pinned.set", key: "checkpoint" },
-    valid: false,
-  },
-  {
-    // `JSON.stringify` drops an explicitly-undefined value, so the wire
-    // payload is `{"key":"k"}` — which fails `required: ["content"]`.
-    label: "pinned.set — explicitly undefined content",
-    event: { ...base, type: "pinned.set", key: "k", content: undefined },
-    valid: false,
-  },
-  {
-    label: "pinned.set — numeric key",
-    event: { ...base, type: "pinned.set", key: 42, content: 1 },
-    valid: false,
-  },
-  {
-    label: "pinned.set — empty key",
-    event: { ...base, type: "pinned.set", key: "", content: 1 },
-    valid: false,
-  },
-  {
-    label: "pinned.set — unknown scope",
-    event: { ...base, type: "pinned.set", key: "k", content: 1, scope: "everyone" },
-    valid: false,
-  },
-
   // --- output.emitted -------------------------------------------------
   {
     label: "output.emitted — object payload",
@@ -158,28 +72,6 @@ export const CANONICAL_EVENT_CORPUS: readonly CanonicalEventFixture[] = [
   {
     label: "output.emitted — explicitly undefined data",
     event: { ...base, type: "output.emitted", data: undefined },
-    valid: false,
-  },
-
-  // --- log.written ----------------------------------------------------
-  {
-    label: "log.written — info line",
-    event: { ...base, type: "log.written", level: "info", message: "x" },
-    valid: true,
-  },
-  {
-    label: "log.written — unknown level",
-    event: { ...base, type: "log.written", level: "debug", message: "x" },
-    valid: false,
-  },
-  {
-    label: "log.written — missing message",
-    event: { ...base, type: "log.written", level: "info" },
-    valid: false,
-  },
-  {
-    label: "log.written — numeric message",
-    event: { ...base, type: "log.written", level: "warn", message: 42 },
     valid: false,
   },
 

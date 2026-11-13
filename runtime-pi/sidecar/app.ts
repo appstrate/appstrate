@@ -3,8 +3,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { Hono, type Context } from "hono";
 import pLimit, { type LimitFunction } from "p-limit";
-import { mountMcp, validateMcpHostHeader } from "./mcp.ts";
-import { RuntimeEventJournal } from "./runtime-event-journal.ts";
+import { mountMcp } from "./mcp.ts";
 import type { ApiCallBaseDeps } from "./credential-proxy.ts";
 import type { CookieJar } from "@appstrate/afps-runtime/resolvers";
 import type { AppstrateToolDefinition } from "@appstrate/mcp-transport";
@@ -123,12 +122,12 @@ export interface AppDeps {
    */
   runId?: string;
   /**
-   * Lazy provider for additional MCP tool definitions. Called on every
+   * Lazy provider for the MCP tool definitions `/mcp` serves. Called on every
    * `/mcp` request so integrations that finish booting after the
    * sidecar's HTTP listener comes up still appear on the next call.
    * The integration runtime wires `McpHost.buildTools` here.
    */
-  additionalMcpToolsProvider?: () => AppstrateToolDefinition[];
+  mcpToolsProvider?: () => AppstrateToolDefinition[];
   /**
    * Pre-built run-scoped runtime deps (blob store, token budget,
    * concurrency limiter, credential-proxy base deps). Production wires
@@ -154,14 +153,6 @@ export interface AppDeps {
    * tests / sidecars launched without integrations.
    */
   integrationBootReportProvider?: () => IntegrationBootReport;
-  /**
-   * Per-run runtime-event journal. The runtime-tool defs (`server.ts`) are
-   * wrapped to journal their canonical events on a single handler execution;
-   * the `GET /runtime-events` endpoint serves them to whichever runner is
-   * draining. Omitted by tests / sidecars without runtime tools → the endpoint
-   * answers an empty batch.
-   */
-  runtimeEventJournal?: RuntimeEventJournal;
 }
 
 /**
@@ -563,9 +554,9 @@ function platformLlmUpstream(
  *                          back to the agent without buffering. The agent
  *                          never sees a credential.
  *   - `ALL  /mcp`        — JSON-RPC entrypoint mounted by `mountMcp`.
- *                          Exposes `{ns}__api_call`, `run_history`, and
- *                          `recall_memory` as MCP tools backed by the
- *                          credential-proxy core in `credential-proxy.ts`.
+ *                          Exposes `{ns}__api_call` (backed by the
+ *                          credential-proxy core in `credential-proxy.ts`)
+ *                          and every integration tool as MCP tools.
  */
 /**
  * Run-scoped runtime singletons shared between the HTTP `/mcp` surface
@@ -659,8 +650,8 @@ export function createApp(deps: AppDeps): Hono {
   //
   // DENY BY DEFAULT, with `/health` as the single exemption: a route added to
   // this app later is protected without anyone remembering to say so, which is
-  // the opposite of how `/llm/*`, `/mcp`, `/integrations/boot-report` and
-  // `/runtime-events` each ended up open one at a time.
+  // the opposite of how `/llm/*`, `/mcp` and `/integrations/boot-report` each
+  // ended up open one at a time.
   //
   // `/health` is exempt because it is the container health gate — the
   // orchestrator probes it before the run exists and it discloses one bit
@@ -995,39 +986,16 @@ export function createApp(deps: AppDeps): Hono {
     );
   }
 
-  // MCP exposure — the agent-facing surface for the first-party tools
-  // (`run_history`, `recall_memory`) plus every integration tool the
+  // MCP exposure — the agent-facing surface for every integration tool the
   // McpHost aggregates (spawned/remote MCP servers AND the in-process
   // `api_call` server). Run-scoped deps are built once and shared with
   // `bootIntegrations` (when `server.ts` pre-builds them) so the
   // in-process api_call server and the outer resource provider use the
   // same blob store.
-  // Runtime-event drain surface — the Pi runner pulls the
-  // canonical events the sidecar journaled while executing runtime tools, and
-  // re-emits them on its single run-event sink. Same posture as `/mcp`: the
-  // agent-auth middleware gates it, and the `Host` check on top is the
-  // DNS-rebinding defence. An empty journal (no runtime tools selected)
-  // answers an empty batch.
-  app.get("/runtime-events", (c) => {
-    const denied = validateMcpHostHeader(c.req.raw);
-    if (denied) return denied;
-    const journal = deps.runtimeEventJournal;
-    if (!journal) return c.json({ events: [], cursor: 0, firstSeq: 1 });
-    const after = Number.parseInt(c.req.query("after") ?? "0", 10);
-    const cursor = Number.isFinite(after) && after >= 0 ? after : 0;
-    return c.json(journal.after(cursor));
-  });
-
-  const { blobStore, tokenBudget, apiCallLimit, proxyDeps } =
-    deps.runtimeDeps ?? buildSidecarRuntimeDeps(deps);
+  const { blobStore } = deps.runtimeDeps ?? buildSidecarRuntimeDeps(deps);
   mountMcp(app, {
     blobStore,
-    tokenBudget,
-    apiCallLimit,
-    proxyDeps,
-    ...(deps.additionalMcpToolsProvider
-      ? { additionalToolsProvider: deps.additionalMcpToolsProvider }
-      : {}),
+    ...(deps.mcpToolsProvider ? { toolsProvider: deps.mcpToolsProvider } : {}),
   });
 
   return app;

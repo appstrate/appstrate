@@ -2,7 +2,9 @@
 
 /**
  * The journal's two empty bodies: a run that logged nothing says so plainly,
- * and only a journal whose filters hide every event offers to clear them.
+ * and only a journal whose filters hide every event offers to clear them. The
+ * inspector reads a `recall_memory` result, under the name the agent calls it
+ * by, as the memories it returned.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -13,7 +15,7 @@ installFakeStorage({
   __APP_CONFIG__: { features: {}, trustedOrigins: [] },
 });
 
-const { LogViewer } = await import("../log-viewer.tsx");
+const { LogEntryInspector, LogViewer } = await import("../log-viewer.tsx");
 const { render } = await import("../../test/render.tsx");
 const agentsFr = (await import("../../locales/fr/agents.json")).default;
 const commonFr = (await import("../../locales/fr/common.json")).default;
@@ -45,5 +47,28 @@ describe("LogViewer — an empty journal", () => {
     expect(html).toContain(agentsFr["log.noMatches"]);
     expect(html).toContain(commonFr["toolbar.clearAll"]);
     expect(html).not.toContain(agentsFr["log.empty"]);
+  });
+});
+
+describe("LogEntryInspector — a platform tool's result", () => {
+  const recall = (tool: string): ExecutionEntry => ({
+    id: "tool_1",
+    kind: "tool",
+    tool,
+    status: "success",
+    args: { query: "relevé" },
+    result: { content: [{ type: "text", text: '{"memories":[]}' }] },
+  });
+
+  it("reads appstrate_platform__recall_memory as the memories it returned", () => {
+    const html = render(
+      <LogEntryInspector entry={recall("appstrate_platform__recall_memory")} onClose={() => {}} />,
+    );
+    expect(html).toContain(agentsFr["log.recalledNone"]);
+  });
+
+  it("keeps any other tool's result as JSON", () => {
+    const html = render(<LogEntryInspector entry={recall("recall_memory")} onClose={() => {}} />);
+    expect(html).not.toContain(agentsFr["log.recalledNone"]);
   });
 });

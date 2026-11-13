@@ -441,10 +441,10 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
 
   // --- Memory ---
   // Data-only section: dumps the agent's pinned memory list (working
-  // set, tier 1). The archive tier is reachable via
-  // tool calls — those instructions live in each tool's MCP descriptor
-  // `description` (`note` for writes, runtime-injected `recall_memory`
-  // for searches, surfaced via `tools/list`). Section omitted when no
+  // set, tier 1). The archive tier is reachable via tool calls — those
+  // instructions live in each tool's MCP descriptor `description` (the
+  // `@appstrate/platform` tools `note` for writes, `recall_memory` for
+  // searches, surfaced via `tools/list`). Section omitted when no
   // memories are pinned.
   if (context.memories && context.memories.length > 0) {
     sections.push("## Memory\n");
@@ -481,7 +481,7 @@ export function renderPlatformPrompt(opts: PlatformPromptOptions): string {
   // Rendered LAST so the constraint is freshly in the LLM's context when
   // it reads the agent task prompt below. See `outputSchema` docstring
   // for why this duplicates the tool-level schema.
-  if (opts.outputSchema && Object.keys(opts.outputSchema).length > 0) {
+  if (opts.outputSchema) {
     sections.push("## Output Format\n");
     sections.push(
       "You MUST call the `output` tool **exactly once**, as your FINAL action, " +

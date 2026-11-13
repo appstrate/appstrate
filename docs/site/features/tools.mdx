@@ -3,15 +3,16 @@ title: Tools
 description: What an agent can call during a run, where each tool comes from, and how to add your own through MCP.
 ---
 
-A **tool** is a function the model can call during a run. A skill tells the agent what to do and when. A tool lets it do something. An agent sees three families of tools, each coming from a different place.
+A **tool** is a function the model can call during a run. A skill tells the agent what to do and when. A tool lets it do something. An agent sees four families of tools, each coming from a different place.
 
 | Family            | Where it comes from                                       | Declared in                                                  |
 | ----------------- | --------------------------------------------------------- | ------------------------------------------------------------ |
 | Sandbox tools     | The agent runtime                                         | Nothing to declare                                           |
-| Runtime tools     | The platform                                              | `runtime_tools` in the manifest                              |
+| Harness tools     | The agent runtime                                         | Nothing to declare                                           |
+| Platform tools    | The `@appstrate/platform` system integration              | `dependencies.integrations` and `integrations_configuration` |
 | Integration tools | Integrations, which wrap third-party APIs and MCP servers | `dependencies.integrations` and `integrations_configuration` |
 
-All platform-provided tools are delivered over [MCP](https://modelcontextprotocol.io) by the run's sidecar (see [Sandbox and Sidecar](/features/sandbox-and-sidecar)). Tool names and descriptions are advertised through MCP, not written into the prompt.
+Platform and integration tools are delivered over [MCP](https://modelcontextprotocol.io) by the run's sidecar (see [Sandbox and Sidecar](/features/sandbox-and-sidecar)); the runner registers harness tools in process. Tool names and descriptions are advertised through MCP, not written into the prompt.
 
 ## Sandbox tools
 
@@ -19,25 +20,38 @@ The agent runs on the Pi coding agent, which gives the model file and shell tool
 
 These tools act inside the sandbox only. Anything that reaches the outside world on the agent's behalf goes through the sidecar. Raw credentials are never in the sandbox.
 
-## Runtime tools
+## Harness tools
 
-Runtime tools are first-party and **opt-in**. You choose them per agent with `runtime_tools`. None is injected by default, not even `output`.
+The runner registers two tools without any declaration:
 
-| Tool           | Purpose                                                                                                                                                                                                                |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `output`       | Returns the run's structured result as its `data` argument, whose schema is the agent's `output.schema`, and the call is validated. A successful call ends the run. Required when the agent declares an output schema. |
-| `log`          | Sends a progress message (`info`, `warn`, `error`) that the user sees live.                                                                                                                                            |
-| `note`         | Appends a long-term memory (up to 2000 characters), private to the actor by default or `shared` for the space.                                                                                                         |
-| `pin`          | Upserts a named slot that is pinned into the prompt of every run (`checkpoint`, `persona`, ...).                                                                                                                       |
-| `publish_file` | Publishes a workspace file as a durable run file immediately and returns its `appfile://` URI.                                                                                                                         |
+| Tool           | Purpose                                                                                                                                                                                                                       |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `output`       | Returns the run's structured result as its `data` argument, whose schema is the agent's `output.schema`, and the call is validated. A successful call ends the run. Present exactly when the agent declares an output schema. |
+| `publish_file` | Publishes a workspace file as a durable run file immediately and returns its `appfile://` URI. Present on every platform run.                                                                                                 |
+
+## Platform tools
+
+The `@appstrate/platform` system integration serves six tools from the platform that runs the agent. Declaring the dependency gives all of them but `notify`, which reaches people and is given only to an agent that selects it; `integrations_configuration["@appstrate/platform"].tools` sets the selection. The model sees them as `appstrate_platform__<tool>`.
+
+| Tool            | Purpose                                                                                                                                                                                 |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `log`           | Sends a progress message (`info`, `warn`, `error`, up to 2000 characters) that the user sees live.                                                                                      |
+| `note`          | Appends a long-term memory (up to 2000 characters), private to the actor by default or `shared` for the space.                                                                          |
+| `pin`           | Upserts a named slot that is pinned into the prompt of every run (`checkpoint`, `persona`, ...).                                                                                        |
+| `recall_memory` | Searches the memory archive.                                                                                                                                                            |
+| `run_history`   | Returns the metadata of recent runs.                                                                                                                                                    |
+| `notify`        | Sends an in-app [notification](/features/notifications) (title up to 100 characters, message up to 500) to the people the run's completion notifies, once per run. Selected explicitly. |
 
 Excerpt of the agent manifest:
 
 ```json
-{ "runtime_tools": ["output", "log", "note"] }
+{
+  "dependencies": { "integrations": { "@appstrate/platform": "^1.0.0" } },
+  "integrations_configuration": { "@appstrate/platform": { "tools": ["log", "note"] } }
+}
 ```
 
-Alongside them the sidecar exposes two read-only first-party tools, `run_history` (metadata of recent runs) and `recall_memory` (search the memory archive). `note`, `pin` and `recall_memory` are explained in [Memory](/features/memory). Files are covered in [Files](/features/files).
+`note`, `pin` and `recall_memory` are explained in [Memory](/features/memory). Files are covered in [Files](/features/files).
 
 The model's plain text is never delivered. To reach the user, an agent must call `output`, `log` or write a file.
 

@@ -13,6 +13,7 @@ import { createVersionAndUpload } from "./package-versions.ts";
 import { uploadPackageFiles, SYSTEM_STORAGE_NAMESPACE } from "./package-items/storage.ts";
 import { storageFolderForType } from "./package-items/config.ts";
 import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
+import { isRuntimeBoundIntegration } from "@appstrate/core/integration";
 
 export type { SystemPackageEntry };
 
@@ -38,6 +39,17 @@ let systemPackages: ReadonlyMap<string, SystemPackageEntry> = new Map();
 // to register each version in `package_versions` so semver ranges like `^1.0.0`
 // resolve correctly even when a newer major has shipped.
 let systemPackageVersions: readonly SystemPackageEntry[] = [];
+// Ids of the runtime-bound integrations among `systemPackages`, computed when a
+// registry is installed ({@link installRegistry}).
+let runtimeBoundIntegrationIds: readonly string[] = [];
+
+/** Install `entries` as the canonical registry, with the lists derived from it. */
+function installRegistry(entries: ReadonlyMap<string, SystemPackageEntry>): void {
+  systemPackages = entries;
+  runtimeBoundIntegrationIds = [...entries.values()]
+    .filter((e) => e.type === "integration" && isRuntimeBoundIntegration(e.manifest))
+    .map((e) => e.packageId);
+}
 
 /**
  * Max concurrent DB round-trips issued by the boot sync. The postgres.js pool
@@ -70,7 +82,7 @@ export async function initSystemPackages(): Promise<void> {
       version: entry.version,
     });
   }
-  systemPackages = pkgMap;
+  installRegistry(pkgMap);
   systemPackageVersions = result.packages;
 
   logger.info("System packages loaded", {
@@ -96,6 +108,15 @@ export function isSystemPackage(id: string): boolean {
 }
 
 /**
+ * Ids of the system integrations bound to the runtime that executes the run
+ * ({@link isRuntimeBoundIntegration}). They are part of the run itself, so the
+ * activation rule switches them on in every space that holds no row for them.
+ */
+export function listRuntimeBoundSystemIntegrationIds(): readonly string[] {
+  return runtimeBoundIntegrationIds;
+}
+
+/**
  * Test-only: install a registry and return the undo. `getTestApp()` skips
  * `boot()`, so the registry is empty under test and every boot-registry branch
  * (e.g. the mcp-server byte route's system short-circuit — the one caller
@@ -107,9 +128,9 @@ export function _setSystemPackagesForTesting(
   entries: ReadonlyMap<string, SystemPackageEntry>,
 ): () => void {
   const previous = systemPackages;
-  systemPackages = entries;
+  installRegistry(entries);
   return () => {
-    systemPackages = previous;
+    installRegistry(previous);
   };
 }
 

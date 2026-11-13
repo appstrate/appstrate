@@ -2,8 +2,6 @@
 
 import type { Manifest } from "@appstrate/core/validation";
 import { asRecord } from "@appstrate/core/safe-json";
-import { asJSONSchemaObject } from "@appstrate/core/form";
-import type { JSONSchemaObject } from "@appstrate/core/form";
 
 /** Narrow a JSONB-stored manifest column (`unknown`) to the typed shape. */
 export function parseDraftManifest(value: unknown): Partial<Manifest> {
@@ -33,18 +31,4 @@ export function extractSkillIdsFromManifest(manifest: Partial<Manifest>): string
   const dependencies = asRecord(manifest.dependencies);
   const skillsMap = asRecord(dependencies.skills) as Record<string, string>;
   return Object.keys(skillsMap).filter(Boolean);
-}
-
-/**
- * Extract a manifest's output JSON schema, with safe narrowing.
- *
- * Output only. This returned `{ input, output }` until the input half ran out
- * of readers: every input-schema caller reaches `manifest.input?.schema` at its
- * own site (`routes/runs.ts`, `routes/schedules.ts`, `services/inline-run.ts`, …).
- */
-export function extractManifestOutputSchema(
-  manifest: Partial<Manifest>,
-): JSONSchemaObject | undefined {
-  const m = manifest as Record<string, { schema?: unknown } | undefined>;
-  return m.output?.schema ? asJSONSchemaObject(m.output.schema) : undefined;
 }

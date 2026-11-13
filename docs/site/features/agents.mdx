@@ -9,10 +9,10 @@ An agent is an **LLM in a loop with tools**, running inside an isolated sandbox.
 
 An agent is an [AFPS package](/features/packages) of type `agent`. It is made of:
 
-- `manifest.json`: identity, input and output schemas, timeout, dependencies, runtime tools.
+- `manifest.json`: identity, input and output schemas, timeout, dependencies and their configuration.
 - `prompt.md`: the instructions the model receives.
 
-At run time Appstrate assembles the agent, its [skills](/features/skills), its [integrations](/integrations/how-integrations-work) and the [runtime tools](/features/tools) it selected, starts a sandbox (see [Sandbox and Sidecar](/features/sandbox-and-sidecar)) and lets the model loop until it calls the `output` tool, finishes, fails, or hits the timeout.
+At run time Appstrate assembles the agent, its [skills](/features/skills), its [integrations](/integrations/how-integrations-work) and the [tools](/features/tools) they bring, starts a sandbox (see [Sandbox and Sidecar](/features/sandbox-and-sidecar)) and lets the model loop until it calls the `output` tool, finishes, fails, or hits the timeout.
 
 Plain text the model writes outside a tool call is never delivered to anyone. Results leave the run through tools: `output` for structured data, `log` for progress, and files written under `./outputs/` (see [Files](/features/files)).
 
@@ -31,7 +31,7 @@ A launch with no selector runs the **latest published version**. The draft runs 
 
 ### In the web app
 
-Open **Agents** in the sidebar and choose **New agent**. A name, what it does and its prompt are enough to create it. The rest is set afterwards on the agent: the input and output schemas, skills and integrations, and the runtime tools. Saving edits the draft. **Create version**, in the agent's actions menu, cuts a version.
+Open **Agents** in the sidebar and choose **New agent**. A name, what it does and its prompt are enough to create it. The rest is set afterwards on the agent: the input and output schemas, skills and integrations. Saving edits the draft. **Create version**, in the agent's actions menu, cuts a version.
 
 ### Through the API
 
@@ -74,7 +74,7 @@ You can also import an existing package (ZIP, GitHub URL or `.afps-bundle`). See
 
 ## The manifest
 
-A manifest follows the [AFPS specification](/resources/afps-specification), plus Appstrate's `runtime_tools` field.
+A manifest follows the [AFPS specification](/resources/afps-specification).
 
 ```json
 {
@@ -103,12 +103,12 @@ A manifest follows the [AFPS specification](/resources/afps-specification), plus
   },
   "dependencies": {
     "skills": { "@acme/tone-of-voice": "^1.0.0" },
-    "integrations": { "@appstrate/zendesk": "^1.0.0" }
+    "integrations": { "@appstrate/zendesk": "^1.0.0", "@appstrate/platform": "^1.0.0" }
   },
   "integrations_configuration": {
-    "@appstrate/zendesk": { "tools": ["api_call"] }
-  },
-  "runtime_tools": ["output", "log", "note"]
+    "@appstrate/zendesk": { "tools": ["api_call"] },
+    "@appstrate/platform": { "tools": ["log", "note"] }
+  }
 }
 ```
 
@@ -118,14 +118,13 @@ The fields the platform reads:
 | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `timeout`                                              | Run timeout in seconds. Default `300`. Clamped to the platform ceiling (`timeout_ceiling_seconds`, default `1800`). The agent detail returns `effective_timeout_seconds`.                                                                                                                                                 |
 | `input.schema`                                         | JSON Schema 2020-12 for the run input. Drives the launch form.                                                                                                                                                                                                                                                            |
-| `output.schema`                                        | JSON Schema 2020-12 for the result. If set, `runtime_tools` must include `output`.                                                                                                                                                                                                                                        |
+| `output.schema`                                        | JSON Schema 2020-12 for the result. If set, the run has the `output` tool.                                                                                                                                                                                                                                                |
 | `dependencies.skills` / `mcp_servers` / `integrations` | Flat maps of package id to semver range.                                                                                                                                                                                                                                                                                  |
 | `integrations_configuration.<id>`                      | Per-integration selection: `tools`, `scopes`, `auth_key`. Every key must match a declared integration dependency.                                                                                                                                                                                                         |
-| `runtime_tools`                                        | Opt-in first-party tools: `output`, `log`, `note`, `pin`, `publish_file`. None is injected by default.                                                                                                                                                                                                                    |
 | `icon`, `_meta["dev.appstrate/ui"].color`              | Optional visual identity of the agent in the web app (Preview): `icon` is `lucide:<name>`, `emoji:<emoji>` or an inline `data:image/webp` or `data:image/png` image, `color` is `neutral`, `blue`, `emerald`, `violet`, `amber`, `rose`, `cyan`, `pink` or `orange`. Without a `color`, one is derived from the agent id. |
 | `_meta["dev.appstrate/resources"]`                     | Optional memory and CPU hints. See [Configuring agent resources](https://github.com/appstrate/appstrate/blob/main/docs/guides/configuring-agent-resources.md).                                                                                                                                                            |
 
-The platform validates manifests on every write path. An unknown `runtime_tools` id is rejected on author input and dropped (with a report) when read back from a stored manifest.
+The platform validates manifests on every write path.
 
 ## The prompt
 
@@ -170,17 +169,17 @@ Without `agents:read`, run responses return `input: null` for registered agents,
 
 The `output` tool takes one argument, `data`, the object to return. When `output.schema` is declared, it is the schema of `data`, and the model sees it in the tool definition. The call is validated in the sandbox and again on the server. A mismatch marks the run `failed`. The payload is still stored, never dropped.
 
-A run with no output schema can finish without calling `output`.
+The `output` tool exists exactly when `output.schema` is declared, and the run must then call it. A run with no output schema has no `output` tool and finishes without a structured result.
 
 ## Capabilities
 
-| Capability                                                          | Where it is declared                                         | Page                                                |
-| ------------------------------------------------------------------- | ------------------------------------------------------------ | --------------------------------------------------- |
-| Skills                                                              | `dependencies.skills`                                        | [Skills](/features/skills)                          |
-| Integrations (third-party APIs and MCP servers behind a connection) | `dependencies.integrations` and `integrations_configuration` | [Integrations](/integrations/how-integrations-work) |
-| MCP servers (executable bundles referenced by integrations)         | `dependencies.mcp_servers`                                   | [Packages](/features/packages)                      |
-| Runtime tools (`output`, `log`, `note`, `pin`, `publish_file`)      | `runtime_tools`                                              | [Tools](/features/tools)                            |
-| Memory                                                              | `note` / `pin` tools and the `recall_memory` tool            | [Memory](/features/memory)                          |
+| Capability                                                                                   | Where it is declared                                                                                    | Page                                                |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------- |
+| Skills                                                                                       | `dependencies.skills`                                                                                   | [Skills](/features/skills)                          |
+| Integrations (third-party APIs and MCP servers behind a connection)                          | `dependencies.integrations` and `integrations_configuration`                                            | [Integrations](/integrations/how-integrations-work) |
+| MCP servers (executable bundles referenced by integrations)                                  | `dependencies.mcp_servers`                                                                              | [Packages](/features/packages)                      |
+| Platform tools (`log`, `note`, `pin`, `recall_memory`, `run_history`; `notify` on selection) | `dependencies.integrations` (`@appstrate/platform`); `notify` in its `integrations_configuration` tools | [Tools](/features/tools)                            |
+| Memory                                                                                       | `note` / `pin` tools and the `recall_memory` tool                                                       | [Memory](/features/memory)                          |
 
 Attachment is **manifest-only**: edit the draft, then publish a version. There is no separate endpoint to attach a skill or a tool.
 

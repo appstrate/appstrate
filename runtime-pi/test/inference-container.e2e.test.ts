@@ -89,12 +89,10 @@ interface CapturedRequest {
  * The canned Codex SSE completion — enough for the Pi run loop to finish its
  * one turn and finalize `success`. Same frame as `pi-runner-transport.test.ts`.
  *
- * `output: []` is load-bearing, not just brevity: the sidecar advertises
- * `run_history` and `recall_memory` to the model (`runtime-pi/sidecar/mcp.ts`),
- * so a frame carrying a tool call would send the agent to
- * `GET /internal/run-history` or `/internal/memories`, which the stub below
- * deliberately does not serve — a surprise call must stay a failure, and it
- * shows up as the offending path in `unmatchedRequests`.
+ * `output: []` is load-bearing, not just brevity: a frame carrying a tool call
+ * would send the agent to a sidecar tool, and from there possibly to a platform
+ * route the stub below deliberately does not serve — a surprise call must stay
+ * a failure, and it shows up as the offending path in `unmatchedRequests`.
  */
 function completedSseBody(): string {
   return `data: ${JSON.stringify({

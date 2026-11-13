@@ -28,30 +28,7 @@ describe("parseSidecarEnv", () => {
       port: 8080,
       forwardProxyPort: 8081,
       listenHost: "0.0.0.0",
-      runtimeToolNames: [],
     });
-  });
-
-  it("parses the run's runtime tools and output schema", () => {
-    const env = parseSidecarEnv({
-      ...VALID,
-      RUNTIME_TOOLS_JSON: '["output","note"]',
-      OUTPUT_SCHEMA: '{"type":"object"}',
-    });
-    expect(env.runtimeToolNames).toEqual(["output", "note"]);
-    expect(env.outputSchema).toEqual({ type: "object" });
-  });
-
-  it("fails on a malformed runtime-tool list or output schema instead of dropping it", () => {
-    expect(issuesOf({ ...VALID, RUNTIME_TOOLS_JSON: "[output" })).toEqual([
-      "RUNTIME_TOOLS_JSON: must be valid JSON",
-    ]);
-    expect(issuesOf({ ...VALID, RUNTIME_TOOLS_JSON: '["output",1]' })).toEqual([
-      "RUNTIME_TOOLS_JSON: unexpected shape",
-    ]);
-    expect(issuesOf({ ...VALID, OUTPUT_SCHEMA: "[]" })).toEqual([
-      "OUTPUT_SCHEMA: unexpected shape",
-    ]);
   });
 
   it("requires a 32-byte CONNECT_RESULT_KEY in connect mode, and only there", () => {

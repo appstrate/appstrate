@@ -62,7 +62,7 @@ async function makeResourcesApp(overrides: Partial<AppDeps> = {}) {
   return createTestApp({
     ...appDeps,
     runtimeDeps,
-    additionalMcpToolsProvider: () => host.buildTools(),
+    mcpToolsProvider: () => host.buildTools(),
   });
 }
 

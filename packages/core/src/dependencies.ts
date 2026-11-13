@@ -42,7 +42,7 @@ export interface Dependencies {
  * The rejection below is a POLICY on author input, not a shape constraint —
  * which is what lets already-published manifests carrying a retired key keep
  * validating (and therefore keep running) forever. See
- * {@link import("./validation.ts").RetiredRuntimeToolsPolicy}.
+ * {@link import("./validation.ts").RetiredVocabularyPolicy}.
  */
 const RETIRED_DEPENDENCY_KEYS = {
   tools: "mcp_servers",
@@ -90,8 +90,7 @@ export function findRetiredDependencyKeys(manifest: unknown): RetiredDependencyK
 /**
  * Strip the retired AFPS 1.x `dependencies` keys from an EDITABLE manifest.
  *
- * The mirror image of `dropRetiredRuntimeTools` in `validation.ts`, and used
- * for the same reason: an agent whose draft carries a retired key (imported
+ * An agent whose draft carries a retired key (imported
  * from a bundle assembled out of a legacy published version, say) would
  * otherwise round-trip it forever, and the first save through the author path
  * — where the key is rejected — would fail on a field the editor cannot even
