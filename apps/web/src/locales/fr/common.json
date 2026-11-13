@@ -148,7 +148,7 @@
   "apiError.signup_disabled": "Les inscriptions sont fermées sur cette instance : un administrateur doit vous inviter.",
   "apiError.signup_domain_not_allowed": "Les inscriptions ne sont pas ouvertes aux adresses email de ce domaine.",
   "apiError.sso_required": "Votre organisation exige la connexion avec Microsoft pour cette adresse : utilisez « Continuer avec Microsoft ».",
-  "apiError.sso_tenant_mismatch": "Ce compte Microsoft n'appartient pas au tenant de l'organisation qui détient cette adresse : connectez-vous avec votre compte Microsoft professionnel.",
+  "apiError.sso_tenant_mismatch": "Ce compte Microsoft n'est pas celui de cette adresse dans le tenant de l'organisation qui la détient : connectez-vous avec votre propre compte Microsoft professionnel.",
   "apiError.sso_enforced": "La connexion Microsoft est exigée : levez d'abord l'obligation.",
   "apiError.sso_not_ready": "Pour exiger Microsoft, connectez d'abord le tenant et vérifiez au moins un domaine.",
   "apiError.microsoft_session_required": "Connectez-vous avec Microsoft depuis le tenant de l'organisation (il y a moins de 15 minutes), puis réessayez.",

@@ -26,6 +26,14 @@ export function emailDomainOf(email: string): string | null {
   return normalizeDomain(email.slice(at + 1));
 }
 
+/** An address in one comparable form (lowercase, normalized domain), or `null`. */
+export function normalizeAddress(email: string): string | null {
+  const at = email.trim().lastIndexOf("@");
+  const domain = emailDomainOf(email.trim());
+  if (at < 1 || !domain) return null;
+  return `${email.trim().slice(0, at).toLowerCase()}@${domain}`;
+}
+
 /** The DNS name that carries an organization's proof for `domain`. */
 export function verificationRecordName(domain: string): string {
   return `_appstrate.${domain}`;

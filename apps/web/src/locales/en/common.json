@@ -148,7 +148,7 @@
   "apiError.signup_disabled": "Sign-ups are closed on this instance: an administrator must invite you.",
   "apiError.signup_domain_not_allowed": "Sign-ups are not open to email addresses of this domain.",
   "apiError.sso_required": "Your organization requires signing in with Microsoft for this address: use \"Continue with Microsoft\".",
-  "apiError.sso_tenant_mismatch": "This Microsoft account does not belong to the tenant of the organization that owns this address: sign in with your work Microsoft account.",
+  "apiError.sso_tenant_mismatch": "This Microsoft account is not this address's own account in the tenant of the organization that owns it: sign in with your own work Microsoft account.",
   "apiError.sso_enforced": "Microsoft sign-in is required: lift the requirement first.",
   "apiError.sso_not_ready": "To require Microsoft, connect the tenant and verify at least one domain first.",
   "apiError.microsoft_session_required": "Sign in with Microsoft from the organization's tenant (less than 15 minutes ago), then try again.",

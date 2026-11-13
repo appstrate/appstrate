@@ -30,7 +30,13 @@ import { BASE_ERROR_CODES, getCurrentAdapter } from "better-auth";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { defineRequestState } from "@better-auth/core/context";
 import { emailDomainOf } from "./domain.ts";
-import { cappedRefresh, decideSession, type SessionOrigin, type SsoRefusal } from "./policy.ts";
+import {
+  cappedRefresh,
+  decideSession,
+  microsoftVouchesFor,
+  type SessionOrigin,
+  type SsoRefusal,
+} from "./policy.ts";
 import {
   findDomainPolicy,
   microsoftSessionOf,
@@ -68,12 +74,15 @@ interface HookContext {
 interface SignInState {
   /** The tenant of the Microsoft identity this callback signed in. */
   microsoftTenant: string | null;
+  /** The address (`email` claim) of that identity. */
+  microsoftEmail: string | null;
   /** The account an owner's emergency sign-in was cleared for. */
   breakGlassUserId: string | null;
 }
 
 const signInState = defineRequestState<SignInState>(() => ({
   microsoftTenant: null,
+  microsoftEmail: null,
   breakGlassUserId: null,
 }));
 
@@ -112,7 +121,7 @@ async function policyForEmail(email: string | null | undefined): Promise<DomainP
 const REFUSAL_MESSAGES: Record<SsoRefusal, string> = {
   sso_required: "This address belongs to an organization that requires signing in with Microsoft.",
   sso_tenant_mismatch:
-    "This Microsoft account does not belong to the tenant of the organization that owns this address.",
+    "This Microsoft account is not this address's own account in the tenant of the organization that owns it.",
 };
 
 /** Browser GETs answered with a redirect carrying the code, like Better Auth's own refusals. */
@@ -165,7 +174,10 @@ async function onMicrosoftAccount(
   if (account.providerId !== MICROSOFT || context?.path !== CALLBACK_PATH) return;
   const { tenantId, email } = idTokenClaims(account.idToken);
   const state = await currentState();
-  if (state) state.microsoftTenant = tenantId;
+  if (state) {
+    state.microsoftTenant = tenantId;
+    state.microsoftEmail = email;
+  }
   const owner = typeof account.userId === "string" ? await readUser(account.userId, context) : null;
   if (owner && owner.realm !== "platform") return;
   for (const address of [email, owner?.email]) {
@@ -182,7 +194,11 @@ function originOf(
 ): SessionOrigin {
   const path = context?.path;
   if (path === CALLBACK_PATH && context?.params?.id === MICROSOFT) {
-    return { kind: "microsoft", tenantId: state?.microsoftTenant ?? null };
+    return {
+      kind: "microsoft",
+      tenantId: state?.microsoftTenant ?? null,
+      email: state?.microsoftEmail ?? null,
+    };
   }
   if (path === "/sign-in/email" && state?.breakGlassUserId === userId)
     return { kind: "break_glass" };
@@ -204,6 +220,7 @@ async function beforeSessionCreate(
   const decision = decideSession(
     policy,
     originOf(session.userId, context, await currentState()),
+    user.email,
     new Date(session.expiresAt),
     new Date(),
   );
@@ -236,13 +253,18 @@ async function afterSessionCreate(
   if (!session || context?.path !== CALLBACK_PATH || context.params?.id !== MICROSOFT) return;
   const { logger, members } = getPlatform().services;
   try {
-    const tenantId = (await currentState())?.microsoftTenant;
-    if (!tenantId) return;
+    const state = await currentState();
+    const tenantId = state?.microsoftTenant;
+    if (!state || !tenantId) return;
     await recordMicrosoftSession(session.id, session.userId, tenantId);
     const user = await readUser(session.userId, context);
     if (!user || user.realm !== "platform") return;
     const policy = await policyForEmail(user.email);
-    if (!policy || policy.tenantId !== tenantId) return;
+    if (
+      !policy ||
+      !microsoftVouchesFor(policy, { tenantId, email: state.microsoftEmail }, user.email)
+    )
+      return;
     if (await orgRoleOf(policy.orgId, session.userId)) return;
     const { created } = await members.provision(policy.orgId, session.userId, policy.joinRole);
     if (created) {

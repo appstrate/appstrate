@@ -117,15 +117,19 @@ function cookiesOf(res: Response): string {
     .join("; ");
 }
 
-/** Drive `/sign-in/social` then `/callback/:provider`; resolves the callback's response. */
+/**
+ * Drive `/sign-in/social` (or `/link-social` with the session in `linkAs`) then
+ * `/callback/:provider`; resolves the callback's response.
+ */
 async function socialSignIn(
   app: TestApp,
   provider: "microsoft" | "github",
   answer: Handler,
+  linkAs?: string,
 ): Promise<Response> {
-  const start = await app.request("/api/auth/sign-in/social", {
+  const start = await app.request(`/api/auth/${linkAs ? "link-social" : "sign-in/social"}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(linkAs ? { Cookie: linkAs } : {}) },
     body: JSON.stringify({ provider, callbackURL: "/", errorCallbackURL: "/login" }),
   });
   if (!start.ok) throw new Error(`sign-in/social answered ${start.status}: ${await start.text()}`);
@@ -133,16 +137,24 @@ async function socialSignIn(
   const state = new URL(url).searchParams.get("state")!;
   handlers = [answer];
   try {
+    const cookies = [cookiesOf(start), linkAs].filter(Boolean).join("; ");
     return await app.request(`/api/auth/callback/${provider}?code=test-code&state=${state}`, {
-      headers: { Cookie: cookiesOf(start) },
+      headers: { Cookie: cookies },
     });
   } finally {
     handlers = [];
   }
 }
 
-/** A Microsoft sign-in of `identity`, as Entra would answer it. */
-export function microsoftSignIn(app: TestApp, identity: MicrosoftIdentity): Promise<Response> {
+/**
+ * A Microsoft sign-in of `identity`, as Entra would answer it; with `linkAs` (a
+ * session cookie), the same identity linked to that session's account instead.
+ */
+export function microsoftSignIn(
+  app: TestApp,
+  identity: MicrosoftIdentity,
+  linkAs?: string,
+): Promise<Response> {
   const idToken = unsignedJwt({
     oid: identity.oid ?? `oid-${identity.email}`,
     tid: identity.tenantId,
@@ -150,15 +162,19 @@ export function microsoftSignIn(app: TestApp, identity: MicrosoftIdentity): Prom
     name: identity.name ?? identity.email,
     xms_edov: identity.xmsEdov ?? true,
   });
-  return socialSignIn(app, "microsoft", (req) =>
-    new URL(req.url).hostname === "login.microsoftonline.com"
-      ? Response.json({
-          access_token: "ms-access",
-          id_token: idToken,
-          token_type: "Bearer",
-          expires_in: 3600,
-        })
-      : null,
+  return socialSignIn(
+    app,
+    "microsoft",
+    (req) =>
+      new URL(req.url).hostname === "login.microsoftonline.com"
+        ? Response.json({
+            access_token: "ms-access",
+            id_token: idToken,
+            token_type: "Bearer",
+            expires_in: 3600,
+          })
+        : null,
+    linkAs,
   );
 }
 

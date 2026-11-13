@@ -462,7 +462,7 @@ const SSO_REFUSAL_MESSAGES: Readonly<Record<string, string>> = {
   sso_required:
     "Votre organisation exige la connexion avec Microsoft pour cette adresse. Utilisez « Continuer avec Microsoft ».",
   sso_tenant_mismatch:
-    "Ce compte Microsoft n'appartient pas à l'organisation qui détient cette adresse. Connectez-vous avec votre compte professionnel.",
+    "Ce compte Microsoft n'est pas celui de cette adresse dans l'organisation qui la détient. Connectez-vous avec votre propre compte professionnel.",
 };
 
 /** The policy refusal a Better Auth error body carries, if any. */
