@@ -34,6 +34,19 @@ Apache-2.0 file may import it statically (`verify:module-isolation`).
   (an owner, from a dashboard session), so every door gets it.
 - `src/sso/routes.ts` + `src/sso/openapi.ts`: `/api/org-sso`.
 
+## Known limits (documented for the IT administrator)
+
+- A member removed by an owner joins again at their next Microsoft sign-in
+  while their Entra account is enabled: deprovision in Entra too.
+- Only dashboard sessions are capped at 24 h. CLI logins and OAuth/MCP tokens
+  obtained after enforcement started, and API keys, live until the person is
+  removed from the organization. Enforcement itself ends the domain's sessions,
+  CLI logins and OAuth refresh tokens (the platform's credential-change
+  revocation).
+- The owners' emergency password can be reset by email: it is only as strong as
+  their mailbox.
+- A domain proof is checked once, at verification, never again.
+
 ## Testing
 
 `test/requirements.ts` declares PostgreSQL, so the tests run under the tier-3
