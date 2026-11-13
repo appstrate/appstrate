@@ -78,7 +78,7 @@ const spacePathParameter = {
 const MCP_TOOLS_DESCRIPTION =
   "Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it " +
   "declares follow the caller's permissions: the read-only set (`search_operations`, " +
-  "`describe_operation`, `read_file`, `read_skill`, `validate_package_file`, " +
+  "`describe_operation`, `read_file`, `validate_package_file`, " +
   "`get_runtime_capabilities`, " +
   "and `get_me` unless the client injects its own caller context) is always present, " +
   "while the acting tools — `invoke_operation` (`mcp:invoke`), " +
@@ -320,6 +320,14 @@ const skillEntrySchema = {
         required: ["uri", "digest", "size"],
       },
     },
+    _meta: {
+      type: "object",
+      description:
+        "Present on a draft's entry only: `dev.appstrate/lock_version` is the `lock_version` of " +
+        "the draft whose files `resources` describes.",
+      properties: { "dev.appstrate/lock_version": { type: "integer" } },
+      required: ["dev.appstrate/lock_version"],
+    },
   },
   required: ["uri", "frontmatter", "resources"],
 } as const;
@@ -346,8 +354,8 @@ const skillsRestPaths = {
         "The entries of `skills/list`: the published definition of each active skill of the " +
         "space that the caller may read and the server can serve whole. With " +
         "`definition=draft`, the drafts of the space that the caller may read (only a caller " +
-        "who may write a package reads its draft), at their `@draft` URIs; `skills/list` " +
-        "never holds a draft. " +
+        "who may write a package reads its draft), at their `@draft` URIs, as `skills/list` " +
+        'lists them with the request `_meta` `{"dev.appstrate/definition": "draft"}`. ' +
         SKILLS_REST_DESCRIPTION,
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },

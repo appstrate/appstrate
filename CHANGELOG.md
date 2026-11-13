@@ -102,16 +102,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- **BREAKING (MCP): the `read_skill` tool is removed** (#2175). A skill and its files
+  are read through the MCP Skills extension: `skills/list` and `skills/get` for the
+  entries, `resources/read` on a file's `skill://` URI for its bytes. The access rule
+  is unchanged (`skills:read`, or a skill the chat turn injected, at the definition
+  injected); a refusal is `Resource not found` (`-32002`) on `resources/read` and
+  `-32602` on `skills/get` instead of a `read_skill` result carrying the REST 403 or
+  404, and a changed injected draft is `-32600` with
+  `data.code: "injected_draft_changed"`. A client calling `read_skill` gets
+  `-32602 Unknown tool`.
+  The chat's model reads a skill's files with its `read_resource` tool.
+
 - **The MCP server serves skills through the MCP Skills extension (SEP-2640)** (#2175). It
   declares `io.modelcontextprotocol/skills` in `capabilities.extensions` at `initialize` and
   answers `skills/list` and `skills/get`; `resources/read` returns a skill's files under
   `skill://<spaceId>/<scope>/<package-name>/<name>/<path>` (a draft under
-  `<package-name>@draft`, readable by whoever may write the package, never listed). Entries
+  `<package-name>@draft`, readable by whoever may write the package, listed only on request: see the `dev.appstrate/definition` entry below). Entries
   carry the served `SKILL.md` frontmatter verbatim and every file's `sha256` digest and size.
   The served skill is a valid Agent Skills directory: packaging entries dropped, `SKILL.md`
   `name` set to the served name, `metadata.version` set to the published version (absent from
   a draft). The list covers every space the connection reaches (each space of an
-  organization URL), and each read follows the `read_skill` rule with the caller's permissions in
+  organization URL), and each read is checked with the caller's permissions in
   the skill's space (`skills:read` under the credential's ceiling, or a skill the chat turn
   injected, at the definition injected). A
   skill with more than 512 files or more than 16 MiB of served bytes is not served; any file
@@ -137,6 +148,73 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   itself: the server does. `--source draft` syncs the drafts the instance lists
   for you, published or not: those of the skills you may write; a draft you may
   not write is absent from the list, so it is not synced.
+
+- **The skills served for published versions are kept in memory** (#2175). A
+  published version is immutable, so `skills/list`, `skills/get`, `resources/read`
+  on `skill://` and their REST reflection read and digest it once per API process,
+  then serve it from a least-recently-used cache bounded at 64 MiB of files (four
+  skills at the SEP-2640 limit). The access rule runs on every call, before the
+  cache. Drafts and system skills are read on every call.
+
+- **A draft the chat turn injected and that changed since is refused explicitly on
+  `skill://`** (#2175). `skills/get` and `resources/read` answer JSON-RPC
+  `-32600` with the `injected_draft_changed` message (the next turn injects the
+  current draft) instead of `Resource not found`. `skills/list` leaves that skill
+  out and lists the others.
+
+- **`skills/list` lists drafts on request, and a draft's entry names its
+  `lock_version`** (#2175). With `dev.appstrate/definition: "draft"` in the
+  request `_meta`, `skills/list` lists the drafts the caller may read at their `@draft`
+  URIs, the entries `GET /api/mcp/skills?definition=draft` serves (one server
+  function); without it, the list holds the published skills. A draft's entry
+  carries `_meta["dev.appstrate/lock_version"]`, the `lock_version` of the draft its
+  files and digests were read from, read under the draft lock.
+
+- **The chat injects an enforced skill as the MCP Skills extension serves it**
+  (#2175). Its `SKILL.md` is the served one (`name` and `metadata.version`
+  normalized), with its `skill://` URI, so it is the bytes `resources/read`
+  answers there. A published version that cannot be served as a skill (over the
+  SEP-2640 limits, no valid name) refuses the turn's enforced skills like an
+  unreadable archive (`version_artifact_unavailable`). Enforcing such a skill is
+  refused with `409 skill_not_servable` (also when another skill already enforced
+  in the space cannot be served), so the turns of the space are never refused for
+  it. The `enforced_skills_budget` check measures each enforced skill by this
+  served `SKILL.md`, the text the chat injects, read from its whole archive.
+
+- **The chat's model reads platform resources with a `read_resource` tool** (#2175).
+  It runs `resources/read` on the platform MCP server only, and returns each content
+  whole within the bounds of the platform's file reads: its text up to 1 MiB, or a
+  binary file's base64 in `blob` up to 700 KiB; a larger content returns its size and
+  a note.
+
+- **The chat reads the skills it injects through the MCP Skills extension**
+  (#2175). A chosen skill is listed by `skills/list` (the caller's draft when the
+  drafts list holds it, else the published version) and its `SKILL.md` read by
+  `resources/read`, over a platform MCP connection with the caller's own
+  permissions and no injected-skills claim, closed before the turn's connection
+  opens; the chat no longer reads `GET /api/packages/skills`. An injected draft is
+  pinned by its entry's `dev.appstrate/lock_version`, and a `SKILL.md` whose bytes
+  do not match the `sha256` digest its entry lists (a draft saved between the list
+  and the read) is not injected: the skill gets its could-not-be-read notice. Each injected `<skill>` tag
+  carries its `uri`, and the prompt teaches `read_resource` on that URI for the
+  files a skill references. In the `auto` mode, the skills the model may load are
+  listed the same way, each with its `skill://` URI, and the model loads one with
+  `read_resource`: the list is whole (no `(list truncated)` marker, no `listSkills`
+  call) and no longer comes from `GET /api/me/context`. Each line names the skill
+  by its id, its published version and its URI, followed by its description (the
+  served frontmatter carries no display name). A draft is listed only when the
+  turn itself may read it (it keeps the caller's `skills:write`, which the
+  authoring switch drops); otherwise the line is the published version's, and a
+  skill never published is not listed. A chosen skill the caller reads neither as
+  a draft nor published (a never-published skill chosen by someone who may not
+  write it) gets its not-available notice. In the `manual` mode, the model lists
+  the skills on the user's request with the chat's `list_skills` tool, which
+  relays `skills/list` (drafts with `definition: "draft"`) over the turn's own
+  MCP connection, so it lists only what the turn's `read_resource` reads, and
+  loads one with `read_resource`; `list_skills` is registered on a `manual` turn
+  holding `skills:read` alone. The read of a turn's skills is bounded to 10 seconds; a
+  failed list or read is logged. `AppstrateMcpClient` gains `listSkills`, which
+  follows `nextCursor` and accepts an entry whose `resources` is `"dynamic"`.
 
 - **BREAKING (CLI, MCP): agents are prompts of the MCP server, and `code sync`
   syncs skills only** (#2172). The Claude Code plugin's `/appstrate:run-<agent>`

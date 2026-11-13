@@ -32,6 +32,9 @@ import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import {
   notifyDetached,
+  RESOURCE_BLOB_MAX_BYTES,
+  RESOURCE_OVERSIZED_NOTE,
+  RESOURCE_TEXT_MAX_BYTES,
   type AppstrateRequestExtra,
   type AppstrateResourceProvider,
   type AppstrateToolDefinition,
@@ -82,7 +85,6 @@ import {
   asRecord,
   asString,
   dispatchHeaders,
-  RESOURCE_BLOB_MAX_BYTES,
   jsonResult,
   refusalResult,
   ToolRefusal,
@@ -91,7 +93,6 @@ import {
 } from "./tool-results.ts";
 import { buildConnectionTools } from "./connection-tools.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
-import { buildReadSkillTool, type SkillToolContext } from "./skill-tools.ts";
 import {
   describeSpace,
   grantedIn,
@@ -115,7 +116,6 @@ export type McpToolName =
   | "run_and_wait"
   | "list_files"
   | "read_file"
-  | "read_skill"
   | "validate_package_file"
   | "import_package_file"
   | "get_runtime_capabilities"
@@ -177,8 +177,6 @@ export interface McpToolContext {
   scope: SpaceScope;
   authorizeBundle: Parameters<typeof buildPackageFileTools>[0]["authorizeBundle"];
   placeRootAs: Parameters<typeof buildPackageFileTools>[0]["placeRootAs"];
-  /** `read_skill`'s read, bound to the caller and space (`skillReaderFor`). */
-  readSkill: SkillToolContext["readSkill"];
   /** The inbound request's id, for the problem bodies a tool builds itself. */
   requestId: string;
   /**
@@ -270,13 +268,6 @@ const MAX_RESPONSE_CHARS = 100_000;
 // dependency-free helpers from `@appstrate/core/file-uri` (imported above)
 // — the tool layer stays free of the files service's DB/storage graph
 // while sharing one contract.
-
-/**
- * Ceiling on inlining a file's bytes into a `resources/read` text block.
- * Above it (or for a non-textual mime) the read returns metadata only — MCP has
- * no partial-content standard, so we keep it simple.
- */
-const RESOURCE_TEXT_MAX_BYTES = 1024 * 1024;
 
 /** A published run file → the MCP `resource_link` content block (spec 2025-06-18). */
 function fileResourceLink(doc: RunAndWaitFile): {
@@ -1728,8 +1719,7 @@ function buildFileResourceReader(ctx: McpToolContext): {
         canonicalUri,
         row,
         capabilities,
-        "Content omitted — it exceeds the inline size limit (1 MiB text / 700 KiB binary). " +
-          "Fetch it from the content_url.",
+        `${RESOURCE_OVERSIZED_NOTE} Fetch it from the content_url.`,
       );
     },
   };
@@ -1912,12 +1902,6 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
     ...(surface.runs ? [buildRunAndWaitTool(ctx, surface.composes)] : []),
     ...(surface.listsFiles ? [buildListFilesTool(ctx)] : []),
     buildReadFileTool(ctx),
-    buildReadSkillTool({
-      readSkill: ctx.readSkill,
-      origin: ctx.origin,
-      requestId: ctx.requestId,
-      observe: (event) => emit(ctx, event),
-    }),
     ...buildPackageFileTools(ctx, surface.importsPackages),
     ...(surface.proxies
       ? buildConnectionTools({
@@ -1950,7 +1934,6 @@ const SPACE_ACTS: Record<McpToolName, keyof McpSurface | null | false> = {
   run_and_wait: "runs",
   list_files: "listsFiles",
   read_file: null,
-  read_skill: null,
   validate_package_file: null,
   import_package_file: "importsPackages",
   list_connections: "proxies",

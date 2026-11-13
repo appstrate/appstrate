@@ -207,6 +207,7 @@
   "apiError.in_use": "This package is used by other packages: remove it from their dependencies first.",
   "apiError.no_changes": "No changes since the last version.",
   "apiError.skill_unchanged": "This skill already exists with the same content.",
+  "apiError.skill_not_servable": "This skill's published version cannot be served to the chat, publish a version with a valid SKILL.md: {{message}}",
   "apiError.version_exists": "This version is already published and can no longer change: bump the version number.",
   "apiError.integrity_mismatch": "This version already exists with different content.",
   "apiError.draft_overwrite": "This package has unpublished changes the import would overwrite.",

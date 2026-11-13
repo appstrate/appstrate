@@ -20,6 +20,7 @@ import {
   parseSkillUriPackage,
   SKILL_MAX_FILES,
   SKILL_MAX_TOTAL_BYTES,
+  skillFileDigest,
   type SkillAddress,
   type SkillEntry,
   type SkillResource,
@@ -253,8 +254,7 @@ export async function fetchSkillFiles(
   for (const [path, resource] of expected) {
     const bytes = files[path];
     if (!bytes || bytes.byteLength !== resource.size) throw changed;
-    const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
-    if (digest !== resource.digest) throw changed;
+    if (skillFileDigest(bytes) !== resource.digest) throw changed;
   }
   const { fields } = parseSkillFrontmatter(new TextDecoder().decode(files[SKILL_ENTRY]));
   // The entry reached the CLI through JSON: both sides compare after the same

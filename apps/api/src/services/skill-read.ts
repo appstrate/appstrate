@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// MCP `read_skill` and `skill://` reads: the file explorer's readers, with their own access rule.
+// `skill://` reads: the file explorer's readers, with their own access rule.
 
 import type { Context } from "hono";
 import { packagePermission } from "@appstrate/core/permissions";
@@ -12,7 +12,7 @@ import {
 } from "@appstrate/core/chat-contract";
 import { eq } from "drizzle-orm";
 import { packages } from "@appstrate/db/schema";
-import { conflict } from "../lib/errors.ts";
+import { conflict, notFound } from "../lib/errors.ts";
 import type { AppEnv } from "../types/index.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import {
@@ -111,11 +111,12 @@ async function resolveSkillReadAccess(
 }
 
 /**
- * The draft at `lockVersion`, or 409. Read under the draft lock a save holds
- * across its row write, upload and commit — the one publication reads under —
- * so the row checked and the files read are the same draft.
+ * The draft with the `lock_version` it is read at; 409 when `pinned` names
+ * another. Read under the draft lock a save holds across its row write, upload
+ * and commit — the one publication reads under — so the version returned and
+ * the files read are the same draft.
  */
-function readPinnedDraft(pkg: FileExplorerPackage, lockVersion: number) {
+function readDraft(pkg: FileExplorerPackage, pinned: number | undefined): Promise<SkillFiles> {
   return withPackageDraftLock(pkg.id, async (tx) => {
     const [row] = await tx
       .select({
@@ -126,7 +127,8 @@ function readPinnedDraft(pkg: FileExplorerPackage, lockVersion: number) {
       .from(packages)
       .where(eq(packages.id, pkg.id))
       .limit(1);
-    if (row?.lockVersion !== lockVersion) {
+    if (!row) throw notFound(`Package '${pkg.id}' not found`);
+    if (pinned !== undefined && row.lockVersion !== pinned) {
       throw conflict(
         "injected_draft_changed",
         `The draft of '${pkg.id}' changed since this conversation turn injected it, so its ` +
@@ -134,41 +136,55 @@ function readPinnedDraft(pkg: FileExplorerPackage, lockVersion: number) {
       );
     }
     const draft = { ...pkg, ...row };
-    return readPackageSnapshot(draft, await resolvePackageFileValidator(draft, undefined));
+    const snapshot = await readPackageSnapshot(draft, await resolvePackageFileValidator(draft));
+    return { ...snapshot, lockVersion: row.lockVersion };
   });
 }
 
-export interface SkillSnapshot {
+/** The files of a skill read, with the draft `lock_version` they were read at (`null` outside a draft). */
+interface SkillFiles extends PackageFileSnapshot {
+  lockVersion: number | null;
+}
+
+/** A granted skill read: which definition it serves, its files read on demand. */
+export interface SkillRead {
   packageId: string;
   /** `null` for the stored tree (the draft, or a system package). */
   version: string | null;
   definition: "draft" | "published";
-  snapshot: PackageFileSnapshot;
+  /** The integrity of the published archive served, `null` for the stored tree. */
+  integrity: string | null;
+  readSnapshot: () => Promise<SkillFiles>;
 }
 
 export type SkillDefinitionSelector = "published" | "draft";
 
 /**
- * `null` when refused; the caller answers it as REST does (403, else 404).
- * `definition` names the definition to read (see `resolveSkillReadAccess`).
+ * The access rule applied, without reading the files: `null` when refused, the
+ * caller answers it as REST does (403, else 404). `definition` names the
+ * definition to read (see `resolveSkillReadAccess`). `readSnapshot` of a draft
+ * pinned by the turn throws 409 `injected_draft_changed` once that draft moved;
+ * a draft's files come with the `lock_version` they were read at.
  */
-export async function readSkillSnapshot(
+export async function resolveSkillRead(
   c: Context<AppEnv>,
   space: SkillReadSpace,
   packageId: string,
   definition?: SkillDefinitionSelector,
-): Promise<SkillSnapshot | null> {
+): Promise<SkillRead | null> {
   const access = await resolveSkillReadAccess(c, space, packageId, definition);
   if (!access) return null;
   const { pkg, spec, draftLock } = access;
   const validator = await resolvePackageFileValidator(pkg, spec);
+  const served = servedDefinition(pkg, spec);
   return {
     packageId: pkg.id,
     version: validator.kind === "version" ? validator.version : null,
-    definition: servedDefinition(pkg, spec),
-    snapshot:
-      draftLock === undefined
-        ? await readPackageSnapshot(pkg, validator)
-        : await readPinnedDraft(pkg, draftLock),
+    integrity: validator.kind === "version" ? validator.integrity : null,
+    definition: served,
+    readSnapshot: async () =>
+      served === "draft"
+        ? readDraft(pkg, draftLock)
+        : { ...(await readPackageSnapshot(pkg, validator)), lockVersion: null },
   };
 }

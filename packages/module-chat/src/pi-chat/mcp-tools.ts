@@ -13,11 +13,20 @@
  * extension that streams a LIVE preliminary run card into the UI stream (the
  * run id appears the moment the run is launched, then the card updates as the
  * run progresses) while the tool result stays blocked on completion — the same
- * behaviour the live run card needs.
+ * behaviour the live run card needs. `read_resource` reads a resource of the
+ * platform server (a skill's files, by `skill://` URI) through `resources/read`,
+ * and `list_skills` lists the space's skills through `skills/list`.
  */
 
 import { formatTurnBudgetNote } from "@appstrate/core/chat-turn-metadata";
-import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
+import { parseSkillUriPackage, SKILL_DEFINITION_META_KEY } from "@appstrate/core/skill-uri";
+import {
+  createMcpHttpClient,
+  RESOURCE_BLOB_MAX_BYTES,
+  RESOURCE_OVERSIZED_NOTE,
+  RESOURCE_TEXT_MAX_BYTES,
+  type AppstrateMcpClient,
+} from "@appstrate/mcp-transport";
 import { unsafeSchema, type ExtensionAPI, type ExtensionFactory } from "@appstrate/runner-pi";
 import type { UIMessageChunk } from "ai";
 import { stripMcpToolPrefix } from "./ui-stream-mapper.ts";
@@ -33,6 +42,8 @@ import { logger } from "../logger.ts";
 import { platformMcpSurfaceCache, type PlatformMcpSurface } from "./mcp-surface-cache.ts";
 
 const RUN_AND_WAIT_TOOL = "run_and_wait";
+const READ_RESOURCE_TOOL = "read_resource";
+const LIST_SKILLS_TOOL = "list_skills";
 
 /** Pi `AgentToolResult`-shaped payload (text content + structured details). */
 interface PiToolResult {
@@ -174,6 +185,8 @@ interface BuildPlatformMcpToolsOptions {
    */
   fetch?: typeof fetch;
   surfaceKey?: string;
+  /** Registers `list_skills`: the `manual` skill mode, on a turn holding `skills:read`. */
+  listsSkills?: boolean;
 }
 
 /**
@@ -235,19 +248,34 @@ function answerStatelessHopsLocally(next: typeof fetch): typeof fetch {
  * `tools/call`; a failed lazy connect fails that call and evicts the entry unless
  * the turn was stopped, so the next turn handshakes eagerly and fails loudly.
  */
+/** A connected client of the platform MCP server at `opts.url`, authenticated by `opts.headers`. */
+export function connectPlatformMcp(opts: {
+  url: string;
+  headers: Record<string, string>;
+  /** Cancels the connect: `initialize` re-enters this process and can wedge. */
+  signal?: AbortSignal;
+  fetch?: typeof fetch;
+}): Promise<AppstrateMcpClient> {
+  return createMcpHttpClient(opts.url, {
+    clientInfo: { name: "appstrate-chat-pi", version: "1.0" },
+    // The platform's MCP module is on the v1 SDK, legacy by construction: no era probe.
+    era: "legacy",
+    extraHeaders: opts.headers,
+    ...(opts.signal ? { signal: opts.signal } : {}),
+    fetch: answerStatelessHopsLocally(opts.fetch ?? fetch),
+  });
+}
+
 export async function buildPlatformMcpTools(
   opts: BuildPlatformMcpToolsOptions,
 ): Promise<PlatformMcpTools> {
+  // The turn's signal (not a tool call's — a lazy connect is shared) keeps stop and deadline live.
   const connect = () =>
-    createMcpHttpClient(opts.url, {
-      clientInfo: { name: "appstrate-chat-pi", version: "1.0" },
-      // The platform's MCP module is on the v1 SDK, legacy by construction: no era probe.
-      era: "legacy",
-      extraHeaders: opts.headers,
-      // `initialize` re-enters this process and can wedge: the turn's signal (not a
-      // tool call's — a lazy connect is shared) keeps stop and deadline live.
+    connectPlatformMcp({
+      url: opts.url,
+      headers: opts.headers,
       signal: opts.signal,
-      fetch: answerStatelessHopsLocally(opts.fetch ?? fetch),
+      ...(opts.fetch ? { fetch: opts.fetch } : {}),
     });
 
   const { surfaceKey } = opts;
@@ -283,7 +311,7 @@ export async function buildPlatformMcpTools(
   };
 
   const runOrigin = new URL(opts.url).origin;
-  const extensionFactories = surface.tools.map((tool) =>
+  const toolFactories = surface.tools.map((tool) =>
     tool.name === RUN_AND_WAIT_TOOL
       ? makeRunAndWaitExtension(tool, {
           origin: runOrigin,
@@ -297,6 +325,11 @@ export async function buildPlatformMcpTools(
         })
       : makeForwardExtension(tool, getClient, opts.signal, opts.turnBudget),
   );
+  const extensionFactories = [
+    ...toolFactories,
+    makeReadResourceExtension(getClient, opts.signal, opts.turnBudget),
+    ...(opts.listsSkills ? [makeListSkillsExtension(getClient, opts.signal, opts.turnBudget)] : []),
+  ];
 
   const close = async () => {
     if (closed) return;
@@ -353,6 +386,142 @@ function makeForwardExtension(
       },
     });
   };
+}
+
+/**
+ * `read_resource` Pi tool: `resources/read` on the platform MCP server, the
+ * only server it reaches — how the model reads a skill's `SKILL.md` or one of
+ * its files by its `skill://` URI (SEP-2640). Each content is returned whole
+ * within the platform's inline bounds ({@link inlineResourceContent}): its
+ * text, or a binary file's base64 in `blob`. A refusal reaches the model as the
+ * server's error.
+ */
+function makeReadResourceExtension(
+  getClient: () => Promise<AppstrateMcpClient>,
+  signal: AbortSignal,
+  turnBudget: PiTurnBudget,
+): ExtensionFactory {
+  return (pi: ExtensionAPI) => {
+    pi.registerTool({
+      name: READ_RESOURCE_TOOL,
+      label: READ_RESOURCE_TOOL,
+      description:
+        "Read a resource of the Appstrate platform by its URI, such as a skill's SKILL.md or one of its files (`skill://…`). Returns each content whole: its text up to 1 MiB, or a binary file's base64 in `blob` up to 700 KiB. A larger content returns its size and a note instead.",
+      parameters: unsafeSchema<{ uri: string }>({
+        type: "object",
+        properties: {
+          uri: {
+            type: "string",
+            description:
+              "The resource URI. A skill's file sits next to its SKILL.md: replace `SKILL.md` in the skill's URI with the file's path.",
+          },
+        },
+        required: ["uri"],
+        additionalProperties: false,
+      }),
+      async execute(_toolCallId: string, params: unknown, execSignal?: AbortSignal) {
+        const callSignal = execSignal ?? signal;
+        const uri = (params as { uri?: unknown } | null)?.uri;
+        if (typeof uri !== "string" || uri === "") {
+          throw new Error("`uri` must be a non-empty string");
+        }
+        const client = await untilAborted(getClient(), callSignal);
+        const result = await client.readResource({ uri }, { signal: callSignal });
+        const content = result.contents.map((c) => ({
+          type: "text" as const,
+          text: inlineResourceContent(c),
+        }));
+        return withTurnBudgetNote({ content, details: { uri } }, turnBudget);
+      },
+    });
+  };
+}
+
+/**
+ * `list_skills` Pi tool: `skills/list` on the platform MCP server, with the
+ * turn's own bearer — how the model finds a skill the user asks for that its
+ * context does not show, before loading it with `read_resource` on its `uri`.
+ * Listing and reading share that bearer, so every URI it lists is one
+ * `read_resource` reads: a draft is listed only to a turn that may read it.
+ */
+function makeListSkillsExtension(
+  getClient: () => Promise<AppstrateMcpClient>,
+  signal: AbortSignal,
+  turnBudget: PiTurnBudget,
+): ExtensionFactory {
+  return (pi: ExtensionAPI) => {
+    pi.registerTool({
+      name: LIST_SKILLS_TOOL,
+      label: LIST_SKILLS_TOOL,
+      description:
+        'List the skills of the current space: each with its `id`, `description`, `version` (null for a draft) and the `uri` of its SKILL.md, which `read_resource` loads. Lists the published skills, or with `definition: "draft"` the drafts this conversation may read.',
+      parameters: unsafeSchema<{ definition?: "published" | "draft" }>({
+        type: "object",
+        properties: {
+          definition: {
+            type: "string",
+            enum: ["published", "draft"],
+            description: "The definition listed. Defaults to `published`.",
+          },
+        },
+        additionalProperties: false,
+      }),
+      async execute(_toolCallId: string, params: unknown, execSignal?: AbortSignal) {
+        const callSignal = execSignal ?? signal;
+        const definition = (params as { definition?: unknown } | null)?.definition ?? "published";
+        if (definition !== "published" && definition !== "draft") {
+          throw new Error('`definition` must be "published" or "draft"');
+        }
+        const client = await untilAborted(getClient(), callSignal);
+        const { skills } = await client.listSkills(
+          definition === "draft"
+            ? { meta: { [SKILL_DEFINITION_META_KEY]: "draft" }, signal: callSignal }
+            : { signal: callSignal },
+        );
+        const listed = skills.map((entry) => {
+          const version = (entry.frontmatter.metadata as { version?: unknown } | undefined)
+            ?.version;
+          return {
+            id: parseSkillUriPackage(entry.uri)?.packageId ?? null,
+            description: entry.frontmatter.description,
+            version: definition === "published" && typeof version === "string" ? version : null,
+            uri: entry.uri,
+          };
+        });
+        return withTurnBudgetNote(
+          { content: [{ type: "text", text: JSON.stringify(listed) }], details: { definition } },
+          turnBudget,
+        );
+      },
+    });
+  };
+}
+
+/**
+ * One `resources/read` content as `read_resource` returns it: the text, or
+ * `{ uri, mimeType, blob }`, within the bounds the platform's file reads
+ * apply; above them, `{ uri, mimeType, size, note }` (`size` in bytes).
+ */
+function inlineResourceContent(
+  content: Awaited<ReturnType<AppstrateMcpClient["readResource"]>>["contents"][number],
+): string {
+  if ("text" in content && typeof content.text === "string") {
+    const size = Buffer.byteLength(content.text, "utf8");
+    if (size <= RESOURCE_TEXT_MAX_BYTES) return content.text;
+    return JSON.stringify({
+      uri: content.uri,
+      mimeType: content.mimeType,
+      size,
+      note: RESOURCE_OVERSIZED_NOTE,
+    });
+  }
+  const blob = "blob" in content && typeof content.blob === "string" ? content.blob : "";
+  const size = Buffer.from(blob, "base64").byteLength;
+  return JSON.stringify(
+    size <= RESOURCE_BLOB_MAX_BYTES
+      ? { uri: content.uri, mimeType: content.mimeType, blob }
+      : { uri: content.uri, mimeType: content.mimeType, size, note: RESOURCE_OVERSIZED_NOTE },
+  );
 }
 
 /**

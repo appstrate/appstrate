@@ -26,12 +26,21 @@ import { listResponse } from "../../lib/list-response.ts";
 import { logger } from "../../lib/logger.ts";
 import { rateLimit } from "../../middleware/rate-limit.ts";
 import { requirePermission } from "../../middleware/require-permission.ts";
-import { readSkillSnapshot, type SkillReadSpace } from "../../services/skill-read.ts";
+import { resolveSkillRead, type SkillReadSpace } from "../../services/skill-read.ts";
 import { listActivePackages } from "../../services/space-packages.ts";
+import { SKILL_MAX_TOTAL_BYTES } from "@appstrate/core/skill-uri";
 import { zipArtifact } from "@appstrate/core/zip";
+import { createServedSkillCache } from "./skill-cache.ts";
 import { buildSkillServer, type SkillServer } from "./skills.ts";
 
 const SKILLS_REST_PATH = "/api/mcp/skills";
+
+/**
+ * The published skills served by this process, shared by every request: room
+ * for four skills at the SEP-2640 size limit, and for hundreds of skills of a
+ * few hundred KiB, the size skills usually have.
+ */
+const servedSkills = createServedSkillCache(4 * SKILL_MAX_TOTAL_BYTES);
 
 /** The skill server over `spaces`, each read with the caller's permissions in that space. */
 export function skillServerFor(c: Context<AppEnv>, spaces: readonly SkillReadSpace[]): SkillServer {
@@ -49,7 +58,8 @@ export function skillServerFor(c: Context<AppEnv>, spaces: readonly SkillReadSpa
         )
         .map((row) => row.id),
     readSkill: (spaceId, packageId, definition) =>
-      readSkillSnapshot(c, bySpace.get(spaceId)!, packageId, definition),
+      resolveSkillRead(c, bySpace.get(spaceId)!, packageId, definition),
+    cache: servedSkills,
     logUnservable: (event) =>
       logger.warn("mcp.skill_unservable", { requestId: c.get("requestId"), ...event }),
   });

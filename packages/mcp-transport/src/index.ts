@@ -436,9 +436,18 @@ export {
   httpStatusOf,
   wrapClient,
   type AppstrateMcpClient,
+  type ListedSkillEntry,
 } from "./client.ts";
 
 export { parseMcpPost, serveStatelessPost, type McpPost } from "./streamable-post.ts";
+
+// Inline bounds of a resource's bytes in a tool or `resources/read` result,
+// shared by the platform's file reads and the chat's `read_resource` tool.
+export {
+  RESOURCE_BLOB_MAX_BYTES,
+  RESOURCE_OVERSIZED_NOTE,
+  RESOURCE_TEXT_MAX_BYTES,
+} from "./resource-limits.ts";
 
 // Subprocess transport — spawn a third-party MCP server as a child
 // process and speak newline-delimited JSON-RPC over stdio. Compatible

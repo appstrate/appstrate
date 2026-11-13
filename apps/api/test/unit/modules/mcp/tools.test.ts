@@ -63,7 +63,6 @@ function makeTools(
     scope: { orgId: "org_1", spaceId: "spc_1" },
     authorizeBundle: async () => {},
     placeRootAs: async () => null,
-    readSkill: () => Promise.reject(new Error("read_skill is not exercised here")),
     requestId: "req_test",
     followRunLogs: () => () => {},
     contextInjected,
@@ -87,10 +86,13 @@ describe("mcp catalog", () => {
   it("excludes the MCP server's own transport + discovery paths", () => {
     for (const op of getCatalog().operations.values()) {
       // The per-org transport endpoint (`/api/mcp/o/:org`) must never be
-      // surfaced as an invokable operation — recursive self-invocation.
+      // surfaced as an invokable operation — recursive self-invocation — and
+      // the skills routes serve `code sync` alone: the chat lists skills with
+      // its `list_skills` tool, over the Skills extension.
       expect(op.pathTemplate.startsWith("/api/mcp")).toBe(false);
       expect(op.pathTemplate.startsWith("/.well-known/oauth-protected-resource")).toBe(false);
     }
+    expect([...getCatalog().operations.keys()]).not.toContain("listServedSkills");
   });
 
   it("keeps the credential proxy out: `api_call` is its one MCP path", async () => {
@@ -169,7 +171,6 @@ describe("buildMcpTools declarations", () => {
     "get_me",
     "get_runtime_capabilities",
     "read_file",
-    "read_skill",
     "search_operations",
     "validate_package_file",
   ];
@@ -511,7 +512,6 @@ describe("describe_operation", () => {
             scope: { orgId: "org_1", spaceId: "spc_1" },
             authorizeBundle: async () => {},
             placeRootAs: async () => null,
-            readSkill: () => Promise.reject(new Error("read_skill is not exercised here")),
             requestId: "req_test",
             followRunLogs: () => () => {},
           }).map((t) => [t.descriptor.name, t]),
@@ -1112,7 +1112,6 @@ describe("buildMcpTools contextInjected", () => {
       scope: { orgId: "org_1", spaceId: "spc_1" },
       authorizeBundle: async () => {},
       placeRootAs: async () => null,
-      readSkill: () => Promise.reject(new Error("read_skill is not exercised here")),
       requestId: "req_test",
       followRunLogs: () => () => {},
     });
@@ -1128,7 +1127,6 @@ describe("buildMcpTools contextInjected", () => {
       "invoke_operation",
       "list_files",
       "read_file",
-      "read_skill",
       "run_and_wait",
       "search_operations",
       "validate_package_file",

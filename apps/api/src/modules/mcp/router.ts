@@ -104,7 +104,6 @@ import {
   type McpSurface,
 } from "./tools.ts";
 import { buildOperationIndex, buildOrgWideOperationIndex, operationIdGranted } from "./catalog.ts";
-import { skillReaderFor } from "./skill-tools.ts";
 import { createSkillRouter, skillServerFor } from "./skill-routes.ts";
 import { SKILL_URI_PREFIX } from "@appstrate/core/skill-uri";
 import {
@@ -656,7 +655,6 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const toolCtx = {
       authorizeBundle: (bundle: Bundle) => authorizeBundlePackages(c, bundle),
       placeRootAs: (packageId: string) => heldPlacementAuthority(c, packageId),
-      readSkill: skillReaderFor(c, { ...scope, permissions }),
       requestId: c.get("requestId"),
       followRunLogs: (runId: string, onLog: (log: RunLogEvent) => void) =>
         followRunLogs(

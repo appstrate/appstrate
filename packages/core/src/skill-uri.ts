@@ -16,6 +16,7 @@
  * `encodeURIComponent`; only that canonical spelling parses.
  */
 
+import { createHash } from "node:crypto";
 import { isValidSkillName } from "@appstrate/afps-shared/companion-files";
 import { parseScopedName } from "./naming.ts";
 import { isSafeArchivePath } from "./zip.ts";
@@ -28,12 +29,26 @@ export const SKILL_MAX_FILES = 512;
 /** SEP-2640: a server SHOULD NOT serve a skill with more bytes than this, all files together. */
 export const SKILL_MAX_TOTAL_BYTES = 16 * 1024 * 1024;
 
+/** The SEP-2640 `digest` of a served file: `sha256:<hex>` of its bytes, a string as its UTF-8 bytes. */
+export function skillFileDigest(bytes: Uint8Array | string): string {
+  return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+}
+
 /** A file of a skill: its resource URI, `sha256:{hex}` digest of its raw bytes, and byte length. */
 export interface SkillResource {
   uri: string;
   digest: string;
   size: number;
 }
+
+/**
+ * `skills/list` request `_meta` key: `"draft"` lists the drafts the caller may
+ * read, at their `@draft` URIs; absent, the list holds the published skills.
+ */
+export const SKILL_DEFINITION_META_KEY = "dev.appstrate/definition";
+
+/** Entry `_meta` key of a draft: the `lock_version` of the draft its files and digests were read from. */
+export const SKILL_LOCK_VERSION_META_KEY = "dev.appstrate/lock_version";
 
 /** A SEP-2640 skill entry, identical in `skills/list` and `skills/get`. */
 export interface SkillEntry {
@@ -43,6 +58,8 @@ export interface SkillEntry {
   frontmatter: { name: string; description: string; [key: string]: unknown };
   /** Every file of the skill, `SKILL.md` included. */
   resources: SkillResource[];
+  /** Appstrate fields: a draft's entry carries {@link SKILL_LOCK_VERSION_META_KEY}. */
+  _meta?: { [SKILL_LOCK_VERSION_META_KEY]?: number };
 }
 
 /** What a `skill://` URI names. */

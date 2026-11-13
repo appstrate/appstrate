@@ -9,9 +9,14 @@
 
 import { beforeEach, describe, expect, it } from "bun:test";
 import { createHash } from "node:crypto";
-import { packageDistTags } from "@appstrate/db/schema";
+import { eq } from "drizzle-orm";
+import { packageDistTags, packages } from "@appstrate/db/schema";
 import { unzipArtifact, zipArtifact } from "@appstrate/core/zip";
-import { parseSkillUri } from "@appstrate/core/skill-uri";
+import {
+  parseSkillUri,
+  SKILL_DEFINITION_META_KEY,
+  SKILL_LOCK_VERSION_META_KEY,
+} from "@appstrate/core/skill-uri";
 import { computeIntegrity } from "@appstrate/core/integrity";
 import * as storage from "@appstrate/db/storage";
 import { getTestApp } from "../../helpers/app.ts";
@@ -32,6 +37,7 @@ import {
 } from "../../helpers/seed.ts";
 import { mcpRpc, type JsonRpcEnvelope, inSpace } from "../../helpers/mcp.ts";
 import { registerTestPlatformApp } from "../../helpers/platform-app.ts";
+import { loadEnforcedChatSkills } from "../../../src/services/chat-enforced-skills.ts";
 import {
   AGENT_PACKAGES_BUCKET,
   versionZipKey,
@@ -55,6 +61,7 @@ interface Entry {
   uri: string;
   frontmatter: Record<string, unknown>;
   resources: Array<{ uri: string; digest: string; size: number }>;
+  _meta?: Record<string, unknown>;
 }
 
 let owner: TestContext;
@@ -197,6 +204,16 @@ describe("skills/list and resources/read", () => {
   });
 });
 
+describe("an enforced chat skill", () => {
+  it("is injected as the SKILL.md resources/read serves at its URI", async () => {
+    await seedSpacePackage(owner.defaultSpaceId, TONE, { chatEnforced: true });
+    const [enforced] = await loadEnforcedChatSkills(owner.orgId, owner.defaultSpaceId);
+    expect(enforced?.uri).toBe(toneUri());
+    const read = await call(ownerHeaders(), "resources/read", { uri: toneUri() });
+    expect((read.result?.contents as Array<{ text: string }>)[0]!.text).toBe(enforced!.content!);
+  });
+});
+
 describe("skills/get on a draft", () => {
   const draftUri = () => `skill://${owner.defaultSpaceId}/skillsext/tone@draft/tone/SKILL.md`;
 
@@ -206,6 +223,29 @@ describe("skills/get on a draft", () => {
     const read = await call(ownerHeaders(), "resources/read", { uri: draftUri() });
     expect((read.result?.contents as Array<{ text: string }>)[0]!.text).toContain("Draft body");
     expect(await listUris(ownerHeaders())).not.toContain(draftUri());
+  });
+
+  it("lists the drafts on skills/list under dev.appstrate/definition, as REST does, with their lock_version", async () => {
+    const meta = { _meta: { [SKILL_DEFINITION_META_KEY]: "draft" } };
+    const listed = (await call(ownerHeaders(), "skills/list", meta)).result?.skills as Entry[];
+    const rest = (await (
+      await app.request("/api/mcp/skills?definition=draft", {
+        headers: { ...ownerHeaders(), "X-Space-Id": owner.defaultSpaceId },
+      })
+    ).json()) as { data: Entry[] };
+    const draft = listed.find((e) => e.uri === draftUri());
+    expect(draft).toEqual(rest.data.find((e) => e.uri === draftUri()));
+    const [row] = await db
+      .select({ lockVersion: packages.lockVersion })
+      .from(packages)
+      .where(eq(packages.id, TONE));
+    expect(draft?._meta).toEqual({ [SKILL_LOCK_VERSION_META_KEY]: row!.lockVersion });
+    expect((await call(ownerHeaders(), "skills/list", {})).result?.skills).not.toContainEqual(
+      draft,
+    );
+    const reader = await guest({ [owner.defaultSpaceId]: ["mcp:read", "skills:read"] });
+    const readerList = (await call(reader, "skills/list", meta)).result?.skills as Entry[];
+    expect(readerList.filter((e) => e.uri.includes("/skillsext/"))).toEqual([]);
   });
 
   it("refuses the draft to a reader who cannot write the package", async () => {
