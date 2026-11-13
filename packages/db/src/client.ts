@@ -67,10 +67,10 @@ async function initPGlite(): Promise<Db> {
   _pgliteClient = client;
   _closeDb = async () => {
     pgliteInstances.delete(dataDir);
-    // `close()` takes no lock: run it under the transaction mutex so nothing is
-    // in flight. Not re-entrant — never call this from inside a transaction.
-    await client.waitReady;
-    await client._runExclusiveTransaction(() => client.close());
+    // `close()` waits on the transaction and query mutexes itself, so nothing is
+    // in flight when it tears down. Not re-entrant — never call this from inside
+    // a transaction.
+    await client.close();
   };
   _listenClient = {
     listen: async (channel, handler) => {
