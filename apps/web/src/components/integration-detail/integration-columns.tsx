@@ -75,9 +75,7 @@ export function clientDeeds(
  *
  * ONE table for both tiers (`lib/integration-clients.ts` merges the space's and
  * the organization's lists): a client appears once, and "used here" is the
- * single verdict that matters for a new connection. Use waits for a 36rem
- * table and level for the next tier: on a phone what matters is which clients
- * exist and how to remove one, and on a narrow table which one is in use.
+ * single verdict that matters for a new connection.
  *
  * What a row offers follows its level: a space's own client can be edited,
  * shared with the organization or deleted by whoever configures the space; an
@@ -129,14 +127,12 @@ export function useIntegrationClientColumns({
       id: "level",
       header: t("integration.clients.col.level"),
       width: 104,
-      tier: 3,
       cell: (row) => <CellText>{t(clientLevelKey(row))}</CellText>,
     },
     {
       id: "use",
       header: t("integration.clients.col.use"),
       width: 168,
-      tier: 2,
       cell: (row) =>
         row.usedHere ? (
           <Badge variant="success">{t("integration.clients.usedHere")}</Badge>
@@ -220,11 +216,8 @@ export function useIntegrationClientColumns({
  * and delete, share and reconnect are all owner-only server-side. A control
  * drawn for a row the caller does not own is a button that answers 403.
  *
- * Tier one is the account and its action end. Status and the scope with
- * its share editor wait for 36rem; the method, the owner, the granted
- * scopes and the expiry wait for 56rem because they are the longest and least
- * often read facts. The floors are written so that the whole set, method
- * included, holds in 56rem and a 1440px page needs no sideways scroll.
+ * The widths are written so that the whole set holds in 56rem and a 1440px
+ * page needs no sideways scroll.
  */
 export function useConnectionColumns({
   packageId,
@@ -268,7 +261,6 @@ export function useConnectionColumns({
       header: t("integration.presentation.method"),
       width: 84,
       elastic: true,
-      tier: 3,
       cell: (c) => <CellText title={methodLabel(c)}>{methodLabel(c)}</CellText>,
     },
     {
@@ -276,7 +268,6 @@ export function useConnectionColumns({
       header: t("proxies.col.status"),
       width: 104,
       elastic: true,
-      tier: 2,
       cell: (c) => <StatusCell connection={c} />,
     },
     {
@@ -284,7 +275,6 @@ export function useConnectionColumns({
       header: t("integration.connection.col.owner"),
       width: 88,
       elastic: true,
-      tier: 3,
       cell: (c) => {
         const owner = c.owner_name ?? t("integration.connection.ownerUnknown");
         return <CellText title={owner}>{owner}</CellText>;
@@ -295,7 +285,6 @@ export function useConnectionColumns({
       header: t("roles.permissionsLabel"),
       width: 80,
       elastic: true,
-      tier: 3,
       cell: (c) =>
         c.scopes_granted.length > 0 ? (
           <ScopeSummaryText
@@ -312,7 +301,6 @@ export function useConnectionColumns({
       id: "expires",
       header: t("apiKeys.expirationColumn"),
       width: 84,
-      tier: 3,
       align: "end",
       cell: (c) => <CellDate value={c.expiresAt} granularity="date" />,
     },
@@ -320,7 +308,6 @@ export function useConnectionColumns({
       id: "usage",
       header: t("integration.connection.col.usage"),
       width: 184,
-      tier: 2,
       cell: (c) => <ConnectionScopeBadge scope={c.scope} testId={`connection-scope-${c.id}`} />,
     },
     {

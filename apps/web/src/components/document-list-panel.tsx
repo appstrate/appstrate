@@ -37,7 +37,6 @@ export function DocumentListPanel({
   display = "table",
   toolbar,
   tableLabel,
-  tiered,
   tableSurface = "framed",
 }: {
   documents: FileDto[];
@@ -53,8 +52,6 @@ export function DocumentListPanel({
   /** Apparatus owned by the caller, built from the table's real columns. */
   toolbar?: (context: { columns: ColumnMenuSpec }) => ReactNode;
   tableLabel?: string;
-  /** Read columns wait for room by their tier (a narrow panel); see `DataTable`. */
-  tiered?: boolean;
   /** Integrated rails already provide the surrounding surface. */
   tableSurface?: "framed" | "integrated";
 }) {
@@ -169,7 +166,6 @@ export function DocumentListPanel({
             tableId="documents"
             label={tableLabel ?? t("tableLabel")}
             columns={columns}
-            tiered={tiered}
             surface={tableSurface}
             rows={documents}
             rowKey={(doc) => doc.id}

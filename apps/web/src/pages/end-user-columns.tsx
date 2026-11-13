@@ -48,7 +48,6 @@ export function useEndUserColumns({
       header: t("login.email"),
       width: 100,
       elastic: true,
-      tier: 2,
       cell: (user) => <CellText>{user.email ?? ""}</CellText>,
     },
     {
@@ -56,14 +55,12 @@ export function useEndUserColumns({
       header: t("spaces.endUserExternalId"),
       width: 80,
       elastic: true,
-      tier: 2,
       cell: (user) => <CellText mono>{user.externalId ?? ""}</CellText>,
     },
     {
       id: "createdAt",
       header: t("spaces.createdAtLabel"),
       width: 104,
-      tier: 2,
       align: "end",
       cell: (user) => <CellDate value={user.createdAt} granularity="date" />,
     },

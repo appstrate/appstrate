@@ -73,6 +73,9 @@ function PackageIndex({ type }: { type: Exclude<IndexType, "agent"> }) {
   return <PackageIndexBody type={type} items={items} isLoading={isLoading} error={error} />;
 }
 
+/** Agents are the org's own work: where each came from is a detail, hidden until asked for. */
+const AGENT_HIDDEN_COLUMNS = ["origin"];
+
 function PackageIndexBody({
   type,
   items,
@@ -90,7 +93,11 @@ function PackageIndexBody({
   const [creating, setCreating] = useState<{ integrationId: string | null } | null>(null);
   const list = useListParams(["origin", "activity"]);
   const [view, setView] = useListView(type);
-  const { columns, menu } = useColumnVisibility(`packages-${type}`, usePackageColumns(type));
+  const { columns, menu } = useColumnVisibility(
+    `packages-${type}`,
+    usePackageColumns(type),
+    type === "agent" ? AGENT_HIDDEN_COLUMNS : undefined,
+  );
   // Creating — by hand, with the chat or by import — is a write on the package
   // type, as its routes are. The import names the type, so the server refuses
   // an archive of another one.

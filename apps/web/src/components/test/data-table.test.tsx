@@ -2,8 +2,8 @@
 
 /**
  * The shared table primitive. What a screenshot does not show is pinned here:
- * where the row's link lives, which columns a tier hides and which are held in
- * place when the table scrolls.
+ * where the row's link lives, that every column is drawn at every width, and
+ * which columns are held in place when the table scrolls.
  */
 
 import { describe, it, expect } from "bun:test";
@@ -29,14 +29,13 @@ const ROWS: Row[] = [
 ];
 
 const COLUMNS: DataColumn<Row>[] = [
-  { id: "num", header: "#", width: 56, tier: 2, cell: (r) => <span>{r.id}</span> },
+  { id: "num", header: "#", width: 56, cell: (r) => <span>{r.id}</span> },
   { id: "name", header: "Nom", width: 120, elastic: true, cell: (r) => <span>{r.name}</span> },
   {
     id: "when",
     header: "Date",
     width: 96,
     align: "end",
-    tier: 3,
     cell: (r) => <span>{r.when}</span>,
   },
 ];
@@ -71,40 +70,43 @@ describe("semantics", () => {
   });
 });
 
-describe("tiers", () => {
-  it("draws every column, and scrolls, unless the table is tiered", () => {
+describe("width", () => {
+  it("draws every column at every width, and scrolls under their sum", () => {
+    // The width never hides a column: which ones show is the reader's call.
     const html = table();
-    expect(html).not.toContain("hidden @xl/table");
-    expect(html).toContain("--dt-floor-3:272px");
-  });
-
-  it("hides a tiered column's head AND its cells", () => {
-    const html = table({ tiered: true });
-    for (const [tier, query] of [
-      [2, "@xl/table"],
-      [3, "@4xl/table"],
-    ] as const) {
-      const hidden = [...html.matchAll(new RegExp(`hidden ${query}:table-cell`, "g"))];
-      const count = COLUMNS.filter((c) => c.tier === tier).length;
-      expect(hidden).toHaveLength(count * (1 + ROWS.length));
-    }
-  });
-
-  it("publishes the floor of each tier", () => {
-    const html = table({ tiered: true });
-    expect(html).toContain("--dt-floor:120px");
-    expect(html).toContain("--dt-floor-2:176px");
-    expect(html).toContain("--dt-floor-3:272px");
+    expect(html).not.toContain("hidden @");
+    expect(html).toContain("--dt-floor:272px");
+    expect(html).toContain("min-w-(--dt-floor)");
   });
 });
 
 describe("the row's link", () => {
-  it("sits in the first column of tier one", () => {
+  it("sits in the first read column", () => {
     const html = table();
-    // `num` waits for a wider table: a link parked there leaves the row
-    // unclickable on a phone. It belongs to `name`.
+    expect(html).toMatch(/<a[^>]*href="\/rows\/a"[^>]*>\s*<div[^>]*>\s*<span>a<\/span>/);
+    expect(html).not.toMatch(/<a[^>]*>\s*<div[^>]*>\s*<span>Alpha<\/span>/);
+  });
+
+  it("sits in the column marked as the row's identity, and holds what precedes it", () => {
+    const columns = COLUMNS.map((c) => (c.id === "name" ? { ...c, identity: true as const } : c));
+    const html = table({ columns });
     expect(html).toMatch(/<a[^>]*href="\/rows\/a"[^>]*>\s*<div[^>]*>\s*<span>Alpha<\/span>/);
-    expect(html).not.toMatch(/<a[^>]*>\s*<div[^>]*>\s*<span>a<\/span>/);
+    const heads = html.match(/<th[^>]*>/g) ?? [];
+    expect(heads.find((head) => head.includes('data-column="num"'))).toContain("sticky");
+    expect(heads.find((head) => head.includes('data-column="name"'))).toContain("left:56px");
+  });
+
+  it("skips a control before it: a tick is not the row's name", () => {
+    const tick: DataColumn<Row> = {
+      id: "tick",
+      header: "",
+      headerNode: <i>x</i>,
+      width: 40,
+      control: true,
+      cell: () => <input type="checkbox" />,
+    };
+    const html = table({ columns: [tick, ...COLUMNS] });
+    expect(html).toMatch(/<a[^>]*href="\/rows\/a"[^>]*>\s*<div[^>]*>\s*<span>a<\/span>/);
   });
 
   it("carries a name of its own and covers the whole row", () => {
@@ -150,7 +152,7 @@ describe("states", () => {
 describe("controls and the row's end", () => {
   const columns: DataColumn<Row>[] = [
     { id: "name", header: "Nom", width: 120, elastic: true, cell: (r) => <span>{r.name}</span> },
-    { id: "when", header: "Date", width: 96, tier: 2, cell: (r) => <span>{r.when}</span> },
+    { id: "when", header: "Date", width: 96, cell: (r) => <span>{r.when}</span> },
     {
       id: "role",
       header: "Rôle",
@@ -159,17 +161,9 @@ describe("controls and the row's end", () => {
       control: true,
       cell: () => <button type="button">Choisir</button>,
     },
-    { id: "actions", header: "", width: 80, align: "end", tier: 3, cell: () => <span>…</span> },
+    { id: "actions", header: "", width: 80, align: "end", cell: () => <span>…</span> },
   ];
-  const html = table({ columns, tiered: true });
-
-  it("never hides a control: it has no tier class and counts in the narrowest floor", () => {
-    expect(html).toContain("--dt-floor:340px");
-    expect(html).toContain("--dt-floor-2:436px");
-    expect(html).toContain("--dt-floor-3:436px");
-    expect(html).not.toMatch(/<t[hd][^>]*data-column="role"[^>]*class="[^"]*hidden/);
-    expect(html).not.toMatch(/<t[hd][^>]*data-column="actions"[^>]*class="[^"]*hidden/);
-  });
+  const html = table({ columns });
 
   it("holds the name and the row's end in place", () => {
     const heads = html.match(/<th[^>]*>/g) ?? [];
@@ -183,6 +177,57 @@ describe("controls and the row's end", () => {
     const cells = html.match(/<td[^>]*data-column="(?:name|actions)"[^>]*>/g) ?? [];
     expect(cells).toHaveLength(2 * ROWS.length);
     for (const cell of cells) expect(cell).toContain("group-hover/row:bg-(--dt-surface-hover)");
+  });
+});
+
+describe("a head that is not drawn", () => {
+  const columns = COLUMNS.map((c) => (c.id === "when" ? { ...c, hideHeader: true as const } : c));
+  const html = table({ columns });
+
+  it("keeps its word for screen readers only", () => {
+    expect(html).toMatch(/<th[^>]*data-column="when"[^>]*>\s*<span class="sr-only">Date<\/span>/);
+  });
+
+  it("keeps its column and its resize handle", () => {
+    expect([...html.matchAll(/<th /g)]).toHaveLength(COLUMNS.length);
+    expect(html).toContain('aria-label="Redimensionner la colonne Date"');
+  });
+});
+
+describe("a column narrower in a narrow table", () => {
+  // `num` collapses in a table under 32rem (a compact badge does): its width, the floor and the offset of
+  // the held name after it all switch with the table.
+  const columns = COLUMNS.map((c) =>
+    c.id === "num"
+      ? { ...c, narrowWidth: 24 }
+      : c.id === "name"
+        ? { ...c, identity: true as const }
+        : c,
+  );
+  const html = table({ columns });
+  const head = (id: string) =>
+    (html.match(/<th[^>]*>/g) ?? []).find((h) => h.includes(`data-column="${id}"`)) ?? "";
+
+  it("switches its width with the table", () => {
+    expect(head("num")).toContain("--dt-w:56px;--dt-w-narrow:24px");
+    expect(head("num")).toContain("w-(--dt-w-narrow) @lg/table:w-(--dt-w)");
+  });
+
+  it("switches the floor and the held name's offset with it", () => {
+    expect(html).toContain("--dt-floor:272px;--dt-floor-narrow:240px");
+    expect(head("name")).toContain("--dt-left:56px;--dt-left-narrow:24px");
+    expect(head("name")).toContain("left-(--dt-left-narrow) @lg/table:left-(--dt-left)");
+  });
+
+  it("keeps one plain width where nothing collapses", () => {
+    expect(head("when")).toContain("width:96px");
+  });
+
+  it("gives way to a width the reader chose, at every size", () => {
+    storage.setItem("appstrate-column-widths-chosen", JSON.stringify({ num: 80 }));
+    const chosen = table({ columns, tableId: "chosen" });
+    expect(chosen).toContain("width:80px");
+    expect(chosen).not.toContain("--dt-w-narrow");
   });
 });
 

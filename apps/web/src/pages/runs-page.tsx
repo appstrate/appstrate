@@ -93,7 +93,6 @@ export function RunsPage() {
       />
 
       <RunList
-        pageSize={15}
         user={user}
         kind={kind}
         status={statuses}

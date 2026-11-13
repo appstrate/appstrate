@@ -87,7 +87,6 @@ export function usePackageColumns(holds: PackageType): DataColumn<CardItem>[] {
       header: t("manifest.keywords"),
       width: 140,
       elastic: true,
-      tier: 3,
       cell: (item) => {
         const used =
           item.type !== "agent" && item.usedByAgents
@@ -102,11 +101,7 @@ export function usePackageColumns(holds: PackageType): DataColumn<CardItem>[] {
       id: "state",
       header: t("list.column.state"),
       width: 104,
-      // Waits for a 36rem table. It carries a badge only while a run is in
-      // flight and an em dash the rest of the time, so at tier one it would be
-      // a column of dashes taking 104px from the two things a phone needs here:
-      // which package this is, and the button that runs it.
-      tier: 2,
+      // A badge only while a run is in flight, an em dash the rest of the time.
       cell: (item) =>
         item.type === "agent" && !!item.runningRuns && item.runningRuns > 0 ? (
           <RunStatusBadge status="running" compact />

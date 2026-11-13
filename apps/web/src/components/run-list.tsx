@@ -24,17 +24,16 @@ import type { RunStatus } from "@appstrate/core/run-status";
 import { ListFooter, type ColumnMenuSpec } from "./list-toolbar";
 import { PlayCircle } from "lucide-react";
 
+/** One page of runs, on the runs page and in every detail panel alike. */
+const PAGE_SIZE = 15;
+
 interface RunListProps {
   packageId?: string;
   scheduleId?: string;
   /** Fixed agent name -- skips agent lookup when set (e.g. schedule detail) */
   fixedAgentName?: string;
-  /** Items per page (default 20) */
-  pageSize?: number;
   /** Show pagination controls (default true) */
   paginated?: boolean;
-  /** Hide agent name column (when already in agent context) */
-  hideAgentName?: boolean;
   /** Custom empty state (replaces default) */
   emptyState?: React.ReactNode;
   /** Preview row shown above the first page (e.g. scheduled next-run) */
@@ -61,8 +60,6 @@ interface RunListProps {
    * second time to count them would send a duplicate `GET /api/runs`.
    */
   countLabel?: (total: number) => React.ReactNode;
-  /** Read columns wait for room by their tier (a narrow panel); see `DataTable`. */
-  tiered?: boolean;
   tableSurface?: "framed" | "integrated";
 }
 
@@ -70,9 +67,7 @@ export function RunList({
   packageId,
   scheduleId,
   fixedAgentName,
-  pageSize = 20,
   paginated = true,
-  hideAgentName = false,
   emptyState,
   banner,
   user,
@@ -81,13 +76,15 @@ export function RunList({
   search,
   toolbar,
   countLabel,
-  tiered,
   tableSurface = "framed",
 }: RunListProps) {
   const { t } = useTranslation(["agents"]);
   const agentName = useRunAgentName(fixedAgentName);
   const agentIdentity = useRunAgentIdentity();
-  const allColumns = useRunColumns({ agentName, agentIdentity, hideAgentName });
+  // Inside one agent (its tab, a schedule's history) the « Run » column leads
+  // with the number: the agent is the page's title.
+  const oneAgent = packageId != null || scheduleId != null;
+  const allColumns = useRunColumns({ agentName, agentIdentity, oneAgent });
   // Per TABLE, not per screen: the run list keeps its columns wherever it is
   // shown — the runs page, an agent's tab, a schedule's history.
   const { columns, menu } = useColumnVisibility("runs", allColumns);
@@ -112,15 +109,15 @@ export function RunList({
     kind,
     status,
     search: querySearch || undefined,
-    limit: pageSize,
-    offset: page * pageSize,
+    limit: PAGE_SIZE,
+    offset: page * PAGE_SIZE,
   });
 
   const runs: EnrichedRun[] = data?.data ?? [];
   // Undefined until the request answers — the count and the pager both read
   // it, and `?? 0` here would tell the footer there were zero runs on a 500.
   const total = data?.total;
-  const totalPages = total === undefined ? 0 : Math.ceil(total / pageSize);
+  const totalPages = total === undefined ? 0 : Math.ceil(total / PAGE_SIZE);
 
   // Only the first page shows a placeholder; paging keeps the previous rows.
   const showLoading = isLoading && page === 0;
@@ -146,7 +143,6 @@ export function RunList({
         error={errorBody}
         empty={emptyBody}
         banner={page === 0 ? banner : undefined}
-        tiered={tiered}
         surface={tableSurface}
       />
 
