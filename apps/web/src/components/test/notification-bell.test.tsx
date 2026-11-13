@@ -83,7 +83,7 @@ describe("NotificationContent", () => {
     const html = renderList([
       {
         id: "n3",
-        type: "run_completed",
+        type: "run_failed",
         runId: "run_1",
         payload: { packageId: PACKAGE_ID, status: "failed" },
         read_at: null,
@@ -101,7 +101,7 @@ describe("NotificationContent", () => {
     const notifications: Notifications = [
       {
         id: "n4",
-        type: "run_completed",
+        type: "run_failed",
         runId: "run_2",
         payload: { packageId: PACKAGE_ID, status: "timeout" },
         read_at: null,

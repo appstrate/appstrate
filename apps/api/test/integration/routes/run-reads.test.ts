@@ -30,7 +30,7 @@ import { and, eq, sql } from "drizzle-orm";
 const app = getTestApp();
 
 // A run's read state is the per-recipient `run_reads` row. A run that failed or
-// timed out also writes a `run_completed` notification (the bell); opening the
+// timed out also writes a `run_failed` notification (the bell); opening the
 // run acknowledges it. The read state is read through the run surfaces
 // (`GET /api/runs?unread=true`, the `unread` flag, `unread_count` on
 // `GET /api/agents`) and written through `PUT /api/runs/{id}/read` and
@@ -116,7 +116,7 @@ describe("Run read state (per-recipient)", () => {
       .where(eq(runReads.runId, runId));
   }
 
-  /** The bell's `run_completed` notifications of one run. */
+  /** The bell's `run_failed` notifications of one run. */
   async function notificationsOf(runId: string) {
     return db
       .select({
@@ -670,7 +670,7 @@ describe("Run read state (per-recipient)", () => {
       await expectNotNullViolation(
         db.execute(
           sql`INSERT INTO notifications (org_id, space_id, recipient_type, type)
-              VALUES (${ctx.orgId}, ${ctx.defaultSpaceId}, 'user', 'run_completed')`,
+              VALUES (${ctx.orgId}, ${ctx.defaultSpaceId}, 'user', 'run_failed')`,
         ),
         "recipient_id",
       );
@@ -680,7 +680,7 @@ describe("Run read state (per-recipient)", () => {
       await expectNotNullViolation(
         db.execute(
           sql`INSERT INTO notifications (org_id, space_id, recipient_id, type)
-              VALUES (${ctx.orgId}, ${ctx.defaultSpaceId}, ${ctx.user.id}, 'run_completed')`,
+              VALUES (${ctx.orgId}, ${ctx.defaultSpaceId}, ${ctx.user.id}, 'run_failed')`,
         ),
         "recipient_type",
       );
@@ -716,7 +716,7 @@ describe("Run read state (per-recipient)", () => {
       try {
         await db.execute(
           sql`INSERT INTO notifications (org_id, space_id, recipient_type, recipient_id, type)
-              VALUES (${ctx.orgId}, ${ctx.defaultSpaceId}, 'robot', ${ctx.user.id}, 'run_completed')`,
+              VALUES (${ctx.orgId}, ${ctx.defaultSpaceId}, 'robot', ${ctx.user.id}, 'run_failed')`,
         );
       } catch (e) {
         err = e;
@@ -773,7 +773,7 @@ describe("Run read state (per-recipient)", () => {
         spaceId: ctx.defaultSpaceId,
         recipientType: "end_user",
         recipientId: eu.id,
-        type: "run_completed",
+        type: "run_failed",
         payload: { packageId: null, status: "failed" },
       });
       expect(await countForRecipient("end_user", eu.id)).toBe(2);

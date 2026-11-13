@@ -18977,7 +18977,7 @@ export interface operations {
                              */
                             id: string;
                             /** @constant */
-                            type: "run_completed";
+                            type: "run_failed";
                             /** @description Originating run id, when the notification references one */
                             runId: string | null;
                             /** @description Render-without-join data. */

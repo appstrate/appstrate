@@ -62,7 +62,7 @@ export async function notifyRunFinished(
 ): Promise<void> {
   const { status } = run;
   if (!needsAttention(status) || recipients.length === 0) return;
-  const payload: NotificationPayloads["run_completed"] = { packageId: run.packageId, status };
+  const payload: NotificationPayloads["run_failed"] = { packageId: run.packageId, status };
   await db
     .insert(notifications)
     .values(
@@ -71,7 +71,7 @@ export async function notifyRunFinished(
         spaceId: scope.spaceId,
         recipientType: r.type,
         recipientId: r.id,
-        type: "run_completed" as const,
+        type: "run_failed" as const,
         runId: run.id,
         payload,
       })),
@@ -97,7 +97,7 @@ export async function markRunNotificationsRead(
         spaceId: scope.spaceId,
         extra: [
           recipientFilter(actor),
-          eq(notifications.type, "run_completed"),
+          eq(notifications.type, "run_failed"),
           isNull(notifications.readAt),
           ...(runId ? [eq(notifications.runId, runId)] : []),
         ],

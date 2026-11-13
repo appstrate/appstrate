@@ -41,7 +41,7 @@ function notificationOf(kind: string, payload: Record<string, unknown>) {
  */
 const notificationObject = {
   oneOf: [
-    notificationOf("run_completed", {
+    notificationOf("run_failed", {
       required: ["packageId", "status"],
       properties: {
         packageId: {

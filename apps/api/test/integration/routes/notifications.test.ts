@@ -138,13 +138,13 @@ describe("Notifications feed API (per-recipient)", () => {
       const validate = new Ajv({ strict: false, validateFormats: false }).compile(item);
 
       const data = await listNotifications(authHeaders(ctx));
-      expect(data.map((n) => n.type).sort()).toEqual(["package_shared", "run_completed"]);
+      expect(data.map((n) => n.type).sort()).toEqual(["package_shared", "run_failed"]);
       for (const n of data)
         expect({ valid: validate(n), errors: validate.errors }).toEqual({
           valid: true,
           errors: null,
         });
-      const failed = data.find((n) => n.type === "run_completed")!;
+      const failed = data.find((n) => n.type === "run_failed")!;
       expect(failed.payload?.status).toBe("failed");
       // A kind's payload does not validate under the other kind's branch.
       expect(validate({ ...failed, type: "package_shared" })).toBe(false);
@@ -180,7 +180,7 @@ describe("Notifications feed API (per-recipient)", () => {
 
       const data = await listNotifications(authHeaders(ctx), "");
       expect(data.map((n) => n.runId).sort()).toEqual([failed.id, timedOut.id].sort());
-      expect(data.every((n) => n.type === "run_completed")).toBe(true);
+      expect(data.every((n) => n.type === "run_failed")).toBe(true);
       expect(await unreadCount(authHeaders(ctx))).toBe(2);
     });
 

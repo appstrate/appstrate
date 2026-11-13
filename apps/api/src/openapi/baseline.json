@@ -18444,7 +18444,7 @@
                               },
                               "type": {
                                 "type": "string",
-                                "const": "run_completed"
+                                "const": "run_failed"
                               },
                               "runId": {
                                 "type": ["string", "null"],

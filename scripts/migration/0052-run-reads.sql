@@ -7,14 +7,14 @@ BEGIN;
 SET LOCAL lock_timeout = '5s';
 SET LOCAL statement_timeout = '300s';
 
--- 1. A run's read state moves to `run_reads`: every `run_completed` notification, read or not, is
---    the read state of its run for its recipient. A row the release already wrote (a run finished
+-- 1. A run's read state moves to `run_reads`: every run notification (`run_failed` since drizzle
+--    0103 renamed the type), read or not, is the read state of its run for its recipient. A row the release already wrote (a run finished
 --    after the deploy) wins.
 WITH copied AS (
   INSERT INTO run_reads (run_id, org_id, space_id, recipient_type, recipient_id, read_at, created_at)
   SELECT run_id, org_id, space_id, recipient_type, recipient_id, read_at, created_at
   FROM notifications
-  WHERE type = 'run_completed' AND run_id IS NOT NULL
+  WHERE type = 'run_failed' AND run_id IS NOT NULL
   ON CONFLICT DO NOTHING
   RETURNING 1
 )
@@ -24,7 +24,7 @@ SELECT count(*) AS run_reads_copied FROM copied;
 --    ended `failed` or `timeout`. The others were read state, now in `run_reads`.
 WITH removed AS (
   DELETE FROM notifications
-  WHERE type = 'run_completed'
+  WHERE type = 'run_failed'
     AND coalesce(payload ->> 'status', '') NOT IN ('failed', 'timeout')
   RETURNING 1
 )
@@ -33,7 +33,7 @@ SELECT count(*) AS run_notifications_removed FROM removed;
 -- Every remaining run notification has its read state.
 SELECT count(*) AS run_notifications_without_read_state
 FROM notifications n
-WHERE n.type = 'run_completed' AND n.run_id IS NOT NULL
+WHERE n.type = 'run_failed' AND n.run_id IS NOT NULL
   AND NOT EXISTS (
     SELECT 1 FROM run_reads r
     WHERE r.run_id = n.run_id

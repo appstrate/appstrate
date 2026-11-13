@@ -5257,7 +5257,7 @@
         },
         "notifications_type_valid": {
           "name": "notifications_type_valid",
-          "value": "type IN ('run_completed', 'package_shared')"
+          "value": "type IN ('run_failed', 'package_shared')"
         }
       },
       "isRLSEnabled": false

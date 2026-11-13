@@ -50,7 +50,7 @@ import { runs } from "./runs.ts";
  * carries the few fields the bell needs to render without a join.
  */
 /** The notification kinds — `notifications.type`, held by the CHECK below. */
-export const notificationTypeValues = ["run_completed", "package_shared"] as const;
+export const notificationTypeValues = ["run_failed", "package_shared"] as const;
 export type NotificationType = (typeof notificationTypeValues)[number];
 
 /**
@@ -63,7 +63,7 @@ export type RunAlertStatus = (typeof runAlertStatusValues)[number];
 
 /** The render-without-join payload of each kind. */
 export interface NotificationPayloads {
-  run_completed: { packageId: string | null; status: RunAlertStatus };
+  run_failed: { packageId: string | null; status: RunAlertStatus };
   package_shared: { packageId: string; package_type: PackageType; shared_by_name: string };
 }
 
@@ -95,7 +95,7 @@ export const notifications = pgTable(
     recipientId: text("recipient_id").notNull(),
     // text + CHECK, not a pgEnum: a kind is added without an ALTER TYPE.
     type: text("type").notNull().$type<NotificationType>(),
-    // Originating entity (the run, for "run_completed"). Null for types
+    // Originating entity (the run, for "run_failed"). Null for types
     // that have no run. `runs.id` is a text (`run_`-prefixed) id, so this
     // is text too. ON DELETE CASCADE: deleting a run drops its notifications.
     runId: text("run_id").references(() => runs.id, { onDelete: "cascade" }),

@@ -1519,7 +1519,7 @@ describe("Organizations API", () => {
         spaceId: ctx.defaultSpaceId,
         recipientType: "user",
         recipientId: leaver.id,
-        type: "run_completed",
+        type: "run_failed",
         payload: { packageId: pkg.id, status: "failed" },
       });
       const leaverRun = await seedRun({

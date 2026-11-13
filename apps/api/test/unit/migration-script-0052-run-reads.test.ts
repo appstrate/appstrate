@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `scripts/migration/0052-run-reads.sql` on a private PGlite replayed through the
- * migration that creates `run_reads` (`0103`), seeded with the `run_completed`
- * notifications the previous release wrote: every one becomes a read-state row,
- * and only those of a failed or timed-out run stay in the bell. A second run
- * changes nothing.
+ * Drizzle `0103` then `scripts/migration/0052-run-reads.sql` on a private PGlite
+ * replayed through `0102` and seeded with the `run_completed` notifications the
+ * previous release wrote: `0103` renames them `run_failed`, the script makes
+ * every one a read-state row and keeps in the bell only those of a failed or
+ * timed-out run. A second run changes nothing.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
@@ -16,10 +16,12 @@ import { journalPGlite } from "../helpers/journal.ts";
 
 const REPO_ROOT = resolve(import.meta.dir, "../../../..");
 const SCRIPT = `${REPO_ROOT}/scripts/migration/0052-run-reads.sql`;
-/** The migration that creates `run_reads`, whatever its slug. */
-const REPLAY_THROUGH = readdirSync(`${REPO_ROOT}/packages/db/drizzle`)
-  .filter((f) => f.startsWith("0103_") && f.endsWith(".sql"))
-  .map((f) => f.replace(/\.sql$/, ""))[0]!;
+const DRIZZLE = `${REPO_ROOT}/packages/db/drizzle`;
+/** A migration's tag, whatever its slug. */
+const tagOf = (index: string) =>
+  readdirSync(DRIZZLE)
+    .filter((f) => f.startsWith(`${index}_`) && f.endsWith(".sql"))
+    .map((f) => f.replace(/\.sql$/, ""))[0]!;
 
 const ORG = "e0000000-0000-4000-8000-00000000d052";
 const SPACE = "spc_d0520000-0000-4000-8000-000000000001";
@@ -33,7 +35,7 @@ const run = (n: number) => `run_0052_${n}`;
 async function notificationsByRun(): Promise<Record<string, string>> {
   const { rows } = await pg.query<{ run_id: string; status: string }>(
     `SELECT run_id, payload ->> 'status' AS status FROM notifications
-     WHERE type = 'run_completed' ORDER BY run_id`,
+     WHERE type = 'run_failed' ORDER BY run_id`,
   );
   return Object.fromEntries(rows.map((r) => [r.run_id, r.status]));
 }
@@ -46,7 +48,7 @@ async function reads(): Promise<{ run_id: string; read: boolean }[]> {
 }
 
 beforeAll(async () => {
-  pg = await journalPGlite({ through: REPLAY_THROUGH });
+  pg = await journalPGlite({ through: tagOf("0102") });
   const statuses = ["success", "failed", "timeout", "cancelled"];
   await pg.exec(`
     INSERT INTO organizations (id, name, slug) VALUES ('${ORG}', 'Zero52', 'zero-52');
@@ -67,6 +69,7 @@ beforeAll(async () => {
       VALUES ('${ORG}', '${SPACE}', 'user', '${ALICE}', 'package_shared',
         '{"packageId":"@acme0052/skill","package_type":"skill","shared_by_name":"Bob"}'::jsonb);
   `);
+  await pg.exec(await Bun.file(`${DRIZZLE}/${tagOf("0103")}.sql`).text());
 });
 
 afterAll(async () => {
@@ -74,6 +77,20 @@ afterAll(async () => {
 });
 
 describe("scripts/migration/0052-run-reads.sql", () => {
+  it("drizzle 0103 renames the stored run notifications and refuses the old type", async () => {
+    const { rows } = await pg.query<{ type: string; n: number }>(
+      `SELECT type, count(*)::int AS n FROM notifications GROUP BY type ORDER BY type`,
+    );
+    expect(rows).toEqual([
+      { type: "package_shared", n: 1 },
+      { type: "run_failed", n: 4 },
+    ]);
+    await expect(
+      pg.exec(`INSERT INTO notifications (org_id, space_id, recipient_type, recipient_id, type)
+        VALUES ('${ORG}', '${SPACE}', 'user', '${ALICE}', 'run_completed')`),
+    ).rejects.toThrow(/notifications_type_valid/);
+  });
+
   it("copies every run notification into run_reads, keeping read state", async () => {
     await pg.exec(await Bun.file(SCRIPT).text());
     expect(await reads()).toEqual([

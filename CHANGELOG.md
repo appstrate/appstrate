@@ -9,7 +9,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Operators
 
 - **Run `scripts/migration/0052-run-reads.sql` once after deploying** (drizzle
-  `0103` creates `run_reads`). It copies each run's read state out of the
+  `0103` creates `run_reads` and renames the stored run notifications to
+  `run_failed`). It copies each run's read state out of the
   `run_completed` notifications and removes the notifications of runs that did
   not fail or time out. Until it runs, runs finished before the deploy read as
   read and the bell still lists them. The app may keep running; detail in
@@ -119,6 +120,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     `GET /api/agents` items carry `unread_count`, like a schedule.
   - The bell (`/api/notifications`) receives a run only when it ended `failed`
     or `timeout`, plus package shares. Opening the run reads its notification.
+    Its notification type is renamed `run_completed` → `run_failed`.
   - Removed: `GET /api/notifications/unread-counts-by-agent` (use
     `unread_count` on `GET /api/agents`) and
     `PUT /api/notifications/read/{runId}` (use `PUT /api/runs/{id}/read`).
