@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from "bun:test";
 import { eq } from "drizzle-orm";
 import { db } from "@appstrate/db/client";
-import { connectionCalls, spaces } from "@appstrate/db/schema";
+import { connectionCalls, integrationConnections, spaces } from "@appstrate/db/schema";
 import { clearAllCachesLocally } from "@appstrate/core/cache";
 import { forgetProtocolEras } from "@appstrate/mcp-transport/testing";
 import type { IntegrationManifest } from "@appstrate/core/integration";
@@ -17,7 +17,7 @@ import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import { seedApiKey } from "../../helpers/seed.ts";
 import { flushRedis } from "../../helpers/redis.ts";
-import { createTestContext, type TestContext } from "../../helpers/auth.ts";
+import { createTestContext, memberContext, type TestContext } from "../../helpers/auth.ts";
 import { allowLoopbackOAuthEgress } from "../../helpers/strict-authorization-server.ts";
 import {
   seedProxyConnection,
@@ -57,7 +57,13 @@ afterAll(() => {
   restoreEgress();
 });
 
-const remote = (opts: { url?: string; authorizedUris?: string[] } = {}): IntegrationManifest => ({
+const remote = (
+  opts: {
+    url?: string;
+    authorizedUris?: string[];
+    variables?: IntegrationManifest["variables"];
+  } = {},
+): IntegrationManifest => ({
   ...remoteIntegrationManifest({
     name: ID,
     url: opts.url ?? server.url,
@@ -80,17 +86,18 @@ const remote = (opts: { url?: string; authorizedUris?: string[] } = {}): Integra
     },
   }),
   hidden_tools: ["delete"],
+  ...(opts.variables ? { variables: opts.variables } : {}),
 });
 
 describe("POST /api/credential-proxy/tools/*", () => {
   let ctx: TestContext;
   let apiKey: string;
 
-  const post = (path: "list" | "call", body: unknown) =>
+  const post = (path: "list" | "call", body: unknown, key = apiKey) =>
     getTestApp().request(`/api/credential-proxy/tools/${path}`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Bearer ${key}`,
         "X-Org-Id": ctx.orgId,
         "X-Space-Id": ctx.defaultSpaceId,
         "Content-Type": "application/json",
@@ -141,12 +148,110 @@ describe("POST /api/credential-proxy/tools/*", () => {
 
     const res = await post("list", { integration_id: ID, connection_id: connectionId });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { listed: boolean; tools: { name: string }[] };
+    const body = (await res.json()) as { listed: boolean; tools: Record<string, unknown>[] };
     expect(body.listed).toBe(false);
     // The declared names (`tools_policy` keys, stored as JSONB: their order is not the author's).
     expect(body.tools.map((tool) => tool.name).sort()).toEqual(["create", "forge", "search"]);
     for (const tool of body.tools)
-      expect(tool).toEqual({ name: tool.name, inputSchema: { type: "object" } });
+      expect(tool).toEqual({ name: tool.name, input_schema: { type: "object" } });
+  });
+
+  it("lists with the connection the proxy selects when none is named", async () => {
+    await seedProxyIntegration(ctx, remote());
+    await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+    const res = await post("list", { integration_id: ID });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { listed: boolean; tools: Record<string, unknown>[] };
+    expect(body.listed).toBe(true);
+    expect(body.tools[0]).toEqual({
+      name: "search",
+      description: "Full-text search.",
+      input_schema: { type: "object", properties: {} },
+    });
+  });
+
+  it("refuses a colleague's unshared connection even when its catalog is cached", async () => {
+    await seedProxyIntegration(ctx, remote());
+    const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+    const colleague = await memberContext(ctx, "member");
+    const colleagueKey = (
+      await seedApiKey({
+        orgId: ctx.orgId,
+        spaceId: ctx.defaultSpaceId,
+        createdBy: colleague.user.id,
+        scopes: ["credential-proxy:call-own"],
+      })
+    ).rawKey;
+
+    const cold = await post(
+      "list",
+      { integration_id: ID, connection_id: connectionId },
+      colleagueKey,
+    );
+    expect(cold.status).toBe(404);
+    // The owner's listing fills the cache for that connection.
+    expect((await post("list", { integration_id: ID, connection_id: connectionId })).status).toBe(
+      200,
+    );
+    const warm = await post(
+      "list",
+      { integration_id: ID, connection_id: connectionId },
+      colleagueKey,
+    );
+    expect(warm.status).toBe(404);
+    expect(((await warm.json()) as { code: string }).code).toBe(
+      ((await cold.json()) as { code: string }).code,
+    );
+  });
+
+  describe("a server URL built from the connection's variables", () => {
+    const path = () => server.url.slice(server.origin.length);
+    const seedTemplated = () =>
+      seedProxyIntegration(
+        ctx,
+        remote({
+          url: `{$variable.base_url}${path()}`,
+          authorizedUris: ["{$variable.base_url}/**"],
+          variables: {
+            schema: {
+              type: "object",
+              properties: { base_url: { type: "string" } },
+              required: ["base_url"],
+            },
+          },
+        }),
+      );
+
+    it("is rendered for the selected connection and held to the proxy's egress guard", async () => {
+      await seedTemplated();
+      const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+      await db
+        .update(integrationConnections)
+        .set({ variables: { base_url: server.origin } })
+        .where(eq(integrationConnections.id, connectionId));
+
+      // The rendered loopback host reaches the proxy, whose guard refuses a host a variable chose.
+      for (const res of [
+        await post("list", { integration_id: ID }),
+        await post("call", { integration_id: ID, name: "search", arguments: {} }),
+      ]) {
+        expect(res.status).toBe(403);
+        const problem = (await res.json()) as { code: string; detail: string };
+        expect(problem.code).toBe("blocked_target");
+        expect(problem.detail).toContain("127.0.0.1");
+      }
+      expect(server.requests).toEqual([]);
+    });
+
+    it("answers 422 remote_url_unrenderable when the connection's variables do not render it", async () => {
+      await seedTemplated();
+      await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+
+      const res = await post("list", { integration_id: ID });
+      expect(res.status).toBe(422);
+      expect(((await res.json()) as { code: string }).code).toBe("remote_url_unrenderable");
+    });
   });
 
   it("calls a tool with the connection's credential and journals one row per tools/call", async () => {

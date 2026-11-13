@@ -1328,7 +1328,7 @@ export interface paths {
         put?: never;
         /**
          * List the typed tools of a remote MCP integration
-         * @description The tools the integration's remote MCP server (`source.kind: "remote"`, Streamable HTTP) offers through one connection, outside a run: the integration catalog's selection (its `tools_policy` keys, or every tool the server lists when `allow_undeclared_tools` is `true`), less `hidden_tools` and the connect tool, each described by the server's `tools/list` with its description and schemas sanitised as in a run. The listing is cached per connection and integration version for 5 minutes. The exchange goes through the credential proxy with the access rule of `/api/credential-proxy/proxy` without `X-Run-Id`, against the integration's latest published version. A server that cannot be listed answers the declared names alone with `listed: false`. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`.
+         * @description The tools the integration's remote MCP server (`source.kind: "remote"`, Streamable HTTP) offers through one connection, outside a run: the integration catalog's selection (its `tools_policy` keys, or every tool the server lists when `allow_undeclared_tools` is `true`), less `hidden_tools` and the connect tool, each described by the server's `tools/list` with its description and schemas sanitised as in a run. The connection is selected first, as `/api/credential-proxy/proxy` selects it, and a server URL built from connection variables is rendered from its variables. The listing is cached per connection and integration version for 5 minutes, and read only after that selection. The exchange goes through the credential proxy with the access rule of `/api/credential-proxy/proxy` without `X-Run-Id`, against the integration's latest published version. A server that cannot be listed answers the declared names alone with `listed: false`. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`.
          */
         post: operations["listRemoteIntegrationTools"];
         delete?: never;
@@ -12523,7 +12523,7 @@ export interface operations {
                     connection_id?: string;
                     /** @description The tool's name, as the server lists it. */
                     name: string;
-                    /** @description The tool's arguments, following its `inputSchema`. */
+                    /** @description The tool's arguments, following its `input_schema`. */
                     arguments?: {
                         [key: string]: unknown;
                     };
@@ -12551,7 +12551,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description `integration_not_remote` — the integration is not backed by a Streamable HTTP MCP server; `remote_url_templated` — its server URL is chosen per connection. */
+            /** @description `integration_not_remote` — the integration is not backed by a Streamable HTTP MCP server; `remote_url_unrenderable` — its server URL is built from the connection's variables and they do not render it. */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -12591,9 +12591,9 @@ export interface operations {
                     integration_id: string;
                     /**
                      * Format: uuid
-                     * @description The connection the server is listed with, as `X-Connection-Id` names one on `/api/credential-proxy/proxy`.
+                     * @description The connection the server is listed with, as `X-Connection-Id` names one on `/api/credential-proxy/proxy`. Omitted, the proxy's selection picks it.
                      */
-                    connection_id: string;
+                    connection_id?: string;
                 };
             };
         };
@@ -12607,15 +12607,13 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        tools: ({
+                        tools: {
                             name: string;
                             description?: string;
-                            inputSchema: {
+                            input_schema: {
                                 [key: string]: unknown;
                             };
-                        } & {
-                            [key: string]: unknown;
-                        })[];
+                        }[];
                         /** @description `false` when the server's `tools/list` could not be read: `tools` holds the declared names, each with an empty object schema. */
                         listed: boolean;
                     };
@@ -12625,7 +12623,7 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description `integration_not_remote` — the integration is not backed by a Streamable HTTP MCP server; `remote_url_templated` — its server URL is chosen per connection. */
+            /** @description `integration_not_remote` — the integration is not backed by a Streamable HTTP MCP server; `remote_url_unrenderable` — its server URL is built from the connection's variables and they do not render it. */
             422: {
                 headers: {
                     [name: string]: unknown;

@@ -3,9 +3,11 @@
 /**
  * The typed tools of an integration backed by a remote MCP server (`source.kind: "remote"`),
  * outside a run: its `tools/list` and one `tools/call`, both spoken over the credential proxy
- * (`proxyCall`), so connection selection, `authorized_uris`, the egress guard and the 401 refresh
- * are the proxy's. The tools offered are the integration catalog's (`"*"` selection less
- * `hidden_tools` and the connect tool), sanitised as `McpHost` registers them in a run.
+ * (`proxyCall`), so `authorized_uris`, the egress guard and the 401 refresh are the proxy's. The
+ * connection is selected first, by the proxy's rule (`selectAccessibleConnection`), and every
+ * catalog read, URL rendering and exchange uses that connection. The tools offered are the
+ * integration catalog's (`"*"` selection less `hidden_tools` and the connect tool), sanitised as
+ * `McpHost` registers them in a run.
  */
 
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
@@ -16,7 +18,6 @@ import {
   stripForgedRuntimeEvents,
   type AppstrateMcpClient,
 } from "@appstrate/mcp-transport";
-import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { createCache } from "@appstrate/core/cache";
 import {
   getApiCallConfigs,
@@ -30,7 +31,8 @@ import { logger } from "../../lib/logger.ts";
 import { proxyProblem } from "../../lib/proxy-status.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
 import { trackAudit } from "../audit.ts";
-import type { ProxyReach } from "../integration-connections.ts";
+import { selectAccessibleConnection, type ProxyReach } from "../integration-connections.ts";
+import { renderRemoteSource } from "../integration-manifest-helpers.ts";
 import {
   readIntegrationManifestForProxy,
   type ResolvedIntegrationVersion,
@@ -38,6 +40,7 @@ import {
 import { getCredentialProxyLimits } from "../proxy-limits.ts";
 import { recordConnectionCall, type ConnectionCall } from "./call-journal.ts";
 import { proxyCall, ProxyCallError } from "./core.ts";
+import { noConnectionMessage } from "./integration-resolver.ts";
 
 /** Who calls, as the call journal records it. */
 export type ProxyCaller = Pick<ConnectionCall, "apiKeyId" | "authMethod" | "requestId">;
@@ -146,8 +149,8 @@ const CATALOG_TTL_MS = 5 * 60 * 1000;
 
 /**
  * The sanitised upstream descriptors of a connection's catalog, keyed by connection and
- * integration version. Holds no credential and decides no access: every read and call still goes
- * through the proxy.
+ * integration version. Holds no credential and decides no access: it is read only with a
+ * connection the caller's selection resolved.
  */
 const catalogCache = createCache<Tool[]>({
   name: "remote-integration-tools",
@@ -165,10 +168,7 @@ interface RemoteToolsInput {
 }
 
 /** The latest published manifest, the one `proxyCall` authorizes outside a run against. */
-async function remoteManifest(
-  integrationId: string,
-  orgId: string,
-): Promise<{ manifest: IntegrationManifest; url: string }> {
+async function remoteManifest(integrationId: string, orgId: string): Promise<IntegrationManifest> {
   const loaded = await readIntegrationManifestForProxy(integrationId, orgId, null);
   if (!loaded.ok) throw notFound(`Integration '${integrationId}' has no published version`);
   const source = loaded.manifest.source;
@@ -180,15 +180,46 @@ async function remoteManifest(
       detail: `Integration '${integrationId}' is not backed by a Streamable HTTP MCP server.`,
     });
   }
-  if (isVariableTemplate(source.remote.url)) {
+  return loaded.manifest;
+}
+
+/**
+ * The caller's connection of the integration, selected as `proxyCall` selects it (named id,
+ * organization defaults, reach), and the server URL rendered from its variables (AFPS §7.12).
+ */
+async function remoteConnection(
+  input: RemoteToolsInput & { connectionId?: string },
+  manifest: IntegrationManifest,
+): Promise<{ connectionId: string; url: string }> {
+  const connection = await selectAccessibleConnection(
+    input.integrationId,
+    manifest,
+    input.connectionId ?? null,
+    { spaceId: input.scope.spaceId, actor: input.actor, reach: input.reach },
+  );
+  if (!connection) {
+    throw proxyProblem(
+      "credential_not_found",
+      noConnectionMessage({
+        integrationId: input.integrationId,
+        orgId: input.scope.orgId,
+        spaceId: input.scope.spaceId,
+        actor: input.actor,
+        reach: input.reach,
+        ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+      }),
+    );
+  }
+  const remote = renderRemoteSource(manifest, connection.variables);
+  if (!remote) {
     throw new ApiError({
       status: 422,
-      code: "remote_url_templated",
-      title: "Server URL Is Templated",
-      detail: `Integration '${integrationId}' chooses its server URL per connection; its tools are reached in a run only.`,
+      code: "remote_url_unrenderable",
+      title: "Server URL Does Not Render",
+      detail: `Integration '${input.integrationId}' builds its server URL from the connection's variables, and they do not render it; reconnect with valid values.`,
     });
   }
-  return { manifest: loaded.manifest, url: source.remote.url };
+  return { connectionId: connection.id, url: remote.url };
 }
 
 /**
@@ -214,7 +245,7 @@ function offeredRemoteToolNames(
 }
 
 async function withClient<T>(
-  input: RemoteToolsInput & { connectionId?: string; timeoutMs: number },
+  input: RemoteToolsInput & { connectionId: string; timeoutMs: number },
   url: string,
   journals: (body: string | null) => boolean,
   use: (client: AppstrateMcpClient, deadline: AbortSignal) => Promise<T>,
@@ -228,7 +259,7 @@ async function withClient<T>(
         scope: input.scope,
         actor: input.actor,
         integrationId: input.integrationId,
-        ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+        connectionId: input.connectionId,
         reach: input.reach,
         caller: input.caller,
         deadline,
@@ -245,9 +276,16 @@ async function withClient<T>(
   }
 }
 
+/** A tool as the catalog offers it, in the REST wire's casing. */
+interface RemoteTool {
+  name: string;
+  description?: string;
+  input_schema: Tool["inputSchema"];
+}
+
 export interface RemoteToolCatalog {
   /** The offered tools, in catalog order. */
-  tools: Tool[];
+  tools: RemoteTool[];
   /**
    * False when the server's `tools/list` could not be read: `tools` then holds the declared names
    * alone, without description or input schema.
@@ -256,20 +294,23 @@ export interface RemoteToolCatalog {
 }
 
 /**
- * The tools a connection of a remote integration offers, described by the server's `tools/list`
- * (cached per connection and integration version). A server that cannot be listed leaves the
- * declared names; a refusal of the proxy (connection, permission, `authorized_uris`) is thrown.
+ * The tools the caller's connection of a remote integration offers, described by the server's
+ * `tools/list` (cached per connection and integration version). The connection is selected before
+ * the cache is read, so a cached catalog answers only a caller who reaches that connection. A
+ * server that cannot be listed leaves the declared names; a refusal of the proxy (connection,
+ * permission, `authorized_uris`) is thrown.
  */
 export async function listRemoteTools(
-  input: RemoteToolsInput & { connectionId: string },
+  input: RemoteToolsInput & { connectionId?: string },
 ): Promise<RemoteToolCatalog> {
-  const { manifest, url } = await remoteManifest(input.integrationId, input.scope.orgId);
-  const key = `${input.scope.orgId}:${input.connectionId}:${input.integrationId}@${manifest.version}`;
+  const manifest = await remoteManifest(input.integrationId, input.scope.orgId);
+  const { connectionId, url } = await remoteConnection(input, manifest);
+  const key = `${input.scope.orgId}:${connectionId}:${input.integrationId}@${manifest.version}`;
   let described: Tool[] | undefined;
   try {
     described = await catalogCache.get(key, () =>
       withClient(
-        { ...input, timeoutMs: LIST_TIMEOUT_MS },
+        { ...input, connectionId, timeoutMs: LIST_TIMEOUT_MS },
         url,
         () => false,
         async (client, deadline) => {
@@ -285,18 +326,27 @@ export async function listRemoteTools(
     }
     logger.warn("credential-proxy: remote tools/list failed", {
       integrationId: input.integrationId,
-      connectionId: input.connectionId,
+      connectionId,
       error: getErrorMessage(err),
     });
   }
   const offered = offeredRemoteToolNames(manifest, described);
   if (described === undefined) {
     return {
-      tools: [...offered].map((name) => ({ name, inputSchema: { type: "object" } })),
+      tools: [...offered].map((name) => ({ name, input_schema: { type: "object" } })),
       listed: false,
     };
   }
-  return { tools: described.filter((tool) => offered.has(tool.name)), listed: true };
+  return {
+    tools: described
+      .filter((tool) => offered.has(tool.name))
+      .map((tool) => ({
+        name: tool.name,
+        ...(tool.description !== undefined ? { description: tool.description } : {}),
+        input_schema: tool.inputSchema,
+      })),
+    listed: true,
+  };
 }
 
 /**
@@ -310,7 +360,7 @@ export async function callRemoteTool(
     arguments: Record<string, unknown>;
   },
 ): Promise<CallToolResult> {
-  const { manifest, url } = await remoteManifest(input.integrationId, input.scope.orgId);
+  const manifest = await remoteManifest(input.integrationId, input.scope.orgId);
   const undeclared = (manifest as { allow_undeclared_tools?: boolean }).allow_undeclared_tools;
   // With `allow_undeclared_tools`, any listed name is in the selection; the hidden ones never are.
   const offered = offeredRemoteToolNames(
@@ -320,9 +370,10 @@ export async function callRemoteTool(
   if (!offered.has(input.name)) {
     throw notFound(`Integration '${input.integrationId}' offers no tool named '${input.name}'`);
   }
+  const { connectionId, url } = await remoteConnection(input, manifest);
   try {
     const result = await withClient(
-      { ...input, timeoutMs: CALL_TIMEOUT_MS },
+      { ...input, connectionId, timeoutMs: CALL_TIMEOUT_MS },
       url,
       isToolsCall,
       (client, deadline) =>

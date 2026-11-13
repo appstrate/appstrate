@@ -607,8 +607,10 @@ export const credentialProxyPaths = {
         "selection (its `tools_policy` keys, or every tool the server lists when " +
         "`allow_undeclared_tools` is `true`), less `hidden_tools` and the connect tool, each " +
         "described by the server's `tools/list` with its description and schemas sanitised as " +
-        "in a run. The listing is cached per connection and integration version for 5 " +
-        "minutes. The exchange goes through the credential proxy with the access rule of " +
+        "in a run. The connection is selected first, as `/api/credential-proxy/proxy` " +
+        "selects it, and a server URL built from connection variables is rendered from its " +
+        "variables. The listing is cached per connection and integration version for 5 " +
+        "minutes, and read only after that selection. The exchange goes through the credential proxy with the access rule of " +
         "`/api/credential-proxy/proxy` without `X-Run-Id`, against the integration's latest " +
         "published version. A server that cannot be listed answers the declared names alone " +
         "with `listed: false`. Requires `credential-proxy:call-own` or `credential-proxy:call`. " +
@@ -623,7 +625,7 @@ export const credentialProxyPaths = {
           "application/json": {
             schema: {
               type: "object",
-              required: ["integration_id", "connection_id"],
+              required: ["integration_id"],
               additionalProperties: false,
               properties: {
                 integration_id: {
@@ -635,7 +637,7 @@ export const credentialProxyPaths = {
                   type: "string",
                   format: "uuid",
                   description:
-                    "The connection the server is listed with, as `X-Connection-Id` names one on `/api/credential-proxy/proxy`.",
+                    "The connection the server is listed with, as `X-Connection-Id` names one on `/api/credential-proxy/proxy`. Omitted, the proxy's selection picks it.",
                 },
               },
             },
@@ -656,14 +658,14 @@ export const credentialProxyPaths = {
                     type: "array",
                     items: {
                       type: "object",
-                      required: ["name", "inputSchema"],
+                      required: ["name", "input_schema"],
                       description:
-                        "An MCP tool descriptor, as the server listed it after sanitisation.",
-                      additionalProperties: true,
+                        "An MCP tool, as the server listed it after sanitisation: its name, description and input schema.",
+                      additionalProperties: false,
                       properties: {
                         name: { type: "string" },
                         description: { type: "string" },
-                        inputSchema: { type: "object", additionalProperties: true },
+                        input_schema: { type: "object", additionalProperties: true },
                       },
                     },
                   },
@@ -684,7 +686,8 @@ export const credentialProxyPaths = {
         "422": {
           description:
             "`integration_not_remote` — the integration is not backed by a Streamable HTTP MCP " +
-            "server; `remote_url_templated` — its server URL is chosen per connection.",
+            "server; `remote_url_unrenderable` — its server URL is built from the connection's " +
+            "variables and they do not render it.",
           content: {
             "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
           },
@@ -740,7 +743,7 @@ export const credentialProxyPaths = {
                 arguments: {
                   type: "object",
                   additionalProperties: true,
-                  description: "The tool's arguments, following its `inputSchema`.",
+                  description: "The tool's arguments, following its `input_schema`.",
                 },
               },
             },
@@ -775,7 +778,8 @@ export const credentialProxyPaths = {
         "422": {
           description:
             "`integration_not_remote` — the integration is not backed by a Streamable HTTP MCP " +
-            "server; `remote_url_templated` — its server URL is chosen per connection.",
+            "server; `remote_url_unrenderable` — its server URL is built from the connection's " +
+            "variables and they do not render it.",
           content: {
             "application/problem+json": { schema: { $ref: "#/components/schemas/ProblemDetail" } },
           },

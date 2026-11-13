@@ -312,7 +312,7 @@ export async function listConnectionsOutsideRun(
  * Why no connection answers. Outside a run the wording depends only on whether an id was named,
  * never on whose row it names or whether it exists.
  */
-function noConnectionMessage(input: ResolveIntegrationProxyInput): string {
+export function noConnectionMessage(input: ResolveIntegrationProxyInput): string {
   const { integrationId, run } = input;
   if (run) return `Run '${run.id}' binds no usable connection of integration '${integrationId}'`;
   if (input.reach === "usable") {

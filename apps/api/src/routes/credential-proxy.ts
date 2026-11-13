@@ -113,7 +113,7 @@ import { getCredentialProxyLimits } from "../services/proxy-limits.ts";
 
 export const listRemoteToolsSchema = z.strictObject({
   integration_id: z.string().min(1),
-  connection_id: z.uuid(),
+  connection_id: z.uuid().optional(),
 });
 
 export const callRemoteToolSchema = z.strictObject({
@@ -484,7 +484,9 @@ export function createCredentialProxyRouter() {
   );
 
   // The typed tools of a remote MCP integration (`credential-proxy/remote-tools.ts`), under the
-  // access rule of `/proxy` outside a run; each `tools/call` counts against the rate limit.
+  // access rule of `/proxy` outside a run. The limiter keys on the route pattern, so `/tools/list`,
+  // `/tools/call` and `/proxy` each count in their own bucket: discovery never spends the budget
+  // of calls, and each `tools/call` counts once.
   const remoteToolsCaller = (c: Context<AppEnv>) => {
     assertBearerOnly(c.get("authMethod"), "Credential proxy", {
       firstPartyLoopback: c.get("firstPartyLoopback"),
@@ -513,7 +515,7 @@ export function createCredentialProxyRouter() {
       const catalog = await listRemoteTools({
         ...caller,
         integrationId: body.integration_id,
-        connectionId: body.connection_id,
+        ...(body.connection_id ? { connectionId: body.connection_id } : {}),
       });
       return c.json(catalog);
     },

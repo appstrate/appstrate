@@ -431,17 +431,24 @@ role. Runs keep their connections there:
   concurrently, three at a time and not in order, and each counts against the
   proxy's rate limit.
 - **Typed tools of a remote MCP server.** An integration backed by a remote
-  MCP server (`source.kind: "remote"`, Streamable HTTP, a server URL that is not
-  chosen per connection) also lists the tools that server offers, named
+  MCP server (`source.kind: "remote"`, Streamable HTTP) also lists the tools
+  that server offers, named
   `{ns}__{tool}` as in a run: its catalog's selection (the `tools_policy` keys,
   or every tool the server lists when `allow_undeclared_tools` is `true`), less
   `hidden_tools` and its connect tool. Descriptions and input schemas come from
-  the server's `tools/list`, read with your first connection of the
-  integration, sanitised as in a run and cached for 5 minutes per connection
-  and integration version; a server that cannot be listed leaves the tool names
+  the server's `tools/list`, read with the connection the proxy selects for
+  you as for an `api_call` (when several qualify, the first of your connections
+  it accepts), sanitised as in a run and cached for 5 minutes per connection
+  and integration version; the cache is read only after that selection, so it
+  never answers for a connection you do not reach. A server URL built from
+  connection variables (`{$variable.…}`) is rendered from that connection's.
+  A server that cannot be listed leaves the tool names
   alone, each marked `catalog_unreadable: true`. A call is one `tools/call`
   through the credential proxy (`POST /api/credential-proxy/tools/call`), on the
-  connection the proxy selects as for an `api_call`, journaled as one call of
+  connection named by the `connection_id` argument of `call_integration_tool`
+  (one of the tool's `connections`) or, without it, the one the proxy selects
+  as for an `api_call`; when several qualify, the refusal lists the candidate
+  connections. A call is journaled as one call of
   that connection and counted once against the rate limit; it returns the
   server's own tool result (`isError: true` is the tool's failure), refused
   past 256 KiB. The server's tool annotations are not relayed:

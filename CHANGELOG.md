@@ -489,12 +489,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `hidden_tools` and the connect tool), named `{ns}__{tool}` and described by
   the server's `tools/list` (sanitised, cached 5 minutes per connection and
   integration version; a server that cannot be listed leaves the names, marked
-  `catalog_unreadable`). `call_integration_tool` sends one `tools/call` through
-  the credential proxy, which selects the connection, injects its credential
-  and journals one call. Two routes back them, `POST
+  `catalog_unreadable`). The connection is selected once, by the credential
+  proxy's rule, before the catalog cache is read, the server URL is rendered
+  (a URL built from connection variables uses that connection's) and anything
+  is sent. `call_integration_tool` takes an optional `connection_id` and sends
+  one `tools/call` through the credential proxy, which injects the
+  connection's credential and journals one call. Two routes back them, `POST
 /api/credential-proxy/tools/list` and `POST /api/credential-proxy/tools/call`,
   under the access rule of `/api/credential-proxy/proxy` outside a run and the
-  space's `credential_proxy_open`. The MCP exchange of the editor's server sync
+  space's `credential_proxy_open`, each with its own rate-limit bucket. The MCP exchange of the editor's server sync
   and of these routes share one proxy adapter; `stripForgedRuntimeEvents` moves
   from the sidecar to `@appstrate/mcp-transport`, which both consume.
 

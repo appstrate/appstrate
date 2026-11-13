@@ -919,14 +919,14 @@ describe("typed tools of a remote MCP integration", () => {
   const searchTool = {
     name: "search",
     description: "Full-text search.",
-    inputSchema: { type: "object", properties: { q: { type: "string" } }, required: ["q"] },
+    input_schema: { type: "object", properties: { q: { type: "string" } }, required: ["q"] },
   };
   const remoteRoutes =
     (call: Respond, list: Respond = () => Response.json({ tools: [searchTool], listed: true })) =>
     (req: Request) =>
       new URL(req.url).pathname === "/api/credential-proxy/tools/list" ? list(req) : call(req);
 
-  it("lists the server's tools under the integration's namespace, read with its connection", async () => {
+  it("lists the server's tools under the integration's namespace, read with the proxy's selection", async () => {
     const made = makeTools(
       CALL_OWN,
       remoteRoutes(() => Response.json({})),
@@ -945,11 +945,81 @@ describe("typed tools of a remote MCP integration", () => {
       }),
     ]);
     expect((payload.best_match as { input_schema: unknown }).input_schema).toEqual(
-      searchTool.inputSchema,
+      searchTool.input_schema,
     );
     const listed = made.calls[0]!;
     expect(new URL(listed.url).pathname).toBe("/api/credential-proxy/tools/list");
-    expect(await listed.json()).toEqual({ integration_id: REMOTE, connection_id: CONNECTION_ID });
+    expect(await listed.json()).toEqual({ integration_id: REMOTE });
+  });
+
+  it("lists with one of the caller's connections when several qualify and none is named", async () => {
+    const lists: unknown[] = [];
+    const made = makeTools(
+      CALL_OWN,
+      remoteRoutes(
+        () => Response.json({}),
+        async (req) => {
+          const body = (await req.json()) as { connection_id?: string };
+          lists.push(body);
+          return body.connection_id
+            ? Response.json({ tools: [searchTool], listed: true })
+            : problem(409, "must_choose_connection", "Several connections qualify.");
+        },
+      ),
+      true,
+      fixture,
+    );
+    const payload = parseResult(
+      await made.byName.get("search_integration_tools")!.handler({}, noExtra),
+    );
+    expect(payload.tools).toEqual([expect.objectContaining({ tool: "acme_docs__search" })]);
+    expect(lists).toEqual([
+      { integration_id: REMOTE },
+      { integration_id: REMOTE, connection_id: CONNECTION_ID },
+    ]);
+  });
+
+  it("lists and calls with the connection_id the caller names", async () => {
+    const made = makeTools(
+      CALL_OWN,
+      remoteRoutes(() => Response.json({ result: { content: [] } })),
+      true,
+      fixture,
+    );
+    await made.byName
+      .get("call_integration_tool")!
+      .handler(
+        { tool: "acme_docs__search", arguments: { q: "x" }, connection_id: CONNECTION_ID },
+        noExtra,
+      );
+    const bodies = await Promise.all(made.calls.map((req) => req.clone().json()));
+    expect(bodies).toEqual([
+      { integration_id: REMOTE, connection_id: CONNECTION_ID },
+      {
+        integration_id: REMOTE,
+        connection_id: CONNECTION_ID,
+        name: "search",
+        arguments: { q: "x" },
+      },
+    ]);
+  });
+
+  it("relays the listing's refusal when the tool cannot be listed", async () => {
+    const made = makeTools(
+      CALL_OWN,
+      remoteRoutes(
+        () => Response.json({}),
+        () => problem(404, "credential_not_found", "No connection is usable in this space."),
+      ),
+      true,
+      fixture,
+    );
+    const result = await made.byName
+      .get("call_integration_tool")!
+      .handler({ tool: "acme_docs__search", arguments: { q: "x" } }, noExtra);
+    expect(result.isError).toBe(true);
+    expect(parseResult(result)).toMatchObject({ code: "credential_not_found" });
+    expect(made.calls.some((req) => new URL(req.url).pathname.endsWith("/tools/call"))).toBe(false);
   });
 
   it("marks a tool whose server could not be listed", async () => {
@@ -959,7 +1029,7 @@ describe("typed tools of a remote MCP integration", () => {
         () => Response.json({}),
         () =>
           Response.json({
-            tools: [{ name: "search", inputSchema: { type: "object" } }],
+            tools: [{ name: "search", input_schema: { type: "object" } }],
             listed: false,
           }),
       ),
@@ -975,7 +1045,7 @@ describe("typed tools of a remote MCP integration", () => {
   });
 
   it("calls the tool through the proxy's tool route and relays the server's result", async () => {
-    const upstream = { content: [{ type: "text", text: "3 documents" }] };
+    const upstream = { content: [{ type: "text" as const, text: "3 documents" }] };
     const made = makeTools(
       CALL_OWN,
       remoteRoutes(() => Response.json({ result: upstream })),

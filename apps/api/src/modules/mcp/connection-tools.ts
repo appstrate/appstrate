@@ -472,8 +472,18 @@ interface IntegrationTool {
   inputSchema: Record<string, unknown>;
   /** The connections it reaches. */
   connections: ListedConnection[];
-  /** Runs a call whose arguments `schema` accepted. */
-  execute(args: unknown, extra: AppstrateRequestExtra): Promise<ToolCallOutcome | Refusal>;
+  /** Runs a call whose arguments `schema` accepted, with the connection the caller named. */
+  execute(
+    args: unknown,
+    extra: AppstrateRequestExtra,
+    connectionId: string | undefined,
+  ): Promise<ToolCallOutcome | Refusal>;
+}
+
+/** An integration's tools, and the proxy's refusal of its remote server's listing, if any. */
+interface IntegrationToolSet {
+  tools: IntegrationTool[];
+  refusal?: Record<string, unknown>;
 }
 
 const DEFAULT_SEARCH_LIMIT = 25;
@@ -527,6 +537,7 @@ async function executeApiCall(
   sharesIntegration: boolean,
   args: ApiCallArguments,
   extra: AppstrateRequestExtra,
+  defaultConnectionId: string | undefined,
 ): Promise<ToolCallOutcome | Refusal> {
   const { requests } = args;
   // The proxy's cookie-jar session: a fresh one unless the caller continues a previous call's.
@@ -538,7 +549,7 @@ async function executeApiCall(
   const calls: PreparedCall[] = [];
   for (const [index, request] of requests.entries()) {
     const argument = `arguments.requests[${index}].connection_id`;
-    let connectionId = request.connection_id;
+    let connectionId = request.connection_id ?? defaultConnectionId;
     if (connectionId !== undefined && !connectionIds.includes(connectionId)) {
       return {
         code: "invalid_argument",
@@ -641,13 +652,14 @@ async function listIntegrations(
 /**
  * The tools of one integration: the `api_call` tools its catalog exposes (selection `"*"`, less
  * `hidden_tools` and connect tools) whose auth has a connection, then, for a remote MCP source,
- * the typed tools its server offers.
+ * the typed tools its server offers, listed with `connectionId` when the caller names one.
  */
 async function integrationTools(
   ctx: ConnectionToolContext,
   integration: ListedIntegration,
   manifest: IntegrationManifest,
-): Promise<IntegrationTool[]> {
+  connectionId?: string,
+): Promise<IntegrationToolSet> {
   const catalog = new Set(
     resolveIntegrationToolCatalog({ integration: manifest }).map((entry) => entry.name),
   );
@@ -672,18 +684,23 @@ async function integrationTools(
         usage: API_CALL_USAGE,
         schema: apiCallSchema,
         inputSchema: API_CALL_INPUT_SCHEMA,
-        execute: (args: ApiCallArguments, extra: AppstrateRequestExtra) =>
-          executeApiCall(ctx, tool, sharesIntegration, args, extra),
+        execute: (
+          args: ApiCallArguments,
+          extra: AppstrateRequestExtra,
+          named: string | undefined,
+        ) => executeApiCall(ctx, tool, sharesIntegration, args, extra, named),
       };
     });
-  if (manifest.source?.kind !== "remote") return apiCallTools;
+  if (manifest.source?.kind !== "remote") return { tools: apiCallTools };
   const taken = new Set(apiCallTools.map((tool) => tool.name));
-  return [...apiCallTools, ...(await remoteTools(ctx, integration, manifest, taken))];
+  const remote = await remoteTools(ctx, integration, manifest, taken, connectionId);
+  return { ...remote, tools: [...apiCallTools, ...remote.tools] };
 }
 
 const REMOTE_TOOL_USAGE =
-  "Pass the tool's own arguments, following its `input_schema`; the proxy chooses the " +
-  "connection as for an `api_call`. The result is the MCP server's own tool result, relayed " +
+  "Pass the tool's own arguments in `arguments`, following its `input_schema`. The " +
+  "`connection_id` of call_integration_tool names the connection; without it the proxy " +
+  "chooses as for an `api_call`. The result is the MCP server's own tool result, relayed " +
   `as is up to ${MAX_RESULT_BYTES} bytes; \`isError: true\` is the tool's own failure.`;
 
 /** Upstream arguments: the server validates them against its own schema. */
@@ -691,33 +708,55 @@ const remoteArgumentsSchema = z.record(z.string(), z.unknown());
 
 /**
  * The typed tools a remote integration's server offers, read through the proxy's tool listing
- * with the integration's first connection, each named `{ns}__{tool}` as in a run. A listing the
- * proxy refuses leaves the integration's `api_call` tools alone.
+ * with the connection the proxy selects for the caller (or the one named), each named
+ * `{ns}__{tool}` as in a run. When several connections qualify and none is named, the listing
+ * uses the first of the caller's connections the proxy accepts by name. A listing the proxy
+ * refuses leaves the integration's `api_call` tools alone, and its refusal is returned.
  */
 async function remoteTools(
   ctx: ConnectionToolContext,
   integration: ListedIntegration,
   manifest: IntegrationManifest,
   taken: Set<string>,
-): Promise<IntegrationTool[]> {
-  const response = await ctx.dispatch(
-    new Request(new URL(REMOTE_TOOLS_LIST_PATH, ctx.origin).toString(), {
-      method: "POST",
-      headers: dispatchHeaders(
-        ctx.authHeaders,
-        new Headers({ "Content-Type": "application/json" }),
-      ),
-      body: JSON.stringify({
-        integration_id: integration.id,
-        connection_id: integration.connections[0]!.connection_id,
+  connectionId: string | undefined,
+): Promise<IntegrationToolSet> {
+  const list = async (named: string | undefined) => {
+    const response = await ctx.dispatch(
+      new Request(new URL(REMOTE_TOOLS_LIST_PATH, ctx.origin).toString(), {
+        method: "POST",
+        headers: dispatchHeaders(
+          ctx.authHeaders,
+          new Headers({ "Content-Type": "application/json" }),
+        ),
+        body: JSON.stringify({
+          integration_id: integration.id,
+          ...(named ? { connection_id: named } : {}),
+        }),
       }),
-    }),
-  );
-  const body = asRecord(await response.json().catch(() => undefined));
-  if (!response.ok || !Array.isArray(body?.tools)) return [];
+    );
+    return { ok: response.ok, body: asRecord(await response.json().catch(() => undefined)) };
+  };
+  let listing = await list(connectionId);
+  if (
+    !listing.ok &&
+    connectionId === undefined &&
+    listing.body?.code === "must_choose_connection"
+  ) {
+    for (const connection of integration.connections) {
+      const named = await list(connection.connection_id);
+      if (named.ok) {
+        listing = named;
+        break;
+      }
+    }
+  }
+  const { body } = listing;
+  if (!listing.ok || !Array.isArray(body?.tools)) {
+    return { tools: [], refusal: body ?? { error: "The tool listing did not answer." } };
+  }
   const listed = body.listed !== false;
   const about = manifest.display_name ?? manifest.name;
-  return (body.tools as Tool[]).flatMap((upstream): IntegrationTool[] => {
+  const tools = (body.tools as RemoteToolListing[]).flatMap((upstream): IntegrationTool[] => {
     let name: string;
     try {
       name = allocateMcpToolName(integration.namespace, upstream.name, (n) => taken.has(n));
@@ -733,13 +772,24 @@ async function remoteTools(
         ...(listed ? {} : { catalogUnreadable: true }),
         usage: REMOTE_TOOL_USAGE,
         schema: remoteArgumentsSchema,
-        inputSchema: upstream.inputSchema,
+        inputSchema: upstream.input_schema,
         connections: integration.connections,
-        execute: (args: Record<string, unknown>, extra: AppstrateRequestExtra) =>
-          executeRemoteTool(ctx, integration.id, upstream.name, args, extra),
+        execute: (
+          args: Record<string, unknown>,
+          extra: AppstrateRequestExtra,
+          named: string | undefined,
+        ) => executeRemoteTool(ctx, integration.id, upstream.name, args, extra, named),
       },
     ];
   });
+  return { tools };
+}
+
+/** A tool as `/api/credential-proxy/tools/list` returns it. */
+interface RemoteToolListing {
+  name: string;
+  description?: string;
+  input_schema: Record<string, unknown>;
 }
 
 /** One `tools/call` through the proxy's tool route; its refusal comes back as is. */
@@ -749,6 +799,7 @@ async function executeRemoteTool(
   name: string,
   args: Record<string, unknown>,
   extra: AppstrateRequestExtra,
+  connectionId: string | undefined,
 ): Promise<ToolCallOutcome> {
   const response = await ctx.dispatch(
     new Request(new URL(REMOTE_TOOLS_CALL_PATH, ctx.origin).toString(), {
@@ -757,7 +808,12 @@ async function executeRemoteTool(
         ctx.authHeaders,
         new Headers({ "Content-Type": "application/json" }),
       ),
-      body: JSON.stringify({ integration_id: integrationId, name, arguments: args }),
+      body: JSON.stringify({
+        integration_id: integrationId,
+        ...(connectionId ? { connection_id: connectionId } : {}),
+        name,
+        arguments: args,
+      }),
       ...(extra.signal ? { signal: extra.signal } : {}),
     }),
   );
@@ -892,7 +948,8 @@ function buildSearchIntegrationToolsTool(ctx: ConnectionToolContext): AppstrateT
     const perIntegration = await mapWithConcurrency(
       searchedIntegrations.map((entry, i) => ({ entry, manifest: manifests[i] })),
       CONCURRENCY,
-      async ({ entry, manifest }) => (manifest ? integrationTools(ctx, entry, manifest) : []),
+      async ({ entry, manifest }) =>
+        manifest ? (await integrationTools(ctx, entry, manifest)).tools : [],
     );
     const tools = perIntegration.flat();
     const matches = tools
@@ -930,6 +987,7 @@ function buildSearchIntegrationToolsTool(ctx: ConnectionToolContext): AppstrateT
 const callSchema = z.strictObject({
   tool: z.string().min(1),
   arguments: z.record(z.string(), z.unknown()),
+  connection_id: z.uuid().optional(),
 });
 
 function buildCallIntegrationToolTool(ctx: ConnectionToolContext): AppstrateToolDefinition {
@@ -965,6 +1023,14 @@ function buildCallIntegrationToolTool(ctx: ConnectionToolContext): AppstrateTool
         arguments: {
           type: "object",
           description: "The tool's arguments, following its `input_schema`.",
+        },
+        connection_id: {
+          type: "string",
+          description:
+            "The connection to call with, one of the tool's `connections[].connection_id`. " +
+            "Without it the proxy chooses as for an `api_call`, and refuses with the candidate " +
+            "connections when several qualify. For an `api_call` tool, it applies to each " +
+            "request that names no `connection_id` of its own.",
         },
       },
     },
@@ -1012,12 +1078,20 @@ function buildCallIntegrationToolTool(ctx: ConnectionToolContext): AppstrateTool
     const namespace = call.data.tool.split("__")[0];
     const integration = listed.integrations.find((entry) => entry.namespace === namespace);
     const manifest = integration ? await ctx.readManifest(integration.id) : null;
-    const tool =
+    const toolSet =
       integration && manifest
-        ? (await integrationTools(ctx, integration, manifest)).find(
-            (t) => t.name === call.data.tool,
-          )
+        ? await integrationTools(ctx, integration, manifest, call.data.connection_id)
         : undefined;
+    const tool = toolSet?.tools.find((t) => t.name === call.data.tool);
+    if (!tool && toolSet?.refusal) {
+      // The remote server's listing was refused (connection, permission): the refusal says why.
+      ctx.observe({
+        tool: "call_integration_tool",
+        durationMs: performance.now() - start,
+        outcome: "invoked",
+      });
+      return jsonResult(toolSet.refusal, true);
+    }
     if (!tool) {
       return refuse({
         code: "unknown_tool",
@@ -1042,7 +1116,7 @@ function buildCallIntegrationToolTool(ctx: ConnectionToolContext): AppstrateTool
     }
     const parsed = tool.schema.safeParse(call.data.arguments);
     if (!parsed.success) return refuse(argumentsRefusal(parsed.error, ["arguments"]));
-    const outcome = await tool.execute(parsed.data, extra);
+    const outcome = await tool.execute(parsed.data, extra, call.data.connection_id);
     if ("code" in outcome) return refuse(outcome);
     ctx.observe({
       tool: "call_integration_tool",
