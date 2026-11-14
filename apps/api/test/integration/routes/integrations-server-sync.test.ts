@@ -13,6 +13,7 @@ import {
   integrationOrgDefaults,
   packages,
   spacePackages,
+  spaces,
 } from "@appstrate/db/schema";
 import { drainAudits } from "../../../src/services/audit.ts";
 import { getTestApp } from "../../helpers/app.ts";
@@ -183,6 +184,20 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     expect(server.authorizations.every((a) => a === `Bearer ${TOKEN}`)).toBe(true);
   });
 
+  it("is refused in a space whose credential proxy is closed, before any exchange", async () => {
+    await seedProxyIntegration(ctx, remote());
+    const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
+    await db
+      .update(spaces)
+      .set({ credentialProxyOpen: false })
+      .where(eq(spaces.id, ctx.defaultSpaceId));
+
+    const res = await sync(ctx, { connection_id: connectionId });
+    expect(res.status).toBe(403);
+    expect(((await res.json()) as { code: string }).code).toBe("credential_proxy_closed");
+    expect(server.methods).toEqual([]);
+  });
+
   it("proposes no instructions when the draft already holds an INTEGRATION.md", async () => {
     const manifest = remote();
     await seedProxyIntegration(ctx, manifest);
@@ -209,7 +224,7 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     );
   });
 
-  it("journals each MCP exchange as a proxied call of the connection", async () => {
+  it("journals the listing as one proxied call of the connection", async () => {
     await seedProxyIntegration(ctx, remote());
     const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: TOKEN });
     expect((await sync(ctx, { connection_id: connectionId })).status).toBe(200);
@@ -220,15 +235,8 @@ describe("POST /api/integrations/{packageId}/discover", () => {
       .select()
       .from(connectionCalls)
       .where(eq(connectionCalls.connectionId, connectionId));
-    // The era probe (400), initialize, the `initialized` notification (202), three pages.
-    expect(rows.map((row) => row.outcome).sort()).toEqual([
-      "200",
-      "200",
-      "200",
-      "200",
-      "202",
-      "400",
-    ]);
+    // The listing's first page alone: the era probe, the handshake and the later pages add none.
+    expect(rows.map((row) => row.outcome)).toEqual(["200"]);
     for (const row of rows) {
       expect(row).toMatchObject({
         connectionId,
@@ -253,7 +261,11 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     ]);
     const res = await sync(member, { connection_id: ownerConnection });
     expect(res.status).toBe(409);
-    expect(((await res.json()) as { code: string }).code).toBe("integration_not_connected");
+    const body = (await res.json()) as { code: string; detail: string };
+    expect(body.code).toBe("integration_not_connected");
+    // The connection is named in the body, not in the proxy's header.
+    expect(body.detail).toStartWith("`connection_id` names none of your own connections");
+    expect(body.detail).not.toContain("X-Connection-Id");
     expect(server.methods).toEqual([]);
   });
 
@@ -332,7 +344,7 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     expect(server.methods).toEqual([]);
   });
 
-  it("syncs a draft never published, through the draft's auth, journaling each exchange", async () => {
+  it("syncs a draft never published, through the draft's auth, journaling its listing", async () => {
     await seedPackage({
       id: ID,
       orgId: ctx.orgId,
@@ -356,8 +368,8 @@ describe("POST /api/integrations/{packageId}/discover", () => {
       .select()
       .from(connectionCalls)
       .where(eq(connectionCalls.connectionId, connectionId));
-    // The era probe, initialize, initialized, three pages.
-    expect(rows).toHaveLength(6);
+    // One row for the listing, over three pages.
+    expect(rows).toHaveLength(1);
   });
 
   it("authorizes against the draft, not the published version", async () => {
@@ -481,9 +493,23 @@ describe("POST /api/integrations/{packageId}/discover", () => {
     await seedProxyConnection(ctx, ID, "api_key", { token: "wrong" });
     const res = await sync(ctx, {});
     expect(res.status).toBe(502);
-    const body = (await res.json()) as { code: string; detail: string };
-    expect(body.code).toBe("bad_gateway");
+    const body = (await res.json()) as { code: string; detail: string; upstream_status: number };
+    expect(body.code).toBe("upstream_credential_rejected");
+    expect(body.upstream_status).toBe(401);
     expect(body.detail).toContain("refused the connection's credential");
+  });
+
+  it("journals one row when the server refuses the handshake, no listing ever sent", async () => {
+    await seedProxyIntegration(ctx, remote());
+    const connectionId = await seedProxyConnection(ctx, ID, "api_key", { token: "wrong" });
+    expect((await sync(ctx, { connection_id: connectionId })).status).toBe(502);
+    expect(server.methods.length).toBeGreaterThan(0);
+    await drainAudits(5_000);
+    const rows = await db
+      .select()
+      .from(connectionCalls)
+      .where(eq(connectionCalls.connectionId, connectionId));
+    expect(rows.map((row) => row.outcome)).toEqual(["401"]);
   });
 
   it("sends the server's own header values back as written: no placeholder reaches a credential", async () => {

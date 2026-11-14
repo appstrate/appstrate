@@ -23,10 +23,11 @@ import {
   CREDENTIAL_FAILURE_CAUSES,
   type CredentialFailureCause,
 } from "@appstrate/core/sidecar-types";
+import { CREDENTIAL_FAILURE_SENTENCES } from "./credential-failure.ts";
 
 export const CREDENTIAL_STATUS_HEADER = "X-Appstrate-Credential-Status";
 
-/** What the platform concluded about a rejected credential, as the header and `api_call` name it. */
+/** What the platform concluded about a rejected credential, as the header and `call_integration_tool` name it. */
 export type CredentialStatus =
   | {
       status: "in_use";
@@ -71,4 +72,30 @@ export function parseCredentialStatus(value: string | null): CredentialStatus | 
   return Number.isSafeInteger(failures) && Number.isSafeInteger(maxFailures)
     ? { status, cause: known, failures, maxFailures }
     : { status, cause: known };
+}
+
+/** A {@link CredentialStatus} on the wire: an `api_call` entry's or a tool call refusal's `credential`. */
+export interface CredentialMember {
+  status: CredentialStatus["status"];
+  cause: CredentialStatus["cause"];
+  detail: string;
+  failures?: number;
+  max_failures?: number;
+}
+
+/**
+ * What the platform concluded about the connection's credential when the upstream refused it and
+ * a forced refresh could not recover it, as a model reads it.
+ */
+export function credentialMember(credential: CredentialStatus): CredentialMember {
+  const member = {
+    status: credential.status,
+    cause: credential.cause,
+    detail: CREDENTIAL_FAILURE_SENTENCES[credential.cause],
+  };
+  return credential.status === "in_use" &&
+    credential.failures !== undefined &&
+    credential.maxFailures !== undefined
+    ? { ...member, failures: credential.failures, max_failures: credential.maxFailures }
+    : member;
 }

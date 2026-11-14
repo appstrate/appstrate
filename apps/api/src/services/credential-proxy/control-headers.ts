@@ -2,7 +2,7 @@
 
 /**
  * The control headers of `/api/credential-proxy/proxy`, lower case. The route consumes them and
- * never sends one upstream; the MCP `api_call` tool sets them from typed arguments and lets no
+ * never sends one upstream; the MCP `call_integration_tool` sets them from typed arguments and lets no
  * free-form header carry one. `X-Run-Id` is among the platform's own request headers
  * (`isPlatformRequestHeader`, `@appstrate/connect/platform-request-headers`).
  */

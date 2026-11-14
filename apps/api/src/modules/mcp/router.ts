@@ -346,6 +346,7 @@ function unionSurface(spaces: readonly McpSpace[]): McpSurface {
     listsFiles: any("listsFiles"),
     importsPackages: any("importsPackages"),
     proxies: any("proxies"),
+    proxiesClosed: any("proxiesClosed"),
   };
 }
 
@@ -526,7 +527,13 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     const proxied = proxyAcceptsCredential(c);
     const reachable = (await listReachableSpaces(c, orgId)).map((space) => ({
       ...space,
-      surface: deriveMcpSurface(space.permissions, ceiling, actor, proxied),
+      surface: deriveMcpSurface(
+        space.permissions,
+        ceiling,
+        actor,
+        proxied,
+        space.credentialProxyOpen,
+      ),
     }));
     const requested = await requestedSpaceId(post?.payload, orgId);
     const chosen = reachable.find((s) => s.id === requested) ?? reachable[0];
@@ -541,7 +548,14 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
       ...chosen,
       role: toSpaceRoleWire(c.get("spaceRole")!)!.name,
       permissions,
-      surface: deriveMcpSurface(permissions, ceiling, actor, proxied),
+      credentialProxyOpen: c.get("space")!.credentialProxyOpen,
+      surface: deriveMcpSurface(
+        permissions,
+        ceiling,
+        actor,
+        proxied,
+        c.get("space")!.credentialProxyOpen,
+      ),
     };
     c.set("mcpOrgSpaces", {
       reachable: reachable.map((s) => (s.id === current.id ? current : s)),
@@ -681,7 +695,13 @@ export function createMcpRouter(deps: McpRouterDeps = {}): Hono<AppEnv> {
     };
     const surface = orgSpaces
       ? unionSurface(orgSpaces.reachable)
-      : deriveMcpSurface(permissions, ceiling, actor, proxyAcceptsCredential(c));
+      : deriveMcpSurface(
+          permissions,
+          ceiling,
+          actor,
+          proxyAcceptsCredential(c),
+          c.get("space")!.credentialProxyOpen,
+        );
     const tools = buildMcpTools(toolCtx, surface);
     // `resources/read` for `appfile://file_xxx` — resolves through the same
     // forwarded-auth in-process dispatch as the tools (files are NOT listed

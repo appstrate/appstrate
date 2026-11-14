@@ -40,6 +40,7 @@ function emptyApiKeysPage(permissions: string[]): string {
     settings: {},
     visibility: "open",
     default_role: "viewer",
+    credential_proxy_open: true,
     personal: false,
     access: "member",
     role: null,

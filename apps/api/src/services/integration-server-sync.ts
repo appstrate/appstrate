@@ -10,33 +10,34 @@
  */
 
 import type { Implementation, Tool } from "@modelcontextprotocol/sdk/types.js";
-import {
-  createMcpHttpClient,
-  httpStatusOf,
-  type AppstrateMcpClient,
-} from "@appstrate/mcp-transport";
+import { createMcpHttpClient, type AppstrateMcpClient } from "@appstrate/mcp-transport";
 import { isVariableTemplate } from "@appstrate/afps-shared/connection-variables";
 import { isUnauthenticatedIntegration } from "@appstrate/core/integration";
 import { isIconImage } from "@appstrate/core/appearance";
 import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
-import { getErrorMessage } from "@appstrate/core/errors";
 import type { Actor } from "../lib/actor.ts";
 import { ApiError, badGateway } from "../lib/errors.ts";
 import { checkEgressUrl, egressFetchImpl, fetchWithin } from "../lib/egress-host-guard.ts";
 import { readBodyUnder } from "../lib/capped-body.ts";
 import { logger } from "../lib/logger.ts";
-import { proxyProblem } from "../lib/proxy-status.ts";
 import type { SpaceScope } from "../lib/scope.ts";
-import { trackAudit } from "./audit.ts";
-import { recordConnectionCall, type ConnectionCall } from "./credential-proxy/call-journal.ts";
-import { proxyCall, ProxyCallError } from "./credential-proxy/core.ts";
+import { ProxyCallError } from "./credential-proxy/core.ts";
+import {
+  listToolPages,
+  MAX_EXCHANGE_BYTES,
+  MAX_LISTED_PAGES,
+  MAX_LISTED_TOOLS,
+  McpExchangeTooLargeError,
+  mcpServerFailure,
+  proxiedMcpOperation,
+  type ProxyCaller,
+} from "./credential-proxy/mcp-over-proxy.ts";
 import type { ProxyReach } from "./integration-connections.ts";
 import {
   readIntegrationManifestForRun,
   type ResolvedIntegrationVersion,
 } from "./integration-service.ts";
 import { downloadPackageFiles } from "./package-items/storage.ts";
-import { getCredentialProxyLimits } from "./proxy-limits.ts";
 import { fetchServerIcon, siteIconFetch } from "./integration-icon.ts";
 import { serverIdentityFields } from "./integration-discovery.ts";
 
@@ -63,11 +64,6 @@ export interface DiscoveredTool {
 /** The sync reads, and the proxy authorizes against, the draft its route lets a home writer edit. */
 const DRAFT: ResolvedIntegrationVersion = { source: "draft", version: null };
 const SYNC_TIMEOUT_MS = 20_000;
-const MAX_TOOLS = 500;
-/** Bounds a server answering `nextCursor` forever with empty pages. */
-const MAX_PAGES = 20;
-/** Per MCP exchange: a `tools/list` page is kilobytes, not the proxy's general ceiling (an operator cap below it wins). */
-const MAX_EXCHANGE_BYTES = 2 * 1024 * 1024;
 /** `instructions` is the server's free text, proposed as a file: bounded like one. */
 const MAX_INSTRUCTIONS_BYTES = 32 * 1024;
 const MAX_TOOL_TITLE_CHARS = 200;
@@ -81,7 +77,7 @@ export async function syncIntegrationFromServer(input: {
   /** The caller's proxy reach, asked only on the proxied path: it throws when the caller has none. */
   proxyReach: () => ProxyReach;
   /** Who called, as the call journal records it. */
-  caller: Pick<ConnectionCall, "apiKeyId" | "authMethod" | "requestId">;
+  caller: ProxyCaller;
   /** The caller's request: its going away ends the sync. */
   signal?: AbortSignal;
 }): Promise<ServerSyncProposal> {
@@ -137,85 +133,51 @@ export async function syncIntegrationFromServer(input: {
     if (init?.method === "GET") return new Response(null, { status: 405 });
     const res = await egressFetch(target, init);
     const body = await readBodyUnder(res, MAX_EXCHANGE_BYTES);
-    if (body === null) throw new Error("an MCP answer exceeds the synchronization's bound");
+    if (body === null) throw new McpExchangeTooLargeError(MAX_EXCHANGE_BYTES);
     return new Response(body, { status: res.status, headers: res.headers });
   }) as typeof fetch;
-  const proxiedVia = (reach: ProxyReach) =>
-    (async (target: Parameters<typeof fetch>[0], init?: RequestInit) => {
-      // The standalone GET stream carries server-initiated messages, which a list-and-close never reads.
-      if (init?.method === "GET") return new Response(null, { status: 405 });
-      const method = init?.method ?? "POST";
-      const href = target instanceof Request ? target.url : String(target);
-      const started = Date.now();
-      // Journaled as the proxy route does: once per exchange that may have sent the credential.
-      const journal = (connectionId: string, outcome: string) =>
-        void trackAudit(
-          recordConnectionCall({
-            ...input.caller,
-            orgId: scope.orgId,
-            spaceId: scope.spaceId,
-            connectionId,
-            integrationId: packageId,
-            actor: input.actor,
-            runId: null,
-            method,
-            target: href,
-            outcome,
-            durationMs: Date.now() - started,
-          }),
-        );
-      let result;
-      try {
-        result = await proxyCall({
-          orgId: scope.orgId,
-          spaceId: scope.spaceId,
-          actor: input.actor,
-          ...(input.connectionId ? { connectionId: input.connectionId } : {}),
-          reach,
-          version: DRAFT,
-          integrationId: packageId,
-          method,
-          target: href,
-          headers: Object.fromEntries(new Headers(init?.headers)),
-          body: typeof init?.body === "string" ? init.body : null,
-          // The SDK echoes the server's values (`Mcp-Session-Id`, `nextCursor`): never a placeholder.
-          literalHeaders: true,
-          maxResponseBytes: Math.min(
-            MAX_EXCHANGE_BYTES,
-            getCredentialProxyLimits().max_response_bytes,
-          ),
-          signal: init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline,
-        });
-      } catch (err) {
-        if (err instanceof ProxyCallError && err.connectionId) journal(err.connectionId, err.code);
-        throw err;
-      }
-      journal(result.connectionId, String(result.status));
-      return new Response(result.body, { status: result.status, headers: result.headers });
-    }) as typeof fetch;
 
   // Alongside the exchange; a storage fault surfaces as itself, not as an MCP failure.
   const hasDoc = draftHasIntegrationDoc(scope.orgId, packageId);
   hasDoc.catch(() => {});
 
+  const proxied =
+    reach === null
+      ? null
+      : proxiedMcpOperation({
+          scope,
+          actor: input.actor,
+          integrationId: packageId,
+          ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+          reach,
+          version: DRAFT,
+          caller: input.caller,
+          deadline,
+        });
+  const signal = proxied?.signal ?? deadline;
   let client: AppstrateMcpClient | undefined;
-  let exchanged;
-  try {
+  const exchange = async () => {
     client = await createMcpHttpClient(url, {
-      fetch: reach === null ? direct : proxiedVia(reach),
-      signal: deadline,
+      fetch: proxied?.fetch ?? direct,
+      signal,
       onWarning: (message, data) => logger.warn(message, { packageId, ...data }),
     });
-    const { tools, truncated } = await listAllTools(client, deadline);
-    exchanged = {
+    const { tools, truncated } = await listToolPages(client, signal);
+    return {
       tools,
       truncated,
       info: client.getServerVersion(),
       instructions: client.getInstructions(),
     };
+  };
+  let exchanged;
+  try {
+    exchanged = await (proxied ? proxied.guard(exchange()) : exchange());
   } catch (err) {
     throw syncFailure(err, packageId, url, unauthenticated);
   } finally {
+    // Before the session's close, which is no exchange of the listing.
+    await proxied?.settle();
     await client?.close().catch(() => {});
   }
   return proposalFromServer(
@@ -237,21 +199,6 @@ async function draftHasIntegrationDoc(orgId: string, packageId: string): Promise
   const path = PACKAGE_CONTENT_ENTRY.integration?.path;
   const files = await downloadPackageFiles("integrations", orgId, packageId, undefined, "org");
   return path !== undefined && files !== null && Object.hasOwn(files, path);
-}
-
-async function listAllTools(
-  client: AppstrateMcpClient,
-  signal: AbortSignal,
-): Promise<{ tools: Tool[]; truncated: boolean }> {
-  const tools: Tool[] = [];
-  let cursor: string | undefined;
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const res = await client.listToolsPage({ ...(cursor ? { cursor } : {}), signal });
-    tools.push(...res.tools);
-    cursor = res.nextCursor;
-    if (!cursor || tools.length >= MAX_TOOLS) break;
-  }
-  return { tools: tools.slice(0, MAX_TOOLS), truncated: tools.length > MAX_TOOLS || !!cursor };
 }
 
 /** The proposal a server's answers make. Exported for unit tests. */
@@ -287,7 +234,7 @@ export async function proposalFromServer(
   if (server.truncated) {
     warnings.push({
       code: "tools_truncated",
-      message: `The server lists more tools than are read (${MAX_TOOLS} tools over at most ${MAX_PAGES} pages): only the first ${names.length} are proposed.`,
+      message: `The server lists more tools than are read (${MAX_LISTED_TOOLS} tools over at most ${MAX_LISTED_PAGES} pages): only the first ${names.length} are proposed.`,
     });
   }
   const instructions = capInstructions(server.instructions?.trim() ?? "");
@@ -355,42 +302,15 @@ function syncFailure(
   url: string,
   unauthenticated: boolean,
 ): Error {
-  // The proxy names its own `X-Connection-Id` header; this route takes the body's `connection_id`.
-  if (err instanceof ApiError && err.code === "must_choose_connection") {
-    const detail = `No single connection of '${packageId}' applies: name one in the request body's \`connection_id\`.`;
-    return new ApiError({
-      status: err.status,
-      code: err.code,
-      title: err.title,
-      detail,
-      ...(err.fieldErrors
-        ? { errors: err.fieldErrors.map((item) => ({ ...item, message: detail })) }
-        : {}),
-    });
+  if (err instanceof ProxyCallError && err.code === "credential_not_found") {
+    return notConnected(err.message);
   }
-  if (err instanceof ApiError) return err;
-  if (err instanceof ProxyCallError) {
-    return err.code === "credential_not_found"
-      ? notConnected(err.message)
-      : proxyProblem(err.code, err.message);
-  }
-  const origin = URL.parse(url)?.origin;
-  logger.warn("integration server sync: MCP exchange failed", {
-    packageId,
-    origin,
-    error: getErrorMessage(err),
+  // AFPS §7.2: for an unauthenticated integration a challenge makes it unavailable, never an ad
+  // hoc authorization.
+  return mcpServerFailure(err, {
+    integrationId: packageId,
+    url,
+    unauthenticated,
+    failed: "could not be synchronized",
   });
-  const status = httpStatusOf(err);
-  if ((status === 401 || status === 403) && unauthenticated) {
-    // AFPS §7.2: a challenge makes the integration unavailable, never an ad hoc authorization.
-    return badGateway(
-      `The MCP server at ${origin} asks for a credential (HTTP ${status}), but the integration declares no authentication.`,
-    );
-  }
-  if (status === 401 || status === 403) {
-    return badGateway(
-      `The MCP server at ${origin} refused the connection's credential (HTTP ${status}); reconnect the integration.`,
-    );
-  }
-  return badGateway(`The MCP server at ${origin} could not be synchronized.`);
 }

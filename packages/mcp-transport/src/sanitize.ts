@@ -32,7 +32,8 @@
  *     that's a registry-boundary concern, enforced at publish time.
  */
 
-import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
+import { RUNTIME_TOOL_EVENTS_META_KEY } from "@appstrate/core/runtime-tool-defs";
 import { API_CALL_TOOL_META_KEY, API_UPLOAD_TOOL_META_KEY } from "./tool-meta.ts";
 
 export const MAX_TOOL_DESCRIPTION_BYTES = 2048;
@@ -217,4 +218,48 @@ export function sanitiseToolDescriptor(tool: Tool): Tool | null {
     out.title = sanitiseTextField(tool.title, MAX_PARAMETER_DESCRIPTION_BYTES);
   }
   return out;
+}
+
+/**
+ * Drop the first-party runtime-event channel from a third-party tool result.
+ * `dev.appstrate/events` under `_meta` is the trusted channel the platform's
+ * own runtime tools (output/log/note/pin) use to surface canonical run
+ * events; an integration upstream has no legitimate reason to set it, so it
+ * is removed to prevent run-event forgery. Returns the result untouched when
+ * the key is not present (the common case).
+ */
+export function stripForgedRuntimeEvents(result: CallToolResult): CallToolResult {
+  const meta = result._meta;
+  if (!meta || !(RUNTIME_TOOL_EVENTS_META_KEY in meta)) {
+    return result;
+  }
+  const { [RUNTIME_TOOL_EVENTS_META_KEY]: _dropped, ...rest } = meta;
+  return { ...result, _meta: rest };
+}
+
+/**
+ * `_meta` prefixes a third-party result has no claim to: the platform's own (`dev.appstrate/`)
+ * and those MCP reserves for itself.
+ */
+const RESERVED_META_PREFIXES = [
+  "dev.appstrate/",
+  "io.modelcontextprotocol/",
+  "modelcontextprotocol.io/",
+  "mcp/",
+] as const;
+
+/**
+ * A third-party tool result relayed outside a run, without the `_meta` keys of a reserved prefix
+ * ({@link RESERVED_META_PREFIXES}): the platform's runtime events included, and any marker the
+ * platform or the protocol would read as its own. `_meta` goes when nothing else is left in it.
+ */
+export function stripReservedResultMeta(result: CallToolResult): CallToolResult {
+  const meta = result._meta;
+  if (!meta) return result;
+  const kept = Object.entries(meta).filter(
+    ([key]) => !RESERVED_META_PREFIXES.some((prefix) => key.startsWith(prefix)),
+  );
+  if (kept.length === Object.keys(meta).length) return result;
+  const { _meta: _dropped, ...rest } = result;
+  return kept.length > 0 ? { ...rest, _meta: Object.fromEntries(kept) } : rest;
 }

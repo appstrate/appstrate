@@ -50,6 +50,7 @@ import {
   type SystemIntegrationClientDefinition,
 } from "./integration-client-registry.ts";
 import { isActiveHere } from "./package-activation.ts";
+import { activePackagesFilter } from "./space-packages.ts";
 import { placementReadFilter, placementRowJoin } from "./package-placement.ts";
 import {
   setExactlyOneDefault,
@@ -65,7 +66,15 @@ import {
   encryptionKeyUnavailable,
   KEY_UNAVAILABLE,
 } from "../lib/stored-credential.ts";
-import { ApiError, notFound, conflict, invalidRequest, forbidden } from "../lib/errors.ts";
+import {
+  ApiError,
+  notFound,
+  conflict,
+  invalidRequest,
+  forbidden,
+  type ResolutionFieldError,
+} from "../lib/errors.ts";
+import { mapWithConcurrency } from "@appstrate/core/map-with-concurrency";
 import { proxyProblem } from "../lib/proxy-status.ts";
 import {
   evaluateJsonPath,
@@ -102,6 +111,7 @@ import { CONNECTION_LABEL_MAX, toMintedLabel } from "../lib/connection-label.ts"
 import { dedupeLabel } from "@appstrate/core/dedupe-label";
 import type { Actor, AuthorizationServerBinding, ResolvedOAuthClient } from "@appstrate/connect";
 import {
+  allowsUndeclaredTools,
   isUnauthenticatedIntegration,
   resolveIntegrationToolCatalog,
   readDefaultTools,
@@ -373,6 +383,31 @@ export interface RunBoundSelection {
 
 export type ProxyReach = "own" | "usable";
 
+/**
+ * What a caller outside a run may reach, for a verdict that reaches no credential: a
+ * {@link ProxyReach}, `closed` when the space closes the credential proxy outside a run, `null`
+ * without either proxy permission (`reachOutsideRunIfPermitted`).
+ */
+export type ReachOutsideRun = ProxyReach | "closed" | null;
+
+/**
+ * How a caller names a connection: the credential proxy's `X-Connection-Id` header, or a
+ * `connection_id` field (`/api/credential-proxy/tools*`, the server sync). A refusal about the
+ * named connection speaks of it the way the caller wrote it.
+ */
+export type ConnectionNaming = "X-Connection-Id" | "connection_id";
+
+/** The `param` and the wording of a refusal about the connection a caller names. */
+export function connectionParam(naming: ConnectionNaming = "X-Connection-Id"): {
+  param: ConnectionNaming;
+  label: string;
+  remedy: string;
+} {
+  return naming === "connection_id"
+    ? { param: naming, label: "`connection_id`", remedy: "name one in `connection_id`" }
+    : { param: naming, label: naming, remedy: "name one with the X-Connection-Id header" };
+}
+
 /** What a proxy call selects from: a run's bound set, or the caller's reach outside a run. */
 type ProxySelectionPath =
   { run: RunBoundSelection; reach?: never } | { reach: ProxyReach; run?: never };
@@ -385,6 +420,10 @@ type ConnectionSelectionContext = {
    * run they are then not read again. Never mutated.
    */
   orgDefaults?: Record<string, OrgDefaultPick>;
+  /** The tool the call runs, when it names one: the selection then serves it (`proxyRequirement`). */
+  tool?: string;
+  /** How the caller names a connection; the header when omitted. */
+  naming?: ConnectionNaming;
 } & ProxySelectionPath;
 
 /**
@@ -394,7 +433,9 @@ type ConnectionSelectionContext = {
  * id must be one of its members and is picked alone (the resolver would bind the imposed set
  * whole), an unnamed call binds the default; under `own` no org default applies, and an
  * integration an enforced one governs answers `call_permission_required`. `null` when nothing
- * answers, as for an id out of reach (a colleague's row or none). The pick passes health checks.
+ * answers, as for an id out of reach (a colleague's row or none). The pick passes health checks,
+ * and serves `context.tool` when the call names one: a row short of its scopes or on an auth that
+ * does not serve it answers `insufficient_scopes` or `auth_serves_no_selected_tool`.
  */
 export async function selectAccessibleConnection(
   packageId: string,
@@ -402,11 +443,25 @@ export async function selectAccessibleConnection(
   namedConnectionId: string | null,
   context: ConnectionSelectionContext,
 ): Promise<ResolvedConnectionRow | null> {
+  return (await selectConnection(packageId, manifest, namedConnectionId, context)).row;
+}
+
+/**
+ * {@link selectAccessibleConnection}'s selection, with the resolver's `not_connected` item when
+ * nothing answers for that reason: the auth and scopes a connect flow would target.
+ */
+async function selectConnection(
+  packageId: string,
+  manifest: IntegrationManifest,
+  namedConnectionId: string | null,
+  context: ConnectionSelectionContext,
+): Promise<{ row: ResolvedConnectionRow | null; notConnected?: ResolutionFieldError }> {
   let named = namedConnectionId?.toLowerCase() ?? null;
   const identity = actorIdentityOf(context.actor);
   const candidatesOf = (set: readonly SelectableRow[]) =>
     set.map((r) => candidateOf(identity, r, []));
   const { run, reach } = context;
+  const param = connectionParam(context.naming);
   let rows: SelectableRow[];
   // A run's bound set passed governance at kickoff, and the `own` reach skips every layer.
   let orgDefaults: Record<string, OrgDefaultPick> | null = null;
@@ -418,12 +473,12 @@ export async function selectAccessibleConnection(
         packageId,
         connectionId: named,
         bound,
-        param: "X-Connection-Id",
+        param: param.param,
       });
     } else if (bound.length === 1) {
       named = bound[0]!.connectionId;
     } else if (bound.length === 0) {
-      return null;
+      return { row: null };
     }
     rows = await listReachableConnections(context, "usable", [packageId]);
     if (!named) {
@@ -432,6 +487,7 @@ export async function selectAccessibleConnection(
         packageId,
         candidatesOf(rows.filter((r) => ids.has(r.id))),
         `Run '${run.id}' bound several connections`,
+        param.remedy,
       );
     }
   } else {
@@ -446,9 +502,9 @@ export async function selectAccessibleConnection(
         if (!enforcedIds.includes(named)) {
           throw proxyProblem(
             "connection_not_in_org_default",
-            `X-Connection-Id names a connection outside the enforced org default of '${packageId}', ` +
+            `${param.label} names a connection outside the enforced org default of '${packageId}', ` +
               `which binds every call in this space: name one of its members, or none.`,
-            "X-Connection-Id",
+            param.param,
           );
         }
         // The named member alone: the resolver would bind the imposed set whole.
@@ -467,7 +523,7 @@ export async function selectAccessibleConnection(
   }
 
   const { resolved, errors } = resolveConnections({
-    requirements: [proxyRequirement(packageId, manifest)],
+    requirements: [proxyRequirement(packageId, manifest, context.tool)],
     accessibleConnections: rows,
     pins: [],
     orgDefaults,
@@ -475,21 +531,27 @@ export async function selectAccessibleConnection(
     ...identity,
   });
   const error = errors[0];
-  if (error?.code === "not_connected" || error?.code === "override_connection_unavailable") {
-    return null;
+  if (error?.code === "not_connected") {
+    return { row: null, notConnected: translateResolutionError(error) };
   }
+  if (error?.code === "override_connection_unavailable") return { row: null };
   if (error?.code === "must_choose_connection") {
     const candidates = error.candidateConnections ?? [];
     const reason = candidates.some((c) => c.ownedByActor)
       ? "No single connection applies"
       : "Only connections shared by other members exist";
-    throw mustChoose(packageId, candidates, reason);
+    throw mustChoose(packageId, candidates, reason, param.remedy);
   }
   if (error) throw resolutionConflict(error);
 
   const set = resolved[packageId]!.map((m) => rows.find((r) => r.id === m.connectionId)!);
-  if (set.length === 1) return toResolvedRow(set[0]!);
-  throw mustChoose(packageId, candidatesOf(set), "The org default holds several connections");
+  if (set.length === 1) return { row: toResolvedRow(set[0]!) };
+  throw mustChoose(
+    packageId,
+    candidatesOf(set),
+    "The org default holds several connections",
+    param.remedy,
+  );
 }
 
 /**
@@ -508,6 +570,8 @@ export async function selectAccessibleConnection(
  *   - `default_unavailable`: the org default cannot bind (a member gone or off-auth, an empty set,
  *     a set too large); pins never apply outside a run.
  *   - `unusable`: `insufficient_scopes`, `auth_serves_no_selected_tool`, or another refusal (logged).
+ *   - `proxy_closed`: the space closes the credential proxy outside a run, whatever the caller's
+ *     role: only a run reaches its connections.
  *
  * `imposed`: an enforced org default governs the integration here — the space's admins decide.
  */
@@ -519,50 +583,111 @@ export type ProxyConnectionStatus =
   | "not_permitted"
   | "default_unavailable"
   | "unusable"
+  | "proxy_closed"
   | "not_required";
 
 export async function proxyConnectionVerdict(
   packageId: string,
   manifest: IntegrationManifest,
-  context: { spaceId: string; actor: Actor; reach: ProxyReach | null },
+  context: { spaceId: string; actor: Actor; reach: ReachOutsideRun },
 ): Promise<{ status: ProxyConnectionStatus; imposed: boolean }> {
-  // Read once, for `imposed` and for the selection.
-  const orgDefaults = await listOrgDefaultsForResolver(context.spaceId);
-  const imposed = orgDefaults[packageId]?.enforce === true;
-  if (isUnauthenticatedIntegration(manifest)) return { status: "not_required", imposed };
-  const { reach } = context;
-  // The proxy route admits neither: nothing is selected for such a caller.
-  if (reach === null) return { status: "not_permitted", imposed };
-  const selection = { spaceId: context.spaceId, actor: context.actor, reach, orgDefaults };
-  const status = await selectAccessibleConnection(packageId, manifest, null, selection).then(
-    (row): ProxyConnectionStatus => (row ? "ready" : "none"),
-    (err: unknown): ProxyConnectionStatus => {
-      if (!(err instanceof ApiError)) throw err;
-      switch (err.code) {
-        case "must_choose_connection":
-          return "must_choose";
-        case "needs_reconnection":
-          return "needs_reconnection";
-        case "call_permission_required":
-          return "not_permitted";
-        case "pinned_connection_unavailable":
-        case "required_integration_unbound":
-        case "connection_set_too_large":
-          return "default_unavailable";
-        case "insufficient_scopes":
-        case "auth_serves_no_selected_tool":
-          return "unusable";
-        default:
-          logger.warn("proxy connection verdict: unmapped selection refusal", {
-            packageId,
-            code: err.code,
-          });
-          return "unusable";
-      }
-    },
-  );
+  const { status, imposed } = await proxyConnectionOutcome(packageId, manifest, {
+    ...context,
+    // Read once, for `imposed` and for the selection.
+    orgDefaults: await listOrgDefaultsForResolver(context.spaceId),
+  });
   return { status, imposed };
 }
+
+/**
+ * {@link proxyConnectionVerdict}, and the selection's item behind a refusal (`refusal`): the
+ * `not_connected` item of `none`, else the first item of the refusal, as a run launch's 409
+ * carries it.
+ */
+async function proxyConnectionOutcome(
+  packageId: string,
+  manifest: IntegrationManifest,
+  context: {
+    spaceId: string;
+    actor: Actor;
+    reach: ReachOutsideRun;
+    orgDefaults: Record<string, OrgDefaultPick>;
+  },
+): Promise<{ status: ProxyConnectionStatus; imposed: boolean; refusal?: ResolutionFieldError }> {
+  const { orgDefaults, reach } = context;
+  const imposed = orgDefaults[packageId]?.enforce === true;
+  if (isUnauthenticatedIntegration(manifest)) return { status: "not_required", imposed };
+  // The proxy route admits neither: nothing is selected for such a caller.
+  if (reach === null) return { status: "not_permitted", imposed };
+  if (reach === "closed") return { status: "proxy_closed", imposed };
+  const selection = { spaceId: context.spaceId, actor: context.actor, reach, orgDefaults };
+  return selectConnection(packageId, manifest, null, selection).then(
+    ({ row, notConnected }) =>
+      row
+        ? { status: "ready" as const, imposed }
+        : { status: "none" as const, imposed, ...(notConnected ? { refusal: notConnected } : {}) },
+    (err: unknown) => {
+      if (!(err instanceof ApiError)) throw err;
+      const refusal = err.fieldErrors?.[0] as ResolutionFieldError | undefined;
+      return {
+        status: refusalStatus(packageId, err.code),
+        imposed,
+        ...(refusal ? { refusal } : {}),
+      };
+    },
+  );
+}
+
+/** The {@link ProxyConnectionStatus} of a selection refusal's `code`. */
+function refusalStatus(packageId: string, code: string): ProxyConnectionStatus {
+  switch (code) {
+    case "must_choose_connection":
+      return "must_choose";
+    case "needs_reconnection":
+      return "needs_reconnection";
+    case "call_permission_required":
+      return "not_permitted";
+    case "pinned_connection_unavailable":
+    case "required_integration_unbound":
+    case "connection_set_too_large":
+      return "default_unavailable";
+    case "insufficient_scopes":
+    case "auth_serves_no_selected_tool":
+      return "unusable";
+    default:
+      logger.warn("proxy connection verdict: unmapped selection refusal", { packageId, code });
+      return "unusable";
+  }
+}
+
+/** An integration active in the space, with the verdict of an unnamed proxy call outside a run. */
+export interface IntegrationProxyVerdict {
+  integrationId: string;
+  manifest: IntegrationManifest;
+  status: ProxyConnectionStatus;
+  imposed: boolean;
+  refusal?: ResolutionFieldError;
+}
+
+/**
+ * {@link proxyConnectionVerdict} of each integration of `manifests` (the manifest the proxy
+ * authorizes against, by id), with its refusal item ({@link proxyConnectionOutcome}); the org
+ * defaults are read once.
+ */
+export async function proxyConnectionVerdicts(
+  manifests: ReadonlyMap<string, IntegrationManifest>,
+  context: { spaceId: string; actor: Actor; reach: ReachOutsideRun },
+): Promise<IntegrationProxyVerdict[]> {
+  const orgDefaults = await listOrgDefaultsForResolver(context.spaceId);
+  return mapWithConcurrency([...manifests], VERDICT_CONCURRENCY, async ([id, manifest]) => ({
+    integrationId: id,
+    manifest,
+    ...(await proxyConnectionOutcome(id, manifest, { ...context, orgDefaults })),
+  }));
+}
+
+/** Integrations judged at once by {@link proxyConnectionVerdicts}: a few queries each. */
+const VERDICT_CONCURRENCY = 8;
 
 /**
  * The rows the actor reaches in `spaceId`, {@link OLDEST_FIRST}: under `usable` what it may bind
@@ -627,11 +752,12 @@ function mustChoose(
   packageId: string,
   candidateConnections: ConnectionCandidate[],
   reason: string,
+  remedy: string,
 ): ApiError {
   return resolutionConflict({
     integrationId: packageId,
     code: "must_choose_connection",
-    message: `${reason} for '${packageId}' — name one with the X-Connection-Id header.`,
+    message: `${reason} for '${packageId}' — ${remedy}.`,
     candidateConnections,
   });
 }
@@ -708,6 +834,17 @@ export async function listActiveIntegrationIds(
     if (activation.active) active.add(id);
   }
   return active;
+}
+
+/** The integrations of the organization (system ones included) active in the space, sorted by id. */
+export async function listIntegrationIdsActiveInSpace(scope: SpaceScope): Promise<string[]> {
+  const rows = await db
+    .select({ id: packages.id })
+    .from(packages)
+    .leftJoin(spacePackages, placementRowJoin(packages.id, scope.spaceId))
+    .where(activePackagesFilter(scope, "integration"))
+    .orderBy(packages.id);
+  return rows.map((row) => row.id);
 }
 
 /** Throw `notFound` unless the integration is active in the space. */
@@ -3078,8 +3215,8 @@ export async function getIntegrationAuthStatuses(
   packageId: string,
   caller: ConnectionCaller,
   orgRole: OrgRole | null,
-  /** Outside-run proxy reach (`reachOutsideRunIfPermitted`); `null` without either permission. */
-  reach: ProxyReach | null,
+  /** What the caller may reach outside a run (`reachOutsideRunIfPermitted`). */
+  reach: ReachOutsideRun,
 ): Promise<{
   manifest: IntegrationManifest;
   auths: IntegrationAuthStatus[];
@@ -3163,8 +3300,7 @@ export async function getIntegrationAuthStatuses(
     auths,
     tool_catalog: toolCatalog,
     default_tools: readDefaultTools(manifest),
-    allow_undeclared_tools:
-      (manifest as { allow_undeclared_tools?: boolean }).allow_undeclared_tools === true,
+    allow_undeclared_tools: allowsUndeclaredTools(manifest),
     active: activation.active,
     block_user_connections: activation.blockUserConnections,
     platform_redirect_uri: integrationCallbackUrl(),

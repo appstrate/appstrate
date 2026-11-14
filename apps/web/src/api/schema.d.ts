@@ -1180,7 +1180,7 @@ export interface paths {
         };
         /**
          * List the connections the caller can call outside a run
-         * @description What a call to `/api/credential-proxy/proxy` without `X-Run-Id` would accept from this caller in this space, of the integrations active in the space that have a published version. Read with the rule the proxy applies. With `credential-proxy:call-own` alone: the caller's OWN connections (user or end-user) usable here, and never one another member shared into the space. With `credential-proxy:call`: those and the connections shared into the space, each telling which it is (`owned_by_actor`); of an integration governed by an enforced org default, that default's members only. Grouped by integration, oldest first within one. An entry the caller does not own is used when named with `X-Connection-Id` or designated by an org default. `call_permission_required` and `needs_reconnection` describe a call NAMING that entry with `X-Connection-Id`. A call naming none follows the order that parameter describes on `/api/credential-proxy/proxy`: several own entries of one integration need it, and with `credential-proxy:call` an org default binds its set before the caller's own connection, refusing the call while one of its members is out of the caller's reach or needs reconnecting. No credential is decrypted to build it. Requires `credential-proxy:call-own` or `credential-proxy:call`.
+         * @description What a call to `/api/credential-proxy/proxy` without `X-Run-Id` would accept from this caller in this space, of the integrations active in the space that have a published version. Read with the rule the proxy applies. With `credential-proxy:call-own` alone: the caller's OWN connections (user or end-user) usable here, and never one another member shared into the space. With `credential-proxy:call`: those and the connections shared into the space, each telling which it is (`owned_by_actor`); of an integration governed by an enforced org default, that default's members only. Grouped by integration, oldest first within one. An entry the caller does not own is used when named with `X-Connection-Id` or designated by an org default. `call_permission_required` and `needs_reconnection` describe a call NAMING that entry with `X-Connection-Id`. A call naming none follows the order that parameter describes on `/api/credential-proxy/proxy`: several own entries of one integration need it, and with `credential-proxy:call` an org default binds its set before the caller's own connection, refusing the call while one of its members is out of the caller's reach or needs reconnecting. No credential is decrypted to build it. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`, whatever the caller's role.
          */
         get: operations["listCredentialProxyConnections"];
         put?: never;
@@ -1204,7 +1204,7 @@ export interface paths {
          *
          *     Authentication: bearer only — an API key or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
          *
-         *     Two permissions govern it; `credential-proxy:call` implies `credential-proxy:call-own`. **For a run** (`X-Run-Id`): requires `credential-proxy:call` — launching runs (`agents:run`) does not grant it; the header names the caller's own in-flight run that the caller executes itself (a remote run), and the call reaches the connections that run bound, a connection another member shared into the space included. **Outside a run** (no `X-Run-Id`): with `credential-proxy:call` the call reaches the connections usable in the space, the caller's own and those shared into it, through the resolver's cascade without agent pins (org defaults included): the rows a run in the space binds for that caller. With `credential-proxy:call-own` alone it reaches the caller's OWN connections only: a connection another member shared into the space is out of reach, and so is every connection of an integration governed by an enforced org default; a call for a run is refused. `GET /api/credential-proxy/connections` lists the candidates of a call outside a run and, per row, what such a call would still refuse.
+         *     Two permissions govern it; `credential-proxy:call` implies `credential-proxy:call-own`. **For a run** (`X-Run-Id`): requires `credential-proxy:call` — launching runs (`agents:run`) does not grant it; the header names the caller's own in-flight run that the caller executes itself (a remote run), and the call reaches the connections that run bound, a connection another member shared into the space included. **Outside a run** (no `X-Run-Id`): with `credential-proxy:call` the call reaches the connections usable in the space, the caller's own and those shared into it, through the resolver's cascade without agent pins (org defaults included): the rows a run in the space binds for that caller. With `credential-proxy:call-own` alone it reaches the caller's OWN connections only: a connection another member shared into the space is out of reach, and so is every connection of an integration governed by an enforced org default; a call for a run is refused. `GET /api/credential-proxy/connections` lists the candidates of a call outside a run and, per row, what such a call would still refuse. A call outside a run in a space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`, whatever the caller's role; a call for a run is not affected.
          *
          *     Optional `Appstrate-User` header (API-key auth only) makes that end-user the caller: outside a run the call reaches the end-user's own connections, and with `credential-proxy:call` those a member shared into the space.
          *
@@ -1223,7 +1223,7 @@ export interface paths {
          *
          *     Authentication: bearer only — an API key or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
          *
-         *     Two permissions govern it; `credential-proxy:call` implies `credential-proxy:call-own`. **For a run** (`X-Run-Id`): requires `credential-proxy:call` — launching runs (`agents:run`) does not grant it; the header names the caller's own in-flight run that the caller executes itself (a remote run), and the call reaches the connections that run bound, a connection another member shared into the space included. **Outside a run** (no `X-Run-Id`): with `credential-proxy:call` the call reaches the connections usable in the space, the caller's own and those shared into it, through the resolver's cascade without agent pins (org defaults included): the rows a run in the space binds for that caller. With `credential-proxy:call-own` alone it reaches the caller's OWN connections only: a connection another member shared into the space is out of reach, and so is every connection of an integration governed by an enforced org default; a call for a run is refused. `GET /api/credential-proxy/connections` lists the candidates of a call outside a run and, per row, what such a call would still refuse.
+         *     Two permissions govern it; `credential-proxy:call` implies `credential-proxy:call-own`. **For a run** (`X-Run-Id`): requires `credential-proxy:call` — launching runs (`agents:run`) does not grant it; the header names the caller's own in-flight run that the caller executes itself (a remote run), and the call reaches the connections that run bound, a connection another member shared into the space included. **Outside a run** (no `X-Run-Id`): with `credential-proxy:call` the call reaches the connections usable in the space, the caller's own and those shared into it, through the resolver's cascade without agent pins (org defaults included): the rows a run in the space binds for that caller. With `credential-proxy:call-own` alone it reaches the caller's OWN connections only: a connection another member shared into the space is out of reach, and so is every connection of an integration governed by an enforced org default; a call for a run is refused. `GET /api/credential-proxy/connections` lists the candidates of a call outside a run and, per row, what such a call would still refuse. A call outside a run in a space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`, whatever the caller's role; a call for a run is not affected.
          *
          *     Optional `Appstrate-User` header (API-key auth only) makes that end-user the caller: outside a run the call reaches the end-user's own connections, and with `credential-proxy:call` those a member shared into the space.
          *
@@ -1242,7 +1242,7 @@ export interface paths {
          *
          *     Authentication: bearer only — an API key or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
          *
-         *     Two permissions govern it; `credential-proxy:call` implies `credential-proxy:call-own`. **For a run** (`X-Run-Id`): requires `credential-proxy:call` — launching runs (`agents:run`) does not grant it; the header names the caller's own in-flight run that the caller executes itself (a remote run), and the call reaches the connections that run bound, a connection another member shared into the space included. **Outside a run** (no `X-Run-Id`): with `credential-proxy:call` the call reaches the connections usable in the space, the caller's own and those shared into it, through the resolver's cascade without agent pins (org defaults included): the rows a run in the space binds for that caller. With `credential-proxy:call-own` alone it reaches the caller's OWN connections only: a connection another member shared into the space is out of reach, and so is every connection of an integration governed by an enforced org default; a call for a run is refused. `GET /api/credential-proxy/connections` lists the candidates of a call outside a run and, per row, what such a call would still refuse.
+         *     Two permissions govern it; `credential-proxy:call` implies `credential-proxy:call-own`. **For a run** (`X-Run-Id`): requires `credential-proxy:call` — launching runs (`agents:run`) does not grant it; the header names the caller's own in-flight run that the caller executes itself (a remote run), and the call reaches the connections that run bound, a connection another member shared into the space included. **Outside a run** (no `X-Run-Id`): with `credential-proxy:call` the call reaches the connections usable in the space, the caller's own and those shared into it, through the resolver's cascade without agent pins (org defaults included): the rows a run in the space binds for that caller. With `credential-proxy:call-own` alone it reaches the caller's OWN connections only: a connection another member shared into the space is out of reach, and so is every connection of an integration governed by an enforced org default; a call for a run is refused. `GET /api/credential-proxy/connections` lists the candidates of a call outside a run and, per row, what such a call would still refuse. A call outside a run in a space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`, whatever the caller's role; a call for a run is not affected.
          *
          *     Optional `Appstrate-User` header (API-key auth only) makes that end-user the caller: outside a run the call reaches the end-user's own connections, and with `credential-proxy:call` those a member shared into the space.
          *
@@ -1261,7 +1261,7 @@ export interface paths {
          *
          *     Authentication: bearer only — an API key or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
          *
-         *     Two permissions govern it; `credential-proxy:call` implies `credential-proxy:call-own`. **For a run** (`X-Run-Id`): requires `credential-proxy:call` — launching runs (`agents:run`) does not grant it; the header names the caller's own in-flight run that the caller executes itself (a remote run), and the call reaches the connections that run bound, a connection another member shared into the space included. **Outside a run** (no `X-Run-Id`): with `credential-proxy:call` the call reaches the connections usable in the space, the caller's own and those shared into it, through the resolver's cascade without agent pins (org defaults included): the rows a run in the space binds for that caller. With `credential-proxy:call-own` alone it reaches the caller's OWN connections only: a connection another member shared into the space is out of reach, and so is every connection of an integration governed by an enforced org default; a call for a run is refused. `GET /api/credential-proxy/connections` lists the candidates of a call outside a run and, per row, what such a call would still refuse.
+         *     Two permissions govern it; `credential-proxy:call` implies `credential-proxy:call-own`. **For a run** (`X-Run-Id`): requires `credential-proxy:call` — launching runs (`agents:run`) does not grant it; the header names the caller's own in-flight run that the caller executes itself (a remote run), and the call reaches the connections that run bound, a connection another member shared into the space included. **Outside a run** (no `X-Run-Id`): with `credential-proxy:call` the call reaches the connections usable in the space, the caller's own and those shared into it, through the resolver's cascade without agent pins (org defaults included): the rows a run in the space binds for that caller. With `credential-proxy:call-own` alone it reaches the caller's OWN connections only: a connection another member shared into the space is out of reach, and so is every connection of an integration governed by an enforced org default; a call for a run is refused. `GET /api/credential-proxy/connections` lists the candidates of a call outside a run and, per row, what such a call would still refuse. A call outside a run in a space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`, whatever the caller's role; a call for a run is not affected.
          *
          *     Optional `Appstrate-User` header (API-key auth only) makes that end-user the caller: outside a run the call reaches the end-user's own connections, and with `credential-proxy:call` those a member shared into the space.
          *
@@ -1282,7 +1282,7 @@ export interface paths {
          *
          *     Authentication: bearer only — an API key or an OIDC-issued JWT (device-flow access token for the interactive CLI, dashboard access token for second-party apps). Cookie sessions are rejected. Session binding pins the `X-Session-Id` to the first principal (API key or JWT user) that used it.
          *
-         *     Two permissions govern it; `credential-proxy:call` implies `credential-proxy:call-own`. **For a run** (`X-Run-Id`): requires `credential-proxy:call` — launching runs (`agents:run`) does not grant it; the header names the caller's own in-flight run that the caller executes itself (a remote run), and the call reaches the connections that run bound, a connection another member shared into the space included. **Outside a run** (no `X-Run-Id`): with `credential-proxy:call` the call reaches the connections usable in the space, the caller's own and those shared into it, through the resolver's cascade without agent pins (org defaults included): the rows a run in the space binds for that caller. With `credential-proxy:call-own` alone it reaches the caller's OWN connections only: a connection another member shared into the space is out of reach, and so is every connection of an integration governed by an enforced org default; a call for a run is refused. `GET /api/credential-proxy/connections` lists the candidates of a call outside a run and, per row, what such a call would still refuse.
+         *     Two permissions govern it; `credential-proxy:call` implies `credential-proxy:call-own`. **For a run** (`X-Run-Id`): requires `credential-proxy:call` — launching runs (`agents:run`) does not grant it; the header names the caller's own in-flight run that the caller executes itself (a remote run), and the call reaches the connections that run bound, a connection another member shared into the space included. **Outside a run** (no `X-Run-Id`): with `credential-proxy:call` the call reaches the connections usable in the space, the caller's own and those shared into it, through the resolver's cascade without agent pins (org defaults included): the rows a run in the space binds for that caller. With `credential-proxy:call-own` alone it reaches the caller's OWN connections only: a connection another member shared into the space is out of reach, and so is every connection of an integration governed by an enforced org default; a call for a run is refused. `GET /api/credential-proxy/connections` lists the candidates of a call outside a run and, per row, what such a call would still refuse. A call outside a run in a space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`, whatever the caller's role; a call for a run is not affected.
          *
          *     Optional `Appstrate-User` header (API-key auth only) makes that end-user the caller: outside a run the call reaches the end-user's own connections, and with `credential-proxy:call` those a member shared into the space.
          *
@@ -1295,6 +1295,46 @@ export interface paths {
          *     Every response carries RFC 9209 `Proxy-Status`: `appstrate; received-status=<n>` on an upstream response relayed whatever its status (a relayed 401 carries no platform `WWW-Authenticate` challenge — it is the upstream refusing the connection's credential), `appstrate; error=<type>` on a response the proxy produced itself, whose problem `code` names the cause.
          */
         patch: operations["credentialProxyPatch"];
+        trace?: never;
+    };
+    "/api/credential-proxy/tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the tools the caller can call outside a run
+         * @description Every tool a call outside a run reaches in this space, for this caller: each integration's `api_call` tools (called through `/api/credential-proxy/proxy`) whose auth has a connection the caller reaches, and, for an integration backed by a remote MCP server, the typed tools that server offers (called through `/api/credential-proxy/tools/call`): the integration catalog's selection (its `tools_policy` keys, or every tool the server lists when `allow_undeclared_tools` is `true`), less `hidden_tools` and the connect tool, described by the server's `tools/list`. Each server is listed with the connection the proxy selects (or the `connection_id` named, when it is one of that integration's; when the selection asks for a choice, the first of the caller's connections it accepts), cached per connection, integration version and server URL for 5 minutes, and journaled as one call of the connection when the listing reaches the server, its handshake refused included. A catalog keeps at most 500 tools, and at most 512 KiB of descriptors. The listing waits 20 s for the servers in all, and no longer than the request: a catalog not read by then is listed as one whose server could not be listed, and read on for the next listing; once that wait is over, no further server is contacted. Each tool carries the connections it reaches, the rows of `GET /api/credential-proxy/connections`. `not_ready` lists the integrations active in the space the caller has no usable connection of, with the verdict of a call naming none; with `X-Appstrate-Connect-Offers: 1`, a refusal item a connect flow clears carries a `connect_url`. `unlisted` lists the remote integrations whose server the proxy refused to list (connection selection, permission, `authorized_uris`, an unrenderable URL) or whose server refused the connection's credential (`upstream_credential_rejected`), each with that refusal. Read with the access rule of `/api/credential-proxy/proxy` without `X-Run-Id`, against each integration's latest published version. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`.
+         */
+        get: operations["listIntegrationTools"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/credential-proxy/tools/call": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Call a typed tool of a remote MCP integration
+         * @description One `tools/call` on the integration's remote MCP server, outside a run, for a tool `GET /api/credential-proxy/tools` lists by its `remote_name`; a tool outside the integration catalog's selection answers `404` before any exchange. The exchange goes through the credential proxy with the access rule and the connection selection of `/api/credential-proxy/proxy` without `X-Run-Id`, against the integration's latest published version, and is journaled as one call of the connection once anything was sent (the `tools/call` itself whatever its outcome, a timeout included, else the last exchange that reached the server, such as a refused handshake). The server's result is relayed without the `_meta` keys of a reserved prefix (`dev.appstrate/`, `io.modelcontextprotocol/`, `modelcontextprotocol.io/`, `mcp/`); a tool error is a result with `isError: true`. A refusal produced by the credential proxy's own checks or a transport fault carries RFC 9209 `Proxy-Status: appstrate; error=<type>` (the 403, 502, 503 and 504 below name it); the platform's other refusals and the result carry none. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`.
+         */
+        post: operations["callRemoteIntegrationTool"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/docs": {
@@ -1920,7 +1960,7 @@ export interface paths {
         put?: never;
         /**
          * Propose manifest fields from the integration's connected MCP server
-         * @description Connects to the remote MCP server of the integration's draft (the working copy being edited, published or not) through the credential proxy, authorized against that draft — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, each exchange journaled like one of its calls (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted; an integration declaring no auths (AFPS §7.2) has nothing to inject, and its server is reached directly, egress-guarded on every hop, without a connection — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500 tools over 20 pages of at most 2 MiB each) as an empty `tools_policy` entry each and as an entry of `tools`, and as `default_tools` only the tools annotated `readOnlyHint: true` and not `destructiveHint: true`, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning). The whole sync is bounded to 20 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Only a Streamable HTTP server is supported. Requires write authority on the package in its home space and, when the draft declares auths, `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too). Rate limited to 10 requests per minute.
+         * @description Connects to the remote MCP server of the integration's draft (the working copy being edited, published or not) through the credential proxy, authorized against that draft — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, its listing journaled as one call of the connection (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted; an integration declaring no auths (AFPS §7.2) has nothing to inject, and its server is reached directly, egress-guarded on every hop, without a connection — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500 tools over 20 pages of at most 2 MiB each) as an empty `tools_policy` entry each and as an entry of `tools`, and as `default_tools` only the tools annotated `readOnlyHint: true` and not `destructiveHint: true`, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning). The whole sync is bounded to 20 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Only a Streamable HTTP server is supported. Requires write authority on the package in its home space and, when the draft declares auths, `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too). Rate limited to 10 requests per minute.
          */
         post: operations["syncIntegrationFromServer"];
         delete?: never;
@@ -2160,7 +2200,7 @@ export interface paths {
         put?: never;
         /**
          * Per-organization MCP Streamable HTTP endpoint
-         * @description Model Context Protocol server (Streamable HTTP, stateless) for a single organization. Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it declares follow the caller's permissions: the read-only set (`search_operations`, `describe_operation`, `read_file`, `validate_package_file`, `get_runtime_capabilities`, and `get_me` unless the client injects its own caller context) is always present, while the acting tools — `invoke_operation` (`mcp:invoke`), `run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` (whatever guards the `listFiles` operation's own route), `import_package_file`, and `list_connections` with `api_call` (`mcp:invoke` plus `credential-proxy:call-own` or `credential-proxy:call`, on a bearer credential the credential proxy accepts) — are declared only to a caller whose grants make them usable, so `tools/list` differs by role. Together they let an MCP client discover and call platform API operations, launch and wait for agent runs, and call third-party APIs through the caller's own connections (and those shared into the space, for a caller holding `credential-proxy:call`), with the caller's own credentials. `api_call` is the only MCP path to the credential proxy: `/api/credential-proxy/proxy` is not an operation `invoke_operation` serves. Each organization has its own endpoint: a token obtained for this endpoint is audience-bound (RFC 8707) to the per-org resource URI `<APP_URL>/api/mcp/o/{org}` and cannot drive any other organization. To use several organizations, configure one MCP server entry per organization. Without a pinned space (no space-bound credential, no `/s/{space}` in the URL) the connection reaches every space where the caller holds a role, and every tool that acts in a space requires a `space_id` argument whose schema lists them. Requires the `mcp:read` permission (and `mcp:invoke` to call operations). A refused tool call (missing, unknown or invalid argument, unknown operation or space, missing grant) is a `tools/call` result with `isError: true` whose text is `{ code, error, … }`; an operation the route answered with an HTTP error is returned as `{ status, body }` with `isError: true`, except a 403 the caller's permissions explain, which is a `not_granted` refusal. Only an unknown tool name is a JSON-RPC `-32602`.
+         * @description Model Context Protocol server (Streamable HTTP, stateless) for a single organization. Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it declares follow the caller's permissions: the read-only set (`search_operations`, `describe_operation`, `read_file`, `validate_package_file`, `get_runtime_capabilities`, and `get_me` unless the client injects its own caller context) is always present, while the acting tools — `invoke_operation` (`mcp:invoke`), `run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` (whatever guards the `listFiles` operation's own route), `import_package_file`, and `search_integration_tools` with `call_integration_tool` (`mcp:invoke` plus `credential-proxy:call-own` or `credential-proxy:call`, on a bearer credential the credential proxy accepts) — are declared only to a caller whose grants make them usable, so `tools/list` differs by role. Together they let an MCP client discover and call platform API operations, launch and wait for agent runs, and call third-party APIs through the caller's own connections (and those shared into the space, for a caller holding `credential-proxy:call`), with the caller's own credentials. `call_integration_tool` is the only MCP path to the credential proxy: `/api/credential-proxy/proxy` is not an operation `invoke_operation` serves. Each organization has its own endpoint: a token obtained for this endpoint is audience-bound (RFC 8707) to the per-org resource URI `<APP_URL>/api/mcp/o/{org}` and cannot drive any other organization. To use several organizations, configure one MCP server entry per organization. Without a pinned space (no space-bound credential, no `/s/{space}` in the URL) the connection reaches every space where the caller holds a role, and every tool that acts in a space requires a `space_id` argument whose schema lists them. Requires the `mcp:read` permission (and `mcp:invoke` to call operations). A refused tool call (missing, unknown or invalid argument, unknown operation or space, missing grant) is a `tools/call` result with `isError: true` whose text is `{ code, error, … }`; an operation the route answered with an HTTP error is returned as `{ status, body }` with `isError: true`, except a 403 the caller's permissions explain, which is a `not_granted` refusal. Only an unknown tool name is a JSON-RPC `-32602`.
          */
         post: operations["mcpStreamableHttpPost"];
         delete?: never;
@@ -2184,7 +2224,7 @@ export interface paths {
         put?: never;
         /**
          * Space-pinned MCP Streamable HTTP endpoint
-         * @description Model Context Protocol server (Streamable HTTP, stateless) for one space of an organization: the organization's endpoint pinned to `{space}` by its URL, usable by any client. Every call acts in `{space}`, and tools take no `space_id`. Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it declares follow the caller's permissions: the read-only set (`search_operations`, `describe_operation`, `read_file`, `validate_package_file`, `get_runtime_capabilities`, and `get_me` unless the client injects its own caller context) is always present, while the acting tools — `invoke_operation` (`mcp:invoke`), `run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` (whatever guards the `listFiles` operation's own route), `import_package_file`, and `list_connections` with `api_call` (`mcp:invoke` plus `credential-proxy:call-own` or `credential-proxy:call`, on a bearer credential the credential proxy accepts) — are declared only to a caller whose grants make them usable, so `tools/list` differs by role. Together they let an MCP client discover and call platform API operations, launch and wait for agent runs, and call third-party APIs through the caller's own connections (and those shared into the space, for a caller holding `credential-proxy:call`), with the caller's own credentials. `api_call` is the only MCP path to the credential proxy: `/api/credential-proxy/proxy` is not an operation `invoke_operation` serves. The endpoint is its own OAuth protected resource, `<APP_URL>/api/mcp/o/{org}/s/{space}` (RFC 8707, RFC 9728). It accepts a token bound to that URI or to the organization's resource `<APP_URL>/api/mcp/o/{org}`. A token bound to the space reaches neither another space nor the organization's endpoint, and it is capped like a space API key: no organization-level permission (member management, organization settings) is in its reach. A space-bound credential (API key or token) naming another space is a 403. Requires the `mcp:read` permission (and `mcp:invoke` to call operations). A refused tool call (missing, unknown or invalid argument, unknown operation or space, missing grant) is a `tools/call` result with `isError: true` whose text is `{ code, error, … }`; an operation the route answered with an HTTP error is returned as `{ status, body }` with `isError: true`, except a 403 the caller's permissions explain, which is a `not_granted` refusal. Only an unknown tool name is a JSON-RPC `-32602`.
+         * @description Model Context Protocol server (Streamable HTTP, stateless) for one space of an organization: the organization's endpoint pinned to `{space}` by its URL, usable by any client. Every call acts in `{space}`, and tools take no `space_id`. Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it declares follow the caller's permissions: the read-only set (`search_operations`, `describe_operation`, `read_file`, `validate_package_file`, `get_runtime_capabilities`, and `get_me` unless the client injects its own caller context) is always present, while the acting tools — `invoke_operation` (`mcp:invoke`), `run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` (whatever guards the `listFiles` operation's own route), `import_package_file`, and `search_integration_tools` with `call_integration_tool` (`mcp:invoke` plus `credential-proxy:call-own` or `credential-proxy:call`, on a bearer credential the credential proxy accepts) — are declared only to a caller whose grants make them usable, so `tools/list` differs by role. Together they let an MCP client discover and call platform API operations, launch and wait for agent runs, and call third-party APIs through the caller's own connections (and those shared into the space, for a caller holding `credential-proxy:call`), with the caller's own credentials. `call_integration_tool` is the only MCP path to the credential proxy: `/api/credential-proxy/proxy` is not an operation `invoke_operation` serves. The endpoint is its own OAuth protected resource, `<APP_URL>/api/mcp/o/{org}/s/{space}` (RFC 8707, RFC 9728). It accepts a token bound to that URI or to the organization's resource `<APP_URL>/api/mcp/o/{org}`. A token bound to the space reaches neither another space nor the organization's endpoint, and it is capped like a space API key: no organization-level permission (member management, organization settings) is in its reach. A space-bound credential (API key or token) naming another space is a 403. Requires the `mcp:read` permission (and `mcp:invoke` to call operations). A refused tool call (missing, unknown or invalid argument, unknown operation or space, missing grant) is a `tools/call` result with `isError: true` whose text is `{ code, error, … }`; an operation the route answered with an HTTP error is returned as `{ status, body }` with `isError: true`, except a 403 the caller's permissions explain, which is a `not_granted` refusal. Only an unknown tool name is a JSON-RPC `-32602`.
          */
         post: operations["mcpStreamableHttpPostInSpace"];
         delete?: never;
@@ -4862,7 +4902,7 @@ export interface paths {
         head?: never;
         /**
          * Update a space
-         * @description Update space name, icon, colour, settings, visibility or default role. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears `icon` or `color`. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility`, `default_role`, `icon` or `color` is a 409 `personal_space_immutable`.
+         * @description Update space name, icon, colour, settings, visibility, default role or credential proxy switch. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears `icon` or `color`. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility`, `default_role`, `icon`, `color` or `credential_proxy_open` is a 409 `personal_space_immutable`.
          */
         patch: operations["updateSpace"];
         trace?: never;
@@ -6964,7 +7004,7 @@ export interface components {
             source?: "admin_pin" | "org_default_enforced" | "run_override" | "schedule_override" | "member_pin" | "org_default" | "fallback_auto";
             /**
              * Format: uri
-             * @description Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 or launch `warnings[]` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` or `auth_key_mismatch` naming an `auth_key`, or `needs_reconnection` on a connection the actor owns, which the link reconnects in place). Never on `insufficient_scopes`. Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.
+             * @description Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409, launch `warnings[]`, a `/api/credential-proxy/tools/call` connection-selection 409 or a `refusal` of a `not_ready` entry of `GET /api/credential-proxy/tools` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` or `auth_key_mismatch` naming an `auth_key`, or `needs_reconnection` on a connection the actor owns, which the link reconnects in place). Never on `insufficient_scopes`. Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.
              */
             connect_url?: string;
             /**
@@ -7438,6 +7478,8 @@ export interface components {
              * @enum {string}
              */
             default_role: "admin" | "builder" | "operator" | "runner" | "viewer";
+            /** @description Whether members may use the space's connections directly, outside a run: `/api/credential-proxy/connections`, `/api/credential-proxy/tools`, `/api/credential-proxy/tools/call`, `/api/credential-proxy/proxy` without `X-Run-Id`, `POST /api/integrations/{packageId}/discover` for an integration declaring auths, and the MCP tools `search_integration_tools` and `call_integration_tool`. `false` answers those routes `403 credential_proxy_closed` and withholds those tools, for every role, organization owners and admins included. Runs keep their connections: a run the platform executes reaches them through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a member who may launch an inline run from having an agent make the call inside that run; that is governed by the inline-run permission of the member's role. Default `true`. */
+            credential_proxy_open: boolean;
             /** @description Whether this space is one member's personal space. Such a space is reached by its owner alone — organization owners and admins included — takes no other members, is always `private`, and only its name can be changed. Its owner is deliberately not named on the wire. */
             personal: boolean;
             /**
@@ -7924,7 +7966,7 @@ export interface components {
         AppstrateVersion: string;
         /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Scoped to the organization, the space and the authenticated caller — the member or end-user, the API key or OAuth client, the auth method — so the same key sent by another caller is a new request, never a replay. Only a request that executed — a 2xx — is stored, for 24 hours. A repeat by the same caller with the same method, URL and body re-serves that response with `Idempotent-Replayed: true`: current permissions are checked again, a run is re-read under current visibility, and its `warnings` items carry no bearer connect link (`connect_url`, `expiresAt`, `packageId`). A refusal (4xx) or failure (5xx) is never stored: the key is released and a retry is judged again, so a `409 missing_integration_connection` retried after connecting launches the run. While a response is stored, the same key with a different method, URL or body is `422 idempotency_conflict`; a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
         IdempotencyKey: string;
-        /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, and each such item of a launch response's `warnings`, also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
+        /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, each such item of a launch response's `warnings`, each such item of a `/api/credential-proxy/tools/call` connection-selection 409, and each such `refusal` of a `not_ready` entry of `GET /api/credential-proxy/tools` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
         ConnectOffers: "1";
         /** @description Space ID. Required for cookie auth (SSE cannot send X-Space-Id header). Not needed for API key auth (space resolved from key). */
         SseSpaceId: string;
@@ -8982,7 +9024,7 @@ export interface operations {
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
                 /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Scoped to the organization, the space and the authenticated caller — the member or end-user, the API key or OAuth client, the auth method — so the same key sent by another caller is a new request, never a replay. Only a request that executed — a 2xx — is stored, for 24 hours. A repeat by the same caller with the same method, URL and body re-serves that response with `Idempotent-Replayed: true`: current permissions are checked again, a run is re-read under current visibility, and its `warnings` items carry no bearer connect link (`connect_url`, `expiresAt`, `packageId`). A refusal (4xx) or failure (5xx) is never stored: the key is released and a retry is judged again, so a `409 missing_integration_connection` retried after connecting launches the run. While a response is stored, the same key with a different method, URL or body is `422 idempotency_conflict`; a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, and each such item of a launch response's `warnings`, also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
+                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, each such item of a launch response's `warnings`, each such item of a `/api/credential-proxy/tools/call` connection-selection 409, and each such `refusal` of a `not_ready` entry of `GET /api/credential-proxy/tools` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
                 "X-Appstrate-Connect-Offers"?: components["parameters"]["ConnectOffers"];
             };
             path: {
@@ -11530,7 +11572,16 @@ export interface operations {
                 };
             };
             401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
+            /** @description `forbidden` — the principal holds neither `credential-proxy:call-own` nor `credential-proxy:call`; `credential_proxy_closed` — the space's `credential_proxy_open` is `false`. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
         };
     };
     credentialProxyGet: {
@@ -11612,7 +11663,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
+            /** @description Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -11798,7 +11849,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
+            /** @description Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -11984,7 +12035,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
+            /** @description Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -12165,7 +12216,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
+            /** @description Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -12351,7 +12402,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
+            /** @description Forbidden. `unauthorized_target` — the target is not in `authorized_uris`, or, on a call that substitutes a `{{credential_field}}`, a redirect hop is not (any other call gets that 3xx back unfollowed), or the connection does not render the declared list (`Proxy-Status` error `http_request_denied`); `blocked_target` — it resolves into a blocked network range (`destination_ip_prohibited`); `credential_exfiltration_refused` — the call carries a credential and the allowlist does not name its hosts: it is empty or has an entry that leaves the host to the caller, or every entry matching the target reaches it through a wildcard past the registrable domain written under it, judged with the Public Suffix List (the message then names the host to list) (`http_request_denied`); `call_permission_required` — no `X-Run-Id`, an enforced org default governs the integration in this space and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`http_request_denied`); `credential_proxy_closed` — no `X-Run-Id`, and the space's `credential_proxy_open` is `false`, whatever the caller's role (`proxy_internal_response`); `forbidden` — the principal lacks the permission of the path the call takes (`credential-proxy:call` with `X-Run-Id`, `credential-proxy:call-own` or `credential-proxy:call` without), session bound to a different principal, cookie session used, or `X-Run-Id` names another actor's run or a run the platform executes. */
             403: {
                 headers: {
                     /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
@@ -12449,6 +12500,327 @@ export interface operations {
                 };
                 content: {
                     "*/*": unknown;
+                };
+            };
+        };
+    };
+    listIntegrationTools: {
+        parameters: {
+            query?: {
+                /** @description Lists the tools of this integration alone (`@scope/name`); `404` when it is not active in the space. */
+                integration_package_id?: string;
+                /** @description Resolves the tool of this name alone: an `api_call` tool lists no server, and only the remote integrations whose namespace starts the name are listed. `not_ready` is then empty. */
+                name?: string;
+                /** @description The connection the server of the integration it belongs to is listed with, as `X-Connection-Id` names one on `/api/credential-proxy/proxy`. */
+                connection_id?: string;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, each such item of a launch response's `warnings`, each such item of a `/api/credential-proxy/tools/call` connection-selection 409, and each such `refusal` of a `not_ready` entry of `GET /api/credential-proxy/tools` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
+                "X-Appstrate-Connect-Offers"?: components["parameters"]["ConnectOffers"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tools, sorted by integration, `api_call` tools first within one; a remote integration's typed tools follow in the order its server's `tools/list` gives them, or, when the server could not be listed in time (`catalog_unreadable`), its declared names in no guaranteed order. A server the proxy refused to list is an entry of `unlisted`, never an error status. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        tools: {
+                            /** @description The tool's name: `{ns}__api_call` (`{ns}__api_call__{auth}` when several auths of the integration expose one) or `{ns}__{tool}` for a typed tool, `{ns}` being the package id normalised, with a suffix hashed from the package id when another integration active in the space normalises alike. */
+                            name: string;
+                            /**
+                             * @description `api_call`: called through `/api/credential-proxy/proxy` with one of `connections`; `remote`: a typed tool of the integration's MCP server, called through `/api/credential-proxy/tools/call` by its `remote_name`.
+                             * @enum {string}
+                             */
+                            kind: "api_call" | "remote";
+                            /** @description Integration package id: the `X-Integration-Id` of a call. */
+                            integration_package_id: string;
+                            description: string;
+                            /** @description `api_call` only: the auth whose connections it reaches. */
+                            auth_key?: string;
+                            /** @description `api_call` only: the integration also has connections of another auth, so a call names one of `connections` (`X-Connection-Id`). */
+                            connection_required?: boolean;
+                            /** @description `remote` only: the name the server lists the tool by, which `tools/call` takes. */
+                            remote_name?: string;
+                            /** @description `remote` only: the tool's input schema, sanitised as in a run. */
+                            input_schema?: {
+                                [key: string]: unknown;
+                            };
+                            /** @description `remote` only, when the server declares one: the schema of the tool's `structuredContent`, sanitised as in a run. */
+                            output_schema?: {
+                                [key: string]: unknown;
+                            };
+                            /**
+                             * @description `remote` only: the server's `tools/list` could not be read, or not within the listing's 20 s, so the tool is a declared name, without description and with an empty object schema.
+                             * @enum {boolean}
+                             */
+                            catalog_unreadable?: true;
+                            /** @description The connections it reaches, as `GET /api/credential-proxy/connections` lists them. */
+                            connections: {
+                                /**
+                                 * Format: uuid
+                                 * @description The `X-Connection-Id` that names this connection.
+                                 */
+                                connection_id: string;
+                                label: string;
+                                /** @description True when the connection is the caller's own, false when another member shared it in the space: listed for a caller holding `credential-proxy:call`, and used when named or designated by an org default. */
+                                owned_by_actor: boolean;
+                                /** @description The manifest auth the connection is on. */
+                                auth_key: string;
+                                scopes_granted: string[];
+                                /** @description The auth's `authorized_uris`: what `X-Target` and every redirect hop are matched against. A literal entry is given as is, an entry templated on a connection variable (`{$variable.<name>}`) rendered for this connection, or omitted when the connection does not render it. An entry templated on a credential field (`{$credential.<field>}`) is given as the manifest declares it, never rendered: the proxy resolves it server-side from the stored credential, whose values this list never carries. To call such a target, write `{{<field>}}` in `X-Target` where the entry has `{$credential.<field>}`: `{{webhook_url}}` for an entry that is `{$credential.webhook_url}` alone (the field holds the whole URL), `https://{{host}}/v1/items` for `https://{$credential.host}/**`. */
+                                authorized_uris: string[];
+                                /** @description The auth sets `allow_all_uris`. Ignored on a call that places a `{{credential_field}}`: see `X-Target`. */
+                                allow_all_uris: boolean;
+                                /** @description A call binding it answers `409 needs_reconnection` until it is reconnected. */
+                                needs_reconnection: boolean;
+                                /** @description An enforced org default governs the integration in this space and the caller holds no `credential-proxy:call`: their call without `X-Run-Id` answers `403 call_permission_required`, this connection named or not. */
+                                call_permission_required: boolean;
+                                /** @description `remote` only: the scopes the tool's `tools_policy` entry requires on the connection's auth that it lacks; a call with it answers `409 insufficient_scopes`. */
+                                missing_scopes?: string[];
+                            }[];
+                        }[];
+                        not_ready: {
+                            /** @description Integration package id: the `X-Integration-Id` of a call. */
+                            integration_package_id: string;
+                            display_name: string;
+                            /** @description What a call naming no connection gets for this caller, as the integration detail's `proxy_connection` states it, judged against the latest published version: one of `none`, `needs_reconnection`, `not_permitted`, `default_unavailable`, `unusable` (`proxy_closed` never: a closed space refuses the listing itself). */
+                            proxy_connection: {
+                                /**
+                                 * @description `not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, and the server sync reaches its server directly. `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections.
+                                 * @enum {string}
+                                 */
+                                status: "ready" | "must_choose" | "needs_reconnection" | "none" | "not_permitted" | "default_unavailable" | "unusable" | "proxy_closed" | "not_required";
+                                /** @description An ENFORCED org default governs the integration in this space: its connection is the space admins' to set, never the caller's. */
+                                imposed: boolean;
+                            };
+                            /** @description Present when the verdict is a refusal the selection describes: the `not_connected` item of `none` (with the `auth_key` and `required_scopes` a connect flow targets), else the first item of the refusal (`needs_reconnection`, `pinned_connection_unavailable`…). Absent on `not_permitted`. */
+                            refusal?: components["schemas"]["ResolutionFieldError"];
+                        }[];
+                        unlisted: {
+                            integration_package_id: string;
+                            refusal: components["schemas"]["ProblemDetail"] & {
+                                /**
+                                 * @description `upstream_credential_rejected`: the server's HTTP status.
+                                 * @enum {integer}
+                                 */
+                                upstream_status?: 401 | 403;
+                                /** @description `upstream_credential_rejected`, when the proxy's forced refresh judged the rejection (`X-Appstrate-Credential-Status` on `/proxy`): `needs_reconnection` — the connection is now flagged and its owner must reconnect it; `in_use` — it stays in use, `failures` counting this rejection toward the flag when it was counted. */
+                                credential?: {
+                                    /** @enum {string} */
+                                    status: "in_use" | "needs_reconnection";
+                                    cause: string;
+                                    detail: string;
+                                    failures?: number;
+                                    max_failures?: number;
+                                };
+                                /** @description `upstream_mcp_error`: the server's JSON-RPC error, its message untrusted. */
+                                mcp_error?: {
+                                    code: number;
+                                    message: string;
+                                };
+                            };
+                        }[];
+                        /** @description The remote integrations whose server lists more tools than are read: only its first `max_tools` at most are listed, fewer when their descriptors exceed 512 KiB. Empty when `name` is given. */
+                        truncated_catalogs: {
+                            integration_package_id: string;
+                            max_tools: number;
+                        }[];
+                    };
+                };
+            };
+            /** @description `validation_failed` — an unknown query parameter, an empty `integration_package_id` or `name`, or a `connection_id` that is not a uuid (`errors[]` names each). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description `forbidden` — the principal holds neither `credential-proxy:call-own` nor `credential-proxy:call`, or authenticates with a session cookie or another credential the bearer-only proxy refuses (the chat's MCP loopback bearer included); `credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever the caller's role. No `Proxy-Status`: nothing is relayed on this route. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `not_found` — `integration_package_id` names an integration that is not active in this space. Without it, an inactive integration is left out of the listing. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    callRemoteIntegrationTool: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, each such item of a launch response's `warnings`, each such item of a `/api/credential-proxy/tools/call` connection-selection 409, and each such `refusal` of a `not_ready` entry of `GET /api/credential-proxy/tools` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
+                "X-Appstrate-Connect-Offers"?: components["parameters"]["ConnectOffers"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Integration package id (`@scope/name`). */
+                    integration_package_id: string;
+                    /**
+                     * Format: uuid
+                     * @description The connection to call with; omitted, the proxy's selection (`X-Connection-Id` semantics).
+                     */
+                    connection_id?: string;
+                    /** @description The tool's name, as the server lists it. */
+                    name: string;
+                    /** @description The tool's arguments, following its `input_schema`. */
+                    arguments?: {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+        responses: {
+            /** @description The server's result. */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description An MCP `CallToolResult` (`content`, optional `structuredContent` and `isError`). */
+                        result: {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+            };
+            /** @description `invalid_request` — the body is not valid JSON; `validation_failed` — it is not the schema's object (a missing or empty `integration_package_id` or `name`, a `connection_id` that is not a uuid, `arguments` that is not an object, an unknown field such as the retired `integration_id`); `connection_not_in_org_default` — an enforced org default governs the integration and `connection_id` names a connection outside its set (a holder of `credential-proxy:call`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description `forbidden` — the principal holds neither `credential-proxy:call-own` nor `credential-proxy:call`, or authenticates with a session cookie or another credential the bearer-only proxy refuses (the chat's MCP loopback bearer included); `credential_proxy_closed` — the space's `credential_proxy_open` is `false`, whatever the caller's role; `call_permission_required` — an enforced org default governs the integration and the caller holds `credential-proxy:call-own` without `credential-proxy:call` (`Proxy-Status` error `http_request_denied`); the proxy's refusals of the server URL, before anything is sent: `unauthorized_target` (`http_request_denied`), `blocked_target` (`destination_ip_prohibited`), `credential_exfiltration_refused` (`http_request_denied`). */
+            403: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `not_found` — the integration is not active in this space, has no published version, or its catalog offers no tool of that `name` (hidden, the connect tool, an `api_call` tool, or undeclared while `allow_undeclared_tools` is not `true`), before any exchange; `credential_not_found` — no connection the caller reaches, or `connection_id` names nothing the caller reaches (the same body whether it is another member's connection out of reach or no connection at all). */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description The connection selection of `/api/credential-proxy/proxy` refused, judged for the named tool: `must_choose_connection` (`errors[0].candidate_connections`, each with its `missing_scopes` for the tool; retry with one `id` in `connection_id`), `needs_reconnection`, `pinned_connection_unavailable`; `insufficient_scopes` — the connection lacks scopes the tool's `tools_policy` entry requires (`errors[0].missing_scopes`, `required_scopes`, `auth_key`, `connection_id`, `owned_by_actor`, `remedy`). With `X-Appstrate-Connect-Offers: 1` and `integrations:connect`, an item a connect flow clears carries a `connect_url` (a reconnection of the caller's own connection; never `insufficient_scopes`, whose `remedy` says what to do). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `integration_not_remote` — the integration is not backed by a Streamable HTTP MCP server; `remote_url_unrenderable` — its server URL is built from the connection's variables and they do not render it. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+            /** @description `bad_gateway` — the MCP server failed the exchange; `upstream_credential_rejected` — it refused the connection's credential (`upstream_status`: 401 or 403; `credential: { status, cause, detail, failures?, max_failures? }` when the proxy's forced refresh judged the rejection, as `X-Appstrate-Credential-Status` states it on `/proxy`: `needs_reconnection` — the connection is now flagged and its owner must reconnect it, `in_use` — it stays in use); `upstream_mcp_error` — it answered a JSON-RPC error (`mcp_error: { code, message }`, its message untrusted text); `upstream_response_too_large` — the tool ran, but its answer exceeds the exchange bound, answered as JSON or as an event stream; the proxy's own `upstream_unresolvable` (`Proxy-Status` error `dns_error`), `upstream_unreachable` (`destination_unavailable`) and `credential_unusable` (`proxy_configuration_error`). */
+            502: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"] & {
+                        /**
+                         * @description `upstream_credential_rejected`: the server's HTTP status.
+                         * @enum {integer}
+                         */
+                        upstream_status?: 401 | 403;
+                        /** @description `upstream_credential_rejected`, when the proxy's forced refresh judged the rejection (`X-Appstrate-Credential-Status` on `/proxy`): `needs_reconnection` — the connection is now flagged and its owner must reconnect it; `in_use` — it stays in use, `failures` counting this rejection toward the flag when it was counted. */
+                        credential?: {
+                            /** @enum {string} */
+                            status: "in_use" | "needs_reconnection";
+                            cause: string;
+                            detail: string;
+                            failures?: number;
+                            max_failures?: number;
+                        };
+                        /** @description `upstream_mcp_error`: the server's JSON-RPC error, its message untrusted. */
+                        mcp_error?: {
+                            code: number;
+                            message: string;
+                        };
+                    };
+                };
+            };
+            /** @description `encryption_key_unavailable` — the connection's stored credential is encrypted under a key id missing from the platform's keyring; nothing was sent (`Proxy-Status` error `proxy_configuration_error`). */
+            503: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the MCP server did not answer within the call's 45 s deadline, the tool may have run (`Proxy-Status` error `http_response_timeout`). */
+            504: {
+                headers: {
+                    /** @description RFC 9209. `appstrate; received-status=<n>`: the upstream's response, relayed. `appstrate; error=<type>` (RFC 9209 §2.3 error type): the proxy's own response. Bare `appstrate`: served by the proxy without contacting the upstream (a cache hit). */
+                    "Proxy-Status"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
         };
@@ -13982,10 +14354,10 @@ export interface operations {
                         /** @description The connection an unnamed credential-proxy call outside a run (`/api/credential-proxy/proxy` with no `X-Run-Id` and no `X-Connection-Id`) gets for THIS caller in the current space: the same selection, under the caller's reach (`credential-proxy:call` reaches the connections usable in the space, `credential-proxy:call-own` alone the caller's own), with the space's org default applied. It is judged against this response's `manifest` — the latest published version, else the draft while nothing is published — which is what the proxy authorizes a call against once a version exists, and what the server sync of a never-published draft (`POST /api/integrations/{packageId}/discover`) authorizes against. A published integration whose draft changed its auths is judged on the published auths, so a sync of that draft may still answer otherwise. Unlike `auths[].ready`, it is the governed answer. It names no connection. The proxy also requires the integration to be active here (`active`), which this verdict does not repeat. */
                         proxy_connection: {
                             /**
-                             * @description `not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, and the server sync reaches its server directly. `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal).
+                             * @description `not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, and the server sync reaches its server directly. `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections.
                              * @enum {string}
                              */
-                            status: "ready" | "must_choose" | "needs_reconnection" | "none" | "not_permitted" | "default_unavailable" | "unusable" | "not_required";
+                            status: "ready" | "must_choose" | "needs_reconnection" | "none" | "not_permitted" | "default_unavailable" | "unusable" | "proxy_closed" | "not_required";
                             /** @description An ENFORCED org default governs the integration in this space: its connection is the space admins' to set, never the caller's. */
                             imposed: boolean;
                         };
@@ -15115,7 +15487,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description No write authority on the package, `credential-proxy:call-own` missing for a draft declaring auths, or the proxy refused the call (`unauthorized_target`: the server URL is outside the auth's `authorized_uris`; `blocked_target`: egress guard). */
+            /** @description No write authority on the package, `credential-proxy:call-own` missing for a draft declaring auths, `credential_proxy_closed` — the draft declares auths and the space's `credential_proxy_open` is `false`, whatever the caller's role —, or the proxy refused the call (`unauthorized_target`: the server URL is outside the auth's `authorized_uris`; `blocked_target`: egress guard). */
             403: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
@@ -15150,8 +15522,19 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
-            /** @description `bad_gateway` — the server could not be reached, did not answer as an MCP server within 20 s, refused the credential, or asked one of an integration declaring no auths; the proxy's `upstream_*` and `credential_unusable` codes are relayed. */
+            /** @description `bad_gateway` — the server could not be reached, did not answer as an MCP server, or asked a credential of an integration declaring no auths; `upstream_credential_rejected` — it refused the connection's credential (`upstream_status`: 401 or 403; `credential: { status, cause, detail }` when the proxy's forced refresh judged it, `needs_reconnection` meaning the connection is now flagged); `upstream_mcp_error` — it answered a JSON-RPC error (`mcp_error: { code, message }`); `upstream_response_too_large` — an answer exceeds 2 MiB; the proxy's `upstream_unresolvable`, `upstream_unreachable` and `credential_unusable` codes are relayed. */
             502: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description `upstream_timeout` — the server did not answer within the sync's 20 s (`Proxy-Status` error `http_response_timeout`). */
+            504: {
                 headers: {
                     "Request-Id": components["headers"]["RequestId"];
                     "Appstrate-Version": components["headers"]["AppstrateVersion"];
@@ -15612,10 +15995,10 @@ export interface operations {
                         /** @description The connection an unnamed credential-proxy call outside a run (`/api/credential-proxy/proxy` with no `X-Run-Id` and no `X-Connection-Id`) gets for THIS caller in the current space: the same selection, under the caller's reach (`credential-proxy:call` reaches the connections usable in the space, `credential-proxy:call-own` alone the caller's own), with the space's org default applied. It is judged against this response's `manifest` — the latest published version, else the draft while nothing is published — which is what the proxy authorizes a call against once a version exists, and what the server sync of a never-published draft (`POST /api/integrations/{packageId}/discover`) authorizes against. A published integration whose draft changed its auths is judged on the published auths, so a sync of that draft may still answer otherwise. Unlike `auths[].ready`, it is the governed answer. It names no connection. The proxy also requires the integration to be active here (`active`), which this verdict does not repeat. */
                         proxy_connection: {
                             /**
-                             * @description `not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, and the server sync reaches its server directly. `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal).
+                             * @description `not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, and the server sync reaches its server directly. `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections.
                              * @enum {string}
                              */
-                            status: "ready" | "must_choose" | "needs_reconnection" | "none" | "not_permitted" | "default_unavailable" | "unusable" | "not_required";
+                            status: "ready" | "must_choose" | "needs_reconnection" | "none" | "not_permitted" | "default_unavailable" | "unusable" | "proxy_closed" | "not_required";
                             /** @description An ENFORCED org default governs the integration in this space: its connection is the space admins' to set, never the caller's. */
                             imposed: boolean;
                         };
@@ -24304,7 +24687,7 @@ export interface operations {
                 "Appstrate-Version"?: components["parameters"]["AppstrateVersion"];
                 /** @description Unique key for idempotent requests (max 255 chars). Prevents duplicate resource creation on retries. Scoped to the organization, the space and the authenticated caller — the member or end-user, the API key or OAuth client, the auth method — so the same key sent by another caller is a new request, never a replay. Only a request that executed — a 2xx — is stored, for 24 hours. A repeat by the same caller with the same method, URL and body re-serves that response with `Idempotent-Replayed: true`: current permissions are checked again, a run is re-read under current visibility, and its `warnings` items carry no bearer connect link (`connect_url`, `expiresAt`, `packageId`). A refusal (4xx) or failure (5xx) is never stored: the key is released and a retry is judged again, so a `409 missing_integration_connection` retried after connecting launches the run. While a response is stored, the same key with a different method, URL or body is `422 idempotency_conflict`; a concurrent duplicate is `409 idempotency_in_progress`. This operation honours the header because it declares this parameter — operations that do not declare it refuse the header with `400 idempotency_not_supported` rather than silently ignoring it (see the “Idempotency” section of the API description). */
                 "Idempotency-Key"?: components["parameters"]["IdempotencyKey"];
-                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, and each such item of a launch response's `warnings`, also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
+                /** @description Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, each such item of a launch response's `warnings`, each such item of a `/api/credential-proxy/tools/call` connection-selection 409, and each such `refusal` of a `not_ready` entry of `GET /api/credential-proxy/tools` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it. */
                 "X-Appstrate-Connect-Offers"?: components["parameters"]["ConnectOffers"];
             };
             path?: never;
@@ -25976,6 +26359,7 @@ export interface operations {
                      *           },
                      *           "visibility": "open",
                      *           "default_role": "operator",
+                     *           "credential_proxy_open": true,
                      *           "personal": false,
                      *           "access": "member",
                      *           "role": {
@@ -26006,6 +26390,7 @@ export interface operations {
                      *           },
                      *           "visibility": "closed",
                      *           "default_role": "operator",
+                     *           "credential_proxy_open": true,
                      *           "personal": false,
                      *           "access": "none",
                      *           "role": null,
@@ -26085,6 +26470,7 @@ export interface operations {
                      *       },
                      *       "visibility": "open",
                      *       "default_role": "operator",
+                     *       "credential_proxy_open": true,
                      *       "personal": false,
                      *       "access": "member",
                      *       "role": {
@@ -26235,6 +26621,8 @@ export interface operations {
                      * @enum {string}
                      */
                     default_role?: "admin" | "builder" | "operator" | "runner" | "viewer";
+                    /** @description Whether members may use the space's connections directly, outside a run: `/api/credential-proxy/connections`, `/api/credential-proxy/tools`, `/api/credential-proxy/tools/call`, `/api/credential-proxy/proxy` without `X-Run-Id`, `POST /api/integrations/{packageId}/discover` for an integration declaring auths, and the MCP tools `search_integration_tools` and `call_integration_tool`. `false` answers those routes `403 credential_proxy_closed` and withholds those tools, for every role, organization owners and admins included. Runs keep their connections: a run the platform executes reaches them through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a member who may launch an inline run from having an agent make the call inside that run; that is governed by the inline-run permission of the member's role. Default `true`. */
+                    credential_proxy_open?: boolean;
                 };
             };
         };

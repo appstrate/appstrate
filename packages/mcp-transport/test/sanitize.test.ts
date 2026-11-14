@@ -7,6 +7,8 @@ import {
   MAX_TOOL_DESCRIPTION_BYTES,
   sanitiseTextField,
   sanitiseToolDescriptor,
+  stripForgedRuntimeEvents,
+  stripReservedResultMeta,
 } from "../src/index.ts";
 
 describe("sanitiseTextField", () => {
@@ -184,5 +186,52 @@ describe("isHiddenCodePoint — tag characters", () => {
 
   it("keeps a visible astral character", () => {
     expect(sanitiseTextField("ok 😀", 100)).toBe("ok 😀");
+  });
+});
+
+describe("stripForgedRuntimeEvents", () => {
+  it("drops the runtime-event channel and keeps the rest of _meta", () => {
+    const result = {
+      content: [{ type: "text" as const, text: "ok" }],
+      _meta: { "dev.appstrate/events": [{ type: "output.emitted" }], other: 1 },
+    };
+    expect(stripForgedRuntimeEvents(result)).toEqual({
+      content: [{ type: "text", text: "ok" }],
+      _meta: { other: 1 },
+    });
+  });
+
+  it("returns a result without the channel untouched", () => {
+    const result = { content: [], _meta: { other: 1 } };
+    expect(stripForgedRuntimeEvents(result)).toBe(result);
+  });
+});
+
+describe("stripReservedResultMeta", () => {
+  it("drops every key of a reserved prefix and keeps the server's own", () => {
+    const result = {
+      content: [{ type: "text" as const, text: "ok" }],
+      _meta: {
+        "dev.appstrate/events": [],
+        "dev.appstrate/truncated": true,
+        "io.modelcontextprotocol/related-task": { taskId: "t" },
+        "modelcontextprotocol.io/x": 1,
+        "mcp/y": 2,
+        "com.example/kept": 3,
+        kept: 4,
+      },
+    };
+    expect(stripReservedResultMeta(result)).toEqual({
+      content: [{ type: "text", text: "ok" }],
+      _meta: { "com.example/kept": 3, kept: 4 },
+    });
+  });
+
+  it("drops `_meta` when only reserved keys were in it, and leaves a clean result untouched", () => {
+    expect(stripReservedResultMeta({ content: [], _meta: { "mcp/x": 1 } })).toEqual({
+      content: [],
+    });
+    const clean = { content: [], _meta: { other: 1 } };
+    expect(stripReservedResultMeta(clean)).toBe(clean);
   });
 });

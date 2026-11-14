@@ -55,3 +55,21 @@ export async function seedProxyConnection(
     .returning({ id: integrationConnections.id });
   return row!.id;
 }
+
+/** An oauth2 auth with a consent screen, its access token sent as a Bearer to `authorizedUris`. */
+export function bearerOauthAuth(authorizedUris: string[]): Record<string, unknown> {
+  return {
+    type: "oauth2",
+    authorization_endpoint: "https://idp.example.com/authorize",
+    token_endpoint: "https://idp.example.com/token",
+    authorized_uris: authorizedUris,
+    delivery: {
+      http: {
+        in: "header",
+        name: "Authorization",
+        prefix: "Bearer ",
+        value: "{$credential.access_token}",
+      },
+    },
+  };
+}

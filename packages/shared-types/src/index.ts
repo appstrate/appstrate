@@ -1256,6 +1256,13 @@ export interface SpaceInfo {
   /** Preset the implicit members of an `open` space hold. */
   default_role: "admin" | "builder" | "operator" | "viewer";
   /**
+   * Whether members may use the space's connections through the credential proxy outside a
+   * run (REST without `X-Run-Id`, MCP `search_integration_tools` /
+   * `call_integration_tool`). `false` closes that
+   * door for every role; runs keep their connections. Always `true` on a personal space.
+   */
+  credential_proxy_open: boolean;
+  /**
    * Whether this is one member's personal space (RBAC spec §3.6). Reached by
    * its owner alone — organization owners and admins included — takes no other
    * members, always `private`, and only its name is editable. The owner is

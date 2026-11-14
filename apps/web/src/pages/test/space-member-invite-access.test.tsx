@@ -55,6 +55,7 @@ function pageFor(
     settings: {},
     visibility: options.visibility ?? (options.personal ? "private" : "open"),
     default_role: "viewer",
+    credential_proxy_open: true,
     personal: options.personal ?? false,
     access: "member",
     role: null,

@@ -219,15 +219,8 @@ const MAY_BE_REDEEMED =
  * RFC 9457 extension member `grant_may_be_redeemed: true` lets a client say it in its own words.
  */
 function mayHaveRedeemed(err: ApiError): ApiError {
-  return new ApiError({
-    status: err.status,
-    code: err.code,
-    title: err.title,
+  return err.with({
     detail: `${err.message} ${MAY_BE_REDEEMED}`,
-    param: err.param,
-    retryAfter: err.retryAfter,
-    errors: err.fieldErrors,
-    headers: err.headers,
     extensions: { ...err.extensions, grant_may_be_redeemed: true },
     cause: err.cause ?? err,
   });

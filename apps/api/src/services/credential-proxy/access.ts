@@ -9,37 +9,84 @@
  *     colleague's shared connection included, which is why launching runs (`agents:run`) is not
  *     enough: registering a remote run would otherwise hand out raw access to that connection.
  *   - outside a run: `credential-proxy:call` reaches the connections usable in the space,
- *     `credential-proxy:call-own` the caller's own only ({@link reachOutsideRun},
- *     `selectAccessibleConnection`).
+ *     `credential-proxy:call-own` the caller's own only, and only in a space whose admin left the
+ *     proxy open ({@link reachOutsideRun}, `selectAccessibleConnection`).
  *
- * The REST route decides it here, and the MCP module's `api_call` tool re-enters that route.
+ * Every door reaching a connection's credential outside a run takes its reach from
+ * {@link reachOutsideRun}: `/api/credential-proxy/{connections,proxy,tools,tools/call}` and the
+ * authenticated `POST /api/integrations/{packageId}/discover`. The MCP module's
+ * `call_integration_tool` re-enters those routes.
  */
 
 import type { Actor } from "../../lib/actor.ts";
 import type { Permission } from "../../lib/permissions.ts";
-import { forbidden } from "../../lib/errors.ts";
-import type { ProxyReach } from "../integration-connections.ts";
+import { ApiError, forbidden } from "../../lib/errors.ts";
+import type { SpaceContextRow } from "../../lib/space-lookup.ts";
+import type { ProxyReach, ReachOutsideRun } from "../integration-connections.ts";
 import { requireAttributableRun } from "../state/runs.ts";
 
 /** Reaches the connections usable in the space, and opens the run path. */
 const PROXY_CALL_PERMISSION = "credential-proxy:call" satisfies Permission;
 
-/** Outside a run: `usable` under `credential-proxy:call`, `own` under `call-own` alone. */
-export function reachOutsideRun(permissions: ReadonlySet<string>): ProxyReach {
+/** The one rule outside a run: the space's switch first, then the caller's permission. */
+function reachOf(
+  permissions: ReadonlySet<string>,
+  space: Pick<SpaceContextRow, "credentialProxyOpen">,
+): ProxyReach | "closed" {
+  if (!space.credentialProxyOpen) return "closed";
   return permissions.has(PROXY_CALL_PERMISSION) ? "usable" : "own";
+}
+
+/**
+ * The reach of a call outside a run: `usable` under `credential-proxy:call`, `own` under
+ * `call-own` alone. Throws `403 credential_proxy_closed` when the space's admin closed the proxy
+ * outside a run (`spaces.credential_proxy_open`), whatever the caller's role, org owners and
+ * admins included. A run's calls never come here: the platform's reach their connections through
+ * the sidecar, a remote run's are bounded by {@link authorizeProxyCall}.
+ */
+export function reachOutsideRun(
+  permissions: ReadonlySet<string>,
+  space: Pick<SpaceContextRow, "id" | "name" | "credentialProxyOpen">,
+): ProxyReach {
+  const reach = reachOf(permissions, space);
+  if (reach === "closed") {
+    throw new ApiError({
+      status: 403,
+      code: "credential_proxy_closed",
+      title: "Credential Proxy Closed",
+      detail: credentialProxyClosedDetail(space),
+    });
+  }
+  return reach;
 }
 
 /** Outside a run: `credential-proxy:call-own`, which `credential-proxy:call` implies. */
 const PROXY_CALL_OWN_PERMISSION = "credential-proxy:call-own" satisfies Permission;
 
 /**
- * {@link reachOutsideRun} for a caller the proxy route may not have admitted: `null` when it
- * holds neither proxy permission, the caller the route refuses outright.
+ * What {@link reachOutsideRun} gives the caller, for a readiness verdict that reaches no
+ * credential: `null` when it holds neither proxy permission (the route refuses it before anything
+ * else), `closed` when the space closes the proxy outside a run, else its reach.
  */
-export function reachOutsideRunIfPermitted(permissions: ReadonlySet<string>): ProxyReach | null {
-  return permissions.has(PROXY_CALL_PERMISSION) || permissions.has(PROXY_CALL_OWN_PERMISSION)
-    ? reachOutsideRun(permissions)
-    : null;
+export function reachOutsideRunIfPermitted(
+  permissions: ReadonlySet<string>,
+  space: Pick<SpaceContextRow, "credentialProxyOpen">,
+): ReachOutsideRun {
+  if (!permissions.has(PROXY_CALL_PERMISSION) && !permissions.has(PROXY_CALL_OWN_PERMISSION)) {
+    return null;
+  }
+  return reachOf(permissions, space);
+}
+
+/**
+ * Why a closed space refuses a call outside a run: the `credential_proxy_closed` refusal of the
+ * REST route and of the MCP module's org-wide `space_id` check.
+ */
+export function credentialProxyClosedDetail(space: { id: string; name: string }): string {
+  return (
+    `Space '${space.name}' (${space.id}) closes the credential proxy outside a run: its ` +
+    "connections are reached by a run only. A space admin can reopen it in the space settings."
+  );
 }
 
 /** Throws unless the caller may call the proxy for the run it names with `X-Run-Id`. */

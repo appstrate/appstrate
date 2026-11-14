@@ -424,6 +424,7 @@
     "agentSchema",
     "allocateMcpToolName",
     "allocateMcpToolNamespace",
+    "allowsUndeclaredTools",
     "anthropicReasoningBudgetTokens",
     "anthropicThinkingBudgets",
     "apiUploadToolNameFor",

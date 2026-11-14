@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `list_connections` and `api_call` through the real `/api/mcp/o/:org` endpoint, the real
+ * `search_integration_tools` and `call_integration_tool` through the real `/api/mcp/o/:org`
+ * endpoint, the real
  * credential-proxy routes behind them and a real minted MCP instance token (DCR client,
  * authorization-code flow, `aud` = the organization's MCP resource):
  *
@@ -9,23 +10,29 @@
  *     and a credential holding `credential-proxy:call` or `credential-proxy:call-own`, never a
  *     runner, a credential whose scopes omit both, or a cookie session or the chat's loopback
  *     bearer, which the bearer-only proxy refuses;
- *   - `api_call` makes one proxy call per request and relays what each came back with: the
+ *   - `call_integration_tool` with `{ns}__api_call` makes one proxy call per request and relays what each came back with: the
  *     upstream's answer, cut and filtered, or the proxy's own refusal. A connection another
  *     member shared is reached once named by a holder of `credential-proxy:call`, never with
  *     `credential-proxy:call-own` alone;
- *   - `list_connections` and the catalog's listing operation serve the same rows: the caller's
- *     own, and for a holder of `credential-proxy:call` those shared into the space.
+ *   - `search_integration_tools` and the catalog's listing operation serve the same rows: the caller's
+ *     own, and for a holder of `credential-proxy:call` those shared into the space;
+ *   - a remote MCP integration's typed tool (a fake server on loopback) searched, described and
+ *     called on both endpoints, an integration nobody connected in `not_ready` with its connect
+ *     link, the chat's loopback bearer refused at the routes themselves, and a closed space's
+ *     pinned endpoint offering nothing to call.
  *
  * The upstream is a stub of the global `fetch` the proxy calls, as in
  * `test/integration/routes/credential-proxy.test.ts`, which covers the proxy's access rule and
  * what reaches the upstream; argument handling and result shaping are covered request by request
- * in `test/unit/modules/mcp/connection-tools.test.ts`.
+ * in `test/unit/modules/mcp/integration-tools.test.ts`.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "bun:test";
+import { forgetProtocolEras } from "@appstrate/mcp-transport/testing";
 import { getEnv } from "@appstrate/env";
+import type { IntegrationManifest } from "@appstrate/core/integration";
 import { eq, like } from "drizzle-orm";
-import { integrationConnections, oauthResource } from "@appstrate/db/schema";
+import { integrationConnections, oauthResource, spaces } from "@appstrate/db/schema";
 import { getTestApp } from "../../../../../test/helpers/app.ts";
 import { db, truncateAll } from "../../../../../test/helpers/db.ts";
 import { flushRedis } from "../../../../../test/helpers/redis.ts";
@@ -44,7 +51,13 @@ import {
 import {
   httpHeaderDelivery,
   localIntegrationManifest,
+  remoteIntegrationManifest,
 } from "../../../../../test/helpers/integration-manifests.ts";
+import {
+  startFakeMcpServer,
+  type FakeMcpServer,
+} from "../../../../../test/helpers/fake-mcp-server.ts";
+import { allowLoopbackOAuthEgress } from "../../../../../test/helpers/strict-authorization-server.ts";
 import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../../../../test/helpers/mcp.ts";
 import { overrideJwks } from "../../../oidc/services/enduser-token.ts";
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
@@ -126,7 +139,7 @@ async function mintInstanceToken(ctx: TestContext): Promise<string> {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      client_name: "MCP client (connection tools)",
+      client_name: "MCP client (integration tools)",
       redirect_uris: [REDIRECT_URI],
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
@@ -213,14 +226,27 @@ type Entry = Record<string, unknown> & {
 };
 const entries = (data: Record<string, unknown>) => data.results as Entry[];
 
+/** The tool `@cporg/crm` exposes. */
+const TOOL = "cporg_crm__api_call";
+
+/** `call_integration_tool` on {@link TOOL}; `space_id` goes to the top level. */
+const callApi = (
+  caller: Caller,
+  { space_id, ...args }: Record<string, unknown>,
+): ReturnType<typeof callTool> =>
+  callTool(caller, "call_integration_tool", {
+    ...(space_id === undefined ? {} : { space_id }),
+    tool: TOOL,
+    arguments: args,
+  });
+
 const get = (path: string, overrides: Record<string, unknown> = {}) => ({
-  integration_package_id: INTEGRATION_ID,
   method: "GET",
   target: `${UPSTREAM}${path}`,
   ...overrides,
 });
 
-describe("mcp connection tools", () => {
+describe("mcp integration tools", () => {
   /** The organization's owner: preset `admin` in the default space. */
   let owner: TestContext;
 
@@ -234,9 +260,8 @@ describe("mcp connection tools", () => {
     owner = await createTestContext({ orgSlug: "cporg" });
     // The row the authorization server needs to mint the organization's MCP resource.
     await mcpModule.events!.onOrgCreate!(owner.orgId, owner.user.email);
-    await seedProxyIntegration(
-      owner,
-      localIntegrationManifest({
+    await seedProxyIntegration(owner, {
+      ...localIntegrationManifest({
         name: INTEGRATION_ID,
         displayName: "CRM",
         description: "CRM integration",
@@ -252,7 +277,8 @@ describe("mcp connection tools", () => {
           },
         },
       }),
-    );
+      _meta: { "dev.appstrate/api": { auths: { api: {} } } },
+    } as IntegrationManifest);
     mockUpstream(() => json({ ok: true }));
   });
 
@@ -277,15 +303,15 @@ describe("mcp connection tools", () => {
       for (const preset of ["admin", "operator"] as const) {
         const caller = preset === "admin" ? owner : await memberContext(owner, "member", preset);
         const names = await toolNames(await instanceCaller(caller));
-        expect(names, preset).toContain("list_connections");
-        expect(names, preset).toContain("api_call");
+        expect(names, preset).toContain("search_integration_tools");
+        expect(names, preset).toContain("call_integration_tool");
       }
 
       const runner = await toolNames(
         await instanceCaller(await memberContext(owner, "member", "runner")),
       );
-      expect(runner).not.toContain("list_connections");
-      expect(runner).not.toContain("api_call");
+      expect(runner).not.toContain("search_integration_tools");
+      expect(runner).not.toContain("call_integration_tool");
       // The control: a runner runs agents, which is not what declares the tools.
       expect(runner).toContain("run_and_wait");
     });
@@ -294,8 +320,8 @@ describe("mcp connection tools", () => {
       const names = await toolNames(
         await instanceCaller(await memberHolding(owner, CALL_OWN_ROLE)),
       );
-      expect(names).toContain("list_connections");
-      expect(names).toContain("api_call");
+      expect(names).toContain("search_integration_tools");
+      expect(names).toContain("call_integration_tool");
     });
 
     it("declares both to the owner of a personal space, preset `admin` there", async () => {
@@ -309,8 +335,8 @@ describe("mcp connection tools", () => {
         path: spacePath(owner, personal.id),
         headers: { Authorization: `Bearer ${await mintInstanceToken(owner)}` },
       });
-      expect(names).toContain("list_connections");
-      expect(names).toContain("api_call");
+      expect(names).toContain("search_integration_tools");
+      expect(names).toContain("call_integration_tool");
       expect(names).toContain("run_and_wait");
     });
 
@@ -319,8 +345,8 @@ describe("mcp connection tools", () => {
       const without = await toolNames(
         await keyCaller(owner, ["mcp:read", "mcp:invoke", "agents:run", "runs:read"]),
       );
-      expect(without).not.toContain("list_connections");
-      expect(without).not.toContain("api_call");
+      expect(without).not.toContain("search_integration_tools");
+      expect(without).not.toContain("call_integration_tool");
       expect(without).toContain("run_and_wait");
 
       // A key scoped `credential-proxy:call` alone, which implies `call-own`.
@@ -328,8 +354,8 @@ describe("mcp connection tools", () => {
         const withIt = await toolNames(
           await keyCaller(owner, ["mcp:read", "mcp:invoke", permission]),
         );
-        expect(withIt, permission).toContain("list_connections");
-        expect(withIt, permission).toContain("api_call");
+        expect(withIt, permission).toContain("search_integration_tools");
+        expect(withIt, permission).toContain("call_integration_tool");
       }
     });
 
@@ -338,8 +364,8 @@ describe("mcp connection tools", () => {
         path: spacePath(owner),
         headers: { Cookie: owner.cookie, "X-Org-Id": owner.orgId },
       });
-      expect(names).not.toContain("list_connections");
-      expect(names).not.toContain("api_call");
+      expect(names).not.toContain("search_integration_tools");
+      expect(names).not.toContain("call_integration_tool");
       expect(names).toContain("invoke_operation");
     });
 
@@ -358,8 +384,8 @@ describe("mcp connection tools", () => {
         path: spacePath(owner),
         headers: { Authorization: `Bearer ${token}`, "X-Org-Id": owner.orgId },
       });
-      expect(names).not.toContain("list_connections");
-      expect(names).not.toContain("api_call");
+      expect(names).not.toContain("search_integration_tools");
+      expect(names).not.toContain("call_integration_tool");
       expect(names).toContain("invoke_operation");
       expect(names).toContain("run_and_wait");
     });
@@ -375,18 +401,20 @@ describe("mcp connection tools", () => {
         headers: { Authorization: `Bearer ${await mintInstanceToken(member)}` },
       };
 
-      const apiCall = (await listTools(caller)).find((tool) => tool.name === "api_call")!;
+      const apiCall = (await listTools(caller)).find(
+        (tool) => tool.name === "call_integration_tool",
+      )!;
       expect(apiCall.inputSchema.required).toContain("space_id");
       // Granted in one of the two spaces: the description names it, and only it.
       const availableIn = apiCall.description.slice(
         0,
-        apiCall.description.indexOf("Call third-party APIs"),
+        apiCall.description.indexOf("Call a tool search_integration_tools"),
       );
       expect(availableIn).toStartWith("Available in: ");
       expect(availableIn).toContain(owner.defaultSpaceId);
       expect(availableIn).not.toContain(other.id);
 
-      const refused = await callTool(caller, "api_call", {
+      const refused = await callApi(caller, {
         space_id: other.id,
         requests: [get("/contacts")],
       });
@@ -397,12 +425,62 @@ describe("mcp connection tools", () => {
       });
       expect(upstreamCalls).toHaveLength(0);
 
-      const served = await callTool(caller, "api_call", {
+      const served = await callApi(caller, {
         space_id: owner.defaultSpaceId,
         requests: [get("/contacts")],
       });
       expect(entries(served.data)[0]).toMatchObject({ status: 200, body: { ok: true } });
       expect(upstreamAuth()).toEqual(["Bearer tok-mine"]);
+    });
+
+    it("declares neither in a space that closes the credential proxy, to the org owner too", async () => {
+      const caller = await instanceCaller(owner);
+      expect(await toolNames(caller)).toEqual(
+        expect.arrayContaining(["search_integration_tools", "call_integration_tool"]),
+      );
+      await db
+        .update(spaces)
+        .set({ credentialProxyOpen: false })
+        .where(eq(spaces.id, owner.defaultSpaceId));
+      const names = await toolNames(caller);
+      expect(names).not.toContain("search_integration_tools");
+      expect(names).not.toContain("call_integration_tool");
+      const getMe = (await listTools(caller)).find((tool) => tool.name === "get_me")!;
+      expect(getMe.description).not.toContain("search_integration_tools");
+    });
+
+    it("withholds them per space on the organization's endpoint when one space is closed", async () => {
+      const closed = await seedSpace({ orgId: owner.orgId, name: "Coffre" });
+      await db.update(spaces).set({ credentialProxyOpen: false }).where(eq(spaces.id, closed.id));
+      const caller: Caller = {
+        path: `/api/mcp/o/${owner.orgId}`,
+        headers: { Authorization: `Bearer ${await mintInstanceToken(owner)}` },
+      };
+
+      const callIntegrationTool = (await listTools(caller)).find(
+        (tool) => tool.name === "call_integration_tool",
+      )!;
+      const availableIn = callIntegrationTool.description.slice(
+        0,
+        callIntegrationTool.description.indexOf("Call a tool search_integration_tools"),
+      );
+      expect(availableIn).toContain(owner.defaultSpaceId);
+      expect(availableIn).not.toContain(closed.id);
+
+      const refused = await callApi(caller, {
+        space_id: closed.id,
+        requests: [get("/contacts")],
+      });
+      expect(refused.isError).toBe(true);
+      expect(refused.data).toMatchObject({
+        code: "credential_proxy_closed",
+        space: { id: closed.id, name: "Coffre" },
+        granted_in: [owner.defaultSpaceId],
+      });
+      const error = String(refused.data.error);
+      expect(error).toContain(`'Coffre' (${closed.id}) closes the credential proxy outside a run`);
+      expect(error).not.toContain("role");
+      expect(upstreamCalls).toHaveLength(0);
     });
   });
 
@@ -426,7 +504,7 @@ describe("mcp connection tools", () => {
       await connect(owner, "mine");
       mockUpstream(() => json({ contacts: [{ id: 1 }] }));
 
-      const { isError, data } = await callTool(caller, "api_call", {
+      const { isError, data } = await callApi(caller, {
         requests: [get("/contacts?limit=1", { headers: { Accept: "application/json" } })],
       });
 
@@ -451,7 +529,7 @@ describe("mcp connection tools", () => {
       await connect(owner, "mine");
       mockUpstream(() => json({ message: "Bad credentials" }, 401));
 
-      const { data } = await callTool(caller, "api_call", { requests: [get("/contacts")] });
+      const { data } = await callApi(caller, { requests: [get("/contacts")] });
 
       expect(entries(data)[0]).toMatchObject({
         status: 401,
@@ -478,7 +556,7 @@ describe("mcp connection tools", () => {
         .where(eq(integrationConnections.id, connectionId));
       mockUpstream(() => json({ message: "Bad credentials" }, 401));
 
-      const { data } = await callTool(caller, "api_call", { requests: [get("/contacts")] });
+      const { data } = await callApi(caller, { requests: [get("/contacts")] });
 
       expect(entries(data)[0]).toMatchObject({ status: 401, body: { message: "Bad credentials" } });
       expect(entries(data)[0]!.credential).toEqual({
@@ -497,7 +575,7 @@ describe("mcp connection tools", () => {
       await connect(owner, "mine");
       mockUpstream(() => json({ message: "Forbidden" }, 403));
 
-      const { data } = await callTool(caller, "api_call", { requests: [get("/contacts")] });
+      const { data } = await callApi(caller, { requests: [get("/contacts")] });
 
       expect(entries(data)[0]).toMatchObject({ status: 403 });
       expect(entries(data)[0]).not.toHaveProperty("credential");
@@ -511,15 +589,11 @@ describe("mcp connection tools", () => {
           : json({ path: call.path, method: call.method }),
       );
 
-      const { isError, data } = await callTool(caller, "api_call", {
+      const { isError, data } = await callApi(caller, {
         requests: [
           get("/a"),
           // Off the integration's `authorized_uris`: the proxy refuses, nothing is sent.
-          {
-            integration_package_id: INTEGRATION_ID,
-            method: "GET",
-            target: "https://8.8.8.8/elsewhere",
-          },
+          { method: "GET", target: "https://8.8.8.8/elsewhere" },
           get("/missing"),
           { ...get("/b"), method: "POST", body: { name: "x" } },
         ],
@@ -549,7 +623,7 @@ describe("mcp connection tools", () => {
           : new Response(new Uint8Array(300), { headers: { "content-type": "image/png" } }),
       );
 
-      const { data } = await callTool(caller, "api_call", {
+      const { data } = await callApi(caller, {
         requests: [get("/export"), get("/logo.png")],
         max_response_bytes: 100,
       });
@@ -559,45 +633,116 @@ describe("mcp connection tools", () => {
       expect(image).toMatchObject({ status: 200, bytes: 100, truncated: true });
     });
 
-    const notFound = { status: 404, code: "credential_not_found" };
-
-    it("reaches a colleague's shared connection once named; credential-proxy:call-own alone never does", async () => {
+    it("reaches a colleague's shared connection once named; credential-proxy:call-own alone is never offered it", async () => {
       const shared = await shareColleagueConnection();
       const unnamed = get("/contacts");
       const named = get("/contacts", { connection_id: shared });
 
       // The admin holds `credential-proxy:call`: the fallback binds no share.
-      const fallback = await callTool(caller, "api_call", { requests: [unnamed] });
+      const fallback = await callApi(caller, { requests: [unnamed] });
       expect(entries(fallback.data)[0]!.error).toMatchObject({
         status: 409,
         code: "must_choose_connection",
       });
       expect(upstreamCalls).toHaveLength(0);
-      const served = await callTool(caller, "api_call", { requests: [named] });
+      const served = await callApi(caller, { requests: [named] });
       expect(entries(served.data)[0]).toMatchObject({ status: 200, body: { ok: true } });
       expect(upstreamAuth()).toEqual(["Bearer tok-theirs"]);
 
+      // `credential-proxy:call-own` alone, no connection of its own: the tool is not its to call.
       const ownOnly = await instanceCaller(await memberHolding(owner, CALL_OWN_ROLE));
       for (const request of [unnamed, named]) {
-        const { data } = await callTool(ownOnly, "api_call", { requests: [request] });
-        expect(entries(data)[0]!.error).toMatchObject(notFound);
+        const { isError, data } = await callApi(ownOnly, { requests: [request] });
+        expect(isError).toBe(true);
+        expect(data).toMatchObject({ code: "unknown_tool" });
       }
+      // Holding one of its own, the colleague's is still out of reach, by name or by the proxy.
+      const connectedMember = await memberHolding(owner, CALL_OWN_ROLE);
+      await connect(connectedMember, "own");
+      const ownConnected = await instanceCaller(connectedMember);
+      const byName = await callApi(ownConnected, { requests: [named] });
+      expect(byName.data).toMatchObject({
+        code: "invalid_argument",
+        arguments: ["arguments.requests[0].connection_id"],
+      });
       expect(upstreamCalls).toHaveLength(1);
     });
 
-    it("serves the listing operation the same rows as list_connections: shared ones for credential-proxy:call only", async () => {
+    it("keeps a colleague's shared connection from a `credential-proxy:call-own` member at /proxy itself, whatever its credential", async () => {
+      const shared = await shareColleagueConnection();
+      const member = await memberHolding(owner, CALL_OWN_ROLE);
+      await connect(member, "own");
+      const memberKey = await seedApiKey({
+        orgId: owner.orgId,
+        spaceId: owner.defaultSpaceId,
+        createdBy: member.user.id,
+        scopes: ["credential-proxy:call-own"],
+      });
+      const proxy = (bearer: string, headers: Record<string, string> = {}) =>
+        app.request("/api/credential-proxy/proxy", {
+          method: "POST",
+          headers: {
+            ...headers,
+            Authorization: `Bearer ${bearer}`,
+            "X-Org-Id": owner.orgId,
+            "X-Space-Id": owner.defaultSpaceId,
+            "X-Integration-Id": INTEGRATION_ID,
+            "X-Target": `${UPSTREAM}/contacts`,
+            "X-Session-Id": crypto.randomUUID(),
+            "Content-Type": "application/json",
+          },
+          body: "{}",
+        });
+
+      // The member's MCP instance token is bound to the MCP resource (RFC 8707): it reaches
+      // /proxy only through call_integration_tool, which offers no connection outside its listing.
+      const instance = await proxy(await mintInstanceToken(member), { "X-Connection-Id": shared });
+      expect(instance.status).toBe(401);
+      expect(instance.headers.get("www-authenticate")).toContain("invalid_token");
+      const byTool = await callApi(await instanceCaller(member), {
+        requests: [get("/contacts", { connection_id: shared })],
+      });
+      expect(byTool.data).toMatchObject({ code: "invalid_argument" });
+      expect(upstreamCalls).toHaveLength(0);
+
+      // The same member's API key, the credential that does reach the route: its own connection
+      // is served, the colleague's named one is the opaque 404 of no connection at all.
+      const own = await proxy(memberKey.rawKey);
+      expect(own.status).toBe(200);
+      expect(upstreamAuth()).toEqual(["Bearer tok-own"]);
+      const named = await proxy(memberKey.rawKey, { "X-Connection-Id": shared });
+      expect(named.status).toBe(404);
+      expect(((await named.json()) as { code: string }).code).toBe("credential_not_found");
+      expect(upstreamAuth()).toEqual(["Bearer tok-own"]);
+    });
+
+    it("serves the listing operation the same rows as search_integration_tools: shared ones for credential-proxy:call only", async () => {
       /** `[connection_id, owned_by_actor]` of each row, read at both doors. */
       const listedBy = async (asCaller: Caller) => {
-        const listed = await callTool(asCaller, "list_connections");
+        const listed = await callTool(asCaller, "search_integration_tools");
         const invoked = await callTool(asCaller, "invoke_operation", {
           operation_id: "listCredentialProxyConnections",
         });
         expect(invoked.isError).toBe(false);
-        const rows = listed.data.connections as Array<{
-          connection_id: string;
-          owned_by_actor: boolean;
+        const tools = listed.data.tools as Array<{
+          tool: string;
+          integration: string;
+          connections: Array<{ connection_id: string; owned_by_actor: boolean }>;
         }>;
-        expect((invoked.data.body as { data: unknown[] }).data).toEqual(rows);
+        expect(tools.map((tool) => [tool.tool, tool.integration])).toEqual([
+          [TOOL, INTEGRATION_ID],
+        ]);
+        const rows = tools[0]!.connections;
+        // Every field of the listing's rows and the integration carried by the tool; an HTTP
+        // call selects no tool, so no `missing_scopes`.
+        const listingRows: Record<string, unknown>[] = (
+          invoked.data.body as { data: Record<string, unknown>[] }
+        ).data;
+        const searchRows: Record<string, unknown>[] = rows.map((row) => ({
+          integration_package_id: INTEGRATION_ID,
+          ...row,
+        }));
+        expect(listingRows).toEqual(searchRows);
         return rows
           .map((row): [string, boolean] => [row.connection_id, row.owned_by_actor])
           .sort(([a], [b]) => a.localeCompare(b));
@@ -613,6 +758,215 @@ describe("mcp connection tools", () => {
       ];
       expect(await listedBy(caller)).toEqual(both.sort(([a], [b]) => a.localeCompare(b)));
       expect(await listedBy(await instanceCaller(member))).toEqual([[members, true]]);
+    });
+  });
+  describe("a remote MCP integration's typed tools, through the endpoint and the routes", () => {
+    const REMOTE_ID = "@cporg/docs";
+    const REMOTE_TOOL = "cporg_docs__search";
+    const NOTES_ID = "@cporg/notes";
+    const REMOTE_TOKEN = "tok-remote";
+    let server: FakeMcpServer;
+    let restoreEgress: () => void;
+
+    beforeAll(() => {
+      restoreEgress = allowLoopbackOAuthEgress();
+      server = startFakeMcpServer({
+        tools: [{ name: "search", description: "Full-text search." }],
+        bearer: REMOTE_TOKEN,
+      });
+    });
+
+    afterAll(() => {
+      server.stop();
+      restoreEgress();
+    });
+
+    beforeEach(async () => {
+      forgetProtocolEras();
+      server.requests.length = 0;
+      const bearerAuth = {
+        type: "api_key" as const,
+        authorizedUris: [`${server.origin}/**`],
+        credentialFields: ["token"],
+        requiredCredentialFields: ["token"],
+        delivery: {
+          http: {
+            in: "header" as const,
+            name: "Authorization",
+            prefix: "Bearer ",
+            value: "{$credential.token}",
+          },
+        },
+      };
+      await seedProxyIntegration(
+        owner,
+        remoteIntegrationManifest({
+          name: REMOTE_ID,
+          url: server.url,
+          tools_policy: { search: {} },
+          auths: { api_key: bearerAuth },
+        }),
+      );
+      await seedProxyConnection(owner, REMOTE_ID, "api_key", { token: REMOTE_TOKEN });
+      // Active here, connected by no one: what a connect link clears (an oauth2 consent screen).
+      await seedProxyIntegration(owner, {
+        ...remoteIntegrationManifest({
+          name: NOTES_ID,
+          url: server.url,
+          tools_policy: { search: {} },
+          auths: {},
+        }),
+        auths: {
+          oauth: {
+            type: "oauth2",
+            authorization_endpoint: "https://idp.example.com/authorize",
+            token_endpoint: "https://idp.example.com/token",
+            authorized_uris: [`${server.origin}/**`],
+            delivery: {
+              http: {
+                in: "header",
+                name: "Authorization",
+                prefix: "Bearer ",
+                value: "{$credential.access_token}",
+              },
+            },
+          },
+        },
+      } as unknown as IntegrationManifest);
+    });
+
+    /** Search, read the typed tool, call it and read the not-ready integration, through `caller`. */
+    async function searchAndCall(caller: Caller, spaceId?: string) {
+      const where = spaceId === undefined ? {} : { space_id: spaceId };
+      const searched = await callTool(caller, "search_integration_tools", {
+        ...where,
+        query: "search",
+      });
+      expect(searched.isError).toBe(false);
+      expect(searched.data.best_match).toMatchObject({
+        tool: REMOTE_TOOL,
+        integration: REMOTE_ID,
+        description: `${REMOTE_ID}. Full-text search.`,
+        input_schema: { type: "object", properties: {} },
+      });
+      // `not_ready` is filtered like the tools: searched by its integration.
+      const forNotes = await callTool(caller, "search_integration_tools", {
+        ...where,
+        integration: NOTES_ID,
+      });
+      const notReady = forNotes.data.not_ready as Array<{
+        integration: string;
+        proxy_connection: { status: string };
+        refusal?: { code: string; connect_url?: string };
+      }>;
+      expect(notReady).toEqual([
+        expect.objectContaining({
+          integration: NOTES_ID,
+          proxy_connection: { status: "none", imposed: false },
+          refusal: expect.objectContaining({ code: "not_connected", auth_key: "oauth" }),
+        }),
+      ]);
+      // The MCP door asks for connect links: the caller holds `integrations:connect`.
+      expect(new URL(notReady[0]!.refusal!.connect_url!).pathname).toBe(
+        "/api/integrations/connect/start",
+      );
+
+      const exchanges = server.requests.length;
+      const envelope = await mcp(caller, "tools/call", {
+        name: "call_integration_tool",
+        arguments: { ...where, tool: REMOTE_TOOL, arguments: { q: "invoices" } },
+      });
+      const result = envelope.result as {
+        isError?: boolean;
+        content: Array<{ type: string; text: string }>;
+      };
+      expect(result.isError ?? false).toBe(false);
+      // The server's own result, relayed.
+      expect(result.content).toEqual([{ type: "text", text: JSON.stringify({ q: "invoices" }) }]);
+      // Sent with the connection's credential, never the caller's MCP token.
+      const sent = server.requests.slice(exchanges);
+      expect(sent.length).toBeGreaterThan(0);
+      expect(sent.every((r) => r.headers.get("authorization") === `Bearer ${REMOTE_TOKEN}`)).toBe(
+        true,
+      );
+      expect(sent.some((r) => r.body.includes('"tools/call"'))).toBe(true);
+    }
+
+    it("searches, describes and calls a typed tool on the endpoint pinned to the space", async () => {
+      await searchAndCall(await instanceCaller(owner));
+    });
+
+    it("does the same on the organization's endpoint, naming the space with `space_id`", async () => {
+      await searchAndCall(
+        {
+          path: `/api/mcp/o/${owner.orgId}`,
+          headers: { Authorization: `Bearer ${await mintInstanceToken(owner)}` },
+        },
+        owner.defaultSpaceId,
+      );
+    });
+
+    it("refuses the chat's loopback bearer at the routes themselves, not only at the endpoint", async () => {
+      const token = mintMcpLoopbackToken({
+        userId: owner.user.id,
+        email: owner.user.email,
+        name: owner.user.name,
+        orgId: owner.orgId,
+        orgRole: "owner",
+        permissions: [...CALL_OWN_ROLE, "credential-proxy:call"],
+      });
+      const headers = {
+        Authorization: `Bearer ${token}`,
+        "X-Org-Id": owner.orgId,
+        "X-Space-Id": owner.defaultSpaceId,
+      };
+      const listed = await app.request("/api/credential-proxy/tools", { headers });
+      expect(listed.status).toBe(403);
+      expect(((await listed.json()) as { code: string }).code).toBe("forbidden");
+      const called = await app.request("/api/credential-proxy/tools/call", {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ integration_package_id: REMOTE_ID, name: "search" }),
+      });
+      expect(called.status).toBe(403);
+      expect(((await called.json()) as { code: string }).code).toBe("forbidden");
+      expect(server.requests).toEqual([]);
+    });
+
+    it("refuses a call on the endpoint pinned to a space that closes the credential proxy, before any exchange", async () => {
+      const caller = await instanceCaller(owner);
+      await db
+        .update(spaces)
+        .set({ credentialProxyOpen: false })
+        .where(eq(spaces.id, owner.defaultSpaceId));
+
+      const envelope = await mcp(caller, "tools/call", {
+        name: "call_integration_tool",
+        arguments: { tool: REMOTE_TOOL, arguments: { q: "invoices" } },
+      });
+      // A closed space declares neither tool on its pinned endpoint, so the call names no tool
+      // there (the organization's endpoint answers `credential_proxy_closed` for a `space_id`).
+      expect(envelope.result).toBeUndefined();
+      expect(envelope.error).toMatchObject({ code: -32602 });
+      expect(String(envelope.error?.message)).toContain("Unknown tool: call_integration_tool");
+      expect(server.requests).toEqual([]);
+
+      // `get_me` says why they are absent; open again, it points at the search instead.
+      const describeGetMe = async () => {
+        const listed = await mcp(caller, "tools/list", {});
+        const tools = (listed.result as { tools: { name: string; description: string }[] }).tools;
+        return tools.find((tool) => tool.name === "get_me")!.description;
+      };
+      const closed = await describeGetMe();
+      expect(closed).toContain("an admin closed this space's credential proxy");
+      expect(closed).not.toContain("are listed by `search_integration_tools`");
+      await db
+        .update(spaces)
+        .set({ credentialProxyOpen: true })
+        .where(eq(spaces.id, owner.defaultSpaceId));
+      const open = await describeGetMe();
+      expect(open).toContain("are listed by `search_integration_tools`");
+      expect(open).not.toContain("closed this space's credential proxy");
     });
   });
 });

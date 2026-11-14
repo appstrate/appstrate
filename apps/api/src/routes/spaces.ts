@@ -117,6 +117,7 @@ function spaceWireForCaller(
     createdBy: string | null;
     visibility: SpaceVisibility;
     defaultRole: SpaceRolePreset;
+    credentialProxyOpen: boolean;
     ownerUserId: string | null;
     orphanedAt: Date | null;
   },
@@ -137,32 +138,40 @@ function spaceWireForCaller(
 
 /**
  * Project a Drizzle space row onto the wire shape. The DB columns are
- * `created_by` / `default_role`; the Drizzle TS fields are `createdBy` /
- * `defaultRole` and the wire contract (SpaceObject) is snake_case for both, so
- * both are renamed here. `ownerUserId` / `orphanedAt` are dropped and replaced
+ * `created_by` / `default_role` / `credential_proxy_open`; the Drizzle TS fields
+ * are camelCase and the wire contract (SpaceObject) is snake_case for all three,
+ * so they are renamed here. `ownerUserId` / `orphanedAt` are dropped and replaced
  * by what {@link spaceWireForCaller} computes from them.
  */
 function toSpaceWire<
   T extends {
     createdBy: string | null;
     defaultRole: SpaceRolePreset;
+    credentialProxyOpen: boolean;
     ownerUserId: string | null;
     orphanedAt: Date | null;
   },
 >(
   space: T,
-): Omit<T, "createdBy" | "defaultRole" | "ownerUserId" | "orphanedAt"> & {
+): Omit<T, "createdBy" | "defaultRole" | "credentialProxyOpen" | "ownerUserId" | "orphanedAt"> & {
   created_by: string | null;
   default_role: SpaceRolePreset;
+  credential_proxy_open: boolean;
 } {
   const {
     createdBy,
     defaultRole,
+    credentialProxyOpen,
     ownerUserId: _ownerUserId,
     orphanedAt: _orphanedAt,
     ...rest
   } = space;
-  return { ...rest, created_by: createdBy, default_role: defaultRole };
+  return {
+    ...rest,
+    created_by: createdBy,
+    default_role: defaultRole,
+    credential_proxy_open: credentialProxyOpen,
+  };
 }
 
 /**
@@ -198,6 +207,7 @@ export const updateSpaceSchema = z
     settings: spaceSettingsSchema.optional(),
     visibility: z.enum(SPACE_VISIBILITIES).optional(),
     default_role: z.enum(SPACE_ROLE_PRESETS).optional(),
+    credential_proxy_open: z.boolean().optional(),
   })
   .strict();
 
@@ -504,11 +514,11 @@ export function createSpacesRouter() {
       }
 
       try {
-        const { default_role, ...rest } = data;
+        const { default_role, credential_proxy_open, ...rest } = data;
         const { space, unsharedShares, disabledScheduleIds } = await updateSpace(
           orgId,
           spaceId,
-          { ...rest, defaultRole: default_role },
+          { ...rest, defaultRole: default_role, credentialProxyOpen: credential_proxy_open },
           current,
         );
         await removeScheduleJobs(disabledScheduleIds);
@@ -523,6 +533,7 @@ export function createSpacesRouter() {
             settings: data.settings,
             visibility: data.visibility,
             defaultRole: default_role,
+            credentialProxyOpen: credential_proxy_open,
           },
         });
         await recordSharesRemoved(c, orgId, unsharedShares, "access_lost");

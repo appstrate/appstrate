@@ -127,6 +127,19 @@ const PACKAGE_HOME_PROPERTIES = {
 export const EMOJI_ICON_WRITE_RULE =
   "An `emoji:` value written to an organization or a space must hold exactly one emoji of Unicode's RGI set, and is stored in its RGI form, the only rewrite being U+FE0F added or removed: a U+FE0F the emoji does not take is removed (`emoji:👍️` → `emoji:👍`), and one is added after each text-default pictograph or keycap base that lacks it (`emoji:❤` → `emoji:❤️`, `emoji:1⃣` → `emoji:1️⃣`, `emoji:👁‍🗨` → `emoji:👁️‍🗨️`).";
 
+/** `credential_proxy_open` on the space object and on `PATCH /api/spaces/{id}`. */
+export const CREDENTIAL_PROXY_OPEN_DESCRIPTION =
+  "Whether members may use the space's connections directly, outside a run: " +
+  "`/api/credential-proxy/connections`, `/api/credential-proxy/tools`, " +
+  "`/api/credential-proxy/tools/call`, `/api/credential-proxy/proxy` without `X-Run-Id`, " +
+  "`POST /api/integrations/{packageId}/discover` for an integration declaring auths, and the MCP " +
+  "tools `search_integration_tools` and `call_integration_tool`. `false` answers those routes " +
+  "`403 credential_proxy_closed` and withholds those tools, for every role, organization owners " +
+  "and admins included. Runs keep their connections: a run the platform executes reaches them " +
+  "through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a " +
+  "member who may launch an inline run from having an agent make the call inside that run; " +
+  "that is governed by the inline-run permission of the member's role. Default `true`.";
+
 /**
  * The visual identity of an agent, a space or an organization — one `icon`
  * and one `color`, both always present, both nullable. The one definition every
@@ -419,7 +432,7 @@ export const schemas = {
         type: "string",
         format: "uri",
         description:
-          "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 or launch `warnings[]` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` or `auth_key_mismatch` naming an `auth_key`, or `needs_reconnection` on a connection the actor owns, which the link reconnects in place). Never on `insufficient_scopes`. Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.",
+          "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409, launch `warnings[]`, a `/api/credential-proxy/tools/call` connection-selection 409 or a `refusal` of a `not_ready` entry of `GET /api/credential-proxy/tools` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` or `auth_key_mismatch` naming an `auth_key`, or `needs_reconnection` on a connection the actor owns, which the link reconnects in place). Never on `insufficient_scopes`. Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link.",
       },
       expiresAt: {
         type: "string",
@@ -2711,6 +2724,7 @@ export const schemas = {
       "settings",
       "visibility",
       "default_role",
+      "credential_proxy_open",
       "personal",
       "access",
       "role",
@@ -2746,6 +2760,10 @@ export const schemas = {
         type: "string",
         enum: [...SPACE_ROLE_PRESETS],
         description: "Preset the implicit members of an `open` space hold",
+      },
+      credential_proxy_open: {
+        type: "boolean",
+        description: CREDENTIAL_PROXY_OPEN_DESCRIPTION,
       },
       personal: {
         type: "boolean",

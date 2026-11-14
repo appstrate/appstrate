@@ -16,6 +16,7 @@
 import type { Client as LegacyClient } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   Client as DualEraClient,
+  ProtocolError,
   SdkError,
   SdkErrorCode,
   SdkHttpError,
@@ -332,6 +333,11 @@ async function connectAttempt(
 function isInconclusiveProbe(err: unknown): boolean {
   const status = httpStatusOf(err);
   if (status !== undefined) return status >= 500;
+  return isRequestTimeout(err);
+}
+
+/** The SDK gave up waiting for an answer: its own timeout, or the request's signal aborting. */
+export function isRequestTimeout(err: unknown): boolean {
   return err instanceof SdkError && err.code === SdkErrorCode.RequestTimeout;
 }
 
@@ -339,6 +345,16 @@ function isInconclusiveProbe(err: unknown): boolean {
 function isAuthRefusal(err: unknown): boolean {
   const status = httpStatusOf(err);
   return status === 401 || status === 403 || err instanceof UnauthorizedError;
+}
+
+/**
+ * The JSON-RPC error a server answered a request with (`{ code, message }` of its error
+ * response), or `undefined` for any other failure: a transport fault, an HTTP refusal, a local
+ * timeout. The message is the server's own, untrusted text.
+ */
+export function jsonRpcErrorOf(err: unknown): { code: number; message: string } | undefined {
+  if (!(err instanceof ProtocolError)) return undefined;
+  return { code: err.code, message: err.message };
 }
 
 /** The HTTP status a refused connect or call carries, from the SDK's data or its message. */

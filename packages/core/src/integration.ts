@@ -695,7 +695,7 @@ export const integrationManifestSchema = afpsIntegrationManifestSchema.superRefi
   const defaultTools = (manifest as { default_tools?: unknown }).default_tools;
   if (defaultTools !== undefined) {
     if (isToolsWildcard(defaultTools)) {
-      if ((manifest as { allow_undeclared_tools?: boolean }).allow_undeclared_tools !== true) {
+      if (!allowsUndeclaredTools(manifest)) {
         ctx.addIssue({
           code: "custom",
           message:
@@ -991,6 +991,14 @@ export interface ResolveIntegrationToolCatalogInput {
    * `integration.tools_policy` keys.
    */
   mcpServerTools?: ReadonlyArray<{ name: string; description?: string }>;
+}
+
+/**
+ * Whether the integration authorizes the tools its server lists beyond `tools_policy`
+ * (AFPS §7.8 `allow_undeclared_tools: true`); `false` when absent or malformed.
+ */
+export function allowsUndeclaredTools(manifest: object): boolean {
+  return (manifest as { allow_undeclared_tools?: unknown }).allow_undeclared_tools === true;
 }
 
 /**
@@ -1560,9 +1568,7 @@ export function validateAgentIntegrationScopes(
     // via `allow_undeclared_tools: true` (§7.8). The integration schema
     // already enforces that this flag requires ≥1 auth with non-empty
     // `default_scopes`, so the scope set is well-defined at this point.
-    if (
-      (integrationManifest as { allow_undeclared_tools?: boolean }).allow_undeclared_tools !== true
-    ) {
+    if (!allowsUndeclaredTools(integrationManifest)) {
       errors.push({
         field: `integrations_configuration.${selection.id}.tools`,
         code: "wildcard_not_authorized",

@@ -74,8 +74,12 @@ function extractHeaderParams(node: OperationNode): string[] {
   return names;
 }
 
-/** The credential proxy's route: kept out of the catalog, dispatched to by `api_call` alone. */
+/** The credential proxy's route: kept out of the catalog, dispatched to by `call_integration_tool` alone. */
 export const CREDENTIAL_PROXY_PATH = "/api/credential-proxy/proxy";
+
+/** The integration tool routes: kept out of the catalog, dispatched to by the two integration tools alone. */
+export const INTEGRATION_TOOLS_PATH = "/api/credential-proxy/tools";
+export const REMOTE_TOOLS_CALL_PATH = "/api/credential-proxy/tools/call";
 
 /** The served-skill routes of the package API, which `appstrate code sync` reads. */
 const SERVED_SKILLS_PATHS: ReadonlySet<string> = new Set([
@@ -88,8 +92,8 @@ const SERVED_SKILLS_PATHS: ReadonlySet<string> = new Set([
  * 9728 well-known (no recursive self-invocation), the served-skill routes (the
  * endpoint serves skills through the Skills extension, not as operations), the
  * spec document and its viewer, which `describe_operation` already serves
- * piecewise, and the credential proxy, which the `api_call` tool alone reaches
- * (`connection-tools.ts`).
+ * piecewise, and the credential proxy and its tool routes, which the two integration tools
+ * alone reach (`integration-tools.ts`).
  */
 function isExcludedPath(pathTemplate: string): boolean {
   return (
@@ -98,7 +102,9 @@ function isExcludedPath(pathTemplate: string): boolean {
     pathTemplate.startsWith("/.well-known/oauth-protected-resource") ||
     pathTemplate === "/api/openapi.json" ||
     pathTemplate === "/api/docs" ||
-    pathTemplate === CREDENTIAL_PROXY_PATH
+    pathTemplate === CREDENTIAL_PROXY_PATH ||
+    pathTemplate === INTEGRATION_TOOLS_PATH ||
+    pathTemplate === REMOTE_TOOLS_CALL_PATH
   );
 }
 

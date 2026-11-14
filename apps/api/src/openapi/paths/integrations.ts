@@ -628,6 +628,35 @@ const toolCatalogEntrySchema = {
   },
 } as const;
 
+/**
+ * The verdict of a credential-proxy call outside a run naming no connection
+ * (`proxyConnectionVerdict`): the integration detail's `proxy_connection`, and each
+ * `not_ready` entry of `GET /api/credential-proxy/tools`.
+ */
+export const proxyConnectionVerdictProperties = {
+  status: {
+    type: "string",
+    enum: [
+      "ready",
+      "must_choose",
+      "needs_reconnection",
+      "none",
+      "not_permitted",
+      "default_unavailable",
+      "unusable",
+      "proxy_closed",
+      "not_required",
+    ],
+    description:
+      "`not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, and the server sync reaches its server directly. `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal). `proxy_closed` — the space closes the credential proxy outside a run (`credential_proxy_open: false`): whatever the caller's role and connections, a call outside a run answers `403 credential_proxy_closed`, and only a run reaches the integration's connections.",
+  },
+  imposed: {
+    type: "boolean",
+    description:
+      "An ENFORCED org default governs the integration in this space: its connection is the space admins' to set, never the caller's.",
+  },
+} as const;
+
 const integrationDetailSchema = {
   type: "object",
   required: [
@@ -683,28 +712,7 @@ const integrationDetailSchema = {
       additionalProperties: false,
       description:
         "The connection an unnamed credential-proxy call outside a run (`/api/credential-proxy/proxy` with no `X-Run-Id` and no `X-Connection-Id`) gets for THIS caller in the current space: the same selection, under the caller's reach (`credential-proxy:call` reaches the connections usable in the space, `credential-proxy:call-own` alone the caller's own), with the space's org default applied. It is judged against this response's `manifest` — the latest published version, else the draft while nothing is published — which is what the proxy authorizes a call against once a version exists, and what the server sync of a never-published draft (`POST /api/integrations/{packageId}/discover`) authorizes against. A published integration whose draft changed its auths is judged on the published auths, so a sync of that draft may still answer otherwise. Unlike `auths[].ready`, it is the governed answer. It names no connection. The proxy also requires the integration to be active here (`active`), which this verdict does not repeat.",
-      properties: {
-        status: {
-          type: "string",
-          enum: [
-            "ready",
-            "must_choose",
-            "needs_reconnection",
-            "none",
-            "not_permitted",
-            "default_unavailable",
-            "unusable",
-            "not_required",
-          ],
-          description:
-            "`not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, and the server sync reaches its server directly. `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal).",
-        },
-        imposed: {
-          type: "boolean",
-          description:
-            "An ENFORCED org default governs the integration in this space: its connection is the space admins' to set, never the caller's.",
-        },
-      },
+      properties: proxyConnectionVerdictProperties,
     },
   },
 } as const;
@@ -1213,7 +1221,7 @@ export const integrationsPaths = {
       tags: ["Integrations"],
       summary: "Propose manifest fields from the integration's connected MCP server",
       description:
-        "Connects to the remote MCP server of the integration's draft (the working copy being edited, published or not) through the credential proxy, authorized against that draft — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, each exchange journaled like one of its calls (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted; an integration declaring no auths (AFPS §7.2) has nothing to inject, and its server is reached directly, egress-guarded on every hop, without a connection — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500 tools over 20 pages of at most 2 MiB each) as an empty `tools_policy` entry each and as an entry of `tools`, and as `default_tools` only the tools annotated `readOnlyHint: true` and not `destructiveHint: true`, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning). The whole sync is bounded to 20 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Only a Streamable HTTP server is supported. Requires write authority on the package in its home space and, when the draft declares auths, `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too). Rate limited to 10 requests per minute.",
+        "Connects to the remote MCP server of the integration's draft (the working copy being edited, published or not) through the credential proxy, authorized against that draft — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, its listing journaled as one call of the connection (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted; an integration declaring no auths (AFPS §7.2) has nothing to inject, and its server is reached directly, egress-guarded on every hop, without a connection — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500 tools over 20 pages of at most 2 MiB each) as an empty `tools_policy` entry each and as an entry of `tools`, and as `default_tools` only the tools annotated `readOnlyHint: true` and not `destructiveHint: true`, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning). The whole sync is bounded to 20 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Only a Streamable HTTP server is supported. Requires write authority on the package in its home space and, when the draft declares auths, `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too). Rate limited to 10 requests per minute.",
       parameters: [
         { $ref: "#/components/parameters/XOrgId" },
         { $ref: "#/components/parameters/XSpaceId" },
@@ -1343,7 +1351,7 @@ export const integrationsPaths = {
         },
         "403": {
           description:
-            "No write authority on the package, `credential-proxy:call-own` missing for a draft declaring auths, or the proxy refused the call (`unauthorized_target`: the server URL is outside the auth's `authorized_uris`; `blocked_target`: egress guard).",
+            "No write authority on the package, `credential-proxy:call-own` missing for a draft declaring auths, `credential_proxy_closed` — the draft declares auths and the space's `credential_proxy_open` is `false`, whatever the caller's role —, or the proxy refused the call (`unauthorized_target`: the server URL is outside the auth's `authorized_uris`; `blocked_target`: egress guard).",
           headers: STD_RESPONSE_HEADERS,
           content: problemJson,
         },
@@ -1363,7 +1371,13 @@ export const integrationsPaths = {
         "429": { $ref: "#/components/responses/RateLimited" },
         "502": {
           description:
-            "`bad_gateway` — the server could not be reached, did not answer as an MCP server within 20 s, refused the credential, or asked one of an integration declaring no auths; the proxy's `upstream_*` and `credential_unusable` codes are relayed.",
+            "`bad_gateway` — the server could not be reached, did not answer as an MCP server, or asked a credential of an integration declaring no auths; `upstream_credential_rejected` — it refused the connection's credential (`upstream_status`: 401 or 403; `credential: { status, cause, detail }` when the proxy's forced refresh judged it, `needs_reconnection` meaning the connection is now flagged); `upstream_mcp_error` — it answered a JSON-RPC error (`mcp_error: { code, message }`); `upstream_response_too_large` — an answer exceeds 2 MiB; the proxy's `upstream_unresolvable`, `upstream_unreachable` and `credential_unusable` codes are relayed.",
+          headers: STD_RESPONSE_HEADERS,
+          content: problemJson,
+        },
+        "504": {
+          description:
+            "`upstream_timeout` — the server did not answer within the sync's 20 s (`Proxy-Status` error `http_response_timeout`).",
           headers: STD_RESPONSE_HEADERS,
           content: problemJson,
         },

@@ -68,6 +68,7 @@ import {
 } from "./catalog.ts";
 import { internalDispatchHeader } from "../../lib/internal-dispatch.ts";
 import { withoutConnectOffers } from "../../services/connect/preflight-connect-offer.ts";
+import { credentialProxyClosedDetail } from "../../services/credential-proxy/access.ts";
 import { logger } from "../../lib/logger.ts";
 import { ceilingHolds } from "../../lib/route-requirements.ts";
 import type { SpaceScope } from "../../lib/scope.ts";
@@ -91,7 +92,14 @@ import {
   trySetHeader,
   type Refusal,
 } from "./tool-results.ts";
-import { buildConnectionTools } from "./connection-tools.ts";
+import { buildIntegrationTools } from "./integration-tools.ts";
+import {
+  DEFAULT_SEARCH_LIMIT,
+  MAX_SEARCH_LIMIT,
+  rankByKeywords,
+  searchLimit,
+  searchTokens,
+} from "./search.ts";
 import { buildPackageFileTools } from "./package-file-tools.ts";
 import {
   describeSpace,
@@ -119,8 +127,8 @@ export type McpToolName =
   | "validate_package_file"
   | "import_package_file"
   | "get_runtime_capabilities"
-  | "list_connections"
-  | "api_call"
+  | "search_integration_tools"
+  | "call_integration_tool"
   | "get_me";
 
 /** Outcome of an `invoke_operation` call, for audit + telemetry. */
@@ -140,7 +148,7 @@ export interface McpToolEvent {
   tool: McpToolName;
   /** Wall-clock duration of the handler, milliseconds. */
   durationMs: number;
-  /** Rows returned to the caller (after `limit`), not rows matched; `api_call`: its entries. */
+  /** Rows returned to the caller (after `limit`), not rows matched; `call_integration_tool`: its entries. */
   shownCount?: number;
   /** `search_operations`: matches withheld for lack of permission. */
   deniedCount?: number;
@@ -212,8 +220,6 @@ function emit(ctx: McpToolContext, event: McpToolEvent): void {
   }
 }
 
-const DEFAULT_SEARCH_LIMIT = 25;
-const MAX_SEARCH_LIMIT = 100;
 const METHODS_WITH_BODY = new Set(["POST", "PUT", "PATCH"]);
 /**
  * Auth-context headers the router forwards from the inbound MCP request onto
@@ -286,15 +292,6 @@ function fileResourceLink(doc: RunAndWaitFile): {
     size: doc.size,
     description: `File published by this run — read it with read_file or pass its URI to a follow-up run_and_wait input file field.`,
   };
-}
-
-function scoreOperation(op: CatalogOperation, tokens: string[]): number {
-  if (tokens.length === 0) return 0;
-  const haystack =
-    `${op.operationId} ${op.summary} ${op.description} ${op.pathTemplate} ${op.tags.join(" ")}`.toLowerCase();
-  let score = 0;
-  for (const token of tokens) if (haystack.includes(token)) score += 1;
-  return score;
 }
 
 /**
@@ -409,24 +406,26 @@ function buildSearchTool(ctx: McpToolContext, invokes: boolean): AppstrateToolDe
   const handler = async (args: Record<string, unknown>): Promise<CallToolResult> => {
     const start = performance.now();
     const { operations, componentSchemas } = getCatalog();
-    const query = asString(args.query)?.trim().toLowerCase() ?? "";
     const tag = asString(args.tag)?.toLowerCase();
-    const rawLimit = typeof args.limit === "number" ? args.limit : DEFAULT_SEARCH_LIMIT;
-    const limit = Math.min(Math.max(1, Math.floor(rawLimit)), MAX_SEARCH_LIMIT);
-    const tokens = query.split(/\s+/).filter(Boolean);
+    const limit = searchLimit(args.limit);
+    const tokens = searchTokens(args.query);
 
     let matches = [...operations.values()];
     if (tag) matches = matches.filter((op) => op.tags.some((t) => t.toLowerCase() === tag));
 
-    const scored = matches
-      .map((op) => ({ op, score: scoreOperation(op, tokens) }))
-      .filter(({ score }) => tokens.length === 0 || score > 0)
-      .sort((a, b) => b.score - a.score || a.op.operationId.localeCompare(b.op.operationId));
+    const scored = rankByKeywords(
+      matches.sort((a, b) => a.operationId.localeCompare(b.operationId)),
+      tokens,
+      (op) => ({
+        name: op.operationId,
+        text: `${op.summary} ${op.description} ${op.pathTemplate} ${op.tags.join(" ")}`,
+      }),
+    );
 
     // A denied match is answered, not hidden — its id and requirement only.
     const granted: CatalogOperation[] = [];
     const denied: CatalogOperation[] = [];
-    for (const { op } of scored) {
+    for (const op of scored) {
       (operationGranted(op, ctx.permissions, ctx.ceiling) ? granted : denied).push(op);
     }
     const shown = granted.slice(0, limit);
@@ -1750,7 +1749,7 @@ export function buildFileResourceProvider(ctx: McpToolContext): AppstrateResourc
   };
 }
 
-function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
+function buildGetMeTool(ctx: McpToolContext, surface: McpSurface): AppstrateToolDefinition {
   const descriptor: Tool = {
     name: "get_me",
     description:
@@ -1758,8 +1757,14 @@ function buildGetMeTool(ctx: McpToolContext): AppstrateToolDefinition {
       "the space the request resolved to (every list returned is scoped to it), " +
       "and the integrations the caller already has connected and could attach to an agent: one " +
       "entry per integration active in that space with a connection the caller may bind there, " +
-      "its own or shared into the space. The connections `api_call` can use are listed by " +
-      "`list_connections`. Call this first to ground who you are acting for, what the " +
+      "its own or shared into the space. " +
+      (surface.proxies
+        ? "The integration tools you can call with them are listed by `search_integration_tools`. "
+        : surface.proxiesClosed
+          ? "You cannot call them directly here: an admin closed this space's credential proxy " +
+            "outside a run. Agents you run still use them. "
+          : "") +
+      "Call this first to ground who you are acting for, what the " +
       "caller's role allows (operations beyond it fail at invoke time), and which integrations " +
       "to prefer when building or configuring an agent.",
     annotations: {
@@ -1817,8 +1822,13 @@ export interface McpSurface {
   authors: boolean;
   listsFiles: boolean;
   importsPackages: boolean;
-  /** `list_connections` and `api_call`: the credential proxy outside a run. */
+  /** `search_integration_tools` and `call_integration_tool`: the credential proxy outside a run. */
   proxies: boolean;
+  /**
+   * Those two tools are withheld by the space's setting alone (`credential_proxy_open`), not by
+   * the caller's grants: `get_me` says so, since an undeclared tool explains nothing.
+   */
+  proxiesClosed: boolean;
 }
 
 export function deriveMcpSurface(
@@ -1827,11 +1837,16 @@ export function deriveMcpSurface(
   actor: Actor,
   /** The credential proxy accepts the credential this request carries (it is bearer-only). */
   proxyAcceptsCredential: boolean,
+  /** The space leaves the credential proxy open outside a run (`credential_proxy_open`). */
+  proxyOpen: boolean,
 ): McpSurface {
   const granted = (operationId: string): boolean =>
     operationIdGranted(operationId, permissions, ceiling);
   const invokes = permissions.has("mcp:invoke");
   const runs = invokes && granted("runAgent") && granted("getRun");
+  // `credential-proxy:call-own` (implied by `credential-proxy:call`), read off the listing's
+  // route, which guards as `/proxy` does. `mcp:invoke` is checked here and nowhere else.
+  const mayProxy = invokes && proxyAcceptsCredential && granted("listCredentialProxyConnections");
   return {
     invokes,
     runs,
@@ -1842,10 +1857,8 @@ export function deriveMcpSurface(
     // each package's `write`, but `mcp:invoke` and the user actor (the import
     // is recorded under a user id) are checked here and nowhere else.
     importsPackages: invokes && actor.type === "user" && granted("importBundle"),
-    // `credential-proxy:call-own` (implied by `credential-proxy:call`), read off the
-    // listing's route, which guards as `/proxy` does.
-    // `mcp:invoke` is checked here and nowhere else.
-    proxies: invokes && proxyAcceptsCredential && granted("listCredentialProxyConnections"),
+    proxies: mayProxy && proxyOpen,
+    proxiesClosed: mayProxy && !proxyOpen,
   };
 }
 
@@ -1906,7 +1919,7 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
     buildReadFileTool(ctx),
     ...buildPackageFileTools(ctx, surface.importsPackages),
     ...(surface.proxies
-      ? buildConnectionTools({
+      ? buildIntegrationTools({
           origin: ctx.origin,
           authHeaders: ctx.authHeaders,
           dispatch: ctx.dispatch,
@@ -1915,7 +1928,7 @@ export function buildMcpTools(ctx: McpToolContext, surface: McpSurface): Appstra
         })
       : []),
     // Redundant for a context-injecting caller; search_operations stays for `best_match`.
-    ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx)]),
+    ...(ctx.contextInjected ? [] : [buildGetMeTool(ctx, surface)]),
   ];
   const { orgSpaces } = ctx;
   const pinned = orgSpaces === undefined;
@@ -1938,8 +1951,8 @@ const SPACE_ACTS: Record<McpToolName, keyof McpSurface | null | false> = {
   read_file: null,
   validate_package_file: null,
   import_package_file: "importsPackages",
-  list_connections: "proxies",
-  api_call: "proxies",
+  search_integration_tools: "proxies",
+  call_integration_tool: "proxies",
   get_me: null,
   get_runtime_capabilities: false,
 };
@@ -1987,6 +2000,16 @@ function withSpaceArgument(
       // `kind:"inline"` is the `composes` act, a narrower grant than `runs`.
       const need = act === "runs" && args.kind === "inline" ? "composes" : act;
       const { current } = spaces;
+      // The space's setting, not the caller's role, withholds the proxy there.
+      if (need === "proxies" && !current.credentialProxyOpen) {
+        return refusalResult({
+          code: "credential_proxy_closed",
+          error: credentialProxyClosedDetail(current),
+          space: spaceRef(current),
+          ...grantedIn(spaces, holds(need)),
+          hint: NO_FALLBACK_HINT,
+        });
+      }
       if (!holds(need)(current)) {
         return refusalResult({
           code: "not_granted",

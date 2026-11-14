@@ -16,6 +16,7 @@
 
 import { describe, it, expect } from "bun:test";
 import {
+  allowsUndeclaredTools,
   resolveIntegrationToolCatalog,
   getConnectToolNames,
   validateAgentIntegrationScopes,
@@ -460,5 +461,14 @@ describe("api_call / api_upload tool-name helpers", () => {
     for (const name of ["api_calls", "api_call_extra", "api_uploader", "kv_set"]) {
       expect(isApiCallToolName(name)).toBe(false);
     }
+  });
+});
+
+describe("allowsUndeclaredTools", () => {
+  it("is true only for a literal `allow_undeclared_tools: true`", () => {
+    expect(allowsUndeclaredTools({ allow_undeclared_tools: true })).toBe(true);
+    expect(allowsUndeclaredTools({ allow_undeclared_tools: "true" })).toBe(false);
+    expect(allowsUndeclaredTools({ allow_undeclared_tools: false })).toBe(false);
+    expect(allowsUndeclaredTools({})).toBe(false);
   });
 });

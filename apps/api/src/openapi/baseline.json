@@ -6291,7 +6291,7 @@
         "operationId": "syncIntegrationFromServer",
         "tags": ["Integrations"],
         "summary": "Propose manifest fields from the integration's connected MCP server",
-        "description": "Connects to the remote MCP server of the integration's draft (the working copy being edited, published or not) through the credential proxy, authorized against that draft — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, each exchange journaled like one of its calls (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted; an integration declaring no auths (AFPS §7.2) has nothing to inject, and its server is reached directly, egress-guarded on every hop, without a connection — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500 tools over 20 pages of at most 2 MiB each) as an empty `tools_policy` entry each and as an entry of `tools`, and as `default_tools` only the tools annotated `readOnlyHint: true` and not `destructiveHint: true`, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning). The whole sync is bounded to 20 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Only a Streamable HTTP server is supported. Requires write authority on the package in its home space and, when the draft declares auths, `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too). Rate limited to 10 requests per minute.",
+        "description": "Connects to the remote MCP server of the integration's draft (the working copy being edited, published or not) through the credential proxy, authorized against that draft — the same connection selection outside a run, `authorized_uris` allowlist, egress guard and 401 refresh as `/api/credential-proxy/proxy`, its listing journaled as one call of the connection (`GET /api/integrations/calls`); the server's own values (`Mcp-Session-Id`, cursors) are sent back as written, never substituted; an integration declaring no auths (AFPS §7.2) has nothing to inject, and its server is reached directly, egress-guarded on every hop, without a connection — and returns what it reports, as manifest fields for the editor to merge: every tool of `tools/list` (cursor pagination, at most 500 tools over 20 pages of at most 2 MiB each) as an empty `tools_policy` entry each and as an entry of `tools`, and as `default_tools` only the tools annotated `readOnlyHint: true` and not `destructiveHint: true`, `serverInfo.title` (else `name`) as `display_name`, `description`, `websiteUrl` as `homepage`, a raster of `serverInfo.icons` (else the site's icon) as `icon_source`, and `instructions` (at most 32 KiB, cut at a line boundary with an `instructions_truncated` warning). The whole sync is bounded to 20 seconds, the icon lookup included (best-effort: past the bound it finds none). Persists nothing. Only a Streamable HTTP server is supported. Requires write authority on the package in its home space and, when the draft declares auths, `credential-proxy:call-own` in the current space (with `credential-proxy:call`, a connection shared into the space is usable too). Rate limited to 10 requests per minute.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -23509,6 +23509,7 @@
                   },
                   "visibility": "open",
                   "default_role": "operator",
+                  "credential_proxy_open": true,
                   "personal": false,
                   "access": "member",
                   "role": {
@@ -23597,6 +23598,7 @@
                       },
                       "visibility": "open",
                       "default_role": "operator",
+                      "credential_proxy_open": true,
                       "personal": false,
                       "access": "member",
                       "role": {
@@ -23622,6 +23624,7 @@
                       },
                       "visibility": "closed",
                       "default_role": "operator",
+                      "credential_proxy_open": true,
                       "personal": false,
                       "access": "none",
                       "role": null,
@@ -23710,7 +23713,7 @@
         "operationId": "updateSpace",
         "tags": ["Spaces"],
         "summary": "Update a space",
-        "description": "Update space name, icon, colour, settings, visibility or default role. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears `icon` or `color`. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility`, `default_role`, `icon` or `color` is a 409 `personal_space_immutable`.",
+        "description": "Update space name, icon, colour, settings, visibility, default role or credential proxy switch. Merge semantics (RFC 7396): an absent field is left unchanged, `null` clears `icon` or `color`. Requires `space-settings:write` in THIS space (preset `admin`), not the org-level `spaces:write`. Changing the default role or opening a space requires the caller to hold every permission of the resulting default role (403 otherwise). Making the org's default space non-`open` is a 400. On a personal space only `name` is accepted — `visibility`, `default_role`, `icon`, `color` or `credential_proxy_open` is a 409 `personal_space_immutable`.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -23781,6 +23784,10 @@
                     "type": "string",
                     "enum": ["admin", "builder", "operator", "runner", "viewer"],
                     "description": "Preset the implicit members of an `open` space hold"
+                  },
+                  "credential_proxy_open": {
+                    "type": "boolean",
+                    "description": "Whether members may use the space's connections directly, outside a run: `/api/credential-proxy/connections` and `/api/credential-proxy/proxy` without `X-Run-Id`, and the MCP tools `search_integration_tools` and `call_integration_tool`. `false` answers those routes `403 credential_proxy_closed` and withholds those tools, for every role, organization owners and admins included. Runs keep their connections: a run the platform executes reaches them through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a member who may launch an inline run from having an agent make the call inside that run; that is governed by the inline-run permission of the member's role. Default `true`."
                   }
                 },
                 "additionalProperties": false
@@ -27119,7 +27126,7 @@
         "operationId": "listCredentialProxyConnections",
         "tags": ["Credential Proxy"],
         "summary": "List the connections the caller can call outside a run",
-        "description": "What a call to `/api/credential-proxy/proxy` without `X-Run-Id` would accept from this caller in this space, of the integrations active in the space that have a published version. Read with the rule the proxy applies. With `credential-proxy:call-own` alone: the caller's OWN connections (user or end-user) usable here, and never one another member shared into the space. With `credential-proxy:call`: those and the connections shared into the space, each telling which it is (`owned_by_actor`); of an integration governed by an enforced org default, that default's members only. Grouped by integration, oldest first within one. An entry the caller does not own is used when named with `X-Connection-Id` or designated by an org default. `call_permission_required` and `needs_reconnection` describe a call NAMING that entry with `X-Connection-Id`. A call naming none follows the order that parameter describes on `/api/credential-proxy/proxy`: several own entries of one integration need it, and with `credential-proxy:call` an org default binds its set before the caller's own connection, refusing the call while one of its members is out of the caller's reach or needs reconnecting. No credential is decrypted to build it. Requires `credential-proxy:call-own` or `credential-proxy:call`.",
+        "description": "What a call to `/api/credential-proxy/proxy` without `X-Run-Id` would accept from this caller in this space, of the integrations active in the space that have a published version. Read with the rule the proxy applies. With `credential-proxy:call-own` alone: the caller's OWN connections (user or end-user) usable here, and never one another member shared into the space. With `credential-proxy:call`: those and the connections shared into the space, each telling which it is (`owned_by_actor`); of an integration governed by an enforced org default, that default's members only. Grouped by integration, oldest first within one. An entry the caller does not own is used when named with `X-Connection-Id` or designated by an org default. `call_permission_required` and `needs_reconnection` describe a call NAMING that entry with `X-Connection-Id`. A call naming none follows the order that parameter describes on `/api/credential-proxy/proxy`: several own entries of one integration need it, and with `credential-proxy:call` an org default binds its set before the caller's own connection, refusing the call while one of its members is out of the caller's reach or needs reconnecting. No credential is decrypted to build it. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`, whatever the caller's role.",
         "parameters": [
           {
             "$ref": "#/components/parameters/XOrgId"
@@ -27226,7 +27233,417 @@
             "$ref": "#/components/responses/Unauthorized"
           },
           "403": {
+            "description": "`forbidden` — the principal holds neither `credential-proxy:call-own` nor `credential-proxy:call`; `credential_proxy_closed` — the space's `credential_proxy_open` is `false`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/credential-proxy/tools": {
+      "get": {
+        "operationId": "listIntegrationTools",
+        "tags": ["Credential Proxy"],
+        "summary": "List the tools the caller can call outside a run",
+        "description": "Every tool a call outside a run reaches in this space, for this caller: each integration's `api_call` tools (called through `/api/credential-proxy/proxy`) whose auth has a connection the caller reaches, and, for an integration backed by a remote MCP server, the typed tools that server offers (called through `/api/credential-proxy/tools/call`): the integration catalog's selection (its `tools_policy` keys, or every tool the server lists when `allow_undeclared_tools` is `true`), less `hidden_tools` and the connect tool, described by the server's `tools/list`. Each server is listed with the connection the proxy selects (or the `connection_id` named, when it is one of that integration's; when the selection asks for a choice, the first of the caller's connections it accepts), cached per connection and integration version for 5 minutes, and journaled as one call of the connection when the listing reaches the server. Each tool carries the connections it reaches, the rows of `GET /api/credential-proxy/connections`. `not_ready` lists the integrations active in the space the caller has no usable connection of, with the verdict of a call naming none; with `X-Appstrate-Connect-Offers: 1`, a refusal item a connect flow clears carries a `connect_url`. `unlisted` lists the remote integrations whose server the proxy refused to list (connection selection, permission, `authorized_uris`, an unrenderable URL), each with that refusal. Read with the access rule of `/api/credential-proxy/proxy` without `X-Run-Id`, against each integration's latest published version. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "$ref": "#/components/parameters/ConnectOffers"
+          },
+          {
+            "name": "integration_package_id",
+            "in": "query",
+            "required": false,
+            "description": "Lists the tools of this integration alone (`@scope/name`).",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "description": "Resolves the tool of this name alone: an `api_call` tool lists no server, and only the remote integrations whose namespace starts the name are listed. `not_ready` is then empty.",
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          {
+            "name": "connection_id",
+            "in": "query",
+            "required": false,
+            "description": "The connection the server of the integration it belongs to is listed with, as `X-Connection-Id` names one on `/api/credential-proxy/proxy`.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The tools, sorted by integration, `api_call` tools first within one.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["tools", "not_ready", "unlisted"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "tools": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "name",
+                          "kind",
+                          "integration_package_id",
+                          "description",
+                          "connections"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "description": "The tool's name: `{ns}__api_call` (`{ns}__api_call__{auth}` when several auths of the integration expose one) or `{ns}__{tool}` for a typed tool, `{ns}` being the package id normalised, with a suffix hashed from the package id when another listed package normalises alike."
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": ["api_call", "remote"],
+                            "description": "`api_call`: called through `/api/credential-proxy/proxy` with one of `connections`; `remote`: a typed tool of the integration's MCP server, called through `/api/credential-proxy/tools/call` by its `remote_name`."
+                          },
+                          "integration_package_id": {
+                            "type": "string",
+                            "description": "Integration package id: the `X-Integration-Id` of a call."
+                          },
+                          "description": {
+                            "type": "string"
+                          },
+                          "auth_key": {
+                            "type": "string",
+                            "description": "`api_call` only: the auth whose connections it reaches."
+                          },
+                          "connection_required": {
+                            "type": "boolean",
+                            "description": "`api_call` only: the integration also has connections of another auth, so a call names one of `connections` (`X-Connection-Id`)."
+                          },
+                          "remote_name": {
+                            "type": "string",
+                            "description": "`remote` only: the name the server lists the tool by, which `tools/call` takes."
+                          },
+                          "input_schema": {
+                            "type": "object",
+                            "additionalProperties": true,
+                            "description": "`remote` only: the tool's input schema, sanitised as in a run."
+                          },
+                          "catalog_unreadable": {
+                            "type": "boolean",
+                            "enum": [true],
+                            "description": "`remote` only: the server's `tools/list` could not be read, so the tool is a declared name, without description and with an empty object schema."
+                          },
+                          "connections": {
+                            "type": "array",
+                            "description": "The connections it reaches, as `GET /api/credential-proxy/connections` lists them.",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "connection_id",
+                                "label",
+                                "owned_by_actor",
+                                "auth_key",
+                                "scopes_granted",
+                                "authorized_uris",
+                                "allow_all_uris",
+                                "needs_reconnection",
+                                "call_permission_required"
+                              ],
+                              "properties": {
+                                "connection_id": {
+                                  "type": "string",
+                                  "format": "uuid",
+                                  "description": "The `X-Connection-Id` that names this connection."
+                                },
+                                "label": {
+                                  "type": "string"
+                                },
+                                "owned_by_actor": {
+                                  "type": "boolean",
+                                  "description": "True when the connection is the caller's own, false when another member shared it in the space: listed for a caller holding `credential-proxy:call`, and used when named or designated by an org default."
+                                },
+                                "auth_key": {
+                                  "type": "string",
+                                  "description": "The manifest auth the connection is on."
+                                },
+                                "scopes_granted": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "authorized_uris": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "description": "The auth's `authorized_uris`: what `X-Target` and every redirect hop are matched against. A literal entry is given as is, an entry templated on a connection variable (`{$variable.<name>}`) rendered for this connection, or omitted when the connection does not render it. An entry templated on a credential field (`{$credential.<field>}`) is given as the manifest declares it, never rendered: the proxy resolves it server-side from the stored credential, whose values this list never carries. To call such a target, write `{{<field>}}` in `X-Target` where the entry has `{$credential.<field>}`: `{{webhook_url}}` for an entry that is `{$credential.webhook_url}` alone (the field holds the whole URL), `https://{{host}}/v1/items` for `https://{$credential.host}/**`."
+                                },
+                                "allow_all_uris": {
+                                  "type": "boolean",
+                                  "description": "The auth sets `allow_all_uris`. Ignored on a call that places a `{{credential_field}}`: see `X-Target`."
+                                },
+                                "needs_reconnection": {
+                                  "type": "boolean",
+                                  "description": "A call binding it answers `409 needs_reconnection` until it is reconnected."
+                                },
+                                "call_permission_required": {
+                                  "type": "boolean",
+                                  "description": "An enforced org default governs the integration in this space and the caller holds no `credential-proxy:call`: their call without `X-Run-Id` answers `403 call_permission_required`, this connection named or not."
+                                },
+                                "missing_scopes": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  },
+                                  "description": "`remote` only: the scopes the tool's `tools_policy` entry requires on the connection's auth that it lacks; a call with it answers `409 insufficient_scopes`."
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "not_ready": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["integration_package_id", "display_name", "proxy_connection"],
+                        "additionalProperties": false,
+                        "properties": {
+                          "integration_package_id": {
+                            "type": "string",
+                            "description": "Integration package id: the `X-Integration-Id` of a call."
+                          },
+                          "display_name": {
+                            "type": "string"
+                          },
+                          "proxy_connection": {
+                            "type": "object",
+                            "required": ["status", "imposed"],
+                            "additionalProperties": false,
+                            "description": "What a call naming no connection gets for this caller, as the integration detail's `proxy_connection` states it, judged against the latest published version: one of `none`, `needs_reconnection`, `not_permitted`, `default_unavailable`, `unusable`.",
+                            "properties": {
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "ready",
+                                  "must_choose",
+                                  "needs_reconnection",
+                                  "none",
+                                  "not_permitted",
+                                  "default_unavailable",
+                                  "unusable",
+                                  "not_required"
+                                ],
+                                "description": "`not_required` — the integration declares no auths (AFPS §7.2): it binds no connection, the proxy has nothing to inject, and the server sync reaches its server directly. `ready` — one connection is bound and passes its health checks. `must_choose` — several connections apply, or only connections other members shared (`must_choose_connection`): a call names one. `needs_reconnection` — the bound connection must be reconnected. `none` — no connection in reach (`not_connected`). `not_permitted` — the caller holds neither `credential-proxy:call` nor `credential-proxy:call-own`, which the proxy route requires, or an enforced org default governs the integration and the caller holds only `credential-proxy:call-own` (`call_permission_required`). `default_unavailable` — the org default cannot bind: a member is gone or on another auth (`pinned_connection_unavailable`), the set is empty (`required_integration_unbound`) or past the cap (`connection_set_too_large`). `unusable` — the bound connection cannot serve the call (`insufficient_scopes`, `auth_serves_no_selected_tool`, or another selection refusal)."
+                              },
+                              "imposed": {
+                                "type": "boolean",
+                                "description": "An ENFORCED org default governs the integration in this space: its connection is the space admins' to set, never the caller's."
+                              }
+                            }
+                          },
+                          "refusal": {
+                            "$ref": "#/components/schemas/ResolutionFieldError",
+                            "description": "Present when the verdict is a refusal the selection describes: the `not_connected` item of `none` (with the `auth_key` and `required_scopes` a connect flow targets), else the first item of the refusal (`needs_reconnection`, `pinned_connection_unavailable`…). Absent on `not_permitted`."
+                          }
+                        }
+                      }
+                    },
+                    "unlisted": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": ["integration_package_id", "refusal"],
+                        "additionalProperties": false,
+                        "properties": {
+                          "integration_package_id": {
+                            "type": "string"
+                          },
+                          "refusal": {
+                            "$ref": "#/components/schemas/ProblemDetail"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "`forbidden` — the principal holds neither `credential-proxy:call-own` nor `credential-proxy:call`, or authenticates with a session cookie; `credential_proxy_closed` — the space's `credential_proxy_open` is `false`.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/api/credential-proxy/tools/call": {
+      "post": {
+        "operationId": "callRemoteIntegrationTool",
+        "tags": ["Credential Proxy"],
+        "summary": "Call a typed tool of a remote MCP integration",
+        "description": "One `tools/call` on the integration's remote MCP server, outside a run, for a tool `GET /api/credential-proxy/tools` lists by its `remote_name`; a tool outside the integration catalog's selection answers `404` before any exchange. The exchange goes through the credential proxy with the access rule and the connection selection of `/api/credential-proxy/proxy` without `X-Run-Id`, against the integration's latest published version, and is journaled as one call of the connection. The server's result is relayed without its `_meta[\"dev.appstrate/events\"]`; a tool error is a result with `isError: true`. Requires `credential-proxy:call-own` or `credential-proxy:call`. A space whose `credential_proxy_open` is `false` answers `403 credential_proxy_closed`.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/XOrgId"
+          },
+          {
+            "$ref": "#/components/parameters/XSpaceId"
+          },
+          {
+            "$ref": "#/components/parameters/ConnectOffers"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["integration_package_id", "name"],
+                "additionalProperties": false,
+                "properties": {
+                  "integration_package_id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "Integration package id (`@scope/name`)."
+                  },
+                  "connection_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "The connection to call with; omitted, the proxy's selection (`X-Connection-Id` semantics)."
+                  },
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The tool's name, as the server lists it."
+                  },
+                  "arguments": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "The tool's arguments, following its `input_schema`."
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The server's result.",
+            "headers": {
+              "Request-Id": {
+                "$ref": "#/components/headers/RequestId"
+              },
+              "Appstrate-Version": {
+                "$ref": "#/components/headers/AppstrateVersion"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["result"],
+                  "properties": {
+                    "result": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "description": "An MCP `CallToolResult` (`content`, optional `structuredContent` and `isError`)."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/ValidationError"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
             "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "description": "The connection selection of `/api/credential-proxy/proxy` refused, judged for the named tool: `must_choose_connection` (`errors[0].candidate_connections`, each with its `missing_scopes` for the tool; retry with one `id` in `connection_id`), `needs_reconnection`, `pinned_connection_unavailable`; `insufficient_scopes` — the connection lacks scopes the tool's `tools_policy` entry requires (`errors[0].missing_scopes`, `required_scopes`, `auth_key`, `connection_id`, `owned_by_actor`, `remedy`); `auth_serves_no_selected_tool` — the connection's auth does not serve the tool. With `X-Appstrate-Connect-Offers: 1`, an item a connect flow clears carries a `connect_url` (a reconnection of the caller's own connection; never `insufficient_scopes`, whose `remedy` says what to do).",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "`integration_not_remote` — the integration is not backed by a Streamable HTTP MCP server; `remote_url_unrenderable` — its server URL is built from the connection's variables and they do not render it.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "description": "The MCP server failed the exchange or refused the connection's credential.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
           }
         }
       }
@@ -32196,7 +32613,7 @@
         "name": "X-Appstrate-Connect-Offers",
         "in": "header",
         "required": false,
-        "description": "Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, and each such item of a launch response's `warnings`, also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it.",
+        "description": "Opt-in: when set to `1` and the actor holds `integrations:connect`, each actor-actionable item of a 409 `missing_integration_connection`, each such item of a launch response's `warnings`, each such item of a `/api/credential-proxy/tools/call` connection-selection 409, and each such `refusal` of a `not_ready` entry of `GET /api/credential-proxy/tools` also carries a ready-to-open `connect_url` (a single-use bearer link that connects AS the actor). Set only by clients that render the connect card or hand the link to that human. An `Idempotency-Key` replay returns the `warnings` without it.",
         "schema": {
           "type": "string",
           "enum": ["1"]
@@ -32475,7 +32892,7 @@
           "connect_url": {
             "type": "string",
             "format": "uri",
-            "description": "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409 or launch `warnings[]` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` or `auth_key_mismatch` naming an `auth_key`, or `needs_reconnection` on a connection the actor owns, which the link reconnects in place). Never on `insufficient_scopes`. Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link."
+            "description": "Ready-to-open hosted-connect link for this item. Populated only on a run-kickoff 409, launch `warnings[]`, a `/api/credential-proxy/tools/call` connection-selection 409 or a `refusal` of a `not_ready` entry of `GET /api/credential-proxy/tools` whose caller opted in (`X-Appstrate-Connect-Offers`), and only on the items an oauth2 connect flow can clear for the calling actor (`not_connected` or `auth_key_mismatch` naming an `auth_key`, or `needs_reconnection` on a connection the actor owns, which the link reconnects in place). Never on `insufficient_scopes`. Single-use and short-lived — when present, open it instead of calling the connect kickoff, which would mint a second link."
           },
           "expiresAt": {
             "type": "string",
@@ -35896,6 +36313,7 @@
           "settings",
           "visibility",
           "default_role",
+          "credential_proxy_open",
           "personal",
           "access",
           "role",
@@ -35956,6 +36374,10 @@
             "type": "string",
             "enum": ["admin", "builder", "operator", "runner", "viewer"],
             "description": "Preset the implicit members of an `open` space hold"
+          },
+          "credential_proxy_open": {
+            "type": "boolean",
+            "description": "Whether members may use the space's connections directly, outside a run: `/api/credential-proxy/connections` and `/api/credential-proxy/proxy` without `X-Run-Id`, and the MCP tools `search_integration_tools` and `call_integration_tool`. `false` answers those routes `403 credential_proxy_closed` and withholds those tools, for every role, organization owners and admins included. Runs keep their connections: a run the platform executes reaches them through its sidecar, a remote run (`X-Run-Id`) its bound ones. Closing it does not stop a member who may launch an inline run from having an agent make the call inside that run; that is governed by the inline-run permission of the member's role. Default `true`."
           },
           "personal": {
             "type": "boolean",

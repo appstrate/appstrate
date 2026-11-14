@@ -37,13 +37,21 @@ import { actorOwns, type Actor } from "../../lib/actor.ts";
 import { connectionVariablesOf } from "../../lib/connection-identity.ts";
 import { logger } from "../../lib/logger.ts";
 import { decryptStoredCredential } from "../../lib/stored-credential.ts";
+import type { ResolutionFieldError } from "../../lib/errors.ts";
+import type { ConnectOfferPolicy } from "../../lib/connect-offer-policy.ts";
+import type { SpaceScope } from "../../lib/scope.ts";
+import { attachConnectOffers } from "../connect/preflight-connect-offer.ts";
 import { requireCallerRun } from "./access.ts";
 import {
   assertIntegrationActive,
-  listActiveIntegrationIds,
+  connectionParam,
+  listIntegrationIdsActiveInSpace,
   listReachableConnections,
+  proxyConnectionVerdicts,
   selectAccessibleConnection,
   upstreamRejectionStreak,
+  type ConnectionNaming,
+  type ProxyConnectionStatus,
   type ProxyReach,
   type ResolvedConnectionRow,
   type RunBoundSelection,
@@ -104,7 +112,7 @@ export function runBoundSelection(input: {
  * against the latest published version, or the one `version` names.
  *
  * `version` is internal-only: no HTTP door sets it. The `/api/credential-proxy/proxy` route (and
- * the MCP `api_call` tool, which re-enters it) builds its input field by field and never names it;
+ * the MCP `call_integration_tool`, which re-enters it) builds its input field by field and never names it;
  * the one caller is the server sync of a draft (`integration-server-sync.ts`), whose route
  * requires write authority on the package's home, the authority a run launched with the
  * integration's draft (`dependency_overrides`, `403 draft_not_writable`) requires.
@@ -128,8 +136,10 @@ type ResolveIntegrationProxyInput = {
   orgId: string;
   spaceId: string;
   actor: Actor;
-  /** Optional connection id pin (from `X-Connection-Id`). */
+  /** Optional connection id pin (from `X-Connection-Id`, or a body's `connection_id`). */
   connectionId?: string;
+  /** How the caller names `connectionId`; the header when omitted. */
+  connectionNaming?: ConnectionNaming;
 } & ProxyCallPath;
 
 interface ResolvedIntegrationProxyCredentials {
@@ -247,7 +257,7 @@ export async function forceRefreshIntegrationProxyCredentials(
 }
 
 /** One connection a call outside a run may use (`GET /api/credential-proxy/connections`). */
-interface ConnectionOutsideRun {
+export interface ConnectionOutsideRun {
   integration_package_id: string;
   connection_id: string;
   label: string;
@@ -264,23 +274,53 @@ interface ConnectionOutsideRun {
 
 /** What a call outside a run may use under `reach`. It decrypts nothing: a model reads it. */
 export async function listConnectionsOutsideRun(
-  scope: { orgId: string; spaceId: string },
+  scope: SpaceScope,
   actor: Actor,
   reach: ProxyReach,
 ): Promise<ConnectionOutsideRun[]> {
-  const rows = await listReachableConnections({ spaceId: scope.spaceId, actor }, reach);
-  const integrationIds = [...new Set(rows.map((row) => row.integrationId))];
-  const [active, orgDefaults, manifests] = await Promise.all([
-    listActiveIntegrationIds(integrationIds, scope.spaceId),
-    listOrgDefaultsForResolver(scope.spaceId),
-    Promise.all(integrationIds.map((id) => readIntegrationManifestForProxy(id, scope.orgId, null))),
-  ]);
-  const manifestOf = new Map(integrationIds.map((id, i) => [id, manifests[i]!]));
+  const manifests = await publishedManifests(
+    scope.orgId,
+    await listIntegrationIdsActiveInSpace(scope),
+  );
+  return connectionsOutsideRun(scope, actor, reach, manifests);
+}
 
+/**
+ * The published manifest of each of `integrationIds` that has one: the version a call outside a
+ * run is authorized against.
+ */
+export async function publishedManifests(
+  orgId: string,
+  integrationIds: readonly string[],
+): Promise<Map<string, IntegrationManifest>> {
+  const loaded = await Promise.all(
+    integrationIds.map((id) => readIntegrationManifestForProxy(id, orgId, null)),
+  );
+  const manifests = new Map<string, IntegrationManifest>();
+  integrationIds.forEach((id, i) => {
+    const result = loaded[i]!;
+    if (result.ok) manifests.set(id, result.manifest);
+  });
+  return manifests;
+}
+
+/**
+ * {@link listConnectionsOutsideRun}, over the integrations of `manifests` alone: those active in
+ * the space, each with its published manifest, as the caller read them.
+ */
+export async function connectionsOutsideRun(
+  scope: SpaceScope,
+  actor: Actor,
+  reach: ProxyReach,
+  manifests: ReadonlyMap<string, IntegrationManifest>,
+): Promise<ConnectionOutsideRun[]> {
+  const [rows, orgDefaults] = await Promise.all([
+    listReachableConnections({ spaceId: scope.spaceId, actor }, reach),
+    listOrgDefaultsForResolver(scope.spaceId),
+  ]);
   const listed = rows.flatMap((row): ConnectionOutsideRun[] => {
-    const loaded = manifestOf.get(row.integrationId)!;
-    if (!active.has(row.integrationId) || !loaded.ok) return [];
-    const authDef = loaded.manifest.auths?.[row.authKey] as AfpsManifestAuth | undefined;
+    const authDef = manifests.get(row.integrationId)?.auths?.[row.authKey] as
+      AfpsManifestAuth | undefined;
     if (!authDef) return [];
     const orgDefault = orgDefaults[row.integrationId];
     const enforcedMembers = orgDefault?.enforce ? orgDefault.connectionIds : null;
@@ -304,6 +344,48 @@ export async function listConnectionsOutsideRun(
   return listed.sort((a, b) => a.integration_package_id.localeCompare(b.integration_package_id));
 }
 
+/** An integration active in the space, with what a call outside a run naming no connection gets. */
+export interface IntegrationOutsideRun {
+  integration_package_id: string;
+  display_name: string;
+  /** What a call naming no connection gets ({@link proxyConnectionVerdict}). */
+  proxy_connection: { status: ProxyConnectionStatus; imposed: boolean };
+  /** The selection's item behind a refusal, with its `connect_url` when the caller asks for one. */
+  refusal?: ResolutionFieldError;
+}
+
+/**
+ * The integrations of `manifests` (active in the space, each with its published manifest), each
+ * with the verdict of a call outside a run naming no connection, judged against that version
+ * under `reach`. With `connectOffers`, a refusal item a connect flow clears carries its
+ * `connect_url`, minted by the run launch's one minter under its policy (`attachConnectOffers`).
+ */
+export async function integrationsOutsideRun(
+  scope: SpaceScope,
+  actor: Actor,
+  reach: ProxyReach,
+  connectOffers: ConnectOfferPolicy | null,
+  manifests: ReadonlyMap<string, IntegrationManifest>,
+): Promise<IntegrationOutsideRun[]> {
+  const verdicts = await proxyConnectionVerdicts(manifests, {
+    spaceId: scope.spaceId,
+    actor,
+    reach,
+  });
+  const refusals = verdicts.flatMap((verdict) => (verdict.refusal ? [verdict.refusal] : []));
+  const offered = connectOffers
+    ? await attachConnectOffers({ errors: refusals, scope, actor, policy: connectOffers })
+    : refusals;
+  // `offered` holds the refusals in verdict order.
+  let next = 0;
+  return verdicts.map(({ integrationId, manifest, status, imposed, refusal }) => ({
+    integration_package_id: integrationId,
+    display_name: manifest.display_name ?? manifest.name,
+    proxy_connection: { status, imposed },
+    ...(refusal ? { refusal: offered[next++]! } : {}),
+  }));
+}
+
 // ─────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────
@@ -312,16 +394,20 @@ export async function listConnectionsOutsideRun(
  * Why no connection answers. Outside a run the wording depends only on whether an id was named,
  * never on whose row it names or whether it exists.
  */
-function noConnectionMessage(input: ResolveIntegrationProxyInput): string {
+export function noConnectionMessage(
+  input: Pick<ResolveIntegrationProxyInput, "integrationId" | "connectionId" | "connectionNaming"> &
+    ({ run: Pick<ProxyRunSelection, "id">; reach?: never } | { reach: ProxyReach; run?: never }),
+): string {
   const { integrationId, run } = input;
   if (run) return `Run '${run.id}' binds no usable connection of integration '${integrationId}'`;
+  const named = connectionParam(input.connectionNaming).label;
   if (input.reach === "usable") {
     return input.connectionId
-      ? `X-Connection-Id names no connection of integration '${integrationId}' usable in this space`
+      ? `${named} names no connection of integration '${integrationId}' usable in this space`
       : `No connection of integration '${integrationId}' is usable in this space`;
   }
   const subject = input.connectionId
-    ? `X-Connection-Id names none of your own connections of integration '${integrationId}' usable in this space`
+    ? `${named} names none of your own connections of integration '${integrationId}' usable in this space`
     : `You have no connection of integration '${integrationId}' usable in this space`;
   return (
     `${subject}. A connection shared into the space is reached by a caller holding ` +
@@ -368,6 +454,7 @@ function resolveConnection(
   return selectAccessibleConnection(input.integrationId, manifest, input.connectionId ?? null, {
     spaceId: input.spaceId,
     actor: input.actor,
+    ...(input.connectionNaming ? { naming: input.connectionNaming } : {}),
     ...(input.run ? { run: input.run } : { reach: input.reach }),
   });
 }

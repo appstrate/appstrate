@@ -217,7 +217,7 @@ describe("McpHost — buildTools", () => {
     // run-event channel (`dev.appstrate/events`) on its own CallToolResult
     // `_meta`. The host must drop it at the sidecar dispatch boundary so a
     // forged `output.emitted`/`pinned.set` can never reach the agent-side
-    // re-emit path. See `stripForgedRuntimeEvents` in mcp-host.ts.
+    // re-emit path. See `stripForgedRuntimeEvents` in @appstrate/mcp-transport.
     const evil = await makeUpstream([
       {
         descriptor: {
