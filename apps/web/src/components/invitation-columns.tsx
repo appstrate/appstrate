@@ -56,7 +56,6 @@ export function useInvitationColumns({
       header: t("orgSettings.roleColumn"),
       width: 100,
       elastic: true,
-      tier: 2,
       cell: (invitation) => <CellText>{t(roleI18nKey(invitation.role))}</CellText>,
     },
     {
@@ -64,7 +63,6 @@ export function useInvitationColumns({
       header: t("orgSettings.inviteSpacesLabel"),
       width: 80,
       elastic: true,
-      tier: 2,
       cell: (invitation) =>
         assignmentsLoading ? (
           <Skeleton className="h-4 w-40" />
@@ -77,7 +75,6 @@ export function useInvitationColumns({
       header: t("orgSettings.expiresColumn"),
       width: 92,
       align: "end",
-      tier: 2,
       cell: (invitation) => <CellDate value={invitation.expiresAt} granularity="date" />,
     },
     rowActionsColumn((invitation) => (

@@ -51,6 +51,11 @@ export interface ModelPickRow {
   origin: ModelSource | "manual";
   /** Catalog-only: the curated group. */
   featured: boolean;
+  /**
+   * Catalog-only: a subscription provider's live-catalog model, which the provider may
+   * refuse to the subscription (`subscription_unverified`) — offered with a warning.
+   */
+  subscriptionUnverified?: true;
 }
 
 function pickRow(row: Partial<ModelPickRow> & Pick<ModelPickRow, "id" | "origin">): ModelPickRow {
@@ -72,6 +77,7 @@ export interface CatalogModelEntry extends CatalogModelValues {
   id: string;
   label: string;
   featured: boolean;
+  subscription_unverified?: true;
 }
 
 export function catalogRows(entries: readonly CatalogModelEntry[]): ModelPickRow[] {
@@ -83,6 +89,7 @@ export function catalogRows(entries: readonly CatalogModelEntry[]): ModelPickRow
       source: "catalog",
       origin: "catalog",
       featured: m.featured,
+      ...(m.subscription_unverified ? { subscriptionUnverified: true as const } : {}),
     }),
   );
 }

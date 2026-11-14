@@ -12,12 +12,9 @@
  *   other cells, so anything that answers to the pointer — a button, or a
  *   `title` a truncated cell needs readable — has to be RAISED above it
  *   (`relative z-10`) or the row swallows the hover with the click.
- * - **A column that is READ may wait for room, one that is a CONTROL may not.**
- *   With `tiered`, a column declaring a `tier` is drawn only once the table is
- *   wide enough (`2`: 36rem, `3`: 56rem). A control column (a select, a switch,
- *   a button, an action link) has no tier and is never dropped: a person who
- *   cannot see the control cannot act. Without `tiered` every column is drawn and
- *   the table scrolls sideways.
+ * - **Every column the reader keeps is drawn, at every width.** A table too wide
+ *   for its container scrolls sideways; the width never hides a column on its
+ *   own. Which columns show is the reader's call, made in the column menu.
  * - **Columns resize.** Drag the edge of a head, double-click to give the column back its
  *   declared width. The width is the reader's, kept per table (its `label`) and never goes
  *   below the column's declared width. Fixed-size controls and the row's end have no handle.
@@ -29,7 +26,6 @@ import { useRef, useState, type CSSProperties, type MouseEvent, type ReactNode }
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { cn } from "@appstrate/ui/cn";
-import { Skeleton } from "@appstrate/ui/components/skeleton";
 import {
   Table,
   TableBody,
@@ -40,42 +36,49 @@ import {
 } from "@appstrate/ui/components/table";
 import { collectionVerdict, type CollectionState } from "./collection";
 import { ErrorState } from "./page-states";
-import { isIdentityColumn } from "../lib/column-visibility";
+import { CellPlaceholder } from "./table-cells";
+import { identityColumnIndex } from "../lib/column-visibility";
 import { useColumnWidths } from "../stores/column-widths-store";
 
-interface DataColumnBase<T> {
+export interface DataColumn<T> {
   /** Stable handle, independent of the label — a column set is a list of these. */
   id: string;
   /** Column head, already translated. Also the label the column menu lists. */
   header: string;
   /** Drawn instead of `header` when the head is a control rather than a word. */
   headerNode?: ReactNode;
+  /**
+   * A column whose cells say what they are (a status badge) needs no word above
+   * them: the head stays for screen readers and the column menu, but is not drawn.
+   */
+  hideHeader?: true;
   /** Pixels. A fixed column is exactly this wide; an `elastic` one is never narrower. */
   width: number;
+  /**
+   * Pixels, while the table is narrower than 32rem (`@lg`), for a cell that
+   * collapses there — a compact status badge turns into its icon at that same
+   * width. A width the reader chose applies at every width.
+   */
+  narrowWidth?: number;
   /** Takes its share of the room the fixed columns leave. */
   elastic?: boolean;
   /** Numbers, durations and dates read against the right edge. */
   align?: "end";
   cell: (row: T) => ReactNode;
+  /**
+   * Holds something to act on (a select, a switch, a tick, a button), as opposed
+   * to a READ column (text, a badge, a date). Never carries the row's link; the
+   * first read column names the row, unless another is marked `identity`.
+   */
+  control?: boolean;
+  /** Names the row though a read column precedes it (a run's status before the run). */
+  identity?: true;
+  /**
+   * What the cell draws while the rows load: `cell`'s shape (its icon, its lines),
+   * so a loaded row stands where its placeholder did. One muted line when unset.
+   */
+  placeholder?: ReactNode;
 }
-
-/**
- * What a column IS decides whether it may leave: a READ column (text, a badge,
- * a date) may wait for room, a CONTROL column may not.
- */
-type DataColumnNature =
-  | {
-      /** Holds something to act on; never hidden, never carries the row's link. */
-      control: true;
-      tier?: never;
-    }
-  | {
-      control?: false;
-      /** Unset is the row's identity, always drawn. `2` waits for a 36rem table, `3` for a 56rem one. */
-      tier?: 2 | 3;
-    };
-
-export type DataColumn<T> = DataColumnBase<T> & DataColumnNature;
 
 interface DataTableProps<T> extends CollectionState {
   /** Stable preference key, independent of the translated accessible label. */
@@ -97,8 +100,6 @@ interface DataTableProps<T> extends CollectionState {
   banner?: ReactNode;
   /** Names the table for screen readers (never drawn). */
   label: string;
-  /** Read columns wait for room by `tier`; otherwise every column is drawn and the table scrolls. */
-  tiered?: boolean;
   /** Remove the second frame when the table already lives on a white surface. */
   surface?: "framed" | "integrated";
 }
@@ -110,32 +111,38 @@ function isRowEnd<T>(column: DataColumn<T>): boolean {
 
 const SKELETON_ROWS = 3;
 
-/** Written out rather than interpolated: Tailwind reads class names as literals. */
-function tierClass<T>(column: DataColumn<T>): string | undefined {
-  if (column.tier === 2) return "hidden @xl/table:table-cell";
-  if (column.tier === 3) return "hidden @4xl/table:table-cell";
-  return undefined;
-}
+/** A column's width while the table is narrower than 32rem. */
+const narrowOf = <T,>(column: DataColumn<T>) => column.narrowWidth ?? column.width;
 
-const floorOf = <T,>(columns: DataColumn<T>[]) =>
-  `${columns.reduce((sum, c) => sum + c.width, 0)}px`;
+const px = (value: number) => `${value}px`;
+const floorOf = <T,>(columns: DataColumn<T>[], width: (c: DataColumn<T>) => number) =>
+  px(columns.reduce((sum, c) => sum + width(c), 0));
+
+/**
+ * A size that changes at a 32rem table: two custom properties, the class switching between them
+ * (`holdClass`, `widthClass` — Tailwind reads class names as literals).
+ */
+function responsive(name: string, wide: number, narrow: number): CSSProperties {
+  return { [`--dt-${name}`]: px(wide), [`--dt-${name}-narrow`]: px(narrow) };
+}
 
 /**
  * Which columns stay in place when the table scrolls sideways: the row's name
- * (with the fixed ticks before it) and the row's « … ». A name that other READ
- * columns precede is not held: their tier hides them on a narrow table, so
- * there is no stable offset to hold it at.
+ * (with the fixed-width columns before it) and the row's « … ». A name that an
+ * elastic column precedes is not held: there is no stable offset to hold it at.
  */
-type Hold = { side: "start"; left: number } | { side: "end" };
+type Hold = { side: "start"; left: number; narrowLeft: number } | { side: "end" };
 
 function heldColumns<T>(columns: DataColumn<T>[]): Map<string, Hold> {
   const held = new Map<string, Hold>();
-  const identity = columns.findIndex(isIdentityColumn);
-  if (identity >= 0 && columns.slice(0, identity).every((c) => c.control && !c.elastic)) {
+  const identity = identityColumnIndex(columns);
+  if (identity >= 0 && columns.slice(0, identity).every((c) => !c.elastic)) {
     let left = 0;
+    let narrowLeft = 0;
     for (const column of columns.slice(0, identity + 1)) {
-      held.set(column.id, { side: "start", left });
+      held.set(column.id, { side: "start", left, narrowLeft });
       left += column.width;
+      narrowLeft += narrowOf(column);
     }
   }
   const end = columns[columns.length - 1];
@@ -144,7 +151,30 @@ function heldColumns<T>(columns: DataColumn<T>[]): Map<string, Hold> {
 }
 
 function holdStyle(hold: Hold): CSSProperties {
-  return hold.side === "end" ? { right: 0 } : { left: hold.left };
+  if (hold.side === "end") return { right: 0 };
+  return hold.left === hold.narrowLeft
+    ? { left: hold.left }
+    : responsive("left", hold.left, hold.narrowLeft);
+}
+
+function holdClass(hold: Hold): string | undefined {
+  return hold.side === "start" && hold.left !== hold.narrowLeft
+    ? "left-(--dt-left-narrow) @lg/table:left-(--dt-left)"
+    : undefined;
+}
+
+/** A fixed column's width, switching at a 32rem table when it declares a narrower one. */
+function widthStyle<T>(column: DataColumn<T>): CSSProperties | undefined {
+  if (column.elastic) return undefined;
+  return column.width === narrowOf(column)
+    ? { width: column.width }
+    : responsive("w", column.width, narrowOf(column));
+}
+
+function widthClass<T>(column: DataColumn<T>): string | undefined {
+  return !column.elastic && column.width !== narrowOf(column)
+    ? "w-(--dt-w-narrow) @lg/table:w-(--dt-w)"
+    : undefined;
 }
 
 /** Opaque, so what scrolls behind it stays hidden; it follows the row's hover colour. */
@@ -237,7 +267,6 @@ export function DataTable<T>({
   rowState,
   banner,
   label,
-  tiered = false,
   surface = "framed",
   ...state
 }: DataTableProps<T>) {
@@ -249,11 +278,9 @@ export function DataTable<T>({
   const [dragged, setDragged] = useState<{ id: string; width: number } | null>(null);
   const columns = declared.map((column) => {
     const width = dragged?.id === column.id ? dragged.width : stored.widths[column.id];
-    const sized = width
-      ? { ...column, width: Math.max(width, column.width), elastic: false }
+    return width
+      ? { ...column, width: Math.max(width, column.width), narrowWidth: undefined, elastic: false }
       : column;
-    // Actions remain reachable even if a caller assigns them a read-column tier.
-    return column.control || isRowEnd(column) ? { ...sized, tier: undefined } : sized;
   });
   const open = (row: T, href: string | undefined) => {
     if (href) navigate(href, { state: rowState?.(row) });
@@ -287,39 +314,34 @@ export function DataTable<T>({
   }
 
   const held = heldColumns(columns);
-  // The link goes in the first identity column, not in column zero: a run list
-  // leads with `#131`, a tier-two column that a phone does not draw, and a
-  // catalogue leads with a tick, which a link would turn into navigation.
-  const linkColumn = columns.findIndex(isIdentityColumn);
-  // The cover sits in the first cell that is neither held nor tiered: a `sticky` cell would
-  // be its containing block, and a cell that may be hidden takes it with it. A static cell
-  // leaves the row (`relative`) as the block it stretches over. When every drawn column is held
-  // it falls back to the first one: it then covers that cell only, the row's own click does the rest.
-  const coverable = columns.filter((c) => !c.tier);
-  const coverColumn = columns.indexOf((coverable.find((c) => !held.has(c.id)) ?? coverable[0])!);
-  // The least room the table needs at each tier: under it, it scrolls sideways.
-  const floors = {
-    "--dt-floor": floorOf(tiered ? columns.filter((c) => !c.tier) : columns),
-    "--dt-floor-2": floorOf(tiered ? columns.filter((c) => !c.tier || c.tier === 2) : columns),
-    "--dt-floor-3": floorOf(columns),
+  // The link goes in the identity column, not in column zero: a run list leads
+  // with its status, and a catalogue with a tick, which a link would turn into
+  // navigation.
+  const linkColumn = identityColumnIndex(columns);
+  // The cover sits in the first cell that is not held: a `sticky` cell would be its containing
+  // block. A static cell leaves the row (`relative`) as the block it stretches over. When every
+  // column is held it falls back to the first one: it then covers that cell only, the row's own
+  // click does the rest.
+  const coverColumn = Math.max(
+    0,
+    columns.findIndex((c) => !held.has(c.id)),
+  );
+  // The least room the table needs: under it, it scrolls sideways.
+  const floor = {
+    "--dt-floor": floorOf(columns, (c) => c.width),
+    "--dt-floor-narrow": floorOf(columns, narrowOf),
   } as CSSProperties;
   // An end-aligned column keeps clear of the resize handle: its text sits a little in from the edge.
-  const cellClass = (column: DataColumn<T>) =>
-    cn(tiered && tierClass(column), "px-3", column.align === "end" && "pr-5");
+  const cellClass = (column: DataColumn<T>) => cn("px-3", column.align === "end" && "pr-5");
   const heldClass = (hold: Hold | undefined, hover = false) =>
-    hold && cn(HELD, hover && HELD_HOVER);
+    hold && cn(HELD, holdClass(hold), hover && HELD_HOVER);
 
   return (
     <div className={frameClass}>
       <Table
         aria-label={label}
-        style={floors}
-        className={cn(
-          "table-fixed",
-          tiered
-            ? "min-w-(--dt-floor) @xl/table:min-w-(--dt-floor-2) @4xl/table:min-w-(--dt-floor-3)"
-            : "min-w-(--dt-floor-3)",
-        )}
+        style={floor}
+        className="min-w-(--dt-floor-narrow) table-fixed @lg/table:min-w-(--dt-floor)"
       >
         <TableHeader>
           <TableRow className={cn("border-border h-10 hover:bg-transparent", headTopRule)}>
@@ -329,19 +351,22 @@ export function DataTable<T>({
                 <TableHead
                   key={column.id}
                   data-column={column.id}
-                  style={{
-                    ...(column.elastic ? undefined : { width: column.width }),
-                    ...(hold && holdStyle(hold)),
-                  }}
+                  style={{ ...widthStyle(column), ...(hold && holdStyle(hold)) }}
                   className={cn(
                     cellClass(column),
+                    widthClass(column),
                     !hold && "relative",
                     "text-muted-foreground h-10 truncate text-[0.68rem] font-semibold tracking-[0.05em] uppercase",
                     column.align === "end" ? "text-right" : "text-left",
                     heldClass(hold),
                   )}
                 >
-                  {column.headerNode ?? column.header}
+                  {column.headerNode ??
+                    (column.hideHeader ? (
+                      <span className="sr-only">{column.header}</span>
+                    ) : (
+                      column.header
+                    ))}
                   {isResizable(column) && (
                     <ResizeHandle
                       name={column.header}
@@ -372,9 +397,18 @@ export function DataTable<T>({
                   aria-hidden
                   className="border-border/60 h-12 hover:bg-transparent"
                 >
+                  {/* The data row's own cell box (`py-2`, the content wrapper), so a
+                      placeholder taller than the row grows it exactly as its cell would. */}
                   {columns.map((column) => (
-                    <TableCell key={column.id} className={cellClass(column)}>
-                      <Skeleton className="h-3.5 w-full" />
+                    <TableCell key={column.id} className={cn(cellClass(column), "py-2")}>
+                      <div
+                        className={cn(
+                          "flex min-w-0 items-center gap-1.5",
+                          column.align === "end" && "justify-end",
+                        )}
+                      >
+                        {column.placeholder ?? <CellPlaceholder />}
+                      </div>
                     </TableCell>
                   ))}
                 </TableRow>

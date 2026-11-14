@@ -20,7 +20,7 @@ import { DetailBar } from "../components/detail-bar";
 import { PackageIcon } from "../components/package-icon";
 import { ResourceErrorState } from "../components/page-states";
 import { RunDetailSkeleton } from "../components/loading-skeletons";
-import { useMarkReadByRun } from "../hooks/use-notifications";
+import { useMarkRunRead } from "../hooks/use-run-reads";
 import { ACTIVE_RUN_STATUSES, type AgentListItem, type EnrichedRun } from "@appstrate/shared-types";
 import type { components } from "../api/client";
 import { formatDateField } from "../lib/format-date";
@@ -37,7 +37,7 @@ import {
 } from "../lib/query-keys";
 import { inlineRunDisplayName, runPageTitle } from "../lib/run-title";
 import { useTabWithHash } from "../hooks/use-tab-with-hash";
-import { RunHeaderActions, RunHeaderSummary } from "../components/run-detail/run-header-summary";
+import { RunHeaderActions } from "../components/run-detail/run-header-actions";
 import { RunExecutionView } from "../components/run-detail/run-execution-view";
 import { RunResultsView } from "../components/run-detail/run-results-view";
 import { RunSnapshotInspector } from "../components/run-detail/run-snapshot-inspector";
@@ -49,6 +49,7 @@ import { RunProvenanceBadges } from "../components/run-provenance-badges";
 import type { JournalOverviewFilter } from "../components/log-viewer";
 import { isQueryInFlight } from "../lib/query-state";
 import { findModelFallback } from "../lib/run-model-fallback";
+import { findRunErrorReason } from "../lib/run-error";
 
 /** Wire shape of a persisted log row (spec `RunLog`); `createdAt` is an ISO string. */
 type RunLogEntry = components["schemas"]["RunLog"];
@@ -115,9 +116,9 @@ function RunDetailBody() {
 
   const qc = useQueryClient();
 
-  const markRead = useMarkReadByRun();
+  const markRead = useMarkRunRead();
 
-  // Auto-mark notification as read when viewing a terminal run, and refetch the
+  // Mark the run read when viewing it terminal, and refetch the
   // run's logs. Keyed on `status`: the SSE run patch carries `status` (see
   // `runUpdateToRunPatch`), so a run that finalizes while the page is open acts
   // the moment status flips terminal. Idempotent server-side (no-op for a
@@ -130,7 +131,7 @@ function RunDetailBody() {
   useEffect(() => {
     const terminal = !!status && !(ACTIVE_RUN_STATUSES as ReadonlySet<string>).has(status);
     if (run && runId && terminal) {
-      markRead.mutate({ params: { path: { runId } } });
+      markRead.mutate({ params: { path: { id: runId } } });
       void invalidateRunLogs(qc, orgId, spaceId, runId);
     }
   }, [status, runId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -159,6 +160,7 @@ function RunDetailBody() {
   const hasOutput = !!finalOutput && Object.keys(finalOutput).length > 0;
   const allLogs = historicalLogs;
   const modelFallback = useMemo(() => findModelFallback(logs), [logs]);
+  const errorReason = useMemo(() => findRunErrorReason(logs), [logs]);
   // Run-level memory rows (only those touched during this run).
   const { data: runMemories, isLoading: memoriesLoading } = useRunMemories(packageId, runId);
   const { data: runPinned, isLoading: pinnedLoading } = useRunPinned(packageId, runId);
@@ -359,7 +361,6 @@ function RunDetailBody() {
 
       <div className="overflow-visible" data-run-detail-surface>
         <DetailTabPanel value="overview">
-          <RunHeaderSummary run={enrichedRun} />
           <RunSnapshotInspector
             run={enrichedRun}
             turns={turnRows}
@@ -369,6 +370,7 @@ function RunDetailBody() {
             logsLoading={logsQuery.isLoading}
             memoryLoading={memoryLoading}
             modelFallback={modelFallback}
+            errorReason={errorReason}
             onOpenJournal={(filter) => openTab("#journal", filter)}
             onOpenResults={() => openTab("#results")}
           />

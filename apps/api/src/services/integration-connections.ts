@@ -42,7 +42,6 @@ import {
   decryptCredentialsToStringMap,
   isClientMetadataRedirectTag,
 } from "@appstrate/connect";
-import { getEnv } from "@appstrate/env";
 import { issuerOfClientMetadataDocumentRef } from "../lib/integration-client-metadata.ts";
 import {
   resolveSystemClientForAuth,
@@ -2342,16 +2341,16 @@ export async function recordIntegrationRefreshFailure(
 }
 
 /**
- * Count an upstream rejection of an unrefreshable credential toward the max, while `reach` reaches
- * the connection and it still holds `revision`. `null` when nothing was counted.
+ * Count an upstream rejection of an unrefreshable credential toward `maxFailures`, while `reach`
+ * reaches the connection and it still holds `revision`. `null` when nothing was counted.
  */
 export async function recordUnrefreshableRejection(
   connectionId: string,
   integrationId: string,
   reach: { spaceId: string; actor: Actor },
   revision: string,
+  maxFailures: number,
 ): Promise<{ failures: number; maxFailures: number; needsReconnection: boolean } | null> {
-  const maxFailures = getEnv().INTEGRATION_REFRESH_MAX_FAILURES;
   const counted = await recordIntegrationRefreshFailure(connectionId, maxFailures, {
     reachable: and(
       reachableConnection(connectionId, integrationId, reach),
@@ -2514,7 +2513,8 @@ interface UsableIntegration {
 
 /**
  * The integrations the actor could attach to an agent here, one per integration with a connection
- * it may bind ({@link usableInSpace}); `source`: own, shared, or both.
+ * it may bind ({@link usableInSpace}) and active in the space, as a run or a proxy call requires;
+ * `source`: own, shared, or both.
  */
 export async function listUsableIntegrationsForActor(
   scope: SpaceScope,
@@ -2542,7 +2542,9 @@ export async function listUsableIntegrationsForActor(
 
   // Sorted on purpose: the chat renders this list into its system prompt, one cache block, and an
   // unordered SELECT may permute it between identical calls, invalidating the cached prefix.
-  const ids = [...acc.keys()].sort();
+  const active = await listActiveIntegrationIds([...acc.keys()], scope.spaceId);
+  const ids = [...active].sort();
+  if (ids.length === 0) return [];
   const pkgRows = await db
     .select({ id: packages.id, draftManifest: packages.draftManifest })
     .from(packages)

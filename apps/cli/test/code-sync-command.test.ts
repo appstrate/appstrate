@@ -287,7 +287,7 @@ describe("code sync — claude-plugin target", () => {
     expect(again.stderr()).not.toContain("Renamed");
   });
 
-  it("skips a skill with no published version without failing the run", async () => {
+  it("leaves out a skill with no published version, which the list does not hold", async () => {
     createSkillServer([
       ...ONE_SKILL,
       { id: "@acme/unpublished", skillMd: skillMd("unpublished"), unpublished: true },
@@ -296,7 +296,7 @@ describe("code sync — claude-plugin target", () => {
 
     await codeSyncCommand({ target: ["claude-plugin"] }, io);
 
-    expect(stderr()).toContain("Skipped @acme/unpublished: no published version available.");
+    expect(stderr()).not.toContain("@acme/unpublished");
     expect(await readdir(join(pluginRoot(), "skills"))).toEqual(["pdf-tools"]);
   });
 
@@ -307,7 +307,7 @@ describe("code sync — claude-plugin target", () => {
     await expect(codeSyncCommand({ target: ["claude-plugin"] }, io)).rejects.toBeInstanceOf(
       CommandExit,
     );
-    expect(stderr()).toContain("Integrity mismatch");
+    expect(stderr()).toContain("does not match its served digest");
   });
 });
 
@@ -315,14 +315,14 @@ describe("code sync — --print-path", () => {
   it("prints the plugin directory as the only stdout line", async () => {
     createSkillServer([
       ...ONE_SKILL,
-      { id: "@acme/unpublished", skillMd: skillMd("unpublished"), unpublished: true },
+      { id: "@acme/broken", skillMd: skillMd("broken"), corruptDownload: true },
     ]).install();
     const { io, stdout, stderr } = createMemoryIO();
 
     await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io);
 
     expect(stdout()).toBe(`${pluginRoot()}\n`);
-    expect(stderr()).toContain("Skipped @acme/unpublished");
+    expect(stderr()).toContain("Failed @acme/broken");
   });
 
   it("refuses to run without the claude-plugin target", async () => {
@@ -569,7 +569,7 @@ describe("code sync — exit codes", () => {
     await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, io);
 
     expect(stdout()).toBe(`${pluginRoot()}\n`);
-    expect(stderr()).toContain("Integrity mismatch");
+    expect(stderr()).toContain("does not match its served digest");
     expect(await exists(join(pluginRoot(), "skills", "pdf-tools"))).toBe(true);
   });
 
@@ -645,14 +645,12 @@ describe("code sync — --source draft", () => {
       skillMd: skillMd("PDF Tools", "Published copy."),
       draft: {
         skillMd: skillMd("PDF Tools", "Draft copy."),
-        lockVersion: 3,
-        etag: "idx-a",
         files: { "reference/small.md": "small", "assets/big.txt": "big" },
       },
     },
   ];
 
-  it("materializes the working copy from ONE draft archive", async () => {
+  it("writes the working copy the draft list serves", async () => {
     const server = createSkillServer(DRAFT);
     server.install();
     const { io } = createMemoryIO();
@@ -663,15 +661,11 @@ describe("code sync — --source draft", () => {
     expect(await readText(join(dir, "SKILL.md"))).toContain("Draft copy.");
     expect(await readText(join(dir, "reference/small.md"))).toBe("small");
     expect(await readText(join(dir, "assets/big.txt"))).toBe("big");
-    expect(await readdir(dir)).not.toContain("manifest.json");
-    // Every file of the draft rides one archive, whatever its count.
     expect(server.draftDownloads()).toBe(1);
     expect(server.downloads()).toBe(0);
-    // Resolution reads the index once, for its ETag, the change token.
-    expect(server.indexReads()).toBe(1);
   });
 
-  it("does not re-fetch when neither the index nor the draft ETag moved", async () => {
+  it("does not re-fetch when no served digest moved", async () => {
     const server = createSkillServer(DRAFT);
     server.install();
     const { io } = createMemoryIO();
@@ -683,7 +677,7 @@ describe("code sync — --source draft", () => {
     expect(server.draftDownloads()).toBe(after);
   });
 
-  it("re-materializes when the draft ETag moves", async () => {
+  it("re-materializes when the draft's served digests move", async () => {
     createSkillServer(DRAFT).install();
     const { io } = createMemoryIO();
     await codeSyncCommand({ target: ["claude-plugin"], source: "draft" }, io);
@@ -694,8 +688,6 @@ describe("code sync — --source draft", () => {
         draft: {
           ...DRAFT[0]!.draft!,
           skillMd: skillMd("PDF Tools", "Edited draft."),
-          lockVersion: 4,
-          etag: "idx-b",
         },
       },
     ]);
@@ -725,10 +717,10 @@ describe("code sync — --source draft", () => {
   });
 });
 
-describe("code sync — a failed resolution is not a deletion", () => {
+describe("code sync — a failed download is not a deletion", () => {
   const TWO: SkillFixture[] = [...ONE_SKILL, { id: "@acme/notes", skillMd: skillMd("notes") }];
 
-  it("keeps the directory and the ledger entry when versions/latest 500s", async () => {
+  it("keeps the directory and the ledger entry when /archive 500s", async () => {
     createSkillServer(TWO).install();
     const { io } = createMemoryIO();
     await codeSyncCommand({ target: ["claude-plugin", "codex"] }, io);
@@ -737,7 +729,13 @@ describe("code sync — a failed resolution is not a deletion", () => {
     // says the skill is gone.
     createSkillServer([
       ONE_SKILL[0]!,
-      { id: "@acme/notes", skillMd: skillMd("notes"), resolveError: 500 },
+      {
+        id: "@acme/notes",
+        skillMd: skillMd("notes"),
+        version: "1.1.0",
+        extraFiles: { "new.md": "x" },
+        resolveError: 500,
+      },
     ]).install();
     await expect(
       codeSyncCommand({ target: ["claude-plugin", "codex"] }, io),
@@ -762,7 +760,13 @@ describe("code sync — a failed resolution is not a deletion", () => {
 
     createSkillServer([
       ONE_SKILL[0]!,
-      { id: "@acme/notes", skillMd: skillMd("notes"), resolveError: 500 },
+      {
+        id: "@acme/notes",
+        skillMd: skillMd("notes"),
+        version: "1.1.0",
+        extraFiles: { "new.md": "x" },
+        resolveError: 500,
+      },
     ]).install();
     const second = createMemoryIO();
     await codeSyncCommand({ target: ["claude-plugin"], printPath: true }, second.io);
@@ -790,7 +794,13 @@ describe("code sync — a failed resolution is not a deletion", () => {
 
     createSkillServer([
       ONE_SKILL[0]!,
-      { id: "@acme/notes", skillMd: skillMd("notes"), resolveError: 500 },
+      {
+        id: "@acme/notes",
+        skillMd: skillMd("notes"),
+        version: "1.1.0",
+        extraFiles: { "new.md": "x" },
+        resolveError: 500,
+      },
     ]).install();
     await expect(codeSyncCommand({ target: ["codex"] }, io)).rejects.toBeInstanceOf(CommandExit);
 
@@ -814,7 +824,13 @@ describe("code sync — a failed resolution is not a deletion", () => {
     expect((await readdir(join(pluginRoot(), "skills"))).sort()).toEqual(["pdf-tools", "zz-other"]);
 
     createSkillServer([
-      { id: "@acme/pdf-tools", skillMd: skillMd("pdf-tools"), resolveError: 500 },
+      {
+        id: "@acme/pdf-tools",
+        skillMd: skillMd("pdf-tools"),
+        version: "1.1.0",
+        extraFiles: { "new.md": "x" },
+        resolveError: 500,
+      },
       { id: "@zz/other", skillMd: skillMd("pdf-tools") },
     ]).install();
     await expect(codeSyncCommand({ target: ["claude-plugin"] }, io)).rejects.toBeInstanceOf(
@@ -1173,9 +1189,11 @@ describe("code sync — the plugin tree is repaired, not just extended", () => {
 
 describe("code sync — non-conforming frontmatter", () => {
   it("syncs the skill as authored and says so once, without failing the run", async () => {
-    // A legacy published artifact: `yaml` refuses the unquoted second colon.
-    // The sync copies it verbatim and reports it; it never rewrites the body.
-    const source = "---\nname: meeting-notes-fr\ndescription: Notes: weekly\n---\n\nBody.\n";
+    // A published artifact the server still serves: its description is
+    // over the Agent Skills bound. The sync writes the served bytes and reports
+    // it; it never rewrites the body.
+    const description = "x".repeat(1025);
+    const source = `---\nname: meeting-notes-fr\ndescription: ${description}\n---\n\nBody.\n`;
     createSkillServer([{ id: "@pierre-cabriere/meeting-notes-fr", skillMd: source }]).install();
     const { io, stdout, stderr } = createMemoryIO();
 
@@ -1189,7 +1207,7 @@ describe("code sync — non-conforming frontmatter", () => {
       "Claude Code and Codex may not load it — republish it from Appstrate.",
     );
     expect(await readText(join(pluginRoot(), "skills", "meeting-notes-fr", "SKILL.md"))).toBe(
-      source,
+      `---\nname: meeting-notes-fr\ndescription: ${description}\nmetadata:\n  version: 1.0.0\n---\n\nBody.\n`,
     );
   });
 
@@ -1388,7 +1406,7 @@ describe("code sync — session notice", () => {
     const serve = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const path = new URL(String(input)).pathname;
-      if (path.endsWith("/download")) return new Response("", { status: 401 });
+      if (path === "/api/packages/skills/served/archive") return new Response("", { status: 401 });
       if (path === "/api/auth/cli/token") {
         return Response.json({ error: "invalid_grant" }, { status: 400 });
       }
@@ -1407,16 +1425,16 @@ describe("code sync — session notice", () => {
     );
   });
 
-  it("fails the run when the session is lost mid-resolution, and says so next session", async () => {
+  it("fails the run when the session is lost mid-listing, and says so next session", async () => {
     createSkillServer(ONE_SKILL).install();
     await syncPlugin();
     const before = await snapshot(pluginRoot());
-    // The listing still answers; the version resolution is refused and the
+    // The space list still answers; the skill list is refused and the
     // refresh that follows is too, so the session is gone.
     const serve = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const path = new URL(String(input)).pathname;
-      if (path.endsWith("/versions/latest")) return new Response("", { status: 401 });
+      if (path === "/api/packages/skills/served") return new Response("", { status: 401 });
       if (path === "/api/auth/cli/token") {
         return Response.json({ error: "invalid_grant" }, { status: 400 });
       }
@@ -1573,7 +1591,7 @@ describe("code sync — session notice", () => {
 });
 
 describe("code sync — request concurrency", () => {
-  it("never holds more than eight package-route requests open", async () => {
+  it("never holds more than eight skill-route requests open", async () => {
     const many = Array.from({ length: 24 }, (_, i) => ({
       id: `@acme/skill-${String(i).padStart(2, "0")}`,
       skillMd: skillMd(`skill-${String(i).padStart(2, "0")}`),
@@ -1712,7 +1730,8 @@ describe("code sync — multiple spaces", () => {
     const serve = globalThis.fetch;
     const seen: string[] = [];
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-      const path = new URL(String(input)).pathname;
+      const url = new URL(String(input));
+      const path = url.pathname;
       const space = new Headers(init?.headers).get("X-Space-Id");
       if (path === "/api/spaces")
         return Response.json({
@@ -1721,20 +1740,21 @@ describe("code sync — multiple spaces", () => {
             { id: "spc_2", name: "Library", ...MEMBER },
           ],
         });
-      if (path === "/api/packages/skills")
+      if (path === "/api/packages/skills/served" && space === "spc_1") {
+        const listed = (await (await serve(input, init)).json()) as { data: { uri: string }[] };
         return Response.json({
-          data:
-            space === "spc_1"
-              ? [{ id: ONE_SKILL[0]!.id }]
-              : [{ id: ONE_SKILL[0]!.id }, { id: second.id }],
+          object: "list",
+          data: listed.data.filter((entry) => !entry.uri.includes("/other/")),
+          hasMore: false,
         });
-      if (path.includes("other")) expect(space).toBe("spc_2");
+      }
+      if (url.search.includes("other")) expect(space).toBe("spc_2");
       seen.push(path);
       return serve(input, init);
     }) as unknown as typeof fetch;
     const { io } = createMemoryIO();
     await codeSyncCommand({ target: ["claude-plugin"], space: ["spc_1", "Library", "spc_2"] }, io);
-    expect(seen.filter((path) => path.endsWith("/download"))).toHaveLength(2);
+    expect(seen.filter((path) => path === "/api/packages/skills/served/archive")).toHaveLength(2);
     expect(
       JSON.parse(await readText(join(pluginRoot(), ".mcp.json"))).mcpServers.appstrate.url,
     ).toBe("https://app.example.com/api/mcp/o/org_1");
@@ -1796,7 +1816,7 @@ describe("code sync — active context replacement", () => {
     createSkillServer(ONE_SKILL).install();
     const serve = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-      if (new URL(String(input)).pathname.endsWith("/download")) {
+      if (new URL(String(input)).pathname === "/api/packages/skills/served/archive") {
         await updateProfile("default", { orgId: "org_changed" });
       }
       return serve(input, init);
@@ -1820,7 +1840,7 @@ describe("code sync — active context replacement", () => {
     serve.install();
     const passthrough = globalThis.fetch;
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-      if (new URL(String(input)).pathname.endsWith("/download")) {
+      if (new URL(String(input)).pathname === "/api/packages/skills/served/archive") {
         await updateProfile("default", { spaceId: "spc_2" });
       }
       return passthrough(input, init);
@@ -1960,7 +1980,7 @@ it("serializes logout behind an in-flight sync and leaves no connected installat
   });
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     const path = new URL(String(input)).pathname;
-    if (path.endsWith("/download")) {
+    if (path === "/api/packages/skills/served/archive") {
       started();
       await held;
     }

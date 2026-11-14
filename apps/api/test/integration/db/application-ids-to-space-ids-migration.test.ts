@@ -493,15 +493,16 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
       SELECT 'audit_events.space_id',
              (SELECT count(*)::int FROM audit_events WHERE space_id LIKE 'app\\_%')
     `);
-    // 21 single-column FK columns + the constraint-less `audit_events.space_id`.
-    // Two of the 21 arrived with `0056_space_roles` (`space_members.space_id`,
-    // `chat_sessions.space_id`), and two more with the personal-spaces work:
+    // 22 single-column FK columns + the constraint-less `audit_events.space_id`.
+    // Two of the 22 arrived with `0056_space_roles` (`space_members.space_id`,
+    // `chat_sessions.space_id`), two more with the personal-spaces work:
     // `packages.home_space_id` (`0063_packages_home_space`) and
-    // `package_shares.space_id` (`0065_package_shares`). The composite keys of
+    // `package_shares.space_id` (`0065_package_shares`), and one with
+    // `run_reads.space_id` (`0103_run_reads`). The composite keys of
     // `0089` are dropped for this file (`compositeSpaceFks`). 0003 derives the
     // columns it rewrites FROM the FK set, so it covers them without an edit —
     // which is exactly the property this count guards.
-    expect(survivors.length).toBe(22);
+    expect(survivors.length).toBe(23);
     expect(survivors.filter((r) => r.n !== 0)).toEqual([]);
   });
 
@@ -512,7 +513,7 @@ describe("scripts/migration/0003 — `app_` ids and the `application` vocabulary
        WHERE contype = 'f' AND confrelid = 'public.spaces'::regclass
        ORDER BY 1, 2
     `);
-    expect(before.length).toBe(21);
+    expect(before.length).toBe(22);
 
     await replayScript();
 

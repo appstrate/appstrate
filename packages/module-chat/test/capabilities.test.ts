@@ -41,7 +41,7 @@ describe("turnCapabilities", () => {
     expect(transport(["mcp:invoke", "skills:read", "agents:run"])).toBe(false);
   });
 
-  it("reads skills on the transport alone: `read_skill` needs no dispatch", () => {
+  it("reads skills on the transport alone: `resources/read` needs no dispatch", () => {
     const readsSkills = (held: string[]) => turnCapabilities((p) => held.includes(p)).readsSkills;
     expect(readsSkills(["mcp:read", "skills:read"])).toBe(true);
     expect(readsSkills(["skills:read", "mcp:invoke"])).toBe(false);

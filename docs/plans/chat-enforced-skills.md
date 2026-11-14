@@ -23,14 +23,15 @@ comes back enforced when switched on again. It shows up on the wire as
   `skills:write` in the space. It runs before the body is parsed.
 - **Refusals:**
 
-  | Status | Code                           | When                                                                                               |
-  | ------ | ------------------------------ | -------------------------------------------------------------------------------------------------- |
-  | 400    | `chat_enforced_not_skill`      | the package is not a skill                                                                         |
-  | 404    | `not_found`                    | the package is not placed in the space                                                             |
-  | 409    | `no_published_version`         | the skill has no `latest` published version                                                        |
-  | 409    | `enforced_skills_limit`        | more than `MAX_ENFORCED_CHAT_SKILLS` (3) flagged rows in the space, deactivated ones included      |
-  | 409    | `enforced_skills_budget`       | the flagged skills' published `SKILL.md` bodies exceed `CHAT_SKILLS_CONTENT_BUDGET_CHARS` (64 000) |
-  | 422    | `version_artifact_unavailable` | the published archive of this skill, or of another skill already flagged here, cannot be read      |
+  | Status | Code                           | When                                                                                            |
+  | ------ | ------------------------------ | ----------------------------------------------------------------------------------------------- |
+  | 400    | `chat_enforced_not_skill`      | the package is not a skill                                                                      |
+  | 404    | `not_found`                    | the package is not placed in the space                                                          |
+  | 409    | `no_published_version`         | the skill has no `latest` published version                                                     |
+  | 409    | `enforced_skills_limit`        | more than `MAX_ENFORCED_CHAT_SKILLS` (3) flagged rows in the space, deactivated ones included   |
+  | 409    | `skill_not_servable`           | the `latest` version of this skill, or of another skill already flagged here, cannot be served  |
+  | 409    | `enforced_skills_budget`       | the flagged skills' served `SKILL.md` bodies exceed `CHAT_SKILLS_CONTENT_BUDGET_CHARS` (64 000) |
+  | 422    | `version_artifact_unavailable` | the published archive of this skill, or of another skill already flagged here, cannot be read   |
 
 - **Setting `true`:** `updatePlacementSettings` runs it in one transaction
   under the advisory lock `space-chat-enforced:<spaceId>`. The flag is written
@@ -54,13 +55,16 @@ authority. `listEnforcedChatSkills` answers `EnforcedChatSkillRef
 
 - It returns the space's **active** skills whose placement is flagged, ordered
   by id.
-- Each comes as `EnforcedChatSkill { packageId, name, version, content }` at its
-  `latest` published version, never the draft.
-- `content: null` means only that no published version resolves (none
+- Each comes as `EnforcedChatSkill { packageId, name, version, uri, content }`
+  at its `latest` published version, never the draft. `content` is the
+  `SKILL.md` the MCP Skills extension serves (`services/served-skill.ts`: its
+  `name` and `metadata.version` normalized), and `uri` is its `skill://` URI in
+  the space, the one `resources/read` answers with the same bytes.
+- `content: null` (with `uri: null`) means only that no published version resolves (none
   published, or deleted). The turn then renders a notice ("required by this
   space but has no published version to follow") instead of the skill.
-- Any other failure rejects, an unreadable archive
-  (`version_artifact_unavailable`, a storage fault) included. The chat module's
+- Any other failure rejects, an unreadable archive or one that cannot be
+  served as a skill (`version_artifact_unavailable`, a storage fault) included. The chat module's
   deps wrapper (`buildChatPlatformDeps`) turns a rejection of either read into a
   **503 `enforced_skills_unavailable`**. When the cause is an API error (a lost
   archive), its detail, which names the skill, is appended, so an admin knows
@@ -94,7 +98,7 @@ whatever `readsSkills`. Its order:
   whose enforced copy was left out (no published version, over budget) stands as
   an ordinary pin. Enforced skills do not count toward `MAX_PINNED_SKILLS`.
 - **Lead line:** the enforced skills win over a chosen skill on conflict, and
-  only `SKILL.md` is injected: a file it references is read with `read_skill`
+  only `SKILL.md` is injected: a file it references is read with `read_resource`
   (below).
 - **Strict mode:** the note says the conversation is limited to the space's
   skills plus the user's, and that the user lifts only their own restriction.
@@ -103,14 +107,15 @@ whatever `readsSkills`. Its order:
   byte-identical for a given session state. Enforcing, releasing or publishing a
   new version costs each active session in the space one cache miss.
 
-## A skill's other files: `read_skill`
+## A skill's other files: `read_resource`
 
 A multi-file skill (#1312) injects only its `SKILL.md`; the files it references
-are read on demand through the platform MCP tool `read_skill`
-(`{ id, path? }`: without `path`, the `SKILL.md`, the file list and the version
-served; with it, that file at the same version). The tool is read-only and
-declared on every MCP connection, so the chat engine holds it on every turn.
-It answers in three branches, in this order:
+are read on demand with the chat's `read_resource` tool, which calls
+`resources/read` on the platform MCP server at the file's `skill://` URI (the
+`<skill>` tag's `uri` with `SKILL.md` replaced by the file's path).
+`resources/read` and `skills/get` on `skill://` are served on every MCP
+connection, so the chat engine can read on every turn. A read is granted in
+three branches, in this order:
 
 1. the skill was injected in this turn: the chat signs an `injectedSkills`
    claim into the turn's MCP bearer (`injectedSkillsSchema`,
@@ -118,21 +123,24 @@ It answers in three branches, in this order:
    `authExtra[INJECTED_SKILLS_AUTH_EXTRA]`): `{ spaceId, skills }`, each skill
    either `{ definition: "published", version }` or
    `{ definition: "draft", lockVersion }` — enforced skills as published,
-   chosen ones as `getSkill` served them, a draft pinned to the
-   `lock_version` its `ETag` carried (a detail answered without it is
-   malformed: the skill is left out with a "could not be read" notice). The
-   tool serves exactly that definition, with no `skills:*` needed, and
+   chosen ones as `skills/list` named them, a draft pinned to the
+   `lock_version` of its entry's `_meta["dev.appstrate/lock_version"]` (an
+   entry without it is malformed: the skill is left out with a "could not be
+   read" notice), and the `SKILL.md` read is injected only when its bytes match
+   the `sha256` digest the entry lists (a draft saved between the list and the
+   read gets the same notice, with no retry). The read serves exactly that definition, with no `skills:*` needed, and
    honours the claim only on the chat loopback bearer, in the claim's space,
    while the caller still holds `chat:write` there; a skill released mid-turn
    is still served for the rest of that turn, and an edited draft answers
-   409 `injected_draft_changed`. A skill that got a notice (unavailable, over
+   `-32600` with `data.code: "injected_draft_changed"`. A skill that got a notice (unavailable, over
    budget) is not named. A malformed claim is dropped and the token kept;
-2. otherwise, the caller holds `skills:read`: the version `getSkill` serves
-   them (the draft when they may write it, else the latest published), with
-   `getSkill`'s order of refusals — 403 before 404;
-3. otherwise: refused.
+2. otherwise, the caller holds `skills:read`: the latest published version at
+   the published URI, and the draft at the `@draft` URI to whoever may write
+   it;
+3. otherwise: `Resource not found`, whether or not the skill exists.
 
-The first branch is why the rule lives in the tool rather than in RBAC. What
+The first branch is why the rule lives in the skill read service
+(`services/skill-read.ts`) rather than in RBAC. What
 the prompt injected is already disclosed to the member — an enforced skill
 whatever their `skills:*`, a chosen one in `strict` where the turn holds none —
 and its files are the same disclosure, bounded by the same turn. Widening the
@@ -144,12 +152,12 @@ minted after the context block resolves, so it names what the prompt holds.
 
 The persona teaches loading on `readsSkills` (`transport` ∧ `skills:read`,
 `transport` being `mcp:read`). The enforced and chosen lead lines name
-`read_skill` on `transport` alone, since branch 1 needs no `skills:*`; the
+`read_resource` on `transport` alone, since branch 1 needs no `skills:*`; the
 strict note stays about the restriction. A turn without the transport holds no
 tool, and its leads say only that `SKILL.md` is provided. Both variants are
 static per capability set, so the section stays byte-stable per session. An
 injected draft's `<skill>` tag carries `definition="draft"` instead of a
-version, since `read_skill` answers it by definition.
+version, since its `@draft` URI names it by definition.
 
 ## `GET /api/chat/enforced-skills`
 

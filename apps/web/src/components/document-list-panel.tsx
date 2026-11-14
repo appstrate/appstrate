@@ -16,7 +16,7 @@ import { FileText } from "lucide-react";
 import { useDeleteFile, useFileDownload, useKeepFile, type FileDto } from "../hooks/use-files";
 import { EmptyState } from "./page-states";
 import { CardGrid } from "./card-grid";
-import { FileTile } from "./file-tile";
+import { FileTile, FileTileSkeleton } from "./file-tile";
 import { ItemList } from "./item-list";
 import { DataTable } from "./data-table";
 import type { ColumnMenuSpec } from "./list-toolbar";
@@ -37,7 +37,6 @@ export function DocumentListPanel({
   display = "table",
   toolbar,
   tableLabel,
-  tiered,
   tableSurface = "framed",
 }: {
   documents: FileDto[];
@@ -53,8 +52,6 @@ export function DocumentListPanel({
   /** Apparatus owned by the caller, built from the table's real columns. */
   toolbar?: (context: { columns: ColumnMenuSpec }) => ReactNode;
   tableLabel?: string;
-  /** Read columns wait for room by their tier (a narrow panel); see `DataTable`. */
-  tiered?: boolean;
   /** Integrated rails already provide the surrounding surface. */
   tableSurface?: "framed" | "integrated";
 }) {
@@ -125,6 +122,7 @@ export function DocumentListPanel({
             items={documents}
             itemKey={(doc) => doc.id}
             min="12rem"
+            placeholder={<FileTileSkeleton />}
             isLoading={isLoading && documents.length === 0}
             failure={error}
             empty={emptyState}
@@ -169,7 +167,6 @@ export function DocumentListPanel({
             tableId="documents"
             label={tableLabel ?? t("tableLabel")}
             columns={columns}
-            tiered={tiered}
             surface={tableSurface}
             rows={documents}
             rowKey={(doc) => doc.id}

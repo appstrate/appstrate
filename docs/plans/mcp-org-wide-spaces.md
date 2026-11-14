@@ -87,7 +87,7 @@ entered. `get_runtime_capabilities` alone acts in none.
   `space_id` from the JSON-RPC body before it builds the tools, and enters the
   space through the header's own door, `enterSpaceById`. Everything downstream
   is single-space: the request context holds that space's role, so the
-  direct-service tools (`read_skill`, the file resource provider, the package
+  direct-service readers (`skill://` reads, the file resource provider, the package
   file tools) need no change. A request naming no space (`initialize`,
   `tools/list`) enters a reachable one only to pass the `mcp:read` guard.
 - **The schema carries the spaces.** `space_id` is an `enum` of the reachable

@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Operators
 
+- **Run `scripts/migration/0052-run-reads.sql` once after deploying** (drizzle
+  `0103` creates `run_reads` and renames the stored run notifications to
+  `run_failed`). It copies each run's read state out of the
+  `run_completed` notifications and removes the notifications of runs that did
+  not fail or time out. Until it runs, runs finished before the deploy read as
+  read and the bell still lists them. The app may keep running. `0103` makes
+  the previous release unable to record a finished run: do not serve both
+  releases at once, and roll back by restoring the backup. Detail in
+  `scripts/migration/README.md`.
+
 - **Fixed: the runner bootstrap keeps its env across sudo-rs** (#2153).
   `get.appstrate.dev/runner` elevated with `sudo -E`, which sudo-rs (the default
   sudo since Ubuntu 25.10) ignores with only a warning, so `runner install` lost
@@ -101,6 +111,145 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   persistence read.
 
 ### Changed
+
+- **Breaking (API): a run's read state leaves the notifications; the bell
+  shows only what needs attention.** Every finished run used to be a bell
+  notification, so the bell repeated the unread runs of the runs page, and the
+  unread totals and acks lived under `/api/notifications`. Now:
+  - A run's read state is its own (`run_reads`): `GET /api/runs?unread=true`
+    lists the caller's unread runs (its `total` is the Runs badge),
+    `PUT /api/runs/{id}/read` marks one read, `PUT /api/runs/read-all` all;
+    `GET /api/agents` items carry `unread_count`, like a schedule.
+  - The bell (`/api/notifications`) receives a run only when it ended `failed`
+    or `timeout`, plus package shares. Opening the run reads its notification.
+    Its notification type is renamed `run_completed` → `run_failed`. Its payload
+    carries `agent_name`, the name stamped on the run, so the bell names an
+    agent that is switched off or deleted.
+  - A scheduled run refused before it starts is now unread and notified like
+    any other failed run; it used to be recorded for nobody.
+  - Removed: `GET /api/notifications/unread-counts-by-agent` (use
+    `unread_count` on `GET /api/agents`) and
+    `PUT /api/notifications/read/{runId}` (use `PUT /api/runs/{id}/read`).
+
+- **A model test says what it checked** (#2148). A successful model test reads
+  « Credential valid — model not tested », and the `testModel` /
+  `testModelInline` descriptions state that `ok: true` covers the credential
+  (validated offline for a subscription, by one lightweight provider request
+  for an API key), never the model itself. The response is unchanged.
+
+- **BREAKING (MCP): the `read_skill` tool is removed** (#2175). A skill and its files
+  are read through the MCP Skills extension: `skills/list` and `skills/get` for the
+  entries, `resources/read` on a file's `skill://` URI for its bytes. The access rule
+  is unchanged (`skills:read`, or a skill the chat turn injected, at the definition
+  injected); a refusal is `Resource not found` (`-32002`) on `resources/read` and
+  `-32602` on `skills/get` instead of a `read_skill` result carrying the REST 403 or
+  404, and a changed injected draft is `-32600` with
+  `data.code: "injected_draft_changed"`. A client calling `read_skill` gets
+  `-32602 Unknown tool`.
+  The chat's model reads a skill's files with its `read_resource` tool.
+
+- **The MCP server serves skills through the MCP Skills extension (SEP-2640)** (#2175). It
+  declares `io.modelcontextprotocol/skills` in `capabilities.extensions` at `initialize` and
+  answers `skills/list` and `skills/get`; `resources/read` returns a skill's files under
+  `skill://<spaceId>/<scope>/<package-name>/<name>/<path>` (a draft under
+  `<package-name>@draft`, readable by whoever may write the package, listed only on request: see the `dev.appstrate/definition` entry below). Entries
+  carry the served `SKILL.md` frontmatter verbatim and every file's `sha256` digest and size.
+  The served skill is a valid Agent Skills directory: packaging entries dropped, `SKILL.md`
+  `name` set to the served name, `metadata.version` set to the published version (absent from
+  a draft). The list covers every space the connection reaches (each space of an
+  organization URL), and each read is checked with the caller's permissions in
+  the skill's space (`skills:read` under the credential's ceiling, or a skill the chat turn
+  injected, at the definition injected). A
+  skill with more than 512 files or more than 16 MiB of served bytes is not served; any file
+  size within that total is. Only the canonical spelling of a `skill://` URI resolves.
+  `GET /api/packages/skills/served` and `GET /api/packages/skills/served/archive` (a ZIP of
+  every file of one skill) serve the same entries and bytes through the package API for one
+  space (`X-Space-Id`, `skills:read`), for `appstrate code sync` (#2180);
+  `GET /api/packages/skills/served?definition=draft` lists the drafts the caller may read. The `skill://` grammar and the entry type live in `@appstrate/core/skill-uri`.
+
+- **`appstrate code sync` reads skills as the MCP Skills extension serves them**
+  (#2175, #2180). It lists each space's skills with `GET /api/packages/skills/served`
+  (`?definition=draft` for `--source draft`), downloads each changed skill in one
+  `GET /api/packages/skills/served/archive` request, checks each file against its served
+  `sha256` digest and the received `SKILL.md` frontmatter against the entry's,
+  and writes the bytes as served; only the `name` line of a skill renamed after a
+  collision is rewritten. An entry with a file path outside its skill directory,
+  two paths that are one file on a case- or normalization-insensitive disk, a name
+  that is not a valid Agent Skills name (or not the last segment of its URI), a
+  size or digest that is not one, or more than 512 files or 16 MiB is reported and
+  not written, and the skill already on disk is kept; the other skills sync. The
+  sync explains a 404 of its list route (an instance older than the CLI). The ledger compares the served digests, and the plan
+  shows the served `metadata.version`. The CLI no longer normalizes skills
+  itself: the server does. `--source draft` syncs the drafts the instance lists
+  for you, published or not: those of the skills you may write; a draft you may
+  not write is absent from the list, so it is not synced.
+
+- **The skills served for published versions are kept in memory** (#2175). A
+  published version is immutable, so `skills/list`, `skills/get`, `resources/read`
+  on `skill://` and the served-skill routes of the package API read and digest it once per API process,
+  then serve it from a least-recently-used cache bounded at 64 MiB of files (four
+  skills at the SEP-2640 limit). The access rule runs on every call, before the
+  cache. Drafts and system skills are read on every call.
+
+- **A draft the chat turn injected and that changed since is refused explicitly on
+  `skill://`** (#2175). `skills/get` and `resources/read` answer JSON-RPC
+  `-32600` with the `injected_draft_changed` message (the next turn injects the
+  current draft) instead of `Resource not found`. `skills/list` leaves that skill
+  out and lists the others.
+
+- **`skills/list` lists drafts on request, and a draft's entry names its
+  `lock_version`** (#2175). With `dev.appstrate/definition: "draft"` in the
+  request `_meta`, `skills/list` lists the drafts the caller may read at their `@draft`
+  URIs, the entries `GET /api/packages/skills/served?definition=draft` serves (one server
+  function); without it, the list holds the published skills. A draft's entry
+  carries `_meta["dev.appstrate/lock_version"]`, the `lock_version` of the draft its
+  files and digests were read from, read under the draft lock.
+
+- **The chat injects an enforced skill as the MCP Skills extension serves it**
+  (#2175). Its `SKILL.md` is the served one (`name` and `metadata.version`
+  normalized), with its `skill://` URI, so it is the bytes `resources/read`
+  answers there. A published version that cannot be served as a skill (over the
+  SEP-2640 limits, no valid name) refuses the turn's enforced skills like an
+  unreadable archive (`version_artifact_unavailable`). Enforcing such a skill is
+  refused with `409 skill_not_servable` (also when another skill already enforced
+  in the space cannot be served), so the turns of the space are never refused for
+  it. The `enforced_skills_budget` check measures each enforced skill by this
+  served `SKILL.md`, the text the chat injects, read from its whole archive.
+
+- **The chat's model reads platform resources with a `read_resource` tool** (#2175).
+  It runs `resources/read` on the platform MCP server only, and returns each content
+  whole within the bounds of the platform's file reads: its text up to 1 MiB, or a
+  binary file's base64 in `blob` up to 700 KiB; a larger content returns its size and
+  a note.
+
+- **The chat reads the skills it injects through the MCP Skills extension**
+  (#2175). A chosen skill is listed by `skills/list` (the caller's draft when the
+  drafts list holds it, else the published version) and its `SKILL.md` read by
+  `resources/read`, over a platform MCP connection with the caller's own
+  permissions and no injected-skills claim, closed before the turn's connection
+  opens; the chat no longer reads `GET /api/packages/skills`. An injected draft is
+  pinned by its entry's `dev.appstrate/lock_version`, and a `SKILL.md` whose bytes
+  do not match the `sha256` digest its entry lists (a draft saved between the list
+  and the read) is not injected: the skill gets its could-not-be-read notice. Each injected `<skill>` tag
+  carries its `uri`, and the prompt teaches `read_resource` on that URI for the
+  files a skill references. In the `auto` mode, the skills the model may load are
+  listed the same way, each with its `skill://` URI, and the model loads one with
+  `read_resource`: the list is whole (no `(list truncated)` marker, no `listSkills`
+  call) and no longer comes from `GET /api/me/context`. Each line names the skill
+  by its id, its published version and its URI, followed by its description (the
+  served frontmatter carries no display name). A draft is listed only when the
+  turn itself may read it (it keeps the caller's `skills:write`, which the
+  authoring switch drops); otherwise the line is the published version's, and a
+  skill never published is not listed. A chosen skill the caller reads neither as
+  a draft nor published (a never-published skill chosen by someone who may not
+  write it) gets its not-available notice. In the `manual` mode, the model lists
+  the skills on the user's request with the chat's `list_skills` tool, which
+  relays `skills/list` (drafts with `definition: "draft"`) over the turn's own
+  MCP connection, so it lists only what the turn's `read_resource` reads, and
+  loads one with `read_resource`; `list_skills` is registered on a `manual` turn
+  holding `skills:read` alone. The read of a turn's skills is bounded to 10 seconds; a
+  failed list or read is logged. `AppstrateMcpClient` gains `listSkills`, which
+  follows `nextCursor` and accepts an entry whose `resources` is `"dynamic"`.
 
 - **BREAKING (CLI, MCP): agents are prompts of the MCP server, and `code sync`
   syncs skills only** (#2172). The Claude Code plugin's `/appstrate:run-<agent>`
@@ -348,6 +497,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- **A model refused for the runtime version says so** (#2148). When a provider
+  refuses a model for the client version the agent SDK announces (Anthropic's
+  `claude_code_version_too_old` on a Claude Code subscription), the chat shows
+  that the runtime must be updated by an Appstrate release and that another
+  model is to be chosen meanwhile, instead of the generic rejected-request
+  sentence, with neither a retry nor a reconnection link, live and after
+  reload. The run trail records it as
+  `run_logs.data.error_reason: "runtime_version_too_old"` beside the unchanged
+  `error_category`, and a failed run's page reads it there to show the same
+  sentence in place of the provider's own advice. It is read from the refusal's
+  structured code only.
+
+- **Live-catalog models of a subscription provider carry a warning** (#2148).
+  `GET /api/model-provider-credentials/registry` flags them
+  `subscription_unverified: true` and the model picker shows « Not verified with
+  a subscription »: the catalog proves their request builds offline, not that
+  the vendor serves them to a subscription. They stay offered; API-key
+  providers are not flagged.
+
 - **`GET /api/agents` rows carry `published`** (#2172): `true` when the agent
   has a published version (or is a system agent), so launching it without a
   version selector resolves; `false` for a draft-only agent. The row's
@@ -523,6 +691,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `di_client_id`).
 
 ### Fixed
+
+- **`get_me` lists only the integrations active in the space** (#2146).
+  `GET /api/me/context` listed every integration with a connection the caller
+  may bind in the space, including an org-scope connection of an integration
+  not activated there, which `list_connections`, `api_call` and runs refuse.
+  `connections[]` now holds the active integrations only, as the agent and
+  skill hints of the same payload do, and the `get_me` tool description points
+  to `list_connections` for the connections `api_call` can use.
+
+- **A remote MCP integration whose credential is rejected at boot is flagged on
+  the first run** (#2181). A 401 on the MCP handshake of an API key, basic or
+  other unrefreshable credential counted toward `INTEGRATION_REFRESH_MAX_FAILURES`
+  like a 401 on a tool call, and every count cost a whole run (the boot gate
+  stops it), so the connection reached `needs_reconnection` only after five lost
+  runs. The sidecar now sends `rejected_request=handshake` on
+  `POST /internal/integration-credentials/{scope}/{name}/refresh` for a 401
+  received before the remote client connects; the platform flags the connection
+  and answers `410` on that first rejection, and the run fails with an error
+  that names the connection and asks to reconnect it. A 401 on a call made for
+  the agent still counts toward the threshold; OAuth2 refresh and connect.tool
+  re-login are unchanged.
 
 - **`{ns}__api_call` steers request bodies through a workspace file.** An agent
   re-typed a file's base64 into `body` and the upstream accepted the truncated

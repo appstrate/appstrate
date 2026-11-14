@@ -448,6 +448,19 @@ export function createInternalRouter() {
     return parsed.data;
   }
 
+  /** `?rejected_request=handshake` names the MCP handshake as the rejected request; else 400. */
+  function rejectedHandshakeQuery(c: Context): boolean {
+    const raw = c.req.query("rejected_request");
+    if (raw === undefined) return false;
+    if (raw !== "handshake") {
+      throw invalidRequest(
+        "`rejected_request` must be `handshake` when present.",
+        "rejected_request",
+      );
+    }
+    return true;
+  }
+
   /** The run-bound member `?connection_id` names, else 400 — the platform never picks one. */
   function requireBoundConnection(
     c: Context,
@@ -554,7 +567,8 @@ export function createInternalRouter() {
   // POST /internal/integration-credentials/:scope/:name/refresh
   // Sidecar-only, on an upstream 401: force-refreshes that connection's credential (200).
   // An auth with nothing to refresh (api_key, basic, unrefreshable OAuth) answers 502 below
-  // the reconnect threshold and 410 once reached; a revoked refresh token is 410 at once.
+  // the reconnect threshold and 410 once reached, or at once for a rejected MCP handshake
+  // (`?rejected_request=handshake`); a revoked refresh token is 410 at once.
   // A 410 has flagged the connection `needsReconnection`, is stamped onto the run, and
   // tells the sidecar not to retry.
   router.post(`/integration-credentials/${SCOPED_PACKAGE_ROUTE}/refresh`, async (c) => {
@@ -578,7 +592,11 @@ export function createInternalRouter() {
           connectionSource: bound.source,
           resolvedIntegrationVersions: run.resolvedIntegrationVersions,
         },
-        { kind: "rejected", revision: credentialRevisionQuery(c, false) ?? null },
+        {
+          kind: "rejected",
+          revision: credentialRevisionQuery(c, false) ?? null,
+          handshake: rejectedHandshakeQuery(c),
+        },
       );
     } catch (err) {
       // 410 = the connection was flagged needsReconnection (terminal). Record

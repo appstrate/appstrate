@@ -19,7 +19,6 @@ import { buildGenerationLabels } from "@appstrate/ui/components/model-generation
 import { ModelPickerList } from "@appstrate/ui/components/model-picker";
 import { groupModelsForPicker } from "@appstrate/ui/components/model-picker-groups";
 import { buildModelPickerLabels } from "@appstrate/ui/components/model-picker-labels";
-import { Skeleton } from "@appstrate/ui/components/skeleton";
 import { Popover, PopoverContent, PopoverTrigger } from "@appstrate/ui/components/popover";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@appstrate/ui/components/tabs";
 import type { OrgModelOption } from "./models-data.ts";
@@ -67,7 +66,24 @@ export function ModelSelect({
     active.generation.reasoning.supported === "unsupported";
 
   if (models.length === 0) {
-    if (pending) return <Skeleton className="h-7 w-32 rounded-md" aria-hidden />;
+    // The pill itself, emptied: its box (py-1 on a text-sm line, the two 14px icons) is
+    // the loaded one's; only the model's name, unknown yet, may make it wider or narrower.
+    if (pending)
+      return (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled
+          aria-hidden
+          tabIndex={-1}
+          className="bg-muted h-auto max-w-64 animate-pulse justify-start gap-1.5 border-transparent px-2.5 py-1 font-normal text-transparent shadow-none disabled:opacity-100 [&_svg]:size-3.5"
+        >
+          <SlidersHorizontalIcon className="size-3.5 shrink-0" />
+          <span className="font-medium">{t("model.select")}</span>
+          <ChevronDownIcon className="size-3.5 shrink-0" />
+        </Button>
+      );
     if (failed) {
       return (
         <Button

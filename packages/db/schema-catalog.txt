@@ -503,6 +503,13 @@ column run_logs.message text
 column run_logs.org_id uuid not null
 column run_logs.run_id text not null
 column run_logs.type text not null default 'progress'::text
+column run_reads.created_at timestamp with time zone not null default now()
+column run_reads.org_id uuid not null
+column run_reads.read_at timestamp with time zone
+column run_reads.recipient_id text not null
+column run_reads.recipient_type text not null
+column run_reads.run_id text not null
+column run_reads.space_id text not null
 column runs.agent_name text
 column runs.agent_scope text
 column runs.api_key_id text
@@ -800,7 +807,7 @@ constraint notifications notifications_pkey PRIMARY KEY (id)
 constraint notifications notifications_recipient_type_valid CHECK ((recipient_type = ANY (ARRAY['user'::text, 'end_user'::text])))
 constraint notifications notifications_run_id_runs_id_fk FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
 constraint notifications notifications_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
-constraint notifications notifications_type_valid CHECK ((type = ANY (ARRAY['run_completed'::text, 'package_shared'::text])))
+constraint notifications notifications_type_valid CHECK ((type = ANY (ARRAY['run_failed'::text, 'package_shared'::text])))
 constraint oauth_access_tokens oauth_access_tokens_client_id_oauth_clients_client_id_fk FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE
 constraint oauth_access_tokens oauth_access_tokens_pkey PRIMARY KEY (id)
 constraint oauth_access_tokens oauth_access_tokens_refresh_id_oauth_refresh_tokens_id_fk FOREIGN KEY (refresh_id) REFERENCES oauth_refresh_tokens(id) ON DELETE CASCADE
@@ -895,6 +902,11 @@ constraint run_logs run_logs_level_valid CHECK ((level = ANY (ARRAY['debug'::tex
 constraint run_logs run_logs_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
 constraint run_logs run_logs_pkey PRIMARY KEY (id)
 constraint run_logs run_logs_run_id_runs_id_fk FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+constraint run_reads run_reads_org_id_organizations_id_fk FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE
+constraint run_reads run_reads_recipient_type_valid CHECK ((recipient_type = ANY (ARRAY['user'::text, 'end_user'::text])))
+constraint run_reads run_reads_run_id_recipient_type_recipient_id_pk PRIMARY KEY (run_id, recipient_type, recipient_id)
+constraint run_reads run_reads_run_id_runs_id_fk FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+constraint run_reads run_reads_space_id_spaces_id_fk FOREIGN KEY (space_id) REFERENCES spaces(id) ON DELETE CASCADE
 constraint runs runs_api_key_id_api_keys_id_fk FOREIGN KEY (api_key_id) REFERENCES api_keys(id) ON DELETE SET NULL
 constraint runs runs_at_most_one_actor CHECK ((NOT ((user_id IS NOT NULL) AND (end_user_id IS NOT NULL))))
 constraint runs runs_chat_session_id_org_id_fk FOREIGN KEY (chat_session_id, org_id) REFERENCES chat_sessions(id, org_id) ON DELETE SET NULL (chat_session_id)
@@ -1069,6 +1081,9 @@ index CREATE INDEX idx_packages_org_type ON public.packages USING btree (org_id,
 index CREATE INDEX idx_packages_type ON public.packages USING btree (type)
 index CREATE INDEX idx_run_logs_lookup ON public.run_logs USING btree (run_id, id)
 index CREATE INDEX idx_run_logs_org_id ON public.run_logs USING btree (org_id)
+index CREATE INDEX idx_run_reads_recipient ON public.run_reads USING btree (org_id, recipient_type, recipient_id, space_id)
+index CREATE INDEX idx_run_reads_space ON public.run_reads USING btree (space_id)
+index CREATE INDEX idx_run_reads_unread ON public.run_reads USING btree (org_id, space_id, recipient_type, recipient_id) WHERE (read_at IS NULL)
 index CREATE INDEX idx_runs_api_key_id ON public.runs USING btree (api_key_id) WHERE (api_key_id IS NOT NULL)
 index CREATE INDEX idx_runs_boot_deadline_sweep ON public.runs USING btree (boot_deadline_at) WHERE ((boot_deadline_at IS NOT NULL) AND (sink_closed_at IS NULL) AND (last_event_sequence = 0))
 index CREATE INDEX idx_runs_chat_session_started ON public.runs USING btree (chat_session_id, started_at) WHERE (chat_session_id IS NOT NULL)
@@ -1178,6 +1193,7 @@ index CREATE UNIQUE INDEX pkg_ver_deps_unique ON public.package_version_dependen
 index CREATE UNIQUE INDEX pkp_key_unique ON public.package_persistence USING btree (package_id, space_id, actor_type, COALESCE(actor_id, '__shared__'::text), key) WHERE (key IS NOT NULL)
 index CREATE UNIQUE INDEX profiles_pkey ON public.profiles USING btree (id)
 index CREATE UNIQUE INDEX run_logs_pkey ON public.run_logs USING btree (id)
+index CREATE UNIQUE INDEX run_reads_run_id_recipient_type_recipient_id_pk ON public.run_reads USING btree (run_id, recipient_type, recipient_id)
 index CREATE UNIQUE INDEX runs_pkey ON public.runs USING btree (id)
 index CREATE UNIQUE INDEX session_pkey ON public.session USING btree (id)
 index CREATE UNIQUE INDEX session_token_unique ON public.session USING btree (token)

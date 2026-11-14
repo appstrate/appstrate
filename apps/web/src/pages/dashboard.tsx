@@ -8,7 +8,6 @@ import { usePermissions } from "../hooks/use-permissions";
 import { ErrorState } from "../components/page-states";
 import { DashboardBodySkeleton } from "../components/loading-skeletons";
 import { useRunAgentName } from "../hooks/use-run-agent-name";
-import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { DashboardContent, DashboardHeader } from "./dashboard-content";
 
 export function DashboardPage() {
@@ -25,7 +24,6 @@ export function DashboardPage() {
   });
   const { data: agents, isLoading: agentsLoading, error: agentsError } = useAgents();
   const agentName = useRunAgentName();
-  const { data: unreadCounts } = useUnreadCountsByAgent();
   // Their failure is not the dashboard's, but the body waits so nothing reflows from « none ».
   const { data: schedules, isLoading: schedulesLoading } = useAllSchedules();
   const firstName = (profile?.displayName || user?.name || "").split(/\s+/)[0] ?? "";
@@ -81,7 +79,6 @@ export function DashboardPage() {
         runTotal: runsData?.total ?? runs.length,
         schedules: schedules ?? [],
         agentName,
-        unreadCounts,
       }}
     />
   );

@@ -54,7 +54,6 @@ import { SettingsPageActions } from "../../components/settings/settings-page-act
 import { PersonalCredentialsSetting } from "../../components/settings/personal-credentials-setting";
 import { SettingsGroup } from "../../components/settings/setting-row";
 import type { MenuAction } from "../../lib/menu-action";
-import { TextSkeleton } from "../../components/loading-skeletons";
 import { credentialUpdateBody } from "../../lib/personal-model-credentials";
 import {
   isSystemModel,
@@ -212,47 +211,44 @@ export function OrgSettingsModelsPage() {
               <PersonalCredentialsSetting />
             </SettingsGroup>
           )}
-          {settingsLoading ? (
-            <TextSkeleton lines={4} />
-          ) : (
-            <>
-              {personalOff && (
-                <p className="text-muted-foreground mb-3 text-sm">{t("providers.personalOff")}</p>
-              )}
-              <div inert={personalOff} className={cn("mb-6", personalOff && "opacity-50")}>
-                <PersonalServicesTable
-                  rows={serviceRows}
-                  isLoading={modelsLoading || (canReadCredentials && pkLoading)}
-                  error={tableError}
-                  canWriteModels={canWriteModels}
-                  onChooseModels={(row) => personalModels.open(row.id)}
+          {/* Until the setting is read, the table waits in its own rows, where it will stand. */}
+          <>
+            {personalOff && (
+              <p className="text-muted-foreground mb-3 text-sm">{t("providers.personalOff")}</p>
+            )}
+            <div inert={personalOff} className={cn("mb-6", personalOff && "opacity-50")}>
+              <PersonalServicesTable
+                rows={serviceRows}
+                isLoading={settingsLoading || modelsLoading || (canReadCredentials && pkLoading)}
+                error={tableError}
+                canWriteModels={canWriteModels}
+                onChooseModels={(row) => personalModels.open(row.id)}
+              />
+            </div>
+            {/* Outside the greyed table: a key already held is deleted whatever the setting says. */}
+            {canReadCredentials && personalRows.length > 0 && (
+              <section className="mb-6">
+                <h3 className="mb-3 text-sm font-semibold">{t("providers.memberKeys")}</h3>
+                <ProvidersTable
+                  tableId="member-model-keys"
+                  label={t("providers.memberKeys")}
+                  rows={personalRows}
+                  showType
+                  isLoading={false}
+                  error={null}
+                  empty={{ message: t("modelCredentials.empty") }}
+                  canWriteModels={false}
+                  {...keyDeeds}
                 />
-              </div>
-              {/* Outside the greyed table: a key already held is deleted whatever the setting says. */}
-              {canReadCredentials && personalRows.length > 0 && (
-                <section className="mb-6">
-                  <h3 className="mb-3 text-sm font-semibold">{t("providers.memberKeys")}</h3>
-                  <ProvidersTable
-                    tableId="member-model-keys"
-                    label={t("providers.memberKeys")}
-                    rows={personalRows}
-                    showType
-                    isLoading={false}
-                    error={null}
-                    empty={{ message: t("modelCredentials.empty") }}
-                    canWriteModels={false}
-                    {...keyDeeds}
-                  />
-                </section>
-              )}
-              {canConnect && personalAllowed && (
-                <p className="text-muted-foreground text-sm">
-                  {t("providers.personalFooter")}{" "}
-                  <PreferencesModelsLink>{t("providers.personalFooterLink")}</PreferencesModelsLink>
-                </p>
-              )}
-            </>
-          )}
+              </section>
+            )}
+            {canConnect && personalAllowed && (
+              <p className="text-muted-foreground text-sm">
+                {t("providers.personalFooter")}{" "}
+                <PreferencesModelsLink>{t("providers.personalFooterLink")}</PreferencesModelsLink>
+              </p>
+            )}
+          </>
         </>
       )}
 

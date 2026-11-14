@@ -509,6 +509,7 @@ function withRemoteFailures(client: AppstrateMcpClient, origin: string): Appstra
     listToolsPage: (options) => guard(client.listToolsPage(options)),
     callTool: (args, options) => guard(client.callTool(args, options)),
     readResource: (args, options) => guard(client.readResource(args, options)),
+    listSkills: (options) => guard(client.listSkills(options)),
     close: () => guard(client.close()),
   };
 }
@@ -561,6 +562,8 @@ export async function connectRemoteHttpIntegration(
     credential = { source, authKey: pickedAuth.authKey };
   }
 
+  const origin = originForLog(serverUrl) ?? "<unparseable>";
+
   // Per-request injection planner. Reading from the snapshot on every call
   // means an OAuth refresh (which swaps `payload` in place) is picked up
   // automatically — no MCP transport restart needed. Static creds
@@ -586,6 +589,13 @@ export async function connectRemoteHttpIntegration(
   // fixture hostnames) so the guard code on this path is identical for
   // every caller; `guardedFetch` reads the live global `fetch`, which the
   // tests stub.
+
+  // Until the client connects, every request is the MCP handshake the sidecar writes itself: a 401
+  // on it is reported as such, and the platform flags an unrefreshable credential at once. A
+  // connect.tool auth acquires its session after the handshake and keeps the call path.
+  let connected = false;
+  const handshakeRejectable =
+    credential !== null && spec.connectLogin?.authKey !== credential.authKey;
 
   // `typeof fetch` (Bun) carries a static `preconnect` member alongside the
   // call signature. The MCP transport's `fetch?: typeof fetch` option demands
@@ -663,10 +673,23 @@ export async function connectRemoteHttpIntegration(
       };
       let attempt = await send();
       if (credential && attempt.response.status === 401 && attempt.credentialAnswered) {
+        const handshake = handshakeRejectable && !connected;
         const refreshed = await credential.source
-          .refreshOnUnauthorized(credential.authKey, attempt.credentialRevision)
+          .refreshOnUnauthorized(
+            credential.authKey,
+            attempt.credentialRevision,
+            handshake ? "handshake" : undefined,
+          )
           .catch(() => false);
         if (refreshed) attempt = await send();
+        else if (handshake && credential.source.needsReconnection()) {
+          // The connection's name and the reconnect step, rather than the server's 401 body.
+          throw new RemoteCredentialRefusal(
+            `integration ${spec.integrationId}: ${origin} rejected the connection's credential ` +
+              `during the MCP handshake (HTTP 401); the connection is flagged as needing ` +
+              `reconnection. Reconnect it and relaunch the run.`,
+          );
+        }
       }
       if (credential && attempt.response.ok && attempt.credentialAnswered) {
         credential.source.reportUpstreamSuccess(attempt.credentialRevision);
@@ -685,7 +708,6 @@ export async function connectRemoteHttpIntegration(
   // (`customFetch` above), so credential injection + refresh semantics
   // are identical across Streamable HTTP and SSE.
   const toolTimeoutMs = toolTimeoutMsFromEnv();
-  const origin = originForLog(serverUrl) ?? "<unparseable>";
   const connecting =
     transport === "sse"
       ? createSseClient(serverUrl, { fetch: customFetch, clientInfo })
@@ -700,6 +722,7 @@ export async function connectRemoteHttpIntegration(
   const client = await connecting.catch((err: unknown) => {
     throw remoteMcpFailure(err, origin);
   });
+  connected = true;
   return { client: withRemoteFailures(client, origin), authKey: credential?.authKey ?? null };
 }
 

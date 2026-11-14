@@ -17,7 +17,7 @@
  *     `bundle/validate-bundle.ts`; it is not a package subpath either.
  */
 
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, parseDocument } from "yaml";
 
 /**
  * Stable, machine-readable companion-file violation reasons.
@@ -253,11 +253,20 @@ export interface SkillFrontmatter {
   position?: { line: number; column: number };
   name: string;
   description: string;
+  /** The parsed frontmatter mapping, every key as authored; `{}` when absent or invalid. */
+  fields: Record<string, unknown>;
 }
 
 /** Parses the way the skill runtime does, so the gate cannot accept what it fails to read. */
 export function parseSkillFrontmatter(content: string): SkillFrontmatter {
-  const empty = { found: false, unterminated: false, error: null, name: "", description: "" };
+  const empty = {
+    found: false,
+    unterminated: false,
+    error: null,
+    name: "",
+    description: "",
+    fields: {},
+  };
 
   const normalized = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   if (!normalized.startsWith("---")) return empty;
@@ -294,7 +303,7 @@ export function parseSkillFrontmatter(content: string): SkillFrontmatter {
   const description = readStringField(record, "description");
   if (typeof description !== "string") return { ...empty, found: true, error: description.error };
 
-  return { found: true, unterminated: false, error: null, name, description };
+  return { found: true, unterminated: false, error: null, name, description, fields: record };
 }
 
 /** An absent key and an empty scalar both mean "not provided" and yield `""`. */
@@ -426,4 +435,59 @@ export function checkSkillMarkdown(content: string): CompanionFileViolation | nu
     };
   }
   return null;
+}
+
+const SKILL_FRONTMATTER_RE = /^---[^\S\n]*\n([\s\S]*?)\n---/;
+
+/**
+ * Point the frontmatter `name` at `name`, the one rewrite Agent Skills forces.
+ * Every other byte passes through as authored: unknown keys are client
+ * extensions, and invented content would hide a publishing mistake.
+ */
+export function normalizeSkillMd(content: string, name: string): string {
+  if (parseSkillFrontmatter(content).name === name) return content;
+  const match = content.match(SKILL_FRONTMATTER_RE);
+  if (!match) return content;
+
+  // Splice by offset, not `String.replace`: the block is user content that can
+  // recur later, and a replacement would re-interpret `$` sequences.
+  const blockStart = match[0]!.indexOf("\n") + 1;
+  const block = match[1]!;
+  const line = /^name:[^\r\n]*/m.exec(block);
+  if (!line) {
+    const eol = block.includes("\r\n") ? "\r\n" : "\n";
+    return `${content.slice(0, blockStart)}name: ${name}${eol}${content.slice(blockStart)}`;
+  }
+  const at = blockStart + line.index;
+  return `${content.slice(0, at)}name: ${name}${content.slice(at + line[0].length)}`;
+}
+
+function isMapping(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Point the frontmatter `metadata.version` at `version`, or remove it when
+ * `version` is `null`. The frontmatter block is re-serialized only when the
+ * value differs; a `metadata` that is not a mapping gives way to
+ * `{ version }`. Content without a valid frontmatter mapping passes through.
+ */
+export function setSkillMdVersion(content: string, version: string | null): string {
+  const parsed = parseSkillFrontmatter(content);
+  const match = content.match(SKILL_FRONTMATTER_RE);
+  if (!parsed.found || parsed.error || !match) return content;
+  const metadata = parsed.fields.metadata;
+  const current = isMapping(metadata) ? metadata.version : undefined;
+  if (version === null ? current === undefined : current === version) return content;
+
+  const blockStart = match[0]!.indexOf("\n") + 1;
+  // The `\r` of a CRLF line before the closing `---` belongs to that line break.
+  const block = match[1]!.replace(/\r$/, "");
+  const eol = match[1]!.includes("\r\n") ? "\r\n" : "\n";
+  const doc = parseDocument(block.replace(/\r\n/g, "\n"), { uniqueKeys: true });
+  if (version === null) doc.deleteIn(["metadata", "version"]);
+  else if (isMapping(metadata)) doc.setIn(["metadata", "version"], version);
+  else doc.set("metadata", { version });
+  const edited = doc.toString({ lineWidth: 0 }).replace(/\n$/, "").replace(/\n/g, eol);
+  return `${content.slice(0, blockStart)}${edited}${content.slice(blockStart + block.length)}`;
 }

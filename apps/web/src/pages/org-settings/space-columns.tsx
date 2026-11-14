@@ -84,7 +84,6 @@ export function useSpaceColumns({
       header: t("spaces.visibilityLabel"),
       width: 150,
       elastic: true,
-      tier: 2,
       cell: (space) =>
         space.orphaned_at ? (
           // The one state that asks the reader for a decision, so it is said
@@ -105,9 +104,6 @@ export function useSpaceColumns({
       header: t("spaces.createdAtLabel"),
       width: 132,
       align: "end",
-      // Tier 2, not 3: the settings dialog tops out around 800px and never
-      // crosses the 56rem threshold, so tier 3 there means never drawn.
-      tier: 2,
       cell: (space) => (
         <span className="text-muted-foreground text-xs">
           {space.orphaned_at

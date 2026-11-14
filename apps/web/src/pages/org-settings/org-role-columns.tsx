@@ -53,7 +53,6 @@ export function useOrgRoleColumns({
       header: t("orgRolesGuide.spaceAccess"),
       width: 140,
       elastic: true,
-      tier: 2,
       cell: (role) => (
         <span className="text-muted-foreground block text-xs whitespace-normal">
           {t(`orgRolesGuide.access.${ORG_ROLE_SPACE_ACCESS[role]}`)}

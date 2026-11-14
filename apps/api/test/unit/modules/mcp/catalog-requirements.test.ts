@@ -397,9 +397,7 @@ describe("requirement anchors", () => {
       deleteMyIntegrationPin: req(["integrations:connect"]),
       listNotifications: req(["runs:read|runs:read-all"]),
       getUnreadNotificationCount: req(["runs:read|runs:read-all"]),
-      getUnreadCountsByAgent: req(["runs:read|runs:read-all"]),
       markNotificationReadById: req(["runs:read|runs:read-all"]),
-      markNotificationRead: req(["runs:read|runs:read-all"]),
       markAllNotificationsRead: req(["runs:read|runs:read-all"]),
       createUpload: req(["agents:run"]),
     };
@@ -557,7 +555,7 @@ describe("hand-written predicates agree with the guards they stand for", () => {
       guards: transport,
     },
     {
-      // `read_skill` is declared on every connection, so the transport is the
+      // `resources/read` on `skill://` is served on every connection, so the transport is the
       // only MCP half; a skill the space does not enforce is served on
       // `getSkill`'s guard, and `listSkills` names the rest.
       name: "turnCapabilities.readsSkills ↔ mcp:read ∧ getSkill ∧ listSkills",

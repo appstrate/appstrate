@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `formatMaximum` / `formatExclusive*` keywords: they are not JSON Schema 2020-12 and threw a
   `TypeError` at validation time. All formats stay.
 
+### Changed
+
+- **BREAKING: `EnforcedChatSkill` gains the required `uri`** (`@appstrate/core/chat-contract`):
+  the `skill://` URI of an enforced skill's `SKILL.md` (`null` with `content` when no version
+  resolves), and `content` is that `SKILL.md` as the MCP Skills extension serves it, so the
+  chat injects the bytes `resources/read` answers. A `loadEnforcedChatSkills` implementation
+  returns both. (#2175)
+
 ### Added
 
 - **`PlatformServices.members.provision(orgId, userId, role)`** (`@appstrate/core/module`): a
@@ -26,6 +34,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the audience it is about to be created in (`platform` or `end_user:<spaceId>`), resolved on
   demand.
 
+- **`@appstrate/core/model-error`: a structured reason beside the category.**
+  **`MODEL_ERROR_REASONS`** and **`ModelErrorReason`** (`runtime_version_too_old`), and an
+  optional `reason` on `ModelErrorClassification` that `classifyModelError` and
+  `describeModelFailure` set when a `<status> <JSON body>` refusal names a known
+  `error.details.error_code` (Anthropic's `claude_code_version_too_old`). The category, its
+  `retryable` and the five persisted categories are unchanged. `AppstrateTurnMetadata`
+  (`@appstrate/core/chat-turn-metadata`) gains the optional `errorReason`. (#2148)
+- **`@appstrate/core/skill-uri`**: the `skill://` URIs of the MCP Skills extension (SEP-2640)
+  as Appstrate serves them — **`SKILL_URI_PREFIX`**, **`skillFileUri`**, **`parseSkillUri`**
+  (the canonical spelling only, a file path `isSafeArchivePath` accepts, a valid skill name),
+  **`parseSkillUriPackage`** (the package and definition of a URI, from its package segments),
+  the SEP-2640 size limits **`SKILL_MAX_FILES`** (512) and **`SKILL_MAX_TOTAL_BYTES`** (16 MiB),
+  **`skillFileDigest`** (the `sha256:<hex>` digest of a served file, one computation for the
+  server, the chat and the CLI),
+  the `_meta` keys **`SKILL_DEFINITION_META_KEY`** (`dev.appstrate/definition`, a `skills/list`
+  of drafts) and **`SKILL_LOCK_VERSION_META_KEY`** (`dev.appstrate/lock_version`, the draft an
+  entry was read from), and the **`SkillAddress`**, **`SkillEntry`** and **`SkillResource`** types, shared by the API, `@appstrate/mcp-transport` and the CLI. (#2175)
 - **Image MIME types in `extensionForMime`** (`@appstrate/core/naming`): `image/png`, `image/jpeg` and `image/jpg` (`jpg`), `image/gif`, `image/webp`, `image/bmp` and `image/svg+xml` (`svg`) now resolve to an extension, so spilled images are no longer extensionless. (#2120)
 - **`AJV_FORMATS_OPTIONS`** (`@appstrate/core/ajv`): the ajv-formats options `createAjv` uses, so
   the RJSF validator registers the same formats and client and server agree.

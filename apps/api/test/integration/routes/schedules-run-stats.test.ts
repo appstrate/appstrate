@@ -21,7 +21,7 @@
 
 import { describe, it, expect, beforeEach } from "bun:test";
 import { db } from "@appstrate/db/client";
-import { notifications } from "@appstrate/db/schema";
+import { runReads } from "@appstrate/db/schema";
 import { getTestApp } from "../../helpers/app.ts";
 import { truncateAll } from "../../helpers/db.ts";
 import {
@@ -79,15 +79,14 @@ describe("Schedule run counters", () => {
     });
   }
 
-  /** An UNREAD notification for `recipient` about `runId`. */
+  /** An UNREAD read-state row for `recipient` about `runId`. */
   async function seedUnread(runId: string, recipientId: string) {
-    await db.insert(notifications).values({
+    await db.insert(runReads).values({
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       recipientType: "user",
       recipientId,
       runId,
-      type: "run_completed",
     });
   }
 
@@ -117,16 +116,15 @@ describe("Schedule run counters", () => {
     const r3 = await seedScheduleRun(schedule.id, schedule.packageId, "success", 3);
     await seedScheduleRun(schedule.id, schedule.packageId, "failed", 4);
 
-    // 3 notifications, one of them already read.
+    // 3 read-state rows, one of them already read.
     await seedUnread(r1.id, ctx.user.id);
     await seedUnread(r2.id, ctx.user.id);
-    await db.insert(notifications).values({
+    await db.insert(runReads).values({
       orgId: ctx.orgId,
       spaceId: ctx.defaultSpaceId,
       recipientType: "user",
       recipientId: ctx.user.id,
       runId: r3.id,
-      type: "run_completed",
       readAt: new Date(),
     });
 

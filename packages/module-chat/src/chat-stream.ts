@@ -28,6 +28,7 @@ import { logger } from "./logger.ts";
 import { listModels, pickModel } from "./llm.ts";
 import { platformMcpUrl } from "./platform-mcp.ts";
 import { platformMcpSurfaceKey } from "./pi-chat/mcp-surface-cache.ts";
+import { connectPlatformMcp } from "./pi-chat/mcp-tools.ts";
 import { selfOrigin, forwardedHeaders } from "./self.ts";
 import type { InjectedSkills } from "@appstrate/core/chat-contract";
 import { mintLoopbackToken, mintMcpLoopbackToken } from "./loopback-auth.ts";
@@ -351,7 +352,10 @@ export async function handleChatStream(
       skillMode: skills.skillMode,
     });
     const capabilities = turnCapabilities((permission) => permissions.includes(permission));
-    return { skills, permissions, capabilities };
+    // `auto` shows the whole catalogue in the context and `strict` lists nothing:
+    // only a `manual` turn lists the space's skills on the user's request.
+    const listsSkills = capabilities.readsSkills && skills.skillMode === "manual";
+    return { skills, permissions, capabilities, listsSkills };
   });
   const phaseAStart = Date.now();
 
@@ -399,6 +403,30 @@ export async function handleChatStream(
         permissions,
         skills,
         enforced: enforcedSkills,
+        // The turn's skills are read before the claim naming them exists, so
+        // over a connection of their own: the caller's permissions, not narrowed by
+        // `turnPermissions`, and no claim — what the caller reads.
+        // One in-process `initialize` plus the reads, only on a turn that lists
+        // (`auto` with `skills:read`) or injects skills; closed before the turn's
+        // connection opens.
+        openSkillsClient: (signal) =>
+          connectPlatformMcp({
+            signal,
+            url: platformMcpUrl(origin, orgId, spaceId),
+            headers: {
+              Authorization: `Bearer ${mintMcpLoopbackToken({
+                userId: user.id,
+                email: user.email,
+                name: user.name,
+                orgId,
+                orgRole,
+                permissions: [...c.get("permissions")],
+                viewAs: persona,
+              })}`,
+              "x-org-id": orgId,
+            },
+            fetch: platformFetch,
+          }),
       }).finally(() => {
         phaseBMs = Date.now() - phaseBStart;
       }),
@@ -408,7 +436,7 @@ export async function handleChatStream(
       (error: unknown) => ({ ok: false as const, error }),
     );
 
-  const [models, { permissions, capabilities }] = await Promise.all([
+  const [models, { permissions, capabilities, listsSkills }] = await Promise.all([
     listModels(origin, inferenceHeaders, platformFetch),
     turn,
     enforcedSkills,
@@ -659,7 +687,7 @@ export async function handleChatStream(
       // The re-entered request carries no header, so without this the hop would
       // answer with the caller's real authority while a preview is on screen.
       viewAs: persona,
-      // What `read_skill` serves without `skills:*`: the definitions this prompt injected.
+      // What `resources/read` serves without `skills:*`: the definitions this prompt injected.
       injectedSkills,
     },
     { ttlMs: ENGINE_LOOPBACK_TTL_MS },
@@ -696,6 +724,7 @@ export async function handleChatStream(
           // every hop, so the scoped bearer above is exactly as load-bearing.
           fetch: platformFetch,
           surfaceKey: platformMcpSurfaceKey(mcpUrl, permissions),
+          listsSkills,
         },
         // Decoupled from the request connection (see `generation` above).
         abortSignal: generation.signal,

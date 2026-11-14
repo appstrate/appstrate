@@ -128,7 +128,7 @@ describe("mcp org-wide connection", () => {
     expect(invoke.startsWith("Available in:")).toBe(true);
     expect(invoke).toContain(gestion.id);
     expect(invoke).not.toContain(lecture.id);
-    expect(described("read_skill")).not.toContain("Available in:");
+    expect(described("read_file")).not.toContain("Available in:");
   });
 
   it("requires space_id on a read as on a write, and names the space read", async () => {

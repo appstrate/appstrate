@@ -2,7 +2,8 @@
 
 /**
  * A model's connection test words a dead key as the model's, never as the generic
- * « reconnect your integration » sentence the same code carries elsewhere.
+ * « reconnect your integration » sentence the same code carries elsewhere, and a success
+ * as a valid credential whose model was not called.
  */
 
 import { describe, expect, it } from "bun:test";
@@ -23,9 +24,13 @@ describe("ModelTestResult", () => {
     expect(html).toContain("text-destructive");
   });
 
-  it("reports any other outcome as every credential test does", () => {
+  it("says a success checked the credential, not the model", () => {
     const ok = render(<ModelTestResult result={{ ok: true, latency: 42 }} />);
-    expect(ok).toContain(settingsFr["credentials.testSuccess"].replace("{{latency}}", "42"));
+    expect(ok).toContain(settingsFr["models.testSuccess"].replace("{{latency}}", "42"));
+    expect(ok).toContain("text-green-500");
+  });
+
+  it("reports a failure as every credential test does", () => {
     const failed = render(
       <ModelTestResult result={{ ok: false, latency: 0, message: "timeout" }} />,
     );

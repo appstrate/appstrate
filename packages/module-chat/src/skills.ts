@@ -42,12 +42,14 @@ export function parseSkillList(body: unknown): SkillHint[] {
   });
 }
 
-/** A skill's `SKILL.md` as injected: a chosen one as `getSkill` serves it, an enforced one as published. */
+/** A skill's `SKILL.md` as injected: as the MCP Skills extension serves it at `uri`. */
 export interface SkillContent {
   packageId: string;
   version: string | null;
+  /** The `skill://` URI of its `SKILL.md`; a file of the skill sits next to it. */
+  uri: string;
   content: string;
-  /** Its claim entry: what `read_skill` serves this turn. */
+  /** Its claim entry: what `resources/read` serves this turn. */
   served: InjectedSkill;
 }
 
@@ -94,8 +96,8 @@ export function resolveChatSkills(
   let left = CHAT_SKILLS_CONTENT_BUDGET_CHARS;
   const tooLong = (length: number) =>
     `(${length} characters; the injected skills share ${CHAT_SKILLS_CONTENT_BUDGET_CHARS}, ${left} left).`;
-  for (const { packageId, version, content } of enforced) {
-    if (content === null) {
+  for (const { packageId, version, uri, content } of enforced) {
+    if (content === null || uri === null) {
       resolved.notices.push(
         `The skill \`${packageId}\` is required by this space but has no published version to follow.`,
       );
@@ -108,6 +110,7 @@ export function resolveChatSkills(
       resolved.enforced.push({
         packageId,
         version,
+        uri,
         content,
         served: { definition: "published", version },
       });
@@ -139,7 +142,7 @@ export function resolveChatSkills(
 }
 
 /**
- * What `read_skill` may serve this turn without `skills:read`: exactly the
+ * What `resources/read` may serve this turn without `skills:read`: exactly the
  * definitions injected, never a skill that only got a notice.
  */
 export function injectedSkills(resolved: ResolvedChatSkills): InjectedSkills["skills"] {

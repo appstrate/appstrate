@@ -87,6 +87,12 @@ describe("catalogRows", () => {
     });
   });
 
+  it("carries the subscription warning only on the entries the server flags", () => {
+    expect(row).not.toHaveProperty("subscriptionUnverified");
+    const [flagged] = catalogRows([{ ...CATALOG_ENTRY, subscription_unverified: true }]);
+    expect(flagged!.subscriptionUnverified).toBe(true);
+  });
+
   it("carries no cost: a catalogued row is priced server-side on read", () => {
     expect(row!.cost).toBeNull();
   });

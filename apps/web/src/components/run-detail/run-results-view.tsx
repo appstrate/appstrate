@@ -202,7 +202,6 @@ export function RunResultsContent({
         <>
           {featured && <RunDeliverable fileId={featured.id} />}
           <DocumentListPanel
-            tiered
             documents={outputDocuments}
             isLoading={isLoading}
             error={error}

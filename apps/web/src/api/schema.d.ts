@@ -2161,7 +2161,7 @@ export interface paths {
         put?: never;
         /**
          * Per-organization MCP Streamable HTTP endpoint
-         * @description Model Context Protocol server (Streamable HTTP, stateless) for a single organization. Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it declares follow the caller's permissions: the read-only set (`search_operations`, `describe_operation`, `read_file`, `read_skill`, `validate_package_file`, `get_runtime_capabilities`, and `get_me` unless the client injects its own caller context) is always present, while the acting tools — `invoke_operation` (`mcp:invoke`), `run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` (whatever guards the `listFiles` operation's own route), `import_package_file`, and `list_connections` with `api_call` (`mcp:invoke` plus `credential-proxy:call-own` or `credential-proxy:call`, on a bearer credential the credential proxy accepts) — are declared only to a caller whose grants make them usable, so `tools/list` differs by role. Together they let an MCP client discover and call platform API operations, launch and wait for agent runs, and call third-party APIs through the caller's own connections (and those shared into the space, for a caller holding `credential-proxy:call`), with the caller's own credentials. `api_call` is the only MCP path to the credential proxy: `/api/credential-proxy/proxy` is not an operation `invoke_operation` serves. Each organization has its own endpoint: a token obtained for this endpoint is audience-bound (RFC 8707) to the per-org resource URI `<APP_URL>/api/mcp/o/{org}` and cannot drive any other organization. To use several organizations, configure one MCP server entry per organization. Without a pinned space (no space-bound credential, no `/s/{space}` in the URL) the connection reaches every space where the caller holds a role, and every tool that acts in a space requires a `space_id` argument whose schema lists them. Requires the `mcp:read` permission (and `mcp:invoke` to call operations). A refused tool call (missing, unknown or invalid argument, unknown operation or space, missing grant) is a `tools/call` result with `isError: true` whose text is `{ code, error, … }`; an operation the route answered with an HTTP error is returned as `{ status, body }` with `isError: true`, except a 403 the caller's permissions explain, which is a `not_granted` refusal. Only an unknown tool name is a JSON-RPC `-32602`.
+         * @description Model Context Protocol server (Streamable HTTP, stateless) for a single organization. Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it declares follow the caller's permissions: the read-only set (`search_operations`, `describe_operation`, `read_file`, `validate_package_file`, `get_runtime_capabilities`, and `get_me` unless the client injects its own caller context) is always present, while the acting tools — `invoke_operation` (`mcp:invoke`), `run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` (whatever guards the `listFiles` operation's own route), `import_package_file`, and `list_connections` with `api_call` (`mcp:invoke` plus `credential-proxy:call-own` or `credential-proxy:call`, on a bearer credential the credential proxy accepts) — are declared only to a caller whose grants make them usable, so `tools/list` differs by role. Together they let an MCP client discover and call platform API operations, launch and wait for agent runs, and call third-party APIs through the caller's own connections (and those shared into the space, for a caller holding `credential-proxy:call`), with the caller's own credentials. `api_call` is the only MCP path to the credential proxy: `/api/credential-proxy/proxy` is not an operation `invoke_operation` serves. Each organization has its own endpoint: a token obtained for this endpoint is audience-bound (RFC 8707) to the per-org resource URI `<APP_URL>/api/mcp/o/{org}` and cannot drive any other organization. To use several organizations, configure one MCP server entry per organization. Without a pinned space (no space-bound credential, no `/s/{space}` in the URL) the connection reaches every space where the caller holds a role, and every tool that acts in a space requires a `space_id` argument whose schema lists them. Requires the `mcp:read` permission (and `mcp:invoke` to call operations). A refused tool call (missing, unknown or invalid argument, unknown operation or space, missing grant) is a `tools/call` result with `isError: true` whose text is `{ code, error, … }`; an operation the route answered with an HTTP error is returned as `{ status, body }` with `isError: true`, except a 403 the caller's permissions explain, which is a `not_granted` refusal. Only an unknown tool name is a JSON-RPC `-32602`.
          */
         post: operations["mcpStreamableHttpPost"];
         delete?: never;
@@ -2185,7 +2185,7 @@ export interface paths {
         put?: never;
         /**
          * Space-pinned MCP Streamable HTTP endpoint
-         * @description Model Context Protocol server (Streamable HTTP, stateless) for one space of an organization: the organization's endpoint pinned to `{space}` by its URL, usable by any client. Every call acts in `{space}`, and tools take no `space_id`. Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it declares follow the caller's permissions: the read-only set (`search_operations`, `describe_operation`, `read_file`, `read_skill`, `validate_package_file`, `get_runtime_capabilities`, and `get_me` unless the client injects its own caller context) is always present, while the acting tools — `invoke_operation` (`mcp:invoke`), `run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` (whatever guards the `listFiles` operation's own route), `import_package_file`, and `list_connections` with `api_call` (`mcp:invoke` plus `credential-proxy:call-own` or `credential-proxy:call`, on a bearer credential the credential proxy accepts) — are declared only to a caller whose grants make them usable, so `tools/list` differs by role. Together they let an MCP client discover and call platform API operations, launch and wait for agent runs, and call third-party APIs through the caller's own connections (and those shared into the space, for a caller holding `credential-proxy:call`), with the caller's own credentials. `api_call` is the only MCP path to the credential proxy: `/api/credential-proxy/proxy` is not an operation `invoke_operation` serves. The endpoint is its own OAuth protected resource, `<APP_URL>/api/mcp/o/{org}/s/{space}` (RFC 8707, RFC 9728). It accepts a token bound to that URI or to the organization's resource `<APP_URL>/api/mcp/o/{org}`. A token bound to the space reaches neither another space nor the organization's endpoint, and it is capped like a space API key: no organization-level permission (member management, organization settings) is in its reach. A space-bound credential (API key or token) naming another space is a 403. Requires the `mcp:read` permission (and `mcp:invoke` to call operations). A refused tool call (missing, unknown or invalid argument, unknown operation or space, missing grant) is a `tools/call` result with `isError: true` whose text is `{ code, error, … }`; an operation the route answered with an HTTP error is returned as `{ status, body }` with `isError: true`, except a 403 the caller's permissions explain, which is a `not_granted` refusal. Only an unknown tool name is a JSON-RPC `-32602`.
+         * @description Model Context Protocol server (Streamable HTTP, stateless) for one space of an organization: the organization's endpoint pinned to `{space}` by its URL, usable by any client. Every call acts in `{space}`, and tools take no `space_id`. Accepts JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`). The tools it declares follow the caller's permissions: the read-only set (`search_operations`, `describe_operation`, `read_file`, `validate_package_file`, `get_runtime_capabilities`, and `get_me` unless the client injects its own caller context) is always present, while the acting tools — `invoke_operation` (`mcp:invoke`), `run_and_wait` (`mcp:invoke` plus `agents:run` and a run-read permission), `list_files` (whatever guards the `listFiles` operation's own route), `import_package_file`, and `list_connections` with `api_call` (`mcp:invoke` plus `credential-proxy:call-own` or `credential-proxy:call`, on a bearer credential the credential proxy accepts) — are declared only to a caller whose grants make them usable, so `tools/list` differs by role. Together they let an MCP client discover and call platform API operations, launch and wait for agent runs, and call third-party APIs through the caller's own connections (and those shared into the space, for a caller holding `credential-proxy:call`), with the caller's own credentials. `api_call` is the only MCP path to the credential proxy: `/api/credential-proxy/proxy` is not an operation `invoke_operation` serves. The endpoint is its own OAuth protected resource, `<APP_URL>/api/mcp/o/{org}/s/{space}` (RFC 8707, RFC 9728). It accepts a token bound to that URI or to the organization's resource `<APP_URL>/api/mcp/o/{org}`. A token bound to the space reaches neither another space nor the organization's endpoint, and it is capped like a space API key: no organization-level permission (member management, organization settings) is in its reach. A space-bound credential (API key or token) naming another space is a 403. Requires the `mcp:read` permission (and `mcp:invoke` to call operations). A refused tool call (missing, unknown or invalid argument, unknown operation or space, missing grant) is a `tools/call` result with `isError: true` whose text is `{ code, error, … }`; an operation the route answered with an HTTP error is returned as `{ status, body }` with `isError: true`, except a 403 the caller's permissions explain, which is a `not_granted` refusal. Only an unknown tool name is a JSON-RPC `-32602`.
          */
         post: operations["mcpStreamableHttpPostInSpace"];
         delete?: never;
@@ -2733,7 +2733,7 @@ export interface paths {
         put?: never;
         /**
          * Test model configuration inline
-         * @description Test a model configuration without saving it first. The probe uses `api_key` when given, the credential's stored key otherwise. A built-in credential is refused (403). Rate limited to 5 requests per minute.
+         * @description Test a model configuration without saving it first by checking its credential. `ok: true` means the credential is usable. The model itself is not part of the check, so `ok: true` does not establish that the provider serves this model with that credential. A subscription credential (OAuth) is validated offline from its token, with no request to the provider (`latency` is 0). An API key is checked with one lightweight request to the provider: its model listing, or, for a provider whose listing answers any key, a minimal completion on a model of the provider's offer. The check uses `api_key` when given, the credential's stored key otherwise. A built-in credential is refused (403). Rate limited to 5 requests per minute.
          */
         post: operations["testModelInline"];
         delete?: never;
@@ -2777,7 +2777,7 @@ export interface paths {
         put?: never;
         /**
          * Test model connection
-         * @description Test that the model's API key and base URL are valid by making a lightweight request to the provider. Rate limited to 5 requests per minute. Not available for a managed (aliased) model: the result would report the hidden backing's round-trip time and upstream status.
+         * @description Test the credential and base URL a saved model is bound to. `ok: true` means the credential is usable. The model itself is not part of the check, so `ok: true` does not establish that the provider serves this model with that credential. A subscription credential (OAuth) is validated offline from its token, with no request to the provider (`latency` is 0). An API key is checked with one lightweight request to the provider: its model listing, or, for a provider whose listing answers any key, a minimal completion on a model of the provider's offer. Rate limited to 5 requests per minute. Not available for a managed (aliased) model: the result would report the hidden backing's round-trip time and upstream status.
          */
         post: operations["testModel"];
         delete?: never;
@@ -2795,7 +2795,7 @@ export interface paths {
         };
         /**
          * List notifications
-         * @description Keyset-paginated list of the current recipient's notifications, newest first. Follow the `Link: rel="next"` header (`?startingAfter=<id>`) to page. `?unread=true` returns unread only.
+         * @description Keyset-paginated list of the current recipient's notifications, newest first. Follow the `Link: rel="next"` header (`?startingAfter=<id>`) to page. `?unread=true` returns unread only. A finished run is in it only when it failed or timed out; every unread run is `GET /api/runs?unread=true`.
          */
         get: operations["listNotifications"];
         put?: never;
@@ -2816,29 +2816,9 @@ export interface paths {
         get?: never;
         /**
          * Mark all notifications as read
-         * @description Marks all unread notifications as read for the current user. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.
+         * @description Marks every unread notification of the current recipient's feed read. It leaves the runs unread: `PUT /api/runs/read-all` reads them, and their notifications with them. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.
          */
         put: operations["markAllNotificationsRead"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/notifications/read/{runId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Mark a run's notification as read
-         * @description Mark the caller's notification for a run read, keyed by run id — complements `PUT /api/notifications/{id}/read` for callers that hold a run id but not the notification id. Idempotent: a missing run or non-recipient is a no-op, always 204.
-         */
-        put: operations["markNotificationRead"];
         post?: never;
         delete?: never;
         options?: never;
@@ -2855,29 +2835,9 @@ export interface paths {
         };
         /**
          * Get unread notification count
-         * @description Returns the number of unread run notifications for the current user.
+         * @description Returns the number of unread notifications in the current recipient's feed. Unread runs are counted by `GET /api/runs?unread=true`.
          */
         get: operations["getUnreadNotificationCount"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/notifications/unread-counts-by-agent": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get unread notification counts grouped by agent
-         * @description Returns the number of unread run notifications per agent for the current user.
-         */
-        get: operations["getUnreadCountsByAgent"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3972,6 +3932,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/packages/skills/served": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List skills as the MCP Skills extension serves them
+         * @description The entries of `skills/list`: the published definition of each active skill of the space that the caller may read and the server can serve whole. With `definition=draft`, the drafts of the space that the caller may read (only a caller who may write a package reads its draft), at their `@draft` URIs, as `skills/list` lists them with the request `_meta` `{"dev.appstrate/definition": "draft"}`. Serves `appstrate code sync` and reflects the MCP Skills extension (SEP-2640) of the MCP endpoint: same server function, same entries, same bytes, for the space `X-Space-Id` names. Requires `skills:read` in that space. Rate-limited to 50 requests/minute.
+         */
+        get: operations["listServedSkills"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/packages/skills/served/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download every file of a skill as the MCP Skills extension serves it
+         * @description A ZIP of every file `resources/read` serves for the skill whose `SKILL.md` is at the `skill://` URI `uri`, at its path inside the skill directory; each file's `sha256` is the `digest` of its entry. Serves `appstrate code sync` and reflects the MCP Skills extension (SEP-2640) of the MCP endpoint: same server function, same entries, same bytes, for the space `X-Space-Id` names. Requires `skills:read` in that space. Rate-limited to 50 requests/minute.
+         */
+        get: operations["getServedSkillArchive"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/packages/skills/{scope}/{name}": {
         parameters: {
             query?: never;
@@ -4606,6 +4606,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/runs/read-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Mark every run read
+         * @description Marks every unread run of the space read for the caller (read state is per recipient), and the notifications the bell held for them. Bulk mutation — returns a documented operation result ({ updated_count }), not a resource.
+         */
+        put: operations["markAllRunsRead"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/runs/remote": {
         parameters: {
             query?: never;
@@ -4687,6 +4707,26 @@ export interface paths {
          */
         get: operations["getRunLogs"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{id}/read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Mark a run read
+         * @description Marks one run read for the caller (read state is per recipient; the dashboard calls it when a finished run is opened), and its notification when the bell held one. Idempotent: a missing run or one the caller holds no read state for is a no-op, always 204.
+         */
+        put: operations["markRunRead"];
         post?: never;
         delete?: never;
         options?: never;
@@ -5881,6 +5921,8 @@ export interface components {
              */
             type: "agent" | "skill" | "integration" | "mcp-server";
             running_runs: number;
+            /** @description Runs of this agent the CALLER has not read yet. Scoped to the requesting actor, like `EnrichedRun.unread` and a schedule's `unread_count`. */
+            unread_count: number;
             dependencies: {
                 /** @description Withheld from a summary read (`agents:run` without `agents:read`). */
                 skills?: {
@@ -7217,7 +7259,7 @@ export interface components {
             } | null;
             /** @description Inline runs only. Snapshot of the prompt submitted at run time. Null once the shadow has been compacted. */
             inline_prompt?: string | null;
-            /** @description True when the requesting recipient has an unread notification for this run. Per-recipient: derived from the notifications table for the current actor, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows and the per-schedule unread count. */
+            /** @description True when the caller has not read this run yet. Per recipient, so a dashboard user and an end-user see independent state. Drives the unread dot on run rows; `PUT /api/runs/{id}/read` clears it. */
             unread: boolean;
             /** @description Per-(app, package) monotonic counter assigned at run creation. Stable identifier for UI display. */
             runNumber: number | null;
@@ -7391,7 +7433,7 @@ export interface components {
             actor_type: "user" | "end_user" | null;
             /** @description Runs of this schedule currently pending or running. */
             running_runs: number;
-            /** @description Runs of this schedule whose notification is unread by the CALLER. Scoped to the requesting actor, like `EnrichedRun.unread`. */
+            /** @description Runs of this schedule the CALLER has not read yet. Scoped to the requesting actor, like `EnrichedRun.unread`. */
             unread_count: number;
             /** @description Highest run number this schedule ever produced; 0 when it never fired. */
             last_run_number: number;
@@ -8525,6 +8567,7 @@ export interface operations {
                      *           "published": true,
                      *           "type": "agent",
                      *           "running_runs": 1,
+                     *           "unread_count": 2,
                      *           "dependencies": {
                      *             "skills": {},
                      *             "mcp_servers": {},
@@ -8550,6 +8593,7 @@ export interface operations {
                      *           "published": true,
                      *           "type": "agent",
                      *           "running_runs": 0,
+                     *           "unread_count": 0,
                      *           "dependencies": {
                      *             "skills": {
                      *               "@appstrate/summarize": "^1.0.0"
@@ -18039,6 +18083,11 @@ export interface operations {
                                 } | null;
                                 /** @description Surface in the picker's 'Featured' group for this provider AND auto-seed in `org_models` on first connection. True when the model id appears in the provider's pinned `featuredModels` list; the rest of the offer falls under 'All models'. */
                                 featured: boolean;
+                                /**
+                                 * @description Present and `true` on a model of a subscription (OAuth) provider that comes from the live catalog, not from the registry bundled with the platform's agent SDK: the platform builds its request offline, but whether the provider serves it to this subscription is not established. A provider may refuse it at first use, for instance for the client version the SDK announces. Absent otherwise.
+                                 * @enum {boolean}
+                                 */
+                                subscription_unverified?: true;
                             }[];
                         }[];
                         total: number;
@@ -19070,11 +19119,12 @@ export interface operations {
                      *       "data": [
                      *         {
                      *           "id": "550e8400-e29b-41d4-a716-446655440000",
-                     *           "type": "run_completed",
-                     *           "runId": "run_cm4jkl012",
+                     *           "type": "package_shared",
+                     *           "runId": null,
                      *           "payload": {
                      *             "packageId": "@acme/email-sorter",
-                     *             "status": "success"
+                     *             "package_type": "agent",
+                     *             "shared_by_name": "Ada Lovelace"
                      *           },
                      *           "read_at": null,
                      *           "createdAt": "2026-01-15T10:31:12Z"
@@ -19093,15 +19143,17 @@ export interface operations {
                              */
                             id: string;
                             /** @constant */
-                            type: "run_completed";
+                            type: "run_failed";
                             /** @description Originating run id, when the notification references one */
                             runId: string | null;
                             /** @description Render-without-join data. */
                             payload: {
                                 /** @description The run's agent; null once the agent is deleted. */
                                 packageId: string | null;
+                                /** @description The agent's name as stamped on the run, for display when the agent is no longer listed (switched off in the space, deleted). */
+                                agent_name: string | null;
                                 /** @enum {string} */
-                                status: "pending" | "running" | "success" | "failed" | "timeout" | "cancelled";
+                                status: "failed" | "timeout";
                             } | null;
                             /**
                              * Format: date-time
@@ -19179,37 +19231,6 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
-    markNotificationRead: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path: {
-                runId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Notification marked as read (idempotent — 204 even if it was already read) */
-            204: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
     getUnreadNotificationCount: {
         parameters: {
             query?: never;
@@ -19240,50 +19261,6 @@ export interface operations {
                     "application/json": {
                         /** @description Number of unread notifications */
                         count: number;
-                    };
-                };
-            };
-            400: components["responses"]["ValidationError"];
-            401: components["responses"]["Unauthorized"];
-            403: components["responses"]["Forbidden"];
-            404: components["responses"]["NotFound"];
-        };
-    };
-    getUnreadCountsByAgent: {
-        parameters: {
-            query?: never;
-            header?: {
-                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
-                "X-Org-Id"?: components["parameters"]["XOrgId"];
-                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
-                "X-Space-Id"?: components["parameters"]["XSpaceId"];
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Unread counts keyed by package ID */
-            200: {
-                headers: {
-                    "Request-Id": components["headers"]["RequestId"];
-                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
-                    [name: string]: unknown;
-                };
-                content: {
-                    /**
-                     * @example {
-                     *       "counts": {
-                     *         "@acme/email-sorter": 3,
-                     *         "@appstrate/code-reviewer": 2
-                     *       }
-                     *     }
-                     */
-                    "application/json": {
-                        /** @description Map of packageId to unread notification count */
-                        counts: {
-                            [key: string]: number;
-                        };
                     };
                 };
             };
@@ -22991,6 +22968,100 @@ export interface operations {
             };
         };
     };
+    listServedSkills: {
+        parameters: {
+            query?: {
+                /** @description The definition listed. */
+                definition?: "published" | "draft";
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Skill entries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        object: "list";
+                        data: {
+                            /** @description `skill://` URI of the skill's `SKILL.md`: `skill://<spaceId>/<scope>/<package-name>/<name>/SKILL.md` for the published definition, `<package-name>@draft` in place of `<package-name>` for the draft. */
+                            uri: string;
+                            /** @description The YAML frontmatter of the served `SKILL.md`, verbatim. `metadata.version` is the package version: the semver of a published definition; a draft has none. */
+                            frontmatter: {
+                                name: string;
+                                description: string;
+                            } & {
+                                [key: string]: unknown;
+                            };
+                            /** @description Every file of the skill, `SKILL.md` included. */
+                            resources: {
+                                /** @description `skill://` URI of the file. */
+                                uri: string;
+                                /** @description `sha256:<hex>` of the bytes `resources/read` serves for `uri`. */
+                                digest: string;
+                                /** @description Size of the file in bytes. */
+                                size: number;
+                            }[];
+                            /** @description Present on a draft's entry only: `dev.appstrate/lock_version` is the `lock_version` of the draft whose files `resources` describes. */
+                            _meta?: {
+                                "dev.appstrate/lock_version": number;
+                            };
+                        }[];
+                        hasMore: boolean;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getServedSkillArchive: {
+        parameters: {
+            query: {
+                /** @description `skill://` URI of a skill entry's `SKILL.md` (the entry's `uri`). */
+                uri: string;
+            };
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ZIP archive of the skill's files */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": Blob;
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description No skill the caller may read in this space is served at `uri`. */
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
     getSkill: {
         parameters: {
             query?: {
@@ -24749,6 +24820,8 @@ export interface operations {
                 chat_session_id?: string;
                 /** @description Free-text filter, combined with every other filter. Matches the agent the run executed (scope and name, as stamped on the run) and the error it ended on, case-insensitively and anywhere in the value. A query of digits (optionally prefixed with `#`) also matches the run number. Longer than 200 characters is rejected with `400`. */
                 q?: components["parameters"]["RunSearch"];
+                /** @description When true, only the runs the caller has not read yet are returned (`unread` on each row). Read state is per recipient: a run finished for a dashboard user is unread for that user only. A value that is neither `true` nor `false` is rejected with `400`. */
+                unread?: boolean;
             };
             header?: {
                 /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
@@ -25067,6 +25140,47 @@ export interface operations {
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
             500: components["responses"]["InternalServerError"];
+        };
+    };
+    markAllRunsRead: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description End-user ID (eu_ prefix) to execute the request on behalf of. API key auth only — rejected with 400 on cookie auth. */
+                "Appstrate-User"?: components["parameters"]["AppstrateUser"];
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Update result */
+            200: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content: {
+                    /**
+                     * @example {
+                     *       "updated_count": 3
+                     *     }
+                     */
+                    "application/json": {
+                        /** @description Number of runs marked read */
+                        updated_count: number;
+                    };
+                };
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     createRemoteRun: {
@@ -25490,6 +25604,40 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
             429: components["responses"]["RateLimited"];
+        };
+    };
+    markRunRead: {
+        parameters: {
+            query?: never;
+            header?: {
+                /** @description Organization ID. Required for cookie auth. Not needed for API key auth (org resolved from key). */
+                "X-Org-Id"?: components["parameters"]["XOrgId"];
+                /** @description Space ID. Required for space-scoped routes (agents, runs, schedules, and space-scoped module routes). Not needed for API key auth (space resolved from key). */
+                "X-Space-Id"?: components["parameters"]["XSpaceId"];
+                /** @description End-user ID (eu_ prefix) to execute the request on behalf of. API key auth only — rejected with 400 on cookie auth. */
+                "Appstrate-User"?: components["parameters"]["AppstrateUser"];
+            };
+            path: {
+                /** @description Run id */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Run marked read (idempotent — 204 even if it was already read) */
+            204: {
+                headers: {
+                    "Request-Id": components["headers"]["RequestId"];
+                    "Appstrate-Version": components["headers"]["AppstrateVersion"];
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["ValidationError"];
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
         };
     };
     ingestRunEvent: {
@@ -27611,7 +27759,7 @@ export interface operations {
             /** @description The caller lacks the package type's `configure` grant in this space — for a skill, `skills:write`. */
             403: components["responses"]["Forbidden"];
             404: components["responses"]["NotFound"];
-            /** @description Enforcing the skill in the chat is refused: it has no published version (`no_published_version`), the space already enforces the maximum number of skills (`enforced_skills_limit`, the cap in the `limit` extension), or the enforced skills' published `SKILL.md` bodies would exceed the chat's skills budget (`enforced_skills_budget`, with `budget` and `total` extensions). Nothing in the patch is written. */
+            /** @description Enforcing the skill in the chat is refused: it has no published version (`no_published_version`), the space already enforces the maximum number of skills (`enforced_skills_limit`, the cap in the `limit` extension), the latest published version of the skill, or of another skill already enforced here, cannot be served as an Agent Skills skill (`skill_not_servable`), or the enforced skills' `SKILL.md` bodies, as the chat injects them, would exceed the chat's skills budget (`enforced_skills_budget`, with `budget` and `total` extensions). Nothing in the patch is written. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -28552,6 +28700,8 @@ export interface operations {
                 connection_id: string;
                 /** @description The `credential_revision` of the credential that was rejected. Omitted only by a caller that holds no credentials payload (a local MCP server reporting a rejected credential it received at spawn); its rejection is then counted against the connection's current credential. */
                 credential_revision?: string;
+                /** @description `handshake`: the rejected request is the MCP handshake (`initialize`) the sidecar sends to a remote MCP server at boot, which no agent input shapes. An auth nothing can refresh is then flagged on this first rejection (`410`) instead of counted toward `INTEGRATION_REFRESH_MAX_FAILURES`. Omitted for a request made on the agent's behalf (tool call, `api_call`, MITM request). An OAuth2 credential that can be refreshed is refreshed either way. */
+                rejected_request?: "handshake";
             };
             header?: never;
             path: {
@@ -28573,7 +28723,7 @@ export interface operations {
                     "application/json": components["schemas"]["IntegrationCredentialsResponse"];
                 };
             };
-            /** @description The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. A malformed `credential_revision` (empty included) is an `invalid_request` too. */
+            /** @description The `connection_id` selector is missing, malformed, or names a connection this run did not bind. `invalid_request` — absent or not a uuid; the platform never picks a connection on the caller's behalf. `connection_not_in_run` — a well-formed id that is not in `runs.resolved_connections` for this integration; the run token authorises this run's bound set only. A malformed `credential_revision` (empty included) or a `rejected_request` other than `handshake` is an `invalid_request` too. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -28594,7 +28744,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description `integration_connection_needs_reconnection`: the credential is dead and the connection is flagged `needsReconnection`; the run records the integration as degraded and the sidecar stops retrying. Counted failures flag it at `INTEGRATION_REFRESH_MAX_FAILURES` (an OAuth2 token only once expired past `INTEGRATION_REFRESH_GRACE_SECONDS`). */
+            /** @description `integration_connection_needs_reconnection`: the credential is dead and the connection is flagged `needsReconnection`; the run records the integration as degraded and the sidecar stops retrying. Counted failures flag it at `INTEGRATION_REFRESH_MAX_FAILURES` (an OAuth2 token only once expired past `INTEGRATION_REFRESH_GRACE_SECONDS`); a rejected handshake (`rejected_request=handshake`) of an auth nothing can refresh flags it at once. */
             410: {
                 headers: {
                     [name: string]: unknown;

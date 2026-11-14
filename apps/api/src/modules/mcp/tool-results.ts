@@ -43,14 +43,6 @@ export function trySetHeader(headers: Headers, name: string, value: string): boo
   }
 }
 
-/**
- * Ceiling on inlining a NON-textual file's RAW bytes as base64 in a tool or
- * `resources/read` result. Base64 inflates 4/3, so a 700 KiB raw cap keeps the
- * encoded payload (~933 KiB) under the ~1 MB practical MCP response limit. Above
- * it (either kind) the read returns metadata only.
- */
-export const RESOURCE_BLOB_MAX_BYTES = 700 * 1024;
-
 /** Why a tool call was refused. Stable machine codes. */
 type RefusalCode =
   | RunAndWaitArgumentCode

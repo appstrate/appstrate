@@ -219,10 +219,9 @@ export type EnrichedRun = RunWireDto & {
   /** In declaration order; null when the run recorded none (no connection resolution ran). */
   integrations_unbound: RunIntegrationUnboundWire[] | null;
   /**
-   * True when the requesting recipient has an unread notification for this run.
-   * Per-recipient: derived from the `notifications` table for the
-   * current actor, so a dashboard user and an end-user see independent state.
-   * Drives the unread dot on run rows and the per-schedule unread count.
+   * True when the caller has not read this run yet. Per recipient, so a
+   * dashboard user and an end-user see independent state. Drives the unread
+   * dot on run rows; `PUT /api/runs/{id}/read` clears it.
    */
   unread: boolean;
   /**
@@ -396,7 +395,7 @@ export type EnrichedSchedule = ScheduleWireDto & {
    */
   running_runs: number;
   /**
-   * Runs of this schedule whose notification is unread **by the caller**. Scoped
+   * Runs of this schedule **the caller** has not read yet. Scoped
    * to the requesting actor, like `EnrichedRun.unread` — a member and an
    * end-user never observe each other's read state.
    */
@@ -582,6 +581,8 @@ export interface AgentListItem extends BasePackageListItem {
     integrations: Record<string, string>;
   };
   running_runs: number;
+  /** Runs of this agent the caller has not read yet (per recipient, like a schedule's). */
+  unread_count: number;
   /** A published version (or a system agent): launching without a version selector resolves. */
   published: boolean;
   type: PackageType;
@@ -1201,6 +1202,12 @@ export interface ProviderRegistryModelEntry extends CatalogModelEntry {
    * contribution); the rest of the catalog falls under "All models".
    */
   featured: boolean;
+  /**
+   * Set on a model of a subscription (OAuth) provider that the live catalog
+   * adds to the bundled registry: its request builds offline, but whether the
+   * provider serves it to a subscription is not established. Absent otherwise.
+   */
+  subscription_unverified?: true;
 }
 
 // --- Connection Test Types ---

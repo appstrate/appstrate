@@ -24,6 +24,7 @@
  * connection from `platformMcp.url`; the handler only mints the bearer.
  */
 
+import { createHash } from "node:crypto";
 import { describe, it, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { Hono } from "hono";
 import { and, asc, eq } from "drizzle-orm";
@@ -54,6 +55,7 @@ import { buildModuleInitContext } from "../../../apps/api/src/lib/modules/regist
 import { errorHandler } from "../../../apps/api/src/middleware/error-handler.ts";
 import { initSystemModelProviderKeys } from "../../../apps/api/src/services/model-registry.ts";
 import { buildSystemPrompt } from "../src/prompt.ts";
+import { SKILL_DEFINITION_META_KEY, type SkillEntry } from "@appstrate/core/skill-uri";
 import { turnCapabilities } from "../src/capabilities.ts";
 import { chatLoopbackStrategy } from "../src/loopback-auth.ts";
 import { platformMcpSurfaceKey } from "../src/pi-chat/mcp-surface-cache.ts";
@@ -138,9 +140,13 @@ function contextResponse(recentRuns: unknown[] = []): Response {
 function scriptedDispatch(
   apiShape?: string,
   context: () => Response = () => contextResponse(),
+  listedSkill?: SkillEntry,
 ): (req: Request) => Promise<Response> {
   return async (req: Request): Promise<Response> => {
     const path = new URL(req.url).pathname;
+    if (listedSkill && path.startsWith("/api/mcp/")) {
+      return answerSkillsMcp(await req.json(), { entry: listedSkill, text: "", onRead: () => {} });
+    }
     if (path === "/api/models") return modelsResponse(apiShape);
     if (path === "/api/me/context") return context();
     if (path === "/api/spaces") {
@@ -214,6 +220,39 @@ async function tokenInjectedSkills(input: PiChatInput): Promise<unknown> {
   } as never);
   return resolved!.extra?.[INJECTED_SKILLS_AUTH_EXTRA];
 }
+
+/**
+ * A stateless platform MCP server listing one published skill entry and
+ * serving its `SKILL.md`: answers one JSON-RPC message.
+ */
+function answerSkillsMcp(
+  message: { id?: number; method: string; params?: Record<string, unknown> },
+  skill: { entry: SkillEntry; text: string; onRead: (uri: string) => void },
+): Response {
+  const result = (value: unknown) =>
+    Response.json({ jsonrpc: "2.0", id: message.id, result: value });
+  switch (message.method) {
+    case "initialize":
+      return result({
+        protocolVersion: message.params?.protocolVersion,
+        capabilities: { resources: {}, extensions: { "io.modelcontextprotocol/skills": {} } },
+        serverInfo: { name: "fake-platform", version: "1.0.0" },
+      });
+    case "skills/list": {
+      const meta = message.params?._meta as Record<string, unknown> | undefined;
+      return result({ skills: meta?.[SKILL_DEFINITION_META_KEY] === "draft" ? [] : [skill.entry] });
+    }
+    case "resources/read": {
+      const uri = message.params?.uri as string;
+      skill.onRead(uri);
+      return result({ contents: [{ uri, mimeType: "text/markdown", text: skill.text }] });
+    }
+    default:
+      return new Response(null, { status: 202 });
+  }
+}
+
+const sha256 = (text: string) => `sha256:${createHash("sha256").update(text).digest("hex")}`;
 
 /** The permission set the turn's platform-MCP bearer actually carries. */
 async function tokenPermissions(input: PiChatInput): Promise<string[]> {
@@ -289,6 +328,8 @@ describe("handleChatStream", () => {
       recordChatUsage?: ChatPlatformDeps["recordChatUsage"];
       /** Scripted `/api/me/context` body, to vary the payload between turns. */
       context?: () => Response;
+      /** The one skill the scripted platform MCP server lists. */
+      listedSkill?: SkillEntry;
       /** Replace the whole scripted dispatch (to observe request timing). */
       dispatch?: (req: Request) => Promise<Response>;
       /** Stand in for the platform's composer-attachment resolution. */
@@ -324,7 +365,9 @@ describe("handleChatStream", () => {
             }
           : initCtx,
       ),
-      dispatch: overrides?.dispatch ?? scriptedDispatch(overrides?.apiShape, overrides?.context),
+      dispatch:
+        overrides?.dispatch ??
+        scriptedDispatch(overrides?.apiShape, overrides?.context, overrides?.listedSkill),
       ...(overrides?.resolveChatModel ? { resolveChatModel: overrides.resolveChatModel } : {}),
       ...(overrides?.recordChatUsage ? { recordChatUsage: overrides.recordChatUsage } : {}),
       ...(overrides?.resolveChatAttachment
@@ -637,22 +680,25 @@ describe("handleChatStream", () => {
       pinnedSkills: [PIN],
     });
 
-    // The chosen skill is in the space's active listing; record which contents
-    // are read, so the rendered block is a function of what the handler read.
+    // The chosen skill is listed by the platform MCP server; record which
+    // contents are read and with which bearer, so the rendered block is a
+    // function of what the handler read.
+    const uri = `skill://${ctx.defaultSpaceId}/acme/pinned-skill/pinned/SKILL.md`;
+    const PINNED_TEXT = "Always answer in haiku.";
     const read: string[] = [];
+    const skillBearers: string[] = [];
     const dispatch = async (req: Request): Promise<Response> => {
       const url = new URL(req.url);
-      if (url.pathname === "/api/packages/skills") {
-        return Response.json({
-          data: [{ id: PIN, name: "Pinned", description: null, version: "1.0.0" }],
-        });
-      }
-      if (url.pathname.startsWith("/api/packages/skills/")) {
-        read.push(url.pathname.replace("/api/packages/skills/", ""));
-        return Response.json({
-          content: "Always answer in haiku.",
-          definition: "published",
-          version: "1.0.0",
+      if (url.pathname.startsWith("/api/mcp/")) {
+        skillBearers.push(req.headers.get("authorization") ?? "");
+        return answerSkillsMcp(await req.json(), {
+          entry: {
+            uri,
+            frontmatter: { name: "pinned", description: "P", metadata: { version: "1.0.0" } },
+            resources: [{ uri, digest: sha256(PINNED_TEXT), size: 23 }],
+          },
+          text: PINNED_TEXT,
+          onRead: (readUri) => read.push(readUri),
         });
       }
       if (url.pathname !== "/api/me/context") return scriptedDispatch()(req);
@@ -661,8 +707,6 @@ describe("handleChatStream", () => {
         org: { role: "owner", name: CONTEXT_ORG_MARKER, slug: "chat-handler-test" },
         connections: [],
         agents: [],
-        // Non-empty on purpose: strict lists no skill, so it must not render.
-        skills: [{ packageId: "@acme/catalogued", display_name: "Catalogued" }],
       });
     };
 
@@ -670,7 +714,7 @@ describe("handleChatStream", () => {
     const res = await postChat(sessionId, undefined, engine, {
       dispatch,
       // Every `skills:*` is withheld, not only `skills:read`: a write echoes the SKILL.md.
-      // `chat:write` is on every turn token: `read_skill` honours the claim only with it.
+      // `chat:write` is on every turn token: `resources/read` honours the claim only with it.
       permissions: new Set([
         "chat:write",
         "mcp:read",
@@ -683,20 +727,28 @@ describe("handleChatStream", () => {
     expect(res.status).toBe(200);
     await collectUiChunks(res);
 
-    expect(read).toEqual([PIN]);
+    expect(read).toEqual([uri]);
+    // The listing connection carries the caller's permissions, not the turn's
+    // narrowed set, and no claim.
+    const listing = await chatLoopbackStrategy.authenticate({
+      headers: new Headers({ authorization: skillBearers[0]! }),
+    } as never);
+    expect([...(listing!.permissions ?? [])]).toContain("skills:read");
+    expect(listing!.extra?.[INJECTED_SKILLS_AUTH_EXTRA]).toBeUndefined();
     const input = calls[0]!;
     expect(input.system).toContain(
-      `<skill id="${PIN}" version="1.0.0">\nAlways answer in haiku.\n</skill>`,
+      `<skill id="${PIN}" uri="${uri}" version="1.0.0">\nAlways answer in haiku.\n</skill>`,
     );
-    expect(input.system).not.toContain("@acme/catalogued");
+    // Strict lists no skill: the listed entry is injected, never a catalogue line.
+    expect(input.system).not.toContain(`- \`${PIN}\``);
     // No skill tool is taught, and the token cannot reach one.
     // The injected skill's files stay readable; no loading or listing is taught.
-    expect(input.system).toContain("read a file it references with `read_skill`");
+    expect(input.system).toContain("read a file it references with `read_resource`");
     expect(input.system).not.toContain("LOAD IT BEFORE acting");
     expect(input.system).not.toContain("listSkills");
     expect(input.system).toContain("This conversation is restricted to the skills shown here");
     expect(await tokenPermissions(input)).toEqual(["chat:write", "mcp:invoke", "mcp:read"]);
-    // The bearer names what was injected, so `read_skill` serves it without `skills:read`.
+    // The bearer names what was injected, so `resources/read` serves it without `skills:read`.
     expect(await tokenInjectedSkills(input)).toEqual({
       spaceId: ctx.defaultSpaceId,
       skills: { [PIN]: { definition: "published", version: "1.0.0" } },
@@ -719,6 +771,8 @@ describe("handleChatStream", () => {
     expect(row?.skillMode).toBe("strict");
     expect(row?.pinnedSkills).toEqual(["@acme/a", "@acme/z"]);
     expect(await tokenPermissions(calls[0]!)).toEqual(["mcp:invoke", "mcp:read"]);
+    // `strict` lists no skill: `list_skills` is not registered.
+    expect(calls[0]!.platformMcp.listsSkills).toBe(false);
 
     await waitForAssistantPersist(sessionId);
   });
@@ -746,6 +800,8 @@ describe("handleChatStream", () => {
     expect(row?.skillMode).toBe("auto");
     expect(row?.pinnedSkills).toEqual([]);
     expect(await tokenPermissions(calls[0]!)).toContain("skills:read");
+    // `auto` shows the catalogue in the context: `list_skills` is not registered.
+    expect(calls[0]!.platformMcp.listsSkills).toBe(false);
 
     await waitForAssistantPersist(sessionId);
   });
@@ -775,14 +831,17 @@ describe("handleChatStream", () => {
     expect(res.status).toBe(200);
     await collectUiChunks(res);
     expect(await tokenPermissions(calls[0]!)).toEqual(["mcp:invoke", "mcp:read", "skills:read"]);
-    expect(calls[0]!.system).toContain("listSkills");
+    expect(calls[0]!.system).toContain("call `read_resource` with that URI verbatim");
+    // The model finds a skill the user asks for with `list_skills`, registered on this turn alone.
+    expect(calls[0]!.platformMcp.listsSkills).toBe(true);
+    expect(calls[0]!.system).toContain("call `list_skills`, then load the one asked for");
 
     await waitForAssistantPersist(sessionId);
   });
 
   it("teaches no skill on a turn without `skills:read`", async () => {
-    // The payload below DOES carry skills, so every absence asserted is the
-    // turn's own gate, not an empty fixture: neither the persona nor the
+    // The platform MCP server below DOES list a skill, so every absence asserted
+    // is the turn's own gate, not an empty fixture: neither the persona nor the
     // block names a skill.
     const sessionId = mintSessionId();
     const PIN = "@acme/pinned-skill";
@@ -795,18 +854,16 @@ describe("handleChatStream", () => {
       pinnedSkills: [PIN],
     });
     const skillReads: string[] = [];
-    const withSkills = () =>
-      Response.json({
-        user: { name: "Chat Tester", email: "chat-tester@test.com" },
-        org: { role: "owner", name: CONTEXT_ORG_MARKER, slug: "chat-handler-test" },
-        connections: [],
-        agents: [],
-        skills: [{ packageId: "@acme/catalogued", display_name: "Catalogued" }],
-      });
+    const uri = `skill://${ctx.defaultSpaceId}/acme/catalogued/catalogued/SKILL.md`;
+    const catalogued: SkillEntry = {
+      uri,
+      frontmatter: { name: "catalogued", description: "Catalogued" },
+      resources: [{ uri, digest: `sha256:${"0".repeat(64)}`, size: 1 }],
+    };
     const dispatch = async (req: Request): Promise<Response> => {
       const url = new URL(req.url);
-      if (url.pathname.startsWith("/api/packages/skills")) skillReads.push(url.pathname);
-      return scriptedDispatch(undefined, withSkills)(req);
+      if (url.pathname.startsWith("/api/mcp/")) skillReads.push(url.pathname);
+      return scriptedDispatch(undefined, undefined, catalogued)(req);
     };
 
     const { engine, calls } = scriptedEngine();
@@ -820,9 +877,17 @@ describe("handleChatStream", () => {
     expect(skillReads).toEqual([]);
     const system = calls[0]!.system;
     expect(system).toContain(CONTEXT_ORG_MARKER);
-    for (const absent of ["## Skills", PIN, "@acme/catalogued", "read_skill", "listSkills"]) {
+    for (const absent of [
+      "## Skills",
+      PIN,
+      "@acme/catalogued",
+      "read_resource",
+      "listSkills",
+      "list_skills",
+    ]) {
       expect(system).not.toContain(absent);
     }
+    expect(calls[0]!.platformMcp.listsSkills).toBe(false);
 
     await waitForAssistantPersist(sessionId);
   });
@@ -832,6 +897,7 @@ describe("handleChatStream", () => {
       packageId: "@acme/house",
       name: "House rules",
       version: "2.0.0",
+      uri: "skill://space-1/acme/house/house/SKILL.md",
       content: "Always sign with the house motto.",
     };
 
@@ -910,14 +976,14 @@ describe("handleChatStream", () => {
         const system = calls[0]!.system;
         expect(system).toContain("This space requires these skills in every conversation.");
         expect(system).toContain(
-          '<skill id="@acme/house" version="2.0.0">\nAlways sign with the house motto.\n</skill>',
+          '<skill id="@acme/house" uri="skill://space-1/acme/house/house/SKILL.md" version="2.0.0">\nAlways sign with the house motto.\n</skill>',
         );
         // The turn's token still reaches no skill: the content needed none, and
-        // `read_skill` is named for the injected files only (no loading rule is taught).
+        // `read_resource` is named for the injected files only (no loading rule is taught).
         expect(system).not.toContain("LOAD IT BEFORE acting");
         expect(system).toContain("it wins. Only each SKILL.md is shown: read a file");
         expect(await tokenPermissions(calls[0]!)).toEqual(["chat:write", "mcp:invoke", "mcp:read"]);
-        // Readable through `read_skill` all the same: the bearer names it, bound to the space.
+        // Readable through `resources/read` all the same: the bearer names it, bound to the space.
         expect(await tokenInjectedSkills(calls[0]!)).toEqual({
           spaceId: ctx.defaultSpaceId,
           skills: { "@acme/house": { definition: "published", version: "2.0.0" } },
@@ -941,7 +1007,9 @@ describe("handleChatStream", () => {
 
         const system = calls[0]!.system;
         expect(system).not.toContain(CONTEXT_ORG_MARKER);
-        expect(system).toContain('<skill id="@acme/house" version="2.0.0">');
+        expect(system).toContain(
+          '<skill id="@acme/house" uri="skill://space-1/acme/house/house/SKILL.md" version="2.0.0">',
+        );
         expect(await tokenInjectedSkills(calls[0]!)).toEqual({
           spaceId: ctx.defaultSpaceId,
           skills: { "@acme/house": { definition: "published", version: "2.0.0" } },
@@ -1252,13 +1320,13 @@ describe("handleChatStream", () => {
     async function turn(
       permissions: Set<string>,
       packageAuthoring?: boolean,
-      context?: () => Response,
+      listedSkill?: SkillEntry,
     ) {
       const { engine, calls } = scriptedEngine();
       const res = await postChat(mintSessionId(), undefined, engine, {
         permissions,
         ...(packageAuthoring === undefined ? {} : { packageAuthoring }),
-        ...(context === undefined ? {} : { context }),
+        ...(listedSkill === undefined ? {} : { listedSkill }),
       });
       expect(res.status).toBe(200);
       await collectUiChunks(res);
@@ -1353,16 +1421,13 @@ describe("handleChatStream", () => {
 
     it("teaches no authoring without `mcp:invoke` — `createAgent` dispatches through it", async () => {
       // `agents:write` without `mcp:invoke` is a grant the turn cannot dispatch.
-      // Skills are the counterpoint: `read_skill` needs no dispatch, so they stay.
-      const withSkill = () =>
-        Response.json({
-          user: { name: "Chat Tester", email: "chat-tester@test.com" },
-          org: { role: "owner", name: CONTEXT_ORG_MARKER, slug: "chat-handler-test" },
-          connections: [],
-          agents: [],
-          skills: [{ packageId: SKILL_ID, display_name: "Research", version: "1.2.0" }],
-          recent_runs: [],
-        });
+      // Skills are the counterpoint: `read_resource` needs no dispatch, so they stay.
+      const uri = `skill://${ctx.defaultSpaceId}/acme/research/research/SKILL.md`;
+      const withSkill: SkillEntry = {
+        uri,
+        frontmatter: { name: "research", description: "Research", metadata: { version: "1.2.0" } },
+        resources: [{ uri, digest: `sha256:${"0".repeat(64)}`, size: 1 }],
+      };
       const { system } = await turn(
         new Set(["mcp:read", "agents:write", "skills:read"]),
         true,
@@ -1370,7 +1435,7 @@ describe("handleChatStream", () => {
       );
       expect(system).not.toContain(SKILLS_MARKER);
       expect(system).toContain(SKILL_ID);
-      expect(system).toContain("call `read_skill` with its `id`");
+      expect(system).toContain("call `read_resource` with that URI verbatim");
       // Control: the same set plus `mcp:invoke` IS taught authoring.
       const { system: invoking } = await turn(
         new Set(["mcp:read", "mcp:invoke", "agents:write", "skills:read"]),

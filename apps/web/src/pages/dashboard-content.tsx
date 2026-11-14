@@ -29,7 +29,7 @@ import { formatDateField } from "../lib/format-date";
 import { dashboardSections } from "../lib/dashboard-sections";
 import { scheduleDetailPath } from "../lib/package-paths";
 import { toast } from "sonner";
-import { Skeleton } from "@appstrate/ui/components/skeleton";
+import { SkeletonLine } from "../components/skeleton-line";
 
 const CODING_AGENT_SETUP_URL = "https://raw.githubusercontent.com/appstrate/skills/main/README.md";
 
@@ -43,8 +43,6 @@ export interface DashboardData {
   /** Every schedule: the active ones are counted, the soonest listed. */
   schedules: EnrichedSchedule[];
   agentName: (run: EnrichedRun) => string;
-  /** Unread run notifications per agent id. */
-  unreadCounts?: Record<string, number>;
 }
 
 function SectionHeading({ title, href, action }: { title: string; href: string; action: string }) {
@@ -108,7 +106,7 @@ export function DashboardHeader({
         }
       >
         {runningCount === undefined ? (
-          <Skeleton className="mt-1.5 h-3.5 w-56" />
+          <SkeletonLine className="mt-1 w-56 text-sm" />
         ) : (
           <p className="text-muted-foreground mt-1 text-sm first-letter:uppercase">
             {t("dashboard.subtitle", { date, count: runningCount })}
@@ -169,13 +167,7 @@ function MetricCard({
   );
 }
 
-function RecentAgents({
-  agents,
-  unreadCounts,
-}: {
-  agents: AgentListItem[];
-  unreadCounts: Record<string, number> | undefined;
-}) {
+function RecentAgents({ agents }: { agents: AgentListItem[] }) {
   const { t } = useTranslation("common");
   return (
     <div
@@ -185,7 +177,7 @@ function RecentAgents({
     >
       {agents.map((agent) => (
         <div key={agent.id} className="w-[19rem] shrink-0">
-          <PackageCard {...agentCardItem(agent, unreadCounts?.[agent.id])} headingLevel={3} />
+          <PackageCard {...agentCardItem(agent)} headingLevel={3} />
         </div>
       ))}
     </div>
@@ -387,7 +379,7 @@ export function DashboardContent(data: DashboardData) {
               href="/agents"
               action={t("dashboard.allAgents")}
             />
-            <RecentAgents agents={data.agents} unreadCounts={data.unreadCounts} />
+            <RecentAgents agents={data.agents} />
           </section>
         )}
 

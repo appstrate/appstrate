@@ -1,26 +1,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The pure half of `appstrate code sync`. Output is a function of the input —
- * sorted keys, no timestamps — because a `mode: "copy"` plugin's version IS the
- * hash of its contents, so a byte-identical re-run must hash identically.
+ * Directory names of `appstrate code sync`: the collision fallback for a skill
+ * whose served name is taken. Pure, so a re-run names every skill identically.
  */
 
 import { isValidSkillName, SKILL_NAME_MAX_LENGTH } from "@appstrate/afps-shared/companion-files";
-import { extractSkillMeta } from "@appstrate/core/validation";
 import { toSlug } from "@appstrate/core/naming";
-import { isSafeArchivePath } from "@appstrate/core/zip";
-import { PACKAGE_CONTENT_ENTRY, PACKAGE_MANIFEST_FILE } from "@appstrate/core/package-files";
-import { SIGNATURE_RECORD } from "../package-definition.ts";
-
-/** Appstrate packaging, not skill content: both archives carry them, no skill directory does. */
-const DROPPED_ENTRIES: ReadonlySet<string> = new Set([PACKAGE_MANIFEST_FILE, SIGNATURE_RECORD]);
+import { PACKAGE_CONTENT_ENTRY } from "@appstrate/core/package-files";
 
 export const SKILL_ENTRY = PACKAGE_CONTENT_ENTRY.skill!.path;
 
-const FRONTMATTER_RE = /^---[^\S\n]*\n([\s\S]*?)\n---/;
-
-export class SkillMaterializeError extends Error {
+class SkillMaterializeError extends Error {
   constructor(
     message: string,
     public readonly hint?: string,
@@ -28,20 +19,6 @@ export class SkillMaterializeError extends Error {
     super(message);
     this.name = "SkillMaterializeError";
   }
-}
-
-/**
- * The frontmatter `name` wins when legal — the platform enforces that on every
- * write. Legacy artifacts fall back to the package's `name` segment.
- */
-export function skillSlug(frontmatterName: string, packageNameSegment: string): string {
-  if (isValidSkillName(frontmatterName)) return frontmatterName;
-  const fromPackage = toSlug(packageNameSegment, SKILL_NAME_MAX_LENGTH).replace(/-+$/, "");
-  if (isValidSkillName(fromPackage)) return fromPackage;
-  throw new SkillMaterializeError(
-    `Cannot derive a skill directory name from "${frontmatterName}" or "${packageNameSegment}"`,
-    "Agent Skills names are 1-64 characters of [a-z0-9-]. Rename the skill in Appstrate.",
-  );
 }
 
 /**
@@ -70,75 +47,4 @@ function freeSlug(raw: string, taken: ReadonlySet<string>, source: string): stri
     const candidate = `${head}${suffix}`;
     if (!taken.has(candidate) && isValidSkillName(candidate)) return candidate;
   }
-}
-
-/**
- * The platform's own archive-entry predicate, applied where files are created.
- *
- * Imported rather than restated: `unzipArtifact` drops what it refuses and the
- * draft write route answers `400` for it, so a local copy here could only
- * diverge — and it did, refusing `.` segments and drive prefixes the platform
- * accepted, which failed a whole sync on bytes the write route had blessed.
- * This end keeps its own POLICY (abort, with a message naming the entry); the
- * RULE is one.
- */
-function assertSafeEntry(path: string): void {
-  if (!isSafeArchivePath(path)) {
-    throw new SkillMaterializeError(
-      `Refusing archive entry "${path}": absolute, traversing, or not a file`,
-      "The published artifact is malformed. Re-publish the skill from Appstrate.",
-    );
-  }
-}
-
-export interface MaterializeSkillInput {
-  slug: string;
-  files: Record<string, Uint8Array>;
-}
-
-export function materializeSkill(input: MaterializeSkillInput): Record<string, Uint8Array> {
-  const out: Record<string, Uint8Array> = {};
-  const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
-
-  for (const path of Object.keys(input.files).sort()) {
-    assertSafeEntry(path);
-    if (DROPPED_ENTRIES.has(path)) continue;
-    const bytes = input.files[path]!;
-    out[path] =
-      path === SKILL_ENTRY
-        ? encoder.encode(normalizeSkillMd(decoder.decode(bytes), input.slug))
-        : bytes;
-  }
-
-  if (!out[SKILL_ENTRY]) {
-    throw new SkillMaterializeError(
-      `Artifact contains no ${SKILL_ENTRY}`,
-      "Every Appstrate skill stores its body as SKILL.md — the artifact is malformed.",
-    );
-  }
-  return out;
-}
-
-/**
- * Point the frontmatter `name` at the directory — the one rewrite the spec
- * forces. Every other byte passes through as authored: unknown keys are Claude
- * Code's extensions, and invented content would hide a publishing mistake.
- */
-export function normalizeSkillMd(content: string, slug: string): string {
-  if (extractSkillMeta(content).name === slug) return content;
-  const match = content.match(FRONTMATTER_RE);
-  if (!match) return content;
-
-  // Splice by offset, not `String.replace`: the block is user content that can
-  // recur later, and a replacement would re-interpret `$` sequences.
-  const blockStart = match[0]!.indexOf("\n") + 1;
-  const block = match[1]!;
-  const line = /^name:[^\r\n]*/m.exec(block);
-  if (!line) {
-    const eol = block.includes("\r\n") ? "\r\n" : "\n";
-    return `${content.slice(0, blockStart)}name: ${slug}${eol}${content.slice(blockStart)}`;
-  }
-  const at = blockStart + line.index;
-  return `${content.slice(0, at)}name: ${slug}${content.slice(at + line[0].length)}`;
 }

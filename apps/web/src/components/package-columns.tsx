@@ -18,18 +18,31 @@ import { PackageIcon } from "./package-icon";
 import { useCatalogueOriginColumn } from "./catalogue-columns";
 import { CountBadge } from "./count-badge";
 import { rowActionsColumn } from "./row-actions-column";
-import { CellEmpty, CellText } from "./table-cells";
+import { CellEmpty, CellPlaceholder, CellText } from "./table-cells";
 import { useOrg } from "../hooks/use-org";
 import type { CardItem } from "../lib/package-card-item";
 
 /** The package identity shared by the index, usage and catalogue tables. */
-export function usePackageNameColumn(): DataColumn<CardItem> {
+export function usePackageNameColumn(holds?: PackageType): DataColumn<CardItem> {
   const { t } = useTranslation(["agents", "common"]);
   return {
     id: "name",
     header: t("list.column.name"),
     width: 188,
     elastic: true,
+    // An agent's tile, an integration's logo (`sm`), no icon otherwise; always two lines.
+    placeholder: (
+      <CellPlaceholder
+        icon={
+          holds === "agent"
+            ? "size-8 rounded-md"
+            : holds === "integration"
+              ? "size-7 rounded-md"
+              : undefined
+        }
+        twoLines
+      />
+    ),
     cell: (item) => (
       <div className="flex min-w-0 items-center gap-3">
         {item.identity && (
@@ -76,7 +89,7 @@ export function usePackageNameColumn(): DataColumn<CardItem> {
 /** Only agents have a run state and a run action. */
 export function usePackageColumns(holds: PackageType): DataColumn<CardItem>[] {
   const { t } = useTranslation(["agents", "common"]);
-  const name = usePackageNameColumn();
+  const name = usePackageNameColumn(holds);
   const runnable = holds === "agent";
   const origin = useCatalogueOriginColumn<CardItem>(useOrg().currentOrg?.name ?? "");
   const columns: DataColumn<CardItem>[] = [
@@ -87,7 +100,6 @@ export function usePackageColumns(holds: PackageType): DataColumn<CardItem>[] {
       header: t("manifest.keywords"),
       width: 140,
       elastic: true,
-      tier: 3,
       cell: (item) => {
         const used =
           item.type !== "agent" && item.usedByAgents
@@ -102,11 +114,7 @@ export function usePackageColumns(holds: PackageType): DataColumn<CardItem>[] {
       id: "state",
       header: t("list.column.state"),
       width: 104,
-      // Waits for a 36rem table. It carries a badge only while a run is in
-      // flight and an em dash the rest of the time, so at tier one it would be
-      // a column of dashes taking 104px from the two things a phone needs here:
-      // which package this is, and the button that runs it.
-      tier: 2,
+      // A badge only while a run is in flight, an em dash the rest of the time.
       cell: (item) =>
         item.type === "agent" && !!item.runningRuns && item.runningRuns > 0 ? (
           <RunStatusBadge status="running" compact />

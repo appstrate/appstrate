@@ -14,7 +14,6 @@ import { LibraryBig, Plus, Upload } from "lucide-react";
 import type { PackageType } from "@appstrate/core/validation";
 import { packagePermission, spacePackagePermission } from "@appstrate/core/permissions";
 import { useAgents, usePackageList } from "../hooks/use-packages";
-import { useUnreadCountsByAgent } from "../hooks/use-notifications";
 import { useListParams } from "../lib/list-params";
 import { catalogueHref } from "../lib/catalogue-link";
 import { PACKAGE_TYPE_ICON } from "../lib/package-type-icon";
@@ -61,8 +60,7 @@ export function PackageIndexPage({ type }: { type: IndexType }) {
 /** Agents also carry their unread runs. */
 function AgentIndex() {
   const { data: agents, isLoading, error } = useAgents();
-  const { data: unreadCounts } = useUnreadCountsByAgent();
-  const items = agents?.map((agent) => agentCardItem(agent, unreadCounts?.[agent.id]));
+  const items = agents?.map((agent) => agentCardItem(agent));
   return <PackageIndexBody type="agent" items={items} isLoading={isLoading} error={error} />;
 }
 
@@ -72,6 +70,9 @@ function PackageIndex({ type }: { type: Exclude<IndexType, "agent"> }) {
   const items = rows?.map((row) => packageCardItem(row, type));
   return <PackageIndexBody type={type} items={items} isLoading={isLoading} error={error} />;
 }
+
+/** Agents are the org's own work: where each came from is a detail, hidden until asked for. */
+const AGENT_HIDDEN_COLUMNS = ["origin"];
 
 function PackageIndexBody({
   type,
@@ -90,7 +91,11 @@ function PackageIndexBody({
   const [creating, setCreating] = useState<{ integrationId: string | null } | null>(null);
   const list = useListParams(["origin", "activity"]);
   const [view, setView] = useListView(type);
-  const { columns, menu } = useColumnVisibility(`packages-${type}`, usePackageColumns(type));
+  const { columns, menu } = useColumnVisibility(
+    `packages-${type}`,
+    usePackageColumns(type),
+    type === "agent" ? AGENT_HIDDEN_COLUMNS : undefined,
+  );
   // Creating — by hand, with the chat or by import — is a write on the package
   // type, as its routes are. The import names the type, so the server refuses
   // an archive of another one.

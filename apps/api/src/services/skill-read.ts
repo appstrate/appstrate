@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// MCP `read_skill`: the file explorer's readers, with its own access rule.
+// `skill://` reads: the file explorer's readers, with their own access rule.
 
 import type { Context } from "hono";
 import { packagePermission } from "@appstrate/core/permissions";
@@ -12,7 +12,7 @@ import {
 } from "@appstrate/core/chat-contract";
 import { eq } from "drizzle-orm";
 import { packages } from "@appstrate/db/schema";
-import { conflict } from "../lib/errors.ts";
+import { conflict, notFound } from "../lib/errors.ts";
 import type { AppEnv } from "../types/index.ts";
 import type { SpaceScope } from "../lib/scope.ts";
 import {
@@ -27,16 +27,25 @@ import {
   type PackageFileSnapshot,
 } from "./package-files.ts";
 import { withPackageDraftLock } from "./package-locks.ts";
+import { VERSION_SELECTOR_DRAFT } from "./agent-version-resolver.ts";
 
 const SKILLS_READ = packagePermission("skill", "read");
 const CHAT_TURN = "chat:write";
 
 /**
+ * The space a skill read targets, with the caller's permissions there: the live
+ * grants under the token's ceiling. An org-wide MCP connection reads each space
+ * it reaches with that space's permissions, not those of the space it entered.
+ */
+export interface SkillReadSpace extends SpaceScope {
+  permissions: ReadonlySet<string>;
+}
+
+/**
  * The skills this request's chat turn injected, or `null`. The claim is a
  * chat-turn grant: it holds in the turn's space only, and lapses with the
- * caller's LIVE `chat:write` there (the hop's permissions are the live grants
- * under the token's ceiling) — revoking chat access revokes it. A malformed
- * claim is ignored.
+ * caller's LIVE `chat:write` there — revoking chat access revokes it. A
+ * malformed claim is ignored.
  *
  * This IS a hard-coded auth method, the chat module's: core names it (in
  * `@appstrate/core/chat-contract`) because a claim any loaded strategy could
@@ -44,11 +53,11 @@ const CHAT_TURN = "chat:write";
  * therefore a deliberate core change, not a module capability — the same
  * stance as the bearer allowlist in `lib/bearer-only.ts`.
  */
-function turnClaim(c: Context<AppEnv>, scope: SpaceScope): InjectedSkills["skills"] | null {
+function turnClaim(c: Context<AppEnv>, space: SkillReadSpace): InjectedSkills["skills"] | null {
   if (c.get("authMethod") !== CHAT_LOOPBACK_AUTH_METHOD) return null;
-  if (!c.get("permissions")?.has(CHAT_TURN)) return null;
+  if (!space.permissions.has(CHAT_TURN)) return null;
   const claim = injectedSkillsSchema.safeParse(c.get("authExtra")?.[INJECTED_SKILLS_AUTH_EXTRA]);
-  return claim.success && claim.data.spaceId === scope.spaceId ? claim.data.skills : null;
+  return claim.success && claim.data.spaceId === space.spaceId ? claim.data.skills : null;
 }
 
 /** What a read serves: `spec` `undefined` = the stored tree; `draftLock` pins that tree. */
@@ -63,39 +72,51 @@ interface SkillReadAccess {
  * injected answers from the claim alone, without `skills:*` — the chat already
  * put its SKILL.md in context — and never falls through: the published version
  * it was served at (a system skill's shipped tree), or its draft pinned to the
- * `lock_version` injected. Any other skill: `skills:read`, as `GET …/files`.
+ * `lock_version` injected; a `definition` other than the one injected is
+ * refused. Any other skill: `skills:read`, as `GET …/files`, at `definition`
+ * when named (the draft only for whoever may write the package), else at the
+ * file explorer's default.
  */
 async function resolveSkillReadAccess(
   c: Context<AppEnv>,
-  scope: SpaceScope,
+  space: SkillReadSpace,
   packageId: string,
+  definition: SkillDefinitionSelector | undefined,
 ): Promise<SkillReadAccess | null> {
-  const claim = turnClaim(c, scope);
+  const claim = turnClaim(c, space);
   if (claim && Object.hasOwn(claim, packageId)) {
     const served = claim[packageId]!;
-    const pkg = await findFileExplorerPackage(scope, packageId);
+    const pkg = await findFileExplorerPackage(space, packageId);
     if (pkg?.type !== "skill") return null;
-    if (pkg.source === "system") return { pkg, spec: undefined };
+    if (pkg.source === "system") return definition === "draft" ? null : { pkg, spec: undefined };
+    if (definition !== undefined && definition !== served.definition) return null;
     if (served.definition === "draft") {
       return { pkg, spec: undefined, draftLock: served.lockVersion };
     }
     return served.version === null ? null : { pkg, spec: served.version };
   }
-  if (c.get("permissions")?.has(SKILLS_READ)) {
-    const pkg = await findFileExplorerPackage(scope, packageId);
+  if (space.permissions.has(SKILLS_READ)) {
+    const pkg = await findFileExplorerPackage(space, packageId);
     if (pkg?.type === "skill") {
-      return { pkg, spec: await resolveFileExplorerVersion(c, pkg, undefined) };
+      const explicit =
+        definition === undefined
+          ? undefined
+          : definition === "draft"
+            ? VERSION_SELECTOR_DRAFT
+            : "latest";
+      return { pkg, spec: await resolveFileExplorerVersion(c, pkg, explicit) };
     }
   }
   return null;
 }
 
 /**
- * The draft at `lockVersion`, or 409. Read under the draft lock a save holds
- * across its row write, upload and commit — the one publication reads under —
- * so the row checked and the files read are the same draft.
+ * The draft with the `lock_version` it is read at; 409 when `pinned` names
+ * another. Read under the draft lock a save holds across its row write, upload
+ * and commit — the one publication reads under — so the version returned and
+ * the files read are the same draft.
  */
-function readPinnedDraft(pkg: FileExplorerPackage, lockVersion: number) {
+function readDraft(pkg: FileExplorerPackage, pinned: number | undefined): Promise<SkillFiles> {
   return withPackageDraftLock(pkg.id, async (tx) => {
     const [row] = await tx
       .select({
@@ -106,7 +127,8 @@ function readPinnedDraft(pkg: FileExplorerPackage, lockVersion: number) {
       .from(packages)
       .where(eq(packages.id, pkg.id))
       .limit(1);
-    if (row?.lockVersion !== lockVersion) {
+    if (!row) throw notFound(`Package '${pkg.id}' not found`);
+    if (pinned !== undefined && row.lockVersion !== pinned) {
       throw conflict(
         "injected_draft_changed",
         `The draft of '${pkg.id}' changed since this conversation turn injected it, so its ` +
@@ -114,35 +136,55 @@ function readPinnedDraft(pkg: FileExplorerPackage, lockVersion: number) {
       );
     }
     const draft = { ...pkg, ...row };
-    return readPackageSnapshot(draft, await resolvePackageFileValidator(draft, undefined));
+    const snapshot = await readPackageSnapshot(draft, await resolvePackageFileValidator(draft));
+    return { ...snapshot, lockVersion: row.lockVersion };
   });
 }
 
-export interface SkillSnapshot {
+/** The files of a skill read, with the draft `lock_version` they were read at (`null` outside a draft). */
+interface SkillFiles extends PackageFileSnapshot {
+  lockVersion: number | null;
+}
+
+/** A granted skill read: which definition it serves, its files read on demand. */
+export interface SkillRead {
   packageId: string;
   /** `null` for the stored tree (the draft, or a system package). */
   version: string | null;
   definition: "draft" | "published";
-  snapshot: PackageFileSnapshot;
+  /** The integrity of the published archive served, `null` for the stored tree. */
+  integrity: string | null;
+  readSnapshot: () => Promise<SkillFiles>;
 }
 
-/** `null` when refused; the caller answers it as REST does (403, else 404). */
-export async function readSkillSnapshot(
+export type SkillDefinitionSelector = "published" | "draft";
+
+/**
+ * The access rule applied, without reading the files: `null` when refused, the
+ * caller answers it as REST does (403, else 404). `definition` names the
+ * definition to read (see `resolveSkillReadAccess`). `readSnapshot` of a draft
+ * pinned by the turn throws 409 `injected_draft_changed` once that draft moved;
+ * a draft's files come with the `lock_version` they were read at.
+ */
+export async function resolveSkillRead(
   c: Context<AppEnv>,
-  scope: SpaceScope,
+  space: SkillReadSpace,
   packageId: string,
-): Promise<SkillSnapshot | null> {
-  const access = await resolveSkillReadAccess(c, scope, packageId);
+  definition?: SkillDefinitionSelector,
+): Promise<SkillRead | null> {
+  const access = await resolveSkillReadAccess(c, space, packageId, definition);
   if (!access) return null;
   const { pkg, spec, draftLock } = access;
   const validator = await resolvePackageFileValidator(pkg, spec);
+  const served = servedDefinition(pkg, spec);
   return {
     packageId: pkg.id,
     version: validator.kind === "version" ? validator.version : null,
-    definition: servedDefinition(pkg, spec),
-    snapshot:
-      draftLock === undefined
-        ? await readPackageSnapshot(pkg, validator)
-        : await readPinnedDraft(pkg, draftLock),
+    integrity: validator.kind === "version" ? validator.integrity : null,
+    definition: served,
+    readSnapshot: async () =>
+      served === "draft"
+        ? readDraft(pkg, draftLock)
+        : { ...(await readPackageSnapshot(pkg, validator)), lockVersion: null },
   };
 }

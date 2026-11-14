@@ -55,7 +55,6 @@ export function useSpaceSeatColumns<Row>({
       id: "source",
       header: t("spaceMembers.colSource"),
       width: 110,
-      tier: 2,
       cell: (row) => <CellText>{t(`spaceMembers.source.${seat(row).source}`)}</CellText>,
     },
     {

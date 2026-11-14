@@ -64,6 +64,7 @@ const CORE_TABLES = [
   "storage_deletion_jobs",
   // Leaf tables (no dependents)
   "notifications",
+  "run_reads",
   "audit_events",
   // Journal with no FKs, like `audit_events`: nothing cascades into it.
   "connection_calls",

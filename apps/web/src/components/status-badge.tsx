@@ -48,6 +48,11 @@ export function RunStatusBadge({
   unread,
 }: {
   status: string;
+  /**
+   * The bare icon until its container reaches 32rem (`@lg`), the full badge
+   * from there: a table, a row or a card decides, not the screen. Without a
+   * container around it, it stays the icon.
+   */
   compact?: boolean;
   unread?: boolean;
 }) {
@@ -72,10 +77,13 @@ export function RunStatusBadge({
 
   return (
     <span className="relative shrink-0">
-      {/* Mobile: bare icon, toned by its status */}
-      <span className="sm:hidden [&_svg]:h-4 [&_svg]:w-4">{icon}</span>
-      {/* Desktop: full badge */}
-      <Badge variant={variant} className="hidden gap-1 sm:inline-flex">
+      {/* A narrow container: the bare icon, toned by its status (its word for screen readers). */}
+      <span className="@lg:hidden [&_svg]:h-4 [&_svg]:w-4">
+        {icon}
+        <span className="sr-only">{t(`status.${status}`, status)}</span>
+      </span>
+      {/* From a 32rem container: the full badge. */}
+      <Badge variant={variant} className="hidden gap-1 @lg:inline-flex">
         {icon}
         {t(`status.${status}`, status)}
       </Badge>

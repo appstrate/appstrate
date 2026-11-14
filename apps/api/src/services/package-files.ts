@@ -180,7 +180,7 @@ function extensionOf(path: string): string {
  * kept — the one the editor and the CLI ask too, so a file is text or binary
  * the same way on every side of the wire.
  */
-export function classifyPackageFile(
+function classifyPackageFile(
   path: string,
   bytes: Uint8Array,
 ): { kind: PackageFileMediaKind; text: string | null } {

@@ -46,6 +46,7 @@ import {
   localIntegrationManifest,
 } from "../../../../../test/helpers/integration-manifests.ts";
 import { MCP_ACCEPT, type JsonRpcEnvelope } from "../../../../../test/helpers/mcp.ts";
+import { overrideJwks } from "../../../oidc/services/enduser-token.ts";
 import { registerTestPlatformApp } from "../../../../../test/helpers/platform-app.ts";
 import { getMcpOrgResourceUri } from "../../../../lib/audiences.ts";
 import { drainAudits } from "../../../../services/audit.ts";
@@ -227,6 +228,9 @@ describe("mcp connection tools", () => {
     await truncateAll();
     await flushRedis();
     resetOidcGuardsLimiters();
+    // `truncateAll` wipes the signing keys, so every test mints under a new
+    // `kid`; drop the cached key set rather than wait out the refetch cooldown.
+    overrideJwks(null);
     owner = await createTestContext({ orgSlug: "cporg" });
     // The row the authorization server needs to mint the organization's MCP resource.
     await mcpModule.events!.onOrgCreate!(owner.orgId, owner.user.email);

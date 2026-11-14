@@ -32,7 +32,7 @@ export interface CardItem {
   meta?: ReactNode;
 }
 
-export function agentCardItem(agent: AgentListItem, unreadCount?: number): CardItem {
+export function agentCardItem(agent: AgentListItem): CardItem {
   return {
     id: agent.id,
     displayName: agent.display_name ?? agent.id,
@@ -42,7 +42,7 @@ export function agentCardItem(agent: AgentListItem, unreadCount?: number): CardI
     version: agent.version,
     runningRuns: agent.running_runs,
     keywords: agent.keywords,
-    unreadCount,
+    unreadCount: agent.unread_count,
     identity: { icon: agent.icon, color: agent.color },
   };
 }
